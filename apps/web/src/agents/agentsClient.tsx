@@ -1,10 +1,18 @@
-import { createContext, useContext, useSyncExternalStore, useCallback, useRef } from "react";
+import {
+  createContext,
+  useContext,
+  useSyncExternalStore,
+  useCallback,
+  useRef,
+  type ComponentType,
+} from "react";
 import type { EnvironmentId, ProviderApprovalDecision, ThreadId } from "@t3tools/contracts";
 import type {
   AgentContact,
   AgentMessage,
   AgentDraft,
   AgentMemory,
+  AgentModelControlsProps,
   AgentModelOption,
   AgentTrigger,
 } from "./agents.types";
@@ -63,6 +71,8 @@ export interface AgentsClient {
   loadEarlier?: (agent: AgentContact) => Promise<void>;
   canWrite?: (environmentId: EnvironmentId) => boolean;
   openWork: (agent: AgentContact, threadId: ThreadId) => void;
+  /** Model and effort pickers from the live provider catalog; absent where there is none. */
+  ModelControls?: ComponentType<AgentModelControlsProps>;
 }
 const ClientContext = createContext<AgentsClient | null>(null);
 export const AgentsClientProvider = ClientContext.Provider;
@@ -111,7 +121,18 @@ import { agentsRpc } from "~/rpc/agents";
 import { usePrimaryEnvironmentId, useConnectedEnvironmentIds } from "~/state/environments";
 import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
 import { useEnvironmentThread, threadEnvironment } from "~/state/threads";
-import { serverEnvironment } from "~/state/server";
+import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "~/state/server";
+import { useEnvironmentSettings } from "~/hooks/useSettings";
+import { getCustomModelOptionsByInstance } from "~/modelSelection";
+import {
+  applyProviderInstanceSettings,
+  deriveProviderInstanceEntries,
+  isProviderInstancePickerVisible,
+  sortProviderInstanceEntries,
+} from "~/providerInstances";
+import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
+import { ComposerControlSeparator } from "~/components/chat/ComposerControl";
+import { TraitsPicker } from "~/components/chat/TraitsPicker";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useOrchestrationCommand } from "~/state/use-orchestration-command";
 import { readEnvironmentScope } from "~/state/session";
@@ -210,6 +231,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
               .map((model) => ({
                 environmentId,
                 label: `${provider.displayName ?? provider.driver} · ${model.name}`,
+                name: model.name,
                 selection: { instanceId: provider.instanceId, model: model.slug },
               })),
           ),
@@ -401,6 +423,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
                 createdAt: previous?.createdAt ?? new Date().toISOString(),
                 optimistic: true,
                 delivery,
+                model: agent.modelSelection,
               },
             ]);
           });
@@ -487,6 +510,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           params: { environmentId: agent.environmentId, threadId },
         });
       },
+      ModelControls: LiveAgentModelControls,
     }),
     [
       snapshot,
@@ -587,23 +611,27 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
     ];
     const messages = projection.messages
       .filter((message) => message.role !== "system" && message.text.trim())
-      .map((message) => ({
-        id: message.id,
-        role: message.role as "user" | "assistant",
-        text: message.text,
-        createdAt: DateTime.formatIso(message.createdAt),
-        updatedAt: DateTime.formatIso(message.updatedAt),
-        streaming: message.streaming,
-        delivery: messageDelivery(projection.runs.find((run) => run.id === message.runId)),
-        ...(message.scheduledTaskId && message.senderThreadId
-          ? {
-              source: {
-                name: names.get(message.scheduledTaskId) ?? "Background work",
-                threadId: message.senderThreadId,
-              },
-            }
-          : {}),
-      }));
+      .map((message) => {
+        const run = projection.runs.find((candidate) => candidate.id === message.runId);
+        return {
+          id: message.id,
+          role: message.role as "user" | "assistant",
+          text: message.text,
+          createdAt: DateTime.formatIso(message.createdAt),
+          updatedAt: DateTime.formatIso(message.updatedAt),
+          streaming: message.streaming,
+          delivery: messageDelivery(run),
+          ...(message.role === "user" && run ? { model: run.modelSelection } : {}),
+          ...(message.scheduledTaskId && message.senderThreadId
+            ? {
+                source: {
+                  name: names.get(message.scheduledTaskId) ?? "Background work",
+                  threadId: message.senderThreadId,
+                },
+              }
+            : {}),
+        };
+      });
     return {
       messages,
       requests,
@@ -637,6 +665,72 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
             : agent.state,
       }
     : agent;
+}
+
+/** The chat composer's own pickers over the same live catalog, limited to Claude and Codex. */
+function LiveAgentModelControls({ agent, selection, disabled, onChange }: AgentModelControlsProps) {
+  const settings = useEnvironmentSettings(agent.environmentId);
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(agent.environmentId)) ??
+    EMPTY_SERVER_PROVIDERS;
+  const instanceEntries = useMemo(
+    () =>
+      sortProviderInstanceEntries(
+        applyProviderInstanceSettings(
+          deriveProviderInstanceEntries(providers),
+          settings,
+          agent.projectId,
+        ),
+      ).filter(isProviderInstancePickerVisible),
+    [providers, settings, agent.projectId],
+  );
+  const modelOptionsByInstance = useMemo(
+    () =>
+      getCustomModelOptionsByInstance(settings, providers, selection.instanceId, selection.model),
+    [settings, providers, selection.instanceId, selection.model],
+  );
+  const entry = instanceEntries.find((candidate) => candidate.instanceId === selection.instanceId);
+  return (
+    <>
+      <ProviderModelPicker
+        environmentId={agent.environmentId}
+        disabled={disabled}
+        activeInstanceId={selection.instanceId}
+        model={selection.model}
+        lockedProvider={null}
+        instanceEntries={instanceEntries}
+        modelOptionsByInstance={modelOptionsByInstance}
+        onInstanceModelChange={(instanceId, model) => {
+          if (instanceId !== selection.instanceId || model !== selection.model)
+            onChange({ instanceId, model });
+        }}
+      />
+      {entry && (
+        <>
+          <ComposerControlSeparator />
+          <TraitsPicker
+            provider={entry.driverKind}
+            instanceId={entry.instanceId}
+            models={entry.models}
+            model={selection.model}
+            modelOptions={selection.options}
+            prompt=""
+            onPromptChange={() => {}}
+            allowPromptInjectedEffort={false}
+            planModeEnabled={false}
+            disabled={disabled}
+            onModelOptionsChange={(options) =>
+              onChange({
+                instanceId: selection.instanceId,
+                model: selection.model,
+                ...(options ? { options } : {}),
+              })
+            }
+          />
+        </>
+      )}
+    </>
+  );
 }
 
 /** The default workspace stays on the environment where creation was invoked. */

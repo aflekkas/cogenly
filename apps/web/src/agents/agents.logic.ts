@@ -1,5 +1,5 @@
-import type { OrchestrationV2Run } from "@t3tools/contracts";
-import type { AgentContact, AgentMessage } from "./agents.types";
+import type { ModelSelection, OrchestrationV2Run } from "@t3tools/contracts";
+import type { AgentContact, AgentDraft, AgentMessage, AgentModelOption } from "./agents.types";
 
 const GROUP_GAP_MS = 3 * 60_000;
 const SEPARATOR_GAP_MS = 30 * 60_000;
@@ -127,4 +127,43 @@ export function reconcileAgentMessages(
 ): ReadonlyArray<AgentMessage> {
   const ids = new Set(persisted.map((message) => message.id));
   return [...persisted, ...pending.filter((message) => !ids.has(message.id))];
+}
+
+/** The editable profile, so a composer edit saves the same fields as the Details sheet. */
+export function agentDraft(agent: AgentContact): AgentDraft {
+  return {
+    id: agent.id,
+    name: agent.name,
+    avatar: agent.avatar,
+    instructions: agent.instructions,
+    modelSelection: agent.modelSelection,
+    runtimeMode: agent.runtimeMode,
+    projectId: agent.projectId,
+    enabled: agent.enabled,
+    dailyRunCap: agent.dailyRunCap,
+  };
+}
+
+type ModelRef = Pick<ModelSelection, "instanceId" | "model">;
+export const sameModel = (a: ModelRef, b: ModelRef) =>
+  a.instanceId === b.instanceId && a.model === b.model;
+
+/**
+ * Where the conversation changed models: before each owner text sent to a different model
+ * than the previous one, plus a trailing switch the next text will use.
+ */
+export function modelSwitches(messages: ReadonlyArray<AgentMessage>, current: ModelRef) {
+  const before = new Map<string, ModelRef>();
+  let previous: ModelRef | undefined;
+  for (const message of messages) {
+    if (message.role !== "user" || !message.model) continue;
+    if (previous && !sameModel(previous, message.model)) before.set(message.id, message.model);
+    previous = message.model;
+  }
+  return { before, trailing: previous && !sameModel(previous, current) ? current : null };
+}
+
+export function modelDisplayName(models: ReadonlyArray<AgentModelOption>, model: ModelRef) {
+  const option = models.find((candidate) => sameModel(candidate.selection, model));
+  return option?.name ?? option?.label.split(" · ").at(-1) ?? model.model;
 }

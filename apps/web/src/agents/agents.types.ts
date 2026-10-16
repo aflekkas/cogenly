@@ -30,6 +30,8 @@ export interface AgentMessage {
   optimistic?: boolean;
   delivery?: "sending" | "delivered" | "queued" | "read" | "failed" | "interrupted";
   source?: { name: string; threadId: ThreadId };
+  /** The model an owner text went to; drives the "Switched to …" lines. */
+  model?: Pick<ModelSelection, "instanceId" | "model">;
 }
 export interface AgentRequest {
   id: string;
@@ -69,5 +71,14 @@ export interface AgentContact extends AgentListItem {
 export interface AgentModelOption {
   environmentId?: EnvironmentId;
   label: string;
+  /** The model's own display name, e.g. "Claude Opus 5.5". */
+  name?: string;
   selection: ModelSelection;
+}
+/** The live catalog's model and effort pickers, provided by the client boundary. */
+export interface AgentModelControlsProps {
+  agent: AgentContact;
+  selection: ModelSelection;
+  disabled: boolean;
+  onChange: (selection: ModelSelection) => void;
 }

@@ -1,31 +1,26 @@
-import {
-  ArrowUpIcon,
-  ChevronLeftIcon,
-  EllipsisIcon,
-  LoaderCircleIcon,
-  ArrowUpRightIcon,
-} from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ChevronLeftIcon, EllipsisIcon, LoaderCircleIcon, ArrowUpRightIcon } from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
 import { useMessageMotion } from "./useMessageMotion";
-import { conversationRows } from "./agents.logic";
-import { useAgentsClient } from "./agentsClient";
+import { conversationRows, modelDisplayName, modelSwitches } from "./agents.logic";
+import { useAgents, useAgentsClient } from "./agentsClient";
+import { AgentComposer } from "./AgentComposer";
 import { AgentDetails } from "./AgentDetails";
 import type { AgentContact, AgentRequest } from "./agents.types";
 
 export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBack?: () => void }) {
   const client = useAgentsClient();
   const [details, setDetails] = useState<"about" | "activity" | null>(null);
-  const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const textarea = useRef<HTMLTextAreaElement>(null);
+  const { models } = useAgents();
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
   const busy = agent.state === "thinking" || agent.state === "working";
   const { scroll, onScroll, stopFollowing } = useMessageMotion(agent, busy);
   const lastOwner = agent.messages.findLast((message) => message.role === "user");
+  const switches = modelSwitches(agent.messages, agent.modelSelection);
   useEffect(() => {
     const mark = () => {
       if (
@@ -53,18 +48,10 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
     document.addEventListener("visibilitychange", mark);
     return () => document.removeEventListener("visibilitychange", mark);
   }, [agent, client, canWrite]);
-  useLayoutEffect(() => {
-    if (textarea.current) {
-      textarea.current.style.height = "0px";
-      textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 144)}px`;
-    }
-  });
-  async function send() {
-    if (!text.trim() || sending) return;
-    const outgoing = text.trim();
+  async function send(outgoing: string) {
+    if (sending) return;
     setSending(true);
     setError(null);
-    setText("");
     try {
       await client.send(agent, outgoing);
     } catch (cause) {
@@ -73,7 +60,6 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
       );
     } finally {
       setSending(false);
-      textarea.current?.focus();
     }
   }
   async function retry(outgoing: string) {
@@ -188,75 +174,84 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
             </div>
           )}
           {conversationRows(agent.messages).map(({ message, separator, grouped }) => (
-            <div
-              key={message.id}
-              data-message-id={message.id}
-              className="agent-message-row"
-              data-owner={message.role === "user"}
-              data-grouped={grouped}
-            >
-              {separator && (
-                <div className="agent-separator">
-                  <time dateTime={message.createdAt}>{separator}</time>
-                </div>
+            <Fragment key={message.id}>
+              {switches.before.has(message.id) && (
+                <ModelSwitchLine
+                  name={modelDisplayName(models, switches.before.get(message.id)!)}
+                />
               )}
-              <div className="agent-bubble" data-owner={message.role === "user"}>
-                {message.source && (
-                  <button
-                    className="agent-source"
-                    type="button"
-                    onClick={() => client.openWork(agent, message.source!.threadId)}
-                  >
-                    from: {message.source.name}
-                    <ArrowUpRightIcon size={11} />
-                  </button>
-                )}
-                {message.role === "assistant" ? (
-                  <div className="agent-markdown">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>
+              <div
+                data-message-id={message.id}
+                className="agent-message-row"
+                data-owner={message.role === "user"}
+                data-grouped={grouped}
+              >
+                {separator && (
+                  <div className="agent-separator">
+                    <time dateTime={message.createdAt}>{separator}</time>
                   </div>
-                ) : (
-                  message.text
                 )}
+                <div className="agent-bubble" data-owner={message.role === "user"}>
+                  {message.source && (
+                    <button
+                      className="agent-source"
+                      type="button"
+                      onClick={() => client.openWork(agent, message.source!.threadId)}
+                    >
+                      from: {message.source.name}
+                      <ArrowUpRightIcon size={11} />
+                    </button>
+                  )}
+                  {message.role === "assistant" ? (
+                    <div className="agent-markdown">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    message.text
+                  )}
+                </div>
+                {message.role === "user" &&
+                  (message.id === lastOwner?.id ||
+                    message.delivery === "failed" ||
+                    message.delivery === "interrupted") && (
+                    <span
+                      className="agent-delivery"
+                      data-failed={
+                        message.delivery === "failed" || message.delivery === "interrupted"
+                      }
+                      role={message.delivery === "failed" ? "alert" : undefined}
+                    >
+                      {message.delivery === "failed" || message.delivery === "interrupted" ? (
+                        <>
+                          {message.delivery === "failed"
+                            ? `Couldn't reach ${agent.modelSelection.model}`
+                            : "Interrupted"}{" "}
+                          —{" "}
+                          <button
+                            type="button"
+                            disabled={sending || !canWrite}
+                            onClick={() => void retry(message.text)}
+                          >
+                            Retry
+                          </button>
+                        </>
+                      ) : message.delivery === "sending" ? (
+                        "Sending…"
+                      ) : message.delivery === "queued" ? (
+                        "Queued"
+                      ) : message.delivery === "read" ? (
+                        "Read"
+                      ) : (
+                        "Delivered"
+                      )}
+                    </span>
+                  )}
               </div>
-              {message.role === "user" &&
-                (message.id === lastOwner?.id ||
-                  message.delivery === "failed" ||
-                  message.delivery === "interrupted") && (
-                  <span
-                    className="agent-delivery"
-                    data-failed={
-                      message.delivery === "failed" || message.delivery === "interrupted"
-                    }
-                    role={message.delivery === "failed" ? "alert" : undefined}
-                  >
-                    {message.delivery === "failed" || message.delivery === "interrupted" ? (
-                      <>
-                        {message.delivery === "failed"
-                          ? `Couldn't reach ${agent.modelSelection.model}`
-                          : "Interrupted"}{" "}
-                        —{" "}
-                        <button
-                          type="button"
-                          disabled={sending || !canWrite}
-                          onClick={() => void retry(message.text)}
-                        >
-                          Retry
-                        </button>
-                      </>
-                    ) : message.delivery === "sending" ? (
-                      "Sending…"
-                    ) : message.delivery === "queued" ? (
-                      "Queued"
-                    ) : message.delivery === "read" ? (
-                      "Read"
-                    ) : (
-                      "Delivered"
-                    )}
-                  </span>
-                )}
-            </div>
+            </Fragment>
           ))}
+          {switches.trailing && (
+            <ModelSwitchLine name={modelDisplayName(models, switches.trailing)} />
+          )}
           {agent.requests.map((request) => (
             <Request key={request.id} agent={agent} request={request} />
           ))}
@@ -279,51 +274,26 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
             {error}
           </p>
         )}
-        <form
-          className="agent-composer"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void send();
-          }}
-        >
-          <textarea
-            ref={textarea}
-            disabled={!canWrite}
-            aria-label={`Message ${agent.name}`}
-            placeholder={`Message ${agent.name}…`}
-            rows={1}
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                !event.shiftKey &&
-                !event.nativeEvent.isComposing &&
-                !window.matchMedia("(pointer: coarse)").matches
-              ) {
-                event.preventDefault();
-                void send();
-              }
-            }}
-          />
-          <button
-            type="submit"
-            aria-label="Send message"
-            disabled={!text.trim() || sending || !canWrite}
-          >
-            {sending ? (
-              <LoaderCircleIcon size={18} className="agent-spinner" />
-            ) : (
-              <ArrowUpIcon size={19} strokeWidth={2.6} />
-            )}
-          </button>
-        </form>
+        <AgentComposer
+          agent={agent}
+          canWrite={canWrite}
+          sending={sending}
+          onSend={send}
+          onError={setError}
+        />
         {busy && <p className="agent-composer-hint">You can keep messaging while I work.</p>}
       </footer>
       {details && (
         <AgentDetails agent={agent} initialTab={details} onClose={() => setDetails(null)} />
       )}
     </section>
+  );
+}
+function ModelSwitchLine({ name }: { name: string }) {
+  return (
+    <p className="agent-system-line" role="status">
+      Switched to {name}
+    </p>
   );
 }
 function Request({ agent, request }: { agent: AgentContact; request: AgentRequest }) {

@@ -7,7 +7,10 @@ import {
   formatMessageTime,
   sortAgentContacts,
   groupAgentContacts,
+  modelSwitches,
+  modelDisplayName,
 } from "./agents.logic";
+import { ProviderInstanceId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import type { AgentContact, AgentMessage } from "./agents.types";
 
@@ -140,5 +143,38 @@ describe("owner message delivery", () => {
     const persisted = { ...optimistic, optimistic: false, delivery: "read" as const };
     expect(reconcileAgentMessages([persisted], [optimistic, second])).toEqual([persisted, second]);
     expect(reconcileAgentMessages([], [optimistic])).toEqual([optimistic]);
+  });
+});
+
+describe("model switches", () => {
+  const codex = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6" };
+  const claude = { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-opus-5-5" };
+  const sent = (id: string, model: typeof codex): AgentMessage => ({
+    ...message(id, "user", at(16, 9, 0)),
+    model,
+  });
+  it("marks the first text to each new model and a switch the next text will use", () => {
+    const messages = [
+      sent("a", codex),
+      message("r1", "assistant", at(16, 9, 1)),
+      sent("b", codex),
+      sent("c", claude),
+      sent("d", claude),
+    ];
+    const switches = modelSwitches(messages, codex);
+    expect([...switches.before.keys()]).toEqual(["c"]);
+    expect(switches.trailing).toEqual(codex);
+    expect(modelSwitches(messages, claude).trailing).toBeNull();
+    // A new agent's first text has nothing to switch from.
+    expect(modelSwitches([], claude)).toEqual({ before: new Map(), trailing: null });
+  });
+  it("names models from the live catalog with a slug fallback", () => {
+    const models = [
+      { label: "Claude · Claude Opus 5.5", name: "Claude Opus 5.5", selection: claude },
+      { label: "Codex · GPT-6", selection: codex },
+    ];
+    expect(modelDisplayName(models, claude)).toBe("Claude Opus 5.5");
+    expect(modelDisplayName(models, codex)).toBe("GPT-6");
+    expect(modelDisplayName(models, { ...codex, model: "gpt-x" })).toBe("gpt-x");
   });
 });
