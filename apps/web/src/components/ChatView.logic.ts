@@ -562,6 +562,7 @@ export function resolveComposerProviderSelection(input: {
     input.lockedProvider !== null &&
     input.lockedProvider !== "codex" &&
     input.lockedProvider !== "claudeAgent" &&
+    input.lockedProvider !== "muse" &&
     input.lockedInstanceId != null;
   const compatibleEntries = input.entries.filter(
     (entry) =>
@@ -615,7 +616,10 @@ export function getProviderSendBlockReason(
   provider: Pick<ServerProvider, "driver"> | null | undefined,
   _model: string,
 ): string | null {
-  return provider && provider.driver !== "codex" && provider.driver !== "claudeAgent"
+  return provider &&
+    provider.driver !== "codex" &&
+    provider.driver !== "claudeAgent" &&
+    provider.driver !== "muse"
     ? "This provider is no longer supported. This thread is read-only history."
     : null;
 }

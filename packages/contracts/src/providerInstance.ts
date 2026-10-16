@@ -22,8 +22,8 @@
  *
  * The rule: parsing any of those payloads must always succeed, and the
  * runtime is responsible for marking the unknown driver/instance as
- * "unavailable" rather than crashing. The runtime registry ships only Claude
- * and Codex; decodability does not imply that a driver can run.
+ * "unavailable" rather than crashing. The runtime registry ships Claude,
+ * Codex, and Muse; decodability does not imply that a driver can run.
  *
  * Driver-specific configuration is similarly opaque at the contracts layer:
  * drivers live in (or will be extracted to) their own packages and own their

@@ -18,7 +18,6 @@ const removedDrivers = [
   "grok",
   "opencode",
   "antigravity",
-  "muse",
   "pi",
   "acp",
   "acpRegistry",
@@ -30,11 +29,16 @@ const decodeTask = Schema.decodeUnknownSync(ScheduledTask);
 const decodeSelection = Schema.decodeUnknownSync(ModelSelection);
 
 describe("retired provider history", () => {
-  it("only creates implicit Claude and Codex instances", () => {
-    expect(BUILT_IN_DRIVERS.map((driver) => driver.driverKind)).toEqual(["codex", "claudeAgent"]);
+  it("creates implicit supported provider instances", () => {
+    expect(BUILT_IN_DRIVERS.map((driver) => driver.driverKind)).toEqual([
+      "codex",
+      "claudeAgent",
+      "muse",
+    ]);
     expect(Object.keys(deriveProviderInstanceConfigMap(decodeSettings({})))).toEqual([
       "codex",
       "claudeAgent",
+      "muse",
     ]);
   });
 

@@ -449,7 +449,7 @@ function selectionSupportsTextGeneration(
   selection: ModelSelection,
 ): boolean {
   const driver = settings.providerInstances[selection.instanceId]?.driver ?? selection.instanceId;
-  return driver === "codex" || driver === "claudeAgent";
+  return driver === "codex" || driver === "claudeAgent" || driver === "muse";
 }
 
 function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {

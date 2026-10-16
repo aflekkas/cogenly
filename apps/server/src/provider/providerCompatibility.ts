@@ -67,7 +67,8 @@ export function resolveProviderCompatibility(
   );
   if (!policy) return undefined;
   const unprefixed = version?.replace(/^v/, "");
-  const stable = unprefixed;
+  // Muse prints a release revision after its semantic version.
+  const stable = driver === "muse" ? unprefixed?.replace(/-R\d+(?:\.\d+)?$/, "") : unprefixed;
   const status =
     stable && /^\d+\.\d+\.\d+$/.test(stable)
       ? (policy.ranges.find((entry) => satisfiesSemverRange(stable, entry.range))?.status ??

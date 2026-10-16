@@ -100,7 +100,12 @@ export function isProviderInstancePickerReady(entry: ProviderInstanceEntry): boo
 
 /** Picker rails contain configured, enabled instances only. */
 export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): boolean {
-  return entry.enabled && (entry.driverKind === "codex" || entry.driverKind === "claudeAgent");
+  return (
+    entry.enabled &&
+    (entry.driverKind === "codex" ||
+      entry.driverKind === "claudeAgent" ||
+      entry.driverKind === "muse")
+  );
 }
 
 /**

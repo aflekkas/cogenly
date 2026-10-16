@@ -14,7 +14,7 @@ type UsageProviderPresentation = {
  * only requires its contract support and one entry here.
  */
 // Legacy usage buckets remain decodable. Give them neutral history presentation,
-// while only the two supported providers appear in controls and charts.
+// while supported providers appear in controls and charts.
 export const PROVIDER_PRESENTATION = {
   ...Object.fromEntries(
     UsageProviderKind.literals.map((kind) => [
@@ -26,6 +26,7 @@ export const PROVIDER_PRESENTATION = {
       },
     ]),
   ),
+  muse: { label: "Muse Code", color: "#0081fb", driverKind: ProviderDriverKind.make("muse") },
   codex: {
     label: "Codex",
     color: "var(--contrast-foreground)",
@@ -39,7 +40,7 @@ export const PROVIDER_PRESENTATION = {
 } as Record<UsageProviderKind, UsageProviderPresentation>;
 
 /** Stable provider reading order across charts, summaries, tables, and hover rows. */
-export const PROVIDER_ORDER: UsageProviderKind[] = ["codex", "claude"];
+export const PROVIDER_ORDER: UsageProviderKind[] = ["codex", "claude", "muse"];
 
 /** Providers with real activity, independent of the metric currently displayed. */
 export function providersWithUsage(

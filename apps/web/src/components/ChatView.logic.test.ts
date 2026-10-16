@@ -1257,6 +1257,7 @@ describe("resolveComposerProviderSelection", () => {
   it.each([
     ["claudeAgent", "claude_work"],
     ["codex", "codex_work"],
+    ["muse", "muse_work"],
     ["ollama", "local_models"],
   ])("keeps imported %s history selectable through its custom instance", (driver, instanceId) => {
     const importedEntry = entry(driver, instanceId);
@@ -1830,7 +1831,7 @@ describe("waitForRevertedMessage", () => {
 });
 
 describe("retired provider history", () => {
-  it("blocks new work while allowing native Claude and Codex accounts", () => {
+  it("blocks retired providers while allowing supported accounts", () => {
     expect(
       getProviderSendBlockReason({ driver: ProviderDriverKind.make("cursor") }, "old-model"),
     ).toContain("read-only history");
@@ -1842,6 +1843,9 @@ describe("retired provider history", () => {
     ).toBeNull();
     expect(
       getProviderSendBlockReason({ driver: ProviderDriverKind.make("codex") }, "gpt-6-astra"),
+    ).toBeNull();
+    expect(
+      getProviderSendBlockReason({ driver: ProviderDriverKind.make("muse") }, "muse-spark-1.3"),
     ).toBeNull();
   });
 });

@@ -87,6 +87,7 @@ catalog:
   unified: 11.0.5
 
 minimumReleaseAgeExclude:
+  - "@muse-code/sdk@1.4.6"
   - "@legendapp/list@3.3.5"
   - tsc-rs
   - "@tsc-rs/*"

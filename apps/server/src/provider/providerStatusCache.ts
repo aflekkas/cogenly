@@ -32,7 +32,7 @@ const mergeProviderModels = (
 /**
  * Built-in drivers in presentation order. Codex and Claude lead; historical drivers sort after both.
  */
-const BUILT_IN_DRIVER_ORDER: ReadonlyArray<string> = ["codex", "claudeAgent"];
+const BUILT_IN_DRIVER_ORDER: ReadonlyArray<string> = ["codex", "claudeAgent", "muse"];
 
 const driverRank = (driver: string): number => {
   const index = BUILT_IN_DRIVER_ORDER.indexOf(driver);

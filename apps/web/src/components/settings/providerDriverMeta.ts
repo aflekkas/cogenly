@@ -1,3 +1,4 @@
+import { museClient } from "@t3tools/provider-muse/client";
 import { ClaudeSettings, CodexSettings, ProviderDriverKind } from "@t3tools/contracts";
 import { makeProviderClientRegistry } from "@t3tools/provider-core/client";
 
@@ -13,4 +14,5 @@ export const providerClients = makeProviderClientRegistry([
     label: "Claude",
     settingsSchema: ClaudeSettings,
   },
+  museClient,
 ]);

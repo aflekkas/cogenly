@@ -78,7 +78,7 @@ export function isModelSelectionProviderEnabled(
   return isUnconfiguredDefaultInstanceEnabled(selection.instanceId);
 }
 
-const TEXT_GENERATION_FALLBACK_DRIVERS = ["codex", "claudeAgent"].map((driver) =>
+const TEXT_GENERATION_FALLBACK_DRIVERS = ["codex", "claudeAgent", "muse"].map((driver) =>
   ProviderDriverKind.make(driver),
 );
 
