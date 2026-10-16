@@ -450,6 +450,7 @@ function summary(session: TerminalSessionState): TerminalSummary {
     hasRunningSubprocess: session.hasRunningSubprocess,
     label: terminalWireLabel(session),
     updatedAt: session.updatedAt,
+    ...(session.agent ? { startedAt: session.agent.startedAt } : {}),
   };
 }
 

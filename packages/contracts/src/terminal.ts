@@ -79,6 +79,10 @@ export type TerminalResizeInput = Schema.Codec.Encoded<typeof TerminalResizeInpu
 export const TerminalClearInput = TerminalSessionInput;
 export type TerminalClearInput = Schema.Codec.Encoded<typeof TerminalClearInput>;
 
+/** Stop a running agent command. Its terminal stays listed with the exit status. */
+export const TerminalKillInput = TerminalSessionInput;
+export type TerminalKillInput = Schema.Codec.Encoded<typeof TerminalKillInput>;
+
 export const TerminalRestartInput = Schema.Struct({
   ...TerminalSessionInput.fields,
   cwd: TrimmedNonEmptyStringSchema,
@@ -130,6 +134,8 @@ export const TerminalSummary = Schema.Struct({
   /** Server-computed display title (idle shell vs subprocess command). */
   label: Schema.String.check(Schema.isMaxLength(128)),
   updatedAt: Schema.String,
+  /** When an agent command started; absent for user terminals. */
+  startedAt: Schema.optional(Schema.String),
 });
 export type TerminalSummary = typeof TerminalSummary.Type;
 
