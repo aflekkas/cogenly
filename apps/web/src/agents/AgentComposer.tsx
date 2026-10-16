@@ -50,7 +50,8 @@ export function AgentComposer({
     // Measuring from the resting height, not zero, keeps the conversation above from briefly
     // growing, which would clamp its scroll position away from the latest message.
     element.style.height = `${MIN_HEIGHT}px`;
-    element.style.height = `${Math.min(Math.max(element.scrollHeight, MIN_HEIGHT), MAX_HEIGHT)}px`;
+    if (text)
+      element.style.height = `${Math.min(Math.max(element.scrollHeight, MIN_HEIGHT), MAX_HEIGHT)}px`;
   }, [text]);
   async function changeModel(next: ModelSelection) {
     setPendingSelection(next);

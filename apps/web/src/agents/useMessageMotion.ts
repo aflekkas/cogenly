@@ -24,6 +24,7 @@ export function useMessageMotion(
     firstId: string | undefined;
     height: number;
     busy: boolean;
+    trailing: string | null;
   } | null>(null);
   useLayoutEffect(() => {
     const element = scroll.current;
@@ -78,7 +79,9 @@ export function useMessageMotion(
       element.scrollTop += element.scrollHeight - before.height;
     } else if (
       atBottom.current &&
-      (element.scrollHeight !== before?.height || busy !== before?.busy)
+      (element.scrollHeight !== before?.height ||
+        busy !== before?.busy ||
+        trailing !== before?.trailing)
     ) {
       following.current = !reduced;
       element.scrollTo({ top: element.scrollHeight, behavior: reduced ? "instant" : "smooth" });
@@ -91,6 +94,7 @@ export function useMessageMotion(
       lastId: messages.at(-1)?.id,
       height: element.scrollHeight,
       busy,
+      trailing,
     };
   }, [key, messages, requests, hasMoreMessages, busy, trailing]);
   useLayoutEffect(() => {
