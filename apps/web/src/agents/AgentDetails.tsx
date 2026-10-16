@@ -781,9 +781,7 @@ export function CreateAgent({
           )}
         </>
       ) : (
-        <p className="agent-muted">
-          Connect a Claude or Codex provider in Settings to create an agent.
-        </p>
+        <p className="agent-muted">Connect a provider in Settings to create an agent.</p>
       )}
     </AgentSheet>
   );

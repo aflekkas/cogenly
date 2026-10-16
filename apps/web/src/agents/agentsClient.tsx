@@ -201,7 +201,8 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           .filter(
             (provider) =>
               provider.enabled &&
-              (provider.driver === "claude-code" || provider.driver === "codex"),
+              provider.availability !== "unavailable" &&
+              provider.status === "ready",
           )
           .flatMap((provider) =>
             provider.models
