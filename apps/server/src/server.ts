@@ -22,7 +22,7 @@ import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as Schedule from "effect/Schedule";
-import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
+import { FetchHttpClient, HttpRouter, HttpServer, HttpServerRequest } from "effect/http";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
@@ -31,6 +31,7 @@ import * as ServerConfig from "./config.ts";
 import { withUntracedRequests } from "./http.ts";
 import * as ServerHttp from "./http.ts";
 import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
+import * as Health from "./health.ts";
 import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
@@ -659,9 +660,18 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
 
 const layerCommandReadiness = HttpRouter.middleware(
   (httpEffect) =>
-    Effect.flatMap(ServerRuntimeStartup.ServerRuntimeStartup, (startup) =>
-      startup.awaitCommandReady.pipe(Effect.orDie, Effect.andThen(httpEffect)),
-    ),
+    Effect.flatMap(Effect.serviceOption(HttpServerRequest.HttpServerRequest), (maybeRequest) => {
+      const path = Option.map(maybeRequest, (request) => {
+        const queryIndex = request.url.indexOf("?");
+        return queryIndex === -1 ? request.url : request.url.slice(0, queryIndex);
+      });
+      // Liveness probes must answer while the server is still starting. Any
+      // request the middleware cannot see waits for readiness as before.
+      if (Option.isSome(path) && path.value === Health.HEALTH_PATH) return httpEffect;
+      return Effect.flatMap(ServerRuntimeStartup.ServerRuntimeStartup, (startup) =>
+        startup.awaitCommandReady.pipe(Effect.orDie, Effect.andThen(httpEffect)),
+      );
+    }),
   { global: true },
 );
 
@@ -681,6 +691,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerOtlpTracesProxyRoute,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
+    Health.layerHealthRoute,
     DeviceHubProxy.layer,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,

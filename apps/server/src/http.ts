@@ -29,6 +29,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { OtlpTracer, OtlpSerialization } from "effect/observability";
 
 import * as ServerConfig from "./config.ts";
+import { HEALTH_PATH } from "./health.ts";
 import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
 import { githubMediaResponse } from "./assets/GitHubMediaFetch.ts";
 import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
@@ -398,7 +399,11 @@ export const layerOtlpTracesProxyRoute = HttpRouter.add(
   ),
 );
 
-const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([OTLP_TRACES_PROXY_PATH]);
+const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([
+  OTLP_TRACES_PROXY_PATH,
+  // Supervisors poll this; its spans would drown the trace file.
+  HEALTH_PATH,
+]);
 
 // Skips the HTTP server span for UNTRACED_REQUEST_PATHS. That span starts
 // before routing, so a route handler cannot skip it. TracerDisabledWhen is one

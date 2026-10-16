@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -18,6 +19,16 @@ export class Scheduler extends Context.Service<
     ) => Effect.Effect<void, never, R | Scope.Scope>;
   }
 >()("t3/scheduling/Scheduler") {}
+
+/**
+ * One scheduler runs per process, so its heartbeat is process state: epoch
+ * milliseconds of the last tick, or null before the first one. `GET /health`
+ * reads it without needing the Scheduler service, which keeps probes working
+ * where the service is not in scope.
+ */
+const schedulerHeartbeatRef = Ref.makeUnsafe<number | null>(null);
+
+export const lastSchedulerTickAtMs: Effect.Effect<number | null> = Ref.get(schedulerHeartbeatRef);
 
 const make = Effect.gen(function* () {
   const sources = yield* Ref.make(new Map<symbol, Effect.Effect<void>>());
@@ -52,7 +63,11 @@ const make = Effect.gen(function* () {
     // Due work waits for startup recovery, which would cancel runs it started.
     yield* forkParked(run);
   });
-  const tick = Ref.get(sources).pipe(
+  // The heartbeat lands before the sources run: a stuck source must not
+  // look like a dead scheduler.
+  const tick = Clock.currentTimeMillis.pipe(
+    Effect.tap((now) => Ref.set(schedulerHeartbeatRef, now)),
+    Effect.andThen(Ref.get(sources)),
     Effect.flatMap((current) => Effect.forEach(current.values(), (run) => run, { discard: true })),
   );
   // One clock for all due-work sources. A slow source cannot block another
