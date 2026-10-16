@@ -4,7 +4,6 @@ import {
   derivePhysicalProjectKey,
   type ProjectGroupingSettings,
 } from "./logicalProject";
-import { resolveScratchProjectScopeKey } from "@t3tools/client-runtime/state/project-grouping";
 import type { Project } from "./types";
 
 export type EnvironmentPresence = "local-only" | "remote-only" | "mixed";
@@ -70,25 +69,6 @@ export function getSidebarProjectSettingsKey(
       derivePhysicalProjectKey(project),
     ) ?? group.projectKey
   );
-}
-
-/** Retains a saved physical scratch scope when its environment config coalesces the group. */
-export function resolveSidebarProjectScopeKey(input: {
-  readonly groups: ReadonlyArray<SidebarProjectSnapshot>;
-  readonly key: string | null;
-  readonly settings?: ProjectGroupingSettings;
-  readonly canClearMissingScope?: boolean;
-}): string | null {
-  if (input.key === null) return null;
-  const group =
-    input.groups.find((candidate) => candidate.projectKey === input.key) ??
-    input.groups.find(
-      (candidate) =>
-        candidate.isScratch &&
-        resolveScratchProjectScopeKey(input.key, candidate.memberProjects, input.settings) ===
-          candidate.projectKey,
-    );
-  return group?.projectKey ?? (input.canClearMissingScope ? null : input.key);
 }
 
 export function buildPhysicalToLogicalProjectKeyMap(input: {
