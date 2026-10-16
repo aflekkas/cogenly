@@ -30,8 +30,8 @@ const RAIL_BUTTON_CLASS =
 
 function railButtonTone(active: boolean) {
   return active
-    ? "bg-sidebar-row-active text-sidebar-foreground"
-    : "text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground";
+    ? "surface-raised-sm bg-sidebar-row-active text-sidebar-foreground"
+    : "text-sidebar-muted-foreground hover:surface-raised-hover hover:bg-sidebar-row-hover hover:text-sidebar-foreground";
 }
 
 function RailTooltip(props: { label: string; children: ReactElement }) {
