@@ -6,7 +6,12 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Store from "./AgentStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
-import { memoryContext, conversationCarryOver } from "./context.ts";
+import {
+  agentSessionSeedItems,
+  conversationCarryOver,
+  memoryContext,
+  shouldRotateAgentSession,
+} from "./context.ts";
 import { callingAgent } from "./MemoryMcp.ts";
 import * as Invocation from "../mcp/McpInvocationContext.ts";
 import { EnvironmentId } from "@t3tools/contracts";
@@ -180,6 +185,62 @@ describe("persistent agents", () => {
       expect(carry.recent).toContain("text 49");
       expect(carry.recent).not.toContain("text 29");
     }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect(
+    "starts a fresh session seeded with summary, memory and recent texts on a provider switch",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agent = yield* store.save(agentFixture());
+        yield* store.remember({ agentId: agent.id, text: "The owner's codeword is heron." });
+        const codex = { instanceId: agent.modelSelection.instanceId, model: "gpt-codex" };
+        const claude = { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-opus" };
+        // Switching provider, or model on one provider, rotates; effort or a steady model does not.
+        const rotate = (previous: typeof codex | undefined, next: typeof codex) =>
+          shouldRotateAgentSession({ runOrdinal: 7, latestSummaryOrdinal: 0, previous, next });
+        expect(rotate(codex, claude)).toBe(true);
+        expect(rotate(claude, codex)).toBe(true);
+        expect(rotate(codex, { ...codex, model: "gpt-codex-mini" })).toBe(true);
+        expect(rotate(codex, codex)).toBe(false);
+        expect(rotate(undefined, claude)).toBe(false);
+        expect(
+          shouldRotateAgentSession({
+            runOrdinal: 42,
+            latestSummaryOrdinal: 1,
+            previous: codex,
+            next: codex,
+          }),
+        ).toBe(true);
+
+        const messages = Array.from({ length: 30 }, (_, i) => ({
+          role: i % 2 ? "assistant" : "user",
+          text: `text ${i}`,
+        }));
+        yield* store.carryOver(agent.id, 15, messages);
+        const context = yield* store.context(agent.conversationThreadId);
+        expect(context).toContain("heron");
+        expect(context).toContain("user: text 0");
+        expect(context).toContain("assistant: text 9");
+        expect(context).not.toContain("text 10");
+
+        const history = [
+          ...messages.map((m, i) => ({
+            id: `item:${i}`,
+            type: `${m.role}_message`,
+            runId: `run:${Math.floor(i / 2) + 1}`,
+          })),
+          { id: "item:tool", type: "command_execution", runId: "run:15" },
+          { id: "item:current", type: "user_message", runId: "run:16" },
+        ];
+        const earlier = new Set(Array.from({ length: 15 }, (_, i) => `run:${i + 1}`));
+        const seed = agentSessionSeedItems(history, earlier).map((item) => item.id);
+        expect(seed).toHaveLength(20);
+        expect(seed[0]).toBe("item:10");
+        expect(seed.at(-1)).toBe("item:29");
+        expect(seed).not.toContain("item:tool");
+        expect(seed).not.toContain("item:current");
+      }).pipe(Effect.provide(layer)),
   );
 
   it("injects all small memory and bounds large memory with recent facts and older summaries", () => {

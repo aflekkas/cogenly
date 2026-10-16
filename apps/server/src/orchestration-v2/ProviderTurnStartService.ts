@@ -1,5 +1,5 @@
 import * as AgentStore from "../agents/AgentStore.ts";
-import { CONVERSATION_RECENT_MESSAGES, CONVERSATION_SESSION_RUNS } from "../agents/context.ts";
+import { agentSessionSeedItems, shouldRotateAgentSession } from "../agents/context.ts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import {
@@ -614,17 +614,27 @@ export const layer: Layer.Layer<
       const persistentAgent = yield* agentStore
         .forThread(input.threadId)
         .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })));
-      // Rotate native history every forty owner turns, retaining the same app conversation.
-      // Reuse resume-fallback's full_thread_summary handoff and delivery receipts for both providers.
+      // Rotate native history every forty owner turns and on every provider or model switch,
+      // retaining the same app conversation. Reuse resume-fallback's full_thread_summary
+      // handoff and delivery receipts for both providers.
       const latestSummaryOrdinal = Math.max(
         0,
         ...projection.contextHandoffs
           .filter((h) => h.strategy === "full_thread_summary")
           .map((h) => h.coveredRunOrdinals.to),
       );
+      const previousAgentRun = projection.runs
+        .filter((source) => source.ordinal < run.ordinal && source.startedAt !== null)
+        .toSorted((a, b) => a.ordinal - b.ordinal)
+        .at(-1);
       const rotateAgentSession =
         persistentAgent?.conversationThreadId === input.threadId &&
-        run.ordinal - latestSummaryOrdinal > CONVERSATION_SESSION_RUNS;
+        shouldRotateAgentSession({
+          runOrdinal: run.ordinal,
+          latestSummaryOrdinal,
+          previous: previousAgentRun?.modelSelection,
+          next: run.modelSelection,
+        });
       if (rotateAgentSession && persistentAgent !== null) {
         const transcript = yield* projectionStore.getThreadRecords(input.threadId, ["messages"]);
         yield* agentStore
@@ -632,6 +642,99 @@ export const layer: Layer.Layer<
           .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })));
       }
       let effectiveHandoffs = handoffs;
+      // Seeds a fresh native session with portable history, recording the handoff before delivery.
+      const seedFreshSession = Effect.fn("orchestrationV2.providerTurnStart.seedFreshSession")(
+        function* (replacement: OrchestrationV2ProviderThread) {
+          const sourceInstanceId =
+            (rotateAgentSession ? previousAgentRun?.providerInstanceId : undefined) ??
+            providerThread.providerInstanceId;
+          const transferId = yield* idAllocator.allocate.contextTransfer({
+            sourceThreadId: projection.thread.id,
+            targetThreadId: projection.thread.id,
+            type: "provider_resume_fallback",
+          });
+          const createdAt = yield* DateTime.now;
+          const history = yield* projectionStore.getTurnStartHistory(input.threadId);
+          const earlierRunIds = new Set(
+            projection.runs
+              .filter((source) => source.ordinal < run.ordinal)
+              .map((source) => source.id),
+          );
+          const handoff = yield* contextHandoffService.prepareProviderHandoff({
+            threadId: projection.thread.id,
+            targetRunId: run.id,
+            transferId,
+            fromProviderThreadIds: [providerThread.id],
+            toProviderThreadId: providerThread.id,
+            fromProviderInstanceId: sourceInstanceId,
+            toProviderInstanceId: run.providerInstanceId,
+            coveredRunOrdinals: { from: 1, to: Math.max(1, run.ordinal - 1) },
+            strategy: "full_thread_summary",
+            runs: projection.runs,
+            items: rotateAgentSession
+              ? agentSessionSeedItems(history, earlierRunIds)
+              : history.filter((item) => item.runId === null || earlierRunIds.has(item.runId)),
+            createdAt,
+          });
+          // A rotated agent session replaces handoffs aimed at the session it leaves behind.
+          const superseded = rotateAgentSession ? effectiveHandoffs : [];
+          effectiveHandoffs = rotateAgentSession ? [handoff] : [handoff, ...effectiveHandoffs];
+          yield* eventSink.write({
+            events: [
+              ...(yield* Effect.forEach(superseded, (stale) =>
+                Effect.map(
+                  idAllocator.allocate.event({ threadId: projection.thread.id }),
+                  (id) => ({
+                    id,
+                    type: "context-handoff.updated" as const,
+                    threadId: projection.thread.id,
+                    runId: run.id,
+                    providerInstanceId: run.providerInstanceId,
+                    occurredAt: createdAt,
+                    payload: { ...stale, status: "superseded" as const, updatedAt: createdAt },
+                  }),
+                ),
+              )),
+              {
+                id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+                type: "context-handoff.updated",
+                threadId: projection.thread.id,
+                runId: run.id,
+                providerInstanceId: run.providerInstanceId,
+                occurredAt: createdAt,
+                payload: handoff,
+              },
+              {
+                id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+                type: "context-transfer.updated",
+                threadId: projection.thread.id,
+                runId: run.id,
+                providerInstanceId: run.providerInstanceId,
+                occurredAt: createdAt,
+                payload: {
+                  id: transferId,
+                  type: "provider_handoff",
+                  sourceThreadId: projection.thread.id,
+                  targetThreadId: projection.thread.id,
+                  sourcePoint: { threadId: projection.thread.id },
+                  basePoint: null,
+                  sourceProviderInstanceId: sourceInstanceId,
+                  targetProviderInstanceId: run.providerInstanceId,
+                  targetRunId: run.id,
+                  status: "resolved_portable",
+                  resolution: { strategy: "portable_context", contextHandoffId: handoff.id },
+                  createdBy: "system",
+                  error: null,
+                  createdAt,
+                  updatedAt: createdAt,
+                  consumedAt: null,
+                },
+              },
+            ],
+          });
+          return replacement;
+        },
+      );
       const loadedProviderThread = yield* Effect.gen(function* () {
         if (nativeForkTransfer !== undefined) {
           const sourceProjection = yield* projectionStore.getThreadRecords(
@@ -676,7 +779,7 @@ export const layer: Layer.Layer<
           // row's identity when attaching native state. An adapter that mints
           // its own row instead leaves two live rows per app thread, and
           // `activeProviderThreadId` then flaps between them on every update.
-          return yield* loadFromProvider(
+          const created = yield* loadFromProvider(
             session.ensureThread({
               threadId: projection.thread.id,
               title: projection.thread.title,
@@ -686,6 +789,10 @@ export const layer: Layer.Layer<
               existingProviderThread: providerThread,
             }),
           );
+          // An agent's first session on another provider gets the same seed as a rotation.
+          return created === undefined || !rotateAgentSession
+            ? created
+            : yield* seedFreshSession(created);
         }
         const uncertainDelivery = projection.contextHandoffs.some(
           (handoff) =>
@@ -736,83 +843,7 @@ export const layer: Layer.Layer<
           }),
         );
         if (replacement === undefined) return undefined;
-        const transferId = yield* idAllocator.allocate.contextTransfer({
-          sourceThreadId: projection.thread.id,
-          targetThreadId: projection.thread.id,
-          type: "provider_resume_fallback",
-        });
-        const createdAt = yield* DateTime.now;
-        const history = yield* projectionStore.getTurnStartHistory(input.threadId);
-        const recentAgentItems = rotateAgentSession
-          ? new Set(
-              history
-                .filter((item) => item.type === "user_message" || item.type === "assistant_message")
-                .slice(-CONVERSATION_RECENT_MESSAGES)
-                .map((item) => item.id),
-            )
-          : null;
-        const handoff = yield* contextHandoffService.prepareProviderHandoff({
-          threadId: projection.thread.id,
-          targetRunId: run.id,
-          transferId,
-          fromProviderThreadIds: [providerThread.id],
-          toProviderThreadId: providerThread.id,
-          fromProviderInstanceId: providerThread.providerInstanceId,
-          toProviderInstanceId: run.providerInstanceId,
-          coveredRunOrdinals: { from: 1, to: Math.max(1, run.ordinal - 1) },
-          strategy: "full_thread_summary",
-          runs: projection.runs,
-          items: history.filter(
-            (item) =>
-              (recentAgentItems === null || recentAgentItems.has(item.id)) &&
-              (item.runId === null ||
-                projection.runs.some(
-                  (source) => source.id === item.runId && source.ordinal < run.ordinal,
-                )),
-          ),
-          createdAt,
-        });
-        effectiveHandoffs = [handoff, ...effectiveHandoffs];
-        yield* eventSink.write({
-          events: [
-            {
-              id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
-              type: "context-handoff.updated",
-              threadId: projection.thread.id,
-              runId: run.id,
-              providerInstanceId: run.providerInstanceId,
-              occurredAt: createdAt,
-              payload: handoff,
-            },
-            {
-              id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
-              type: "context-transfer.updated",
-              threadId: projection.thread.id,
-              runId: run.id,
-              providerInstanceId: run.providerInstanceId,
-              occurredAt: createdAt,
-              payload: {
-                id: transferId,
-                type: "provider_handoff",
-                sourceThreadId: projection.thread.id,
-                targetThreadId: projection.thread.id,
-                sourcePoint: { threadId: projection.thread.id },
-                basePoint: null,
-                sourceProviderInstanceId: providerThread.providerInstanceId,
-                targetProviderInstanceId: run.providerInstanceId,
-                targetRunId: run.id,
-                status: "resolved_portable",
-                resolution: { strategy: "portable_context", contextHandoffId: handoff.id },
-                createdBy: "system",
-                error: null,
-                createdAt,
-                updatedAt: createdAt,
-                consumedAt: null,
-              },
-            },
-          ],
-        });
-        return replacement;
+        return yield* seedFreshSession(replacement);
       });
       // The last attempt already failed the run.
       if (loadedProviderThread === undefined) return;
