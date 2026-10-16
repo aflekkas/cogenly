@@ -66,7 +66,7 @@ const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
   );
 
 /**
- * Agents T3 Code launched carry a registry token and must never be sent into
+ * Agents Cogenly launched carry a registry token and must never be sent into
  * an OAuth flow when it dies: they cannot open a browser, and a sign-in
  * would mint a credential that outlives their session. Only a request that
  * does not look like a provider token is pointed at the OAuth metadata.
@@ -105,7 +105,7 @@ const unauthorized = (input: {
 
 /**
  * Resolves a bearer token that is not a provider-session token: an OAuth
- * client signed in from outside T3. Undefined when the token is not one.
+ * client signed in from outside Cogenly. Undefined when the token is not one.
  */
 export class McpClientAuthenticator extends Context.Service<
   McpClientAuthenticator,
@@ -174,7 +174,13 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
       });
     }
     return yield* httpEffect.pipe(
-      Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+      Effect.provideService(McpInvocationContext.McpInvocationContext, {
+        ...invocation,
+        httpOrigin: HttpServerRequest.toURL(request).pipe(
+          Option.map((url) => url.origin),
+          Option.getOrUndefined,
+        ),
+      }),
       Effect.map(normalizeMcpHttpResponse),
     );
   }) satisfies McpAuthMiddleware;

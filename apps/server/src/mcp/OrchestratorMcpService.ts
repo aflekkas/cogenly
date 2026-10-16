@@ -247,7 +247,16 @@ function scheduledTaskWorkspaceStrategy(
  * run it: a webhook's URL carries the secret that starts the task's runs, so
  * only such a caller sees it.
  */
-function scheduledTaskSummary(task: ScheduledTask, mayRun: boolean): OrchestratorMcpScheduledTask {
+function scheduledTaskSummary(
+  task: ScheduledTask,
+  mayRun: boolean,
+  httpOrigin?: string,
+): OrchestratorMcpScheduledTask {
+  // Standalone Cogenly serves webhooks itself; no hosted relay is needed.
+  const webhookUrl =
+    httpOrigin && task.webhook
+      ? new URL(task.webhook.path, httpOrigin).href
+      : (task.webhook?.url ?? undefined);
   return {
     scheduledTaskId: task.id,
     title: task.title,
@@ -259,7 +268,7 @@ function scheduledTaskSummary(task: ScheduledTask, mayRun: boolean): Orchestrato
     nextRunAt: task.nextRunAt,
     lastRunStatus: task.lastRunStatus,
     // A bare path is not a URL anyone can call, so agents never get one to share.
-    ...(task.webhook?.url == null || !mayRun ? {} : { webhookUrl: task.webhook.url }),
+    ...(webhookUrl === undefined || !mayRun ? {} : { webhookUrl }),
     ...(task.webhook === undefined
       ? {}
       : { webhookSignature: task.webhook.hasSecret ? "set" : "none" }),
@@ -1046,7 +1055,7 @@ const make = Effect.gen(function* () {
         : Effect.fail(
             failure(
               "target_required",
-              "Pass projectId: this MCP client is not running inside a T3 thread.",
+              "Pass projectId: this MCP client is not running inside a Cogenly thread.",
             ),
           );
 
@@ -1601,6 +1610,7 @@ const make = Effect.gen(function* () {
         live &&
           Option.isSome(modes) &&
           modes.value.every((mode) => withinLimits(caller.limits, mode)),
+        scope.httpOrigin,
       );
     });
 
@@ -1653,7 +1663,7 @@ const make = Effect.gen(function* () {
           return yield* failure(
             "invalid_request",
             parent === undefined
-              ? "bindToCurrentThread needs an agent running inside a T3 thread."
+              ? "bindToCurrentThread needs an agent running inside a Cogenly thread."
               : "bindToCurrentThread binds to this thread, which belongs to a different project.",
           );
         }
@@ -1726,7 +1736,7 @@ const make = Effect.gen(function* () {
           return yield* failure(
             "invalid_request",
             parent === undefined
-              ? "bindToCurrentThread needs an agent running inside a T3 thread."
+              ? "bindToCurrentThread needs an agent running inside a Cogenly thread."
               : "bindToCurrentThread binds to this thread, which belongs to a different project.",
           );
         }

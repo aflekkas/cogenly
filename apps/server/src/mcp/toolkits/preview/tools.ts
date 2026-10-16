@@ -1,4 +1,5 @@
 import {
+  BrowserNavigationTarget,
   OrchestratorMcpFailure,
   ToolActivityIcon,
   PreviewAutomationClickInput,
@@ -79,7 +80,16 @@ const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
       "Initialize a collaborative browser tab and open its thread-bound inline preview by default. Set open=false for background-only automation. Pass tabId to reuse a specific existing tab, set reuseExistingTab=false to create another tab, or omit both to use this agent session's current tab. Parallel subagents sharing a provider session must each open with reuseExistingTab=false and pass their returned tabId on every call. Pass profileId (an id or name from preview_status profiles) to open under a browser profile and its saved logins; omit it for the user's default profile. Another agent session's tabs can be read but not operated.",
-    parameters: PreviewAutomationOpenInput,
+    parameters: PreviewAutomationOpenInput.mapFields(
+      (fields) => ({
+        ...fields,
+        url: fields.url.annotate({
+          description:
+            "Optional initial page URL. Use an absolute http(s) URL or a host such as example.com or localhost:5173. Public hosts use https; loopback hosts use http. Omit for a blank tab.",
+        }),
+      }),
+      { unsafePreserveChecks: true },
+    ),
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
     dependencies,
@@ -102,8 +112,32 @@ const PreviewDialogTool = browserTool(
 const PreviewNavigateTool = safeBrowserTool(
   Tool.make("preview_navigate", {
     description:
-      "Navigate a collaborative browser tab. Pass tabId to target a specific tab, plus {url:'https://t3.chat'} for a website or {target:{kind:'environment-port',port:5173}} for a dev server. Exactly one of url or target is required.",
-    parameters: PreviewAutomationNavigateInput,
+      "Navigate a collaborative browser tab. Pass tabId to target a specific tab, plus {url:'https://example.com'} for a website or {target:{kind:'environment-port',port:5173}} for a dev server. Exactly one of url or target is required.",
+    parameters: PreviewAutomationNavigateInput.mapFields(
+      (fields) => ({
+        ...fields,
+        url: fields.url.annotate({
+          description:
+            "Website URL. Use an absolute http(s) URL or a host such as example.com or localhost:5173. Public hosts use https; loopback hosts use http.",
+        }),
+        target: Schema.optional(
+          Schema.Union([
+            BrowserNavigationTarget.members[0].mapFields((target) => ({
+              ...target,
+              url: target.url.annotate({
+                description:
+                  "Direct website URL, for example https://example.com or localhost:5173.",
+              }),
+            })),
+            BrowserNavigationTarget.members[1],
+          ]),
+        ).annotate({
+          description:
+            "Environment-relative target. Use {kind:'environment-port',port:5173} for a dev server in this environment.",
+        }),
+      }),
+      { unsafePreserveChecks: true },
+    ),
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
     dependencies,
