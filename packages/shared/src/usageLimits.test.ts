@@ -17,12 +17,10 @@ import {
   collectExternalUsageLinks,
   collectLimitNotices,
   collectLimitPools,
-  displayLimitWindows,
   elapsedShare,
   formatResetsIn,
   limitsNotice,
   paceOf,
-  providersWithLimits,
   remainingPercent,
   usesChatGptSharing,
 } from "./usageLimits.ts";
@@ -112,37 +110,6 @@ describe("limitsNotice", () => {
   });
 });
 
-describe("providersWithLimits", () => {
-  it("keeps only usable providers whose driver reports limits at all", () => {
-    const limits = { checkedAt: "2026-09-03T11:00:00.000Z", windows: [window] };
-    const codex = provider({ usageLimits: limits });
-    expect(
-      providersWithLimits([
-        codex,
-        provider({
-          instanceId: ProviderInstanceId.make("cursor"),
-          driver: ProviderDriverKind.make("cursor"),
-        }),
-        provider({
-          instanceId: ProviderInstanceId.make("off"),
-          enabled: false,
-          usageLimits: limits,
-        }),
-        provider({
-          instanceId: ProviderInstanceId.make("gone"),
-          installed: false,
-          usageLimits: limits,
-        }),
-        provider({
-          instanceId: ProviderInstanceId.make("shadow"),
-          availability: "unavailable",
-          usageLimits: limits,
-        }),
-      ]),
-    ).toEqual([codex]);
-  });
-});
-
 describe("pools", () => {
   const checkedAt = "2026-09-03T11:00:00.000Z";
   const weekly = {
@@ -216,74 +183,6 @@ describe("pools", () => {
     });
     // The fresher native snapshot wins; the hub row is pre-filtered by email.
     expect(accounts[0]?.limits.windows[0]?.usedPercent).toBe(55);
-  });
-
-  it("merges OpenCode Go limits from machines with the same API key", () => {
-    const go = provider({
-      driver: ProviderDriverKind.make("opencode"),
-      instanceId: ProviderInstanceId.make("opencode"),
-      auth: { status: "authenticated" },
-      usageLimits: {
-        checkedAt,
-        credentialFingerprint: "shared-go-key",
-        windows: [{ ...window, id: "go_rolling", usedPercent: 3 }],
-      },
-    });
-    const input = new Map([
-      [EnvironmentId.make("env-a"), { ...laptop, serverConfig: { providers: [go] } }],
-      [
-        EnvironmentId.make("env-b"),
-        {
-          entry: { target: { label: "Desktop" } },
-          serverConfig: {
-            providers: [
-              {
-                ...go,
-                usageLimits: {
-                  ...go.usageLimits!,
-                  checkedAt: "2026-09-03T11:30:00.000Z",
-                  windows: [{ ...window, id: "go_rolling", usedPercent: 4 }],
-                },
-              },
-            ],
-          },
-        },
-      ],
-    ]);
-    const accounts = collectLimitAccounts(input);
-    expect(accounts).toHaveLength(1);
-    expect(accounts[0]?.environments).toEqual([
-      { environmentId: "env-a", label: "Laptop" },
-      { environmentId: "env-b", label: "Desktop" },
-    ]);
-    expect(collectLimitPools(accounts, now)[0]?.windows[0]?.members).toHaveLength(1);
-    expect(accounts[0]?.limits.windows[0]?.usedPercent).toBe(4);
-
-    const differentKey = {
-      ...go,
-      usageLimits: { ...go.usageLimits!, credentialFingerprint: "other-go-key" },
-    };
-    input.set(EnvironmentId.make("env-b"), {
-      entry: { target: { label: "Desktop" } },
-      serverConfig: { providers: [differentKey] },
-    });
-    expect(collectLimitAccounts(input)).toHaveLength(2);
-
-    input.set(EnvironmentId.make("env-a"), {
-      ...laptop,
-      serverConfig: {
-        providers: [{ ...go, auth: { status: "authenticated", email: "same@example.com" } }],
-      },
-    });
-    input.set(EnvironmentId.make("env-b"), {
-      entry: { target: { label: "Desktop" } },
-      serverConfig: {
-        providers: [
-          { ...differentKey, auth: { status: "authenticated", email: "SAME@example.com" } },
-        ],
-      },
-    });
-    expect(collectLimitAccounts(input)).toHaveLength(1);
   });
 
   it("takes windows from a fresher hub read but credits and redeem from the native instance", () => {
@@ -933,53 +832,6 @@ describe("pooled account columns", () => {
   });
 });
 
-describe("Cursor limit presentation", () => {
-  const cursorAccount: LimitAccount = {
-    key: "cursor",
-    driver: ProviderDriverKind.make("cursor"),
-    displayName: "Cursor",
-    email: undefined,
-    plan: undefined,
-    accentColor: undefined,
-    environments: [],
-    sourceLabel: "Cursor",
-    redeem: null,
-    limits: {
-      checkedAt: "2026-09-03T11:00:00.000Z",
-      windows: [
-        { id: "apiPercentUsed", kind: "monthly", label: "Other Models", usedPercent: 49 },
-        { id: "autoPercentUsed", kind: "monthly", label: "Cursor Models", usedPercent: 9 },
-        { id: "totalPercentUsed", kind: "monthly", label: "Overall", usedPercent: 15 },
-      ],
-    },
-  };
-
-  it("hides the combined percentage and orders the two pools", () => {
-    const [pool] = collectLimitPools([cursorAccount], now);
-    const display = displayLimitWindows(pool!);
-    expect(display.map((window) => window.id)).toEqual(["autoPercentUsed", "apiPercentUsed"]);
-  });
-
-  it("keeps the combined percentage as a card if either allowance is missing", () => {
-    const [pool] = collectLimitPools(
-      [
-        {
-          ...cursorAccount,
-          limits: {
-            ...cursorAccount.limits,
-            windows: cursorAccount.limits.windows.filter(
-              (window) => window.id !== "apiPercentUsed",
-            ),
-          },
-        },
-      ],
-      now,
-    );
-    const display = displayLimitWindows(pool!);
-    expect(display.map((window) => window.id)).toEqual(["totalPercentUsed", "autoPercentUsed"]);
-  });
-});
-
 describe("collectLimitNotices", () => {
   const checkedAt = "2026-09-03T11:00:00.000Z";
   const claude = ProviderDriverKind.make("claudeAgent");
@@ -1407,63 +1259,5 @@ describe("ChatGPT sharing presentation", () => {
         auth: { status: "unauthenticated", subscriptionSharing: true },
       }),
     ).toBe(false);
-  });
-});
-
-describe("Antigravity limit presentation", () => {
-  it("keeps the shared Claude/GPT bucket separate from Gemini and pairs their windows", () => {
-    const antigravity = provider({
-      instanceId: ProviderInstanceId.make("antigravity"),
-      driver: ProviderDriverKind.make("antigravity"),
-      usageLimits: {
-        checkedAt: "2026-10-09T12:00:00.000Z",
-        windows: [
-          { ...window, id: "3p-5h", label: "Claude & GPT (shared) · 5-hour", usedPercent: 90 },
-          { ...window, id: "gemini-5h", label: "Gemini · 5-hour", usedPercent: 20 },
-          {
-            ...window,
-            id: "3p-weekly",
-            kind: "weekly",
-            label: "Claude & GPT (shared) · Weekly",
-            usedPercent: 100,
-          },
-          {
-            ...window,
-            id: "gemini-weekly",
-            kind: "weekly",
-            label: "Gemini · Weekly",
-            usedPercent: 10,
-          },
-        ],
-      },
-    });
-    const accounts = collectLimitAccounts(
-      new Map([
-        [
-          EnvironmentId.make("a"),
-          {
-            entry: { target: { label: "Local" } },
-            serverConfig: {
-              providers: [
-                provider({
-                  usageLimits: { checkedAt: "2026-10-09T12:00:00.000Z", windows: [window] },
-                }),
-                antigravity,
-              ],
-            },
-          },
-        ],
-      ]),
-    );
-    const pools = collectLimitPools(accounts, now);
-    expect(pools.map((pool) => pool.driver)).toEqual(["codex", "antigravity"]);
-    const windows = displayLimitWindows(pools[1]!);
-    expect(windows.map((window) => window.id)).toEqual([
-      "gemini-5h",
-      "gemini-weekly",
-      "3p-5h",
-      "3p-weekly",
-    ]);
-    expect(windows.map((window) => window.remainingPercent)).toEqual([80, 90, 10, 0]);
   });
 });

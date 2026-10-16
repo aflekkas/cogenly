@@ -123,10 +123,6 @@ minimumReleaseAgeExclude:
   - "@distilled.cloud/gcp@1.0.0-rc.13"
   - "@distilled.cloud/infisical@1.0.0-rc.13"
   - "@distilled.cloud/zerossl@1.0.0-rc.13"
-  - "@opencode/client@2.0.28"
-  - "@opencode/protocol@2.0.28"
-  - "@opencode/schema@2.0.28"
-  - "@muse-code/sdk@1.4.6"
 
 overrides:
   # Keep jsdom's optional peer consistent so Vite+ has one test-runner instance.
@@ -179,12 +175,6 @@ overrides:
   "@tailwindcss/vite": "catalog:"
   "@types/node": "catalog:"
   effect: "catalog:"
-  # OpenCode 2's protocol and schema packages hard-pin an exact Effect version as a
-  # dependency, and their schemas fail to decode under a second Effect copy.
-  # The `effect` override above already collapses them; these name the edge so it
-  # stays pinned on its own. OpenCode2Client.live.test.ts re-proves it on bumps.
-  "@opencode/protocol>effect": "catalog:"
-  "@opencode/schema>effect": "catalog:"
   node-abi: 4.33.0
   # The desktop app installs these without a lockfile when it packages them, so
   # pin the native passkey code that runs in its main process.
@@ -223,12 +213,6 @@ peerDependencyRules:
     - vite
   allowedVersions:
     vite: "*"
-
-# @cursor/sdk finds its platform package (sandbox helper, rg, tree-sitter) by
-# walking up from the entry script for node_modules/@cursor/sdk-<platform>-<arch>.
-# pnpm keeps optional deps inside the virtual store, so hoist it to the root.
-publicHoistPattern:
-  - "@cursor/sdk-*"
 
 supportedArchitectures:
   cpu: [current, x64]

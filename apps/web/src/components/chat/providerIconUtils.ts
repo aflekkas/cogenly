@@ -34,9 +34,9 @@ export function getDisplayModelName(
 
 /**
  * The second line of a model row, naming where the model comes from. A
- * sub-provider whose name reads as its provider plus a qualifier ("OpenCode
- * Zen" under "OpenCode") stands alone: joining the two shows "OpenCode ·
- * OpenCode Zen", and OpenCode's own picker shows the sub-provider by itself.
+ * sub-provider whose name reads as its provider plus a qualifier ("Acme
+ * Pro" under "Acme") stands alone: joining the two shows "Acme ·
+ * Acme Pro". Show the sub-provider by itself instead.
  */
 export function getProviderRowLabel(
   providerDisplayName: string,

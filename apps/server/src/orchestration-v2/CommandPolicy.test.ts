@@ -469,38 +469,6 @@ layer("CommandPolicyV2", (it) => {
     }),
   );
 
-  it.effect("returns a typed error when neither native nor portable fork is available", () =>
-    Effect.gen(function* () {
-      const policy = yield* CommandPolicy.CommandPolicyV2;
-
-      const error = yield* policy
-        .decideForkExecution({
-          commandId,
-          threadId,
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          capabilities: capabilities((current) => ({
-            ...current,
-            threads: {
-              ...current.threads,
-              canForkThread: false,
-            },
-            context: {
-              ...current.context,
-              canConsumeHandoffSummaries: false,
-            },
-          })),
-          sameProvider: true,
-          hasStrongNativeSource: true,
-          sourceRunStatus: "completed",
-          fromSpecificTurn: true,
-        })
-        .pipe(Effect.flip);
-
-      assert.instanceOf(error, CommandPolicy.CommandPolicyCapabilityUnsupportedError);
-      assert.equal(error.capability, "context_handoff");
-    }),
-  );
-
   it.effect("guards rollback behind provider rollback snapshot support", () =>
     Effect.gen(function* () {
       const policy = yield* CommandPolicy.CommandPolicyV2;

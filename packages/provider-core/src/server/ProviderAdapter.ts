@@ -93,7 +93,7 @@ export const ProviderAdapterV2Event = Schema.Union([
     providerThread: OrchestrationV2ProviderThread,
     /**
      * Set when the provider rewound its own conversation outside T3, for
-     * example a Pi extension moving the session-tree leaf back. Lists every
+     * example an external conversation rewind. Lists every
      * native turn id still on the active branch; the ingestor rolls back
      * earlier runs whose turns fell off it.
      */
@@ -449,7 +449,7 @@ export interface ProviderAdapterV2SteerInput {
 export interface ProviderAdapterV2InterruptInput {
   readonly providerThread: OrchestrationV2ProviderThread;
   readonly providerTurnId: ProviderTurnId;
-  /** When true, the next `startTurn` may respawn the provider runtime (Grok Stop recovery). */
+  /** When true, the next `startTurn` may respawn the provider runtime. */
   readonly requestRuntimeRestart?: boolean;
 }
 

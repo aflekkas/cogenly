@@ -1,4 +1,4 @@
-import type { UsageProviderKind } from "@t3tools/contracts";
+import { UsageProviderKind } from "@t3tools/contracts";
 
 import { ProviderDriverKind } from "@t3tools/contracts";
 
@@ -13,7 +13,19 @@ type UsageProviderPresentation = {
  * Declaration order is reused by every chart and table, so adding a provider
  * only requires its contract support and one entry here.
  */
+// Legacy usage buckets remain decodable. Give them neutral history presentation,
+// while only the two supported providers appear in controls and charts.
 export const PROVIDER_PRESENTATION = {
+  ...Object.fromEntries(
+    UsageProviderKind.literals.map((kind) => [
+      kind,
+      {
+        label: kind,
+        color: "var(--muted-foreground)",
+        driverKind: ProviderDriverKind.make(kind),
+      },
+    ]),
+  ),
   codex: {
     label: "Codex",
     color: "var(--contrast-foreground)",
@@ -24,32 +36,10 @@ export const PROVIDER_PRESENTATION = {
     color: "#d97757",
     driverKind: ProviderDriverKind.make("claudeAgent"),
   },
-  grok: {
-    label: "Grok Build",
-    // Contrast-aware neutral between the Codex series and muted chart chrome.
-    color: "color-mix(in oklab, var(--contrast-foreground) 72%, var(--background))",
-    driverKind: ProviderDriverKind.make("grok"),
-  },
-  cursor: { label: "Cursor", color: "#8b8b8b", driverKind: ProviderDriverKind.make("cursor") },
-  opencode: {
-    label: "OpenCode",
-    color: "#5b9bbd",
-    driverKind: ProviderDriverKind.make("opencode"),
-  },
-  antigravity: {
-    label: "Antigravity",
-    color: "#8c7bd1",
-    driverKind: ProviderDriverKind.make("antigravity"),
-  },
-  pi: {
-    label: "Pi",
-    color: "#4d9f8a",
-    driverKind: ProviderDriverKind.make("pi"),
-  },
-} satisfies Record<UsageProviderKind, UsageProviderPresentation>;
+} as Record<UsageProviderKind, UsageProviderPresentation>;
 
 /** Stable provider reading order across charts, summaries, tables, and hover rows. */
-export const PROVIDER_ORDER = Object.keys(PROVIDER_PRESENTATION) as UsageProviderKind[];
+export const PROVIDER_ORDER: UsageProviderKind[] = ["codex", "claude"];
 
 /** Providers with real activity, independent of the metric currently displayed. */
 export function providersWithUsage(

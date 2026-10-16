@@ -13,7 +13,6 @@ import * as Schema from "effect/Schema";
 import { isModelCostUnknown, mergeUsage, type EnvironmentUsage } from "./usageMerge.ts";
 
 const decodeSummary = Schema.decodeUnknownSync(UsageSummary);
-const encodeSummary = Schema.encodeSync(UsageSummary);
 
 function bucket(overrides: Partial<UsageBucket> = {}): UsageBucket {
   return {
@@ -79,41 +78,6 @@ function environment(id: string, usageSummary: UsageSummary): EnvironmentUsage {
 }
 
 describe("mergeUsage", () => {
-  it("counts a Cursor account once across servers while retaining each server's other providers", () => {
-    const account = {
-      provider: "cursor" as const,
-      hostId: "cursor.com",
-      homePath: "cursor-account:account-hash",
-      volumeId: "account-hash",
-    };
-    const merged = mergeUsage(
-      [
-        environment(
-          "mac",
-          summary([bucket({ provider: "cursor", sourcePath: account.homePath })], [account]),
-        ),
-        environment(
-          "linux",
-          summary(
-            [
-              bucket({ provider: "cursor", sourcePath: account.homePath }),
-              bucket({ provider: "opencode", sourcePath: "/opencode" }),
-            ],
-            [account, { provider: "opencode", hostId: "linux", homePath: "/opencode" }],
-          ),
-        ),
-      ],
-      USAGE_CONTRACT_VERSION,
-    );
-    expect(
-      merged.providers.map((provider) => [provider.provider, provider.costUsd]).sort(),
-    ).toEqual([
-      ["cursor", 10],
-      ["opencode", 10],
-    ]);
-    expect(merged.duplicateSources).toHaveLength(1);
-  });
-
   it("sums environments that read different transcript directories", () => {
     const merged = mergeUsage(
       [
@@ -184,31 +148,6 @@ describe("mergeUsage", () => {
         merged.providers.map((provider) => [provider.provider, provider.sessions]),
       ),
     ).toEqual({ claude: 1, codex: 1 });
-  });
-
-  it("counts overlapping provider roots once while keeping each environment's unique root", () => {
-    const source = (homePath: string) => ({
-      provider: "opencode" as const,
-      hostId: "host",
-      homePath,
-    });
-    const usage = (sourcePath: string, costUsd: number) =>
-      bucket({ provider: "opencode", sourcePath, costUsd });
-    const merged = mergeUsage(
-      [
-        environment(
-          "env-a",
-          summary([usage("/shared", 10), usage("/a", 2)], [source("/shared"), source("/a")]),
-        ),
-        environment(
-          "env-b",
-          summary([usage("/shared", 10), usage("/b", 3)], [source("/shared"), source("/b")]),
-        ),
-      ],
-      USAGE_CONTRACT_VERSION,
-    );
-    expect(merged.costUsd).toBe(15);
-    expect(merged.sessions).toBe(3);
   });
 
   it("uses the newest scan when environments share the same transcript directory", () => {
@@ -451,18 +390,6 @@ describe("mergeUsage", () => {
     const merged = mergeUsage([environment("env-a", decoded)], USAGE_CONTRACT_VERSION);
     expect(merged.models).toHaveLength(1);
     expect(merged.models[0]).toMatchObject({ model: "gpt-5", costUsd: 20, totalTokens: 2320 });
-  });
-
-  it("keeps all supported providers when encoding a response", () => {
-    const current = summary(
-      [bucket(), bucket({ provider: "grok" })],
-      [
-        { provider: "claude", hostId: "mac", homePath: "/a" },
-        { provider: "grok", hostId: "mac", homePath: "/b" },
-      ],
-    );
-    expect(encodeSummary(current)).toEqual(current);
-    expect(decodeSummary(encodeSummary(current))).toEqual(current);
   });
 
   it("still rejects a malformed summary envelope", () => {

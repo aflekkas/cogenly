@@ -952,7 +952,6 @@ export function createServerEnvironmentAtoms<R, E>(
         Object.keys(aliases)
           .sort()
           .map((model) => [model, aliases[model]]),
-        settings?.cursorKeychainUsageEnabled ?? false,
       ]);
     }).pipe(Atom.withLabel(`environment-data:server:usage-scan-settings:${environmentId}`)),
   );
@@ -1152,14 +1151,6 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetResourceTelemetryHistory,
       staleTimeMs: 5_000,
     }),
-    searchAcpRegistry: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:server:acp-registry:search",
-      tag: WS_METHODS.serverSearchAcpRegistry,
-      // Each submitted search refreshes the server-side registry. Dropping an
-      // abandoned query immediately also interrupts stale in-flight requests.
-      staleTimeMs: 0,
-      idleTtlMs: 0,
-    }),
     configProjection,
     welcome,
     legacyThreadMigration: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
@@ -1222,93 +1213,6 @@ export function createServerEnvironmentAtoms<R, E>(
     // environment-serial scheduler. The named boundary keeps clients on the
     // atomic map-entry payload instead of rebuilding a stale whole map.
     mutateProviderInstance: updateSettings,
-    prepareAcpRegistryAgent: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:acp-registry:prepare",
-      tag: WS_METHODS.serverPrepareAcpRegistryAgent,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId, input }) => `${environmentId}:${input.agentId}`,
-      },
-    }),
-    uninstallAcpRegistryManagedBinary: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:acp-registry:uninstall-managed-binary",
-      tag: WS_METHODS.serverUninstallAcpRegistryManagedBinary,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId, input }) => `${environmentId}:${input.agentId}`,
-      },
-    }),
-    acceptAcpRegistryUrlAuth: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:acp-registry:accept-url-auth",
-      tag: WS_METHODS.serverAcceptAcpRegistryUrlAuth,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId, input }) =>
-          `${environmentId}:${input.instanceId}:${input.elicitationId}`,
-      },
-    }),
-    listAcpRegistrySessions: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:acp-registry:list-sessions",
-      tag: WS_METHODS.serverListAcpRegistrySessions,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId, input }) =>
-          `${environmentId}:${input.instanceId}:${input.projectId}:${input.cursor ?? "first"}`,
-      },
-    }),
-    importAcpRegistrySession: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:acp-registry:import-session",
-      tag: WS_METHODS.serverImportAcpRegistrySession,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId, input }) =>
-          `${environmentId}:${input.instanceId}:${input.projectId}:${input.sessionId}`,
-      },
-    }),
-    deleteAcpRegistrySession: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:acp-registry:delete-session",
-      tag: WS_METHODS.serverDeleteAcpRegistrySession,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId, input }) =>
-          `${environmentId}:${input.instanceId}:${input.projectId}:${input.sessionId}`,
-      },
-    }),
-    listAcpRegistryProviders: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:acp-registry:list-providers",
-      tag: WS_METHODS.serverListAcpRegistryProviders,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId, input }) =>
-          `${environmentId}:${input.instanceId}:${input.projectId}`,
-      },
-    }),
-    setAcpRegistryProvider: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:acp-registry:set-provider",
-      tag: WS_METHODS.serverSetAcpRegistryProvider,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId, input }) =>
-          `${environmentId}:${input.instanceId}:${input.projectId}:${input.providerId}`,
-      },
-    }),
-    disableAcpRegistryProvider: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:acp-registry:disable-provider",
-      tag: WS_METHODS.serverDisableAcpRegistryProvider,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId, input }) =>
-          `${environmentId}:${input.instanceId}:${input.projectId}:${input.providerId}`,
-      },
-    }),
-    logoutAcpRegistry: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:acp-registry:logout",
-      tag: WS_METHODS.serverLogoutAcpRegistry,
-      concurrency: {
-        mode: "singleFlight",
-        key: ({ environmentId, input }) => `${environmentId}:${input.instanceId}`,
-      },
-    }),
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,

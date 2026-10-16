@@ -1,5 +1,4 @@
 import {
-  ANTIGRAVITY_DEFAULT_MODEL,
   DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
@@ -11,7 +10,6 @@ import {
 import {
   type CustomModelDefinition,
   createModelSelection,
-  normalizeCustomModelSlug,
   readCustomModelEntries,
   resolveSelectableModel,
 } from "@t3tools/shared/model";
@@ -55,9 +53,8 @@ const DEFAULT_TEXT_GENERATION_INSTANCE_ID = ProviderInstanceId.make("codex");
 function readInstanceCustomModels(
   settings: UnifiedSettings,
   instanceId: ProviderInstanceId,
-  driverKind: ProviderDriverKind,
+  _driverKind: ProviderDriverKind,
 ): ReadonlyArray<CustomModelDefinition> {
-  if (driverKind === "antigravity") return [];
   const instance = settings.providerInstances?.[instanceId];
   const config = instance?.config;
   if (config !== null && typeof config === "object") {
@@ -80,27 +77,6 @@ export interface AppModelOption {
   isDefault?: boolean;
   isLegacy?: boolean;
   isUnavailable?: boolean;
-}
-
-function appendUnavailableDynamicModelSelection(
-  options: AppModelOption[],
-  rawModels: ReadonlyArray<ServerProvider["models"][number]>,
-  provider: ProviderDriverKind,
-  selectedModel: string | null | undefined,
-  hiddenModels: ReadonlyArray<string>,
-): AppModelOption[] {
-  if (provider !== "opencode" && provider !== "antigravity") return options;
-  const slug = normalizeCustomModelSlug(selectedModel);
-  if (!slug) return options;
-  if (provider === "antigravity" && slug === ANTIGRAVITY_DEFAULT_MODEL) return options;
-
-  // A model that exists in the raw catalog can be absent from `options`
-  // because the user hid it. Keep that preference authoritative.
-  if (resolveSelectableModel(provider, slug, rawModels) !== null) return options;
-  if (hiddenModels.includes(slug)) return options;
-  if (options.some((option) => option.slug === slug)) return options;
-
-  return [...options, { slug, name: slug, isCustom: false, isUnavailable: true }];
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
@@ -174,7 +150,7 @@ function getAppModelOptions(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
   provider: ProviderDriverKind,
-  selectedModel?: string | null,
+  _selectedModel?: string | null,
 ): AppModelOption[] {
   const rawModels = getProviderModels(providers, provider);
   // Server-reported custom rows mirror settings and can lag a removal, so
@@ -206,13 +182,7 @@ function getAppModelOptions(
   }
 
   const preferences = readInstanceModelPreferences(settings, defaultInstanceId);
-  return appendUnavailableDynamicModelSelection(
-    applyInstanceModelPreferences(options, preferences),
-    rawModels,
-    provider,
-    selectedModel,
-    preferences.hiddenModels,
-  );
+  return applyInstanceModelPreferences(options, preferences);
 }
 
 /**
@@ -228,7 +198,7 @@ function getAppModelOptions(
 export function getAppModelOptionsForInstance(
   settings: UnifiedSettings,
   entry: ProviderInstanceEntry,
-  selectedModel?: string | null,
+  _selectedModel?: string | null,
 ): AppModelOption[] {
   const options: AppModelOption[] = entry.models
     .filter((model) => !model.isCustom)
@@ -251,13 +221,7 @@ export function getAppModelOptionsForInstance(
   }
 
   const preferences = readInstanceModelPreferences(settings, entry.instanceId);
-  return appendUnavailableDynamicModelSelection(
-    applyInstanceModelPreferences(options, preferences),
-    entry.models,
-    entry.driverKind,
-    selectedModel,
-    preferences.hiddenModels,
-  );
+  return applyInstanceModelPreferences(options, preferences);
 }
 
 export function resolveAppModelSelection(
@@ -294,21 +258,6 @@ export function resolveAppModelSelectionForInstance(
   if (resolvedSelection) {
     return resolvedSelection;
   }
-  if (
-    resolutionOptions?.preserveUnavailableSelection &&
-    (entry.driverKind === "opencode" || entry.driverKind === "antigravity")
-  ) {
-    const unavailableSelection = normalizeCustomModelSlug(selectedModel);
-    const hiddenModels = readInstanceModelPreferences(settings, entry.instanceId).hiddenModels;
-    if (
-      unavailableSelection &&
-      !hiddenModels.includes(unavailableSelection) &&
-      resolveSelectableModel(entry.driverKind, selectedModel, entry.models) === null &&
-      (entry.driverKind !== "antigravity" || unavailableSelection !== ANTIGRAVITY_DEFAULT_MODEL)
-    ) {
-      return unavailableSelection;
-    }
-  }
   return options.find((option) => option.isDefault)?.slug ?? options[0]?.slug ?? null;
 }
 
@@ -338,7 +287,7 @@ export function getCustomModelOptionsByInstance(
 }
 
 /**
- * Whether stored model options pick the opencode "plan" agent. Shared settings
+ * Whether stored model options pick the saved "plan" agent. Shared settings
  * pickers keep and show such a value even while this device's legacy plan
  * mode is off: another device may have chosen it, and this device's filter
  * only applies to picks made here.

@@ -54,10 +54,6 @@ export interface ProviderInstanceEntry {
   readonly driverKind: ProviderDriverKind;
   readonly displayName: string;
   readonly accentColor?: string | undefined;
-  /** Registry identity used to resolve the official icon for generic ACP instances. */
-  readonly acpRegistryAgentId?: string | undefined;
-  /** Catalog-advertised icon URL. The renderer still applies the official-CDN allowlist. */
-  readonly acpRegistryIconUrl?: string | undefined;
   readonly continuationGroupKey?: string | undefined;
   readonly enabled: boolean;
   readonly installed: boolean;
@@ -104,7 +100,7 @@ export function isProviderInstancePickerReady(entry: ProviderInstanceEntry): boo
 
 /** Picker rails contain configured, enabled instances only. */
 export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): boolean {
-  return entry.enabled;
+  return entry.enabled && (entry.driverKind === "codex" || entry.driverKind === "claudeAgent");
 }
 
 /**
@@ -127,9 +123,6 @@ export function deriveProviderInstanceEntries(
       driverKind,
       displayName: resolveProviderInstanceDisplayName(snapshot),
       accentColor: normalizeProviderAccentColor(snapshot.accentColor),
-      ...(driverKind === "acpRegistry" && snapshot.iconUrl
-        ? { acpRegistryIconUrl: snapshot.iconUrl }
-        : {}),
       continuationGroupKey: snapshot.continuation?.groupKey,
       enabled: snapshot.enabled,
       installed: snapshot.installed,
@@ -200,32 +193,8 @@ export function applyProviderInstanceSettings(
   projectId: ProjectId | null,
 ): ReadonlyArray<ProviderInstanceEntry> {
   return entries.map((entry) => {
-    const explicitInstance = Object.hasOwn(settings.providerInstances, entry.instanceId)
-      ? settings.providerInstances[entry.instanceId]
-      : undefined;
     const enabled = resolveProjectProviderInstanceEnabled(settings, projectId, entry.instanceId);
-    if (entry.driverKind !== "acpRegistry" || explicitInstance === undefined) {
-      return enabled === entry.enabled ? entry : { ...entry, enabled };
-    }
-    const config =
-      explicitInstance.config !== null && typeof explicitInstance.config === "object"
-        ? (explicitInstance.config as Readonly<Record<string, unknown>>)
-        : null;
-    if (config?.source === "local") {
-      return { ...entry, enabled, acpRegistryAgentId: undefined, acpRegistryIconUrl: undefined };
-    }
-    const agentId = config?.agentId;
-    const iconUrl = config?.registryIconUrl;
-    return {
-      ...entry,
-      enabled,
-      ...(typeof agentId === "string" && agentId.trim()
-        ? { acpRegistryAgentId: agentId.trim() }
-        : {}),
-      ...(typeof iconUrl === "string" && iconUrl.trim()
-        ? { acpRegistryIconUrl: iconUrl.trim() }
-        : {}),
-    };
+    return enabled === entry.enabled ? entry : { ...entry, enabled };
   });
 }
 

@@ -443,14 +443,13 @@ function migrateLegacyProviderSettings(
   };
 }
 
-const ACP_REGISTRY_DRIVER = ProviderDriverKind.make("acpRegistry");
-
-/** ACP Registry instances reject every application text-generation operation. */
+/** Removed drivers can remain in stored selections, but cannot generate new text. */
 function selectionSupportsTextGeneration(
   settings: ServerSettings,
   selection: ModelSelection,
 ): boolean {
-  return settings.providerInstances[selection.instanceId]?.driver !== ACP_REGISTRY_DRIVER;
+  const driver = settings.providerInstances[selection.instanceId]?.driver ?? selection.instanceId;
+  return driver === "codex" || driver === "claudeAgent";
 }
 
 function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {

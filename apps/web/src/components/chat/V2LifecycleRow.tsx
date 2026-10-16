@@ -287,7 +287,6 @@ export function SubagentAvatar({
         <ProviderInstanceIcon
           driverKind={driver}
           displayName={provider?.displayName ?? driver}
-          acpRegistryIconUrl={provider?.iconUrl}
           className="z-auto"
           iconClassName="size-3.5"
         />
@@ -622,8 +621,6 @@ function HandoffEndpoint(props: {
             <ProviderInstanceIcon
               driverKind={entry?.driverKind ?? ProviderDriverKind.make(props.instanceId)}
               displayName={entry?.displayName ?? props.instanceId}
-              acpRegistryAgentId={entry?.acpRegistryAgentId}
-              acpRegistryIconUrl={entry?.acpRegistryIconUrl}
               iconClassName="size-3"
             />
             <span

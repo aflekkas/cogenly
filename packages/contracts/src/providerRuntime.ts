@@ -20,6 +20,7 @@ import { ProviderApprovalOption } from "./providerPolicy.ts";
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown);
 
+// Retain retired protocol literals so persisted diagnostic events still decode.
 const RuntimeEventRawSource = Schema.Union([
   Schema.Literal("codex.app-server.notification"),
   Schema.Literal("codex.app-server.request"),

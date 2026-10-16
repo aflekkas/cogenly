@@ -663,11 +663,8 @@ function OpenCommandPaletteDialog(props: {
         serverConfig?.providers ??
         (environment.environmentId === primaryEnvironmentId ? providers : []);
       const derived = deriveProviderInstanceEntries(environmentProviders);
-      // Settings fill the ACP registry identity (agent id, icon URL) the
-      // derived entries alone do not carry. This map is keyed by environment,
-      // not project, because it backs thread rows across every project on
-      // that environment; `enabled` stays machine-scoped (`null`) since no
-      // single project applies.
+      // Thread rows span every project on the environment, so use machine-wide
+      // enablement here rather than a single project's overrides.
       const entries = serverConfig
         ? applyProviderInstanceSettings(derived, serverConfig.settings, null)
         : derived;
@@ -1295,8 +1292,6 @@ function OpenCommandPaletteDialog(props: {
               providerDisplayName={
                 thread.runtime?.providerName ?? providerEntry?.displayName ?? modelInstanceId
               }
-              acpRegistryAgentId={providerEntry?.acpRegistryAgentId}
-              acpRegistryIconUrl={providerEntry?.acpRegistryIconUrl}
             />
           );
         },

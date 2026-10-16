@@ -100,12 +100,6 @@
         "src/threadLinks.ts": ["exports", "nsExports"],
       },
     },
-    "packages/effect-acp": {
-      "includeEntryExports": true,
-      "entry": ["test/fixtures/*.ts"],
-      // Generated upstream protocol definitions are retained as a complete set.
-      "ignoreIssues": { "src/_generated/**": ["exports", "types"] },
-    },
     "packages/effect-codex-app-server": {
       "includeEntryExports": true,
       "entry": ["test/fixtures/*.ts"],

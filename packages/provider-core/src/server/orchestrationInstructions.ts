@@ -1,5 +1,3 @@
-import type { ProviderInteractionMode } from "@t3tools/contracts";
-
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
 
 ## Cogenly orchestration
@@ -29,7 +27,6 @@ For stacked work, set \`baseRef\` to the intended parent branch and \`startFromO
 
 Tool names may include a harness-normalized MCP prefix, such as \`mcp__cogenly__delegate_task\`; the semantics are the same. Some harnesses attach optional MCP servers lazily: if an initial tool-catalog scan does not show T3 tools, do not conclude that cross-provider delegation is unavailable. Make one bounded direct attempt using the known T3 tool name on the next tool step. In Codex code mode, for example, call \`tools.mcp__cogenly__orchestrator_capabilities({})\` before reporting that the capability is absent. Keep polling/wait loops bounded, do not duplicate active work, and use stable \`clientRequestId\` values when retrying tools that accept them.
 
-ACP fallback: some ACP agents accept the injected MCP server but fail to expose its tools. When the T3 tools are absent and \`COGENLY_ACP_MCP_NODE\` is present, call the same tools through the terminal: \`ELECTRON_RUN_AS_NODE=1 "$COGENLY_ACP_MCP_NODE" \${COGENLY_ACP_MCP_ENTRYPOINT:+"$COGENLY_ACP_MCP_ENTRYPOINT"} acp-mcp-call orchestrator_capabilities '{}'\` (\`COGENLY_ACP_MCP_ENTRYPOINT\` is unset when T3 runs as a standalone executable). Delegate with \`acp-mcp-call delegate_task '{"task":"...","target":{"providerInstanceId":"...","model":"..."},"mode":"async","clientRequestId":"..."}'\`. This is the supported T3 transport fallback, not an ordinary shell-based substitute for delegation.
 
 ### Showing visuals
 
@@ -51,47 +48,6 @@ Do not switch to global browser skills, Chrome, Node REPL browser automation, st
 - the user asks for another browser, or invokes a skill or documented repository workflow that names one; follow that workflow and report any prerequisite it is missing;
 - preview calls on an open tab have failed twice on the same step (timeouts, \`chrome-error://\` pages, a different client answering). Quote the raw error and switch without asking the user which browser to use.
 `;
-
-const T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS = `## Cogenly interaction mode: Default
-
-Prefer making reasonable assumptions and carrying out the user's request. Ask a concise question only when a missing user decision would materially change the result. Treat this mode as active until Cogenly supplies a different interaction-mode instruction.`;
-
-const T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS = `## Cogenly interaction mode: Plan
-
-Investigate with read-only actions and do not edit files or otherwise execute the implementation. Resolve discoverable facts before asking questions. When the requirements are decision complete, return a concrete implementation plan and do not start implementing it. Treat this mode as active until Cogenly supplies a different interaction-mode instruction.`;
-
-export interface T3AcpInstructionState {
-  readonly interactionMode: ProviderInteractionMode;
-  readonly hasT3Mcp: boolean;
-}
-
-/**
- * ACP has no system/developer prompt field, so send T3-owned context in the
- * first user prompt and whenever the available tools or interaction mode change.
- */
-export function t3AcpPromptWithInstructions(input: {
-  readonly prompt: string;
-  readonly state: T3AcpInstructionState;
-  readonly previousState?: T3AcpInstructionState;
-}): string {
-  // Native slash commands must remain at the start of the prompt.
-  if (input.prompt.trimStart().startsWith("/")) return input.prompt;
-  if (
-    input.previousState?.interactionMode === input.state.interactionMode &&
-    input.previousState.hasT3Mcp === input.state.hasT3Mcp
-  ) {
-    return input.prompt;
-  }
-  const instructions = [
-    input.state.interactionMode === "plan"
-      ? T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS
-      : T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS,
-    ...(input.state.hasT3Mcp
-      ? [T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim(), T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim()]
-      : []),
-  ];
-  return `<cogenly_instructions>\n${instructions.join("\n\n")}\n</cogenly_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
-}
 
 /**
  * Providers without a system/developer-instruction channel receive this

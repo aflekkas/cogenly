@@ -16,16 +16,14 @@
  * Forward/backward compatibility invariant
  * ----------------------------------------
  * `ProviderDriverKind` is intentionally an **open** branded slug, not a closed
- * literal union. The server hosts forks, ships in PRs that add drivers, and
- * users frequently roll between branches and forks. Any of those paths can
- * leave `ServerSettings`, persisted thread state, or session bindings
- * referencing a driver that the currently-running build does not know about.
+ * literal union. Stored settings, thread history, scheduled tasks, and session
+ * bindings can reference providers removed from Cogenly. Preserve their identity
+ * when decoding so that history still loads without enabling those runtimes.
  *
  * The rule: parsing any of those payloads must always succeed, and the
  * runtime is responsible for marking the unknown driver/instance as
- * "unavailable" rather than crashing. Built-in drivers shipped by the core
- * product happens to register in a given build is not part of the contract
- * layer. Driver availability is discovered through the runtime registry.
+ * "unavailable" rather than crashing. The runtime registry ships only Claude
+ * and Codex; decodability does not imply that a driver can run.
  *
  * Driver-specific configuration is similarly opaque at the contracts layer:
  * drivers live in (or will be extracted to) their own packages and own their

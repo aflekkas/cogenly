@@ -33,7 +33,7 @@ export interface UsageRecord {
   readonly model: string;
   /**
    * Rate-table key when the provider's display name carries tiers the table
-   * does not know, such as Cursor's `claude-opus-5-5-high`. Defaults to `model`.
+   * does not know, such as a custom model alias. Defaults to `model`.
    */
   readonly rateModel?: string;
   readonly sessionId: string;

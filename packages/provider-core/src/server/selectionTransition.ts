@@ -19,19 +19,3 @@ export type ProviderSelectionTransitionPlan =
 export function turnScopedSelectionTransition(): ProviderSelectionTransitionPlan {
   return { type: "apply_on_next_turn" };
 }
-
-/** ACP models require a negotiated model/config mutation capability. */
-export function acpSelectionTransition(
-  input: ProviderSelectionTransitionInput,
-): ProviderSelectionTransitionPlan {
-  if (
-    input.current.model !== input.target.model &&
-    !input.sessionCapabilities.sessions.supportsModelSwitchInSession
-  ) {
-    return {
-      type: "reject",
-      reason: "The active ACP session does not expose a model-switch capability.",
-    };
-  }
-  return { type: "apply_on_next_turn" };
-}

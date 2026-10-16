@@ -311,11 +311,7 @@ export default defineConfig({
                 "text-[length:80cqh]",
                 // The platform's own selection colour on a selected composer chip.
                 "bg-[Highlight]",
-                // Brand marks keep their brand colours (Cursor, Grok, Claude).
-                "fill-[#26251E]",
-                "fill-[#EDECEC]",
-                "fill-[#0F0F0F]",
-                "fill-[#F5F5F5]",
+                // Claude’s brand mark keeps its brand colour.
                 "fill-[#d97757]",
                 "text-[#d97757]",
               ],

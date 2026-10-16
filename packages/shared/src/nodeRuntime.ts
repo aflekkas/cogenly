@@ -7,12 +7,7 @@ import * as Schema from "effect/Schema";
 import * as HostProcess from "./HostProcess.ts";
 import { CommandResolutionCache, resolveCommandPath } from "./shell.ts";
 
-const NodeRuntimeFeature = Schema.Literals([
-  "Local device support",
-  "Device automation",
-  "Antigravity",
-  "Antigravity sign-in",
-]);
+const NodeRuntimeFeature = Schema.Literals(["Local device support", "Device automation"]);
 
 export const nodeRuntimeUnavailableMessage = (feature: typeof NodeRuntimeFeature.Type): string =>
   `${feature} requires Node.js. Install Node.js and make sure node is on PATH, then retry.`;
@@ -39,7 +34,7 @@ export interface SelfInvocation {
 
 /**
  * How another process runs this T3 install's CLI, for hidden subcommands the
- * server hands to children such as `acp-mcp-bridge`. `process.execPath` plus
+ * server hands to children such as the history worker. `process.execPath` plus
  * `argv[1]` only works for a script run by Node; the single-executable has no
  * entrypoint script (Node repeats the binary at argv[1]), so callers must not
  * assemble the pair themselves.

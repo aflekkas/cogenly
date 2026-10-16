@@ -51,7 +51,6 @@ function ProviderUpdateToastIcon({ provider }: { provider: ServerProvider }) {
       <ProviderInstanceIcon
         driverKind={provider.driver}
         displayName={provider.displayName ?? provider.driver}
-        acpRegistryIconUrl={provider.iconUrl}
         iconClassName="size-4"
       />
       {/* ProviderInstanceIcon stacks at z-30, so the badge must sit above it. */}

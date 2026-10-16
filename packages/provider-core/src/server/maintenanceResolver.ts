@@ -90,7 +90,7 @@ export interface PackageManagedProviderMaintenanceDefinition {
   readonly provider: ProviderDriverKind;
   readonly npmPackageName: string;
   /**
-   * The provider's own updater (`claude update`, `pi update --self`). It runs
+   * The provider's own updater (`claude update`, `codex update`). It runs
    * first for paths its installer owns, and otherwise only when no package
    * manager is proven, because these updaters detect their installer too.
    */

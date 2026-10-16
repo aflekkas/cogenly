@@ -41,7 +41,7 @@ export interface AgentScopeShape {
   /**
    * Forgets the thread's scope. The session manager calls it before it opens
    * a provider session, so a scope only answers for the session that launched
-   * it, even when the next session runs without one (Cursor, OpenCode).
+   * it, even when the next session runs without one.
    */
   readonly clear: (threadId: string) => Effect.Effect<void>;
 }
@@ -58,15 +58,6 @@ export const AgentScope = Context.Reference<AgentScopeShape>("@t3tools/shared/Ag
     clear: () => Effect.void,
   }),
 });
-
-/**
- * The thread an ACP runtime is spawned for. ACP runtimes are shared by several
- * provider flavors and do not take a thread id, so the ACP adapter provides it.
- */
-export const AgentScopeThreadId = Context.Reference<string | undefined>(
-  "@t3tools/shared/AgentScope/ThreadId",
-  { defaultValue: () => undefined },
-);
 
 /**
  * Agents get this `oom_score_adj` so the kernel kills them before the server.
