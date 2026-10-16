@@ -1,3 +1,4 @@
+import { backupCommand } from "./cli/backup.ts";
 import { doctorCommand } from "./cli/doctor.ts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -82,6 +83,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       servicePreflightCommand,
       traceCommand,
       doctorCommand,
+      backupCommand,
       triageCommand,
       cloudEnabled ? connectCommand : connectUnavailableCommand,
     ]),
