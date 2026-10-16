@@ -38,6 +38,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } fr
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../config.ts";
+import { systemLocalTimeZone } from "../scheduling/serverTimeZone.ts";
 import { resolveBaseDir } from "../os-jank.ts";
 import {
   type PersistedServerRuntimeState,
@@ -345,6 +346,7 @@ const makePairServerConfig = Effect.fn(function* (input: {
     logWebSocketEvents: false,
     tailscaleServeEnabled: false,
     tailscaleServePort: DEFAULT_TAILSCALE_SERVE_PORT,
+    serverTimeZone: systemLocalTimeZone(),
   });
 });
 

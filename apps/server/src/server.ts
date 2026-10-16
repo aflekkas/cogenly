@@ -121,6 +121,7 @@ import * as McpOAuth from "./auth/McpOAuth.ts";
 import * as McpOAuthHttp from "./auth/mcpOAuthHttp.ts";
 import {
   relayHookBaseUrl,
+  ScheduledTaskTimeZone,
   ScheduledTaskWebhookOrigin,
 } from "./scheduledTasks/ScheduledTaskService.ts";
 import {
@@ -468,8 +469,16 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
   }),
 );
 
+// Fixed-time schedules run in the configured server zone (`COGENLY_TZ`),
+// defaulting to the host's local zone.
+const layerScheduledTaskTimeZone = Layer.effect(
+  ScheduledTaskTimeZone,
+  Effect.map(ServerConfig.ServerConfig, (config) => config.serverTimeZone),
+);
+
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
   Layer.provide(layerScheduledTaskWebhookOrigin),
+  Layer.provide(layerScheduledTaskTimeZone),
   Layer.provide(ProviderEventIngestor.layerAnalytics),
   Layer.provide(layerCheckpointStore),
   Layer.provide(layerGitWorkflow),

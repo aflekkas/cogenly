@@ -104,6 +104,17 @@ export class ScheduledTaskWebhookOrigin extends Context.Reference<Effect.Effect<
   },
 ) {}
 
+/**
+ * The wall-clock zone fixed-time schedules run in. The server provides its
+ * configured zone; the default keeps tests and bare layers on the host zone.
+ */
+export class ScheduledTaskTimeZone extends Context.Reference<string>(
+  "t3/scheduledTasks/ScheduledTaskTimeZone",
+  {
+    defaultValue: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+  },
+) {}
+
 /** A queued webhook delivery that no longer applies to its task; `reason` is shown in the delivery log. */
 class WebhookDeliverySkipped extends Data.TaggedError("WebhookDeliverySkipped")<{
   readonly reason: string;
@@ -277,12 +288,13 @@ const localNow = DateTime.withCurrentZoneLocal(DateTime.nowInCurrentZone);
 function nextRunAt(
   task: Pick<ScheduledTask, "enabled" | "schedule">,
   from: DateTime.DateTime,
+  timeZone: string,
 ): string | null {
   if (!task.enabled) return null;
   // A stored interval can decode yet overflow the representable DateTime
   // range; an unrepresentable occurrence means the task has no next run.
   try {
-    const next = nextScheduledRunAt(task.schedule, from);
+    const next = nextScheduledRunAt(task.schedule, from, { timeZone });
     return next !== null && Number.isFinite(DateTime.toEpochMillis(next)) ? iso(next) : null;
   } catch {
     return null;
@@ -404,6 +416,7 @@ export const layer = Layer.effect(
     const secretRequests = yield* SecretRequests.SecretRequests;
     const scheduler = yield* Scheduler.Scheduler;
     const readWebhookOrigin = yield* ScheduledTaskWebhookOrigin;
+    const timeZone = yield* ScheduledTaskTimeZone;
     // Webhook deliveries for one task dispatch in arrival order rather than
     // being dropped while an earlier delivery is still dispatching.
     const webhookPermits = yield* Ref.make<ReadonlyMap<ScheduledTaskId, Semaphore.Semaphore>>(
@@ -704,7 +717,7 @@ export const layer = Layer.effect(
           UPDATE scheduled_tasks
           SET last_run_status = 'failed',
               last_run_error = ${message},
-              next_run_at = ${nextRunAt(source, now)},
+              next_run_at = ${nextRunAt(source, now, timeZone)},
               updated_at = ${iso(now)},
               run_count = run_count + 1
           WHERE task_id = ${task.id} AND last_run_status = 'running'
@@ -856,7 +869,7 @@ export const layer = Layer.effect(
           ...scheduleSource,
           updatedAt: iso(completedAt),
           lastRunAt: startedAtIso,
-          nextRunAt: nextRunAt(scheduleSource, completedAt),
+          nextRunAt: nextRunAt(scheduleSource, completedAt, timeZone),
           lastRunStatus,
           lastRunError,
           runCount: scheduleSource.runCount + 1,
@@ -894,7 +907,7 @@ export const layer = Layer.effect(
       task: ScheduledTask,
       now: DateTime.DateTime,
     ) {
-      const next = nextRunAt(task, now);
+      const next = nextRunAt(task, now, timeZone);
       yield* Effect.logInfo("Skipping missed schedule task run", {
         taskId: task.id,
         missedRunAt: task.nextRunAt,
@@ -959,7 +972,7 @@ export const layer = Layer.effect(
                 UPDATE scheduled_tasks
                 SET last_run_status = 'failed',
                     last_run_error = 'Run was interrupted by a server restart.',
-                    next_run_at = ${nextRunAt(decoded.success, now)},
+                    next_run_at = ${nextRunAt(decoded.success, now, timeZone)},
                     updated_at = ${iso(now)},
                     run_count = run_count + 1
                 WHERE task_id IS ${row.task_id} AND last_run_status = 'running'
@@ -1122,7 +1135,7 @@ export const layer = Layer.effect(
           updatedAt: iso(now),
           nextRunAt: scheduleUnchanged
             ? existingTask.nextRunAt
-            : nextRunAt({ enabled: input.enabled, schedule }, now),
+            : nextRunAt({ enabled: input.enabled, schedule }, now, timeZone),
           lastRunAt: existingTask?.lastRunAt ?? null,
           lastRunStatus: existingTask?.lastRunStatus ?? "never",
           lastRunError: existingTask?.lastRunError ?? null,
@@ -1143,7 +1156,11 @@ export const layer = Layer.effect(
         const existing = yield* loadTask(input.id);
         if (existing.enabled === input.enabled) return { task: existing };
         const now = yield* localNow;
-        const next = nextRunAt({ enabled: input.enabled, schedule: existing.schedule }, now);
+        const next = nextRunAt(
+          { enabled: input.enabled, schedule: existing.schedule },
+          now,
+          timeZone,
+        );
         // RETURNING so a task deleted between the load and this UPDATE is a
         // visible not-found error, not a false success.
         const updated = yield* sql<{ task_id: string }>`

@@ -17,6 +17,7 @@ import type * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 
 import { sweepStalePendingAttachments } from "./attachmentStore.ts";
+import { systemLocalTimeZone } from "./scheduling/serverTimeZone.ts";
 import { DEFAULT_SIGNAL_EXPORT, type SignalExport } from "@t3tools/shared/observability";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import packageJson from "../package.json" with { type: "json" };
@@ -104,6 +105,11 @@ export class ServerConfig extends Context.Service<
     readonly logWebSocketEvents: boolean;
     readonly tailscaleServeEnabled: boolean;
     readonly tailscaleServePort: number;
+    /**
+     * IANA zone fixed-time schedules run in. From `COGENLY_TZ`, defaulting to
+     * the host's local zone.
+     */
+    readonly serverTimeZone: string;
   }
 >()("t3/config/ServerConfig") {
   /** @deprecated Import and use `layerTest` from this module. */
@@ -238,6 +244,7 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     logWebSocketEvents: false,
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
+    serverTimeZone: systemLocalTimeZone(),
     port: 0,
     host: undefined,
     desktopBootstrapToken: undefined,

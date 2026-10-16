@@ -24,6 +24,11 @@ import * as CliError from "effect/cli/CliError";
 import { readBootstrapEnvelope } from "../bootstrap.ts";
 import * as ServerConfig from "../config.ts";
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
+import {
+  isValidTimeZone,
+  normalizeTimeZoneSetting,
+  systemLocalTimeZone,
+} from "../scheduling/serverTimeZone.ts";
 import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 
 const modeFlag = Flag.Literals("mode", ServerConfig.RuntimeMode.literals).pipe(
@@ -164,6 +169,7 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  timeZone: Config.String("COGENLY_TZ").pipe(Config.option, Config.map(Option.getOrUndefined)),
 });
 
 const DevAuthTokenConfig = Config.Redacted("COGENLY_DEV_AUTH_TOKEN").pipe(
@@ -409,6 +415,16 @@ export const resolveServerConfig = (
     );
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
 
+    // Fail fast on a bad zone: silently falling back would fire fixed-time
+    // schedules at unexpected hours.
+    const configuredTimeZone = normalizeTimeZoneSetting(env.timeZone);
+    if (configuredTimeZone !== undefined && !isValidTimeZone(configuredTimeZone)) {
+      return yield* new CliError.UserError({
+        cause: `Invalid COGENLY_TZ "${configuredTimeZone}": expected an IANA time zone name such as "America/New_York" or "UTC".`,
+      });
+    }
+    const serverTimeZone = configuredTimeZone ?? systemLocalTimeZone();
+
     const otel = yield* OtelEnvironment.load;
 
     // T3 Code's own OTLP variables name no signal, so the one answer they give
@@ -479,6 +495,7 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      serverTimeZone,
     };
 
     return config;

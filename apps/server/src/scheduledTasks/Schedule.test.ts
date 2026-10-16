@@ -53,6 +53,60 @@ describe("scheduled task schedule calculation", () => {
     expect(parts?.minute).toBe(0);
   });
 
+  it("keeps the wall time across the spring-forward boundary", () => {
+    const next = nextScheduledRunAt(
+      { type: "fixed_time", timeOfDay: "09:00" },
+      DateTime.makeUnsafe("2026-03-07T15:00:00.000Z"),
+      { timeZone: "America/New_York" },
+    );
+    // 09:00 EST would be 14:00Z; after the 2026-03-08 shift it is 09:00 EDT.
+    expect(next ? DateTime.formatIso(DateTime.toUtc(next)) : null).toBe("2026-03-08T13:00:00.000Z");
+  });
+
+  it("keeps the wall time across the fall-back boundary", () => {
+    const next = nextScheduledRunAt(
+      { type: "fixed_time", timeOfDay: "09:00" },
+      DateTime.makeUnsafe("2026-10-31T15:00:00.000Z"),
+      { timeZone: "America/New_York" },
+    );
+    // 09:00 EDT would be 13:00Z; after the 2026-11-01 shift it is 09:00 EST.
+    expect(next ? DateTime.formatIso(DateTime.toUtc(next)) : null).toBe("2026-11-01T14:00:00.000Z");
+  });
+
+  it("reads the calendar day in the server zone, not in UTC", () => {
+    const schedule = { type: "fixed_time", timeOfDay: "09:00" } as const;
+    const from = DateTime.makeUnsafe("2026-07-01T23:30:00.000Z");
+    const utc = nextScheduledRunAt(schedule, from, { timeZone: "UTC" });
+    // In Auckland it is already Thursday 11:30, so Thursday 09:00 has passed
+    // and the next run is Friday 09:00 NZST.
+    const auckland = nextScheduledRunAt(schedule, from, { timeZone: "Pacific/Auckland" });
+    expect(utc ? DateTime.formatIso(DateTime.toUtc(utc)) : null).toBe("2026-07-02T09:00:00.000Z");
+    expect(auckland ? DateTime.formatIso(DateTime.toUtc(auckland)) : null).toBe(
+      "2026-07-02T21:00:00.000Z",
+    );
+  });
+
+  it("shifts a fixed time out of the spring-forward gap instead of skipping the day", () => {
+    const next = nextScheduledRunAt(
+      { type: "fixed_time", timeOfDay: "02:30" },
+      DateTime.makeUnsafe("2026-03-08T00:00:00.000Z"),
+      { timeZone: "America/New_York" },
+    );
+    // 02:30 does not exist on 2026-03-08 in New York; the run moves forward
+    // to 03:30 EDT rather than waiting another day.
+    expect(next ? DateTime.formatIso(DateTime.toUtc(next)) : null).toBe("2026-03-08T07:30:00.000Z");
+  });
+
+  it("falls back to the caller's zone for an unknown zone name", () => {
+    const schedule = { type: "fixed_time", timeOfDay: "09:00" } as const;
+    const from = DateTime.makeUnsafe("2026-07-01T16:00:00.000Z");
+    const fallback = nextScheduledRunAt(schedule, from, { timeZone: "Mars/Olympus" });
+    const plain = nextScheduledRunAt(schedule, from);
+    expect(fallback ? DateTime.formatIso(DateTime.toUtc(fallback)) : null).toBe(
+      plain ? DateTime.formatIso(DateTime.toUtc(plain)) : null,
+    );
+  });
+
   it("skips fixed-time runs missed by more than the grace window", () => {
     const fixedTime = { type: "fixed_time", timeOfDay: "09:00" } as const;
     const dueAt = DateTime.makeUnsafe("2026-07-01T09:00:00.000Z");

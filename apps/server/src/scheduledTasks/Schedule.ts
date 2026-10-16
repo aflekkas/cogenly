@@ -1,5 +1,6 @@
 import { MIN_SCHEDULED_TASK_INTERVAL_MS, type ScheduledTaskSchedule } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 
 const MINUTE_MS = 60_000;
 
@@ -12,6 +13,7 @@ export function parseTimeOfDay(value: string): { hour: number; minute: number } 
 export function nextScheduledRunAt(
   schedule: ScheduledTaskSchedule,
   from: DateTime.DateTime,
+  options?: { readonly timeZone?: string },
 ): DateTime.DateTime | null {
   if (schedule.type === "webhook") return null;
   if (schedule.type === "interval") {
@@ -24,10 +26,19 @@ export function nextScheduledRunAt(
 
   const time = parseTimeOfDay(schedule.timeOfDay);
   if (time === null) return null;
+  // Fixed times are wall-clock times in the server zone. Interpreting `from`
+  // there keeps the same instant but reads its calendar day there, so DST
+  // shifts move the UTC instant while the wall time stays put. Without a zone
+  // the caller's zone applies, as before. An unknown zone cannot happen past
+  // startup validation; it falls back rather than dropping the schedule.
+  const zonedFrom =
+    options?.timeZone === undefined
+      ? from
+      : Option.getOrElse(DateTime.setZoneNamed(from, options.timeZone), () => from);
   const weekdays =
     schedule.weekdays && schedule.weekdays.length > 0 ? new Set(schedule.weekdays) : null;
   for (let offset = 0; offset <= 7; offset += 1) {
-    const candidate = DateTime.setParts(DateTime.add(from, { days: offset }), {
+    const candidate = DateTime.setParts(DateTime.add(zonedFrom, { days: offset }), {
       hour: time.hour,
       minute: time.minute,
       second: 0,
