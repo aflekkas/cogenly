@@ -1,12 +1,20 @@
 # Brand icons
 
+## Placeholder Cogenly mark (current)
+
+Until a real logo is designed, every tracked icon is rendered from `brand/cogenly-mark.svg`: a dark rounded square with a lowercase "c". Run `vp run icons:mark` from the repository root to re-render the web favicons, apple-touch icons, Linux/universal PNGs, Windows ICOs, and macOS PNGs (with the 100px pre-Tahoe safe area) for all three channels, plus the `apps/web/public` copies. It rasterizes with headless Chromium through the server's `playwright-core`; pass `--chromium <path>` to pick the binary.
+
+The Icon Composer projects below now use `brand/cogenly-glyph.svg` as their `text.svg`, but their backgrounds are still the old artwork, so `icons:export` and `icons:check` do not describe the shipped icons. Replace or redesign those projects along with the real logo.
+
+## Icon Composer pipeline
+
 The three Icon Composer projects are the source of truth for full application icons:
 
 - `dev/app-icon.icon`
 - `nightly/app-icon.icon`
 - `prod/app-icon.icon`
 
-Each project uses `text.svg` for the T3 mark and `background.svg` when the background is a vector layer. Additional layers use semantic names that describe their role and placement.
+Each project uses `text.svg` for the foreground mark and `background.svg` when the background is a vector layer. Additional layers use semantic names that describe their role and placement.
 
 Run `vp run icons:export` from the repository root to regenerate the tracked Linux, Windows, and web assets. The development web exports are also copied to `apps/web/public` for the browser favicon and splash screen. Run `vp run icons:check` to verify that the generated assets and public copies match their sources without changing files.
 
