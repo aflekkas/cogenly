@@ -44,6 +44,7 @@ Useful checks: `vp run typecheck`, `vp run lint`, `vp run test`.
 
 - [Architecture overview](./docs/internals/overview.md)
 - [Development](./docs/operations/development.md)
+- [Run it always-on (Mac service or VPS)](./docs/operations/always-on.md)
 - Agent and contributor guidelines: [AGENTS.md](./AGENTS.md)
 
 ## Credits
