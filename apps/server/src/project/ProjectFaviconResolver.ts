@@ -22,9 +22,10 @@ import * as Schema from "effect/Schema";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
 
-// Resolution probes 23 well-known paths plus 7 source files, so a miss
-// costs ~30 filesystem probes. AssetAccess resolves on every project-favicon
-// asset URL, and a project's icon does not move, so the answer is cached.
+// Resolution probes ~40 well-known paths plus 7 source files per package
+// root, so a miss costs a few hundred filesystem probes across a monorepo.
+// AssetAccess resolves on every project-favicon asset URL, and a project's
+// icon does not move, so the answer is cached.
 const FAVICON_CACHE_CAPACITY = 512;
 const FAVICON_POSITIVE_CACHE_TTL = Duration.minutes(10);
 const FAVICON_NEGATIVE_CACHE_TTL = Duration.minutes(1);
@@ -46,32 +47,76 @@ function parseFaviconCacheKey(key: string): {
   return faviconPath.length === 0 ? { cwd } : { cwd, faviconPath };
 }
 
-// Well-known favicon paths checked in order.
+// Well-known favicon paths checked in order, relative to a package root.
+// Vector and large raster icons come before .ico, which is often 16px only.
 const FAVICON_CANDIDATES = [
   "favicon.svg",
-  "favicon.ico",
   "favicon.png",
+  "favicon.ico",
+  "icon.svg",
+  "icon.png",
   "public/favicon.svg",
-  "public/favicon.ico",
+  "public/icon.svg",
+  "public/logo.svg",
+  "public/apple-touch-icon.png",
   "public/favicon.png",
-  "app/favicon.ico",
-  "app/favicon.png",
+  "public/icon.png",
+  "public/favicon.ico",
+  "static/favicon.svg",
+  "static/favicon.png",
+  "static/favicon.ico",
   "app/icon.svg",
   "app/icon.png",
+  "app/apple-icon.png",
+  "app/favicon.png",
+  "app/favicon.ico",
   "app/icon.ico",
-  "src/favicon.ico",
   "src/favicon.svg",
-  "src/app/favicon.ico",
+  "src/favicon.png",
+  "src/favicon.ico",
   "src/app/icon.svg",
   "src/app/icon.png",
+  "src/app/apple-icon.png",
+  "src/app/favicon.ico",
+  "src/assets/logo.svg",
+  "src/assets/icon.svg",
   "assets/icon.svg",
   "assets/icon.png",
   "assets/logo.svg",
   "assets/logo.png",
+  "assets/images/icon.png",
+  "apple-touch-icon.png",
+  "build/icon.png",
+  "resources/icon.png",
   ".idea/icon.svg",
   "Resources/AppIcon.icns",
   "AppIcon.icns",
 ] as const;
+
+// Monorepo folders whose children are package roots worth probing when the
+// workspace root has no icon of its own.
+const MONOREPO_PACKAGE_DIRS = ["apps", "packages", "sites", "services"] as const;
+
+// Single-folder frontends that sit beside a backend at the workspace root.
+const NESTED_APP_DIRS = ["web", "frontend", "client", "site", "www", "app", "ui"] as const;
+
+// User-facing apps carry the brand icon, so they are probed first. Other
+// packages follow alphabetically.
+const PREFERRED_PACKAGE_NAMES = [
+  "web",
+  "app",
+  "frontend",
+  "client",
+  "site",
+  "www",
+  "desktop",
+  "mobile",
+  "marketing",
+  "docs",
+] as const;
+
+// Bounds a miss in a large monorepo.
+const MAX_NESTED_PACKAGE_ROOTS = 16;
 
 // Files that may contain a <link rel="icon"> or icon metadata declaration.
 const ICON_SOURCE_FILES = [
@@ -89,7 +134,7 @@ const ICON_SOURCE_FILES = [
 // is matched by scanning brace-free runs instead of by one combined pattern: an unanchored
 // pattern restarts at every offset and rescans forward, which is quadratic on large sources.
 const LINK_ICON_HTML_RE =
-  /<link\b(?=[^>]*\brel=["'](?:icon|shortcut icon)["'])(?=[^>]*\bhref=["']([^"'?]+))[^>]*>/i;
+  /<link\b(?=[^>]*\brel=["'](?:icon|shortcut icon|apple-touch-icon)["'])(?=[^>]*\bhref=["']([^"'?]+))[^>]*>/i;
 const ICON_REL_RE = /\brel\s*:\s*["'](?:icon|shortcut icon)["']/i;
 const ICON_HREF_RE = /\bhref\s*:\s*["']([^"'?]+)/i;
 
@@ -165,9 +210,9 @@ export const make = Effect.gen(function* () {
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const projectFileLoader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
 
-  const resolveIconHref = (href: string): ReadonlyArray<string> => {
+  const resolveIconHref = (packageRoot: string, href: string): ReadonlyArray<string> => {
     const clean = href.replace(/^\//, "");
-    return [path.join("public", clean), clean];
+    return [path.join(packageRoot, "public", clean), path.join(packageRoot, clean)];
   };
 
   const findExistingFile = Effect.fn("ProjectFaviconResolver.findExistingFile")(function* (
@@ -214,11 +259,14 @@ export const make = Effect.gen(function* () {
     return null;
   });
 
-  // Reads one source file and resolves the icon it declares, if any.
+  // Reads one source file under a package root and resolves the icon it
+  // declares, if any. Hrefs are relative to that package's web root.
   const findIconFromSource = Effect.fn("ProjectFaviconResolver.findIconFromSource")(function* (
     projectCwd: string,
-    sourceFile: string,
+    packageRoot: string,
+    packageSourceFile: string,
   ): Effect.fn.Return<string | null, ProjectFaviconResolutionError> {
+    const sourceFile = path.join(packageRoot, packageSourceFile);
     const sourcePath = yield* workspacePaths
       .resolveRelativePathWithinRoot({
         workspaceRoot: projectCwd,
@@ -254,7 +302,7 @@ export const make = Effect.gen(function* () {
     if (!href) {
       return null;
     }
-    return yield* findExistingFile(projectCwd, resolveIconHref(href), "workspace");
+    return yield* findExistingFile(projectCwd, resolveIconHref(packageRoot, href), "workspace");
   });
 
   // Starts every probe at once and returns the first hit in list order. A miss
@@ -276,6 +324,66 @@ export const make = Effect.gen(function* () {
       }
       return null;
     }).pipe(Effect.scoped);
+
+  // Well-known files first, then icons declared in HTML or route sources.
+  const resolveInPackageRoot = (projectCwd: string, packageRoot: string) =>
+    Effect.gen(function* () {
+      const wellKnown = yield* firstInOrder(FAVICON_CANDIDATES, (candidate) =>
+        findExistingFile(projectCwd, [path.join(packageRoot, candidate)], "workspace"),
+      );
+      if (wellKnown) {
+        return wellKnown;
+      }
+      return yield* firstInOrder(ICON_SOURCE_FILES, (sourceFile) =>
+        findIconFromSource(projectCwd, packageRoot, sourceFile),
+      );
+    });
+
+  const isDirectory = (absolutePath: string) =>
+    fileSystem.stat(absolutePath).pipe(
+      Effect.map((stats) => stats.type === "Directory"),
+      Effect.orElseSucceed(() => false),
+    );
+
+  // Package roots one level below the monorepo folders, plus a lone web/ or
+  // client/ beside a backend. Listing is best effort: an unreadable folder
+  // just contributes nothing.
+  const listNestedPackageRoots = Effect.fn("ProjectFaviconResolver.listNestedPackageRoots")(
+    function* (projectCwd: string) {
+      const listed = yield* Effect.forEach(
+        MONOREPO_PACKAGE_DIRS,
+        (parent) =>
+          fileSystem.readDirectory(path.join(projectCwd, parent)).pipe(
+            Effect.orElseSucceed((): ReadonlyArray<string> => []),
+            Effect.map((names) =>
+              names
+                .filter((name) => !name.startsWith(".") && name !== "node_modules")
+                .toSorted((left, right) => {
+                  const rank = (name: string) => {
+                    const index = (PREFERRED_PACKAGE_NAMES as ReadonlyArray<string>).indexOf(name);
+                    return index === -1 ? PREFERRED_PACKAGE_NAMES.length : index;
+                  };
+                  return rank(left) - rank(right) || left.localeCompare(right);
+                })
+                .map((name) => path.join(parent, name)),
+            ),
+          ),
+        { concurrency: "unbounded" },
+      );
+      const candidates = [...NESTED_APP_DIRS, ...listed.flat()];
+      const directories = yield* Effect.forEach(
+        candidates,
+        (relative) =>
+          isDirectory(path.join(projectCwd, relative)).pipe(
+            Effect.map((isDir) => (isDir ? relative : null)),
+          ),
+        { concurrency: "unbounded" },
+      );
+      return directories
+        .filter((relative): relative is string => relative !== null)
+        .slice(0, MAX_NESTED_PACKAGE_ROOTS);
+    },
+  );
 
   const resolvePathUncached = Effect.fn("ProjectFaviconResolver.resolvePathUncached")(function* (
     cwd: string,
@@ -313,15 +421,15 @@ export const make = Effect.gen(function* () {
       }
     }
 
-    const wellKnown = yield* firstInOrder(FAVICON_CANDIDATES, (candidate) =>
-      findExistingFile(projectCwd, [candidate], "workspace"),
-    );
-    if (wellKnown) {
-      return wellKnown;
+    const atRoot = yield* resolveInPackageRoot(projectCwd, "");
+    if (atRoot) {
+      return atRoot;
     }
 
-    return yield* firstInOrder(ICON_SOURCE_FILES, (sourceFile) =>
-      findIconFromSource(projectCwd, sourceFile),
+    // A monorepo keeps its icon in an app: apps/web/public/favicon.svg.
+    const packageRoots = yield* listNestedPackageRoots(projectCwd);
+    return yield* firstInOrder(packageRoots, (packageRoot) =>
+      resolveInPackageRoot(projectCwd, packageRoot),
     );
   });
 
