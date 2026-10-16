@@ -119,7 +119,7 @@ export function SidebarUpdateCapsule({
               aria-label={
                 view.slow ? `${view.label} ${view.slow.status} ${view.slow.elapsed}` : view.label
               }
-              className="absolute inset-0 cursor-pointer rounded-full outline-hidden ring-ring hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset"
+              className="absolute inset-0 cursor-pointer rounded-full outline-hidden ring-ring state-hover focus-visible:ring-2 focus-visible:ring-inset"
             />
           }
         />

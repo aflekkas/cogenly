@@ -691,7 +691,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         data-testid="sidebar-draft-row"
         className={cn(
           "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-lg text-left text-sidebar-foreground outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          props.isActive ? "bg-sidebar-row-active" : draftSurfaceClassName,
+          props.isActive ? "state-selected" : draftSurfaceClassName,
         )}
         onClick={handleActivate}
         onContextMenu={handleContextMenu}
@@ -1297,22 +1297,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const rowSurfaceClassName = cn(
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-lg text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
-    props.isActive
-      ? "surface-raised-sm bg-sidebar-row-active text-sidebar-foreground"
-      : isSelected || props.sweepAction !== null
-        ? "surface-raised-sm bg-sidebar-row-selected text-sidebar-foreground"
-        : hasUnsentDraft
-          ? cn(draftSurfaceClassName, "text-sidebar-foreground")
-          : shouldRecede
-            ? "text-sidebar-muted-foreground/75 hover:surface-raised-hover hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-            : "bg-transparent text-sidebar-foreground hover:surface-raised-hover hover:bg-sidebar-row-hover",
+    props.isActive || isSelected || props.sweepAction !== null
+      ? "state-selected"
+      : hasUnsentDraft
+        ? cn(draftSurfaceClassName, "text-sidebar-foreground")
+        : shouldRecede
+          ? "state-hover text-sidebar-muted-foreground/75"
+          : "state-hover text-sidebar-foreground",
     // Background work fades as a whole row, status label included, so it
     // takes less attention than rows that need a human (input, approval).
     shouldRecede &&
       status === "working" &&
       "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
-    isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
+    isFileDragOver && !props.isActive && !isSelected && "bg-state-hover",
   );
   const sweepBadge =
     props.sweepAction !== null ? (
@@ -1966,10 +1964,10 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
               className={cn(
                 "group/sidebar-row group/v2-row flex min-h-9 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1 text-left text-sm outline-none",
                 props.isHighlighted || props.isRouteActive
-                  ? "bg-sidebar-row-active text-sidebar-foreground"
-                  : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+                  ? "state-selected"
+                  : "state-hover text-sidebar-muted-foreground/75",
                 isFileDragOver && "ring-1 ring-inset ring-primary/70",
-                isFileDragOver && !props.isRouteActive && "bg-sidebar-row-hover",
+                isFileDragOver && !props.isRouteActive && "bg-state-hover",
               )}
             />
           }
@@ -4186,7 +4184,7 @@ export default function Sidebar() {
                                         onClick={() =>
                                           openProjectSettings(projectGroup, projectRef)
                                         }
-                                        className="flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground/70 outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                                        className="flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground/70 outline-none state-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                                       />
                                     }
                                   >
@@ -4275,7 +4273,7 @@ export default function Sidebar() {
                     <button
                       type="button"
                       onClick={showMoreSettled}
-                      className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                      className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 state-hover"
                     >
                       <PlusIcon aria-hidden className="size-4 shrink-0" />
                       Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
@@ -4300,7 +4298,7 @@ export default function Sidebar() {
                   <button
                     type="button"
                     onClick={openAddProjectCommandPalette}
-                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
                   >
                     <PlusIcon className="-mx-0.5 size-3" />
                     Add project

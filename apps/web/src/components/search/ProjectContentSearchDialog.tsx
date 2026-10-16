@@ -289,8 +289,8 @@ function OpenContentSearchDialog(props: {
                       key={`${match.path}:${match.lineNumber}:${match.resultIndex}`}
                       data-content-search-result={match.resultIndex}
                       className={cn(
-                        "flex h-7 w-full min-w-0 items-center gap-3 px-3 text-left font-mono text-xs hover:bg-accent/60 disabled:pointer-events-none",
-                        match.resultIndex === selectedIndex && "bg-accent text-accent-foreground",
+                        "flex h-7 w-full min-w-0 items-center gap-3 px-3 text-left font-mono text-xs state-hover disabled:pointer-events-none",
+                        match.resultIndex === selectedIndex && "state-selected",
                       )}
                       disabled={!canOpenMatches}
                       onMouseEnter={() => setSelectedIndex(match.resultIndex)}

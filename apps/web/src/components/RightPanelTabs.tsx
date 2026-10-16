@@ -466,10 +466,8 @@ function RightPanelEmptyState(props: {
                 <button
                   type="button"
                   onClick={action.onClick}
-                  className={cn(
-                    "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-(--control-radius) px-2.5 text-left text-sm transition-colors group-hover:bg-accent/60",
-                    isHighlighted(action) && "bg-accent/60",
-                  )}
+                  data-highlighted={isHighlighted(action) || undefined}
+                  className="state-hover flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-(--control-radius) px-2.5 text-left text-sm"
                 >
                   {actionIcon(action, "size-4")}
                   <span
@@ -1023,9 +1021,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     className={cn(
                       "cursor-pointer group/tab flex h-6 max-w-36 shrink-0 items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
                       ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
-                      active
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                      active ? "state-selected" : "state-hover text-muted-foreground",
                     )}
                   >
                     <PanelTabCloseButton

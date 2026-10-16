@@ -786,7 +786,7 @@ function WebhookDeliveriesDialog({
                 <li key={delivery.id}>
                   <button
                     type="button"
-                    className="flex w-full flex-wrap items-center gap-2 py-2 text-left text-sm hover:bg-accent/40"
+                    className="flex w-full flex-wrap items-center gap-2 py-2 text-left text-sm state-hover"
                     onClick={() => setSelectedId(delivery.id)}
                   >
                     <Badge variant={deliveryOutcomeVariant(delivery.outcome)}>

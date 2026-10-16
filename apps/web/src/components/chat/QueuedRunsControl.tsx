@@ -287,7 +287,7 @@ export function QueuedRunsControl({
                   aria-current={isEditing ? "true" : undefined}
                   className={cn(
                     "relative rounded-sm",
-                    isEditing && "bg-accent text-accent-foreground",
+                    isEditing && "state-selected",
                     dragState !== null && dragState.runId === item.runId && "opacity-50",
                   )}
                   draggable={rowDraggable}

@@ -187,11 +187,14 @@ function CommandItem({
 }: React.ComponentProps<typeof AutocompleteItem> & { active?: boolean }) {
   return (
     <AutocompleteItem
+      // The palette's highlighted row is its cursor, so it takes the selected
+      // state rather than the hover one.
+      highlightStates={false}
       className={cn(
-        "py-1.5 data-selected:bg-foreground/[0.06] data-highlighted:bg-foreground/[0.09] data-highlighted:text-foreground [&[data-highlighted][data-selected]]:bg-foreground/[0.09] [&[data-highlighted][data-selected]]:text-foreground",
-        active !== undefined &&
-          "cursor-pointer hover:bg-transparent hover:text-inherit data-highlighted:bg-transparent data-highlighted:text-inherit data-selected:bg-transparent data-selected:text-inherit [&[data-highlighted][data-selected]]:bg-transparent [&[data-highlighted][data-selected]]:text-inherit",
-        active && "bg-accent! text-accent-foreground!",
+        "py-1.5",
+        active === undefined
+          ? "data-highlighted:state-selected data-selected:state-selected"
+          : cn("cursor-pointer", active && "state-selected"),
         className,
       )}
       data-active={active || undefined}

@@ -295,7 +295,7 @@ export function showContextMenuFallback<T extends string>(
 
       const menu = document.createElement("div");
       menu.className =
-        "dropdown-glass fixed z-[10000] min-w-32 max-w-sm overflow-hidden rounded-lg bg-clip-padding text-popover-foreground outline-none";
+        "dropdown-glass surface-raised surface-raised-floating fixed z-[10000] min-w-32 max-w-sm overflow-hidden rounded-lg bg-clip-padding text-popover-foreground outline-none";
       menu.style.cssText =
         "position:fixed;z-index:10000;min-width:8rem;max-width:24rem;overflow:hidden;border-radius:var(--radius-lg);background-clip:padding-box;color:var(--contrast-popover-foreground);outline:none;pointer-events:auto;";
       menu.style.left = `${preferredLeft}px`;
@@ -343,11 +343,15 @@ export function showContextMenuFallback<T extends string>(
           ? `${rowBase} pointer-events-none cursor-not-allowed text-muted-foreground opacity-64`
           : isLeafDestructive
             ? `${rowBase} text-destructive-foreground hover:bg-destructive/10 hover:text-destructive-foreground`
-            : `${rowBase} text-foreground hover:bg-accent hover:text-accent-foreground`;
+            : `${rowBase} text-foreground state-hover`;
         button.style.cssText =
           "display:flex;width:100%;min-height:1.75rem;align-items:center;gap:0.5rem;border:0;border-radius:var(--radius-sm);background:transparent;padding:0.25rem 0.5rem;color:var(--contrast-foreground);font-family:var(--font-sans,system-ui,sans-serif);font-size:0.875rem;line-height:1.25rem;text-align:left;cursor:default;";
         if (isLeafDestructive) {
           button.style.color = "var(--destructive-foreground)";
+        } else if (!isDisabled) {
+          // Plain rows take the shared state-hover surface via data-highlighted.
+          button.style.removeProperty("background");
+          button.style.removeProperty("color");
         }
         if (isDisabled) {
           button.style.color = "var(--contrast-muted-foreground)";
@@ -402,18 +406,12 @@ export function showContextMenuFallback<T extends string>(
           let isFocused = false;
           const updateHighlight = () => {
             const isHighlighted = isHovered || isFocused;
-            button.style.background = isHighlighted
-              ? isLeafDestructive
+            button.toggleAttribute("data-highlighted", isHighlighted);
+            if (isLeafDestructive) {
+              button.style.background = isHighlighted
                 ? "color-mix(in srgb, var(--destructive) 10%, transparent)"
-                : "var(--accent)"
-              : "transparent";
-            button.style.color = isHighlighted
-              ? isLeafDestructive
-                ? "var(--destructive-foreground)"
-                : "var(--contrast-accent-foreground)"
-              : isLeafDestructive
-                ? "var(--destructive-foreground)"
-                : "var(--contrast-foreground)";
+                : "transparent";
+            }
           };
           button.addEventListener("mouseenter", () => {
             button.focus({ preventScroll: true });

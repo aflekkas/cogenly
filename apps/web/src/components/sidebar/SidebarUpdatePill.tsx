@@ -466,12 +466,9 @@ function SidebarUpdateControl() {
         showUpdateIconState
           ? cn(
               "bg-sidebar-control-surface text-sidebar-foreground",
-              !isInteractionDisabled && "hover:bg-sidebar-row-hover",
+              !isInteractionDisabled && "state-hover",
             )
-          : cn(
-              "text-(--sidebar-icon-color)",
-              !isInteractionDisabled && "hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
-            ),
+          : cn("text-(--sidebar-icon-color)", !isInteractionDisabled && "state-hover"),
         disabled && !showUpdateIconState && "opacity-60",
       )}
       onClick={handleAction}

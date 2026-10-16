@@ -1967,7 +1967,7 @@ export default function GitActionsControl({
                             return (
                               <div
                                 key={file.path}
-                                className="flex w-full items-center gap-2 rounded-md px-2 py-1 font-mono hover:bg-accent/50"
+                                className="flex w-full items-center gap-2 rounded-md px-2 py-1 font-mono state-hover"
                               >
                                 {isEditingFiles && (
                                   <Checkbox

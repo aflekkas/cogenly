@@ -149,10 +149,7 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
                 key={entry.id}
                 data-stash-entry={entry.id}
                 data-highlighted={highlightedEntry?.id === entry.id || undefined}
-                className={cn(
-                  "relative rounded-sm",
-                  highlightedEntry?.id === entry.id && "bg-accent text-accent-foreground",
-                )}
+                className="state-hover relative rounded-sm"
                 onMouseMove={() => {
                   if (highlightedId !== entry.id) setHighlightedId(entry.id);
                 }}
