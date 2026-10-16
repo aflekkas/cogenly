@@ -1233,7 +1233,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       });
     };
     const visibleProjectThreads = sortThreads(
-      projectThreads.filter((thread) => thread.archivedAt === null),
+      projectThreads.filter(
+        (thread) => thread.archivedAt === null && thread.source.agent?.role !== "work",
+      ),
       threadSortOrder,
     );
     const projectStatus = resolveProjectStatusIndicator(
@@ -3179,7 +3181,10 @@ export default function LegacySidebar() {
   }, []);
 
   const visibleThreads = useMemo(
-    () => sidebarThreads.filter((thread) => thread.archivedAt === null),
+    () =>
+      sidebarThreads.filter(
+        (thread) => thread.archivedAt === null && thread.source.agent?.role !== "work",
+      ),
     [sidebarThreads],
   );
   const sortedProjects = useMemo(() => {

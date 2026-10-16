@@ -63,6 +63,7 @@ describe("command permissions", () => {
     WS_METHODS.agentsUpsert,
     WS_METHODS.agentsDelete,
     WS_METHODS.agentsSend,
+    WS_METHODS.agentsMarkRead,
     WS_METHODS.agentsMemoryWrite,
     WS_METHODS.agentsMemoryForget,
   ])("requires the destination operate grant for %s", (method) =>

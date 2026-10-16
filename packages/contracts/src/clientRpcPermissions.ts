@@ -44,6 +44,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.agentsUpsert]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsSend]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentsMarkRead]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsMemoryWrite]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsMemoryForget]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksUpsert]: AuthOrchestrationOperateScope,

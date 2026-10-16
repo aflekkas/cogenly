@@ -80,6 +80,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.agentsUpsert]: "agents",
   [WS_METHODS.agentsDelete]: "agents",
   [WS_METHODS.agentsSend]: "agents",
+  [WS_METHODS.agentsMarkRead]: "agents",
   [WS_METHODS.agentsMemoryList]: "agents",
   [WS_METHODS.agentsMemoryWrite]: "agents",
   [WS_METHODS.agentsMemoryForget]: "agents",

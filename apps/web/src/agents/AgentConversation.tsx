@@ -10,7 +10,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
 import { conversationRows } from "./agents.logic";
-import { markAgentRead, useAgentsClient } from "./agentsClient";
+import { useAgentsClient } from "./agentsClient";
 import { AgentDetails } from "./AgentDetails";
 import type { AgentContact, AgentRequest } from "./agents.types";
 
@@ -28,12 +28,31 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
   const lastOwner = agent.messages.findLast((message) => message.role === "user");
   useEffect(() => {
     const mark = () => {
-      if (document.visibilityState === "visible") markAgentRead(agent);
+      if (
+        document.visibilityState !== "visible" ||
+        !canWrite ||
+        agent.unreadCount === 0 ||
+        agent.hasMoreMessages === undefined
+      )
+        return;
+      const latest = agent.messages
+        .filter((message) => message.role === "assistant" && !message.streaming)
+        .toSorted(
+          (a, b) =>
+            (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt) ||
+            b.id.localeCompare(a.id),
+        )[0];
+      if (latest)
+        void client
+          .markRead(agent, latest.id)
+          .catch((cause) =>
+            setError(cause instanceof Error ? cause.message : "Could not mark messages read."),
+          );
     };
     mark();
     document.addEventListener("visibilitychange", mark);
     return () => document.removeEventListener("visibilitychange", mark);
-  }, [agent]);
+  }, [agent, client, canWrite]);
   useLayoutEffect(() => {
     if (atBottom.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   });

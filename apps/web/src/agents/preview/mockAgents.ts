@@ -1,5 +1,11 @@
 import { randomUUID } from "~/lib/utils";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  AgentId,
+  ScheduledTaskId,
+  EnvironmentId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import type { AgentsClient, AgentsSnapshot } from "../agentsClient";
 import type { AgentContact, AgentMessage } from "../agents.types";
 
@@ -24,6 +30,9 @@ export function createMockAgentsClient(): AgentsClient {
   ];
   const base = {
     environmentId,
+    unreadCount: 1,
+    latestMessage: null,
+    hasMoreMessages: false,
     instructions:
       "Keep an eye on my projects. Be thoughtful, concise, and direct. Send me the highlights, and ask before making big changes.",
     modelSelection: models[0]!.selection,
@@ -70,7 +79,7 @@ export function createMockAgentsClient(): AgentsClient {
   ];
   const juniper: AgentContact = {
     ...base,
-    id: "juniper",
+    id: AgentId.make("juniper"),
     name: "Juniper",
     avatar: { seed: "juniper-forest", color: "#90b79c" },
     conversationThreadId: ThreadId.make("preview-juniper"),
@@ -89,7 +98,7 @@ export function createMockAgentsClient(): AgentsClient {
     memory: [
       {
         id: "note-1",
-        agentId: "juniper",
+        agentId: AgentId.make("juniper"),
         text: "Keep changes small enough to review over coffee.",
         source: "conversation",
         createdAt: ago(2000),
@@ -97,7 +106,7 @@ export function createMockAgentsClient(): AgentsClient {
       },
       {
         id: "note-2",
-        agentId: "juniper",
+        agentId: AgentId.make("juniper"),
         text: "Ask before adding a dependency. Prefer what’s already in the project.",
         source: "conversation",
         createdAt: ago(5),
@@ -107,8 +116,8 @@ export function createMockAgentsClient(): AgentsClient {
     activity: [
       {
         id: "run1",
-        agentId: "juniper",
-        triggerId: "nightly",
+        agentId: AgentId.make("juniper"),
+        triggerId: ScheduledTaskId.make("nightly"),
         workThreadId: ThreadId.make("preview-work"),
         status: "completed",
         createdAt: ago(50),
@@ -132,7 +141,7 @@ export function createMockAgentsClient(): AgentsClient {
       juniper,
       {
         ...base,
-        id: "atlas",
+        id: AgentId.make("atlas"),
         name: "Atlas",
         avatar: { seed: "atlas", color: "#c4a4df" },
         conversationThreadId: ThreadId.make("preview-atlas"),
@@ -145,7 +154,7 @@ export function createMockAgentsClient(): AgentsClient {
       },
       {
         ...base,
-        id: "milo",
+        id: AgentId.make("milo"),
         name: "Milo",
         avatar: { seed: "milo", color: "#e3b484" },
         conversationThreadId: ThreadId.make("preview-milo"),
@@ -175,7 +184,7 @@ export function createMockAgentsClient(): AgentsClient {
       },
       {
         ...base,
-        id: "echo",
+        id: AgentId.make("echo"),
         name: "Echo",
         avatar: { seed: "echo", color: "#7da9c9" },
         enabled: false,
@@ -212,12 +221,13 @@ export function createMockAgentsClient(): AgentsClient {
         update(draft.id, (agent) => ({
           ...agent,
           ...draft,
+          id: agent.id,
           state: draft.enabled ? (agent.enabled ? agent.state : "idle") : "asleep",
           updatedAt: ago(0),
         }));
         return snapshot.agents.find((agent) => agent.id === draft.id)!;
       }
-      const id = randomUUID();
+      const id = AgentId.make(randomUUID());
       const agent: AgentContact = {
         ...base,
         ...draft,
@@ -233,6 +243,9 @@ export function createMockAgentsClient(): AgentsClient {
       snapshot = { ...snapshot, agents: [...snapshot.agents, agent] };
       emit();
       return agent;
+    },
+    markRead: async (agent) => {
+      update(agent.id, (current) => ({ ...current, unreadCount: 0 }));
     },
     remove: async (agent) => {
       snapshot = { ...snapshot, agents: snapshot.agents.filter((item) => item.id !== agent.id) };
@@ -276,9 +289,21 @@ export function createMockAgentsClient(): AgentsClient {
     saveMemory: async (agent, note) =>
       update(agent.id, (current) => ({
         ...current,
-        memory: current.memory.map((item) =>
-          item.id === note.id ? { ...item, text: note.text, updatedAt: ago(0) } : item,
-        ),
+        memory: note.id
+          ? current.memory.map((item) =>
+              item.id === note.id ? { ...item, text: note.text, updatedAt: ago(0) } : item,
+            )
+          : [
+              ...current.memory,
+              {
+                id: randomUUID(),
+                agentId: agent.id,
+                text: note.text,
+                source: "owner",
+                createdAt: ago(0),
+                updatedAt: ago(0),
+              },
+            ],
       })),
     deleteMemory: async (agent, id) =>
       update(agent.id, (current) => ({
@@ -294,6 +319,7 @@ export function createMockAgentsClient(): AgentsClient {
             )
           : [...current.triggers, { ...trigger, id: randomUUID() }],
       })),
+    runTrigger: async (agent) => update(agent.id, (current) => ({ ...current, state: "thinking" })),
     deleteTrigger: async (agent, id) =>
       update(agent.id, (current) => ({
         ...current,

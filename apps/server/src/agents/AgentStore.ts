@@ -3,6 +3,8 @@ import {
   AgentError,
   AgentId,
   AgentMemoryNote,
+  AgentListItem,
+  type AgentMarkReadInput,
   AgentWorkRun,
   ThreadId,
   type AgentMemoryWriteInput,
@@ -23,8 +25,10 @@ interface Row {
   pause_reason: string | null;
   enabled: number;
   daily_run_cap: number;
+  unread_count: number;
+  latest_message_json?: string | null;
 }
-const decode = Schema.decodeUnknownEffect(Agent);
+const decode = Schema.decodeUnknownEffect(AgentListItem);
 const decodeNote = Schema.decodeUnknownEffect(AgentMemoryNote);
 const decodeRun = Schema.decodeUnknownEffect(AgentWorkRun);
 const decodeJsonRecord = Schema.decodeUnknownEffect(
@@ -36,11 +40,12 @@ const storeError = (cause: unknown) =>
 export class AgentStore extends Context.Service<
   AgentStore,
   {
-    readonly list: () => Effect.Effect<ReadonlyArray<Agent>, AgentError>;
-    readonly get: (id: AgentId) => Effect.Effect<Agent, AgentError>;
+    readonly list: () => Effect.Effect<ReadonlyArray<AgentListItem>, AgentError>;
+    readonly get: (id: AgentId) => Effect.Effect<AgentListItem, AgentError>;
     readonly forThread: (id: ThreadId) => Effect.Effect<Agent | null, AgentError>;
     readonly save: (agent: Agent) => Effect.Effect<Agent, AgentError>;
     readonly delete: (id: AgentId) => Effect.Effect<boolean, AgentError>;
+    readonly markRead: (input: AgentMarkReadInput) => Effect.Effect<AgentListItem, AgentError>;
     readonly memory: (id: AgentId) => Effect.Effect<ReadonlyArray<AgentMemoryNote>, AgentError>;
     readonly remember: (input: AgentMemoryWriteInput) => Effect.Effect<AgentMemoryNote, AgentError>;
     readonly forget: (agentId: AgentId, id: string) => Effect.Effect<boolean, AgentError>;
@@ -69,10 +74,17 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const fromRow = (row: Row) =>
-    decodeJsonRecord(row.payload_json).pipe(
-      Effect.flatMap((data) =>
+    Effect.all([
+      decodeJsonRecord(row.payload_json),
+      Schema.decodeUnknownEffect(Schema.fromJsonString(AgentListItem.fields.latestMessage))(
+        row.latest_message_json ?? "null",
+      ),
+    ]).pipe(
+      Effect.flatMap(([data, latestMessage]) =>
         decode({
           ...data,
+          unreadCount: row.unread_count ?? 0,
+          latestMessage,
           consecutiveFailures: row.consecutive_failures,
           backoffUntil: row.backoff_until,
           pauseReason: row.pause_reason,
@@ -83,14 +95,14 @@ const make = Effect.gen(function* () {
       Effect.mapError(storeError),
     );
   const get = (id: AgentId) =>
-    sql<Row>`SELECT * FROM agents WHERE agent_id = ${id}`.pipe(
+    sql<Row>`SELECT a.*, (SELECT json_object('id', m.message_id, 'role', m.role, 'text', substr(json_extract(m.payload_json, '$.text'), 1, 240), 'createdAt', m.created_at, 'updatedAt', m.updated_at) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role IN ('user', 'assistant') AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' ORDER BY m.created_at DESC, m.message_id DESC LIMIT 1) AS latest_message_json, (SELECT COUNT(*) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role = 'assistant' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' AND (m.updated_at, m.message_id) > (a.last_read_at, a.last_read_message_id)) AS unread_count FROM agents a WHERE a.agent_id = ${id}`.pipe(
       Effect.mapError(storeError),
       Effect.flatMap((rows) =>
         rows[0] ? fromRow(rows[0]) : Effect.fail(new AgentError({ message: "Agent not found." })),
       ),
     );
   const list = () =>
-    sql<Row>`SELECT * FROM agents ORDER BY agent_id`.pipe(
+    sql<Row>`SELECT a.*, (SELECT json_object('id', m.message_id, 'role', m.role, 'text', substr(json_extract(m.payload_json, '$.text'), 1, 240), 'createdAt', m.created_at, 'updatedAt', m.updated_at) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role IN ('user', 'assistant') AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' ORDER BY m.created_at DESC, m.message_id DESC LIMIT 1) AS latest_message_json, (SELECT COUNT(*) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role = 'assistant' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' AND (m.updated_at, m.message_id) > (a.last_read_at, a.last_read_message_id)) AS unread_count FROM agents a ORDER BY a.agent_id`.pipe(
       Effect.flatMap((rows) => Effect.forEach(rows, fromRow)),
       Effect.mapError(storeError),
     );
@@ -145,6 +157,23 @@ const make = Effect.gen(function* () {
     memory,
     remember,
     runs,
+    markRead: (input) =>
+      Effect.gen(function* () {
+        const agent = yield* get(input.agentId);
+        const rows = yield* sql<{
+          updated_at: string;
+          message_id: string;
+        }>`SELECT updated_at, message_id FROM orchestration_v2_projection_messages WHERE thread_id = ${agent.conversationThreadId} AND message_id = ${input.lastReadMessageId} AND role = 'assistant' AND streaming = 0 AND trim(json_extract(payload_json, '$.text')) <> ''`;
+        const message = rows[0];
+        if (!message)
+          return yield* new AgentError({
+            message: "Read message not found in this agent's conversation.",
+          });
+        // Server-resolved timestamps prevent future cursors. Tuple ordering keeps
+        // simultaneous messages distinct, and stale devices can never move it back.
+        yield* sql`UPDATE agents SET last_read_at = ${message.updated_at}, last_read_message_id = ${message.message_id} WHERE agent_id = ${agent.id} AND (last_read_at, last_read_message_id) < (${message.updated_at}, ${message.message_id})`;
+        return yield* get(agent.id);
+      }).pipe(Effect.mapError(storeError)),
     save: (agent) =>
       sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, ${encodeAgent(agent)}, ${agent.enabled ? 1 : 0}, ${agent.dailyRunCap}) ON CONFLICT(agent_id) DO UPDATE SET payload_json = excluded.payload_json, enabled = excluded.enabled, daily_run_cap = excluded.daily_run_cap, pause_reason = CASE WHEN excluded.enabled = 1 THEN NULL ELSE agents.pause_reason END, consecutive_failures = CASE WHEN excluded.enabled = 1 AND agents.enabled = 0 THEN 0 ELSE agents.consecutive_failures END, backoff_until = CASE WHEN excluded.enabled = 1 AND agents.enabled = 0 THEN NULL ELSE agents.backoff_until END`.pipe(
         Effect.andThen(get(agent.id)),

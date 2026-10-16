@@ -2,11 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   conversationRows,
   mergeLatestMessage,
-  agentThreadRole,
   formatContactTime,
   formatMessageTime,
-  readCursor,
-  unreadCount,
   sortAgentContacts,
 } from "./agents.logic";
 import type { AgentContact, AgentMessage } from "./agents.types";
@@ -69,37 +66,6 @@ describe("texting timeline", () => {
     expect(formatContactTime("bad", now)).toBe("");
   });
 });
-describe("agent unread messages", () => {
-  const messages = [
-    message("a", "assistant", at(16, 7, 10)),
-    message("owner", "user", at(16, 7, 11)),
-    message("b", "assistant", at(16, 7, 12)),
-    message("c", "assistant", at(16, 7, 12)),
-  ];
-  it("counts only agent messages and clears when viewed", () => {
-    expect(unreadCount(messages, null)).toBe(3);
-    expect(unreadCount(messages, readCursor(messages))).toBe(0);
-    expect(readCursor([messages[1]!])).toBeNull();
-  });
-  it("counts a newly arrived message sharing a timestamp with a read message", () => {
-    const cursor = readCursor(messages.slice(0, 3));
-    expect(unreadCount(messages, cursor)).toBe(1);
-  });
-  it("ignores older history loaded after viewing and handles out of order input", () => {
-    const cursor = readCursor([messages[2]!, messages[0]!, messages[3]!]);
-    expect(unreadCount([message("history", "assistant", at(15, 7, 0)), ...messages], cursor)).toBe(
-      0,
-    );
-  });
-  it("adds a later background result to the unread count", () => {
-    expect(
-      unreadCount(
-        [...messages, message("result", "assistant", at(16, 8, 0))],
-        readCursor(messages),
-      ),
-    ).toBe(1);
-  });
-});
 describe("contact ordering", () => {
   it("sorts by activity without mutating the source, with stable ties", () => {
     const agents = [
@@ -117,7 +83,6 @@ describe("shell updates", () => {
     const viewed = [message("a", "assistant", at(16, 7, 10))];
     const updated = mergeLatestMessage(viewed, message("b", "assistant", at(16, 8, 0)));
     expect(updated.map((item) => item.id)).toEqual(["a", "b"]);
-    expect(unreadCount(updated, readCursor(viewed))).toBe(1);
     expect(mergeLatestMessage(updated, updated[1]!)).toBe(updated);
   });
   it("updates streaming text without duplicating a message or moving its timestamp", () => {
@@ -125,11 +90,5 @@ describe("shell updates", () => {
     expect(
       mergeLatestMessage([existing], { ...existing, text: "Finished", createdAt: at(16, 7, 12) }),
     ).toEqual([{ ...existing, text: "Finished" }]);
-  });
-  it("recognizes background work ownership and accepts older shell contracts", () => {
-    expect(agentThreadRole({ agent: { role: "work" } })).toBe("work");
-    expect(agentThreadRole({ agent: { role: "conversation" } })).toBe("conversation");
-    expect(agentThreadRole({})).toBeNull();
-    expect(agentThreadRole({ agent: { role: "new-kind" } })).toBeNull();
   });
 });

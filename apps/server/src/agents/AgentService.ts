@@ -7,6 +7,8 @@ import {
   ThreadId,
   TurnItemId,
   type Agent,
+  type AgentListItem,
+  type AgentMarkReadInput,
   type AgentUpsertInput,
   type AgentSendInput,
   type AgentWorkRun,
@@ -37,8 +39,11 @@ const failure = (cause: unknown) =>
 export class AgentService extends Context.Service<
   AgentService,
   {
-    readonly list: () => Effect.Effect<{ agents: ReadonlyArray<Agent> }, AgentError>;
-    readonly subscribe: () => Stream.Stream<{ agents: ReadonlyArray<Agent> }, AgentError>;
+    readonly list: () => Effect.Effect<{ agents: ReadonlyArray<AgentListItem> }, AgentError>;
+    readonly subscribe: () => Stream.Stream<{ agents: ReadonlyArray<AgentListItem> }, AgentError>;
+    readonly markRead: (
+      input: AgentMarkReadInput,
+    ) => Effect.Effect<{ agent: AgentListItem }, AgentError>;
     readonly upsert: (input: AgentUpsertInput) => Effect.Effect<{ agent: Agent }, AgentError>;
     readonly delete: (id: AgentId) => Effect.Effect<{ deleted: boolean }, AgentError>;
     readonly send: (input: AgentSendInput) => Effect.Effect<
@@ -239,13 +244,40 @@ const make = Effect.gen(function* () {
   yield* scheduler.register("agents", reconcile());
   return AgentService.of({
     list,
+    markRead: (input) =>
+      store.markRead(input).pipe(
+        Effect.tap(() => changed),
+        Effect.map((agent) => ({ agent })),
+      ),
     subscribe: () =>
       Stream.unwrap(
         Effect.gen(function* () {
           const subscription = yield* PubSub.subscribe(changes);
+          const afterSequence = yield* events.latestSequence().pipe(Effect.mapError(failure));
+          const messages = events
+            .stream({ afterSequence, eventType: "message.updated", bounded: true })
+            .pipe(
+              Stream.filter(
+                (stored) =>
+                  stored.event.type === "message.updated" &&
+                  stored.event.payload.role === "assistant" &&
+                  !stored.event.payload.streaming,
+              ),
+              Stream.filterEffect((stored) =>
+                store
+                  .forThread(stored.event.threadId)
+                  .pipe(
+                    Effect.map((agent) => agent?.conversationThreadId === stored.event.threadId),
+                  ),
+              ),
+              Stream.map(() => undefined),
+              Stream.mapError(failure),
+            );
           return Stream.concat(
             Stream.fromEffect(list()),
-            Stream.fromSubscription(subscription).pipe(Stream.mapEffect(list)),
+            Stream.merge(Stream.fromSubscription(subscription), messages).pipe(
+              Stream.mapEffect(list),
+            ),
           );
         }),
       ),

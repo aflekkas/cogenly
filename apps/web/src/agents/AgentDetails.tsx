@@ -66,6 +66,7 @@ export function AgentDetails({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [editingTrigger, setEditingTrigger] = useState<AgentTrigger | "new" | null>(null);
+  const [newMemory, setNewMemory] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   async function mutate(action: () => Promise<unknown>) {
     if (pending) return;
@@ -192,6 +193,14 @@ export function AgentDetails({
                   {!trigger.enabled ? " · Paused" : ""}
                 </span>
                 <p>{trigger.prompt}</p>
+                <button
+                  type="button"
+                  className="agent-text-button"
+                  disabled={pending || !agent.enabled}
+                  onClick={() => void mutate(() => client.runTrigger(agent, trigger.id))}
+                >
+                  Run now
+                </button>
               </div>
             ))}
             {editingTrigger ? (
@@ -226,6 +235,30 @@ export function AgentDetails({
             {agent.memory.length === 0 && (
               <p className="agent-muted">No notes yet. Tell {agent.name} something to remember.</p>
             )}
+            <form
+              className="agent-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void mutate(async () => {
+                  await client.saveMemory(agent, { text: newMemory.trim() });
+                  setNewMemory("");
+                });
+              }}
+            >
+              <label>
+                New memory note
+                <textarea
+                  value={newMemory}
+                  maxLength={8000}
+                  required
+                  onChange={(event) => setNewMemory(event.target.value)}
+                  placeholder="Something to remember"
+                />
+              </label>
+              <button type="submit" disabled={pending || !newMemory.trim()}>
+                Add note
+              </button>
+            </form>
             {agent.memory.map((note) => (
               <MemoryNote
                 key={note.id}

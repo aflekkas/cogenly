@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ThreadId, ProviderInstanceId } from "@t3tools/contracts";
+import { MessageId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -33,6 +33,63 @@ describe("persistent agents", () => {
       expect(yield* store.delete(agent.id)).toBe(true);
       expect(yield* store.list()).toEqual([]);
     }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect(
+    "persists read watermarks, counts only completed replies, and never moves backwards",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const sql = yield* SqlClient.SqlClient;
+        const agent = yield* store.save(agentFixture());
+        const other = yield* store.save(agentFixture("other"));
+        const at = "2026-01-01T01:00:00.000Z";
+        const insert = (
+          id: string,
+          role = "assistant",
+          streaming = 0,
+          text = "reply",
+          threadId = agent.conversationThreadId,
+        ) =>
+          sql`INSERT INTO orchestration_v2_projection_messages(message_id, thread_id, role, streaming, created_at, updated_at, payload_json) VALUES (${id}, ${threadId}, ${role}, ${streaming}, ${at}, ${at}, ${JSON.stringify({ text })})`;
+        yield* insert("a");
+        yield* insert("b");
+        yield* insert("owner", "user", 0, "x".repeat(500));
+        yield* insert("stream", "assistant", 1);
+        yield* insert("empty", "assistant", 0, "  ");
+        yield* insert("foreign", "assistant", 0, "other reply", other.conversationThreadId);
+        expect((yield* store.list()).find((a) => a.id === agent.id)?.unreadCount).toBe(2);
+        expect(
+          (yield* store.markRead({ agentId: agent.id, lastReadMessageId: MessageId.make("a") }))
+            .unreadCount,
+        ).toBe(1);
+        expect((yield* store.get(agent.id)).unreadCount).toBe(1);
+        expect((yield* store.get(agent.id)).latestMessage).toMatchObject({
+          id: "owner",
+          text: "x".repeat(240),
+          role: "user",
+        });
+        yield* store.markRead({ agentId: agent.id, lastReadMessageId: MessageId.make("b") });
+        // An older device's read and an ordinary profile edit cannot reset the cursor.
+        yield* store.markRead({ agentId: agent.id, lastReadMessageId: MessageId.make("a") });
+        yield* store.save({ ...agent, name: "Edited" });
+        expect((yield* store.get(agent.id)).unreadCount).toBe(0);
+        yield* sql`UPDATE orchestration_v2_projection_messages SET streaming = 0, updated_at = '2026-01-01T01:00:01.000Z' WHERE message_id = 'stream'`;
+        expect((yield* store.list()).find((a) => a.id === agent.id)?.unreadCount).toBe(1);
+        // Reconstructing the store (as after a server restart) uses the same persisted cursor.
+        const persisted = yield* store
+          .get(agent.id)
+          .pipe(Effect.provide(Store.layer.pipe(Layer.provide(NodeServices.layer))));
+        expect(persisted.unreadCount).toBe(1);
+        for (const id of ["foreign", "owner", "empty", "missing"]) {
+          expect(
+            (yield* Effect.result(
+              store.markRead({ agentId: agent.id, lastReadMessageId: MessageId.make(id) }),
+            ))._tag,
+          ).toBe("Failure");
+        }
+        expect((yield* store.get(other.id)).unreadCount).toBe(1);
+      }).pipe(Effect.provide(layer)),
   );
 
   it.effect("scopes memory tools by calling thread and rejects unrelated threads", () =>

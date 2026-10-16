@@ -65,37 +65,6 @@ export function conversationRows(
 }
 
 // Timestamp + id avoids dropping messages that share the same timestamp.
-export interface ReadCursor {
-  at: string;
-  ids: ReadonlyArray<string>;
-}
-export function readCursor(messages: ReadonlyArray<AgentMessage>): ReadCursor | null {
-  const agentMessages = messages.filter((message) => message.role === "assistant");
-  const at = agentMessages.reduce(
-    (latest, message) => (message.createdAt > latest ? message.createdAt : latest),
-    "",
-  );
-  return at
-    ? {
-        at,
-        ids: agentMessages
-          .filter((message) => message.createdAt === at)
-          .map((message) => message.id),
-      }
-    : null;
-}
-export function unreadCount(
-  messages: ReadonlyArray<AgentMessage>,
-  cursor: ReadCursor | null,
-): number {
-  return messages.filter(
-    (message) =>
-      message.role === "assistant" &&
-      (!cursor ||
-        message.createdAt > cursor.at ||
-        (message.createdAt === cursor.at && !cursor.ids.includes(message.id))),
-  ).length;
-}
 export function sortAgentContacts(agents: ReadonlyArray<AgentContact>) {
   return [...agents].sort(
     (a, b) =>
@@ -123,18 +92,4 @@ export function mergeLatestMessage(
   return [...messages, latest].sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
   );
-}
-
-/** Accept ownership from newer contracts while this branch still builds on main. */
-export function agentThreadRole(source: object): "conversation" | "work" | null {
-  if (
-    !("agent" in source) ||
-    !source.agent ||
-    typeof source.agent !== "object" ||
-    !("role" in source.agent)
-  )
-    return null;
-  return source.agent.role === "work" || source.agent.role === "conversation"
-    ? source.agent.role
-    : null;
 }

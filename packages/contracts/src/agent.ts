@@ -45,7 +45,26 @@ export type Agent = typeof Agent.Type;
 export const AgentUpsertInput = Schema.Struct({ id: Schema.optional(AgentId), ...AgentFields });
 export type AgentUpsertInput = typeof AgentUpsertInput.Type;
 export const AgentKey = Schema.Struct({ id: AgentId });
-export const AgentListResult = Schema.Struct({ agents: Schema.Array(Agent) });
+export const AgentListItem = Schema.Struct({
+  ...Agent.fields,
+  unreadCount: Schema.Int,
+  /** Bounded contact preview; thread shells deliberately omit message bodies. */
+  latestMessage: Schema.NullOr(
+    Schema.Struct({
+      id: MessageId,
+      role: Schema.Literals(["user", "assistant"]),
+      text: Schema.String,
+      createdAt: IsoDateTime,
+      updatedAt: IsoDateTime,
+    }),
+  ),
+});
+export type AgentListItem = typeof AgentListItem.Type;
+export const AgentListResult = Schema.Struct({ agents: Schema.Array(AgentListItem) });
+/** Advances only through a completed assistant message in this agent's conversation. */
+export const AgentMarkReadInput = Schema.Struct({ agentId: AgentId, lastReadMessageId: MessageId });
+export type AgentMarkReadInput = typeof AgentMarkReadInput.Type;
+export const AgentMarkReadResult = Schema.Struct({ agent: AgentListItem });
 export const AgentMutationResult = Schema.Struct({ agent: Agent });
 /** Deletes identity, triggers and memory, stops active work, and retains thread history. */
 export const AgentDeleteResult = Schema.Struct({ deleted: Schema.Boolean });

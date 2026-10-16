@@ -3,9 +3,9 @@
  *
  * - Chats: threads in an environment's scratch ("No project") project.
  * - Tasks: threads in real projects.
- * - Agents: threads bound to a scheduled task, wherever they live.
+ * - Agents: persistent agent conversations. Background work opens from Activity.
  *
- * Every thread belongs to exactly one mode, so a thread never shows twice and
+ * Every visible thread belongs to one mode, so a thread never shows twice and
  * opening one from anywhere (search, a notification, a link) can switch the
  * sidebar to the mode that lists it.
  */
@@ -34,7 +34,7 @@ export function sidebarModeThreadKey(
   return `${environmentId}:${threadId}`;
 }
 
-/** Agents win over chats: a scheduled task bound to a scratch thread is still an agent. */
+/** Agents win over chats: an agent conversation in a scratch project is still an agent. */
 export function classifySidebarThreadMode(input: {
   readonly isAgent: boolean;
   readonly isScratch: boolean;
@@ -44,7 +44,7 @@ export function classifySidebarThreadMode(input: {
 }
 
 export interface SidebarModeThreadClassifier {
-  /** `environmentId:threadId` of every thread bound to a scheduled task. */
+  /** `environmentId:threadId` of every agent conversation. */
   readonly agentThreadKeys: ReadonlySet<string>;
   /** `environmentId:projectId` of every scratch project. */
   readonly scratchProjectKeys: ReadonlySet<string>;
@@ -55,11 +55,14 @@ export function sidebarModeForThread(
     readonly environmentId: EnvironmentId | string;
     readonly id: ThreadId | string;
     readonly projectId: string;
+    readonly source?: { readonly agent?: { readonly role: "conversation" | "work" } | undefined };
   },
   classifier: SidebarModeThreadClassifier,
 ): SidebarMode {
   return classifySidebarThreadMode({
-    isAgent: classifier.agentThreadKeys.has(sidebarModeThreadKey(thread.environmentId, thread.id)),
+    isAgent:
+      thread.source?.agent !== undefined ||
+      classifier.agentThreadKeys.has(sidebarModeThreadKey(thread.environmentId, thread.id)),
     isScratch: classifier.scratchProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
   });
 }
@@ -69,9 +72,13 @@ export function filterThreadsForSidebarMode<
     readonly environmentId: EnvironmentId | string;
     readonly id: ThreadId | string;
     readonly projectId: string;
+    readonly source?: { readonly agent?: { readonly role: "conversation" | "work" } | undefined };
   },
 >(threads: ReadonlyArray<T>, mode: SidebarMode, classifier: SidebarModeThreadClassifier): T[] {
-  return threads.filter((thread) => sidebarModeForThread(thread, classifier) === mode);
+  return threads.filter(
+    (thread) =>
+      thread.source?.agent?.role !== "work" && sidebarModeForThread(thread, classifier) === mode,
+  );
 }
 
 // Chats ---------------------------------------------------------------------

@@ -1,4 +1,3 @@
-import { PlusIcon } from "lucide-react";
 import { AgentFace } from "~/components/agents/face";
 import { agentContactKey, formatContactTime } from "./agents.logic";
 import { useAgentUnread, useAgents } from "./agentsClient";
@@ -18,14 +17,6 @@ export function AgentContacts({
     <div className="agent-contacts">
       <div className="agent-list-heading">
         <span>Agents</span>
-        <button
-          type="button"
-          className="agent-icon-button"
-          aria-label="Create an agent"
-          onClick={onCreate}
-        >
-          <PlusIcon size={16} />
-        </button>
       </div>
       {error && (
         <p role="alert" className="agent-error">

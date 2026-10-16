@@ -1,4 +1,3 @@
-import { agentThreadRole } from "../../../agents/agents.logic";
 import { useAgents } from "../../../agents/agentsClient";
 import type {
   EnvironmentProject,
@@ -9,7 +8,6 @@ import type { EnvironmentId, ResolvedKeybindingsConfig, ScopedThreadRef } from "
 import { useEffect, useMemo } from "react";
 
 import { resolveShortcutCommand } from "../../../keybindings";
-import { useConnectedEnvironmentIds } from "../../../state/environments";
 import { useUiStateStore } from "../../../uiStateStore";
 import {
   filterThreadsForSidebarMode,
@@ -18,7 +16,6 @@ import {
   type SidebarMode,
   type SidebarModeThreadClassifier,
 } from "./sidebarModes.logic";
-import { useAgentScheduledTasks } from "./useAgentScheduledTasks";
 
 const MODE_BY_COMMAND: Record<string, SidebarMode> = {
   "sidebar.mode.chats": "chats",
@@ -56,14 +53,6 @@ export function useSidebarModeState(input: {
   const mode = useUiStateStore((store) => store.sidebarMode);
   const setMode = useUiStateStore((store) => store.setSidebarMode);
 
-  const connectedEnvironmentIds = useConnectedEnvironmentIds();
-  // A connected environment's config arrives a beat later; until then its
-  // task subscription has nothing to say.
-  const taskEnvironmentIds = useMemo(
-    () => connectedEnvironmentIds.filter((environmentId) => serverConfigs.has(environmentId)),
-    [connectedEnvironmentIds, serverConfigs],
-  );
-  const scheduledTasks = useAgentScheduledTasks(taskEnvironmentIds);
   const { agents } = useAgents();
 
   const scratchProjectKeys = useMemo(
@@ -87,23 +76,14 @@ export function useSidebarModeState(input: {
       agents.map((agent) => sidebarModeThreadKey(agent.environmentId, agent.conversationThreadId)),
     );
     for (const thread of threads) {
-      if (agentThreadRole(thread.source) === "conversation")
+      if (thread.source.agent?.role === "conversation")
         agentThreadKeys.add(sidebarModeThreadKey(thread.environmentId, thread.id));
     }
-    for (const { environmentId, task } of scheduledTasks) {
-      if (task.threadId !== null)
-        agentThreadKeys.add(sidebarModeThreadKey(environmentId, task.threadId));
-    }
     return { agentThreadKeys, scratchProjectKeys };
-  }, [agents, scheduledTasks, scratchProjectKeys, threads]);
+  }, [agents, scratchProjectKeys, threads]);
 
   const modeThreads = useMemo(
-    () =>
-      filterThreadsForSidebarMode(
-        threads.filter((thread) => agentThreadRole(thread.source) !== "work"),
-        mode,
-        classifier,
-      ),
+    () => filterThreadsForSidebarMode(threads, mode, classifier),
     [classifier, mode, threads],
   );
 
@@ -136,7 +116,11 @@ export function useSidebarModeState(input: {
       ) ?? null
     );
   }, [routeThreadRef, threads]);
-  const routeThreadMode = routeThread ? sidebarModeForThread(routeThread, classifier) : null;
+  const routeThreadMode = routeThread?.source.agent
+    ? "agents"
+    : routeThread
+      ? sidebarModeForThread(routeThread, classifier)
+      : null;
   const routeThreadKey = routeThread
     ? sidebarModeThreadKey(routeThread.environmentId, routeThread.id)
     : null;

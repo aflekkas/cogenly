@@ -7,14 +7,7 @@ import type {
   AgentModelOption,
   AgentTrigger,
 } from "./agents.types";
-import {
-  agentContactKey,
-  readCursor,
-  mergeLatestMessage,
-  sortAgentContacts,
-  unreadCount,
-  type ReadCursor,
-} from "./agents.logic";
+import { agentContactKey, mergeLatestMessage, sortAgentContacts } from "./agents.logic";
 
 export class AgentCreatedWithoutTriggerError extends Error {
   constructor(
@@ -42,18 +35,23 @@ export interface AgentsClient {
     firstTrigger?: Omit<AgentTrigger, "id">,
   ) => Promise<AgentContact>;
   remove: (agent: AgentContact) => Promise<void>;
+  markRead: (agent: AgentContact, messageId: string) => Promise<void>;
   send: (agent: AgentContact, text: string) => Promise<void>;
   respond: (
     agent: AgentContact,
     requestId: string,
     response: ProviderApprovalDecision | Record<string, unknown>,
   ) => Promise<void>;
-  saveMemory: (agent: AgentContact, note: Pick<AgentMemory, "id" | "text">) => Promise<void>;
+  saveMemory: (
+    agent: AgentContact,
+    note: Pick<AgentMemory, "text"> & { id?: string },
+  ) => Promise<void>;
   deleteMemory: (agent: AgentContact, id: string) => Promise<void>;
   saveTrigger: (
     agent: AgentContact,
     trigger: Omit<AgentTrigger, "id"> & { id?: string },
   ) => Promise<void>;
+  runTrigger: (agent: AgentContact, id: string) => Promise<void>;
   deleteTrigger: (agent: AgentContact, id: string) => Promise<void>;
   loadEarlier?: (agent: AgentContact) => Promise<void>;
   canWrite?: (environmentId: EnvironmentId) => boolean;
@@ -82,55 +80,8 @@ export function useAgentActivity(key: string) {
   return useAgent(key)?.activity ?? [];
 }
 
-// Read state is local to this device and isolated by environment + agent.
-const listeners = new Set<() => void>();
-const cursors = new Map<string, ReadCursor>();
-function getCursor(key: string): ReadCursor | null {
-  if (cursors.has(key)) return cursors.get(key)!;
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(`cogenly.agent-read.${key}`) ?? "null");
-    if (
-      value &&
-      typeof value === "object" &&
-      "at" in value &&
-      typeof value.at === "string" &&
-      "ids" in value &&
-      Array.isArray(value.ids) &&
-      value.ids.every((id: unknown) => typeof id === "string")
-    ) {
-      const cursor = { at: value.at, ids: value.ids as string[] };
-      cursors.set(key, cursor);
-      return cursor;
-    }
-  } catch {
-    /* Storage may be unavailable in a private session. */
-  }
-  return null;
-}
 export function useAgentUnread(agent: AgentContact) {
-  const key = agentContactKey(agent);
-  const cursor = useSyncExternalStore(
-    useCallback((listener: () => void) => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    }, []),
-    () => getCursor(key),
-  );
-  return unreadCount(agent.messages, cursor);
-}
-export function markAgentRead(agent: AgentContact) {
-  const key = agentContactKey(agent);
-  const next = readCursor(agent.messages);
-  if (!next || JSON.stringify(getCursor(key)) === JSON.stringify(next)) return;
-  cursors.set(key, next);
-  try {
-    localStorage.setItem(`cogenly.agent-read.${key}`, JSON.stringify(next));
-  } catch {
-    /* Memory-only fallback. */
-  }
-  listeners.forEach((listener) => listener());
+  return agent.unreadCount;
 }
 
 // All environment, thread, and RPC access for the feature stays at this boundary.
@@ -139,6 +90,7 @@ import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/threa
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   CommandId,
+  MessageId,
   ScheduledTaskId,
   RuntimeRequestId,
   AuthOrchestrationOperateScope,
@@ -148,7 +100,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { agentsRpc, hasAgentContracts } from "~/rpc/agents";
+import { agentsRpc } from "~/rpc/agents";
 import { usePrimaryEnvironmentId, useConnectedEnvironmentIds } from "~/state/environments";
 import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
 import { useEnvironmentThread, threadEnvironment } from "~/state/threads";
@@ -159,7 +111,7 @@ import { readEnvironmentScope } from "~/state/session";
 import { useEnvironmentQuery } from "~/state/query";
 import { randomUUID, newMessageId } from "~/lib/utils";
 import { useAgentScheduledTasks } from "~/components/sidebar/modes/useAgentScheduledTasks";
-import type { AgentRecord, AgentRequest } from "./agents.types";
+import type { AgentRequest } from "./agents.types";
 
 function commandValue<A>(
   result:
@@ -173,26 +125,6 @@ function commandValue<A>(
   return result.value;
 }
 
-/** Temporary projection of pre-migration schedules. No synthetic agents are saved. */
-function legacyAgent(task: import("@t3tools/contracts").ScheduledTask): AgentRecord {
-  return {
-    id: `legacy:${task.id}`,
-    name: task.title,
-    avatar: { seed: task.id },
-    instructions: task.prompt,
-    modelSelection: task.modelSelection,
-    runtimeMode: task.runtimeMode,
-    projectId: task.projectId,
-    enabled: task.enabled,
-    dailyRunCap: 24,
-    conversationThreadId: task.threadId!,
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
-    consecutiveFailures: 0,
-    pauseReason: null,
-    backoffUntil: null,
-  };
-}
 const subscribeToContext = () => () => {};
 
 export function LiveAgentsProvider({ children }: { children: ReactNode }) {
@@ -221,7 +153,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   const save = useOrchestrationCommand(agentsRpc.save, { reportFailure: false });
   const remove = useOrchestrationCommand(agentsRpc.remove, { reportFailure: false });
   const sendAgent = useOrchestrationCommand(agentsRpc.send, { reportFailure: false });
-  const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const markRead = useOrchestrationCommand(agentsRpc.markRead, { reportFailure: false });
   const approval = useOrchestrationCommand(threadEnvironment.respondToApproval, {
     reportFailure: false,
   });
@@ -233,6 +165,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   const upsertTask = useAtomCommand(serverEnvironment.upsertScheduledTask, {
     reportFailure: false,
   });
+  const runTask = useAtomCommand(serverEnvironment.runScheduledTaskNow, { reportFailure: false });
   const deleteTask = useAtomCommand(serverEnvironment.deleteScheduledTask, {
     reportFailure: false,
   });
@@ -260,29 +193,18 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   const agents = useMemo(
     () =>
       results.flatMap(({ environmentId, result }) => {
-        // TODO(agents-core): remove the legacy projection after migration + agents.subscribe are integrated.
-        const records =
-          Option.getOrNull(AsyncResult.value(result))?.agents ??
-          tasks
-            .filter(
-              (entry) => entry.environmentId === environmentId && entry.task.threadId !== null,
-            )
-            .map((entry) => legacyAgent(entry.task));
+        const records = Option.getOrNull(AsyncResult.value(result))?.agents ?? [];
         return records.map((record): AgentContact => {
           const shell = threads.find(
             (thread) =>
               thread.environmentId === environmentId && thread.id === record.conversationThreadId,
           );
-          const latest = shell?.source.latestVisibleMessage;
+          const latest = record.latestMessage;
           const key = agentContactKey({ environmentId, id: record.id });
           const cached = hydrated.get(key);
           const triggers = tasks
             .filter(
-              (entry) =>
-                entry.environmentId === environmentId &&
-                (record.id.startsWith("legacy:")
-                  ? record.id === `legacy:${entry.task.id}`
-                  : (entry.task as typeof entry.task & { agentId?: string }).agentId === record.id),
+              (entry) => entry.environmentId === environmentId && entry.task.agentId === record.id,
             )
             .map(({ task }) => ({
               id: task.id,
@@ -292,11 +214,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
               enabled: task.enabled,
             }));
           const workThreads = threads.filter((thread) => {
-            const ownership = (
-              thread.source as typeof thread.source & {
-                agent?: { id: string; role: "conversation" | "work" };
-              }
-            ).agent;
+            const ownership = thread.source.agent;
             return (
               thread.environmentId === environmentId &&
               ownership?.id === record.id &&
@@ -322,16 +240,15 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
             state,
             updatedAt: shell?.updatedAt ?? record.updatedAt,
             preview: latest?.text ?? "Say hello",
-            // TODO(agents-core): expose unread counts/read watermarks to count
-            // messages missed while this device was offline.
             messages: mergeLatestMessage(
               cached?.messages ?? [],
-              latest && latest.role !== "system"
+              latest && !cached?.messages.some((message) => message.id === latest.id)
                 ? {
                     id: latest.id,
                     role: latest.role,
                     text: latest.text,
-                    createdAt: DateTime.formatIso(latest.updatedAt),
+                    createdAt: latest.createdAt,
+                    updatedAt: latest.updatedAt,
                   }
                 : null,
             ),
@@ -348,11 +265,11 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
     () => ({
       agents,
       models,
-      loading: results.some(({ result }) => result.waiting),
+      loading: results.some(({ result }) => result._tag === "Initial"),
       error: agents.length
         ? null
         : results.some(({ result }) => result._tag === "Failure")
-          ? "Agent profiles aren’t available on this server yet."
+          ? "Could not load agents. Check your connection."
           : null,
     }),
     [agents, models, results],
@@ -381,8 +298,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       )?.task;
       const input = {
         ...triggerFields,
-        // TODO(agents-core): use the native AgentId after the contracts merge.
-        ...(hasAgentContracts && !agent.id.startsWith("legacy:") ? { agentId: agent.id } : {}),
+        agentId: agent.id,
         ...(trigger.id ? { id: ScheduledTaskId.make(trigger.id), requireExisting: true } : {}),
         projectId,
         threadId: agent.conversationThreadId,
@@ -391,8 +307,6 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
         interactionMode: existingTask?.interactionMode ?? ("default" as const),
         workspaceStrategy: existingTask?.workspaceStrategy ?? { type: "root" as const },
       };
-      if (!hasAgentContracts && !agent.id.startsWith("legacy:"))
-        throw new Error("Agent triggers need the updated server contracts.");
       commandValue(await upsertTask({ environmentId: agent.environmentId, input }));
     },
     [projects, tasks, upsertTask],
@@ -406,6 +320,8 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
         const contact: AgentContact = {
           ...record,
           environmentId,
+          unreadCount: 0,
+          latestMessage: null,
           state: record.enabled ? "idle" : "asleep",
           preview: "Say hello",
           messages: [],
@@ -428,6 +344,14 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       remove: async (agent) => {
         commandValue(await remove({ environmentId: agent.environmentId, input: { id: agent.id } }));
       },
+      markRead: async (agent, messageId) => {
+        commandValue(
+          await markRead({
+            environmentId: agent.environmentId,
+            input: { agentId: agent.id, lastReadMessageId: MessageId.make(messageId) },
+          }),
+        );
+      },
       send: async (agent, text) => {
         const key = agentContactKey(agent);
         const existing = pendingSends.current.get(key);
@@ -436,33 +360,10 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
             ? existing
             : { text, commandId: CommandId.make(randomUUID()), messageId: newMessageId() };
         pendingSends.current.set(key, identity);
-        if (!agent.id.startsWith("legacy:")) {
-          commandValue(
-            await sendAgent({
-              environmentId: agent.environmentId,
-              input: {
-                id: agent.id,
-                commandId: identity.commandId,
-                messageId: identity.messageId,
-                text,
-                mode: "auto",
-              },
-            }),
-          );
-          pendingSends.current.delete(key);
-          return;
-        }
         commandValue(
-          await startTurn({
+          await sendAgent({
             environmentId: agent.environmentId,
-            input: {
-              threadId: agent.conversationThreadId,
-              commandId: identity.commandId,
-              message: { messageId: identity.messageId, role: "user", text, attachments: [] },
-              runtimeMode: agent.runtimeMode,
-              interactionMode: "default",
-              dispatchMode: "queue",
-            },
+            input: { id: agent.id, ...identity, mode: "auto" },
           }),
         );
         pendingSends.current.delete(key);
@@ -501,6 +402,14 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
         );
       },
       saveTrigger: persistTrigger,
+      runTrigger: async (agent, id) => {
+        commandValue(
+          await runTask({
+            environmentId: agent.environmentId,
+            input: { id: ScheduledTaskId.make(id) },
+          }),
+        );
+      },
       deleteTrigger: async (agent, id) => {
         if (!readEnvironmentScope(agent.environmentId, AuthOrchestrationOperateScope))
           throw new Error("This connection cannot change agents.");
@@ -533,13 +442,14 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       save,
       remove,
       sendAgent,
-      startTurn,
+      markRead,
       approval,
       answer,
       saveMemory,
       deleteMemory,
       persistTrigger,
       deleteTask,
+      runTask,
       navigate,
       loadEarlier,
     ],
@@ -568,12 +478,12 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
   );
   const setHydrated = useContext(AgentHydrationContext);
   const memory = useEnvironmentQuery(
-    agent && !agent.id.startsWith("legacy:")
+    agent
       ? agentsRpc.memory({ environmentId: agent.environmentId, input: { agentId: agent.id } })
       : null,
   );
   const activity = useEnvironmentQuery(
-    agent && !agent.id.startsWith("legacy:")
+    agent
       ? agentsRpc.activity({ environmentId: agent.environmentId, input: { id: agent.id } })
       : null,
   );
@@ -638,6 +548,7 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
         role: message.role as "user" | "assistant",
         text: message.text,
         createdAt: DateTime.formatIso(message.createdAt),
+        updatedAt: DateTime.formatIso(message.updatedAt),
         streaming: message.streaming,
         delivery: projection.runs.some((run) => run.id === message.runId && run.status === "queued")
           ? ("queued" as const)

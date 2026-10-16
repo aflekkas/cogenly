@@ -60,6 +60,25 @@ describe("filterThreadsForSidebarMode", () => {
     thread("env-b", "scratch-agent", "scratch"),
   ];
 
+  it("hides agent work in scratch and project workspaces, retaining conversations", () => {
+    const owned = [
+      {
+        ...thread("env-a", "scratch-work", "scratch"),
+        source: { agent: { role: "work" as const } },
+      },
+      { ...thread("env-a", "project-work", "app"), source: { agent: { role: "work" as const } } },
+      {
+        ...thread("env-a", "conversation", "app"),
+        source: { agent: { role: "conversation" as const } },
+      },
+    ];
+    expect(filterThreadsForSidebarMode(owned, "chats", classifier)).toEqual([]);
+    expect(filterThreadsForSidebarMode(owned, "tasks", classifier)).toEqual([]);
+    expect(filterThreadsForSidebarMode(owned, "agents", classifier).map((t) => t.id)).toEqual([
+      "conversation",
+    ]);
+  });
+
   it("partitions every thread into exactly one mode", () => {
     const chats = filterThreadsForSidebarMode(threads, "chats", classifier);
     const tasks = filterThreadsForSidebarMode(threads, "tasks", classifier);
