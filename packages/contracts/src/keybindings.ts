@@ -68,6 +68,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   ...SIDEBAR_MODE_KEYBINDING_COMMANDS,
   "navigation.back",
   "navigation.forward",
+  // terminal.* retired with the terminal drawer: still decoded so stored rules load, never run.
   "terminal.toggle",
   "terminal.split",
   "terminal.splitVertical",
