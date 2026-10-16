@@ -287,6 +287,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* Rail buttons sit a touch rounder than rows (10px at the default radius). */
+  --radius-rail: calc(var(--radius) + 2px);
   --radius-2xl: calc(var(--radius) + 8px);
   --radius-3xl: calc(var(--radius) + 12px);
   @keyframes skeleton {
