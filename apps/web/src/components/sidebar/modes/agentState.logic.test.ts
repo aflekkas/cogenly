@@ -217,6 +217,27 @@ describe("buildAgentGroups", () => {
     expect(new Set(groups.flatMap((group) => group.rows.map((row) => row.key))).size).toBe(4);
   });
 
+  it("lists no-project agents first, ungrouped, above the project groups", () => {
+    const groups = buildAgentGroups(
+      [
+        entry(envA, "web", { id: ScheduledTaskId.make("a"), title: "Alpha" }),
+        entry(envA, "scratch", { id: ScheduledTaskId.make("b"), title: "Loose" }),
+        entry(envA, "api", { id: ScheduledTaskId.make("c"), title: "Gamma" }),
+      ],
+      {
+        nowMs: NOW,
+        projectLabel: (environmentId, projectId) =>
+          labels[`${environmentId}:${projectId}`] ?? "No project",
+        isScratchProject: (_environmentId, projectId) => projectId === "scratch",
+      },
+    );
+    expect(groups.map((group) => [group.projectKey, group.ungrouped])).toEqual([
+      ["env-a:scratch", true],
+      ["env-a:api", false],
+      ["env-a:web", false],
+    ]);
+  });
+
   it("counts agents that need you", () => {
     const groups = buildAgentGroups(
       [

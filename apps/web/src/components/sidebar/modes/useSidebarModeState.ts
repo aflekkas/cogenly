@@ -143,8 +143,17 @@ export function useSidebarModeState(input: {
       nowMs: Date.parse(`${nowMinute}:00.000Z`),
       projectLabel: (environmentId: EnvironmentId, projectId: ProjectId) =>
         projectDisplayNameByKey.get(`${environmentId}:${projectId}`) ?? "Project",
+      isScratchProject: (environmentId: EnvironmentId, projectId: ProjectId) =>
+        scratchProjectKeys.has(`${environmentId}:${projectId}`),
     });
-  }, [nowMinute, projectDisplayNameByKey, scheduledTasks, scopedProjectKeys, threads]);
+  }, [
+    nowMinute,
+    projectDisplayNameByKey,
+    scheduledTasks,
+    scopedProjectKeys,
+    scratchProjectKeys,
+    threads,
+  ]);
   const agentsNeedingYou = useMemo(() => countAgentsNeedingYou(agentGroups), [agentGroups]);
 
   // Opening a thread that another mode lists (search, notification, link)

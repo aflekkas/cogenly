@@ -174,6 +174,11 @@ export interface AgentGroup<TThread extends AgentThread = AgentThread> {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   readonly label: string;
+  /**
+   * Agents in a scratch ("No project") project. They list first, with no
+   * heading or icon: having no project is not a group of its own.
+   */
+  readonly ungrouped: boolean;
   readonly rows: ReadonlyArray<AgentRow<TThread>>;
 }
 
@@ -190,19 +195,27 @@ const STATE_RANK: Record<AgentFaceState, number> = {
 
 /**
  * Groups by project (labels A–Z, ties by key so same-named projects on two
- * machines stay apart and stable). Inside a group, agents that want something
- * come first, then by name.
+ * machines stay apart and stable), after the ungrouped no-project agents.
+ * Inside a group, agents that want something come first, then by name.
  */
 export function buildAgentGroups<TThread extends AgentThread>(
   entries: ReadonlyArray<AgentEntry<TThread>>,
   options: {
     readonly nowMs: number;
     readonly projectLabel: (environmentId: EnvironmentId, projectId: ProjectId) => string;
+    /** True for scratch ("No project") projects. */
+    readonly isScratchProject?: (environmentId: EnvironmentId, projectId: ProjectId) => boolean;
   },
 ): AgentGroup<TThread>[] {
   const groups = new Map<
     string,
-    { environmentId: EnvironmentId; projectId: ProjectId; label: string; rows: AgentRow<TThread>[] }
+    {
+      environmentId: EnvironmentId;
+      projectId: ProjectId;
+      label: string;
+      ungrouped: boolean;
+      rows: AgentRow<TThread>[];
+    }
   >();
   for (const entry of entries) {
     const projectKey = `${entry.environmentId}:${entry.task.projectId}`;
@@ -212,6 +225,7 @@ export function buildAgentGroups<TThread extends AgentThread>(
         environmentId: entry.environmentId,
         projectId: entry.task.projectId,
         label: options.projectLabel(entry.environmentId, entry.task.projectId),
+        ungrouped: options.isScratchProject?.(entry.environmentId, entry.task.projectId) ?? false,
         rows: [],
       };
       groups.set(projectKey, group);
@@ -232,6 +246,7 @@ export function buildAgentGroups<TThread extends AgentThread>(
       environmentId: group.environmentId,
       projectId: group.projectId,
       label: group.label,
+      ungrouped: group.ungrouped,
       rows: group.rows.toSorted(
         (left, right) =>
           STATE_RANK[left.presentation.state] - STATE_RANK[right.presentation.state] ||
@@ -241,7 +256,9 @@ export function buildAgentGroups<TThread extends AgentThread>(
     }))
     .toSorted(
       (left, right) =>
-        left.label.localeCompare(right.label) || left.projectKey.localeCompare(right.projectKey),
+        Number(right.ungrouped) - Number(left.ungrouped) ||
+        left.label.localeCompare(right.label) ||
+        left.projectKey.localeCompare(right.projectKey),
     );
 }
 

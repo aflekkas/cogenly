@@ -59,12 +59,14 @@ export function SidebarAgentsList(props: {
   return (
     <ul role="presentation" className="flex flex-col gap-px" data-testid="sidebar-agents-list">
       {props.groups.map((group) => [
-        <SidebarModeGroupLabel
-          key={`label:${group.projectKey}`}
-          icon={props.renderGroupIcon(group.environmentId, group.projectId)}
-        >
-          {group.label}
-        </SidebarModeGroupLabel>,
+        group.ungrouped ? null : (
+          <SidebarModeGroupLabel
+            key={`label:${group.projectKey}`}
+            icon={props.renderGroupIcon(group.environmentId, group.projectId)}
+          >
+            {group.label}
+          </SidebarModeGroupLabel>
+        ),
         ...group.rows.map((row) => (
           <SidebarAgentRow
             key={row.key}
