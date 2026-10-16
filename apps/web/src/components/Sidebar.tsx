@@ -3958,7 +3958,7 @@ export default function Sidebar() {
                   id="sidebar-thread-search-results"
                   role="listbox"
                   aria-label="Thread search results"
-                  className="flex flex-col gap-px"
+                  className="flex flex-col gap-1"
                 >
                   {threadSearchResults.map((thread, index) => {
                     const threadKey = scopedThreadKey(
@@ -4040,7 +4040,7 @@ export default function Sidebar() {
                 // presentational while preserving every descendant control.
                 role="presentation"
                 className={cn(
-                  "relative flex flex-col gap-px",
+                  "relative flex flex-col gap-1",
                   sidebarListItems.length > 0 && "flex-1",
                   // An action sweep owns the pointer: rows it passes over
                   // neither show hover actions nor open tooltips, even
