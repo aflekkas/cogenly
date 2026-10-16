@@ -1,0 +1,171 @@
+/**
+ * The navigation rail: a narrow icon column at the window's left edge, beside
+ * the thread list. Chats, Tasks and Agents switch the list from the top;
+ * Usage and Settings sit at the bottom. It stays put while the list collapses,
+ * so modes and settings remain one click away.
+ *
+ * Mobile keeps the segmented control inside the sheet instead (see
+ * SidebarModeSwitcher), so the rail renders only on wider windows.
+ */
+import { useAtomValue } from "@effect/atom-react";
+import { ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import { type KeyboardEvent as ReactKeyboardEvent, type ReactElement, useRef } from "react";
+import { useLocation, useNavigate } from "@tanstack/react-router";
+
+import { isElectron } from "../../env";
+import { shortcutLabelForCommand } from "../../keybindings";
+import { cn } from "../../lib/utils";
+import { primaryServerKeybindingsAtom } from "../../state/server";
+import { useUiStateStore } from "../../uiStateStore";
+import { useSidebar } from "../ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
+import { SIDEBAR_MODE_ICONS } from "./modes/SidebarModeSwitcher";
+import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./modes/sidebarModes.logic";
+import { resolveVerticalTabIndex } from "./navRail.logic";
+import { useNavRailBadgeStore } from "./navRailState";
+
+const RAIL_BUTTON_CLASS =
+  "relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:size-4.5 [&_svg]:shrink-0";
+
+function railButtonTone(active: boolean) {
+  return active
+    ? "bg-sidebar-row-active text-sidebar-foreground"
+    : "text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground";
+}
+
+function RailTooltip(props: { label: string; children: ReactElement }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={props.children} />
+      <TooltipPopup side="right">{props.label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+export function SidebarNavRail() {
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const mode = useUiStateStore((store) => store.sidebarMode);
+  const setMode = useUiStateStore((store) => store.setSidebarMode);
+  const agentsNeedingYou = useNavRailBadgeStore((store) => store.agentsNeedingYou);
+  const { open, setOpen } = useSidebar();
+  const navigate = useNavigate();
+  const navigateToMainApp = useNavigateToMainApp();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const onUtilityPage = isSidebarUtilityPage(pathname);
+  const onSettings = pathname === "/settings" || pathname.startsWith("/settings/");
+  const onUsage = pathname === "/usage";
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const selectMode = (next: SidebarMode) => {
+    setMode(next);
+    // A collapsed list opens on the mode picked, and a utility page hands
+    // the column back to the thread list.
+    if (!open) setOpen(true);
+    if (onUtilityPage) void navigateToMainApp();
+  };
+
+  const handleTabsKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const index = SIDEBAR_MODES.indexOf(mode);
+    const nextIndex = resolveVerticalTabIndex(event.key, index, SIDEBAR_MODES.length);
+    if (nextIndex === null) return;
+    event.preventDefault();
+    setMode(SIDEBAR_MODES[nextIndex]!);
+    tabRefs.current[nextIndex]?.focus();
+  };
+
+  return (
+    <nav
+      aria-label="Workspace"
+      // Shares the sidebar's palette scope, so rail and list read as one surface.
+      data-app-sidebar=""
+      className={cn(
+        "relative z-20 hidden h-full w-(--nav-rail-width) shrink-0 flex-col items-center bg-sidebar surface-grain pb-2 text-sidebar-foreground md:flex",
+        // Seamless beside the list; a hairline only once the list is
+        // collapsed and the rail meets the main pane.
+        "border-r border-transparent group-data-[sidebar-state=collapsed]/sidebar-wrapper:border-sidebar-border",
+      )}
+    >
+      {/* The titlebar row: the fixed sidebar toggle sits over this space. */}
+      <div
+        aria-hidden
+        className={cn(
+          "h-[var(--workspace-topbar-height)] w-full shrink-0",
+          isElectron && "drag-region",
+        )}
+      />
+      <div
+        role="tablist"
+        aria-label="Sidebar view"
+        aria-orientation="vertical"
+        onKeyDown={handleTabsKeyDown}
+        className="flex flex-col items-center gap-1"
+      >
+        {SIDEBAR_MODES.map((segment, segmentIndex) => {
+          // A utility page owns the column, so no mode reads as current there.
+          const selected = segment === mode && !onUtilityPage;
+          const label = SIDEBAR_MODE_LABELS[segment];
+          const Icon = SIDEBAR_MODE_ICONS[segment];
+          const shortcut = shortcutLabelForCommand(keybindings, `sidebar.mode.${segment}`);
+          const badge = segment === "agents" && agentsNeedingYou > 0 ? agentsNeedingYou : null;
+          return (
+            <RailTooltip key={segment} label={shortcut ? `${label} (${shortcut})` : label}>
+              <button
+                ref={(node) => {
+                  tabRefs.current[segmentIndex] = node;
+                }}
+                type="button"
+                role="tab"
+                id={`sidebar-mode-tab-${segment}`}
+                aria-label={label}
+                aria-selected={selected}
+                tabIndex={segment === mode ? 0 : -1}
+                data-testid={`sidebar-mode-${segment}`}
+                onClick={() => selectMode(segment)}
+                className={cn(RAIL_BUTTON_CLASS, railButtonTone(selected))}
+              >
+                <Icon aria-hidden />
+                {badge !== null ? (
+                  <span
+                    aria-label={`${badge} ${badge === 1 ? "agent needs" : "agents need"} you`}
+                    className="absolute -top-0.5 -right-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-warning px-0.5 text-3xs font-semibold leading-none text-background tabular-nums ring-2 ring-sidebar"
+                  >
+                    {badge > 9 ? "9+" : badge}
+                  </span>
+                ) : null}
+              </button>
+            </RailTooltip>
+          );
+        })}
+      </div>
+      <div className="flex-1" />
+      <div className="flex flex-col items-center gap-1">
+        <RailTooltip label="Usage">
+          <button
+            type="button"
+            aria-label="Usage"
+            aria-current={onUsage ? "page" : undefined}
+            onClick={() => void navigate({ to: "/usage" })}
+            className={cn(RAIL_BUTTON_CLASS, railButtonTone(onUsage))}
+          >
+            <ChartNoAxesColumnIcon aria-hidden />
+          </button>
+        </RailTooltip>
+        <RailTooltip label="Settings">
+          <button
+            type="button"
+            aria-label="Settings"
+            aria-current={onSettings ? "page" : undefined}
+            onClick={() => {
+              if (!open) setOpen(true);
+              if (!onSettings) void navigate({ to: "/settings" });
+            }}
+            className={cn(RAIL_BUTTON_CLASS, railButtonTone(onSettings))}
+          >
+            <SettingsIcon aria-hidden />
+          </button>
+        </RailTooltip>
+      </div>
+    </nav>
+  );
+}

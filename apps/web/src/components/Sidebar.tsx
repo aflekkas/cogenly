@@ -212,6 +212,7 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { useNavRailBadgeStore } from "./sidebar/navRailState";
 import {
   CHAT_DATE_GROUP_LABELS,
   SidebarAgentsList,
@@ -2041,6 +2042,9 @@ export default function Sidebar() {
   const threads = useThreadShells();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
+  // AppSidebarLayout shows the navigation rail beside this sidebar on wider
+  // windows (the legacy sidebar never mounts this component).
+  const navRailVisible = !isMobile;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -2245,6 +2249,10 @@ export default function Sidebar() {
     projectDisplayNameByKey,
   });
   const sidebarMode = sidebarModes.mode;
+  const setNavRailAgentsNeedingYou = useNavRailBadgeStore((store) => store.setAgentsNeedingYou);
+  useEffect(() => {
+    setNavRailAgentsNeedingYou(sidebarModes.agentsNeedingYou);
+  }, [setNavRailAgentsNeedingYou, sidebarModes.agentsNeedingYou]);
   const sidebarModeActions = useSidebarModeActions({
     mode: sidebarMode,
     currentEnvironmentId: routeThreadRef?.environmentId ?? primaryEnvironmentId,
@@ -3873,6 +3881,35 @@ export default function Sidebar() {
     shortcutLabelForCommand(keybindings, "chat.new") ??
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  const threadHeader = (
+    <SidebarThreadHeader
+      hasProjects={projectGroups.length > 0}
+      onNewProject={openAddProjectCommandPalette}
+      onNewThread={sidebarModeActions.createInMode ?? handleNewThreadClick}
+      newThreadLabel={sidebarModeActions.newItemLabel}
+      newThreadDisabled={sidebarMode === "tasks" && projects.length === 0}
+      newThreadShortcutLabel={
+        sidebarMode === "tasks"
+          ? newThreadShortcutLabel
+          : sidebarMode === "chats"
+            ? shortcutLabelForCommand(keybindings, "chat.newWithoutProject")
+            : null
+      }
+      newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
+      showNewThreadInProjectHint={projectGroups.length > 1}
+      searchInputRef={threadSearchInputRef}
+      searchQuery={threadSearchQuery}
+      onSearchQueryChange={(value) => {
+        setThreadSearchQuery(value);
+        setActiveSearchResultIndex(0);
+      }}
+      onSearchKeyDown={handleThreadSearchKeyDown}
+      isSearching={isSearchingThreads}
+      searchResultCount={threadSearchResults.length}
+      activeSearchResultIndex={activeSearchResultIndex}
+      onClearSearch={clearThreadSearch}
+    />
+  );
   return (
     <>
       <ThreadContextDragGhost />
@@ -3880,44 +3917,22 @@ export default function Sidebar() {
       <SidebarContent
         className="min-h-full"
         fixedHeader={
+          // Desktop switches modes from the navigation rail and keeps search
+          // at the foot of the list; the mobile sheet keeps both up top.
           // Lifted above the stage backdrop, whose fade bleeds below the
           // header and would otherwise paint across the search row's outline.
-          <SidebarGroup className="z-[1]">
-            <SidebarModeSwitcher
-              className="mb-1.5"
-              mode={sidebarMode}
-              onModeChange={sidebarModes.setMode}
-              agentsNeedingYou={sidebarModes.agentsNeedingYou}
-              keybindings={keybindings}
-            />
-            <SidebarThreadHeader
-              hasProjects={projectGroups.length > 0}
-              onNewProject={openAddProjectCommandPalette}
-              onNewThread={sidebarModeActions.createInMode ?? handleNewThreadClick}
-              newThreadLabel={sidebarModeActions.newItemLabel}
-              newThreadDisabled={sidebarMode === "tasks" && projects.length === 0}
-              newThreadShortcutLabel={
-                sidebarMode === "tasks"
-                  ? newThreadShortcutLabel
-                  : sidebarMode === "chats"
-                    ? shortcutLabelForCommand(keybindings, "chat.newWithoutProject")
-                    : null
-              }
-              newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
-              showNewThreadInProjectHint={projectGroups.length > 1}
-              searchInputRef={threadSearchInputRef}
-              searchQuery={threadSearchQuery}
-              onSearchQueryChange={(value) => {
-                setThreadSearchQuery(value);
-                setActiveSearchResultIndex(0);
-              }}
-              onSearchKeyDown={handleThreadSearchKeyDown}
-              isSearching={isSearchingThreads}
-              searchResultCount={threadSearchResults.length}
-              activeSearchResultIndex={activeSearchResultIndex}
-              onClearSearch={clearThreadSearch}
-            />
-          </SidebarGroup>
+          navRailVisible ? undefined : (
+            <SidebarGroup className="z-[1]">
+              <SidebarModeSwitcher
+                className="mb-1.5"
+                mode={sidebarMode}
+                onModeChange={sidebarModes.setMode}
+                agentsNeedingYou={sidebarModes.agentsNeedingYou}
+                keybindings={keybindings}
+              />
+              {threadHeader}
+            </SidebarGroup>
+          )
         }
       >
         <SidebarGroup className="flex-1" role="presentation">
@@ -4323,7 +4338,8 @@ export default function Sidebar() {
           ) : null}
         </SidebarGroup>
       </SidebarContent>
-      <SidebarChromeFooter />
+      {navRailVisible ? <SidebarGroup className="z-[1]">{threadHeader}</SidebarGroup> : null}
+      <SidebarChromeFooter utilityMenu={!navRailVisible} />
     </>
   );
 }

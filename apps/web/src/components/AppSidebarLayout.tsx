@@ -36,6 +36,9 @@ import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
 import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { SidebarNavRail } from "./sidebar/SidebarNavRail";
+import { NAV_RAIL_WIDTH_PX } from "./sidebar/navRail.logic";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
 import { useProjects } from "../state/entities";
 import {
@@ -229,8 +232,17 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // that would otherwise refresh a render-time snapshot.
   const viewportWidth = useSyncExternalStore(subscribeToViewportWidth, readViewportWidth);
   const [brandWidth, setBrandWidth] = useState(0);
+  // The rail replaces the mode switcher and the Settings and Usage row. The
+  // mobile sheet keeps those, and the legacy sidebar keeps its own layout.
+  const isMobile = useIsMobile();
+  const navRailVisible = !isMobile && !legacySidebarEnabled;
+  const navRailWidth = navRailVisible ? NAV_RAIL_WIDTH_PX : 0;
   const sidebarMinimumWidth = resolveThreadSidebarMinimumWidth(brandWidth);
-  const sidebarMaximumWidth = resolveThreadSidebarMaximumWidth(viewportWidth, sidebarMinimumWidth);
+  // The sidebar width is the list column alone; the rail takes its own room.
+  const sidebarMaximumWidth = resolveThreadSidebarMaximumWidth(
+    viewportWidth - navRailWidth,
+    sidebarMinimumWidth,
+  );
   const resetSidebarWidth = () => {
     try {
       removeLocalStorageItem(THREAD_SIDEBAR_WIDTH_STORAGE_KEY);
@@ -253,6 +265,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const sidebarProviderStyle = {
     "--sidebar-width": `${clampThreadSidebarWidth(sidebarWidth, sidebarMinimumWidth, sidebarMaximumWidth)}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
+    "--nav-rail-width": `${navRailWidth}px`,
     ...windowControlsInsetStyle,
   } as CSSProperties;
 
@@ -298,11 +311,13 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       <SidebarProvider
         className="h-dvh! min-h-0!"
         data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
+        data-nav-rail={navRailVisible ? "" : undefined}
         defaultOpen
         style={sidebarProviderStyle}
       >
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
         <ProjectProjectionRetention />
+        {navRailVisible ? <SidebarNavRail /> : null}
         <Sidebar
           side="left"
           collapsible="offcanvas"
@@ -314,10 +329,16 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
             minWidth: sidebarMinimumWidth,
             shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
               nextWidth <= currentWidth ||
-              wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
+              wrapper.clientWidth - navRailWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
             storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
             onResize: setSidebarWidth,
           }}
+          // The list column starts after the rail and slides under it when collapsed.
+          className={
+            navRailVisible
+              ? "left-(--nav-rail-width) group-data-[collapsible=offcanvas]:left-[calc(var(--nav-rail-width)-var(--sidebar-width))]"
+              : undefined
+          }
           // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
           style={windowControlsInsetStyle}
         >

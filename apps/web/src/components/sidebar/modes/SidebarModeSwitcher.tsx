@@ -1,5 +1,6 @@
 /**
- * Chats | Tasks | Agents: the segmented control above the sidebar search row.
+ * Chats | Tasks | Agents as a segmented control: the mobile sheet's mode row;
+ * wider windows switch modes from the navigation rail instead.
  * One pill slides between equal-width segments, so the control never reflows
  * when a badge appears. Arrow keys move between segments, as in any tablist.
  */
@@ -12,7 +13,7 @@ import { shortcutLabelForCommand } from "../../../keybindings";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./sidebarModes.logic";
 
-const SIDEBAR_MODE_ICONS: Record<SidebarMode, LucideIcon> = {
+export const SIDEBAR_MODE_ICONS: Record<SidebarMode, LucideIcon> = {
   chats: MessageCircleIcon,
   tasks: ListChecksIcon,
   agents: BotIcon,

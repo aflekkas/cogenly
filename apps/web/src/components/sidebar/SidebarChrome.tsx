@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
-import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import {
   resolveEnvironmentIdentificationPillLabel,
@@ -91,7 +91,7 @@ export function SidebarBrandWidthProbe({
       className="pointer-events-none invisible fixed top-0 left-0 flex w-max border-r border-transparent pr-3"
       ref={observeWidth}
     >
-      <div className="ml-[var(--workspace-titlebar-content-left)] flex">
+      <div className="ml-[max(calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset)),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] flex">
         <SidebarBrandMark />
       </div>
     </div>
@@ -102,7 +102,7 @@ function SidebarBrand() {
   return (
     <Link
       aria-label="Go to threads"
-      className="relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md text-foreground outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex"
+      className="relative z-10 ml-[max(calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset)),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md text-foreground outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex"
       to="/"
     >
       <SidebarBrandMark />
@@ -159,6 +159,9 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const navigateToMainApp = useNavigateToMainApp();
   const { isMobile, setOpenMobile } = useSidebar();
+  // Matches AppSidebarLayout: the rail already shows Settings as current.
+  const legacySidebarEnabled = useLegacySidebarEnabled();
+  const navRailVisible = !isMobile && !legacySidebarEnabled;
   const isOnUtilityPage = useLocation({
     select: (location) => isSidebarUtilityPage(location.pathname),
   });
@@ -194,12 +197,14 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               <span>Back</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            isActive={isOnSettings}
-            label="Settings"
-            onClick={handleSettingsClick}
-          />
+          {navRailVisible ? null : (
+            <SidebarUtilityItem
+              icon={<SettingsIcon />}
+              isActive={isOnSettings}
+              label="Settings"
+              onClick={handleSettingsClick}
+            />
+          )}
         </>
       ) : (
         <>
@@ -221,13 +226,24 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   );
 });
 
-export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+export const SidebarChromeFooter = memo(function SidebarChromeFooter({
+  utilityMenu = true,
+}: {
+  /** False beside the navigation rail, which carries Settings and Usage itself. */
+  utilityMenu?: boolean;
+}) {
   return (
-    <SidebarFooter>
+    <SidebarFooter className={cn(!utilityMenu && "empty:hidden")}>
       <SidebarThreadUndoNotice />
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
-      <SidebarUtilityMenu />
+      {utilityMenu ? (
+        <SidebarUtilityMenu />
+      ) : (
+        <SidebarMenu className="empty:hidden">
+          <SidebarUpdatePill />
+        </SidebarMenu>
+      )}
     </SidebarFooter>
   );
 });
