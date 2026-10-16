@@ -4,7 +4,6 @@ import {
   messageDelivery,
   reconcileAgentMessages,
   mergeLatestMessage,
-  formatContactTime,
   formatMessageTime,
   sortAgentContacts,
   groupAgentContacts,
@@ -65,9 +64,6 @@ describe("texting timeline", () => {
     expect(formatMessageTime(at(15, 19, 5), now, "en-US")).toBe("Yesterday 7:05 PM");
     expect(formatMessageTime(at(12, 9, 0), now, "en-US")).toBe("Oct 12 9:00 AM");
     expect(formatMessageTime("bad", now, "en-US")).toBe("");
-    expect(formatContactTime(at(16, 7, 13), now, "en-US")).toBe("7:13 AM");
-    expect(formatContactTime(at(15, 19, 5), now, "en-US")).toBe("Oct 15");
-    expect(formatContactTime("bad", now)).toBe("");
   });
 });
 describe("contact ordering", () => {

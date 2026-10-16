@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { AgentFace } from "~/components/agents/face";
-import { agentContactKey, formatContactTime } from "./agents.logic";
+import { agentContactKey } from "./agents.logic";
 import { useAgentUnread, useAgents } from "./agentsClient";
 import type { AgentContact } from "./agents.types";
 
@@ -84,7 +84,6 @@ function Contact({
         <span className="agent-contact-copy">
           <span className="agent-contact-name">
             <span>{agent.name}</span>
-            <time dateTime={agent.updatedAt}>{formatContactTime(agent.updatedAt)}</time>
           </span>
           <span className="agent-contact-preview">
             <span>{agent.preview || "Say hello"}</span>

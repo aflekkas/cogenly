@@ -27,14 +27,6 @@ export function formatMessageTime(at: string, now = new Date(), locale?: string)
   return `${day} ${date.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" })}`;
 }
 
-export function formatContactTime(at: string, now = new Date(), locale?: string): string {
-  const date = validDate(at);
-  if (!date) return "";
-  return dayKey(date) === dayKey(now)
-    ? date.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" })
-    : date.toLocaleDateString(locale, { month: "short", day: "numeric" });
-}
-
 export function conversationRows(
   messages: ReadonlyArray<AgentMessage>,
   now = new Date(),

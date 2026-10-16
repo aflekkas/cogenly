@@ -1215,16 +1215,16 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
      any surface; [data-app-sidebar] swaps the fills for the sidebar row
      tokens so themes keep driving navigation. */
   --state-hover-fill: color-mix(in srgb, var(--foreground) 4%, transparent);
-  --state-hover-sheen-top: rgb(255 255 255 / 0%);
-  --state-hover-sheen-bottom: rgb(0 0 0 / 0%);
-  --state-hover-highlight: rgb(255 255 255 / 40%);
+  --state-hover-sheen-top: transparent;
+  --state-hover-sheen-bottom: transparent;
+  --state-hover-highlight: transparent;
   --state-hover-foreground: var(--contrast-foreground);
   --state-selected-fill: color-mix(in srgb, var(--foreground) 6.5%, transparent);
-  --state-selected-sheen-top: rgb(255 255 255 / 0%);
-  --state-selected-sheen-bottom: rgb(0 0 0 / 1.5%);
-  --state-selected-highlight: rgb(255 255 255 / 60%);
-  --state-selected-edge: rgb(0 0 0 / 4%);
-  --state-selected-shadow: 0 1px 1px rgb(0 0 0 / 3%);
+  --state-selected-sheen-top: transparent;
+  --state-selected-sheen-bottom: transparent;
+  --state-selected-highlight: transparent;
+  --state-selected-edge: transparent;
+  --state-selected-shadow: 0 0 #0000;
   --state-selected-foreground: var(--contrast-foreground);
   --foreground: var(--color-zinc-800);
   --card: var(--color-white);
@@ -1300,16 +1300,16 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       0 1px 2px rgb(0 0 0 / 40%), 0 18px 44px -18px rgb(0 0 0 / 80%);
     /* Dark states are barely-there white fills; the lit top edge and faint
        hairline carry the selection, never a gray slab. */
-    --state-hover-fill: rgb(255 255 255 / 2.5%);
-    --state-hover-sheen-top: rgb(255 255 255 / 1.5%);
-    --state-hover-sheen-bottom: rgb(255 255 255 / 0%);
-    --state-hover-highlight: rgb(255 255 255 / 3%);
-    --state-selected-fill: rgb(255 255 255 / 4%);
-    --state-selected-sheen-top: rgb(255 255 255 / 2.5%);
-    --state-selected-sheen-bottom: rgb(255 255 255 / 0%);
-    --state-selected-highlight: rgb(255 255 255 / 8%);
-    --state-selected-edge: rgb(255 255 255 / 3%);
-    --state-selected-shadow: 0 1px 2px rgb(0 0 0 / 35%);
+    --state-hover-fill: rgb(255 255 255 / 3.5%);
+    --state-hover-sheen-top: transparent;
+    --state-hover-sheen-bottom: transparent;
+    --state-hover-highlight: transparent;
+    --state-selected-fill: rgb(255 255 255 / 6%);
+    --state-selected-sheen-top: transparent;
+    --state-selected-sheen-bottom: transparent;
+    --state-selected-highlight: transparent;
+    --state-selected-edge: transparent;
+    --state-selected-shadow: 0 0 #0000;
     --foreground: var(--color-neutral-100);
     --card: color-mix(in srgb, var(--background) 97%, var(--color-white));
     --card-foreground: var(--color-neutral-100);
@@ -1371,9 +1371,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* Light navigation selects with a white raised pill on the zinc-50 list. */
   --state-hover-fill: var(--sidebar-row-hover);
   --state-selected-fill: var(--sidebar-row-active);
-  --state-selected-highlight: rgb(255 255 255 / 70%);
-  --state-selected-edge: rgb(0 0 0 / 5%);
-  --state-selected-shadow: 0 1px 2px rgb(0 0 0 / 5%);
+  --state-selected-highlight: transparent;
+  --state-selected-edge: transparent;
+  --state-selected-shadow: 0 0 #0000;
   --state-hover-foreground: var(--contrast-sidebar-foreground);
   --state-selected-foreground: var(--contrast-sidebar-foreground);
 
@@ -1398,9 +1398,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 4%, transparent);
     --sidebar-row-selected: var(--sidebar-row-active);
     --sidebar-border: var(--border);
-    --state-selected-highlight: rgb(255 255 255 / 8%);
-    --state-selected-edge: rgb(255 255 255 / 3%);
-    --state-selected-shadow: 0 1px 2px rgb(0 0 0 / 35%);
+    --state-selected-highlight: transparent;
+    --state-selected-edge: transparent;
+    --state-selected-shadow: 0 0 #0000;
   }
 }
 
