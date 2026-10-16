@@ -93,3 +93,27 @@ export function mergeLatestMessage(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
   );
 }
+
+/** No-project contacts come first without a heading; each project keeps activity order. */
+export function groupAgentContacts(
+  agents: ReadonlyArray<AgentContact>,
+  projectOf: (agent: AgentContact) => { key: string; label: string } | null,
+) {
+  const groups = new Map<string, { key: string; label: string | null; agents: AgentContact[] }>();
+  for (const agent of sortAgentContacts(agents)) {
+    const project = projectOf(agent);
+    const key = project?.key ?? "no-project";
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, label: project?.label ?? null, agents: [] };
+      groups.set(key, group);
+    }
+    group.agents.push(agent);
+  }
+  return [...groups.values()].toSorted(
+    (a, b) =>
+      Number(b.label === null) - Number(a.label === null) ||
+      (a.label ?? "").localeCompare(b.label ?? "") ||
+      a.key.localeCompare(b.key),
+  );
+}

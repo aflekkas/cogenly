@@ -25,7 +25,7 @@ export function AgentSheet({
   return (
     <dialog
       ref={dialog}
-      className="agent-sheet"
+      className="agent-sheet surface-raised surface-raised-floating"
       aria-label={title}
       onCancel={(event) => {
         event.preventDefault();
@@ -169,7 +169,7 @@ export function AgentDetails({
               A nudge to get things moving. Results come back here.
             </p>
             {agent.triggers.map((trigger) => (
-              <div className="agent-detail-card" key={trigger.id}>
+              <div className="agent-detail-card surface-raised" key={trigger.id}>
                 <div className="agent-card-top">
                   <button
                     type="button"
@@ -279,7 +279,7 @@ export function AgentDetails({
             {agent.activity.map((run) => (
               <button
                 type="button"
-                className="agent-activity-card"
+                className="agent-activity-card surface-raised"
                 key={run.id}
                 onClick={() => client.openWork(agent, run.workThreadId)}
               >
@@ -317,7 +317,7 @@ function MemoryNote({
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(note.text);
   return (
-    <div className="agent-detail-card">
+    <div className="agent-detail-card surface-raised">
       {editing ? (
         <form
           onSubmit={(event) => {

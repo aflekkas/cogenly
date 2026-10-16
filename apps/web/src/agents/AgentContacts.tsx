@@ -1,3 +1,4 @@
+import { Fragment, type ReactNode } from "react";
 import { AgentFace } from "~/components/agents/face";
 import { agentContactKey, formatContactTime } from "./agents.logic";
 import { useAgentUnread, useAgents } from "./agentsClient";
@@ -7,17 +8,16 @@ export function AgentContacts({
   activeKey,
   onOpen,
   onCreate,
+  groups,
 }: {
   activeKey: string | null;
   onOpen: (agent: AgentContact) => void;
   onCreate: () => void;
+  groups?: ReadonlyArray<{ key: string; heading?: ReactNode; agents: ReadonlyArray<AgentContact> }>;
 }) {
   const { agents, loading, error } = useAgents();
   return (
     <div className="agent-contacts">
-      <div className="agent-list-heading">
-        <span>Agents</span>
-      </div>
       {error && (
         <p role="alert" className="agent-error">
           {error}
@@ -39,13 +39,18 @@ export function AgentContacts({
         </div>
       )}
       <ul aria-label="Agents">
-        {agents.map((agent) => (
-          <Contact
-            key={agentContactKey(agent)}
-            agent={agent}
-            active={activeKey === agentContactKey(agent)}
-            onOpen={onOpen}
-          />
+        {(groups ?? [{ key: "all", agents }]).map((group) => (
+          <Fragment key={group.key}>
+            {group.heading}
+            {group.agents.map((agent) => (
+              <Contact
+                key={agentContactKey(agent)}
+                agent={agent}
+                active={activeKey === agentContactKey(agent)}
+                onOpen={onOpen}
+              />
+            ))}
+          </Fragment>
         ))}
       </ul>
     </div>
@@ -65,7 +70,7 @@ function Contact({
     <li>
       <button
         type="button"
-        className="agent-contact"
+        className={`agent-contact ${active ? "surface-raised-sm" : "hover:surface-raised-hover"}`}
         data-active={active}
         aria-current={active ? "page" : undefined}
         onClick={() => onOpen(agent)}

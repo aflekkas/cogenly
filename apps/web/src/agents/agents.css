@@ -418,15 +418,15 @@
   border-radius: 11px;
   width: 100%;
   text-align: left;
-  background: none;
+  background-color: transparent;
   color: inherit;
   cursor: pointer;
 }
 .agent-contact:hover {
-  background: var(--muted);
+  background-color: var(--muted);
 }
 .agent-contact[data-active="true"] {
-  background: var(--secondary);
+  background-color: var(--secondary);
 }
 @utility agent-contact-copy {
   display: flex;

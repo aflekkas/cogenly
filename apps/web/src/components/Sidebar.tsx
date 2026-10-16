@@ -4006,6 +4006,7 @@ export default function Sidebar() {
           ) : null}
           {!isSearchingThreads && sidebarMode === "agents" ? (
             <SidebarAgentsList
+              projectDisplayNameByKey={projectDisplayNameByKey}
               activeThreadKey={
                 routeThreadRef ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}` : null
               }

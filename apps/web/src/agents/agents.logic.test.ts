@@ -5,6 +5,7 @@ import {
   formatContactTime,
   formatMessageTime,
   sortAgentContacts,
+  groupAgentContacts,
 } from "./agents.logic";
 import type { AgentContact, AgentMessage } from "./agents.types";
 
@@ -90,5 +91,24 @@ describe("shell updates", () => {
     expect(
       mergeLatestMessage([existing], { ...existing, text: "Finished", createdAt: at(16, 7, 12) }),
     ).toEqual([{ ...existing, text: "Finished" }]);
+  });
+});
+
+describe("project contact groups", () => {
+  it("puts no-project agents first without a label, then projects by name and contacts by activity", () => {
+    const contacts = [
+      { id: "older", name: "Older", projectId: "z", updatedAt: at(16, 7, 0) },
+      { id: "newer", name: "Newer", projectId: "z", updatedAt: at(16, 8, 0) },
+      { id: "free", name: "Free", projectId: null, updatedAt: at(16, 6, 0) },
+      { id: "alpha", name: "Alpha", projectId: "a", updatedAt: at(16, 5, 0) },
+    ] as AgentContact[];
+    const groups = groupAgentContacts(contacts, (agent) =>
+      agent.projectId
+        ? { key: agent.projectId, label: agent.projectId === "a" ? "Alpha" : "Zulu" }
+        : null,
+    );
+    expect(groups.map((group) => group.label)).toEqual([null, "Alpha", "Zulu"]);
+    expect(groups[0]?.agents.map((agent) => agent.id)).toEqual(["free"]);
+    expect(groups[2]?.agents.map((agent) => agent.id)).toEqual(["newer", "older"]);
   });
 });

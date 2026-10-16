@@ -1,6 +1,5 @@
 import { AgentConversation } from "../agents/AgentConversation";
 import { useAgents, useAgentConversation } from "../agents/agentsClient";
-import { useSidebar } from "./ui/sidebar";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
@@ -43,7 +42,6 @@ import {
 export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   const navigate = useNavigate();
   const { agents } = useAgents();
-  const { setOpenMobile, isMobile } = useSidebar();
   const contact =
     target.kind === "server"
       ? (agents.find(
@@ -185,7 +183,6 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
       <AgentConversation
         key={`${agentConversation.environmentId}:${agentConversation.id}`}
         agent={agentConversation}
-        {...(isMobile ? { onBack: () => setOpenMobile(true) } : {})}
       />
     );
   } else if (target.kind === "draft") {
