@@ -4,7 +4,6 @@ import type {
   PreviewSessionSnapshot,
   ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
   closestCenter,
   DndContext,
@@ -103,7 +102,6 @@ interface RightPanelTabsProps {
    * process, so desktop operations must not be addressed with them.
    */
   previewRuntimeTabId?: ((tabId: string) => string) | undefined;
-  terminalLabelsById: ReadonlyMap<string, string>;
   onActivate: (surface: RightPanelSurface) => void;
   onRenameDevice?: (surfaceId: string, title: string) => void;
   onCloseSurface: (surface: RightPanelSurface) => void;
@@ -120,6 +118,7 @@ interface RightPanelTabsProps {
    * accept the MouseEvent as a profile id.
    */
   onAddBrowserInProfile: (profileId: string) => void;
+  /** Shows the thread's agent terminals; it never starts a shell. */
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
@@ -140,7 +139,7 @@ export function shouldOpenDefaultBrowserProfileFromMenuClick(
 
 const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the Cogenly desktop app.",
-  terminal: "Terminal surfaces are only available from a project thread.",
+  terminal: "Agent terminals are only available from a project thread.",
   files: "Files are only available when a project is open.",
   diff: "Diff is only available for server threads in Git repositories.",
   device: "Devices are only available from a thread.",
@@ -542,7 +541,6 @@ function RightPanelEmptyState(props: {
 function surfaceTitle(
   surface: RightPanelSurface,
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
-  terminalLabelsById: ReadonlyMap<string, string>,
 ): string {
   switch (surface.kind) {
     case "diff":
@@ -554,10 +552,7 @@ function surfaceTitle(
         Math.max(surface.relativePath.lastIndexOf("/"), surface.relativePath.lastIndexOf("\\")) + 1,
       );
     case "terminal":
-      return (
-        terminalLabelsById.get(surface.activeTerminalId) ??
-        getTerminalLabel(surface.activeTerminalId)
-      );
+      return "Terminal";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
@@ -1006,11 +1001,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               {props.surfaces.map((surface) => {
                 const active = surface.id === props.activeSurfaceId;
                 const pending = props.pendingSurfaceIds.has(surface.id);
-                const title = surfaceTitle(
-                  surface,
-                  props.previewSessions,
-                  props.terminalLabelsById,
-                );
+                const title = surfaceTitle(surface, props.previewSessions);
                 const previewTabId = previewTabIdOf(surface, props.previewSessions);
                 // Desktop state is keyed by the session id, but desktop actions
                 // must be addressed with the runtime id.

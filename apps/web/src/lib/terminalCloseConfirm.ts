@@ -8,10 +8,8 @@ export function isTerminalCloseConfirmPending(): boolean {
 }
 
 /**
- * Confirmation for individual terminal close actions: drawer buttons, panel
- * buttons, the `terminal.close` keybinding, and closing a terminal surface from
- * the tab strip. Auto-exit cleanup and bulk tab closes skip this path and close
- * directly.
+ * Confirmation for closing a script or setup terminal from the right panel's
+ * Terminal surface. Agent commands are stopped instead and stay listed.
  */
 export async function confirmTerminalClose(
   labels: readonly [string, ...string[]],

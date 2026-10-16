@@ -62,14 +62,7 @@ export interface KeybindingRow {
 export type WhenVariableOption = string;
 export type KeybindingCommandOption = KeybindingCommand;
 
-const CORE_WHEN_VARIABLES = [
-  "terminalFocus",
-  "terminalOpen",
-  "isWeb",
-  "isDesktop",
-  "true",
-  "false",
-] as const;
+const CORE_WHEN_VARIABLES = ["terminalFocus", "isWeb", "isDesktop", "true", "false"] as const;
 
 const DEFAULT_WHEN_VARIABLES = new Set<string>(CORE_WHEN_VARIABLES);
 for (const binding of DEFAULT_RESOLVED_KEYBINDINGS) {
@@ -224,7 +217,6 @@ const KEYBINDING_GROUPS = [
   },
   { id: "threads", title: "Threads", prefixes: ["thread", "chat", "pullRequest"] },
   { id: "composer", title: "Composer", prefixes: ["composer", "modelPicker"] },
-  { id: "terminal", title: "Terminal", prefixes: ["terminal"] },
   { id: "preview", title: "Preview & diff", prefixes: ["preview", "diff"] },
   { id: "appearance", title: "Appearance", prefixes: ["appearance"] },
   { id: "scripts", title: "Project scripts", prefixes: ["script"] },
@@ -261,7 +253,8 @@ export function buildKeybindingRows(
   query: string,
 ): ReadonlyArray<KeybindingRow> {
   const normalizedQuery = query.trim().toLowerCase();
-  const rows = keybindings.map((binding, index) => {
+  const rows = keybindings.flatMap((binding, index) => {
+    if (RETIRED_KEYBINDING_COMMANDS.has(binding.command)) return [];
     const defaultBinding = defaultBindingForBinding(binding);
     const key = shortcutToKeybindingInput(binding.shortcut);
     const when = whenAstToExpression(binding.whenAst);
@@ -356,8 +349,16 @@ export function buildWhenVariableOptions(): ReadonlyArray<WhenVariableOption> {
   });
 }
 
-// Still decodable so stored keybindings load, but no longer offered: pinning was removed.
-const RETIRED_KEYBINDING_COMMANDS: ReadonlySet<KeybindingCommand> = new Set(["thread.pin"]);
+// Still decodable so stored keybindings load, but no longer offered: pinning and the
+// terminal drawer were removed.
+export const RETIRED_KEYBINDING_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
+  "thread.pin",
+  "terminal.toggle",
+  "terminal.split",
+  "terminal.splitVertical",
+  "terminal.new",
+  "terminal.close",
+]);
 
 export function buildKeybindingCommandOptions(
   keybindings: ResolvedKeybindingsConfig,

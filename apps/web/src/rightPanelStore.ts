@@ -4,8 +4,9 @@
  * This is intentionally a shallow workspace model: it owns an ordered set of
  * surface descriptors and the active surface, while each feature continues to
  * own its durable resource state. Browser surfaces point at preview tab ids,
- * terminal surfaces point at terminal session ids, file surfaces point at
- * workspace paths, and diff/files remain singleton surfaces.
+ * file surfaces point at workspace paths, and diff/files/terminal remain
+ * singleton surfaces. The terminal surface lists the thread's agent commands
+ * and remembers which one is selected.
  */
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { type ScopedThreadRef } from "@t3tools/contracts";
@@ -32,12 +33,10 @@ export type RightPanelSurface =
   | { id: "browser:new"; kind: "preview"; resourceId: null }
   | { id: "device" | `device:${string}`; kind: "device"; target?: DeviceTabTarget; title?: string }
   | {
-      id: `terminal:${string}`;
+      id: "terminal";
       kind: "terminal";
-      resourceId: string;
-      terminalIds: string[];
-      activeTerminalId: string;
-      splitDirection?: "horizontal" | "vertical";
+      /** The terminal shown below the command list; the newest one when unset. */
+      activeTerminalId?: string;
     }
   | { id: "diff"; kind: "diff" }
   | {
@@ -69,7 +68,8 @@ const RIGHT_PANEL_STORAGE_KEY = "cogenly:right-panel-state:v2";
 // v11 stops persisting the pull-request list's shared panel, so a restart opens the page fresh.
 // v12 adds the device surface.
 // v14 removes the agents surface; lineage lives in the thread title bar.
-const RIGHT_PANEL_STORAGE_VERSION = 15;
+// v16 folds per-shell terminal surfaces into the single agent terminal surface.
+const RIGHT_PANEL_STORAGE_VERSION = 16;
 
 export interface ThreadRightPanelState {
   isOpen: boolean;
@@ -127,15 +127,13 @@ interface RightPanelStoreState {
     keepSource?: boolean,
   ) => void;
   openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
-  openTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
-  splitTerminal: (
-    ref: ScopedThreadRef,
-    surfaceId: string,
-    terminalId: string,
-    direction?: "horizontal" | "vertical",
-  ) => void;
-  activateTerminal: (ref: ScopedThreadRef, surfaceId: string, terminalId: string) => void;
-  closeTerminal: (ref: ScopedThreadRef, surfaceId: string, terminalId: string) => void;
+  /** Show the terminal surface, selecting `terminalId` when given. */
+  openTerminal: (ref: ScopedThreadRef, terminalId?: string) => void;
+  /**
+   * Show a terminal the agent just started. Automatic, so it does not count as
+   * a user panel choice; it never moves keyboard focus.
+   */
+  revealAgentTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
   activateSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeOtherSurfaces: (ref: ScopedThreadRef, surfaceId: string) => void;
@@ -212,13 +210,29 @@ const attachmentSurface = (attachment: ChatFileAttachment): RightPanelSurface =>
   attachment,
 });
 
-const terminalSurface = (terminalId: string): RightPanelSurface => ({
-  id: `terminal:${terminalId}`,
+const terminalSurface = (terminalId?: string): RightPanelSurface => ({
+  id: "terminal",
   kind: "terminal",
-  resourceId: terminalId,
-  terminalIds: [terminalId],
-  activeTerminalId: terminalId,
+  ...(terminalId === undefined ? {} : { activeTerminalId: terminalId }),
 });
+
+const showTerminal = (
+  current: ThreadRightPanelState,
+  terminalId: string | undefined,
+): ThreadRightPanelState => {
+  const surface = terminalSurface(terminalId);
+  const exists = current.surfaces.some((entry) => entry.id === surface.id);
+  return {
+    ...current,
+    isOpen: true,
+    activeSurfaceId: surface.id,
+    surfaces: exists
+      ? current.surfaces.map((entry) =>
+          entry.id === surface.id && terminalId !== undefined ? surface : entry,
+        )
+      : [...current.surfaces, surface],
+  };
+};
 
 const upsertSurface = (
   current: ThreadRightPanelState,
@@ -311,8 +325,8 @@ const updateThread = (
 };
 
 // Every store action is a user choice unless it goes through `automaticUpdate`.
-// Only `openProactive` and resource reconciliation are automatic, so a new
-// action counts as a user choice by default.
+// Only `openProactive`, agent terminal reveals and resource reconciliation are
+// automatic, so a new action counts as a user choice by default.
 const automaticUpdate = (
   state: RightPanelStoreState,
   threadKey: string,
@@ -387,6 +401,7 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
             .map(([threadKey, threadState]) => {
               const validThreadState =
                 threadState && typeof threadState === "object" ? threadState : null;
+              let seenTerminalSurface = false;
               const surfaces = Array.isArray(validThreadState?.surfaces)
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
                     // Removed surfaces: plans render inline, agents in thread lineage.
@@ -421,40 +436,19 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                       return [{ ...surface, revealLine, revealRequestId }];
                     }
                     if (surface.kind !== "terminal") return [surface];
-                    if (
-                      !("resourceId" in surface) ||
-                      typeof surface.resourceId !== "string" ||
-                      surface.id !== `terminal:${surface.resourceId}`
-                    ) {
-                      return [];
-                    }
-                    const terminalIds =
-                      "terminalIds" in surface && Array.isArray(surface.terminalIds)
-                        ? [
-                            ...new Set(
-                              surface.terminalIds.filter(
-                                (terminalId): terminalId is string =>
-                                  typeof terminalId === "string",
-                              ),
-                            ),
-                          ]
-                        : [surface.resourceId];
-                    const activeTerminalId =
-                      "activeTerminalId" in surface &&
-                      typeof surface.activeTerminalId === "string" &&
-                      terminalIds.includes(surface.activeTerminalId)
-                        ? surface.activeTerminalId
-                        : (terminalIds[0] ?? surface.resourceId);
-                    return [
-                      {
-                        ...surface,
-                        terminalIds: terminalIds.length > 0 ? terminalIds : [surface.resourceId],
-                        activeTerminalId,
-                      },
-                    ];
+                    // Older versions kept one surface per user shell. Keep a single
+                    // terminal surface in the first one's place.
+                    if (seenTerminalSurface) return [];
+                    seenTerminalSurface = true;
+                    return [{ id: "terminal", kind: "terminal" }];
                   })
                 : [];
-              const rawActiveSurfaceId = validThreadState?.activeSurfaceId;
+              const storedActiveSurfaceId = validThreadState?.activeSurfaceId;
+              const rawActiveSurfaceId =
+                typeof storedActiveSurfaceId === "string" &&
+                storedActiveSurfaceId.startsWith("terminal:")
+                  ? "terminal"
+                  : storedActiveSurfaceId;
               const persistedActiveSurfaceId = surfaces.some(
                 (surface) => surface.id === rawActiveSurfaceId,
               )
@@ -676,82 +670,13 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         ),
       openTerminal: (ref, terminalId) =>
         set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) =>
-            upsertSurface(current, terminalSurface(terminalId)),
+          userAction(state, scopedThreadKey(ref), (current) => showTerminal(current, terminalId)),
+        ),
+      revealAgentTerminal: (ref, terminalId) =>
+        set((state) =>
+          automaticUpdate(state, scopedThreadKey(ref), (current) =>
+            showTerminal(current, terminalId),
           ),
-        ),
-      splitTerminal: (ref, surfaceId, terminalId, direction = "horizontal") =>
-        set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => ({
-            ...current,
-            isOpen: true,
-            activeSurfaceId: surfaceId,
-            surfaces: current.surfaces.map((surface) => {
-              if (surface.id !== surfaceId || surface.kind !== "terminal") return surface;
-              const { splitDirection: _splitDirection, ...baseSurface } = surface;
-              return {
-                ...baseSurface,
-                terminalIds: surface.terminalIds.includes(terminalId)
-                  ? surface.terminalIds
-                  : [...surface.terminalIds, terminalId],
-                activeTerminalId: terminalId,
-                ...(direction === "vertical" ? { splitDirection: "vertical" as const } : {}),
-              };
-            }),
-          })),
-        ),
-      activateTerminal: (ref, surfaceId, terminalId) =>
-        set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => ({
-            ...current,
-            activeSurfaceId: surfaceId,
-            surfaces: current.surfaces.map((surface) =>
-              surface.id === surfaceId &&
-              surface.kind === "terminal" &&
-              surface.terminalIds.includes(terminalId)
-                ? { ...surface, activeTerminalId: terminalId }
-                : surface,
-            ),
-          })),
-        ),
-      closeTerminal: (ref, surfaceId, terminalId) =>
-        set((state) =>
-          closeAction(state, scopedThreadKey(ref), (current) => {
-            const surface = current.surfaces.find(
-              (entry) => entry.id === surfaceId && entry.kind === "terminal",
-            );
-            if (!surface || surface.kind !== "terminal") return current;
-            const terminalIds = surface.terminalIds.filter((id) => id !== terminalId);
-            if (terminalIds.length === 0) {
-              const index = current.surfaces.findIndex((entry) => entry.id === surfaceId);
-              const surfaces = current.surfaces.filter((entry) => entry.id !== surfaceId);
-              const fallback = surfaces[Math.min(index, surfaces.length - 1)] ?? null;
-              return {
-                ...current,
-                isOpen: surfaces.length > 0 && current.isOpen,
-                surfaces,
-                activeSurfaceId:
-                  current.activeSurfaceId === surfaceId
-                    ? (fallback?.id ?? null)
-                    : current.activeSurfaceId,
-              };
-            }
-            return {
-              ...current,
-              surfaces: current.surfaces.map((entry) =>
-                entry.id === surfaceId && entry.kind === "terminal"
-                  ? {
-                      ...entry,
-                      terminalIds,
-                      activeTerminalId:
-                        entry.activeTerminalId === terminalId
-                          ? (terminalIds.at(-1) ?? terminalIds[0]!)
-                          : entry.activeTerminalId,
-                    }
-                  : entry,
-              ),
-            };
-          }),
         ),
       activateSurface: (ref, surfaceId) =>
         set((state) =>

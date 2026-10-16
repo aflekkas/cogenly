@@ -76,7 +76,7 @@ import { ChatGptWelcomeCoordinator } from "../settings/ChatGptWelcomeCoordinator
 import { AddManagedCodexAccountDialog, CodexSetupSection } from "../settings/CodexSetupSection";
 import { readCodexSetupMode } from "../settings/CodexSetupSection.logic";
 import { buildProviderInstanceUpdatePatch } from "../settings/SettingsPanels.logic";
-import { TerminalViewport } from "../ThreadTerminalDrawer";
+import { TerminalViewport } from "../TerminalViewport";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
 import { presentSavedCloudEnvironmentConnection } from "../cloud/cloudEnvironmentConnectionPresentation";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -1153,7 +1153,6 @@ function AgentInstallTerminal({
             autoFocus
             visible
             resizeEpoch={0}
-            drawerHeight={256}
             keybindings={keybindings}
           />
         ) : null}

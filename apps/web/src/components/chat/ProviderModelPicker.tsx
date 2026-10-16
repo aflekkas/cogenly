@@ -48,7 +48,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   compact?: boolean;
   isComposerOwned?: boolean;
   disabled?: boolean;
-  terminalOpen?: boolean;
   open?: boolean;
   triggerClassName?: string;
   /** Aggregate settings can show a neutral value without claiming one provider is selected. */
@@ -301,7 +300,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           instanceEntries={props.instanceEntries}
           {...(props.keybindings ? { keybindings: props.keybindings } : {})}
           modelOptionsByInstance={props.modelOptionsByInstance}
-          terminalOpen={props.terminalOpen ?? false}
           onRequestClose={() => setIsMenuOpen(false)}
           {...(props.onOpenProviderSetup ? { onOpenProviderSetup: props.onOpenProviderSetup } : {})}
           {...(props.getModelDisabledReason

@@ -1,21 +1,8 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
 
-import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
-import { useTerminalUiStateStore } from "../terminalUiStateStore";
+import { useRightPanelStore } from "../rightPanelStore";
 
-/** Reveal an existing terminal in the panel that owns it, without opening another PTY. */
+/** Reveal an existing terminal in the right panel's Terminal surface, without opening another PTY. */
 export function revealThreadTerminal(threadRef: ScopedThreadRef, terminalId: string) {
-  const panels = useRightPanelStore.getState();
-  const surface = selectThreadRightPanelState(panels.byThreadKey, threadRef).surfaces.find(
-    (surface) => surface.kind === "terminal" && surface.terminalIds.includes(terminalId),
-  );
-  if (surface) {
-    panels.activateTerminal(threadRef, surface.id, terminalId);
-    panels.activateSurface(threadRef, surface.id);
-    return;
-  }
-  useTerminalUiStateStore.getState().ensureTerminal(threadRef, terminalId, {
-    open: true,
-    active: true,
-  });
+  useRightPanelStore.getState().openTerminal(threadRef, terminalId);
 }

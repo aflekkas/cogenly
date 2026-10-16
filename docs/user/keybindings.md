@@ -78,8 +78,8 @@ It is a JSON array of rules:
 
 ```json
 [
-  { "key": "mod+g", "command": "terminal.toggle" },
-  { "key": "mod+shift+g", "command": "terminal.new", "when": "terminalFocus" }
+  { "key": "mod+g", "command": "rightPanel.toggle" },
+  { "key": "mod+shift+g", "command": "preview.toggle", "when": "!terminalFocus" }
 ]
 ```
 
@@ -103,7 +103,7 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 
 ## When conditions
 
-Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
+Available context keys are `terminalFocus`, `previewFocus`,
 `previewOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`, `composerDraft`,
 `turnRunning`, `editableFocus`, `isWeb`, and `isDesktop`.
 `editableFocus` is true while a text field, the composer, or another editor has
@@ -119,8 +119,11 @@ the same jumps in a browser.
 Combine keys with `!` for not, `&&` for and, `||` for or, and parentheses:
 
 ```json
-{ "key": "mod+j", "command": "terminal.toggle", "when": "terminalOpen && !terminalFocus" }
+{ "key": "mod+j", "command": "preview.toggle", "when": "previewOpen && !terminalFocus" }
 ```
+
+The `terminal.*` commands and the `terminalOpen` key belonged to the removed terminal
+drawer. Rules that use them still load but do nothing.
 
 ## Find in the current thread
 
@@ -158,10 +161,9 @@ through the pages you have visited, like a browser's back and forward buttons.
 
 ## Reserved shortcuts
 
-In the desktop app, `mod+w` closes the focused terminal or the active right-panel
-tab. When nothing remains to close, it closes the window. In a browser, `mod+w`
-closes the browser tab; rebind `rightPanel.close` and `terminal.close` to an available
-shortcut such as `alt+w`.
+In the desktop app, `mod+w` closes the active right-panel tab. When nothing remains
+to close, it closes the window. In a browser, `mod+w` closes the browser tab; rebind
+`rightPanel.close` to an available shortcut such as `alt+w`.
 
 `mod+shift+t` reopens the last closed tab across the app, including files,
 diffs, pull requests, browsers, and devices, in the order you closed them.

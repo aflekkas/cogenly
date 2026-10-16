@@ -141,7 +141,6 @@ import {
   isWindowsPlatform,
   newProjectId,
 } from "../lib/utils";
-import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
 import {
@@ -368,11 +367,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     select: (params) => resolveThreadRouteTarget(params),
   });
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
-  const terminalOpen = useTerminalUiStateStore((state) =>
-    routeThreadRef
-      ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
-      : false,
-  );
   const previewOpen = useRightPanelStore((state) =>
     routeThreadRef
       ? selectActiveRightPanel(state.byThreadKey, routeThreadRef) === "preview"
@@ -399,7 +393,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       const command = resolveShortcutCommand(event, keybindings, {
         context: {
           terminalFocus: isTerminalFocused(),
-          terminalOpen,
           previewFocus: isPreviewFocused(),
           previewOpen,
           modelPickerOpen: composerHandleRef.current?.isModelPickerOpen() ?? false,
@@ -457,7 +450,6 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     router,
     setAppearanceMode,
     setOpen,
-    terminalOpen,
     toggleMode,
   ]);
 

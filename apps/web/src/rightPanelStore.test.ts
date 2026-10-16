@@ -1,0 +1,78 @@
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { describe, expect, it } from "vite-plus/test";
+
+import {
+  migratePersistedRightPanelState,
+  selectThreadRightPanelState,
+  useRightPanelStore,
+} from "./rightPanelStore";
+
+const threadRef = {
+  environmentId: EnvironmentId.make("env-1"),
+  threadId: ThreadId.make("thread-1"),
+};
+
+describe("migratePersistedRightPanelState", () => {
+  it("folds per-shell terminal surfaces into the single agent terminal surface", () => {
+    const migrated = migratePersistedRightPanelState({
+      byThreadKey: {
+        "env-1:thread-1": {
+          isOpen: true,
+          activeSurfaceId: "terminal:term-2",
+          surfaces: [
+            { id: "diff", kind: "diff" },
+            {
+              id: "terminal:term-1",
+              kind: "terminal",
+              resourceId: "term-1",
+              terminalIds: ["term-1"],
+              activeTerminalId: "term-1",
+            },
+            {
+              id: "terminal:term-2",
+              kind: "terminal",
+              resourceId: "term-2",
+              terminalIds: ["term-2", "term-3"],
+              activeTerminalId: "term-3",
+            },
+          ],
+        },
+      },
+    });
+    expect(migrated.byThreadKey["env-1:thread-1"]).toEqual({
+      isOpen: true,
+      activeSurfaceId: "terminal",
+      surfaces: [
+        { id: "diff", kind: "diff" },
+        { id: "terminal", kind: "terminal" },
+      ],
+    });
+  });
+});
+
+describe("terminal surface actions", () => {
+  it("reveals an agent terminal without counting as a user panel choice", () => {
+    const store = useRightPanelStore.getState();
+    store.open(threadRef, "diff");
+    const revision = useRightPanelStore.getState().getUserActionRevision(threadRef);
+
+    useRightPanelStore.getState().revealAgentTerminal(threadRef, "agent-1");
+
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
+    expect(state.isOpen).toBe(true);
+    expect(state.activeSurfaceId).toBe("terminal");
+    expect(state.surfaces).toContainEqual({
+      id: "terminal",
+      kind: "terminal",
+      activeTerminalId: "agent-1",
+    });
+    expect(useRightPanelStore.getState().getUserActionRevision(threadRef)).toBe(revision);
+
+    // A later reveal selects the newer command in the same surface.
+    useRightPanelStore.getState().revealAgentTerminal(threadRef, "agent-2");
+    const next = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
+    expect(next.surfaces.filter((surface) => surface.kind === "terminal")).toEqual([
+      { id: "terminal", kind: "terminal", activeTerminalId: "agent-2" },
+    ]);
+  });
+});

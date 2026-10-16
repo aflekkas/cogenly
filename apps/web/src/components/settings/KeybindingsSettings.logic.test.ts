@@ -64,7 +64,6 @@ describe("KeybindingsSettings.logic", () => {
       "Navigation",
       "Threads",
       "Composer",
-      "Terminal",
       "Preview & diff",
       "Appearance",
       "Other",
@@ -73,9 +72,9 @@ describe("KeybindingsSettings.logic", () => {
     expect(composer?.rows.map((row) => row.command)).toEqual(
       expect.arrayContaining(["composer.host", "modelPicker.toggle"]),
     );
-    expect(groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "split"))).toEqual(
-      [expect.objectContaining({ id: "terminal" })],
-    );
+    expect(
+      groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "diff.toggle")),
+    ).toEqual([expect.objectContaining({ id: "preview" })]);
   });
   it("orders Usage bindings and command choices like the page", () => {
     const expected = [
@@ -104,7 +103,7 @@ describe("KeybindingsSettings.logic", () => {
     const rows = buildKeybindingRows(
       [
         {
-          command: "terminal.toggle",
+          command: "preview.toggle",
           shortcut: {
             key: "j",
             modKey: true,
@@ -119,19 +118,36 @@ describe("KeybindingsSettings.logic", () => {
           },
         },
       ] satisfies ResolvedKeybindingsConfig,
-      "terminal",
+      "preview",
     );
 
     expect(rows).toEqual([
       expect.objectContaining({
-        command: "terminal.toggle",
+        command: "preview.toggle",
         key: "mod+j",
         when: "!terminalFocus",
-        defaultKey: "mod+j",
+        defaultKey: "mod+shift+j",
         defaultWhen: "",
         source: "Custom",
       }),
     ]);
+  });
+
+  it("hides stored bindings for the retired terminal drawer commands", () => {
+    const toggle = {
+      command: "terminal.toggle",
+      shortcut: {
+        key: "j",
+        modKey: true,
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+      },
+    } satisfies ResolvedKeybindingsConfig[number];
+    expect(buildKeybindingRows([toggle], "")).toEqual([]);
+    expect(buildKeybindingCommandOptions([toggle])).not.toContain("terminal.toggle");
+    expect(buildKeybindingCommandOptions([])).not.toContain("terminal.new");
   });
 
   it("captures platform-specific mod shortcuts", () => {
@@ -292,7 +308,6 @@ describe("KeybindingsSettings.logic", () => {
     expect(options).toEqual(
       expect.arrayContaining([
         "terminalFocus",
-        "terminalOpen",
         "isWeb",
         "isDesktop",
         "modelPickerOpen",
@@ -301,6 +316,7 @@ describe("KeybindingsSettings.logic", () => {
       ]),
     );
     expect(options).not.toContain("customModeActive");
+    expect(options).not.toContain("terminalOpen");
   });
 
   it("builds command options from all static commands and resolved project bindings", () => {

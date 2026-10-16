@@ -1557,7 +1557,6 @@ export interface ChatComposerProps {
   resolvedTheme: "light" | "dark";
   settings: UnifiedSettings;
   keybindings: ResolvedKeybindingsConfig;
-  terminalOpen: boolean;
   gitCwd: string | null;
   pullRequestProjectId: ProjectId | null;
   pullRequestRepository: string | null;
@@ -1703,7 +1702,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     resolvedTheme,
     settings,
     keybindings,
-    terminalOpen,
     gitCwd,
     pullRequestProjectId,
     pullRequestRepository,
@@ -5355,7 +5353,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               )
             : "-ms-2.5 min-w-13"
         }
-        terminalOpen={terminalOpen}
         open={isComposerModelPickerOpen}
         instanceIndicatorBackground={
           composerControlsCollapsed
@@ -5491,7 +5488,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const command = resolveShortcutCommand(event, keybindings, {
         context: {
           terminalFocus: getTerminalFocusOwner() !== null,
-          terminalOpen,
           modelPickerOpen: isComposerModelPickerOpen,
         },
       });
@@ -5523,7 +5519,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectSelectionRequired,
     stashCurrentPromptStable,
     isRevertingCheckpoint,
-    terminalOpen,
   ]);
 
   // ------------------------------------------------------------------
@@ -6862,7 +6857,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     stashShortcutLabel={shortcutLabelForCommand(keybindings, "composer.stash", {
                       context: {
                         terminalFocus: false,
-                        terminalOpen,
                         modelPickerOpen: false,
                       },
                     })}

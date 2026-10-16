@@ -72,7 +72,6 @@ import {
   useThreadShellsForProjectRefs,
   waitForProjectRemoval,
 } from "../state/entities";
-import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useThreadDiscoveredPorts } from "../portDiscoveryState";
 import { openDiscoveredPort } from "./preview/openDiscoveredPort";
@@ -271,7 +270,6 @@ function projectGroupingModeDescription(mode: SidebarProjectGroupingMode): strin
 function buildThreadJumpLabelMap(input: {
   keybindings: ResolvedKeybindingsConfig;
   platform: string;
-  terminalOpen: boolean;
   threadJumpCommandByKey: ReadonlyMap<
     string,
     NonNullable<ReturnType<typeof threadJumpCommandForIndex>>
@@ -285,7 +283,6 @@ function buildThreadJumpLabelMap(input: {
     platform: input.platform,
     context: {
       terminalFocus: false,
-      terminalOpen: input.terminalOpen,
     },
   } as const;
   const mapping = new Map<string, string>();
@@ -2975,11 +2972,6 @@ export default function LegacySidebar() {
     [routeDraftThread, routeTarget],
   );
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
-  const routeTerminalOpen = useTerminalUiStateStore((state) =>
-    routeThreadRef
-      ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
-      : false,
-  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const openAddProjectCommandPalette = useCallback(
     () => openCommandPalette({ open: "add-project" }),
@@ -3126,17 +3118,15 @@ export default function LegacySidebar() {
   const getCurrentSidebarShortcutContext = useCallback(
     () => ({
       terminalFocus: isTerminalFocused(),
-      terminalOpen: routeTerminalOpen,
       modelPickerOpen: isModelPickerOpen(),
     }),
-    [routeTerminalOpen],
+    [],
   );
   const newThreadShortcutLabelOptions = useMemo(
     () => ({
       platform,
       context: {
         terminalFocus: false,
-        terminalOpen: false,
       },
     }),
     [platform],
@@ -3283,7 +3273,6 @@ export default function LegacySidebar() {
   );
   const sidebarShortcutContext = {
     terminalFocus: terminalFocused,
-    terminalOpen: routeTerminalOpen,
     modelPickerOpen: isModelPickerOpen(),
   };
   const threadJumpLabelByKey = useMemo(
@@ -3291,10 +3280,9 @@ export default function LegacySidebar() {
       buildThreadJumpLabelMap({
         keybindings,
         platform,
-        terminalOpen: sidebarShortcutContext.terminalOpen,
         threadJumpCommandByKey,
       }),
-    [keybindings, platform, sidebarShortcutContext.terminalOpen, threadJumpCommandByKey],
+    [keybindings, platform, threadJumpCommandByKey],
   );
   const shouldShowThreadJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
     shortcutModifiers,

@@ -6,7 +6,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { DEFAULT_KEYBINDINGS } from "@t3tools/shared/keybindings";
-import { commandLabel } from "./KeybindingsSettings.logic";
+import { commandLabel, RETIRED_KEYBINDING_COMMANDS } from "./KeybindingsSettings.logic";
 import {
   validateSettingsScopeSearch,
   type ResolvedSettingsScope,
@@ -119,21 +119,23 @@ export function keybindingSearchAnchorId<Command extends KeybindingCommand>(comm
  * Sidebar: Toggle. A command with no default binding may have no row, so it
  * points at the section instead.
  */
-const KEYBINDING_SEARCH_ITEMS = STATIC_KEYBINDING_COMMANDS.toSorted((left, right) =>
-  commandLabel(left).localeCompare(commandLabel(right)),
-).map((command) => {
-  const defaultKeys = DEFAULT_KEYBINDINGS.filter((binding) => binding.command === command).map(
-    (binding) => binding.key,
-  );
-  return {
-    id: keybindingSearchAnchorId(command),
-    title: commandLabel(command),
-    to: "/settings/keybindings" as const,
-    searchTerms: [command, ...defaultKeys],
-    secondary: true,
-    ...(defaultKeys.length === 0 ? { targetId: "keybindings" } : {}),
-  };
-});
+const KEYBINDING_SEARCH_ITEMS = STATIC_KEYBINDING_COMMANDS.filter(
+  (command) => !RETIRED_KEYBINDING_COMMANDS.has(command),
+)
+  .toSorted((left, right) => commandLabel(left).localeCompare(commandLabel(right)))
+  .map((command) => {
+    const defaultKeys = DEFAULT_KEYBINDINGS.filter((binding) => binding.command === command).map(
+      (binding) => binding.key,
+    );
+    return {
+      id: keybindingSearchAnchorId(command),
+      title: commandLabel(command),
+      to: "/settings/keybindings" as const,
+      searchTerms: [command, ...defaultKeys],
+      secondary: true,
+      ...(defaultKeys.length === 0 ? { targetId: "keybindings" } : {}),
+    };
+  });
 
 /** Anchor id of a source control host's settings form on the Source Control page. */
 export function sourceControlHostSettingsSearchId(kind: string) {

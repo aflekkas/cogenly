@@ -137,11 +137,16 @@ without deleting the conversation. **Un-settle thread** restores it to active wo
 and prevents automatic settlement until new activity resumes the usual rules.
 Manually settling an idle thread dismisses unanswered async questions without
 sending an answer or restarting the agent. Settling also closes the thread's
-terminals that wait at an idle prompt, and keeps their output. A terminal that
-you started stays open while it runs a command. Agent-run terminals, including dev servers
-and their child processes, stop when you settle, archive, or delete the thread. Their tabs
-are labelled **agent**, open automatically when commands start, and keep finished output
-until you close them. Agent terminal commands require full-access/default mode. To
+terminals that wait at an idle prompt, and keeps their output. A project script you
+started stays open while it runs a command. Agent-run terminals, including dev servers
+and their child processes, stop when you settle, archive, or delete the thread.
+
+Every shell command the agent runs appears in the right panel's **Terminal** tab, newest
+first and labelled with the command. The tab opens when the agent starts a command,
+without taking focus from the composer. Running commands stream live and have a stop
+button. Finished ones stay listed with their exit status. You can scroll, select and copy
+their output, and type into a command that still reads input. Cogenly does not open a
+shell of its own there. Agent terminal commands require full-access/default mode. To
 restore provider-native shells, set the server preference `enableAgentTerminals` to
 `false` and restart provider sessions.
 

@@ -99,7 +99,6 @@ import {
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
-import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { readLocalApi } from "../localApi";
@@ -3766,11 +3765,6 @@ export default function Sidebar() {
 
   // Thread jump (cmd+1..9) and prev/next traversal reuse the same commands as
   // v1 — the keybinding layer is shared, only the ordered list differs.
-  const routeTerminalOpen = useTerminalUiStateStore((state) =>
-    routeThreadRef
-      ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
-      : false,
-  );
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen()) {
@@ -3780,7 +3774,6 @@ export default function Sidebar() {
         platform: navigator.platform,
         context: {
           terminalFocus: isTerminalFocused(),
-          terminalOpen: routeTerminalOpen,
           modelPickerOpen: isModelPickerOpen(),
           isWeb: !isElectron,
           isDesktop: isElectron,
@@ -3812,14 +3805,7 @@ export default function Sidebar() {
     };
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
-  }, [
-    keybindings,
-    navigateToThread,
-    orderedThreadKeys,
-    routeTerminalOpen,
-    routeThreadKey,
-    threadByKey,
-  ]);
+  }, [keybindings, navigateToThread, orderedThreadKeys, routeThreadKey, threadByKey]);
 
   // Same predicate as v1: hints show only while the held modifiers exactly
   // match a thread-jump binding. Adding Shift (screenshots) or Alt no
@@ -3833,7 +3819,6 @@ export default function Sidebar() {
       platform: navigator.platform,
       context: {
         terminalFocus: terminalFocused,
-        terminalOpen: routeTerminalOpen,
         modelPickerOpen: isModelPickerOpen(),
         isWeb: !isElectron,
         isDesktop: isElectron,
