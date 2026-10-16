@@ -1,0 +1,855 @@
+/* Feature-owned controls share the app's palette and typography. */
+@utility agent-conversation {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+@utility agent-contact-header {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  flex: none;
+  padding: 25px 24px 17px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+}
+@utility agent-header-person {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  color: inherit;
+  font-size: 16px;
+  font-weight: 550;
+  letter-spacing: -0.025em;
+}
+.agent-header-person small {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  letter-spacing: 0;
+  margin-top: -4px;
+}
+.agent-header-person svg {
+  margin-bottom: 2px;
+}
+@utility agent-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.agent-icon-button:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.agent-icon-button:focus-visible,
+.agent-contact:focus-visible,
+.agent-header-person:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.agent-icon-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+@utility agent-header-more {
+  position: absolute;
+  right: 21px;
+  top: 22px;
+}
+@utility agent-back {
+  position: absolute;
+  left: 15px;
+  top: 22px;
+}
+@utility agent-message-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+@utility agent-messages {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 21px 30px 26px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  justify-content: flex-end;
+}
+@utility agent-message-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: 13px;
+  min-width: 0;
+}
+.agent-message-row[data-grouped="true"] {
+  margin-top: 4px;
+}
+.agent-message-row[data-owner="true"] {
+  align-items: flex-end;
+}
+@utility agent-separator {
+  align-self: stretch;
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 12px 0 20px;
+  letter-spacing: 0.015em;
+}
+@utility agent-bubble {
+  max-width: 85%;
+  padding: 10px 15px;
+  border-radius: 20px 20px 20px 7px;
+  background: var(--secondary);
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.agent-bubble[data-owner="true"] {
+  border-radius: 20px 20px 7px 20px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  max-width: 80%;
+}
+@utility agent-markdown {
+  white-space: normal;
+  min-width: 0;
+}
+.agent-markdown p {
+  margin: 0;
+}
+.agent-markdown p + p,
+.agent-markdown ul + p,
+.agent-markdown pre + p {
+  margin-top: 8px;
+}
+.agent-markdown ul,
+.agent-markdown ol {
+  padding-left: 20px;
+  margin: 6px 0;
+  list-style: revert;
+}
+.agent-markdown li + li {
+  margin-top: 2px;
+}
+.agent-markdown pre {
+  overflow: auto;
+  max-width: 100%;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background) 65%, transparent);
+  padding: 10px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.agent-markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+.agent-markdown :not(pre) > code {
+  background: color-mix(in srgb, var(--background) 65%, transparent);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.agent-markdown a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.agent-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+  margin: 8px 0;
+}
+.agent-markdown h1,
+.agent-markdown h2,
+.agent-markdown h3 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 8px 0;
+}
+.agent-markdown table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.agent-markdown td,
+.agent-markdown th {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+}
+@utility agent-delivery {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  padding: 4px 7px 0;
+}
+@utility agent-source {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  padding: 0;
+  margin: 0 0 6px;
+  cursor: pointer;
+  font-size: 10px;
+}
+.agent-source:hover {
+  text-decoration: underline;
+}
+@utility agent-working {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  margin: 18px 0 0 13px;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  cursor: pointer;
+}
+.agent-working:hover {
+  color: var(--foreground);
+}
+@utility agent-work-dot {
+  width: 5px;
+  height: 5px;
+  background: var(--muted-foreground);
+  border-radius: 50%;
+}
+@utility agent-spinner {
+  animation: agent-spin 1.2s linear infinite;
+}
+@keyframes agent-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-spinner {
+    animation: none;
+  }
+}
+@utility agent-composer-area {
+  flex: none;
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 12px 30px 22px;
+}
+@utility agent-composer {
+  display: flex;
+  align-items: flex-end;
+  border: 1px solid var(--border);
+  border-radius: 25px;
+  padding: 7px 8px 7px 18px;
+  background: color-mix(in srgb, var(--secondary) 28%, var(--background));
+  gap: 10px;
+}
+.agent-composer:focus-within {
+  border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+}
+.agent-composer textarea {
+  resize: none;
+  flex: 1;
+  min-width: 0;
+  min-height: 28px;
+  max-height: 144px;
+  padding: 4px 0;
+  background: none;
+  color: var(--foreground);
+  outline: none;
+  border: 0;
+  font-size: 14px;
+  line-height: 20px;
+  scrollbar-width: thin;
+}
+.agent-composer textarea::placeholder {
+  color: var(--muted-foreground);
+}
+.agent-composer > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 29px;
+  height: 29px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  cursor: pointer;
+}
+.agent-composer > button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+@utility agent-composer-hint {
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  margin: 7px 0 -8px;
+}
+@utility agent-error {
+  font-size: 12px;
+  color: var(--destructive);
+  padding: 10px;
+  overflow-wrap: anywhere;
+}
+@utility agent-conversation-empty {
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  margin: auto;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--muted-foreground);
+}
+.agent-conversation-empty span {
+  font-size: 12px;
+}
+@utility agent-request {
+  border: 1px solid var(--border);
+  padding: 13px 16px;
+}
+.agent-request p {
+  margin: 5px 0 10px;
+}
+@utility agent-request-eyebrow {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+@utility agent-inline-actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.agent-inline-actions button,
+.agent-small-button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 12px;
+  cursor: pointer;
+}
+.agent-inline-actions button:first-child {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: transparent;
+}
+.agent-inline-actions button:disabled,
+.agent-small-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+@utility agent-question {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12px;
+  margin-top: 12px;
+}
+.agent-question input,
+.agent-question select {
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px;
+  min-width: 0;
+}
+@utility agent-contacts {
+  width: 100%;
+  padding: 6px;
+  color: var(--foreground);
+}
+@utility agent-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  padding: 3px 9px 10px;
+}
+.agent-contacts ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+@utility agent-contact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 11px;
+  border: 0;
+  border-radius: 11px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.agent-contact:hover {
+  background: var(--muted);
+}
+.agent-contact[data-active="true"] {
+  background: var(--secondary);
+}
+@utility agent-contact-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 5px;
+}
+@utility agent-contact-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 550;
+}
+.agent-contact-name time {
+  margin-left: auto;
+  flex: none;
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+@utility agent-contact-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.agent-contact-preview > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@utility agent-unread {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  margin-left: auto;
+  border-radius: 10px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 9px;
+  font-weight: 600;
+}
+@utility agent-empty {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 14px;
+  text-align: center;
+  padding: 36px 15px;
+  font-size: 13px;
+}
+.agent-empty > span {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  line-height: 1.6;
+}
+@utility agent-sheet {
+  position: fixed;
+  inset: 0 0 0 auto;
+  margin: 0;
+  width: min(430px, 100vw);
+  height: 100dvh;
+  max-height: 100dvh;
+  max-width: 100vw;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  padding: 0;
+  box-shadow: -20px 0 80px #0002;
+  overflow: auto;
+}
+.agent-sheet::backdrop {
+  background: #0005;
+  backdrop-filter: blur(3px);
+}
+@utility agent-sheet-content {
+  padding: 22px 25px 35px;
+}
+@utility agent-sheet-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.agent-sheet-heading h2 {
+  font-size: 14px;
+  font-weight: 550;
+}
+@utility agent-details-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 11px;
+  padding: 24px 0 23px;
+}
+.agent-details-identity h3 {
+  font-size: 20px;
+  font-weight: 550;
+  letter-spacing: -0.03em;
+}
+.agent-details-identity > span {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+@utility agent-detail-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  gap: 5px;
+}
+.agent-detail-tabs button {
+  flex: 1;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 11px 0;
+  text-transform: capitalize;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  cursor: pointer;
+}
+.agent-detail-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--primary);
+  color: var(--foreground);
+}
+@utility agent-detail-panel {
+  padding-top: 20px;
+}
+@utility agent-section-intro {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  line-height: 1.7;
+  margin: 14px 0 20px;
+}
+@utility agent-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.agent-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.agent-form input:not([type="checkbox"]),
+.agent-form textarea,
+.agent-form select,
+.agent-detail-card textarea {
+  font: inherit;
+  font-weight: 400;
+  font-size: 13px;
+  line-height: 1.5;
+  width: 100%;
+  min-width: 0;
+  background: var(--secondary);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  outline: none;
+}
+.agent-form textarea {
+  resize: vertical;
+  min-height: 70px;
+}
+.agent-form input:focus-visible,
+.agent-form textarea:focus-visible,
+.agent-form select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.agent-form label.agent-toggle-row,
+.agent-form label.agent-cap-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.agent-toggle-row small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  font-weight: 400;
+  margin-top: 4px;
+}
+.agent-toggle-row input {
+  accent-color: var(--primary);
+  width: 17px;
+  height: 17px;
+}
+.agent-form .agent-cap-row input {
+  width: 80px;
+}
+@utility agent-face-picker {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+@utility agent-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  padding: 4px 0;
+  font-size: 11px;
+  cursor: pointer;
+}
+.agent-text-button:hover {
+  color: var(--foreground);
+}
+@utility agent-primary-button {
+  border: 0;
+  border-radius: 10px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  padding: 11px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.agent-primary-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+@utility agent-delete {
+  background: none;
+  border: 0;
+  color: var(--destructive);
+  padding: 25px 0 0;
+  font-size: 11px;
+  cursor: pointer;
+}
+@utility agent-delete-confirm {
+  margin-top: 20px;
+  font-size: 12px;
+}
+@utility agent-first-trigger {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.agent-first-trigger span {
+  flex: 1;
+}
+@utility agent-detail-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 11px;
+}
+@utility agent-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+@utility agent-card-title {
+  font-size: 12px;
+  font-weight: 500;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.agent-detail-card > span {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.agent-detail-card p {
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-detail-card .agent-card-top + p,
+.agent-detail-card > span + p {
+  margin-top: 8px;
+}
+@utility agent-memory-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.agent-memory-footer > span {
+  flex: 1;
+  font-size: 9px;
+  color: var(--muted-foreground);
+}
+@utility agent-add-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: none;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  padding: 12px;
+  cursor: pointer;
+}
+@utility agent-trigger-form {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+}
+@utility agent-muted {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.65;
+}
+@utility agent-activity-card {
+  display: block;
+  text-align: left;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+.agent-activity-card:hover {
+  background: var(--secondary);
+}
+.agent-activity-card strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.agent-activity-card p {
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 8px 0;
+}
+.agent-activity-card time {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+@utility agent-run-status {
+  display: inline-block;
+  font-size: 10px;
+  margin-top: 7px;
+  color: var(--muted-foreground);
+  text-transform: capitalize;
+}
+.agent-run-status[data-status="running"],
+.agent-run-status[data-status="starting"] {
+  color: var(--primary);
+}
+.agent-run-status[data-status="failed"] {
+  color: var(--destructive);
+}
+@utility agent-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border: 0;
+  font-size: 10px;
+}
+.agent-weekdays legend {
+  margin-bottom: 8px;
+  color: var(--muted-foreground);
+}
+.agent-weekdays label {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+@media (max-width: 600px) {
+  .agent-contact-header {
+    padding: 19px 18px 14px;
+  }
+  .agent-header-person svg {
+    width: 55px;
+    height: 55px;
+  }
+  .agent-messages {
+    padding: 12px 16px 20px;
+  }
+  .agent-bubble {
+    max-width: 91%;
+    font-size: 14px;
+    padding: 10px 14px;
+  }
+  .agent-bubble[data-owner="true"] {
+    max-width: 87%;
+  }
+  .agent-composer-area {
+    padding: 9px 13px max(16px, env(safe-area-inset-bottom));
+  }
+  .agent-composer textarea {
+    font-size: 16px;
+  }
+  .agent-sheet-content {
+    padding: 19px 21px 30px;
+  }
+}
+
+@utility agent-small-button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 12px;
+  cursor: pointer;
+}

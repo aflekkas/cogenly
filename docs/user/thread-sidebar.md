@@ -3,6 +3,17 @@
 Use a new thread for a separate task. Choose **New worktree** when its code changes
 need a separate branch and working directory.
 
+## Message an agent
+
+The sidebar's **Agents** tab lists your persistent agents by recent activity. Open
+one to message it, or choose **New agent** to give one a name, instructions and a
+Claude or Codex model. You can add a first trigger during creation or add one later.
+
+Open the agent's name or face to edit its instructions, pause background work,
+manage triggers and memory, or inspect recent runs. Trigger results arrive in the
+same conversation; their source links open the background work. Messages sent
+while an agent is busy use its normal queue or steering behavior.
+
 ## Start a thread
 
 On web and desktop, a new thread keeps the current project and carries your model

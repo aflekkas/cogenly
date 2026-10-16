@@ -4006,19 +4006,10 @@ export default function Sidebar() {
           ) : null}
           {!isSearchingThreads && sidebarMode === "agents" ? (
             <SidebarAgentsList
-              groups={sidebarModes.agentGroups}
               activeThreadKey={
                 routeThreadRef ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}` : null
               }
-              renderGroupIcon={(environmentId, projectId) => {
-                const project = projectByKey.get(`${environmentId}:${projectId}`);
-                return project ? (
-                  <ProjectFavicon project={project} className="size-3.5 shrink-0" />
-                ) : null;
-              }}
               onOpenThread={navigateToThread}
-              onOpenTask={sidebarModeActions.openAgentTask}
-              onThreadContextMenu={handleThreadContextMenu}
               onCreateAgent={sidebarModeActions.createAgent}
             />
           ) : null}

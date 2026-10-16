@@ -1,3 +1,4 @@
+import { requestAgentCreation } from "../../../agents/AgentsCreateHost";
 import type { EnvironmentId, ScheduledTaskId } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
@@ -14,8 +15,8 @@ const NEW_ITEM_LABELS: Record<SidebarMode, string> = {
 
 /**
  * Creation and navigation that differ by mode: the header's new button makes a
- * scratch chat in Chats and a scheduled task in Agents (Tasks keeps the
- * sidebar's own new-thread flow), and agents without a thread open their task.
+ * scratch chat in Chats and an agent in Agents (Tasks keeps the
+ * sidebar's own new-thread flow).
  */
 export function useSidebarModeActions(input: {
   readonly mode: SidebarMode;
@@ -36,14 +37,8 @@ export function useSidebarModeActions(input: {
 
   const createAgent = useCallback(() => {
     if (isMobile) setOpenMobile(false);
-    void router.navigate({
-      to: "/settings/scheduled-tasks",
-      search: {
-        create: true,
-        ...(currentEnvironmentId ? { environmentId: currentEnvironmentId } : {}),
-      },
-    });
-  }, [currentEnvironmentId, isMobile, router, setOpenMobile]);
+    requestAgentCreation(currentEnvironmentId);
+  }, [currentEnvironmentId, isMobile, setOpenMobile]);
 
   const openAgentTask = useCallback(
     (environmentId: EnvironmentId, taskId: ScheduledTaskId) => {

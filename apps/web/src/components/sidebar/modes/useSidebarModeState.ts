@@ -1,21 +1,16 @@
+import { agentThreadRole } from "../../../agents/agents.logic";
+import { useAgents } from "../../../agents/agentsClient";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import type {
-  EnvironmentId,
-  ProjectId,
-  ResolvedKeybindingsConfig,
-  ScopedThreadRef,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ResolvedKeybindingsConfig, ScopedThreadRef } from "@t3tools/contracts";
 import { useEffect, useMemo } from "react";
 
-import { useNowMinute } from "../../../hooks/useNowMinute";
 import { resolveShortcutCommand } from "../../../keybindings";
 import { useConnectedEnvironmentIds } from "../../../state/environments";
 import { useUiStateStore } from "../../../uiStateStore";
-import { buildAgentGroups, countAgentsNeedingYou, type AgentGroup } from "./agentState.logic";
 import {
   filterThreadsForSidebarMode,
   sidebarModeForThread,
@@ -38,7 +33,6 @@ export interface SidebarModeState {
   readonly modeThreads: ReadonlyArray<EnvironmentThreadShell>;
   /** Project keys whose new-thread drafts belong in the current mode; null for all. */
   readonly draftProjectKeys: ReadonlySet<string> | null;
-  readonly agentGroups: ReadonlyArray<AgentGroup<EnvironmentThreadShell>>;
   readonly agentsNeedingYou: number;
 }
 
@@ -57,15 +51,8 @@ export function useSidebarModeState(input: {
   /** Group label per `environmentId:projectId`. */
   readonly projectDisplayNameByKey: ReadonlyMap<string, string>;
 }): SidebarModeState {
-  const {
-    threads,
-    projects,
-    serverConfigs,
-    scopedProjectKeys,
-    routeThreadRef,
-    keybindings,
-    projectDisplayNameByKey,
-  } = input;
+  const { threads, projects, serverConfigs, scopedProjectKeys, routeThreadRef, keybindings } =
+    input;
   const mode = useUiStateStore((store) => store.sidebarMode);
   const setMode = useUiStateStore((store) => store.setSidebarMode);
 
@@ -77,6 +64,7 @@ export function useSidebarModeState(input: {
     [connectedEnvironmentIds, serverConfigs],
   );
   const scheduledTasks = useAgentScheduledTasks(taskEnvironmentIds);
+  const { agents } = useAgents();
 
   const scratchProjectKeys = useMemo(
     () =>
@@ -95,16 +83,27 @@ export function useSidebarModeState(input: {
     [projects, serverConfigs],
   );
   const classifier = useMemo((): SidebarModeThreadClassifier => {
-    const agentThreadKeys = new Set<string>();
+    const agentThreadKeys = new Set(
+      agents.map((agent) => sidebarModeThreadKey(agent.environmentId, agent.conversationThreadId)),
+    );
+    for (const thread of threads) {
+      if (agentThreadRole(thread.source) === "conversation")
+        agentThreadKeys.add(sidebarModeThreadKey(thread.environmentId, thread.id));
+    }
     for (const { environmentId, task } of scheduledTasks) {
       if (task.threadId !== null)
         agentThreadKeys.add(sidebarModeThreadKey(environmentId, task.threadId));
     }
     return { agentThreadKeys, scratchProjectKeys };
-  }, [scheduledTasks, scratchProjectKeys]);
+  }, [agents, scheduledTasks, scratchProjectKeys, threads]);
 
   const modeThreads = useMemo(
-    () => filterThreadsForSidebarMode(threads, mode, classifier),
+    () =>
+      filterThreadsForSidebarMode(
+        threads.filter((thread) => agentThreadRole(thread.source) !== "work"),
+        mode,
+        classifier,
+      ),
     [classifier, mode, threads],
   );
 
@@ -119,42 +118,10 @@ export function useSidebarModeState(input: {
     return new Set(keys);
   }, [mode, projects, scopedProjectKeys, scratchProjectKeys]);
 
-  // Agents: one per scheduled task, with the bound thread's live shell.
-  // Minute-quantized UTC clock ("YYYY-MM-DDTHH:MM"): ticks the relative times.
-  const nowMinute = useNowMinute();
-  const agentGroups = useMemo(() => {
-    const threadByKey = new Map(
-      threads.map((thread) => [sidebarModeThreadKey(thread.environmentId, thread.id), thread]),
-    );
-    const entries = scheduledTasks
-      .filter(
-        ({ environmentId, task }) =>
-          scopedProjectKeys === null || scopedProjectKeys.has(`${environmentId}:${task.projectId}`),
-      )
-      .map(({ environmentId, task }) => ({
-        environmentId,
-        task,
-        thread:
-          task.threadId === null
-            ? null
-            : (threadByKey.get(sidebarModeThreadKey(environmentId, task.threadId)) ?? null),
-      }));
-    return buildAgentGroups(entries, {
-      nowMs: Date.parse(`${nowMinute}:00.000Z`),
-      projectLabel: (environmentId: EnvironmentId, projectId: ProjectId) =>
-        projectDisplayNameByKey.get(`${environmentId}:${projectId}`) ?? "Project",
-      isScratchProject: (environmentId: EnvironmentId, projectId: ProjectId) =>
-        scratchProjectKeys.has(`${environmentId}:${projectId}`),
-    });
-  }, [
-    nowMinute,
-    projectDisplayNameByKey,
-    scheduledTasks,
-    scopedProjectKeys,
-    scratchProjectKeys,
-    threads,
-  ]);
-  const agentsNeedingYou = useMemo(() => countAgentsNeedingYou(agentGroups), [agentGroups]);
+  const agentsNeedingYou = useMemo(
+    () => agents.filter((agent) => agent.state === "blocked" || agent.state === "needsYou").length,
+    [agents],
+  );
 
   // Opening a thread that another mode lists (search, notification, link)
   // switches to that mode. Keyed on the thread's own mode, so picking a
@@ -191,5 +158,5 @@ export function useSidebarModeState(input: {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [keybindings, setMode]);
 
-  return { mode, setMode, modeThreads, draftProjectKeys, agentGroups, agentsNeedingYou };
+  return { mode, setMode, modeThreads, draftProjectKeys, agentsNeedingYou };
 }
