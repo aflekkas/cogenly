@@ -21,6 +21,7 @@ import {
   pinnedRuntimeCommand,
   pinnedRuntimePaths,
   PinnedRuntimeInstallError,
+  resolveCheckoutRuntime,
 } from "./pinnedRuntime.ts";
 import {
   SERVICE_LAUNCHER_PROTOCOL,
@@ -639,6 +640,25 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       "/sbin",
     ]),
   ).join(":");
+  // A CLI running under plain Node from a checkout pins a wrapper that execs
+  // the checkout when no release origin offers an archive. Anything else —
+  // single-executables, odd wrappers — resolves no checkout and keeps the
+  // archive path, which reports the missing origin itself.
+  const cwd = yield* HostProcess.WorkingDirectory;
+  const checkoutCandidate = resolveCheckoutRuntime({
+    isExecutable: yield* HostProcess.IsExecutable,
+    nodePath: host.execPath,
+    scriptArg: (yield* HostProcess.Arguments)[1],
+    resolveEntry: (script) => path.resolve(cwd, script),
+  });
+  const checkoutEntryExists =
+    checkoutCandidate === undefined
+      ? false
+      : yield* fs
+          .exists(checkoutCandidate.entryPath)
+          .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
+  const checkout =
+    checkoutCandidate !== undefined && checkoutEntryExists ? checkoutCandidate : undefined;
 
   const detectedManager = selectBootServiceManager({
     platform,
@@ -824,6 +844,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       platform,
       arch,
       releaseBaseUrl,
+      ...(checkout === undefined ? {} : { checkout }),
       validate: (runtime) =>
         runner
           .run({
