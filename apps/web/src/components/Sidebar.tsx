@@ -3140,11 +3140,30 @@ export default function Sidebar() {
     [sidebarListItems],
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
+  const sidebarModeListRef = useRef<HTMLDivElement | null>(null);
+  const listMotionModeRef = useRef(sidebarMode);
   useLayoutEffect(() => {
     // Draft navigation can reveal a frozen row without changing the draft count.
     void sidebarListOrderKey;
-    listMotionRef.current?.update(sidebarListHasRows);
-  }, [routeDraftIdForRows, sidebarListHasRows, sidebarListOrderKey, visibleDraftSessionCount]);
+    // A mode switch replaces the whole list. Fading every row out (each as a
+    // deep clone) and back in cost a long frame, so the list snaps to the new
+    // mode and only fades in as one composited layer.
+    const modeChanged = listMotionModeRef.current !== sidebarMode;
+    listMotionModeRef.current = sidebarMode;
+    listMotionRef.current?.update(sidebarListHasRows && !modeChanged);
+    if (modeChanged && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      sidebarModeListRef.current?.animate([{ opacity: 0.4 }, { opacity: 1 }], {
+        duration: 120,
+        easing: "ease-out",
+      });
+    }
+  }, [
+    routeDraftIdForRows,
+    sidebarListHasRows,
+    sidebarListOrderKey,
+    sidebarMode,
+    visibleDraftSessionCount,
+  ]);
   // One snooze per thread at a time — same double-dispatch guard as settle.
   const snoozingThreadKeysRef = useRef(new Set<string>());
   const performSnooze = useCallback(
@@ -3926,7 +3945,7 @@ export default function Sidebar() {
           </SidebarGroup>
         }
       >
-        <SidebarGroup className="flex-1" role="presentation">
+        <SidebarGroup ref={sidebarModeListRef} className="flex-1" role="presentation">
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
