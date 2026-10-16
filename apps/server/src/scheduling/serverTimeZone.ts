@@ -14,7 +14,8 @@ export const systemLocalTimeZone = (): string => Intl.DateTimeFormat().resolvedO
 /** True when `Intl` accepts the name, which is what the scheduler needs. */
 export const isValidTimeZone = (zone: string): boolean => {
   try {
-    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    // An unknown zone throws RangeError out of the constructor.
+    new Intl.DateTimeFormat("en-US", { timeZone: zone }).resolvedOptions();
     return true;
   } catch {
     return false;
