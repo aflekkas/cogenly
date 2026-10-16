@@ -362,6 +362,8 @@ const make = Effect.gen(function* () {
     send: (input) =>
       Effect.gen(function* () {
         const agent = yield* store.get(input.id);
+        // Pausing, backoff and daily caps govern background reservations only.
+        // An owner text always reaches the provider, including after auto-pause.
         const result = yield* threads.sendToThread({
           projectId: yield* workspace(agent),
           commandId: input.commandId,

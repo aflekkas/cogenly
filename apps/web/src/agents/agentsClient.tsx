@@ -2,12 +2,19 @@ import { createContext, useContext, useSyncExternalStore, useCallback, useRef } 
 import type { EnvironmentId, ProviderApprovalDecision, ThreadId } from "@t3tools/contracts";
 import type {
   AgentContact,
+  AgentMessage,
   AgentDraft,
   AgentMemory,
   AgentModelOption,
   AgentTrigger,
 } from "./agents.types";
-import { agentContactKey, mergeLatestMessage, sortAgentContacts } from "./agents.logic";
+import {
+  agentContactKey,
+  mergeLatestMessage,
+  sortAgentContacts,
+  messageDelivery,
+  reconcileAgentMessages,
+} from "./agents.logic";
 
 export class AgentCreatedWithoutTriggerError extends Error {
   constructor(
@@ -150,6 +157,24 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   );
   const results = useAtomValue(queryAtom);
   const [hydrated, setHydrated] = useState<ReadonlyMap<string, AgentConversationData>>(new Map());
+  const [outbox, setOutbox] = useState<ReadonlyMap<string, ReadonlyArray<AgentMessage>>>(new Map());
+  const hydrate = useCallback((key: string, content: AgentConversationData) => {
+    setHydrated((current) =>
+      current.get(key) === content ? current : new Map(current).set(key, content),
+    );
+    setOutbox((current) => {
+      const pending = current.get(key);
+      if (!pending) return current;
+      const remaining = pending.filter(
+        (message) => !content.messages.some((item) => item.id === message.id),
+      );
+      if (remaining.length === pending.length) return current;
+      const next = new Map(current);
+      if (remaining.length) next.set(key, remaining);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
   const save = useOrchestrationCommand(agentsRpc.save, { reportFailure: false });
   const remove = useOrchestrationCommand(agentsRpc.remove, { reportFailure: false });
   const sendAgent = useOrchestrationCommand(agentsRpc.send, { reportFailure: false });
@@ -221,36 +246,38 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
               ownership.role === "work"
             );
           });
-          const state = !record.enabled
-            ? "asleep"
-            : shell?.hasPendingApprovals ||
-                shell?.hasPendingUserInput ||
-                cached?.requests.length ||
-                workThreads.some(
-                  (thread) => thread.hasPendingApprovals || thread.hasPendingUserInput,
-                )
+          const state =
+            shell?.hasPendingApprovals ||
+            shell?.hasPendingUserInput ||
+            cached?.requests.length ||
+            workThreads.some((thread) => thread.hasPendingApprovals || thread.hasPendingUserInput)
               ? "blocked"
               : shell?.runtime?.activeRunId ||
                   workThreads.some((thread) => thread.runtime?.activeRunId)
                 ? "thinking"
-                : "idle";
+                : record.enabled
+                  ? "idle"
+                  : "asleep";
           return {
             ...record,
             environmentId,
             state,
             updatedAt: shell?.updatedAt ?? record.updatedAt,
             preview: latest?.text ?? "Say hello",
-            messages: mergeLatestMessage(
-              cached?.messages ?? [],
-              latest && !cached?.messages.some((message) => message.id === latest.id)
-                ? {
-                    id: latest.id,
-                    role: latest.role,
-                    text: latest.text,
-                    createdAt: latest.createdAt,
-                    updatedAt: latest.updatedAt,
-                  }
-                : null,
+            messages: reconcileAgentMessages(
+              mergeLatestMessage(
+                cached?.messages ?? [],
+                latest && !cached?.messages.some((message) => message.id === latest.id)
+                  ? {
+                      id: latest.id,
+                      role: latest.role,
+                      text: latest.text,
+                      createdAt: latest.createdAt,
+                      updatedAt: latest.updatedAt,
+                    }
+                  : null,
+              ),
+              outbox.get(key) ?? [],
             ),
             triggers,
             memory: cached?.memory ?? [],
@@ -259,7 +286,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           };
         });
       }),
-    [results, tasks, threads, hydrated],
+    [results, tasks, threads, hydrated, outbox],
   );
   const snapshot = useMemo<AgentsSnapshot>(
     () => ({
@@ -360,13 +387,36 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
             ? existing
             : { text, commandId: CommandId.make(randomUUID()), messageId: newMessageId() };
         pendingSends.current.set(key, identity);
-        commandValue(
-          await sendAgent({
-            environmentId: agent.environmentId,
-            input: { id: agent.id, ...identity, mode: "auto" },
-          }),
-        );
-        pendingSends.current.delete(key);
+        const updatePending = (delivery: NonNullable<AgentMessage["delivery"]>) =>
+          setOutbox((current) => {
+            const messages = current.get(key) ?? [];
+            const previous = messages.find((message) => message.id === identity.messageId);
+            return new Map(current).set(key, [
+              ...messages.filter((message) => message.id !== identity.messageId),
+              {
+                id: identity.messageId,
+                role: "user",
+                text,
+                createdAt: previous?.createdAt ?? new Date().toISOString(),
+                optimistic: true,
+                delivery,
+              },
+            ]);
+          });
+        updatePending("sending");
+        try {
+          const result = commandValue(
+            await sendAgent({
+              environmentId: agent.environmentId,
+              input: { id: agent.id, ...identity, mode: "auto" },
+            }),
+          );
+          updatePending(result.delivery === "queued" ? "queued" : "delivered");
+          pendingSends.current.delete(key);
+        } catch (cause) {
+          updatePending("failed");
+          throw cause;
+        }
       },
       respond: async (agent, requestId, response) => {
         const request = agent.requests.find((item) => item.id === requestId);
@@ -456,27 +506,20 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   );
   return (
     <AgentsClientProvider value={client}>
-      <AgentHydrationContext.Provider value={setHydrated}>
-        {children}
-      </AgentHydrationContext.Provider>
+      <AgentHydrationContext.Provider value={hydrate}>{children}</AgentHydrationContext.Provider>
     </AgentsClientProvider>
   );
 }
 type AgentConversationData = Pick<AgentContact, "messages" | "requests" | "memory" | "activity">;
 const AgentHydrationContext = createContext<
-  | ((
-      update: (
-        current: ReadonlyMap<string, AgentConversationData>,
-      ) => ReadonlyMap<string, AgentConversationData>,
-    ) => void)
-  | null
+  ((key: string, content: AgentConversationData) => void) | null
 >(null);
 export function useAgentConversation(agent: AgentContact | null): AgentContact | null {
   const state = useEnvironmentThread(
     agent?.environmentId ?? null,
     agent?.conversationThreadId ?? null,
   );
-  const setHydrated = useContext(AgentHydrationContext);
+  const hydrate = useContext(AgentHydrationContext);
   const memory = useEnvironmentQuery(
     agent
       ? agentsRpc.memory({ environmentId: agent.environmentId, input: { agentId: agent.id } })
@@ -550,9 +593,7 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
         createdAt: DateTime.formatIso(message.createdAt),
         updatedAt: DateTime.formatIso(message.updatedAt),
         streaming: message.streaming,
-        delivery: projection.runs.some((run) => run.id === message.runId && run.status === "queued")
-          ? ("queued" as const)
-          : ("delivered" as const),
+        delivery: messageDelivery(projection.runs.find((run) => run.id === message.runId)),
         ...(message.scheduledTaskId && message.senderThreadId
           ? {
               source: {
@@ -571,28 +612,28 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
   }, [projection, workProjection, triggerNames, memory.data, activity.data]);
   const key = agent ? agentContactKey(agent) : null;
   useEffect(() => {
-    if (!key || !content || !setHydrated) return;
-    setHydrated((current) => {
-      const existing = current.get(key);
-      if (existing === content) return current;
-      return new Map(current).set(key, content);
-    });
-  }, [key, content, setHydrated]);
+    if (key && content && hydrate) hydrate(key, content);
+  }, [key, content, hydrate]);
   return agent && content
     ? {
         ...agent,
         ...content,
+        messages: reconcileAgentMessages(
+          content.messages,
+          agent.messages.filter((message) => message.optimistic),
+        ),
         hasMoreMessages: state.history.hasMoreHistory,
         loadingEarlierMessages: state.history.loading,
         historyError: state.history.error,
         conversationError: Option.getOrNull(state.error),
-        state: !agent.enabled
-          ? "asleep"
-          : content.requests.length
-            ? "blocked"
-            : content.activity.some((run) => run.status === "running" || run.status === "starting")
-              ? "thinking"
-              : agent.state,
+        state: content.requests.length
+          ? "blocked"
+          : projection?.runs.some((run) =>
+                ["preparing", "starting", "running"].includes(run.status),
+              ) ||
+              content.activity.some((run) => run.status === "running" || run.status === "starting")
+            ? "thinking"
+            : agent.state,
       }
     : agent;
 }

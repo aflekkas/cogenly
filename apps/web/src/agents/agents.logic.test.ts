@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   conversationRows,
+  messageDelivery,
+  reconcileAgentMessages,
   mergeLatestMessage,
   formatContactTime,
   formatMessageTime,
   sortAgentContacts,
   groupAgentContacts,
 } from "./agents.logic";
+import * as DateTime from "effect/DateTime";
 import type { AgentContact, AgentMessage } from "./agents.types";
 
 const now = new Date(2026, 9, 16, 10, 30);
@@ -110,5 +113,36 @@ describe("project contact groups", () => {
     expect(groups.map((group) => group.label)).toEqual([null, "Alpha", "Zulu"]);
     expect(groups[0]?.agents.map((agent) => agent.id)).toEqual(["free"]);
     expect(groups[2]?.agents.map((agent) => agent.id)).toEqual(["newer", "older"]);
+  });
+});
+
+describe("owner message delivery", () => {
+  it("shows provider failures instead of a successful delivery receipt", () => {
+    expect(messageDelivery({ status: "failed", startedAt: null })).toBe("failed");
+    expect(
+      messageDelivery({ status: "failed", startedAt: DateTime.makeUnsafe("2026-10-16T09:00:00Z") }),
+    ).toBe("failed");
+    expect(messageDelivery({ status: "cancelled", startedAt: null })).toBe("interrupted");
+    expect(messageDelivery({ status: "queued", startedAt: null })).toBe("queued");
+    expect(messageDelivery({ status: "starting", startedAt: null })).toBe("delivered");
+    expect(
+      messageDelivery({
+        status: "running",
+        startedAt: DateTime.makeUnsafe("2026-10-16T09:00:00Z"),
+      }),
+    ).toBe("read");
+    expect(messageDelivery({ status: "completed", startedAt: null })).toBe("read");
+  });
+  it("reconciles optimistic sends by identity, including identical texts and failed acknowledgements", () => {
+    const optimistic = {
+      ...message("one", "user", at(16, 9, 0)),
+      text: "hi",
+      optimistic: true,
+      delivery: "failed" as const,
+    };
+    const second = { ...optimistic, id: "two", delivery: "sending" as const };
+    const persisted = { ...optimistic, optimistic: false, delivery: "read" as const };
+    expect(reconcileAgentMessages([persisted], [optimistic, second])).toEqual([persisted, second]);
+    expect(reconcileAgentMessages([], [optimistic])).toEqual([optimistic]);
   });
 });

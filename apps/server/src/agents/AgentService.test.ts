@@ -252,6 +252,72 @@ describe("agent execution", () => {
     }),
   );
 
+  it.effect("paused agents dispatch owner texts while their scheduled triggers stay stopped", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const schedules = yield* Schedules.ScheduledTaskService;
+        const sql = yield* SqlClient.SqlClient;
+        yield* store.save(h.fixture);
+        const { task } = yield* schedules.upsert(h.triggerInput);
+        yield* store.save({ ...h.fixture, enabled: false });
+        const result = yield* agents.send({
+          id: h.fixture.id,
+          commandId: CommandId.make("paused:owner"),
+          messageId: MessageId.make("paused:owner"),
+          text: "Are you there?",
+        });
+        expect(result.threadId).toBe(h.fixture.conversationThreadId);
+        expect(h.calls).toHaveLength(1);
+        expect(h.calls[0]).toMatchObject({
+          text: "Are you there?",
+          mode: "auto",
+          createdBy: "user",
+        });
+        expect(yield* store.context(result.threadId)).toContain(h.fixture.instructions);
+        expect((yield* store.get(h.fixture.id)).enabled).toBe(false);
+        expect(yield* agents.trigger(task, "paused:trigger", task.prompt)).toBe(false);
+        yield* sql`UPDATE scheduled_tasks SET next_run_at = '1969-12-20T09:00:00.000Z' WHERE task_id = ${task.id}`;
+        yield* h.jobs.get("scheduled-tasks")!;
+        expect(h.launches).toEqual([]);
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+
+  it.effect(
+    "owner texts bypass failure backoff and the daily cap without resuming background work",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const store = yield* Store.AgentStore;
+          const agents = yield* Agents.AgentService;
+          const schedules = yield* Schedules.ScheduledTaskService;
+          yield* store.save(h.fixture);
+          const { task } = yield* schedules.upsert(h.triggerInput);
+          expect(yield* store.reserve(h.fixture.id)).toBe(true);
+          expect(yield* store.reserve(h.fixture.id)).toBe(true);
+          for (let failure = 0; failure < 5; failure++) yield* store.outcome(h.fixture.id, false);
+          const paused = yield* store.get(h.fixture.id);
+          expect(paused.enabled).toBe(false);
+          expect(paused.backoffUntil).not.toBeNull();
+          yield* agents.send({
+            id: paused.id,
+            commandId: CommandId.make("auto-paused:owner"),
+            messageId: MessageId.make("auto-paused:owner"),
+            text: "Hello",
+          });
+          expect(h.calls).toHaveLength(1);
+          expect(h.calls[0]?.threadId).toBe(paused.conversationThreadId);
+          expect((yield* store.get(paused.id)).enabled).toBe(false);
+          expect(yield* agents.trigger(task, "auto-paused:trigger", task.prompt)).toBe(false);
+          expect(h.launches).toEqual([]);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
   it.effect("owner texts keep the conversation and queue behind active work", () =>
     Effect.gen(function* () {
       const h = yield* makeHarness;

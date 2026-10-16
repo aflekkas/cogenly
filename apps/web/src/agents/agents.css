@@ -28,7 +28,7 @@
   background: none;
   border: 0;
   color: inherit;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 550;
   letter-spacing: -0.025em;
 }
@@ -63,7 +63,7 @@
 .agent-contact:focus-visible,
 .agent-header-person:focus-visible {
   outline: 2px solid var(--ring);
-  outline-offset: 3px;
+  outline-offset: -2px;
 }
 .agent-icon-button:disabled {
   opacity: 0.4;
@@ -84,11 +84,12 @@
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+  overflow-anchor: none;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
 @utility agent-messages {
-  max-width: 760px;
+  max-width: 780px;
   margin: 0 auto;
   padding: 21px 30px 26px;
   display: flex;
@@ -113,27 +114,27 @@
   align-self: stretch;
   text-align: center;
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
-  padding: 12px 0 20px;
+  padding: 14px 0 22px;
   letter-spacing: 0.015em;
 }
 @utility agent-bubble {
-  max-width: 85%;
-  padding: 10px 15px;
-  border-radius: 20px 20px 20px 7px;
+  max-width: 75%;
+  padding: 12px 17px;
+  border-radius: 23px 23px 23px 8px;
   background: var(--secondary);
   color: var(--foreground);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.55;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 .agent-bubble[data-owner="true"] {
-  border-radius: 20px 20px 7px 20px;
+  border-radius: 23px 23px 8px 23px;
   background: var(--primary);
   color: var(--primary-foreground);
-  max-width: 80%;
+  max-width: 75%;
 }
 @utility agent-markdown {
   white-space: normal;
@@ -202,7 +203,7 @@
   border: 1px solid var(--border);
 }
 @utility agent-delivery {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted-foreground);
   padding: 4px 7px 0;
 }
@@ -258,7 +259,7 @@
 }
 @utility agent-composer-area {
   flex: none;
-  max-width: 760px;
+  max-width: 780px;
   width: 100%;
   margin: 0 auto;
   padding: 12px 30px 22px;
@@ -268,7 +269,7 @@
   align-items: flex-end;
   border: 1px solid var(--border);
   border-radius: 25px;
-  padding: 7px 8px 7px 18px;
+  padding: 9px 9px 9px 19px;
   background: color-mix(in srgb, var(--secondary) 28%, var(--background));
   gap: 10px;
 }
@@ -279,15 +280,15 @@
   resize: none;
   flex: 1;
   min-width: 0;
-  min-height: 28px;
+  min-height: 32px;
   max-height: 144px;
   padding: 4px 0;
   background: none;
   color: var(--foreground);
   outline: none;
   border: 0;
-  font-size: 14px;
-  line-height: 20px;
+  font-size: 16px;
+  line-height: 24px;
   scrollbar-width: thin;
 }
 .agent-composer textarea::placeholder {
@@ -298,8 +299,8 @@
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 29px;
-  height: 29px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   border: 0;
   background: var(--primary);
@@ -328,7 +329,7 @@
   text-align: center;
   margin: auto;
   gap: 6px;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--muted-foreground);
 }
 .agent-conversation-empty span {
@@ -412,10 +413,10 @@
 @utility agent-contact {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 13px 11px;
+  gap: 9px;
+  padding: 7px 9px;
   border: 0;
-  border-radius: 11px;
+  border-radius: 8px;
   width: 100%;
   text-align: left;
   background-color: transparent;
@@ -423,24 +424,34 @@
   cursor: pointer;
 }
 .agent-contact:hover {
-  background-color: var(--muted);
+  background-color: var(--sidebar-row-hover);
 }
 .agent-contact[data-active="true"] {
-  background-color: var(--secondary);
+  background-color: var(--sidebar-row-active);
 }
 @utility agent-contact-copy {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-width: 0;
-  gap: 5px;
+  gap: 2px;
 }
 @utility agent-contact-name {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
+  line-height: 18px;
   font-weight: 550;
+}
+.agent-contact-name > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-contact > svg {
+  flex: none;
 }
 .agent-contact-name time {
   margin-left: auto;
@@ -504,12 +515,11 @@
   background: var(--background);
   color: var(--foreground);
   padding: 0;
-  box-shadow: -20px 0 80px #0002;
+  box-shadow: -4px 0 24px #0001;
   overflow: auto;
 }
 .agent-sheet::backdrop {
-  background: #0005;
-  backdrop-filter: blur(3px);
+  background: #0003;
 }
 @utility agent-sheet-content {
   padding: 22px 25px 35px;
@@ -521,7 +531,7 @@
   gap: 12px;
 }
 .agent-sheet-heading h2 {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 550;
 }
 @utility agent-details-identity {
@@ -819,19 +829,19 @@
     padding: 19px 18px 14px;
   }
   .agent-header-person svg {
-    width: 55px;
-    height: 55px;
+    width: 62px;
+    height: 62px;
   }
   .agent-messages {
     padding: 12px 16px 20px;
   }
   .agent-bubble {
-    max-width: 91%;
-    font-size: 14px;
+    max-width: 85%;
+    font-size: 16px;
     padding: 10px 14px;
   }
   .agent-bubble[data-owner="true"] {
-    max-width: 87%;
+    max-width: 85%;
   }
   .agent-composer-area {
     padding: 9px 13px max(16px, env(safe-area-inset-bottom));
@@ -852,4 +862,22 @@
   color: var(--foreground);
   font-size: 12px;
   cursor: pointer;
+}
+
+.agent-delivery[data-failed="true"] {
+  color: var(--destructive);
+}
+.agent-delivery button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.agent-delivery button:disabled {
+  cursor: default;
+  opacity: 0.5;
 }

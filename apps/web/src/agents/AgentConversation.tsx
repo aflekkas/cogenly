@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
+import { useMessageMotion } from "./useMessageMotion";
 import { conversationRows } from "./agents.logic";
 import { useAgentsClient } from "./agentsClient";
 import { AgentDetails } from "./AgentDetails";
@@ -21,10 +22,9 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
-  const scroll = useRef<HTMLDivElement>(null);
-  const atBottom = useRef(true);
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
   const busy = agent.state === "thinking" || agent.state === "working";
+  const { scroll, onScroll, stopFollowing } = useMessageMotion(agent, busy);
   const lastOwner = agent.messages.findLast((message) => message.role === "user");
   useEffect(() => {
     const mark = () => {
@@ -54,9 +54,6 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
     return () => document.removeEventListener("visibilitychange", mark);
   }, [agent, client, canWrite]);
   useLayoutEffect(() => {
-    if (atBottom.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
-  });
-  useLayoutEffect(() => {
     if (textarea.current) {
       textarea.current.style.height = "0px";
       textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 144)}px`;
@@ -67,17 +64,28 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
     const outgoing = text.trim();
     setSending(true);
     setError(null);
+    setText("");
     try {
       await client.send(agent, outgoing);
-      setText((current) => (current.trim() === outgoing ? "" : current));
-      atBottom.current = true;
     } catch (cause) {
       setError(
-        cause instanceof Error ? cause.message : "Could not send. Your message is still here.",
+        cause instanceof Error ? cause.message : "Could not send. Retry your message below.",
       );
     } finally {
       setSending(false);
       textarea.current?.focus();
+    }
+  }
+  async function retry(outgoing: string) {
+    if (sending) return;
+    setSending(true);
+    setError(null);
+    try {
+      await client.send(agent, outgoing);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not retry your message.");
+    } finally {
+      setSending(false);
     }
   }
   return (
@@ -102,17 +110,17 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
           <AgentFace
             seed={agent.avatar.seed}
             {...(agent.avatar.color ? { color: agent.avatar.color } : {})}
-            state={!agent.enabled ? "asleep" : agent.requests.length ? "blocked" : agent.state}
-            size={66}
+            state={agent.requests.length ? "blocked" : agent.state}
+            size={74}
           />
           <span>{agent.name}</span>
           <small>
-            {!agent.enabled
-              ? "Paused"
-              : agent.requests.length
-                ? "Needs you"
-                : busy
-                  ? "Thinking…"
+            {agent.requests.length
+              ? "Needs you"
+              : busy
+                ? "Thinking…"
+                : !agent.enabled
+                  ? "Background work paused"
                   : "Your always-on agent"}
           </small>
         </button>
@@ -128,10 +136,18 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
       <div
         className="agent-message-scroll"
         ref={scroll}
-        onScroll={() => {
-          const element = scroll.current;
-          if (element)
-            atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+        onScroll={onScroll}
+        onWheel={stopFollowing}
+        onTouchStart={stopFollowing}
+        onTouchEnd={onScroll}
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) stopFollowing();
+        }}
+        onKeyDown={(event) => {
+          if (
+            ["ArrowUp", "PageUp", "Home", "End", "PageDown", "ArrowDown", " "].includes(event.key)
+          )
+            stopFollowing();
         }}
       >
         <div
@@ -174,6 +190,7 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
           {conversationRows(agent.messages).map(({ message, separator, grouped }) => (
             <div
               key={message.id}
+              data-message-id={message.id}
               className="agent-message-row"
               data-owner={message.role === "user"}
               data-grouped={grouped}
@@ -202,15 +219,42 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
                   message.text
                 )}
               </div>
-              {message.id === lastOwner?.id && (
-                <span className="agent-delivery">
-                  {message.delivery === "queued"
-                    ? "Queued"
-                    : message.delivery === "read"
-                      ? "Read"
-                      : "Delivered"}
-                </span>
-              )}
+              {message.role === "user" &&
+                (message.id === lastOwner?.id ||
+                  message.delivery === "failed" ||
+                  message.delivery === "interrupted") && (
+                  <span
+                    className="agent-delivery"
+                    data-failed={
+                      message.delivery === "failed" || message.delivery === "interrupted"
+                    }
+                    role={message.delivery === "failed" ? "alert" : undefined}
+                  >
+                    {message.delivery === "failed" || message.delivery === "interrupted" ? (
+                      <>
+                        {message.delivery === "failed"
+                          ? `Couldn't reach ${agent.modelSelection.model}`
+                          : "Interrupted"}{" "}
+                        —{" "}
+                        <button
+                          type="button"
+                          disabled={sending || !canWrite}
+                          onClick={() => void retry(message.text)}
+                        >
+                          Retry
+                        </button>
+                      </>
+                    ) : message.delivery === "sending" ? (
+                      "Sending…"
+                    ) : message.delivery === "queued" ? (
+                      "Queued"
+                    ) : message.delivery === "read" ? (
+                      "Read"
+                    ) : (
+                      "Delivered"
+                    )}
+                  </span>
+                )}
             </div>
           ))}
           {agent.requests.map((request) => (
@@ -304,7 +348,7 @@ function Request({ agent, request }: { agent: AgentContact; request: AgentReques
     }
   }
   return (
-    <div className="agent-message-row">
+    <div className="agent-message-row" data-message-id={request.id}>
       <div className="agent-bubble agent-request">
         <span className="agent-request-eyebrow">A moment for you</span>
         <p>{request.text}</p>

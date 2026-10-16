@@ -55,6 +55,7 @@ export class AgentStore extends Context.Service<
       ordinal: number,
       messages: ReadonlyArray<{ role: string; text: string }>,
     ) => Effect.Effect<void, AgentError>;
+    /** Reserve background work only; owner messages never consume this allowance. */
     readonly reserve: (id: AgentId) => Effect.Effect<boolean, AgentError>;
     readonly outcome: (id: AgentId, succeeded: boolean) => Effect.Effect<Agent, AgentError>;
     readonly createRun: (run: AgentWorkRun) => Effect.Effect<void, AgentError>;

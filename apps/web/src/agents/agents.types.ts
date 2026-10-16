@@ -27,7 +27,8 @@ export interface AgentMessage {
   createdAt: string;
   updatedAt?: string;
   streaming?: boolean;
-  delivery?: "delivered" | "queued" | "read";
+  optimistic?: boolean;
+  delivery?: "sending" | "delivered" | "queued" | "read" | "failed" | "interrupted";
   source?: { name: string; threadId: ThreadId };
 }
 export interface AgentRequest {

@@ -70,7 +70,7 @@ function Contact({
     <li>
       <button
         type="button"
-        className={`agent-contact ${active ? "surface-raised-sm" : "hover:surface-raised-hover"}`}
+        className="agent-contact"
         data-active={active}
         aria-current={active ? "page" : undefined}
         onClick={() => onOpen(agent)}
@@ -79,11 +79,11 @@ function Contact({
           seed={agent.avatar.seed}
           {...(agent.avatar.color ? { color: agent.avatar.color } : {})}
           state={agent.state}
-          size={38}
+          size={28}
         />
         <span className="agent-contact-copy">
           <span className="agent-contact-name">
-            {agent.name}
+            <span>{agent.name}</span>
             <time dateTime={agent.updatedAt}>{formatContactTime(agent.updatedAt)}</time>
           </span>
           <span className="agent-contact-preview">

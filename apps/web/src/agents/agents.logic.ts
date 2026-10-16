@@ -1,3 +1,4 @@
+import type { OrchestrationV2Run } from "@t3tools/contracts";
 import type { AgentContact, AgentMessage } from "./agents.types";
 
 const GROUP_GAP_MS = 3 * 60_000;
@@ -116,4 +117,22 @@ export function groupAgentContacts(
       (a.label ?? "").localeCompare(b.label ?? "") ||
       a.key.localeCompare(b.key),
   );
+}
+
+/** Delivery follows the durable turn, not just acknowledgement of the send RPC. */
+export function messageDelivery(
+  run: Pick<OrchestrationV2Run, "status" | "startedAt"> | undefined,
+): NonNullable<AgentMessage["delivery"]> {
+  if (run?.status === "failed") return "failed";
+  if (run?.status === "interrupted" || run?.status === "cancelled") return "interrupted";
+  if (run?.status === "queued") return "queued";
+  return run?.startedAt != null || run?.status === "completed" ? "read" : "delivered";
+}
+
+export function reconcileAgentMessages(
+  persisted: ReadonlyArray<AgentMessage>,
+  pending: ReadonlyArray<AgentMessage>,
+): ReadonlyArray<AgentMessage> {
+  const ids = new Set(persisted.map((message) => message.id));
+  return [...persisted, ...pending.filter((message) => !ids.has(message.id))];
 }
