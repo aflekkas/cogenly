@@ -274,6 +274,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --color-sidebar-muted-foreground: var(--contrast-sidebar-muted-foreground);
   --color-sidebar-control-surface: var(--sidebar-control-surface);
   --color-sidebar-row-hover: var(--sidebar-row-hover);
+  --color-nav-rail: var(--nav-rail);
   --color-sidebar-row-active: var(--sidebar-row-active);
   --color-sidebar-row-selected: var(--sidebar-row-selected);
   --color-sidebar-border: var(--contrast-sidebar-border);
@@ -1148,7 +1149,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 :root {
   color-scheme: light;
-  --radius: 0.625rem;
+  --radius: 0.5rem;
   --background: var(--color-zinc-25);
   --app-chrome-background: var(--background);
   --toolbar-background: var(--app-chrome-background);
@@ -1309,6 +1310,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --sidebar-row-active: var(--color-white);
   --sidebar-row-selected: var(--color-white);
   --sidebar-border: var(--color-zinc-200);
+  /* The icon rail sits a step below the list so the two read as separate columns. */
+  --nav-rail: var(--color-zinc-100);
 
   @variant dark {
     --background: #000;
@@ -1321,13 +1324,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --muted-foreground: #a3a3a3;
     --border: rgb(255 255 255 / 8%);
     --input: rgb(255 255 255 / 18%);
-    --sidebar: var(--card);
+    /* Rail (black) < list < main pane: three distinct steps, each with a hairline. */
+    --sidebar: #070708;
+    --nav-rail: #000;
     --sidebar-foreground: var(--foreground);
     --sidebar-muted-foreground: var(--muted-foreground);
     --sidebar-control-surface: var(--muted);
-    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 8%, transparent);
-    --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 11%, transparent);
-    --sidebar-row-selected: color-mix(in srgb, var(--contrast-foreground) 7%, transparent);
+    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 3.5%, transparent);
+    --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 5.5%, transparent);
+    --sidebar-row-selected: color-mix(in srgb, var(--contrast-foreground) 4.5%, transparent);
     --sidebar-border: var(--border);
   }
 }

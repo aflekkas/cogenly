@@ -122,8 +122,8 @@ const SidebarAgentRow = memo(function SidebarAgentRow(props: {
         className={cn(
           "group/sidebar-row relative flex w-full cursor-pointer items-center gap-2.5 overflow-hidden rounded-md px-2 py-1.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           props.isActive
-            ? "bg-sidebar-row-active text-sidebar-foreground"
-            : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
+            ? "surface-raised-sm bg-sidebar-row-active text-sidebar-foreground"
+            : "bg-transparent text-sidebar-foreground hover:surface-raised-hover hover:bg-sidebar-row-hover",
         )}
       >
         <AgentFace

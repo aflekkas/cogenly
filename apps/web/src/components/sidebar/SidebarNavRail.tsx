@@ -77,13 +77,12 @@ export function SidebarNavRail() {
   return (
     <nav
       aria-label="Workspace"
-      // Shares the sidebar's palette scope, so rail and list read as one surface.
+      // Shares the sidebar's palette scope, one step darker than the list.
       data-app-sidebar=""
       className={cn(
-        "relative z-20 hidden h-full w-(--nav-rail-width) shrink-0 flex-col items-center bg-sidebar surface-grain pb-2 text-sidebar-foreground md:flex",
-        // Seamless beside the list; a hairline only once the list is
-        // collapsed and the rail meets the main pane.
-        "border-r border-transparent group-data-[sidebar-state=collapsed]/sidebar-wrapper:border-sidebar-border",
+        "relative z-20 hidden h-full w-(--nav-rail-width) shrink-0 flex-col items-center bg-nav-rail surface-grain pb-2 text-sidebar-foreground md:flex",
+        // A hairline separates the rail from the list, and from the main pane when collapsed.
+        "border-r border-sidebar-border",
       )}
     >
       {/* The titlebar row: the fixed sidebar toggle sits over this space. */}
