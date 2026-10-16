@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema";
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 
 import * as ProcessRunner from "../processRunner.ts";
+import { normalizeTimeZoneSetting } from "../scheduling/serverTimeZone.ts";
 import {
   ensurePinnedRuntimeInstalled,
   pinnedRuntimeCommand,
@@ -87,6 +88,12 @@ export interface BootServicePlan {
   readonly baseDir: string;
   readonly logPath: string;
   readonly unitPath: string;
+  /**
+   * Fixed-time schedules run in this zone. Baked into the unit at install
+   * time so the service does not depend on the machine's zone; absent means
+   * the host's local zone.
+   */
+  readonly timeZone?: string;
 }
 
 /** Pure renderer: service units cannot rely on the user's shell or PATH. */
@@ -102,6 +109,9 @@ export function renderBootServiceUnit(plan: BootServicePlan): string {
     "Type=simple",
     "WorkingDirectory=%h",
     `Environment=COGENLY_HOME=${quoteSystemdValue(plan.baseDir)}`,
+    ...(plan.timeZone === undefined
+      ? []
+      : [`Environment=COGENLY_TZ=${quoteSystemdValue(plan.timeZone)}`]),
     `Environment=${BOOT_SERVICE_UNIT_ENV}=${BOOT_SERVICE_UNIT_FILE}`,
     `ExecStart=${plan.program.map(quoteSystemdValue).join(" ")}`,
     // Let the launcher mark an explicit stop before it signals the server.
@@ -171,6 +181,9 @@ export function renderBootServicePlist(
     `    <string>${escapeXmlText(options.environmentPath)}</string>`,
     `    <key>COGENLY_HOME</key>`,
     `    <string>${escapeXmlText(plan.baseDir)}</string>`,
+    ...(plan.timeZone === undefined
+      ? []
+      : [`    <key>COGENLY_TZ</key>`, `    <string>${escapeXmlText(plan.timeZone)}</string>`]),
     `    <key>${BOOT_SERVICE_UNIT_ENV}</key>`,
     `    <string>${BOOT_SERVICE_PLIST_FILE}</string>`,
     `  </dict>`,
@@ -529,6 +542,8 @@ export interface BootServiceStatus {
   readonly logPath: string;
 }
 
+export type BootServiceManagerKind = "systemd" | "launchd";
+
 export class BootService extends Context.Service<
   BootService,
   {
@@ -540,7 +555,21 @@ export class BootService extends Context.Service<
        * restart, so a later `t3 service restart` lands on the new version.
        */
       readonly start?: boolean;
+      /**
+       * Zone to bake into the unit as `COGENLY_TZ`, overriding the install
+       * environment. Schedules then run in a defined zone even when the
+       * machine's own zone changes.
+       */
+      readonly timeZone?: string;
     }) => Effect.Effect<BootServicePlan, BootServiceError>;
+    /**
+     * Render the unit or plist for `target` without touching the system, for
+     * `service install --print`. Defaults to this host's service manager.
+     */
+    readonly print: (options?: {
+      readonly target?: BootServiceManagerKind;
+      readonly timeZone?: string;
+    }) => Effect.Effect<{ readonly unitPath: string; readonly contents: string }, BootServiceError>;
     /**
      * Stop and start the installed service on the version its unit names.
      * Only when the unit serves this base dir: the unit name is per user, so
@@ -583,6 +612,9 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   );
   const homeDir = yield* Config.String("HOME").pipe(Config.withDefault(""));
   const installerPath = yield* Config.String("PATH").pipe(Config.withDefault(""));
+  const configuredTimeZone = normalizeTimeZoneSetting(
+    Option.getOrUndefined(yield* Config.String("COGENLY_TZ").pipe(Config.option)),
+  );
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const runner = yield* ProcessRunner.ProcessRunner;
@@ -641,11 +673,15 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     ).pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
   // The executable hosts the launcher as a hidden subcommand of itself, so
   // the unit runs the pinned runtime directly.
-  const plan: BootServicePlan = {
-    program: [runtimePaths.entryPath, "__service-launcher"],
-    baseDir: input.baseDir,
-    logPath,
-    unitPath,
+  const planFor = (timeZoneOverride?: string): BootServicePlan => {
+    const timeZone = normalizeTimeZoneSetting(timeZoneOverride) ?? configuredTimeZone;
+    return {
+      program: [runtimePaths.entryPath, "__service-launcher"],
+      baseDir: input.baseDir,
+      logPath,
+      unitPath,
+      ...(timeZone === undefined ? {} : { timeZone }),
+    };
   };
 
   const requireManager = Effect.suspend(() =>
@@ -764,8 +800,10 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const install = Effect.fn("cloud.boot_service.install")(function* (options?: {
     readonly allowDowngrade?: boolean;
     readonly start?: boolean;
+    readonly timeZone?: string;
   }) {
     const manager = yield* requireManager;
+    const plan = planFor(options?.timeZone);
     yield* fs
       .makeDirectory(input.logsDir, { recursive: true })
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -1031,10 +1069,14 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       ? serviceStateActiveVersion(stateText.value)
       : undefined;
     const installedBaseDir = bootServiceBaseDirOf(unit);
+    // COGENLY_TZ is install-time intent: status must not flag a unit as
+    // stale just because this shell's zone differs from the installer's.
     const normalizeUnit = (contents: string) =>
       detectedManager.kind === "launchd"
-        ? contents.replace(/(<key>PATH<\/key>\n\s*<string>)[^<]*(<\/string>)/, "$1$2")
-        : contents;
+        ? contents
+            .replace(/(<key>PATH<\/key>\n\s*<string>)[^<]*(<\/string>)/, "$1$2")
+            .replace(/\n\s*<key>COGENLY_TZ<\/key>\n\s*<string>[^<]*<\/string>/, "")
+        : contents.replace(/\nEnvironment=COGENLY_TZ=.*$/m, "");
     const problems: BootServiceProblem[] =
       detectedManager.kind === "systemd" ? [...(yield* readSystemdProblems(true))] : [];
     if (yield* fs.exists(restartPendingPath)) problems.push("restart-pending");
@@ -1046,7 +1088,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       problems,
       current:
         problems.length === 0 &&
-        normalizeUnit(unit) === normalizeUnit(detectedManager.render(plan)) &&
+        normalizeUnit(unit) === normalizeUnit(detectedManager.render(planFor())) &&
         runtimeEntryExists &&
         Option.isSome(runtimeSentinel) &&
         runtimeSentinel.value.trim() === input.cliVersion &&
@@ -1060,7 +1102,32 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     Effect.withSpan("cloud.boot_service.status"),
   );
 
-  return BootService.of({ install, restart, withStopped, uninstall, status });
+  const managerForKind = (kind: BootServiceManagerKind): BootServiceManager | undefined => {
+    if (detectedManager?.kind === kind) return detectedManager;
+    if (homeDir === "") return undefined;
+    if (kind === "systemd") return systemdManager({ path, homeDir });
+    if (uid === undefined) return undefined;
+    return launchdManager({ path, homeDir, uid, environmentPath });
+  };
+
+  const print: BootService["Service"]["print"] = (options) =>
+    Effect.gen(function* () {
+      const kind =
+        options?.target ??
+        detectedManager?.kind ??
+        (platform === "linux"
+          ? ("systemd" as const)
+          : platform === "darwin"
+            ? ("launchd" as const)
+            : undefined);
+      const manager = kind === undefined ? undefined : managerForKind(kind);
+      if (kind === undefined || manager === undefined) {
+        return yield* new BootServiceUnsupportedError({ platform });
+      }
+      return { unitPath: manager.unitPath, contents: manager.render(planFor(options?.timeZone)) };
+    });
+
+  return BootService.of({ install, restart, withStopped, uninstall, status, print });
 });
 
 export const layer = (input: {

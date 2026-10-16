@@ -1,9 +1,12 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Terminal from "effect/Terminal";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
+import * as CliError from "effect/cli/CliError";
 import { FetchHttpClient } from "effect/http";
 
 import packageJson from "../../package.json" with { type: "json" };
@@ -11,6 +14,7 @@ import * as BootService from "../cloud/bootService.ts";
 import { compareExactServiceVersions } from "../cloud/serviceProtocol.ts";
 import type * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import { isValidTimeZone, normalizeTimeZoneSetting } from "../scheduling/serverTimeZone.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
 export const layer = (config: ServerConfig.ServerConfig["Service"]) =>
@@ -39,6 +43,7 @@ export type ServiceReconcileResult =
 export const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?: {
   readonly allowDowngrade?: boolean;
   readonly start?: boolean;
+  readonly timeZone?: string;
 }) {
   const service = yield* BootService.BootService;
   const status = yield* service.status;
@@ -103,7 +108,7 @@ export function formatServiceStatus(
 
 const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
   flags: { readonly baseDir: Parameters<typeof resolveCliAuthConfig>[0]["baseDir"] },
-  run: Effect.Effect<A, E, BootService.BootService>,
+  run: Effect.Effect<A, E, BootService.BootService | FileSystem.FileSystem>,
 ) {
   const logLevel = yield* GlobalFlag.LogLevel;
   const config = yield* resolveCliAuthConfig(flags, logLevel);
@@ -118,13 +123,57 @@ const serviceReconcileFlags = {
   ),
 };
 
-const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pipe(
+const serviceInstallFlags = {
+  ...serviceReconcileFlags,
+  print: Flag.Boolean("print").pipe(
+    Flag.withDescription("Print the service unit or plist without installing it."),
+    Flag.withDefault(false),
+  ),
+  format: Flag.String("format").pipe(
+    Flag.withDescription(
+      'With --print: render "systemd" or "launchd" instead of this host\'s service manager.',
+    ),
+    Flag.optional,
+  ),
+  tz: Flag.String("tz").pipe(
+    Flag.withDescription(
+      "Bake COGENLY_TZ into the unit so fixed-time schedules run in a defined zone. Without it the install shell's COGENLY_TZ is used when set.",
+    ),
+    Flag.optional,
+  ),
+};
+
+const serviceInstallCommand = Command.make("install", serviceInstallFlags).pipe(
   Command.withDescription("Install Cogenly as a background service for this user."),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
       Effect.gen(function* () {
-        const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
+        const format = Option.getOrUndefined(flags.format);
+        if (format !== undefined && format !== "systemd" && format !== "launchd") {
+          return yield* new CliError.UserError({
+            cause: `Invalid --format "${format}": expected "systemd" or "launchd".`,
+          });
+        }
+        const timeZone = normalizeTimeZoneSetting(Option.getOrUndefined(flags.tz));
+        if (timeZone !== undefined && !isValidTimeZone(timeZone)) {
+          return yield* new CliError.UserError({
+            cause: `Invalid --tz "${timeZone}": expected an IANA time zone name such as "America/New_York" or "UTC".`,
+          });
+        }
+        if (flags.print) {
+          const service = yield* BootService.BootService;
+          const rendered = yield* service.print({
+            ...(format === undefined ? {} : { target: format }),
+            ...(timeZone === undefined ? {} : { timeZone }),
+          });
+          yield* Console.log(rendered.contents.trimEnd());
+          return;
+        }
+        const result = yield* reconcileService({
+          allowDowngrade: flags.allowDowngrade,
+          ...(timeZone === undefined ? {} : { timeZone }),
+        });
         if (!result.changed) {
           yield* Console.log(
             `Cogenly service is already installed with t3@${packageJson.version}.`,
@@ -214,6 +263,54 @@ const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
   ),
 );
 
+/** Last `maxLines` lines of `text`, without a trailing newline. */
+export function tailLines(text: string, maxLines: number): string {
+  if (maxLines <= 0) return "";
+  const lines = text.split("\n");
+  // A trailing newline terminates the last line; it is not an empty line.
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return lines.slice(-maxLines).join("\n");
+}
+
+const serviceLogsCommand = Command.make("logs", {
+  ...projectLocationFlags,
+  lines: Flag.Int("lines").pipe(
+    Flag.withDescription("How many trailing log lines to print."),
+    Flag.withDefault(200),
+  ),
+}).pipe(
+  Command.withDescription("Print the tail of the background service log."),
+  Command.withHandler((flags) =>
+    runServiceCommand(
+      flags,
+      Effect.gen(function* () {
+        if (flags.lines < 1) {
+          return yield* new CliError.UserError({
+            cause: `Invalid --lines "${flags.lines}": expected at least 1.`,
+          });
+        }
+        const service = yield* BootService.BootService;
+        const status = yield* service.status;
+        if (!status.supported) {
+          yield* Console.log("The Cogenly background service is unavailable on this machine.");
+          return;
+        }
+        if (!status.installed) {
+          yield* Console.log("Cogenly service is not installed.");
+          return;
+        }
+        const fs = yield* FileSystem.FileSystem;
+        if (!(yield* fs.exists(status.logPath))) {
+          yield* Console.log(`No log file yet at ${status.logPath}.`);
+          return;
+        }
+        const tail = tailLines(yield* fs.readFileString(status.logPath), flags.lines);
+        yield* Console.log(tail.length > 0 ? tail : "(log is empty)");
+      }),
+    ),
+  ),
+);
+
 export const offerServiceDuringOnboarding = Effect.gen(function* () {
   const service = yield* BootService.BootService;
   const status = yield* service.status;
@@ -294,6 +391,7 @@ export const serviceCommand = Command.make("service").pipe(
     serviceRestartCommand,
     serviceUninstallCommand,
     serviceStatusCommand,
+    serviceLogsCommand,
     serviceUpdateCommand,
   ]),
 );
