@@ -4,6 +4,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
   isAtomCommandInterrupted,
@@ -25,6 +26,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { readLocalApi } from "~/localApi";
+import { useEnvironments } from "../../state/environments";
 import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
@@ -87,6 +89,16 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const activeProjectName = activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
+  const { environments } = useEnvironments();
+  // Scratch chats ("No project") show only their title: the crumb would name
+  // a non-place, with the same dashed glyph on every chat.
+  const showProjectCrumb =
+    activeProject !== null &&
+    !isScratchProject(
+      activeProject,
+      environments.find((entry) => entry.environmentId === activeProject.environmentId)
+        ?.serverConfig?.scratchWorkspaceRoot ?? null,
+    );
   const breadcrumbContainerRef = useRef<HTMLDivElement>(null);
   const [collapseParentTitle, setCollapseParentTitle] = useState(false);
   const activeThreadRef = useMemo(
@@ -310,7 +322,7 @@ export const ChatHeader = memo(function ChatHeader({
         {/* The project always leads the header: knowing which project a
             thread lives in is priority zero, and the thread title alone
             doesn't answer it. */}
-        {activeProject ? (
+        {showProjectCrumb ? (
           <>
             <WorkspaceBreadcrumbItem className="shrink">
               <Tooltip>

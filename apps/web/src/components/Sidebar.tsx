@@ -883,7 +883,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   settlementSupported: boolean;
   // Same contract for thread.snooze/unsnooze.
   snoozeSupported: boolean;
-  // Cards under a project heading leave the project line to the heading.
+  // Cards under a project heading leave the project line to the heading;
+  // slim rows drop the project icon (Chats mode).
   hideProject: boolean;
   // The action this row will take when the sweep is released.
   sweepAction: SidebarSweepAction | null;
@@ -1433,16 +1434,22 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           >
             {accessibleTitle}
             {/* Settled history recedes: dimmed favicon at rest, restored on
-              hover so the tail stays scannable when you're hunting. */}
-            <span
-              className={cn(
-                "flex shrink-0 items-center transition-opacity",
-                (!props.isActive || variantAction === "unsettle") &&
-                  "opacity-40 grayscale group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
-              )}
-            >
-              {props.project ? <ProjectFavicon project={props.project} className="size-4" /> : null}
-            </span>
+              hover so the tail stays scannable when you're hunting. Chats
+              rows carry no icon: nearly all are scratch chats, so it would
+              repeat the same "no project" glyph down the whole list. */}
+            {props.hideProject ? null : (
+              <span
+                className={cn(
+                  "flex shrink-0 items-center transition-opacity",
+                  (!props.isActive || variantAction === "unsettle") &&
+                    "opacity-40 grayscale group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
+                )}
+              >
+                {props.project ? (
+                  <ProjectFavicon project={props.project} className="size-4" />
+                ) : null}
+              </span>
+            )}
             {draftIndicator}
             {title}
             {terminalStatusIcon}
@@ -4204,7 +4211,13 @@ export default function Sidebar() {
                           </SidebarModeGroupLabel>,
                         );
                       }
-                      items.push(renderThreadRow(thread, item.section, taskGroupKey !== null));
+                      items.push(
+                        renderThreadRow(
+                          thread,
+                          item.section,
+                          taskGroupKey !== null || sidebarMode === "chats",
+                        ),
+                      );
                       continue;
                     }
                     switch (item.marker) {
