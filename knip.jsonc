@@ -1,0 +1,124 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Exported types are part of our contracts even before they have consumers.
+  "rules": { "types": "off", "nsTypes": "off" },
+  // These executables are supplied by the OS or installed separately from npm.
+  "ignoreBinaries": ["file", "mkfifo", "pkill", "pkg-config", "plutil", "sips"],
+  "workspaces": {
+    ".": {
+      // Keep vendored reference repositories outside the root project.
+      "project": ["*.{js,mjs,cjs,ts,mts,cts}"],
+    },
+    "scripts": {
+      // Knip loads its preprocessor through a CLI option;
+      // worktree setup (from t3.json) runs directly.
+      "entry": ["knip-schemas.ts", "setup-worktree.ts"],
+    },
+    "apps/server": {
+      // Vite+ pack entries and the launcher used by installed background services.
+      "entry": [
+        "src/bin.ts!",
+        "src/claude-history-worker.ts!",
+        "scripts/cli.ts",
+        "scripts/dev-seed-sidebar.ts",
+        "scripts/evaluate-thread-titles.ts",
+        "scripts/measure-pr-preview.ts",
+        "scripts/probe-claude-fork-local-rollback-replay.ts",
+        "scripts/update-test-shard-weights.ts",
+        "scripts/verify-background-live.ts",
+        "src/provider/testFixtures/*.mjs",
+      ],
+      // Keep the transitive Effect runtime pinned for standalone npm installs.
+      // The Vite+ web build prerequisite.
+      // Native and disk-loaded provider packages stay external to the bundle; the
+      // CLI archive and desktop sidecar stage them from this manifest.
+      "ignoreDependencies": ["@effect/platform-node-shared", "@t3tools/web", "@napi-rs/keyring"],
+    },
+    "apps/desktop": {
+      // Electron loads these bundles by filename rather than importing them.
+      "entry": [
+        "gnome-extension/extension.js!",
+        "src/electron/WindowsForegroundFocusWorker.ts!",
+        "src/snapShot/GlobalShiftShortcutWorker.ts!",
+        "src/snapShot/RegionSnapShotWorker.ts!",
+        "src/snapShot/SnapShotAccessibilityWorker.ts!",
+        "src/boot.ts!",
+        "src/compileCache.ts!",
+        "src/main.ts!",
+        "src/preload.ts!",
+        "src/preview-pick-preload.ts!",
+        "src/preview-pip-preload.ts!",
+        "src/mac-permission-preload.ts!",
+        "src/preview/Annotation.css!",
+      ],
+      // The injected runtime resolves Playwright by string; release tooling runs
+      // electron-builder from this workspace, outside its package scripts.
+      "ignoreDependencies": ["playwright-core", "electron-builder"],
+    },
+    "apps/web": {
+      // Vitest loads this through the per-file @vitest-environment directive.
+      "ignoreDependencies": ["jsdom"],
+      // Worktree setup (scripts/setup-worktree.ts) runs this directly.
+      "entry": ["scripts/warm-dep-cache.ts"],
+      // UI component modules are copied and adapted as cohesive sets. Keep their
+      // named subcomponents even before they have callers; the file audit still
+      // reports an entire component module when nothing imports it.
+      "ignoreIssues": { "src/components/ui/*.tsx": ["exports", "nsExports", "duplicates"] },
+    },
+    "packages/*": {
+      // These workspace packages are private to this monorepo.
+      "includeEntryExports": true,
+    },
+    // Retain the shared mobile client APIs until the server/client protocol cleanup.
+    "packages/client-runtime": {
+      "includeEntryExports": true,
+      "ignoreIssues": {
+        "src/operations/projects.ts": ["exports", "nsExports"],
+        "src/state/attachments.ts": ["exports", "nsExports"],
+        "src/state/device.ts": ["exports", "nsExports"],
+        "src/state/gitActions.ts": ["exports", "nsExports"],
+        "src/state/models.ts": ["exports", "nsExports"],
+        "src/state/presentation.ts": ["exports", "nsExports"],
+        "src/state/projectGrouping.ts": ["exports", "nsExports"],
+        "src/state/projects.ts": ["exports", "nsExports"],
+        "src/state/shellPullRequests.ts": ["exports", "nsExports"],
+        "src/state/threadSettled.ts": ["exports", "nsExports"],
+        "src/voice-input/controller.ts": ["exports", "nsExports"],
+        "src/voice-input/index.ts": ["exports", "nsExports"],
+        "src/voice-input/transcription.ts": ["exports", "nsExports"],
+      },
+    },
+    "packages/contracts": {
+      "includeEntryExports": true,
+      "ignoreIssues": {
+        "src/composerContext.ts": ["exports", "nsExports"],
+        "src/settings.ts": ["exports", "nsExports"],
+      },
+    },
+    "packages/shared": {
+      "includeEntryExports": true,
+      "ignoreIssues": {
+        "src/remote.ts": ["exports", "nsExports"],
+        "src/themePalettes.ts": ["exports", "nsExports"],
+        "src/themePreview.ts": ["exports", "nsExports"],
+        "src/threadLinks.ts": ["exports", "nsExports"],
+      },
+    },
+    "packages/effect-acp": {
+      "includeEntryExports": true,
+      "entry": ["test/fixtures/*.ts"],
+      // Generated upstream protocol definitions are retained as a complete set.
+      "ignoreIssues": { "src/_generated/**": ["exports", "types"] },
+    },
+    "packages/effect-codex-app-server": {
+      "includeEntryExports": true,
+      "entry": ["test/fixtures/*.ts"],
+      "ignoreIssues": { "src/_generated/**": ["exports", "types"] },
+    },
+    "packages/source-control-github": {
+      // graphqlgen reads its config; the generated operations export every selection's class.
+      "entry": ["graphql.config.ts"],
+      "ignoreIssues": { "**/*.graphql.ts": ["exports", "types", "namespaceMembers"] },
+    },
+  },
+}

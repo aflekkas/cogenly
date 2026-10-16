@@ -1,0 +1,115 @@
+// @effect-diagnostics nodeBuiltinImport:off - Tests exercise root env file precedence directly.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
+import { loadRepoEnv, resolvePublicConfig } from "./public-config.ts";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    NodeFS.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+describe("loadRepoEnv", () => {
+  it("does not project cloud configuration for an unconfigured clone", () => {
+    const env = loadRepoEnv({ baseEnv: {}, repoRoot: makeTemporaryDirectory() });
+
+    expect(env.COGENLY_CLERK_PUBLISHABLE_KEY).toBeUndefined();
+    expect(env.COGENLY_CLERK_CLI_OAUTH_CLIENT_ID).toBeUndefined();
+    expect(env.VITE_CLERK_PUBLISHABLE_KEY).toBeUndefined();
+    expect(env.COGENLY_CLERK_JWT_TEMPLATE).toBeUndefined();
+    expect(env.VITE_CLERK_JWT_TEMPLATE).toBeUndefined();
+    expect(env.COGENLY_RELAY_URL).toBeUndefined();
+    expect(env.VITE_COGENLY_RELAY_URL).toBeUndefined();
+    expect(env.COGENLY_RELAY_CLIENT_OTLP_TRACES_URL).toBeUndefined();
+    expect(env.COGENLY_RELAY_CLIENT_OTLP_TRACES_DATASET).toBeUndefined();
+    expect(env.COGENLY_RELAY_CLIENT_OTLP_TRACES_TOKEN).toBeUndefined();
+    expect(env.VITE_RELAY_OTLP_TRACES_URL).toBeUndefined();
+    expect(env.VITE_RELAY_OTLP_TRACES_DATASET).toBeUndefined();
+    expect(env.VITE_RELAY_OTLP_TRACES_TOKEN).toBeUndefined();
+  });
+
+  it("applies process, root local, and root precedence in that order", () => {
+    const repoRoot = makeTemporaryDirectory();
+    NodeFS.writeFileSync(
+      NodePath.join(repoRoot, ".env"),
+      "COGENLY_CLERK_PUBLISHABLE_KEY=pk_root\nCOGENLY_CLERK_JWT_TEMPLATE=template_root\nCOGENLY_CLERK_CLI_OAUTH_CLIENT_ID=oauth_root\nCOGENLY_RELAY_URL=https://root.example.test\n",
+    );
+    NodeFS.writeFileSync(
+      NodePath.join(repoRoot, ".env.local"),
+      "COGENLY_CLERK_PUBLISHABLE_KEY=pk_local\nCOGENLY_CLERK_JWT_TEMPLATE=template_local\nCOGENLY_CLERK_CLI_OAUTH_CLIENT_ID=oauth_local\nCOGENLY_RELAY_URL=https://local.example.test\n",
+    );
+
+    expect(loadRepoEnv({ baseEnv: {}, repoRoot }).COGENLY_RELAY_URL).toBe(
+      "https://local.example.test",
+    );
+    expect(
+      loadRepoEnv({
+        baseEnv: {
+          COGENLY_CLERK_PUBLISHABLE_KEY: "pk_ci",
+          COGENLY_CLERK_JWT_TEMPLATE: "template_ci",
+          COGENLY_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
+          COGENLY_RELAY_URL: "https://ci.example.test",
+        },
+        repoRoot,
+      }),
+    ).toMatchObject({
+      COGENLY_CLERK_PUBLISHABLE_KEY: "pk_ci",
+      COGENLY_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
+      VITE_CLERK_PUBLISHABLE_KEY: "pk_ci",
+      COGENLY_CLERK_JWT_TEMPLATE: "template_ci",
+      VITE_CLERK_JWT_TEMPLATE: "template_ci",
+      COGENLY_RELAY_URL: "https://ci.example.test",
+      VITE_COGENLY_RELAY_URL: "https://ci.example.test",
+    });
+  });
+
+  it("accepts legacy framework aliases as root overrides", () => {
+    expect(
+      resolvePublicConfig({
+        VITE_CLERK_PUBLISHABLE_KEY: "pk_legacy",
+        VITE_CLERK_JWT_TEMPLATE: "template_legacy",
+        COGENLY_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_canonical",
+        VITE_COGENLY_RELAY_URL: "https://legacy.example.test",
+      }),
+    ).toEqual({
+      clerkPublishableKey: "pk_legacy",
+      clerkJwtTemplate: "template_legacy",
+      clerkCliOAuthClientId: "oauth_canonical",
+      relayUrl: "https://legacy.example.test",
+      relayClientOtlpTracesUrl: undefined,
+      relayClientOtlpTracesDataset: undefined,
+      relayClientOtlpTracesToken: undefined,
+    });
+  });
+
+  it("projects canonical relay client tracing values to web build aliases", () => {
+    expect(
+      loadRepoEnv({
+        baseEnv: {
+          COGENLY_RELAY_CLIENT_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
+          COGENLY_RELAY_CLIENT_OTLP_TRACES_DATASET: "relay-client-traces",
+          COGENLY_RELAY_CLIENT_OTLP_TRACES_TOKEN: "relay-client-token",
+        },
+        repoRoot: makeTemporaryDirectory(),
+      }),
+    ).toEqual({
+      COGENLY_RELAY_CLIENT_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
+      COGENLY_RELAY_CLIENT_OTLP_TRACES_DATASET: "relay-client-traces",
+      COGENLY_RELAY_CLIENT_OTLP_TRACES_TOKEN: "relay-client-token",
+      VITE_RELAY_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
+      VITE_RELAY_OTLP_TRACES_DATASET: "relay-client-traces",
+      VITE_RELAY_OTLP_TRACES_TOKEN: "relay-client-token",
+    });
+  });
+});
+
+function makeTemporaryDirectory() {
+  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-public-config-"));
+  temporaryDirectories.push(directory);
+  return directory;
+}

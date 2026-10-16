@@ -1,0 +1,23 @@
+<!doctype html>
+<!--
+  Dev-only preview of <AgentFace>. Vite serves any HTML file under apps/web in
+  dev (open /dev/agent-faces.html); `vp build` only bundles index.html, so this
+  page and its module never reach a production bundle. Add ?theme=light to
+  preview the light theme.
+-->
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent faces</title>
+    <script>
+      if (new URLSearchParams(location.search).get("theme") === "light") {
+        document.documentElement.classList.remove("dark");
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/components/agents/face/preview/main.tsx"></script>
+  </body>
+</html>
