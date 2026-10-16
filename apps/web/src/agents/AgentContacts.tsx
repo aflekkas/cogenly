@@ -70,7 +70,7 @@ function Contact({
     <li>
       <button
         type="button"
-        className="agent-contact"
+        className={active ? "agent-contact state-selected" : "agent-contact state-hover"}
         data-active={active}
         aria-current={active ? "page" : undefined}
         onClick={() => onOpen(agent)}

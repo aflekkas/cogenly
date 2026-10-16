@@ -25,7 +25,7 @@ export function AgentSheet({
   return (
     <dialog
       ref={dialog}
-      className="agent-sheet"
+      className="agent-sheet surface-raised surface-raised-floating"
       aria-label={title}
       onCancel={(event) => {
         event.preventDefault();

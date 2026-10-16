@@ -416,18 +416,12 @@
   gap: 9px;
   padding: 7px 9px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   width: 100%;
   text-align: left;
   background-color: transparent;
   color: inherit;
   cursor: pointer;
-}
-.agent-contact:hover {
-  background-color: var(--sidebar-row-hover);
-}
-.agent-contact[data-active="true"] {
-  background-color: var(--sidebar-row-active);
 }
 @utility agent-contact-copy {
   display: flex;
@@ -515,7 +509,6 @@
   background: var(--background);
   color: var(--foreground);
   padding: 0;
-  box-shadow: -4px 0 24px #0001;
   overflow: auto;
 }
 .agent-sheet::backdrop {
