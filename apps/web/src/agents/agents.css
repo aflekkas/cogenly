@@ -489,46 +489,7 @@
   font-size: 16px;
   font-weight: 550;
 }
-@utility agent-details-identity {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 11px;
-  padding: 24px 0 23px;
-}
-.agent-details-identity h3 {
-  font-size: 20px;
-  font-weight: 550;
-  letter-spacing: -0.03em;
-}
-.agent-details-identity > span {
-  font-size: 11px;
-  color: var(--muted-foreground);
-  text-align: center;
-}
-@utility agent-detail-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--border);
-  gap: 5px;
-}
-.agent-detail-tabs button {
-  flex: 1;
-  background: none;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  padding: 11px 0;
-  text-transform: capitalize;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  cursor: pointer;
-}
-.agent-detail-tabs button[aria-selected="true"] {
-  border-bottom-color: var(--primary);
-  color: var(--foreground);
-}
-@utility agent-detail-panel {
-  padding-top: 20px;
-}
+
 @utility agent-section-intro {
   font-size: 12px;
   color: var(--muted-foreground);
@@ -549,8 +510,7 @@
 }
 .agent-form input:not([type="checkbox"]),
 .agent-form textarea,
-.agent-form select,
-.agent-detail-card textarea {
+.agent-form select {
   font: inherit;
   font-weight: 400;
   font-size: 13px;
@@ -628,18 +588,7 @@
   opacity: 0.4;
   cursor: default;
 }
-@utility agent-delete {
-  background: none;
-  border: 0;
-  color: var(--destructive);
-  padding: 25px 0 0;
-  font-size: 11px;
-  cursor: pointer;
-}
-@utility agent-delete-confirm {
-  margin-top: 20px;
-  font-size: 12px;
-}
+
 @utility agent-first-trigger {
   display: flex;
   gap: 12px;
@@ -650,135 +599,13 @@
 .agent-first-trigger span {
   flex: 1;
 }
-@utility agent-detail-card {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 11px;
-}
-@utility agent-card-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-@utility agent-card-title {
-  font-size: 12px;
-  font-weight: 500;
-  background: none;
-  border: 0;
-  padding: 0;
-  text-align: left;
-  cursor: pointer;
-  color: inherit;
-}
-.agent-detail-card > span {
-  font-size: 10px;
-  color: var(--muted-foreground);
-}
-.agent-detail-card p {
-  font-size: 12px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.agent-detail-card .agent-card-top + p,
-.agent-detail-card > span + p {
-  margin-top: 8px;
-}
-@utility agent-memory-footer {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-}
-.agent-memory-footer > span {
-  flex: 1;
-  font-size: 9px;
-  color: var(--muted-foreground);
-}
-@utility agent-add-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  width: 100%;
-  border: 1px dashed var(--border);
-  border-radius: 10px;
-  background: none;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  padding: 12px;
-  cursor: pointer;
-}
-@utility agent-trigger-form {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px;
-}
+
 @utility agent-muted {
   font-size: 11px;
   color: var(--muted-foreground);
   line-height: 1.65;
 }
-@utility agent-activity-card {
-  display: block;
-  text-align: left;
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-  margin-bottom: 10px;
-}
-.agent-activity-card:hover {
-  background: var(--secondary);
-}
-.agent-activity-card strong {
-  font-size: 12px;
-  font-weight: 500;
-}
-.agent-activity-card p {
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 8px 0;
-}
-.agent-activity-card time {
-  font-size: 10px;
-  color: var(--muted-foreground);
-}
-@utility agent-run-status {
-  display: inline-block;
-  font-size: 10px;
-  margin-top: 7px;
-  color: var(--muted-foreground);
-  text-transform: capitalize;
-}
-.agent-run-status[data-status="running"],
-.agent-run-status[data-status="starting"] {
-  color: var(--primary);
-}
-.agent-run-status[data-status="failed"] {
-  color: var(--destructive);
-}
-@utility agent-weekdays {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  border: 0;
-  font-size: 10px;
-}
-.agent-weekdays legend {
-  margin-bottom: 8px;
-  color: var(--muted-foreground);
-}
-.agent-weekdays label {
-  display: flex;
-  gap: 3px;
-  align-items: center;
-}
+
 @media (max-width: 600px) {
   .agent-contact-header {
     padding: 19px 18px 14px;

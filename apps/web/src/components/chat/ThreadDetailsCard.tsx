@@ -1,11 +1,11 @@
 import { useLayoutEffect, useState, type ReactNode, type RefObject } from "react";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
 import { Popover, PopoverPopup, PopoverCreateHandle } from "../ui/popover";
 import { selectThreadPanelOpen, useRightPanelStore } from "../../rightPanelStore";
 import type { ThreadPanelPresentation } from "../../rightPanelLayout";
 import { useChatCanvas } from "./ChatCanvasContext";
+import { ThreadDetailsSurface } from "./ThreadDetailsSection";
 import {
   THREAD_DETAILS_CARD_GAP,
   resolveThreadDetailsCardDensity,
@@ -121,20 +121,14 @@ export function ThreadDetailsCard({
     return observeResize(element, measure);
   }, [contentElement, density, measurementKey]);
   const card = (
-    <div
-      className={cn(
-        "dropdown-glass surface-raised isolate contain-paint grid max-h-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-3xl",
-        mode === "popover" && "surface-raised-floating",
-        mode === "popover" &&
-          "max-h-[min(calc(100dvh-6.5rem),calc(var(--available-height,100dvh)-1rem))]",
-      )}
+    <ThreadDetailsSurface
+      floating={mode === "popover"}
+      contentRef={setContentElement}
       style={placement ? { maxHeight: height } : undefined}
       data-thread-details-card
     >
-      <ScrollArea scrollFade className="min-h-0">
-        <div ref={setContentElement}>{children(density)}</div>
-      </ScrollArea>
-    </div>
+      {children(density)}
+    </ThreadDetailsSurface>
   );
   return (
     <Popover

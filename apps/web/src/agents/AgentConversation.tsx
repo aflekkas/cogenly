@@ -1,5 +1,5 @@
 import { ChevronLeftIcon, EllipsisIcon, LoaderCircleIcon, ArrowUpRightIcon } from "lucide-react";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
@@ -16,6 +16,7 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { models } = useAgents();
+  const detailsAnchor = useRef<HTMLButtonElement>(null);
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
   const busy = agent.state === "thinking" || agent.state === "working";
   const { scroll, onScroll, stopFollowing } = useMessageMotion(agent, busy);
@@ -112,6 +113,7 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
         </button>
         <button
           type="button"
+          ref={detailsAnchor}
           className="agent-icon-button agent-header-more"
           aria-label="Agent details"
           onClick={() => setDetails("about")}
@@ -284,7 +286,12 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
         {busy && <p className="agent-composer-hint">You can keep messaging while I work.</p>}
       </footer>
       {details && (
-        <AgentDetails agent={agent} initialTab={details} onClose={() => setDetails(null)} />
+        <AgentDetails
+          agent={agent}
+          anchor={detailsAnchor}
+          initialTab={details}
+          onClose={() => setDetails(null)}
+        />
       )}
     </section>
   );

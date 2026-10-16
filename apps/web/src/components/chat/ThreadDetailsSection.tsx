@@ -1,6 +1,32 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, ReactNode, Ref } from "react";
 
 import { cn } from "../../lib/utils";
+import { ScrollArea } from "../ui/scroll-area";
+
+/** The raised card behind thread details; content scrolls inside it when it outgrows its height. */
+export function ThreadDetailsSurface({
+  floating = false,
+  contentRef,
+  className,
+  children,
+  ...props
+}: ComponentProps<"div"> & { floating?: boolean; contentRef?: Ref<HTMLDivElement> }) {
+  return (
+    <div
+      {...props}
+      className={cn(
+        "dropdown-glass surface-raised isolate contain-paint grid max-h-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-3xl",
+        floating && "surface-raised-floating",
+        floating && "max-h-[min(calc(100dvh-6.5rem),calc(var(--available-height,100dvh)-1rem))]",
+        className,
+      )}
+    >
+      <ScrollArea scrollFade className="min-h-0">
+        <div ref={contentRef}>{children}</div>
+      </ScrollArea>
+    </div>
+  );
+}
 
 /** Sections share header and content insets in both the sidebar and popover. */
 export function ThreadDetailsSection({

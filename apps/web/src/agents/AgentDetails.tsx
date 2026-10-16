@@ -1,11 +1,60 @@
-import { randomUUID } from "~/lib/utils";
-import { ArrowUpRightIcon, PlusIcon, RefreshCwIcon, Trash2Icon, XIcon } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { cn, randomUUID } from "~/lib/utils";
+import {
+  ActivityIcon,
+  ArrowUpRightIcon,
+  BookmarkIcon,
+  BotIcon,
+  ChevronDownIcon,
+  CircleCheckIcon,
+  CircleXIcon,
+  GaugeIcon,
+  LoaderCircleIcon,
+  PlayIcon,
+  PlusIcon,
+  PowerIcon,
+  RefreshCwIcon,
+  ScrollTextIcon,
+  Trash2Icon,
+  UserRoundIcon,
+  XIcon,
+  ZapIcon,
+  type LucideIcon,
+} from "lucide-react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { AgentFace } from "~/components/agents/face";
+import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
+import { ThreadDetailsSection, ThreadDetailsSurface } from "~/components/chat/ThreadDetailsSection";
+import {
+  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+  THREAD_DETAILS_PANEL_ICON_CLASS,
+  THREAD_DETAILS_PANEL_LABEL_CLASS,
+} from "~/components/chat/threadDetailsPanelStyles";
+import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
+import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "~/components/ui/menu";
+import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import { Switch } from "~/components/ui/switch";
+import { Textarea } from "~/components/ui/textarea";
+import { Toggle } from "~/components/ui/toggle";
 import { AgentCreatedWithoutTriggerError, useAgents, useAgentsClient } from "./agentsClient";
-import { formatMessageTime } from "./agents.logic";
-import type { AgentContact, AgentDraft, AgentMemory, AgentTrigger } from "./agents.types";
+import { agentDraft, formatMessageTime, modelDisplayName, sameModel } from "./agents.logic";
+import type { AgentContact, AgentDraft, AgentTrigger } from "./agents.types";
 
 export function AgentSheet({
   title,
@@ -52,24 +101,104 @@ export function AgentSheet({
     </dialog>
   );
 }
+type ProfilePatch = Partial<Omit<AgentDraft, "id">>;
+
+/** One details row: a muted icon, a label, and an optional trailing value or control. */
+function DetailRow({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  trailing,
+  ...props
+}: Omit<ComponentProps<typeof ThreadDetailsControl>, "children"> & {
+  icon: LucideIcon;
+  label: ReactNode;
+  value?: ReactNode;
+  /** A second muted line; the row grows to fit it. */
+  detail?: ReactNode;
+  trailing?: ReactNode;
+}) {
+  return (
+    <ThreadDetailsControl multiline={detail !== undefined} {...props}>
+      <Icon
+        className={cn(THREAD_DETAILS_PANEL_ICON_CLASS, detail !== undefined && "self-start mt-1.5")}
+      />
+      <span className="flex min-w-0 flex-1 flex-col gap-1 py-1">
+        <span className={cn("truncate", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+          {label}
+          {value !== undefined && <span className="text-muted-foreground"> · {value}</span>}
+        </span>
+        {detail !== undefined && (
+          <span className="line-clamp-2 whitespace-normal text-xs font-normal text-muted-foreground">
+            {detail}
+          </span>
+        )}
+      </span>
+      {trailing}
+    </ThreadDetailsControl>
+  );
+}
+const chevron = <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />;
+
+/** The agent's profile, triggers, memory and activity in the thread details card. */
 export function AgentDetails({
   agent,
+  anchor,
   onClose,
   initialTab = "about",
 }: {
   agent: AgentContact;
+  anchor: RefObject<Element | null>;
   onClose: () => void;
   initialTab?: "about" | "activity";
 }) {
+  return (
+    <Popover open onOpenChange={(open) => !open && onClose()}>
+      <PopoverPopup
+        anchor={anchor}
+        align="end"
+        side="bottom"
+        variant="panel"
+        padding="none"
+        collisionAvoidance={{ side: "shift", align: "shift", fallbackAxisSide: "none" }}
+        aria-label={`About ${agent.name}`}
+      >
+        <ThreadDetailsSurface floating data-agent-details>
+          <AgentDetailsContent agent={agent} onClose={onClose} initialTab={initialTab} />
+        </ThreadDetailsSurface>
+      </PopoverPopup>
+    </Popover>
+  );
+}
+
+function AgentDetailsContent({
+  agent,
+  onClose,
+  initialTab,
+}: {
+  agent: AgentContact;
+  onClose: () => void;
+  initialTab: "about" | "activity";
+}) {
   const client = useAgentsClient();
-  const [tab, setTab] = useState<string>(initialTab);
+  const { models: allModels } = useAgents();
+  const models = allModels.filter(
+    (model) => !model.environmentId || model.environmentId === agent.environmentId,
+  );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [editingTrigger, setEditingTrigger] = useState<AgentTrigger | "new" | null>(null);
-  const [newMemory, setNewMemory] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editing, setEditing] = useState<
+    | { kind: "name" | "instructions" | "memory:new" | "trigger:new" | "delete" }
+    | { kind: "memory" | "trigger"; id: string }
+    | null
+  >(null);
+  const activity = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (initialTab === "activity") activity.current?.scrollIntoView({ block: "start" });
+  }, [initialTab]);
   async function mutate(action: () => Promise<unknown>) {
-    if (pending) return;
+    if (pending) return false;
     setPending(true);
     setError(null);
     try {
@@ -82,297 +211,521 @@ export function AgentDetails({
       setPending(false);
     }
   }
+  const saveProfile = (patch: ProfilePatch) =>
+    mutate(() => client.save(agent.environmentId, { ...agentDraft(agent), ...patch }));
+  const close = () => setEditing(null);
+  const isEditing = (kind: string, id?: string) =>
+    editing?.kind === kind && (id === undefined || ("id" in editing && editing.id === id));
   return (
-    <AgentSheet title={`About ${agent.name}`} onClose={onClose}>
-      <div className="agent-details-identity">
-        <AgentFace
-          seed={agent.avatar.seed}
-          {...(agent.avatar.color ? { color: agent.avatar.color } : {})}
-          size={72}
-          state={agent.enabled ? agent.state : "asleep"}
-        />
-        <h3>{agent.name}</h3>
-        <span>
-          {agent.enabled
-            ? "Always close. Ready when you are."
-            : agent.pauseReason || "Paused. Your conversation stays here."}
-        </span>
-      </div>
-      <div className="agent-detail-tabs" role="tablist" aria-label="Agent details">
-        {["about", "triggers", "memory", "activity"].map((name) => (
-          <button
-            type="button"
-            key={name}
-            role="tab"
-            aria-selected={tab === name}
-            aria-controls="agent-detail-panel"
-            id={`agent-tab-${name}`}
-            onClick={() => setTab(name)}
-          >
-            {name}
-          </button>
-        ))}
-      </div>
-      {error && (
-        <p className="agent-error" role="alert">
-          {error}
-        </p>
-      )}
-      <div
-        id="agent-detail-panel"
-        role="tabpanel"
-        aria-labelledby={`agent-tab-${tab}`}
-        className="agent-detail-panel"
+    <>
+      <ThreadDetailsSection
+        headingId="agent-details-profile"
+        title="Profile"
+        separated={false}
+        showHeading={false}
       >
-        {tab === "about" && (
-          <>
-            <AgentForm
-              initial={agent}
-              environmentId={agent.environmentId}
+        <div className="flex items-center gap-3 px-2.5 pt-1.5 pb-2">
+          <AgentFace
+            seed={agent.avatar.seed}
+            {...(agent.avatar.color ? { color: agent.avatar.color } : {})}
+            size={40}
+            state={agent.enabled ? agent.state : "asleep"}
+          />
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="truncate text-sm font-medium text-foreground">{agent.name}</span>
+            <span className="line-clamp-2 text-xs text-muted-foreground">
+              {agent.enabled
+                ? "Always close. Ready when you are."
+                : agent.pauseReason || "Paused. Your conversation stays here."}
+            </span>
+          </span>
+          <ThreadDetailsControl
+            part="icon"
+            aria-label="New face"
+            title="New face"
+            disabled={pending}
+            onClick={() => void saveProfile({ avatar: { seed: randomUUID() } })}
+          >
+            <RefreshCwIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+          </ThreadDetailsControl>
+        </div>
+        <div className="flex flex-col">
+          {isEditing("name") ? (
+            <InlineEditor
+              label="Name"
+              initial={agent.name}
+              maxLength={200}
               pending={pending}
-              submitLabel="Save changes"
-              onSubmit={(draft) =>
-                mutate(() => client.save(agent.environmentId, { ...draft, id: agent.id }))
+              onCancel={close}
+              onSave={async (name) => (await saveProfile({ name })) && close()}
+            />
+          ) : (
+            <DetailRow
+              icon={UserRoundIcon}
+              label="Name"
+              value={agent.name}
+              onClick={() => setEditing({ kind: "name" })}
+            />
+          )}
+          {isEditing("instructions") ? (
+            <InlineEditor
+              label="Instructions"
+              multiline
+              allowEmpty
+              initial={agent.instructions}
+              maxLength={32000}
+              placeholder="What should your agent help with? How should they talk to you?"
+              pending={pending}
+              onCancel={close}
+              onSave={async (instructions) => (await saveProfile({ instructions })) && close()}
+            />
+          ) : (
+            <DetailRow
+              icon={ScrollTextIcon}
+              label="Instructions"
+              detail={agent.instructions.trim() || "Add standing instructions"}
+              onClick={() => setEditing({ kind: "instructions" })}
+            />
+          )}
+          <Menu>
+            <MenuTrigger
+              render={
+                <DetailRow
+                  icon={BotIcon}
+                  label="Model"
+                  value={modelDisplayName(models, agent.modelSelection)}
+                  trailing={chevron}
+                  disabled={pending}
+                />
               }
             />
-            {confirmDelete ? (
-              <div className="agent-delete-confirm">
-                <p>Delete {agent.name} and its triggers? Your work threads remain.</p>
-                <div className="agent-inline-actions">
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() =>
-                      void mutate(async () => {
-                        await client.remove(agent);
-                        onClose();
-                      })
-                    }
+            <MenuPopup align="start">
+              <MenuRadioGroup
+                value={`${agent.modelSelection.instanceId}\0${agent.modelSelection.model}`}
+                onValueChange={(value) => {
+                  const option = models.find(
+                    (model) => `${model.selection.instanceId}\0${model.selection.model}` === value,
+                  );
+                  if (option && !sameModel(option.selection, agent.modelSelection))
+                    void saveProfile({ modelSelection: option.selection });
+                }}
+              >
+                {models.map((model) => (
+                  <MenuRadioItem
+                    key={`${model.selection.instanceId}\0${model.selection.model}`}
+                    value={`${model.selection.instanceId}\0${model.selection.model}`}
                   >
-                    Delete agent
-                  </button>
-                  <button type="button" onClick={() => setConfirmDelete(false)}>
-                    Keep agent
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button className="agent-delete" type="button" onClick={() => setConfirmDelete(true)}>
-                Delete agent
-              </button>
-            )}
-          </>
-        )}
-        {tab === "triggers" && (
-          <>
-            <p className="agent-section-intro">
-              A nudge to get things moving. Results come back here.
-            </p>
-            {agent.triggers.map((trigger) => (
-              <div className="agent-detail-card" key={trigger.id}>
-                <div className="agent-card-top">
-                  <button
-                    type="button"
-                    className="agent-card-title"
-                    onClick={() => setEditingTrigger(trigger)}
-                  >
-                    {trigger.title}
-                  </button>
-                  <button
-                    type="button"
-                    className="agent-icon-button"
-                    aria-label={`Delete trigger ${trigger.title}`}
-                    disabled={pending}
-                    onClick={() => void mutate(() => client.deleteTrigger(agent, trigger.id))}
-                  >
-                    <Trash2Icon size={14} />
-                  </button>
-                </div>
-                <span>
-                  {describeTrigger(trigger)}
-                  {!trigger.enabled ? " · Paused" : ""}
-                </span>
-                <p>{trigger.prompt}</p>
-                <button
-                  type="button"
-                  className="agent-text-button"
-                  disabled={pending || !agent.enabled}
-                  onClick={() => void mutate(() => client.runTrigger(agent, trigger.id))}
-                >
-                  Run now
-                </button>
-              </div>
-            ))}
-            {editingTrigger ? (
+                    {model.label}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </MenuPopup>
+          </Menu>
+          <DailyCapRow
+            cap={agent.dailyRunCap}
+            pending={pending}
+            onSave={(dailyRunCap) => saveProfile({ dailyRunCap })}
+          />
+          <ThreadDetailsControl render={<label />} className="cursor-pointer">
+            <PowerIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+            <span className={cn("min-w-0 flex-1 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+              Background work
+            </span>
+            <Switch
+              size="sm"
+              checked={agent.enabled}
+              disabled={pending}
+              onCheckedChange={(enabled) => void saveProfile({ enabled })}
+            />
+          </ThreadDetailsControl>
+        </div>
+      </ThreadDetailsSection>
+
+      <ThreadDetailsSection
+        headingId="agent-details-triggers"
+        title="Triggers"
+        actions={
+          <ThreadDetailsControl
+            part="icon"
+            aria-label="Add a trigger"
+            onClick={() => setEditing({ kind: "trigger:new" })}
+          >
+            <PlusIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+          </ThreadDetailsControl>
+        }
+      >
+        <div className="flex flex-col">
+          {agent.triggers.length === 0 && !isEditing("trigger:new") && (
+            <DetailRow
+              icon={ZapIcon}
+              label="Add a trigger"
+              tone="muted"
+              onClick={() => setEditing({ kind: "trigger:new" })}
+            />
+          )}
+          {agent.triggers.map((trigger) =>
+            isEditing("trigger", trigger.id) ? (
               <TriggerForm
-                initial={editingTrigger === "new" ? undefined : editingTrigger}
+                key={trigger.id}
+                initial={trigger}
                 pending={pending}
-                onCancel={() => setEditingTrigger(null)}
-                onSave={(trigger) =>
+                onCancel={close}
+                onSave={(value) =>
                   mutate(async () => {
-                    await client.saveTrigger(agent, trigger);
-                    setEditingTrigger(null);
+                    await client.saveTrigger(agent, value);
+                    close();
                   })
                 }
               />
             ) : (
-              <button
-                type="button"
-                className="agent-add-button"
-                onClick={() => setEditingTrigger("new")}
-              >
-                <PlusIcon size={15} />
-                Add a trigger
-              </button>
-            )}
-          </>
-        )}
-        {tab === "memory" && (
-          <>
-            <p className="agent-section-intro">
-              The little things {agent.name} remembers about you.
-            </p>
-            {agent.memory.length === 0 && (
-              <p className="agent-muted">No notes yet. Tell {agent.name} something to remember.</p>
-            )}
-            <form
-              className="agent-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void mutate(async () => {
-                  await client.saveMemory(agent, { text: newMemory.trim() });
-                  setNewMemory("");
-                });
-              }}
-            >
-              <label>
-                New memory note
-                <textarea
-                  value={newMemory}
-                  maxLength={8000}
-                  required
-                  onChange={(event) => setNewMemory(event.target.value)}
-                  placeholder="Something to remember"
+              <div key={trigger.id} className="flex items-center">
+                <DetailRow
+                  icon={ZapIcon}
+                  label={trigger.title}
+                  detail={`${describeTrigger(trigger)}${trigger.enabled ? "" : " · Paused"}`}
+                  className="flex-1"
+                  onClick={() => setEditing({ kind: "trigger", id: trigger.id })}
                 />
-              </label>
-              <button type="submit" disabled={pending || !newMemory.trim()}>
-                Add note
-              </button>
-            </form>
-            {agent.memory.map((note) => (
-              <MemoryNote
+                <ThreadDetailsControl
+                  part="icon"
+                  aria-label={`Run ${trigger.title} now`}
+                  title="Run now"
+                  disabled={pending || !agent.enabled}
+                  onClick={() => void mutate(() => client.runTrigger(agent, trigger.id))}
+                >
+                  <PlayIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+                </ThreadDetailsControl>
+                <ThreadDetailsControl
+                  part="icon"
+                  aria-label={`Delete trigger ${trigger.title}`}
+                  title="Delete"
+                  disabled={pending}
+                  onClick={() => void mutate(() => client.deleteTrigger(agent, trigger.id))}
+                >
+                  <Trash2Icon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+                </ThreadDetailsControl>
+              </div>
+            ),
+          )}
+          {isEditing("trigger:new") && (
+            <TriggerForm
+              pending={pending}
+              onCancel={close}
+              onSave={(value) =>
+                mutate(async () => {
+                  await client.saveTrigger(agent, value);
+                  close();
+                })
+              }
+            />
+          )}
+        </div>
+      </ThreadDetailsSection>
+
+      <ThreadDetailsSection
+        headingId="agent-details-memory"
+        title="Memory"
+        actions={
+          <ThreadDetailsControl
+            part="icon"
+            aria-label="Add a memory note"
+            onClick={() => setEditing({ kind: "memory:new" })}
+          >
+            <PlusIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+          </ThreadDetailsControl>
+        }
+      >
+        <div className="flex flex-col">
+          {isEditing("memory:new") && (
+            <InlineEditor
+              label="New memory note"
+              multiline
+              initial=""
+              maxLength={8000}
+              placeholder="Something to remember"
+              saveLabel="Add note"
+              pending={pending}
+              onCancel={close}
+              onSave={(text) =>
+                mutate(async () => {
+                  await client.saveMemory(agent, { text });
+                  close();
+                })
+              }
+            />
+          )}
+          {agent.memory.length === 0 && !isEditing("memory:new") && (
+            <DetailRow
+              icon={BookmarkIcon}
+              label="No notes yet"
+              detail={`Tell ${agent.name} something to remember.`}
+              tone="muted"
+              onClick={() => setEditing({ kind: "memory:new" })}
+            />
+          )}
+          {agent.memory.map((note) =>
+            isEditing("memory", note.id) ? (
+              <InlineEditor
                 key={note.id}
-                note={note}
+                label="Memory note"
+                multiline
+                initial={note.text}
+                maxLength={8000}
+                saveLabel="Save note"
                 pending={pending}
-                onSave={(text) => mutate(() => client.saveMemory(agent, { id: note.id, text }))}
-                onDelete={() => mutate(() => client.deleteMemory(agent, note.id))}
+                onCancel={close}
+                onDelete={() =>
+                  void mutate(async () => {
+                    await client.deleteMemory(agent, note.id);
+                    close();
+                  })
+                }
+                deleteLabel={`Forget ${note.text}`}
+                onSave={(text) =>
+                  mutate(async () => {
+                    await client.saveMemory(agent, { id: note.id, text });
+                    close();
+                  })
+                }
               />
-            ))}
-          </>
-        )}
-        {tab === "activity" && (
-          <>
-            <p className="agent-section-intro">
-              Work happens in the background. You get the highlights here.
+            ) : (
+              <DetailRow
+                key={note.id}
+                icon={BookmarkIcon}
+                label={note.text}
+                detail={`${formatMessageTime(note.updatedAt)} · ${note.source}`}
+                onClick={() => setEditing({ kind: "memory", id: note.id })}
+              />
+            ),
+          )}
+        </div>
+      </ThreadDetailsSection>
+
+      <ThreadDetailsSection ref={activity} headingId="agent-details-activity" title="Activity">
+        <div className="flex flex-col">
+          {agent.activity.length === 0 && (
+            <DetailRow icon={ActivityIcon} label="No background runs yet" tone="muted" disabled />
+          )}
+          {agent.activity.map((run) => (
+            <DetailRow
+              key={run.id}
+              icon={
+                run.status === "failed"
+                  ? CircleXIcon
+                  : run.status === "completed"
+                    ? CircleCheckIcon
+                    : LoaderCircleIcon
+              }
+              label={
+                agent.triggers.find((trigger) => trigger.id === run.triggerId)?.title ??
+                "Background work"
+              }
+              value={formatMessageTime(run.createdAt)}
+              detail={run.summary || "Working on it…"}
+              trailing={<ArrowUpRightIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />}
+              onClick={() => client.openWork(agent, run.workThreadId)}
+            />
+          ))}
+        </div>
+      </ThreadDetailsSection>
+
+      <ThreadDetailsSection headingId="agent-details-danger" title="Delete" showHeading={false}>
+        {isEditing("delete") ? (
+          <div className="flex flex-col">
+            <p className="px-2.5 py-2 text-xs text-muted-foreground">
+              Delete {agent.name} and its triggers? Your work threads remain.
             </p>
-            {agent.activity.length === 0 && <p className="agent-muted">No background runs yet.</p>}
-            {agent.activity.map((run) => (
-              <button
-                type="button"
-                className="agent-activity-card"
-                key={run.id}
-                onClick={() => client.openWork(agent, run.workThreadId)}
-              >
-                <span className="agent-card-top">
-                  <strong>
-                    {agent.triggers.find((trigger) => trigger.id === run.triggerId)?.title ??
-                      "Background work"}
-                  </strong>
-                  <ArrowUpRightIcon size={14} />
-                </span>
-                <span className="agent-run-status" data-status={run.status}>
-                  {run.status}
-                </span>
-                <p>{run.summary || "Working on it…"}</p>
-                <time>{formatMessageTime(run.createdAt)}</time>
-              </button>
-            ))}
-          </>
+            <DetailRow
+              icon={Trash2Icon}
+              label="Delete agent"
+              tone="destructive"
+              disabled={pending}
+              onClick={() =>
+                void mutate(async () => {
+                  await client.remove(agent);
+                  onClose();
+                })
+              }
+            />
+            <DetailRow icon={XIcon} label="Keep agent" onClick={close} />
+          </div>
+        ) : (
+          <DetailRow
+            icon={Trash2Icon}
+            label="Delete agent"
+            tone="destructive"
+            onClick={() => setEditing({ kind: "delete" })}
+          />
         )}
-      </div>
-    </AgentSheet>
+      </ThreadDetailsSection>
+      {error && (
+        <p className="border-t border-border/65 px-4 py-2.5 text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+    </>
   );
 }
-function MemoryNote({
-  note,
+
+function DailyCapRow({
+  cap,
   pending,
   onSave,
-  onDelete,
 }: {
-  note: AgentMemory;
+  cap: number;
   pending: boolean;
-  onSave: (text: string) => Promise<boolean | undefined>;
-  onDelete: () => Promise<unknown>;
+  onSave: (cap: number) => Promise<boolean>;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [text, setText] = useState(note.text);
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(String(cap));
+  const parsed = Number(value);
+  const valid = Number.isInteger(parsed) && parsed >= 1 && parsed <= 1000;
   return (
-    <div className="agent-detail-card">
-      {editing ? (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) setValue(String(cap));
+      }}
+    >
+      <PopoverTrigger
+        render={
+          <DetailRow
+            icon={GaugeIcon}
+            label="Runs"
+            value={`Daily cap ${cap}`}
+            trailing={chevron}
+            disabled={pending}
+          />
+        }
+      />
+      <PopoverPopup align="start" padding="compact" width="sm">
         <form
+          className="flex flex-col gap-2"
           onSubmit={(event) => {
             event.preventDefault();
-            void onSave(text.trim()).then((saved) => {
-              if (saved) setEditing(false);
-            });
+            if (valid) void onSave(parsed).then((saved) => saved && setOpen(false));
           }}
         >
-          <textarea
-            aria-label="Memory note"
-            value={text}
-            maxLength={8000}
-            onChange={(event) => setText(event.target.value)}
-          />
-          <div className="agent-inline-actions">
-            <button type="submit" disabled={pending || !text.trim()}>
-              Save note
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setText(note.text);
-                setEditing(false);
-              }}
-            >
-              Cancel
-            </button>
-          </div>
+          <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+            Background runs per day
+            <Input
+              type="number"
+              size="sm"
+              min={1}
+              max={1000}
+              required
+              aria-label="Daily run cap"
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+            />
+          </label>
+          <Button type="submit" size="xs" className="self-end" disabled={pending || !valid}>
+            Save
+          </Button>
         </form>
-      ) : (
-        <>
-          <p>{note.text}</p>
-          <div className="agent-memory-footer">
-            <span>
-              {formatMessageTime(note.updatedAt)} · {note.source}
-            </span>
-            <button type="button" className="agent-text-button" onClick={() => setEditing(true)}>
-              Edit
-            </button>
-            <button
-              type="button"
-              className="agent-icon-button"
-              aria-label={`Forget ${note.text}`}
-              disabled={pending}
-              onClick={() => void onDelete()}
-            >
-              <Trash2Icon size={13} />
-            </button>
-          </div>
-        </>
-      )}
-    </div>
+      </PopoverPopup>
+    </Popover>
   );
 }
+
+/** A row that expanded into an editor; Escape cancels and ⌘/Ctrl+Enter saves. */
+function InlineEditor({
+  label,
+  initial,
+  multiline = false,
+  allowEmpty = false,
+  maxLength,
+  placeholder,
+  saveLabel = "Save",
+  pending,
+  onSave,
+  onCancel,
+  onDelete,
+  deleteLabel,
+}: {
+  label: string;
+  initial: string;
+  multiline?: boolean;
+  allowEmpty?: boolean;
+  maxLength: number;
+  placeholder?: string;
+  saveLabel?: string;
+  pending: boolean;
+  onSave: (text: string) => unknown;
+  onCancel: () => void;
+  onDelete?: () => void;
+  deleteLabel?: string;
+}) {
+  const [text, setText] = useState(initial);
+  const canSave = !pending && (allowEmpty || text.trim().length > 0);
+  const keys = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onCancel();
+    }
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey || !multiline)) {
+      event.preventDefault();
+      if (canSave) void onSave(text.trim());
+    }
+  };
+  return (
+    <form
+      className="flex flex-col gap-2 px-2.5 py-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (canSave) void onSave(text.trim());
+      }}
+    >
+      {multiline ? (
+        <Textarea
+          autoFocus
+          aria-label={label}
+          rows={5}
+          maxLength={maxLength}
+          placeholder={placeholder}
+          value={text}
+          onKeyDown={keys}
+          onChange={(event) => setText(event.target.value)}
+        />
+      ) : (
+        <Input
+          autoFocus
+          size="sm"
+          aria-label={label}
+          maxLength={maxLength}
+          placeholder={placeholder}
+          value={text}
+          onKeyDown={keys}
+          onChange={(event) => setText(event.target.value)}
+        />
+      )}
+      <div className="flex items-center justify-end gap-1.5">
+        {onDelete && (
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost-destructive"
+            className="me-auto"
+            aria-label={deleteLabel}
+            disabled={pending}
+            onClick={onDelete}
+          >
+            Forget
+          </Button>
+        )}
+        <Button type="button" size="xs" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" size="xs" disabled={!canSave}>
+          {saveLabel}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 export function AgentForm({
   initial,
   onSubmit,
@@ -502,6 +855,13 @@ function describeTrigger(trigger: AgentTrigger) {
       ? `At ${schedule.timeOfDay}${schedule.weekdays?.length ? " on selected days" : " every day"}`
       : "On webhook request";
 }
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const SCHEDULE_LABELS = {
+  interval: "On an interval",
+  fixed_time: "At a fixed time",
+  webhook: "On a webhook request",
+} as const;
+
 export function TriggerForm({
   initial,
   pending,
@@ -519,9 +879,10 @@ export function TriggerForm({
     initial?.schedule ?? { type: "interval", everyMs: 3_600_000 },
   );
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
+  const field = "flex flex-col gap-1.5 text-xs font-medium text-muted-foreground";
   return (
     <form
-      className="agent-form agent-trigger-form"
+      className="flex flex-col gap-2.5 px-2.5 py-2"
       onSubmit={(event) => {
         event.preventDefault();
         void onSave({
@@ -533,9 +894,11 @@ export function TriggerForm({
         });
       }}
     >
-      <label>
+      <label className={field}>
         Trigger name
-        <input
+        <Input
+          autoFocus
+          size="sm"
           required
           maxLength={200}
           placeholder="Nightly audit"
@@ -543,9 +906,9 @@ export function TriggerForm({
           onChange={(event) => setTitle(event.target.value)}
         />
       </label>
-      <label>
+      <label className={field}>
         What to do
-        <textarea
+        <Textarea
           required
           rows={2}
           value={prompt}
@@ -553,30 +916,38 @@ export function TriggerForm({
           placeholder="Check the project and send me the highlights."
         />
       </label>
-      <label>
+      <div className={field}>
         When
-        <select
+        <Select
           value={schedule.type}
-          onChange={(event) =>
+          onValueChange={(type) =>
             setSchedule(
-              event.target.value === "interval"
+              type === "interval"
                 ? { type: "interval", everyMs: 3_600_000 }
-                : event.target.value === "fixed_time"
+                : type === "fixed_time"
                   ? { type: "fixed_time", timeOfDay: "09:00" }
                   : { type: "webhook", signature: null },
             )
           }
         >
-          <option value="interval">On an interval</option>
-          <option value="fixed_time">At a fixed time</option>
-          <option value="webhook">On a webhook request</option>
-        </select>
-      </label>
+          <SelectTrigger size="sm" aria-label="When">
+            <SelectValue>{SCHEDULE_LABELS[schedule.type]}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            {Object.entries(SCHEDULE_LABELS).map(([value, label]) => (
+              <SelectItem key={value} value={value} label={label}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
       {schedule.type === "interval" && (
-        <label>
+        <label className={field}>
           Every (minutes)
-          <input
+          <Input
             type="number"
+            size="sm"
             required
             min={1}
             step={1}
@@ -589,60 +960,65 @@ export function TriggerForm({
       )}
       {schedule.type === "fixed_time" && (
         <>
-          <label>
+          <label className={field}>
             Local time
-            <input
+            <Input
               type="time"
+              size="sm"
               required
               value={schedule.timeOfDay}
               onChange={(event) => setSchedule({ ...schedule, timeOfDay: event.target.value })}
             />
           </label>
-          <fieldset className="agent-weekdays">
-            <legend>Days (none means every day)</legend>
-            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day, index) => (
-              <label key={day}>
-                <input
-                  type="checkbox"
-                  checked={schedule.weekdays?.includes(index) ?? false}
-                  onChange={(event) => {
-                    const weekdays = new Set(schedule.weekdays);
-                    if (event.target.checked) weekdays.add(index);
-                    else weekdays.delete(index);
-                    setSchedule({ ...schedule, weekdays: [...weekdays].sort() });
-                  }}
-                />
-                {day}
-              </label>
-            ))}
+          <fieldset className={field}>
+            <legend className="mb-1.5">Days (none means every day)</legend>
+            <div className="flex flex-wrap gap-1">
+              {WEEKDAYS.map((day, index) => {
+                const checked = schedule.weekdays?.includes(index) ?? false;
+                return (
+                  <Toggle
+                    key={day}
+                    size="sm"
+                    variant="outline"
+                    aria-label={day}
+                    pressed={checked}
+                    onPressedChange={(pressed) => {
+                      const weekdays = new Set(schedule.weekdays);
+                      if (pressed) weekdays.add(index);
+                      else weekdays.delete(index);
+                      setSchedule({ ...schedule, weekdays: [...weekdays].sort() });
+                    }}
+                  >
+                    {day}
+                  </Toggle>
+                );
+              })}
+            </div>
           </fieldset>
         </>
       )}
       {schedule.type === "webhook" && (
-        <p className="agent-muted">
+        <p className="text-xs text-muted-foreground">
           Uses a private webhook URL. Manage its URL, signing secret, and delivery history in
           Scheduled tasks settings after saving.
         </p>
       )}
-      <label className="agent-toggle-row">
+      <label className="flex items-center justify-between gap-2 text-xs font-medium text-muted-foreground">
         Enabled
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(event) => setEnabled(event.target.checked)}
-        />
+        <Switch size="sm" checked={enabled} onCheckedChange={setEnabled} />
       </label>
-      <div className="agent-inline-actions">
-        <button type="submit" disabled={pending || !title.trim() || !prompt.trim()}>
-          Save trigger
-        </button>
-        <button type="button" onClick={onCancel}>
+      <div className="flex items-center justify-end gap-1.5">
+        <Button type="button" size="xs" variant="ghost" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
+        <Button type="submit" size="xs" disabled={pending || !title.trim() || !prompt.trim()}>
+          Save trigger
+        </Button>
       </div>
     </form>
   );
 }
+
 const EMPTY_WORKSPACES: ReadonlyArray<{ id: NonNullable<AgentDraft["projectId"]>; title: string }> =
   [];
 
