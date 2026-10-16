@@ -1516,6 +1516,7 @@ export function threadShellFromProjection(
   });
   return {
     createdBy: projection.thread.createdBy,
+    agent: projection.thread.agent,
     creationSource: projection.thread.creationSource,
     id: projection.thread.id,
     projectId: projection.thread.projectId,
@@ -1784,6 +1785,7 @@ function shellFromState(input: {
 }): OrchestrationV2ThreadShell {
   return {
     createdBy: input.state.thread.createdBy,
+    agent: input.state.thread.agent,
     creationSource: input.state.thread.creationSource,
     id: input.state.thread.id,
     projectId: input.state.thread.projectId,

@@ -1,3 +1,5 @@
+import * as AgentStore from "../agents/AgentStore.ts";
+import { CONVERSATION_RECENT_MESSAGES, CONVERSATION_SESSION_RUNS } from "../agents/context.ts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import {
@@ -88,6 +90,7 @@ export class ProviderTurnStartServiceV2 extends Context.Service<
 export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   never,
+  | AgentStore.AgentStore
   | EventSink.EventSinkV2
   | ContextHandoffService.ContextHandoffServiceV2
   | IdAllocator.IdAllocatorV2
@@ -103,6 +106,7 @@ export const layer: Layer.Layer<
 > = Layer.effect(
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
+    const agentStore = yield* AgentStore.AgentStore;
     const eventSink = yield* EventSink.EventSinkV2;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -607,6 +611,26 @@ export const layer: Layer.Layer<
           });
           return undefined;
         });
+      const persistentAgent = yield* agentStore
+        .forThread(input.threadId)
+        .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })));
+      // Rotate native history every forty owner turns, retaining the same app conversation.
+      // Reuse resume-fallback's full_thread_summary handoff and delivery receipts for both providers.
+      const latestSummaryOrdinal = Math.max(
+        0,
+        ...projection.contextHandoffs
+          .filter((h) => h.strategy === "full_thread_summary")
+          .map((h) => h.coveredRunOrdinals.to),
+      );
+      const rotateAgentSession =
+        persistentAgent?.conversationThreadId === input.threadId &&
+        run.ordinal - latestSummaryOrdinal > CONVERSATION_SESSION_RUNS;
+      if (rotateAgentSession && persistentAgent !== null) {
+        const transcript = yield* projectionStore.getThreadRecords(input.threadId, ["messages"]);
+        yield* agentStore
+          .carryOver(persistentAgent.id, run.ordinal - 1, transcript.messages)
+          .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })));
+      }
       let effectiveHandoffs = handoffs;
       const loadedProviderThread = yield* Effect.gen(function* () {
         if (nativeForkTransfer !== undefined) {
@@ -670,7 +694,7 @@ export const layer: Layer.Layer<
             handoff.delivery?.status === "pending",
         );
         const resumed = yield* Effect.result(
-          uncertainDelivery
+          uncertainDelivery || rotateAgentSession
             ? Effect.fail(
                 new ProviderAdapter.ProviderAdapterTurnStartError({
                   driver: session.driver,
@@ -718,6 +742,15 @@ export const layer: Layer.Layer<
           type: "provider_resume_fallback",
         });
         const createdAt = yield* DateTime.now;
+        const history = yield* projectionStore.getTurnStartHistory(input.threadId);
+        const recentAgentItems = rotateAgentSession
+          ? new Set(
+              history
+                .filter((item) => item.type === "user_message" || item.type === "assistant_message")
+                .slice(-CONVERSATION_RECENT_MESSAGES)
+                .map((item) => item.id),
+            )
+          : null;
         const handoff = yield* contextHandoffService.prepareProviderHandoff({
           threadId: projection.thread.id,
           targetRunId: run.id,
@@ -729,12 +762,13 @@ export const layer: Layer.Layer<
           coveredRunOrdinals: { from: 1, to: Math.max(1, run.ordinal - 1) },
           strategy: "full_thread_summary",
           runs: projection.runs,
-          items: (yield* projectionStore.getTurnStartHistory(input.threadId)).filter(
+          items: history.filter(
             (item) =>
-              item.runId === null ||
-              projection.runs.some(
-                (source) => source.id === item.runId && source.ordinal < run.ordinal,
-              ),
+              (recentAgentItems === null || recentAgentItems.has(item.id)) &&
+              (item.runId === null ||
+                projection.runs.some(
+                  (source) => source.id === item.runId && source.ordinal < run.ordinal,
+                )),
           ),
           createdAt,
         });
@@ -951,10 +985,18 @@ export const layer: Layer.Layer<
       const routableSubagents = projection.subagents.filter((subagent) =>
         RunExecutionService.canRouteRelatedSubagent(subagent.status),
       );
-      const userText = projectComposerContextForProvider({
-        text: message.text,
-        records: message.context?.records ?? [],
-      });
+      const agentContext = yield* agentStore
+        .context(input.threadId)
+        .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })));
+      const userText = [
+        agentContext,
+        projectComposerContextForProvider({
+          text: message.text,
+          records: message.context?.records ?? [],
+        }),
+      ]
+        .filter(Boolean)
+        .join("\n\n");
       // Delivered once: this run's provider turn marks the work as told. A
       // restart continuation is prompted by its own text or resumes natively.
       const noteContinuation = isRestartNoteContinuation(

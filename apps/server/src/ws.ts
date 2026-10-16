@@ -1,3 +1,5 @@
+import * as Agents from "./agents/AgentService.ts";
+import * as AgentStore from "./agents/AgentStore.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
@@ -1132,6 +1134,8 @@ const layerWsRpc = (
       };
       const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
+      const agents = yield* Agents.AgentService;
+      const agentStore = yield* AgentStore.AgentStore;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
       const secretRequests = yield* SecretRequests.SecretRequests;
       const pullRequests = yield* PullRequestService.PullRequestService;
@@ -1635,6 +1639,19 @@ const layerWsRpc = (
               Effect.as(commandOutputHub.subscribe(input)),
             ),
           ),
+        [WS_METHODS.agentsList]: () => agents.list(),
+        [WS_METHODS.agentsSubscribe]: () => agents.subscribe(),
+        [WS_METHODS.agentsUpsert]: (input) => agents.upsert(input),
+        [WS_METHODS.agentsDelete]: (input) => agents.delete(input.id),
+        [WS_METHODS.agentsSend]: (input) => agents.send(input),
+        [WS_METHODS.agentsMemoryList]: (input) =>
+          agentStore.memory(input.agentId).pipe(Effect.map((notes) => ({ notes }))),
+        [WS_METHODS.agentsMemoryWrite]: (input) =>
+          agentStore.remember(input).pipe(Effect.map((note) => ({ note }))),
+        [WS_METHODS.agentsMemoryForget]: (input) =>
+          agentStore.forget(input.agentId, input.id).pipe(Effect.map((deleted) => ({ deleted }))),
+        [WS_METHODS.agentsRuns]: (input) =>
+          agentStore.runs(input.id).pipe(Effect.map((runs) => ({ runs }))),
         [WS_METHODS.scheduledTasksList]: (_input) =>
           scheduledTasks.list().pipe(Effect.map(withVisibleWebhookUrls)),
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>

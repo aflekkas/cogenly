@@ -74,6 +74,10 @@ export interface ThreadLaunchInitialMessage {
 }
 
 export interface ThreadLaunchInput {
+  readonly agent?: {
+    readonly id: import("@t3tools/contracts").AgentId;
+    readonly role: "conversation" | "work";
+  };
   readonly commandId: CommandId;
   readonly threadId?: ThreadId;
   readonly reuseExistingThread?: boolean;
@@ -931,6 +935,7 @@ const make = Effect.gen(function* () {
               })
             : threads.dispatch({
                 type: "thread.create",
+                ...(input.agent === undefined ? {} : { agent: input.agent }),
                 commandId: input.commandId,
                 threadId: candidateThreadId,
                 projectId: input.projectId,

@@ -1,3 +1,4 @@
+import * as AgentMemoryMcp from "../agents/MemoryMcp.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -877,6 +878,7 @@ export const layerMcpTransport = McpServer.layerHttp({
 
 export const layer = Layer.mergeAll(
   layerPreviewToolkit,
+  toolkitRegistration(AgentMemoryMcp.toolkit, AgentMemoryMcp.handlers),
   layerOrchestratorToolkit,
   toolkitRegistration(TerminalToolkit, TerminalHandlers.layer).pipe(
     Layer.provide(TerminalMcpService.layer),

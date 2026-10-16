@@ -1,3 +1,5 @@
+import * as Agents from "../agents/AgentService.ts";
+import * as AgentStore from "../agents/AgentStore.ts";
 import {
   CommandId,
   enforceRuntimeMode,
@@ -176,6 +178,7 @@ const encodeHeadersJson = Schema.encodeSync(HeadersJson);
 const encodeMissingFieldsJson = Schema.encodeSync(MissingFieldsJson);
 
 interface ScheduledTaskRow {
+  readonly agent_id: string | null;
   readonly task_id: string;
   readonly title: string;
   readonly prompt: string;
@@ -319,6 +322,7 @@ const decodeRow = (row: ScheduledTaskRow, origin: WebhookOrigin | null = null) =
       // The stored id decodes through the task schema so a corrupt value fails
       // as a typed parse error, not a `ScheduledTaskId.make` defect.
       id: row.task_id,
+      agentId: row.agent_id,
       title: row.title,
       prompt: row.prompt,
       enabled: row.enabled === 1,
@@ -393,6 +397,8 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const crypto = yield* Crypto.Crypto;
+    const agents = yield* Agents.AgentService;
+    const agentStore = yield* AgentStore.AgentStore;
     const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const secretRequests = yield* SecretRequests.SecretRequests;
@@ -416,6 +422,7 @@ export const layer = Layer.effect(
 
     const selectAllRows = () => sql<ScheduledTaskRow>`
       SELECT
+        agent_id,
         task_id,
         title,
         prompt,
@@ -451,6 +458,7 @@ export const layer = Layer.effect(
 
     const getRows = (id: ScheduledTaskId) => sql<ScheduledTaskRow>`
       SELECT
+        agent_id,
         task_id,
         title,
         prompt,
@@ -531,6 +539,7 @@ export const layer = Layer.effect(
     ) =>
       sql<{ task_id: string }>`
         INSERT INTO scheduled_tasks (
+          agent_id,
           task_id,
           title,
           prompt,
@@ -555,6 +564,7 @@ export const layer = Layer.effect(
           webhook_secret
         )
         SELECT
+          ${task.agentId ?? null},
           ${task.id},
           ${task.title},
           ${task.prompt},
@@ -581,6 +591,7 @@ export const layer = Layer.effect(
            OR EXISTS (SELECT 1 FROM scheduled_tasks WHERE task_id = ${task.id})
         ON CONFLICT (task_id)
         DO UPDATE SET
+          agent_id = excluded.agent_id,
           title = excluded.title,
           prompt = excluded.prompt,
           enabled = excluded.enabled,
@@ -794,42 +805,44 @@ export const layer = Layer.effect(
         // dispatch are also captured and recorded as a failed run instead of
         // aborting before markCompleted.
         const result =
-          active.threadId === null
-            ? yield* Effect.exit(
-                threadLaunch.launch({
-                  commandId,
-                  projectId: active.projectId,
-                  title: active.title,
-                  modelSelection: active.modelSelection,
-                  runtimeMode: enforceRuntimeMode(active.runtimeMode),
-                  interactionMode: active.interactionMode,
-                  workspaceStrategy: active.workspaceStrategy,
-                  initialMessage: {
+          active.agentId != null
+            ? yield* Effect.exit(agents.trigger(active, fireKey, prompt))
+            : active.threadId === null
+              ? yield* Effect.exit(
+                  threadLaunch.launch({
+                    commandId,
+                    projectId: active.projectId,
+                    title: active.title,
+                    modelSelection: active.modelSelection,
+                    runtimeMode: enforceRuntimeMode(active.runtimeMode),
+                    interactionMode: active.interactionMode,
+                    workspaceStrategy: active.workspaceStrategy,
+                    initialMessage: {
+                      messageId,
+                      scheduledTaskId: active.id,
+                      text: prompt,
+                      attachments: [],
+                    },
+                    createdBy: active.createdBy,
+                    creationSource: active.creationSource,
+                  }),
+                )
+              : yield* Effect.exit(
+                  threadManagement.sendToThread({
+                    projectId: active.projectId,
+                    commandId,
+                    threadId: ThreadId.make(active.threadId),
                     messageId,
                     scheduledTaskId: active.id,
                     text: prompt,
                     attachments: [],
-                  },
-                  createdBy: active.createdBy,
-                  creationSource: active.creationSource,
-                }),
-              )
-            : yield* Effect.exit(
-                threadManagement.sendToThread({
-                  projectId: active.projectId,
-                  commandId,
-                  threadId: ThreadId.make(active.threadId),
-                  messageId,
-                  scheduledTaskId: active.id,
-                  text: prompt,
-                  attachments: [],
-                  modelSelection: active.modelSelection,
-                  // Scheduled prompts must not interrupt tools in the bound thread.
-                  mode: "queue",
-                  createdBy: active.createdBy,
-                  creationSource: active.creationSource,
-                }),
-              );
+                    modelSelection: active.modelSelection,
+                    // Scheduled prompts must not interrupt tools in the bound thread.
+                    mode: "queue",
+                    createdBy: active.createdBy,
+                    creationSource: active.creationSource,
+                  }),
+                );
 
         const completedAt = yield* localNow;
         const runSucceeded = result._tag === "Success";
@@ -875,8 +888,8 @@ export const layer = Layer.effect(
       );
     });
 
-    // A due fixed-time run that is long past its slot (server was off or
-    // asleep) is skipped and re-aimed at its next occurrence, not fired late.
+    // Legacy tasks skip old fixed-time slots. Agent triggers catch up once and
+    // advance from now, so an outage never creates a backlog.
     const rescheduleMissedRun = Effect.fn("ScheduledTaskService.rescheduleMissedRun")(function* (
       task: ScheduledTask,
       now: DateTime.DateTime,
@@ -912,7 +925,7 @@ export const layer = Layer.effect(
         due,
         ({ task, dueAt }) =>
           Effect.suspend(() =>
-            isMissedFixedTimeRun(task.schedule, dueAt, now)
+            task.agentId == null && isMissedFixedTimeRun(task.schedule, dueAt, now)
               ? rescheduleMissedRun(task, now)
               : runTask(task, "scheduled"),
           ).pipe(
@@ -1021,6 +1034,12 @@ export const layer = Layer.effect(
         // keep their run history, and so real load failures propagate instead
         // of silently resetting an existing row.
         const existingTask = yield* findTask(id);
+        const boundAgent =
+          input.agentId === undefined && input.threadId != null
+            ? yield* agentStore
+                .forThread(input.threadId)
+                .pipe(Effect.mapError((cause) => taskError("Could not resolve agent.", { cause })))
+            : null;
         // Keep the existing next_run_at when the schedule itself is untouched:
         // editing a title or prompt must not postpone (or resurrect) a due
         // run — only schedule/enabled changes restart the clock.
@@ -1083,6 +1102,10 @@ export const layer = Layer.effect(
           isSameSchedule(existingTask.schedule, schedule);
         const task: ScheduledTask = {
           id,
+          agentId:
+            input.agentId === undefined
+              ? (existingTask?.agentId ?? boundAgent?.id ?? null)
+              : input.agentId,
           title: input.title,
           prompt: input.prompt,
           enabled: input.enabled,
@@ -1105,6 +1128,11 @@ export const layer = Layer.effect(
           lastRunError: existingTask?.lastRunError ?? null,
           runCount: existingTask?.runCount ?? 0,
         };
+        if (task.agentId != null) {
+          yield* agentStore
+            .get(task.agentId)
+            .pipe(Effect.mapError((cause) => taskError("Agent not found.", { cause })));
+        }
         yield* saveTask(task, input.requireExisting === true, webhook);
         yield* notifyChanged;
         return { task: (yield* findTask(id)) ?? task };

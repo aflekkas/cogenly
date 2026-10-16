@@ -1,3 +1,4 @@
+import { AgentId } from "./agent.ts";
 import { OrchestrationMessageContext } from "./composerContext.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -361,7 +362,13 @@ export const OrchestrationV2LimitRecoveryUpdate = Schema.Struct({
 );
 export type OrchestrationV2LimitRecoveryUpdate = typeof OrchestrationV2LimitRecoveryUpdate.Type;
 
+const AgentThreadIdentity = Schema.Struct({
+  id: AgentId,
+  role: Schema.Literals(["conversation", "work"]),
+});
 export const OrchestrationV2AppThread = Schema.Struct({
+  /** Work threads are hidden from normal chat/task lists; open them through agents.runs. */
+  agent: Schema.optional(AgentThreadIdentity),
   ...OrchestrationV2CreationFields,
   id: ThreadId,
   projectId: ProjectId,
@@ -1938,6 +1945,7 @@ export type OrchestrationV2LatestVisibleMessageSummary =
   typeof OrchestrationV2LatestVisibleMessageSummary.Type;
 
 export const OrchestrationV2ThreadShell = Schema.Struct({
+  agent: Schema.optional(AgentThreadIdentity),
   ...OrchestrationV2CreationFields,
   id: ThreadId,
   projectId: ProjectId,
@@ -2721,6 +2729,7 @@ export type OrchestrationV2StoredEventJson = typeof OrchestrationV2StoredEventJs
 export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thread.create"),
+    agent: Schema.optional(AgentThreadIdentity),
     ...OrchestrationV2CreationFields,
     commandId: CommandId,
     threadId: ThreadId,

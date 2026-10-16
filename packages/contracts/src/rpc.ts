@@ -1,3 +1,4 @@
+import * as Agents from "./agent.ts";
 import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
@@ -476,7 +477,16 @@ export const WS_METHODS = {
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
-  // Scheduled tasks
+  // Persistent agents and their scheduled-task triggers
+  agentsList: "agents.list",
+  agentsSubscribe: "agents.subscribe",
+  agentsUpsert: "agents.upsert",
+  agentsDelete: "agents.delete",
+  agentsSend: "agents.send",
+  agentsMemoryList: "agents.memoryList",
+  agentsMemoryWrite: "agents.memoryWrite",
+  agentsMemoryForget: "agents.memoryForget",
+  agentsRuns: "agents.runs",
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1676,6 +1686,53 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const WsAgentsListRpc = Rpc.make(WS_METHODS.agentsList, {
+  payload: Schema.Struct({}),
+  success: Agents.AgentListResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsSubscribeRpc = Rpc.make(WS_METHODS.agentsSubscribe, {
+  payload: Schema.Struct({}),
+  success: Agents.AgentListResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsAgentsUpsertRpc = Rpc.make(WS_METHODS.agentsUpsert, {
+  payload: Agents.AgentUpsertInput,
+  success: Agents.AgentMutationResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsDeleteRpc = Rpc.make(WS_METHODS.agentsDelete, {
+  payload: Agents.AgentKey,
+  success: Agents.AgentDeleteResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsSendRpc = Rpc.make(WS_METHODS.agentsSend, {
+  payload: Agents.AgentSendInput,
+  success: Agents.AgentSendResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsMemoryListRpc = Rpc.make(WS_METHODS.agentsMemoryList, {
+  payload: Agents.AgentMemoryListInput,
+  success: Agents.AgentMemoryListResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsMemoryWriteRpc = Rpc.make(WS_METHODS.agentsMemoryWrite, {
+  payload: Agents.AgentMemoryWriteInput,
+  success: Agents.AgentMemoryWriteResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsMemoryForgetRpc = Rpc.make(WS_METHODS.agentsMemoryForget, {
+  payload: Agents.AgentMemoryForgetInput,
+  success: Agents.AgentDeleteResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsRunsRpc = Rpc.make(WS_METHODS.agentsRuns, {
+  payload: Agents.AgentKey,
+  success: Agents.AgentRunsResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -1818,6 +1875,15 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
+  WsAgentsListRpc,
+  WsAgentsSubscribeRpc,
+  WsAgentsUpsertRpc,
+  WsAgentsDeleteRpc,
+  WsAgentsSendRpc,
+  WsAgentsMemoryListRpc,
+  WsAgentsMemoryWriteRpc,
+  WsAgentsMemoryForgetRpc,
+  WsAgentsRunsRpc,
   WsScheduledTasksListRpc,
   WsScheduledTasksSubscribeRpc,
   WsScheduledTasksUpsertRpc,

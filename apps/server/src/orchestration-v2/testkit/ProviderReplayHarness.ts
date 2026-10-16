@@ -1,3 +1,4 @@
+import * as AgentStore from "../../agents/AgentStore.ts";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -403,6 +404,7 @@ export function layerWithRegistry<Error>(
   const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        AgentStore.layer.pipe(Layer.provide(layerDatabase)),
         layerContextHandoffServiceProvided,
         layerEventSinkProvided,
         IdAllocator.layer,

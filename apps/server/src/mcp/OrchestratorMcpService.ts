@@ -1673,6 +1673,7 @@ const make = Effect.gen(function* () {
         const title =
           input.title ?? (derivedTitle.length > 0 ? derivedTitle.slice(0, 80) : "Scheduled task");
         const upsertInput: ScheduledTaskUpsertInput = {
+          ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
           title,
           prompt: input.prompt,
           enabled: input.enabled ?? true,

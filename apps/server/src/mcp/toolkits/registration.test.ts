@@ -1,4 +1,6 @@
 import * as TerminalManager from "../../terminal/Manager.ts";
+import { agentFixture } from "../../agents/agent.testkit.ts";
+import * as AgentStore from "../../agents/AgentStore.ts";
 import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as DeviceService from "../../device/DeviceService.ts";
@@ -57,6 +59,10 @@ const project = {
 };
 const layerStubServices = Layer.mergeAll(
   Layer.mock(TerminalManager.TerminalManager)({ listAgents: () => Effect.succeed([]) }),
+  Layer.mock(AgentStore.AgentStore)({
+    forThread: () => Effect.succeed(agentFixture()),
+    memory: () => Effect.succeed([]),
+  }),
   Layer.mock(Orchestrator.OrchestratorV2)({ getThreadShell: () => Effect.succeed(shell) }),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
@@ -133,6 +139,13 @@ const decodeCallPayload = Schema.decodeUnknownEffect(CallPayload);
 const decodeToolsListPayload = Schema.decodeUnknownEffect(ToolsListPayload);
 
 const smokeCases = [
+  {
+    toolkit: "agentMemory",
+    names: ["memory_read", "memory_write", "memory_remember", "memory_forget"],
+    tool: "memory_read",
+    args: {},
+    expected: { notes: [] },
+  },
   {
     toolkit: "attachment",
     names: ["t3_attachment_discard", "t3_attachment_prepare_upload", "t3_thread_send_attachments"],

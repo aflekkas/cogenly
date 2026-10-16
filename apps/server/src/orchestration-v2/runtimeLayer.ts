@@ -1,3 +1,5 @@
+import * as AgentStore from "../agents/AgentStore.ts";
+import * as Agents from "../agents/AgentService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
@@ -161,6 +163,7 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
 );
 
 const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+  Layer.provide(AgentStore.layer),
   Layer.provide(
     Layer.mergeAll(
       layerContextHandoffServiceProvided,
@@ -281,12 +284,25 @@ const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
+const layerAgentsProvided = Agents.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      AgentStore.layer,
+      layerThreadLaunchProvided,
+      layerThreadManagementProvided,
+      ProjectionStore.layer,
+      layerEventSinkProvided,
+    ),
+  ),
+);
 const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       layerThreadLaunchProvided,
       layerThreadManagementProvided,
       layerSecretRequestsProvided,
+      layerAgentsProvided,
+      AgentStore.layer,
     ),
   ),
 );
@@ -363,6 +379,8 @@ export const layerProduction = Layer.mergeAll(
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
   layerThreadLifecycleProvided,
+  layerAgentsProvided,
+  AgentStore.layer,
   layerScheduledTaskProvided,
   layerSecretRequestsProvided,
   UsageLimitRecoveryWorker.layer.pipe(
