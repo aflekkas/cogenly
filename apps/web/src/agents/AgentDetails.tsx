@@ -38,6 +38,7 @@ import {
   THREAD_DETAILS_PANEL_ICON_CLASS,
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "~/components/chat/threadDetailsPanelStyles";
+import { THREAD_DETAILS_CARD_GAP } from "~/components/chat/threadDetailsCardLayout";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "~/components/ui/menu";
@@ -158,6 +159,8 @@ export function AgentDetails({
       <PopoverPopup
         anchor={anchor}
         align="end"
+        // Lines the card up with the thread details card: the panel pads its card by 8px.
+        alignOffset={THREAD_DETAILS_CARD_GAP - 8}
         side="bottom"
         variant="panel"
         padding="none"
@@ -497,7 +500,10 @@ function AgentDetailsContent({
                 key={note.id}
                 icon={BookmarkIcon}
                 label={note.text}
-                detail={`${formatMessageTime(note.updatedAt)} · ${note.source}`}
+                detail={`${formatMessageTime(note.updatedAt)} · ${
+                  // Notes the agent saves itself name the conversation thread.
+                  note.source.startsWith("thread:") ? "from a conversation" : note.source
+                }`}
                 onClick={() => setEditing({ kind: "memory", id: note.id })}
               />
             ),

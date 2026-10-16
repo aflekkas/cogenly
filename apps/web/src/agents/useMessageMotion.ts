@@ -4,7 +4,12 @@ import type { AgentContact } from "./agents.types";
 import { agentContactKey } from "./agents.logic";
 
 /** Animate only appended live messages; hydration and paginated history stay still. */
-export function useMessageMotion(agent: AgentContact, busy: boolean) {
+export function useMessageMotion(
+  agent: AgentContact,
+  busy: boolean,
+  /** Rows after the last message, such as a pending model switch, that also keep the view pinned. */
+  trailing: string | null = null,
+) {
   const key = agentContactKey(agent);
   const { messages, requests, hasMoreMessages } = agent;
   const scroll = useRef<HTMLDivElement>(null);
@@ -87,7 +92,7 @@ export function useMessageMotion(agent: AgentContact, busy: boolean) {
       height: element.scrollHeight,
       busy,
     };
-  }, [key, messages, requests, hasMoreMessages, busy]);
+  }, [key, messages, requests, hasMoreMessages, busy, trailing]);
   useLayoutEffect(() => {
     const element = scroll.current;
     if (!element) return;

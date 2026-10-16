@@ -21,16 +21,20 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { models } = useAgents();
-  const detailsAnchor = useRef<HTMLButtonElement>(null);
+  const detailsAnchor = useRef<HTMLElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const modelStatus = (model: AgentModelRef) =>
     client.modelStatus?.(agent, model) ?? { status: "unknown" as const, providerName: "" };
   const currentModelUnavailable = modelStatus(agent.modelSelection).status === "unavailable";
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
   const busy = agent.state === "thinking" || agent.state === "working";
-  const { scroll, onScroll, stopFollowing } = useMessageMotion(agent, busy);
   const lastOwner = agent.messages.findLast((message) => message.role === "user");
   const switches = modelSwitches(agent.messages, agent.modelSelection);
+  const { scroll, onScroll, stopFollowing } = useMessageMotion(
+    agent,
+    busy,
+    switches.trailing && `${switches.trailing.instanceId}:${switches.trailing.model}`,
+  );
   useEffect(() => {
     const mark = () => {
       if (
@@ -86,7 +90,7 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
   }
   return (
     <section className="agent-conversation" aria-label={`Conversation with ${agent.name}`}>
-      <header className="agent-contact-header">
+      <header ref={detailsAnchor} className="agent-contact-header">
         {onBack && (
           <button
             type="button"
@@ -122,7 +126,6 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
         </button>
         <button
           type="button"
-          ref={detailsAnchor}
           className="agent-icon-button agent-header-more"
           aria-label="Agent details"
           onClick={() => setDetails("about")}
