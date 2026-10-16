@@ -199,6 +199,50 @@ function SidebarProvider({
   );
 }
 
+/**
+ * Slides the main pane after an offcanvas toggle. The sidebar gap snaps to its
+ * new width, so the pane lays out once at its final size instead of every
+ * frame (a width transition re-ran ResizeObservers and re-rendered the chat on
+ * each frame). The pane then plays a transform from where it was back to rest:
+ * closing, it starts under the leaving sidebar; opening, it starts at the old
+ * edge while its right side, already narrowed, shows the wrapper behind it.
+ */
+function useSidebarMainSlide(
+  peerRef: React.RefObject<HTMLDivElement | null>,
+  state: "expanded" | "collapsed",
+  side: "left" | "right",
+  enabled: boolean,
+) {
+  const previousStateRef = React.useRef(state);
+  React.useLayoutEffect(() => {
+    if (previousStateRef.current === state) return;
+    previousStateRef.current = state;
+    const peer = peerRef.current;
+    if (!enabled || !peer || !peer.closest("[data-panel-animations='true']")) return;
+    const container = peer.querySelector<HTMLElement>("[data-slot='sidebar-container']");
+    const width = container?.offsetWidth ?? 0;
+    if (width === 0) return;
+    let main = peer.nextElementSibling;
+    while (main && !(main instanceof HTMLElement && main.dataset.slot === "sidebar-inset")) {
+      main = main.nextElementSibling;
+    }
+    if (!(main instanceof HTMLElement)) return;
+    const direction = side === "left" ? 1 : -1;
+    const from = (state === "collapsed" ? width : -width) * direction;
+    const duration =
+      Number.parseFloat(getComputedStyle(peer).getPropertyValue("--panel-animation-duration")) ||
+      200;
+    main.getAnimations().forEach((animation) => {
+      if (animation.id === "sidebar-main-slide") animation.cancel();
+    });
+    const animation = main.animate(
+      [{ transform: `translateX(${from}px)` }, { transform: "translateX(0)" }],
+      { duration, easing: "cubic-bezier(0.32, 0.72, 0, 1)" },
+    );
+    animation.id = "sidebar-main-slide";
+  }, [enabled, peerRef, side, state]);
+}
+
 function Sidebar({
   side = "left",
   variant = "sidebar",
@@ -214,6 +258,8 @@ function Sidebar({
   resizable?: boolean | SidebarResizableOptions;
 }) {
   const { isMobile, state, openMobile, setOpenMobile, setMobileSheetElement } = useSidebar();
+  const peerRef = React.useRef<HTMLDivElement | null>(null);
+  useSidebarMainSlide(peerRef, state, side, !isMobile && collapsible === "offcanvas");
   const resolvedResizable = React.useMemo<SidebarResolvedResizableOptions | null>(() => {
     if (isMobile || collapsible === "none" || !resizable) {
       return null;
@@ -294,6 +340,7 @@ function Sidebar({
   return (
     <SidebarInstanceContext value={instanceContextValue}>
       <div
+        ref={peerRef}
         className="group peer hidden text-sidebar-foreground md:block"
         data-collapsible={state === "collapsed" ? collapsible : ""}
         data-side={side}
@@ -304,8 +351,9 @@ function Sidebar({
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
+            // The gap snaps to its new width in one layout; useSidebarMainSlide
+            // then slides the main pane there on the compositor.
             "relative w-(--sidebar-width) bg-transparent",
-            "[[data-panel-animations=true]_&]:transition-[width] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-out",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
@@ -317,10 +365,13 @@ function Sidebar({
         <div
           className={cn(
             "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex",
-            "[[data-panel-animations=true]_&]:transition-[left,right,width] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-out",
+            // Offcanvas open/close is a transform only, so it runs on the
+            // compositor without relayout or repainting the grain. The main
+            // pane rides the same curve (useSidebarMainSlide), edge to edge.
+            "[[data-panel-animations=true]_&]:transition-[translate] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-drawer",
             side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+              ? "left-0 group-data-[collapsible=offcanvas]:-translate-x-full"
+              : "right-0 group-data-[collapsible=offcanvas]:translate-x-full",
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
@@ -525,7 +576,7 @@ function SidebarRail({
             className={cn(
               /* disable pointer events only when offcanvas sidebar is collapsed, that's when the rail sits over the native scrollbar on windows and linux. icon mode stays fully clickable. */
               "-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none",
-              "[[data-panel-animations=true]_&]:transition-all [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-out",
+              "transition-colors",
               "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
               "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
               "group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:left-full",

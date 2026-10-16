@@ -308,7 +308,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   return (
     <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
       <SidebarProvider
-        className="h-dvh! min-h-0!"
+        // Clip the main pane while it slides past the edge on sidebar close.
+        className="h-dvh! min-h-0! overflow-x-clip"
         data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
         data-nav-rail={navRailVisible ? "" : undefined}
         defaultOpen
@@ -333,11 +334,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
             onResize: setSidebarWidth,
           }}
           // The list column starts after the rail and slides under it when collapsed.
-          className={
-            navRailVisible
-              ? "left-(--nav-rail-width) group-data-[collapsible=offcanvas]:left-[calc(var(--nav-rail-width)-var(--sidebar-width))]"
-              : undefined
-          }
+          className={navRailVisible ? "left-(--nav-rail-width)" : undefined}
           // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
           style={windowControlsInsetStyle}
         >
