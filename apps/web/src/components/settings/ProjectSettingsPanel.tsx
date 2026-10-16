@@ -560,7 +560,7 @@ function ProjectDetail({
                 : projectIcon?.kind === "monogram"
                   ? `Folder · ${projectIcon.color}`
                   : projectIcon?.kind === "emoji"
-                    ? projectIcon.emoji
+                    ? "Folder"
                     : (faviconPath ?? "Automatic: the repository's favicon, else a folder icon")
             }
             resetAction={

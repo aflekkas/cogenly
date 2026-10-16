@@ -99,17 +99,8 @@ export function ProjectFavicon(input: {
 
   const icon = source.icon;
   if (icon.kind === "emoji") {
-    return (
-      <span
-        aria-hidden="true"
-        className={cn(
-          "inline-flex size-3.5 shrink-0 items-center justify-center leading-none [container-type:size]",
-          input.className,
-        )}
-      >
-        <span className="text-[length:80cqh] leading-none">{icon.emoji}</span>
-      </span>
-    );
+    // Emoji icons are retired. One saved earlier shows the project's neutral glyph.
+    return <ProjectFallbackGlyphIcon projectName={project.title} className={input.className} />;
   }
   if (icon.kind === "monogram") {
     // Monograms are retired. One saved earlier keeps its colour on the
