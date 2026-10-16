@@ -2323,6 +2323,20 @@ export default function ChatView(props: ChatViewProps) {
     return labels;
   }, [activeThreadKnownSessions]);
   const activeThreadRef = useActiveThreadRef(activeThread);
+  const revealedAgentTerminals = useRef(new Set<string>());
+  useEffect(() => {
+    if (!activeThreadRef) return;
+    for (const session of activeThreadKnownSessions) {
+      const id = session.target.terminalId;
+      const key = `${activeThreadRef.environmentId}:${activeThreadRef.threadId}:${id}`;
+      if (!id.startsWith("agent-") || revealedAgentTerminals.current.has(key)) continue;
+      revealedAgentTerminals.current.add(key);
+      useTerminalUiStateStore
+        .getState()
+        .ensureTerminal(activeThreadRef, id, { open: true, active: true });
+    }
+  }, [activeThreadKnownSessions, activeThreadRef]);
+
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
   const activeEnvironmentServerBrowser = useEnvironmentSupportsServerBrowser(
     activeThreadRef?.environmentId ?? null,

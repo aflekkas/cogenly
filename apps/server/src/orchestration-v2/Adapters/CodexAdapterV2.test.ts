@@ -1106,3 +1106,32 @@ describe("CodexAdapterV2 background command detail", () => {
     assert.notInclude(detail, "y".repeat(1001));
   });
 });
+
+describe("Codex terminal routing", () => {
+  const session = {
+    environmentId: "env" as import("@t3tools/contracts").EnvironmentId,
+    threadId: ThreadId.make("terminal-test"),
+    providerSessionId: "mcp-test",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    endpoint: "http://127.0.0.1:1/mcp",
+    authorizationHeader: "Bearer test",
+    browserToolsAvailable: false,
+  };
+  it("disables all native shell execution while the terminal MCP server is attached", () => {
+    const params = CodexAdapterV2.codexThreadRuntimeParams({ mcpSession: session });
+    assert.equal(params.config["features.shell_tool"], false);
+    assert.isDefined(params.config.mcp_servers);
+    assert.isUndefined(
+      CodexAdapterV2.codexThreadRuntimeParams({ mcpSession: undefined }).config[
+        "features.shell_tool"
+      ],
+    );
+  });
+  it("leaves shell configuration to the provider when the server setting is off", () => {
+    assert.isUndefined(
+      CodexAdapterV2.codexThreadRuntimeParams({
+        mcpSession: { ...session, terminalToolsAvailable: false },
+      }).config["features.shell_tool"],
+    );
+  });
+});

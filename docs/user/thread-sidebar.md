@@ -127,7 +127,12 @@ and prevents automatic settlement until new activity resumes the usual rules.
 Manually settling an idle thread dismisses unanswered async questions without
 sending an answer or restarting the agent. Settling also closes the thread's
 terminals that wait at an idle prompt, and keeps their output. A terminal that
-runs a command, such as a dev server, stays open.
+you started stays open while it runs a command. Agent-run terminals, including dev servers
+and their child processes, stop when you settle, archive, or delete the thread. Their tabs
+are labelled **agent**, open automatically when commands start, and keep finished output
+until you close them. Agent terminal commands require full-access/default mode. To
+restore provider-native shells, set the server preference `enableAgentTerminals` to
+`false` and restart provider sessions.
 
 To reclaim disk space from settled work, turn on **Run in the thread's worktree when the
 thread settles** for one of the project's actions, or set `"runOnSettle": true` on a

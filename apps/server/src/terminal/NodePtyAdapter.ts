@@ -1,3 +1,4 @@
+import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
 import * as NodeModule from "node:module";
 import * as NodeNet from "node:net";
 
@@ -205,7 +206,15 @@ class NodePtyProcess implements PtyAdapter.PtyProcess {
 
   kill(signal?: string): void {
     // node-pty terminates the Windows process tree without a POSIX signal.
-    this.process.kill(this.platform === "win32" ? undefined : signal);
+    if (this.platform === "win32") {
+      this.process.kill();
+      return;
+    }
+    try {
+      signalProcessGroup(this.pid, (signal ?? "SIGHUP") as NodeJS.Signals);
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+    }
   }
 
   onData(callback: (data: string) => void): () => void {

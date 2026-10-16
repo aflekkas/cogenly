@@ -14,6 +14,7 @@ export interface McpProviderSessionConfig {
    * call would reject.
    */
   readonly browserToolsAvailable: boolean;
+  readonly terminalToolsAvailable?: boolean;
   /** Capabilities the credential grants ("preview", "device"). */
   readonly capabilities?: ReadonlySet<string>;
   /**

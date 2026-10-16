@@ -21,6 +21,7 @@ export interface McpCredentialRequest {
    * token is honored (#7083). Defaults to full access.
    */
   readonly browserToolsAvailable?: boolean;
+  readonly terminalToolsAvailable?: boolean;
   readonly capabilities?: ReadonlySet<McpInvocationContext.McpCapability>;
 }
 
@@ -159,6 +160,7 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           endpoint,
           authorizationHeader: `Bearer ${rawToken}`,
           browserToolsAvailable: scope.capabilities.has("preview"),
+          terminalToolsAvailable: request.terminalToolsAvailable ?? true,
           capabilities: scope.capabilities,
         },
       };

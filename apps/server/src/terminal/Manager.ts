@@ -6,6 +6,9 @@
  *
  * @module TerminalManager
  */
+import * as Crypto from "effect/Crypto";
+import * as Deferred from "effect/Deferred";
+import { AgentOutput } from "./AgentOutput.ts";
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import {
   DEFAULT_TERMINAL_ID,
@@ -150,12 +153,32 @@ class TerminalProcessSignalError extends Schema.TaggedError<TerminalProcessSigna
 export class TerminalManager extends Context.Service<
   TerminalManager,
   {
-    /**
-     * Open or attach to a terminal session.
-     *
-     * Reuses an existing session for the same thread/terminal id and restores
-     * persisted history on first open.
-     */
+    /** Run a command in a newly allocated agent PTY, optionally waiting for its exit. */
+    readonly runAgent: (
+      input: Omit<TerminalOpenInput, "terminalId"> & {
+        readonly command: string;
+        readonly background?: boolean;
+        readonly timeoutMs?: number;
+      },
+    ) => Effect.Effect<AgentTerminalResult, TerminalError>;
+    readonly waitAgent: (input: {
+      readonly threadId: string;
+      readonly terminalId: string;
+      readonly timeoutMs?: number;
+    }) => Effect.Effect<AgentTerminalResult, TerminalError>;
+    readonly readAgent: (input: {
+      readonly threadId: string;
+      readonly terminalId: string;
+      readonly sinceOffset?: number;
+    }) => Effect.Effect<AgentTerminalResult, TerminalError>;
+    readonly listAgents: (threadId: string) => Effect.Effect<ReadonlyArray<TerminalSummary>>;
+    readonly killAgent: (input: {
+      readonly threadId: string;
+      readonly terminalId: string;
+    }) => Effect.Effect<void, TerminalError>;
+    readonly stopAgents: (threadId: string, before?: string) => Effect.Effect<void, TerminalError>;
+
+    /** Open or attach to a user terminal; agent ids are reserved for runAgent. */
     readonly open: (
       input: TerminalOpenInput,
     ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>;
@@ -279,7 +302,27 @@ export interface TerminalStartInput extends TerminalOpenInput {
   rows: number;
 }
 
+export interface AgentTerminalResult {
+  readonly terminalId: string;
+  readonly status: TerminalSessionStatus;
+  readonly exitCode: number | null;
+  readonly timedOut: boolean;
+  readonly output: string;
+  readonly nextOffset: number;
+  readonly truncated: boolean;
+}
+
+interface AgentTerminalOpenInput extends TerminalOpenInput {
+  readonly agentCommand?: string;
+}
+
 interface TerminalSessionState {
+  agent?: {
+    readonly command: string;
+    readonly output: AgentOutput;
+    readonly startedAt: string;
+    timedOut: boolean;
+  };
   threadId: string;
   terminalId: string;
   cwd: string;
@@ -366,6 +409,8 @@ function normalizeChildCommandName(raw: string, platform: NodeJS.Platform): stri
 }
 
 function terminalWireLabel(session: TerminalSessionState): string {
+  if (session.agent)
+    return truncateTerminalWireLabel(`agent · ${session.agent.command.replace(/\s+/g, " ")}`);
   if (session.hasRunningSubprocess && session.childCommandLabel) {
     const trimmed = session.childCommandLabel.trim();
     if (trimmed.length > 0) {
@@ -1471,6 +1516,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const crypto = yield* Crypto.Crypto;
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
 
@@ -2041,6 +2087,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           session.pendingHistoryControlSequence = sanitized.pendingControlSequence;
           if (sanitized.visibleText.length > 0) {
             session.history.append(sanitized.visibleText);
+            session.agent?.output.append(sanitized.visibleText);
           }
           const eventStamp = advanceEventSequence(session);
 
@@ -2103,6 +2150,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         continue;
       }
 
+      if (session.agent && action.process) {
+        // The command shell exited; do not leave its background children behind.
+        yield* Effect.sync(() => action.process?.kill("SIGKILL"));
+      }
       yield* clearKillFiber(action.process);
       yield* unregisterTerminal({
         threadId: action.threadId,
@@ -2184,7 +2235,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       args: candidate.args ?? [],
       name: "terminal",
       env: spawnEnv,
-      survivesRestart: true,
+      survivesRestart: session.agent === undefined,
     });
     const attempt = yield* Effect.result(
       options.ptyAdapter.spawn({
@@ -2250,7 +2301,17 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
         Effect.andThen(
           Effect.gen(function* () {
-            const shellCandidates = resolveShellCandidates(shellResolver, platform, baseEnv);
+            const shellCandidates = session.agent
+              ? [
+                  {
+                    shell: platform === "win32" ? (baseEnv.ComSpec ?? "cmd.exe") : "/bin/sh",
+                    args:
+                      platform === "win32"
+                        ? ["/d", "/s", "/c", session.agent.command]
+                        : ["-c", session.agent.command],
+                  },
+                ]
+              : resolveShellCandidates(shellResolver, platform, baseEnv);
             const terminalEnv = createTerminalSpawnEnv(
               baseEnv,
               session.runtimeEnv,
@@ -2546,6 +2607,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         yield* runKillEscalation(session.process, session.threadId, session.terminalId);
       });
 
+      const pendingKills = yield* readManagerState;
+      yield* Effect.forEach([...pendingKills.killFibers.values()], Fiber.await, {
+        discard: true,
+        concurrency: "unbounded",
+      });
       yield* Effect.forEach(sessions, cleanupSession, {
         concurrency: "unbounded",
         discard: true,
@@ -2554,7 +2620,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   );
 
   const openWithWorkspaceLease = Effect.fn("terminal.openLocked")(function* (
-    input: TerminalOpenInput,
+    input: AgentTerminalOpenInput,
   ) {
     const terminalId = input.terminalId;
     yield* assertValidCwd(input.cwd);
@@ -2562,11 +2628,26 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     const sessionKey = toSessionKey(input.threadId, terminalId);
     const existing = yield* getSession(input.threadId, terminalId);
     if (Option.isNone(existing)) {
+      // A client may retain an agent tab after a server restart. Never turn that
+      // stale id into an interactive shell or replay the original command.
+      if (terminalId.startsWith("agent-") && input.agentCommand === undefined) {
+        return yield* new TerminalSessionLookupError({ threadId: input.threadId, terminalId });
+      }
       yield* flushPersist(input.threadId, terminalId);
       const history = yield* readHistory(input.threadId, terminalId);
       const cols = input.cols ?? DEFAULT_OPEN_COLS;
       const rows = input.rows ?? DEFAULT_OPEN_ROWS;
       const session: TerminalSessionState = {
+        ...(input.agentCommand === undefined
+          ? {}
+          : {
+              agent: {
+                command: input.agentCommand,
+                output: new AgentOutput(),
+                startedAt: yield* nowIso,
+                timedOut: false,
+              },
+            }),
         threadId: input.threadId,
         terminalId,
         cwd: input.cwd,
@@ -2679,7 +2760,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     return snapshot(liveSession);
   });
 
-  const openLocked = (input: TerminalOpenInput) =>
+  const openLocked = (input: AgentTerminalOpenInput) =>
     withWorkspaceLease(
       path.resolve(input.worktreePath ?? input.cwd),
       openWithWorkspaceLease(input),
@@ -2998,6 +3079,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     Effect.gen(function* () {
       yield* increment(terminalRestartsTotal, { scope: "thread" });
       const terminalId = input.terminalId;
+      if (terminalId.startsWith("agent-")) {
+        return yield* new TerminalSessionLookupError({ threadId: input.threadId, terminalId });
+      }
       yield* assertValidCwd(input.cwd);
 
       const sessionKey = toSessionKey(input.threadId, terminalId);
@@ -3113,6 +3197,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       Effect.gen(function* () {
         const running = (yield* sessionsForThread(input.threadId)).filter(
           (session): session is TerminalSessionState & { pid: number } =>
+            session.agent === undefined &&
             session.status === "running" &&
             Number.isInteger(session.pid) &&
             (input.terminalId === undefined || session.terminalId === input.terminalId),
@@ -3153,7 +3238,114 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       ),
     );
 
+  const readAgent: TerminalManager["Service"]["readAgent"] = Effect.fn(function* (input) {
+    const session = yield* requireSession(input.threadId, input.terminalId);
+    if (!session.agent) return yield* new TerminalSessionLookupError(input);
+    return {
+      terminalId: session.terminalId,
+      status: session.status,
+      exitCode: session.exitCode,
+      timedOut: session.agent.timedOut,
+      ...session.agent.output.read(input.sinceOffset),
+    };
+  });
+
+  const killAgent: TerminalManager["Service"]["killAgent"] = (input) =>
+    withThreadLock(
+      input.threadId,
+      Effect.gen(function* () {
+        const session = yield* requireSession(input.threadId, input.terminalId);
+        if (!session.agent) return yield* new TerminalSessionLookupError(input);
+        const process = session.process;
+        yield* stopProcess(session);
+        if (process) {
+          yield* clearKillFiber(process);
+          yield* runKillEscalation(process, input.threadId, input.terminalId);
+        }
+        yield* publishEvent({
+          type: "exited",
+          threadId: input.threadId,
+          terminalId: input.terminalId,
+          exitCode: session.exitCode,
+          exitSignal: session.exitSignal,
+        });
+      }),
+    );
+
+  const listAgents: TerminalManager["Service"]["listAgents"] = (threadId) =>
+    sessionsForThread(threadId).pipe(
+      Effect.map((sessions) =>
+        sessions.filter((session) => session.agent !== undefined).map(summary),
+      ),
+    );
+
+  const stopAgents: TerminalManager["Service"]["stopAgents"] = (threadId, before) =>
+    sessionsForThread(threadId).pipe(
+      Effect.flatMap((sessions) =>
+        Effect.forEach(
+          sessions.filter(
+            (session) =>
+              session.agent !== undefined &&
+              (before === undefined || session.agent.startedAt <= before),
+          ),
+          (session) => killAgent({ threadId, terminalId: session.terminalId }),
+          { discard: true },
+        ),
+      ),
+    );
+
+  const waitAgent: TerminalManager["Service"]["waitAgent"] = Effect.fn(function* (input) {
+    const exited = yield* Deferred.make<void>();
+    const unsubscribe = yield* subscribe((event) =>
+      event.threadId === input.threadId &&
+      event.terminalId === input.terminalId &&
+      (event.type === "exited" || event.type === "closed")
+        ? Deferred.succeed(exited, undefined).pipe(Effect.asVoid)
+        : Effect.void,
+    );
+    return yield* Effect.gen(function* () {
+      const initial = yield* readAgent(input);
+      if (initial.status === "running") {
+        const completed = yield* Deferred.await(exited).pipe(
+          Effect.timeoutOption(Math.min(600_000, Math.max(1, input.timeoutMs ?? 120_000))),
+        );
+        if (Option.isNone(completed)) {
+          const session = yield* requireSession(input.threadId, input.terminalId);
+          if (session.agent) session.agent.timedOut = true;
+          yield* killAgent(input);
+        }
+      }
+      return yield* readAgent(input);
+    }).pipe(
+      Effect.ensuring(Effect.sync(unsubscribe)),
+      Effect.onInterrupt(() => killAgent(input).pipe(Effect.ignore)),
+    );
+  });
+
+  const runAgent: TerminalManager["Service"]["runAgent"] = Effect.fn(function* (input) {
+    const terminalId = `agent-${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}`;
+    const identity = { threadId: input.threadId, terminalId };
+    yield* withThreadLock(
+      input.threadId,
+      resolveLaunchInputEnvironment({ ...input, terminalId }).pipe(
+        Effect.flatMap((resolved) => openLocked({ ...resolved, agentCommand: input.command })),
+      ),
+    );
+    return yield* input.background
+      ? readAgent(identity)
+      : waitAgent({
+          ...identity,
+          ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        });
+  });
+
   return TerminalManager.of({
+    runAgent,
+    waitAgent,
+    readAgent,
+    listAgents,
+    killAgent,
+    stopAgents,
     open,
     attachStream,
     observeStream,

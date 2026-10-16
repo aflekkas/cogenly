@@ -20,6 +20,7 @@ import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
 import { EnvironmentToolkit } from "../../mcp/toolkits/environment/tools.ts";
 import { ProjectToolkit } from "../../mcp/toolkits/project/tools.ts";
 import { WorktreeToolkit } from "../../mcp/toolkits/worktree/tools.ts";
+import { TerminalToolkit } from "../../mcp/toolkits/terminal/tools.ts";
 import { ThreadToolkit } from "../../mcp/toolkits/thread/tools.ts";
 import { OrchestratorToolkit } from "../../mcp/toolkits/orchestrator/tools.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
@@ -405,6 +406,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     assert.deepEqual(overrides, {
       allowedTools: [ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD],
       mcpServers: T3_MCP_SERVERS,
+      disallowedTools: ["Bash", "BashOutput", "KillShell", "TaskOutput", "TaskStop"],
     });
   });
 
@@ -420,6 +422,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     assert.deepEqual(overrides, {
       allowedTools: ["Read", "mcp__cogenly__*"],
       mcpServers: T3_MCP_SERVERS,
+      disallowedTools: ["Bash", "BashOutput", "KillShell", "TaskOutput", "TaskStop"],
     });
   });
 
@@ -438,6 +441,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
         ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
       ],
       mcpServers: T3_MCP_SERVERS,
+      disallowedTools: ["Bash", "BashOutput", "KillShell", "TaskOutput", "TaskStop"],
     });
     assert.isFalse(overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD));
   });
@@ -511,9 +515,22 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     assert.notEqual(rotatedKey, initialKey);
   });
 
+  it("restores native shell tools when agent terminals are disabled", () => {
+    const mcpSession = {
+      ...mcpSessionFor(ThreadId.make("disabled")),
+      terminalToolsAvailable: false,
+    };
+    const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
+      mcpSession,
+      readOnlySandbox: false,
+    });
+    assert.isUndefined(overrides.disallowedTools);
+  });
+
   it("matches the read-only allowlist to the orchestrator toolkit annotations", () => {
     const readOnlyToolNames = [
       ...Object.values(OrchestratorToolkit.tools),
+      ...Object.values(TerminalToolkit.tools),
       ...Object.values(ThreadToolkit.tools),
       ...Object.values(WorktreeToolkit.tools),
       ...Object.values(ProjectToolkit.tools),

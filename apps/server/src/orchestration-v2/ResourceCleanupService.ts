@@ -21,7 +21,11 @@ export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupErro
 ) {}
 
 export class ResourceCleanupService extends Context.Reference<{
-  readonly cleanupTerminals: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
+  readonly cleanupTerminals: (
+    threadId: string,
+    agentOnly?: boolean,
+    before?: string,
+  ) => Effect.Effect<void, ResourceCleanupError>;
   /** Closes every preview session of the thread; server browser tabs end with them. */
   readonly cleanupPreviews: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
   readonly cleanupAttachments: (
@@ -43,14 +47,17 @@ export const layer = Layer.effect(
     const fileSystem = yield* FileSystem.FileSystem;
     const config = yield* ServerConfig.ServerConfig;
     return {
-      cleanupTerminals: (threadId: string) =>
-        terminals
-          .close({ threadId, deleteHistory: true })
-          .pipe(
-            Effect.mapError(
-              (cause) => new ResourceCleanupError({ operation: "terminal", threadId, cause }),
-            ),
+      cleanupTerminals: (threadId: string, agentOnly = false, before?: string) =>
+        (agentOnly
+          ? terminals.stopAgents(threadId, before)
+          : terminals
+              .stopAgents(threadId)
+              .pipe(Effect.andThen(terminals.close({ threadId, deleteHistory: true })))
+        ).pipe(
+          Effect.mapError(
+            (cause) => new ResourceCleanupError({ operation: "terminal", threadId, cause }),
           ),
+        ),
       cleanupPreviews: (threadId: string) =>
         previews
           .close({ threadId: ThreadId.make(threadId) })

@@ -96,6 +96,7 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("terminal.cleanup"),
+    agentOnly: Schema.optional(Schema.Boolean),
   }),
   /** Closes a deleted thread's preview sessions, ending their server browser tabs. */
   Schema.Struct({

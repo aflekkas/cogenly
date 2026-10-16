@@ -32,6 +32,9 @@ import { ProjectToolkit } from "./toolkits/project/tools.ts";
 import * as ProjectHandlers from "./toolkits/project/handlers.ts";
 import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
 import * as AttachmentHandlers from "./toolkits/attachment/handlers.ts";
+import { TerminalToolkit } from "./toolkits/terminal/tools.ts";
+import * as TerminalHandlers from "./toolkits/terminal/handlers.ts";
+import * as TerminalMcpService from "./TerminalMcpService.ts";
 import { ThreadToolkit } from "./toolkits/thread/tools.ts";
 import * as ThreadHandlers from "./toolkits/thread/handlers.ts";
 import * as ThreadMetadataMcpService from "./ThreadMetadataMcpService.ts";
@@ -875,6 +878,10 @@ export const layerMcpTransport = McpServer.layerHttp({
 export const layer = Layer.mergeAll(
   layerPreviewToolkit,
   layerOrchestratorToolkit,
+  toolkitRegistration(TerminalToolkit, TerminalHandlers.layer).pipe(
+    Layer.provide(TerminalMcpService.layer),
+    Layer.provide(ThreadCommandExecutor.layer),
+  ),
   layerThreadToolkit,
   layerAttachmentToolkit,
   layerProjectRegistration,

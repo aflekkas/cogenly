@@ -11,6 +11,7 @@ import {
   type TerminalSessionState,
 } from "@t3tools/client-runtime/state/terminal";
 import {
+  Bot,
   Plus,
   Square,
   SquareSplitHorizontal,
@@ -450,7 +451,7 @@ export function TerminalViewport({
   const keybindingsRef = useRef(keybindings);
   const runtimeEnvKey = useMemo(() => runtimeEnvSignature(runtimeEnv), [runtimeEnv]);
   const handleSessionExited = useEffectEvent(() => {
-    if (hasTerminalWriteAccess()) onSessionExited();
+    if (!terminalId.startsWith("agent-") && hasTerminalWriteAccess()) onSessionExited();
   });
   const handleAddTerminalContext = useEffectEvent((selection: TerminalContextSelection) => {
     onAddTerminalContext?.(selection);
@@ -1625,6 +1626,15 @@ export default function ThreadTerminalDrawer({
         </div>
       )}
 
+      {!hasTerminalSidebar && resolvedActiveTerminalId.startsWith("agent-") && (
+        <div className="flex h-7 shrink-0 items-center gap-1 border-b border-border/70 px-2 pr-28 text-xs text-muted-foreground">
+          <Bot className="size-3 shrink-0" />
+          <span className="truncate">
+            {terminalLabelById.get(resolvedActiveTerminalId) ?? "agent"}
+          </span>
+        </div>
+      )}
+
       <div className="min-h-0 w-full flex-1">
         <div
           className={cn(
@@ -1800,7 +1810,11 @@ export default function ThreadTerminalDrawer({
                           }`}
                           onClick={() => onActiveTerminalChange(groupActiveTerminalId)}
                         >
-                          <GroupIcon className="size-3 shrink-0" />
+                          {groupActiveTerminalId.startsWith("agent-") ? (
+                            <Bot className="size-3 shrink-0" />
+                          ) : (
+                            <GroupIcon className="size-3 shrink-0" />
+                          )}
                           <span className="min-w-0 flex-1 truncate text-left">{groupLabel}</span>
                           <span className="text-muted-foreground/70 text-3xs tabular-nums">
                             {terminalCount}
@@ -1831,8 +1845,14 @@ export default function ThreadTerminalDrawer({
                                   onClick={() => confirmCloseTerminal(terminalId)}
                                   tooltip={closeTerminalLabel}
                                 >
-                                  <TerminalSquare className="size-3 shrink-0" />
+                                  {terminalId.startsWith("agent-") ? (
+                                    <Bot className="size-3 shrink-0" />
+                                  ) : (
+                                    <TerminalSquare className="size-3 shrink-0" />
+                                  )}
                                 </PanelTabCloseButton>
+                              ) : terminalId.startsWith("agent-") ? (
+                                <Bot className="size-3 shrink-0" />
                               ) : (
                                 <TerminalSquare className="size-3 shrink-0" />
                               )}

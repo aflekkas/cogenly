@@ -1,3 +1,4 @@
+import * as TerminalManager from "../../terminal/Manager.ts";
 import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as DeviceService from "../../device/DeviceService.ts";
@@ -55,6 +56,7 @@ const project = {
   deletedAt: null,
 };
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(TerminalManager.TerminalManager)({ listAgents: () => Effect.succeed([]) }),
   Layer.mock(Orchestrator.OrchestratorV2)({ getThreadShell: () => Effect.succeed(shell) }),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
@@ -146,6 +148,13 @@ const smokeCases = [
     expected: {
       attachmentId: expect.any(String),
     },
+  },
+  {
+    toolkit: "terminal",
+    names: ["terminal_run", "terminal_read", "terminal_write", "terminal_kill", "terminal_list"],
+    tool: "terminal_list",
+    args: {},
+    expected: { terminals: [] },
   },
   {
     toolkit: "worktree",

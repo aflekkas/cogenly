@@ -725,6 +725,7 @@ export function buildCodexTurnStartParams(input: {
   readonly hasT3Mcp?: boolean;
   readonly browserToolsAvailable?: boolean;
   readonly deviceToolsAvailable?: boolean;
+  readonly terminalToolsAvailable?: boolean;
   /** ChatGPT token sharing does not accept service tiers. */
   readonly omitServiceTier?: boolean;
   /** What the thread's MCP Apps want the agent to know (`ui/update-model-context`). */
@@ -770,6 +771,7 @@ export function buildCodexTurnStartParams(input: {
             {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
+              terminal: input.terminalToolsAvailable ?? false,
             },
           )
         : undefined;
@@ -1346,6 +1348,11 @@ export function codexThreadRuntimeParams(input: {
       ...(mcpSession === undefined
         ? {}
         : {
+            // Codex gates both exec_command and write_stdin on ShellTool before UnifiedExec.
+            // https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/spec_plan.rs#L1234-L1260
+            ...(mcpSession.terminalToolsAvailable === false
+              ? {}
+              : { "features.shell_tool": false }),
             mcp_servers: {
               cogenly: {
                 url: mcpSession.endpoint,
@@ -6316,6 +6323,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               hasT3Mcp: mcpSession !== undefined,
               browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
               deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
+              terminalToolsAvailable:
+                mcpSession !== undefined && mcpSession.terminalToolsAvailable !== false,
               omitServiceTier: adapterOptions.resolveRuntime !== undefined,
               ...(turnInput.appContext === undefined ? {} : { appContext: turnInput.appContext }),
             });

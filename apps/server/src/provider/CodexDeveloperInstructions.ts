@@ -14,6 +14,7 @@ The \`cogenly\` MCP server also exposes \`device_*\` tools for iOS Simulators an
 export interface T3CodeToolAvailability {
   readonly browser: boolean;
   readonly device: boolean;
+  readonly terminal?: boolean;
 }
 
 const normalizeAvailability = (
@@ -33,6 +34,9 @@ const toolInstructions = (availability: boolean | T3CodeToolAvailability): strin
   return [
     tools.browser ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS : "",
     tools.device ? T3_CODE_DEVICE_TOOL_INSTRUCTIONS : "",
+    tools.terminal
+      ? "Use the cogenly MCP terminal_run tool for every shell command so the owner sees it live. Native shell tools are disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. Thread settlement kills these terminals and their children."
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");

@@ -29,8 +29,9 @@ export function resolveTerminalSessionLabel(
 }
 
 /**
- * Client-side terminal id allocator. Ids are ALWAYS chosen by the client and sent explicitly
- * on every `terminal.open` / `terminal.attach` call — the server never allocates.
+ * Client-side user terminal id allocator. User ids are chosen by the client and sent
+ * explicitly on every `terminal.open` / `terminal.attach` call. Agent PTYs use server-allocated
+ * `agent-*` ids and do not consume user terminal numbers.
  *
  * Returns the lowest unused `term-N` number. When metadata is unavailable,
  * callers append a UUID so an unseen host session cannot be reused accidentally.

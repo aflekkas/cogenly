@@ -3504,7 +3504,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 // Terminal detaches revoke the thread's MCP credentials; other
                 // detach reasons keep them so a re-attaching provider process
                 // stays authorized.
-                ...(command.type === "thread.archive" ? { revokeMcpCredential: true } : {}),
+                ...(command.type === "thread.archive" || command.type === "thread.settle"
+                  ? { revokeMcpCredential: true }
+                  : {}),
               },
             } satisfies PendingOrchestrationEffectV2;
             yield* Ref.update(effects, (existing) => [...existing, pendingEffect]);
@@ -3513,14 +3515,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
     }
 
-    if (command.type === "thread.archive") {
+    if (command.type === "thread.archive" || command.type === "thread.settle") {
       yield* Ref.update(effects, (existing) => [
         ...existing,
         {
           id: `effect:${command.commandId}:terminal.cleanup`,
           commandId: command.commandId,
           threadId: command.threadId,
-          request: { type: "terminal.cleanup" },
+          request: {
+            type: "terminal.cleanup",
+            ...(command.type === "thread.settle" ? { agentOnly: true } : {}),
+          },
         } satisfies PendingOrchestrationEffectV2,
       ]);
     }

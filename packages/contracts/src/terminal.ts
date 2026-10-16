@@ -30,7 +30,7 @@ export const TerminalThreadInput = Schema.Struct({
 });
 export type TerminalThreadInput = typeof TerminalThreadInput.Type;
 
-/** Terminal ids are ALWAYS chosen by the client and sent explicitly — no server-side allocation. */
+/** User terminal ids are chosen by clients; agent-* ids are allocated by the server. */
 const TerminalSessionInput = Schema.Struct({
   ...TerminalThreadInput.fields,
   terminalId: TerminalIdSchema,

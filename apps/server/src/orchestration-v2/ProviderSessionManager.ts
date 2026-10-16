@@ -496,6 +496,12 @@ export const layerWithOptions = (
                 // same token or the process's tool calls fail auth.
                 const { browser: browserToolsAvailable, device: deviceToolsAvailable } =
                   yield* agentAccessSettings(threadId);
+                const terminalToolsAvailable = Option.isNone(serverSettings)
+                  ? true
+                  : yield* serverSettings.value.getSettings.pipe(
+                      Effect.map((settings) => settings.enableAgentTerminals),
+                      Effect.orElseSucceed(() => false),
+                    );
                 const capabilities = new Set<
                   import("../mcp/McpInvocationContext.ts").McpCapability
                 >(["orchestration", "worktree", "pull-requests"]);
@@ -525,7 +531,8 @@ export const layerWithOptions = (
                     // A flipped browser-access setting must not survive through
                     // credential reuse: rotate so the new scope reflects it.
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
-                    resolved.capabilities.has("device") === deviceToolsAvailable
+                    resolved.capabilities.has("device") === deviceToolsAvailable &&
+                    existing.terminalToolsAvailable === terminalToolsAvailable
                   ) {
                     return { mcpCredentialId: existing.providerSessionId, issued: false };
                   }
@@ -536,6 +543,7 @@ export const layerWithOptions = (
                   threadId,
                   providerInstanceId,
                   browserToolsAvailable,
+                  terminalToolsAvailable,
                   capabilities,
                 });
                 yield* mcpSessions.set(credential.config);

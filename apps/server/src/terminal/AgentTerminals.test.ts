@@ -1,0 +1,239 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Scope from "effect/Scope";
+import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import { TestClock } from "effect/testing";
+import type { PtyProcess, PtyExitEvent } from "@t3tools/shared/PtyAdapter";
+import * as ProcessRunner from "../processRunner.ts";
+import * as Manager from "./Manager.ts";
+import * as NodePtyAdapter from "./NodePtyAdapter.ts";
+import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
+
+class FakePty implements PtyProcess {
+  readonly pid = 12345;
+  readonly signals: Array<string | undefined> = [];
+  readonly input: string[] = [];
+  private data = (_data: string) => {};
+  private exit = (_event: PtyExitEvent) => {};
+  write(data: string) {
+    this.input.push(data);
+  }
+  resize() {}
+  kill(signal?: string) {
+    this.signals.push(signal);
+  }
+  onData(callback: (data: string) => void) {
+    this.data = callback;
+    return () => {
+      this.data = () => {};
+    };
+  }
+  onExit(callback: (event: PtyExitEvent) => void) {
+    this.exit = callback;
+    return () => {
+      this.exit = () => {};
+    };
+  }
+  output(data: string) {
+    this.data(data);
+  }
+  finish(exitCode: number) {
+    this.exit({ exitCode, signal: null });
+  }
+}
+
+const make = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-terminal-test-" });
+  const process = new FakePty();
+  const manager = yield* Manager.makeWithOptions({
+    logsDir: cwd,
+    ptyAdapter: { spawn: () => Effect.succeed(process) },
+    processKillGraceMs: 0,
+    processTable: Effect.succeed([]),
+  });
+  return { cwd, process, manager };
+});
+const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
+    Effect.provide(ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer))),
+    Effect.scoped,
+  );
+
+it.effect(
+  "background run streams output, reads incremental output, writes input and kills only its owner",
+  () =>
+    provide(
+      Effect.gen(function* () {
+        const { cwd, process, manager } = yield* make;
+        const seen = yield* Deferred.make<void>();
+        yield* manager.subscribe((event) =>
+          event.type === "output"
+            ? Deferred.succeed(seen, undefined).pipe(Effect.asVoid)
+            : Effect.void,
+        );
+        const started = yield* manager.runAgent({
+          threadId: "A",
+          command: "echo hello",
+          cwd,
+          background: true,
+        });
+        expect(started.status).toBe("running");
+        expect((yield* manager.listAgents("A"))[0]?.label).toContain("agent · echo hello");
+        expect(yield* manager.listAgents("B")).toEqual([]);
+        expect(
+          (yield* manager
+            .readAgent({ threadId: "B", terminalId: started.terminalId })
+            .pipe(Effect.flip))._tag,
+        ).toBe("TerminalSessionLookupError");
+        expect(
+          (yield* manager
+            .killAgent({ threadId: "B", terminalId: started.terminalId })
+            .pipe(Effect.flip))._tag,
+        ).toBe("TerminalSessionLookupError");
+        expect(process.signals).toEqual([]);
+        process.output("hello\r\n");
+        yield* Deferred.await(seen);
+        const output = yield* manager.readAgent({ threadId: "A", terminalId: started.terminalId });
+        expect(output.output).toBe("hello\r\n");
+        expect(
+          (yield* manager.readAgent({
+            threadId: "A",
+            terminalId: started.terminalId,
+            sinceOffset: output.nextOffset,
+          })).output,
+        ).toBe("");
+        yield* manager.write({ threadId: "A", terminalId: started.terminalId, data: "yes\r" });
+        expect(process.input).toEqual(["yes\r"]);
+        yield* manager.killAgent({ threadId: "A", terminalId: started.terminalId });
+        expect(process.signals).toContain("SIGKILL");
+        expect(
+          (yield* manager.readAgent({ threadId: "A", terminalId: started.terminalId })).status,
+        ).toBe("exited");
+      }),
+    ),
+);
+
+it.effect("foreground timeout kills the command and preserves output", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, process, manager } = yield* make;
+      const started = yield* Deferred.make<void>();
+      yield* manager.subscribe((event) =>
+        event.type === "started"
+          ? Deferred.succeed(started, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      const result = yield* manager
+        .runAgent({ threadId: "A", command: "sleep 1000", cwd, timeoutMs: 50 })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      yield* TestClock.adjust(50);
+      const ended = yield* Fiber.join(result);
+      expect(ended.timedOut).toBe(true);
+      expect(ended.status).toBe("exited");
+      expect(process.signals).toContain("SIGKILL");
+    }),
+  ),
+);
+
+it.live("settle cleanup kills both sleeps in an owned PTY process group", () =>
+  provide(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-terminal-tree-" });
+      const adapter = yield* PtyAdapter.PtyAdapter;
+      const manager = yield* Manager.makeWithOptions({
+        logsDir: cwd,
+        ptyAdapter: adapter,
+        processKillGraceMs: 30,
+        processTable: Effect.succeed([]),
+      });
+      const children = yield* Deferred.make<ReadonlyArray<number>>();
+      let text = "";
+      yield* manager.subscribe((event) =>
+        Effect.gen(function* () {
+          if (event.type !== "output") return;
+          text += event.data;
+          const match = /CHILD:(\d+),(\d+)/u.exec(text);
+          if (match) yield* Deferred.succeed(children, [Number(match[1]), Number(match[2])]);
+        }),
+      );
+      yield* manager.runAgent({
+        threadId: "A",
+        command: "sh -c 'sleep 1000 & a=$!; sleep 1000 & b=$!; echo CHILD:$a,$b; wait'",
+        cwd,
+        background: true,
+      });
+      const pids = yield* Deferred.await(children);
+      for (const pid of pids) expect(() => process.kill(pid, 0)).not.toThrow();
+      yield* manager.stopAgents("A");
+      for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+    }).pipe(Effect.provide(NodePtyAdapter.layer)),
+  ),
+);
+
+it.effect("foreground returns exit status and bounded head/tail output", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, process, manager } = yield* make;
+      const started = yield* Deferred.make<void>();
+      yield* manager.subscribe((event) =>
+        event.type === "started"
+          ? Deferred.succeed(started, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      const result = yield* manager
+        .runAgent({ threadId: "A", command: "produce-output", cwd })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      process.output("H".repeat(8_000) + "X".repeat(100_000) + "T".repeat(24_000));
+      process.finish(7);
+      const ended = yield* Fiber.join(result);
+      expect(ended.exitCode).toBe(7);
+      expect(ended.timedOut).toBe(false);
+      expect(ended.output.startsWith("H".repeat(8_000))).toBe(true);
+      expect(ended.output.endsWith("T".repeat(24_000))).toBe(true);
+      expect(ended.output).toContain("100000 characters omitted");
+    }),
+  ),
+);
+
+it.effect("shutdown kills active agent PTYs and completes pending group cleanup", () =>
+  provide(
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const { cwd, process, manager } = yield* make.pipe(Effect.provideService(Scope.Scope, scope));
+      yield* manager.runAgent({ threadId: "A", command: "sleep 1000", cwd, background: true });
+      yield* Scope.close(scope, Exit.void);
+      expect(process.signals).toContain("SIGTERM");
+      expect(process.signals).toContain("SIGKILL");
+    }),
+  ),
+);
+
+it.effect("stale agent tabs cannot spawn shells on attach or restart after a server restart", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, process, manager } = yield* make;
+      const identity = { threadId: "A", terminalId: "agent-stale" };
+      expect((yield* manager.open({ ...identity, cwd }).pipe(Effect.flip))._tag).toBe(
+        "TerminalSessionLookupError",
+      );
+      expect(
+        (yield* manager.attachStream({ ...identity, cwd }, () => Effect.void).pipe(Effect.flip))
+          ._tag,
+      ).toBe("TerminalSessionLookupError");
+      expect(
+        (yield* manager.restart({ ...identity, cwd, cols: 80, rows: 24 }).pipe(Effect.flip))._tag,
+      ).toBe("TerminalSessionLookupError");
+      expect(yield* manager.listAgents("A")).toEqual([]);
+      expect(process.signals).toEqual([]);
+    }),
+  ),
+);
