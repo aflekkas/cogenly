@@ -48,4 +48,4 @@ Useful checks: `vp run typecheck`, `vp run lint`, `vp run test`.
 
 ## Credits
 
-Cogenly started as a fork of [T3 Code](https://github.com/pingdotgg/t3code) (MIT) and is now developed independently. The agent faces use [bloub](https://github.com/jeremy-prt/bloub) (MIT). See [LICENSE](./LICENSE) and the third-party notices for details.
+Cogenly started as a fork of [T3 Code](https://github.com/pingdotgg/t3code) (MIT) and is now developed independently. The agent faces use [bloub](https://github.com/jeremy-prt/bloub) (MIT). The sidebar and navigation-rail design is inspired by [Dominik Scholz](https://x.com/dom_scholz)'s T3 Code redesign. See [LICENSE](./LICENSE) and the third-party notices for details.
