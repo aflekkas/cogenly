@@ -9,6 +9,7 @@ import {
   groupAgentContacts,
   modelSwitches,
   modelDisplayName,
+  resolveAgentModelStatus,
 } from "./agents.logic";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -176,5 +177,39 @@ describe("model switches", () => {
     expect(modelDisplayName(models, claude)).toBe("Claude Opus 5.5");
     expect(modelDisplayName(models, codex)).toBe("GPT-6");
     expect(modelDisplayName(models, { ...codex, model: "gpt-x" })).toBe("gpt-x");
+  });
+});
+
+describe("model availability", () => {
+  const codex = {
+    instanceId: "codex",
+    driver: "codex",
+    enabled: true,
+    models: [{ slug: "gpt-6.1-sol" }, { slug: "gpt-6-astra" }],
+  };
+  const pick = (model: string, instanceId = "codex") => ({
+    instanceId: ProviderInstanceId.make(instanceId),
+    model,
+  });
+  it("flags a model missing from its provider's live catalog", () => {
+    expect(resolveAgentModelStatus([codex], pick("gpt-5.4"))).toEqual({
+      status: "unavailable",
+      providerName: "Codex",
+    });
+    expect(resolveAgentModelStatus([codex], pick("gpt-6-astra")).status).toBe("available");
+  });
+  it("flags a missing or disabled provider instance", () => {
+    expect(resolveAgentModelStatus([codex], pick("claude-opus-5-5", "claudeAgent")).status).toBe(
+      "unavailable",
+    );
+    expect(
+      resolveAgentModelStatus([{ ...codex, enabled: false }], pick("gpt-6-astra")).status,
+    ).toBe("unavailable");
+  });
+  it("waits while the catalog loads or a provider is still probing", () => {
+    expect(resolveAgentModelStatus(undefined, pick("gpt-5.4")).status).toBe("unknown");
+    expect(resolveAgentModelStatus([{ ...codex, models: [] }], pick("gpt-5.4")).status).toBe(
+      "unknown",
+    );
   });
 });

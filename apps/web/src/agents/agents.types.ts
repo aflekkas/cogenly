@@ -31,8 +31,9 @@ export interface AgentMessage {
   delivery?: "sending" | "delivered" | "queued" | "read" | "failed" | "interrupted";
   source?: { name: string; threadId: ThreadId };
   /** The model an owner text went to; drives the "Switched to …" lines. */
-  model?: Pick<ModelSelection, "instanceId" | "model">;
+  model?: AgentModelRef;
 }
+export type AgentModelRef = Pick<ModelSelection, "instanceId" | "model">;
 export interface AgentRequest {
   id: string;
   threadId?: ThreadId;
@@ -80,5 +81,9 @@ export interface AgentModelControlsProps {
   agent: AgentContact;
   selection: ModelSelection;
   disabled: boolean;
+  /** The saved model is missing from the catalog or its provider is off. */
+  unavailable: boolean;
+  pickerOpen: boolean;
+  onPickerOpenChange: (open: boolean) => void;
   onChange: (selection: ModelSelection) => void;
 }

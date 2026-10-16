@@ -293,7 +293,11 @@ function AgentDetailsContent({
                 <DetailRow
                   icon={BotIcon}
                   label="Model"
-                  value={modelDisplayName(models, agent.modelSelection)}
+                  value={
+                    client.modelStatus?.(agent, agent.modelSelection).status === "unavailable"
+                      ? `${agent.modelSelection.model} · unavailable`
+                      : modelDisplayName(models, agent.modelSelection)
+                  }
                   trailing={chevron}
                   disabled={pending}
                 />

@@ -14,6 +14,7 @@ import type {
   AgentMemory,
   AgentModelControlsProps,
   AgentModelOption,
+  AgentModelRef,
   AgentTrigger,
 } from "./agents.types";
 import {
@@ -22,6 +23,8 @@ import {
   sortAgentContacts,
   messageDelivery,
   reconcileAgentMessages,
+  resolveAgentModelStatus,
+  type AgentModelStatus,
 } from "./agents.logic";
 
 export class AgentCreatedWithoutTriggerError extends Error {
@@ -71,6 +74,8 @@ export interface AgentsClient {
   loadEarlier?: (agent: AgentContact) => Promise<void>;
   canWrite?: (environmentId: EnvironmentId) => boolean;
   openWork: (agent: AgentContact, threadId: ThreadId) => void;
+  /** Whether a model can run on the agent's environment; absent where there is no catalog. */
+  modelStatus?: (agent: AgentContact, model: AgentModelRef) => AgentModelStatus;
   /** Model and effort pickers from the live provider catalog; absent where there is none. */
   ModelControls?: ComponentType<AgentModelControlsProps>;
 }
@@ -510,6 +515,8 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           params: { environmentId: agent.environmentId, threadId },
         });
       },
+      modelStatus: (agent, model) =>
+        resolveAgentModelStatus(configs.get(agent.environmentId)?.providers, model),
       ModelControls: LiveAgentModelControls,
     }),
     [
@@ -527,6 +534,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       runTask,
       navigate,
       loadEarlier,
+      configs,
     ],
   );
   return (
@@ -668,7 +676,15 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
 }
 
 /** The chat composer's own pickers over the same live catalog, limited to Claude and Codex. */
-function LiveAgentModelControls({ agent, selection, disabled, onChange }: AgentModelControlsProps) {
+function LiveAgentModelControls({
+  agent,
+  selection,
+  disabled,
+  unavailable,
+  pickerOpen,
+  onPickerOpenChange,
+  onChange,
+}: AgentModelControlsProps) {
   const settings = useEnvironmentSettings(agent.environmentId);
   const providers =
     useAtomValue(serverEnvironment.providersValueAtom(agent.environmentId)) ??
@@ -700,12 +716,16 @@ function LiveAgentModelControls({ agent, selection, disabled, onChange }: AgentM
         lockedProvider={null}
         instanceEntries={instanceEntries}
         modelOptionsByInstance={modelOptionsByInstance}
+        // Without this the picker would name the catalog's first model instead.
+        {...(unavailable ? { triggerLabel: `${selection.model} · unavailable` } : {})}
+        open={pickerOpen}
+        onOpenChange={onPickerOpenChange}
         onInstanceModelChange={(instanceId, model) => {
           if (instanceId !== selection.instanceId || model !== selection.model)
             onChange({ instanceId, model });
         }}
       />
-      {entry && (
+      {entry && !unavailable && (
         <>
           <ComposerControlSeparator />
           <TraitsPicker

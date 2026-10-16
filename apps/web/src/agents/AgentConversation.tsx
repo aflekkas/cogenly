@@ -4,11 +4,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
 import { useMessageMotion } from "./useMessageMotion";
-import { conversationRows, modelDisplayName, modelSwitches } from "./agents.logic";
+import {
+  conversationRows,
+  modelDisplayName,
+  modelSwitches,
+  type AgentModelStatus,
+} from "./agents.logic";
 import { useAgents, useAgentsClient } from "./agentsClient";
 import { AgentComposer } from "./AgentComposer";
 import { AgentDetails } from "./AgentDetails";
-import type { AgentContact, AgentRequest } from "./agents.types";
+import type { AgentContact, AgentModelRef, AgentRequest } from "./agents.types";
 
 export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBack?: () => void }) {
   const client = useAgentsClient();
@@ -17,6 +22,10 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
   const [error, setError] = useState<string | null>(null);
   const { models } = useAgents();
   const detailsAnchor = useRef<HTMLButtonElement>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const modelStatus = (model: AgentModelRef) =>
+    client.modelStatus?.(agent, model) ?? { status: "unknown" as const, providerName: "" };
+  const currentModelUnavailable = modelStatus(agent.modelSelection).status === "unavailable";
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
   const busy = agent.state === "thinking" || agent.state === "working";
   const { scroll, onScroll, stopFollowing } = useMessageMotion(agent, busy);
@@ -224,19 +233,16 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
                       role={message.delivery === "failed" ? "alert" : undefined}
                     >
                       {message.delivery === "failed" || message.delivery === "interrupted" ? (
-                        <>
-                          {message.delivery === "failed"
-                            ? `Couldn't reach ${agent.modelSelection.model}`
-                            : "Interrupted"}{" "}
-                          —{" "}
-                          <button
-                            type="button"
-                            disabled={sending || !canWrite}
-                            onClick={() => void retry(message.text)}
-                          >
-                            Retry
-                          </button>
-                        </>
+                        <DeliveryFailure
+                          failed={message.delivery === "failed"}
+                          model={message.model ?? agent.modelSelection}
+                          status={modelStatus(message.model ?? agent.modelSelection)}
+                          // Retry only helps once the agent is on a model that can run.
+                          canRetry={!currentModelUnavailable}
+                          disabled={sending || !canWrite}
+                          onRetry={() => void retry(message.text)}
+                          onSwitchModel={() => setPickerOpen(true)}
+                        />
                       ) : message.delivery === "sending" ? (
                         "Sending…"
                       ) : message.delivery === "queued" ? (
@@ -280,6 +286,9 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
           agent={agent}
           canWrite={canWrite}
           sending={sending}
+          modelUnavailable={currentModelUnavailable}
+          pickerOpen={pickerOpen}
+          onPickerOpenChange={setPickerOpen}
           onSend={send}
           onError={setError}
         />
@@ -294,6 +303,44 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
         />
       )}
     </section>
+  );
+}
+function DeliveryFailure({
+  failed,
+  model,
+  status,
+  canRetry,
+  disabled,
+  onRetry,
+  onSwitchModel,
+}: {
+  failed: boolean;
+  model: AgentModelRef;
+  status: AgentModelStatus;
+  canRetry: boolean;
+  disabled: boolean;
+  onRetry: () => void;
+  onSwitchModel: () => void;
+}) {
+  const unavailable = failed && status.status === "unavailable";
+  return (
+    <>
+      {unavailable
+        ? `${model.model} isn't available on ${status.providerName}`
+        : failed
+          ? `Couldn't reach ${model.model}`
+          : "Interrupted"}{" "}
+      —{" "}
+      {canRetry ? (
+        <button type="button" disabled={disabled} onClick={onRetry}>
+          Retry
+        </button>
+      ) : (
+        <button type="button" onClick={onSwitchModel}>
+          Switch model
+        </button>
+      )}
+    </>
   );
 }
 function ModelSwitchLine({ name }: { name: string }) {

@@ -43,7 +43,6 @@ const httpBase = values.http ?? "http://127.0.0.1:4773";
 const token = NodeFS.readFileSync(values["token-file"] ?? "", "utf8").trim();
 const reposDir = values["repos-dir"] ?? "/tmp/t3-dev-seed-repos";
 
-const modelSelection = { instanceId: "codex", model: "gpt-5.4" } as never;
 const id = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 const commandId = () => CommandId.make(id("seed-cmd"));
 
@@ -76,6 +75,22 @@ async function socketUrl(): Promise<string> {
 
 const program = Effect.gen(function* () {
   const client = yield* RpcClient.make(WsRpcGroup);
+  // Seeded threads and tasks use a model the live catalog actually offers: the
+  // provider's default, preferring Codex, so texting a seeded agent can succeed.
+  yield* client[WS_METHODS.serverRefreshProviders]({}).pipe(Effect.ignore);
+  const { providers } = yield* client[WS_METHODS.serverGetConfig]({});
+  const provider = ["codex", "claudeAgent"]
+    .flatMap((driver) =>
+      providers.filter((candidate) => candidate.driver === driver && candidate.enabled),
+    )
+    .find((candidate) => candidate.models.some((model) => !model.isCustom));
+  if (provider === undefined)
+    return yield* Effect.die("Enable a Codex or Claude provider before seeding.");
+  const builtIn = provider.models.filter((model) => !model.isCustom);
+  const modelSelection = {
+    instanceId: provider.instanceId,
+    model: (builtIn.find((model) => model.isDefault) ?? builtIn[0])!.slug,
+  } as never;
   const dispatch = (command: Record<string, unknown>) =>
     client["orchestration.dispatchCommand"]({
       commandId: commandId(),
@@ -211,7 +226,7 @@ const program = Effect.gen(function* () {
     ),
   ];
 
-  return { scratchId, web, api, chatIds, webIds, apiIds, agents };
+  return { modelSelection, scratchId, web, api, chatIds, webIds, apiIds, agents };
 }).pipe(Effect.scoped);
 
 const url = await socketUrl();

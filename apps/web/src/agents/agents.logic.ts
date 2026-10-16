@@ -167,3 +167,43 @@ export function modelDisplayName(models: ReadonlyArray<AgentModelOption>, model:
   const option = models.find((candidate) => sameModel(candidate.selection, model));
   return option?.name ?? option?.label.split(" · ").at(-1) ?? model.model;
 }
+
+export interface AgentModelStatus {
+  status: "available" | "unavailable" | "unknown";
+  providerName: string;
+}
+/**
+ * Whether a saved model can run: its provider instance must be enabled and list the model.
+ * A provider still probing (no models yet) or a catalog not yet loaded stays "unknown".
+ */
+export function resolveAgentModelStatus(
+  providers:
+    | ReadonlyArray<{
+        instanceId: string;
+        enabled: boolean;
+        displayName?: string | undefined;
+        driver: string;
+        models: ReadonlyArray<{ slug: string }>;
+      }>
+    | undefined,
+  selection: ModelRef,
+): AgentModelStatus {
+  const provider = providers?.find((candidate) => candidate.instanceId === selection.instanceId);
+  const providerName =
+    provider?.displayName ??
+    (provider?.driver === "claudeAgent"
+      ? "Claude"
+      : provider?.driver === "codex"
+        ? "Codex"
+        : null) ??
+    selection.instanceId;
+  if (!providers) return { status: "unknown", providerName };
+  if (!provider?.enabled) return { status: "unavailable", providerName };
+  if (provider.models.length === 0) return { status: "unknown", providerName };
+  return {
+    status: provider.models.some((model) => model.slug === selection.model)
+      ? "available"
+      : "unavailable",
+    providerName,
+  };
+}

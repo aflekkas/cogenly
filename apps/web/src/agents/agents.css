@@ -273,6 +273,26 @@
   padding: 18px 0 6px;
   letter-spacing: 0.015em;
 }
+@utility agent-model-notice {
+  display: block;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warning, var(--muted)) 12%, transparent);
+  color: var(--foreground);
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+.agent-model-notice:hover {
+  background: color-mix(in srgb, var(--warning, var(--muted)) 18%, transparent);
+}
+.agent-model-notice:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
 @utility agent-composer-hint {
   text-align: center;
   color: var(--muted-foreground);
