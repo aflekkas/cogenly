@@ -74,7 +74,7 @@ function readInitialThreadSidebarWidth(): number {
   }
 }
 
-function SidebarControl() {
+function SidebarControl({ showButton }: { showButton: boolean }) {
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
@@ -122,6 +122,9 @@ function SidebarControl() {
       unsubscribe?.();
     };
   }, [keybindings, toggleSidebar, usagePageOpen]);
+
+  // The rail draws the toggle itself; this still owns the shortcut.
+  if (!showButton) return null;
 
   return (
     // The right-side layout controls carry mr-px (border compensation inside
@@ -250,6 +253,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       ? getWindowFullscreenState()
       : false;
   });
+  // The toggle joins the rail as its first button unless the macOS traffic
+  // lights own that corner, where it stays fixed beside them.
+  const sidebarToggleInRail = navRailVisible && !(isMacosDesktop && !isWindowFullscreen);
   const windowControlsInsetStyle = (
     isMacosDesktop && !isWindowFullscreen
       ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
@@ -310,7 +316,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       >
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
         <ProjectProjectionRetention />
-        {navRailVisible ? <SidebarNavRail /> : null}
+        {navRailVisible ? <SidebarNavRail showSidebarToggle={sidebarToggleInRail} /> : null}
         <Sidebar
           side="left"
           collapsible="offcanvas"
@@ -348,7 +354,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           <SidebarRail onDoubleClick={resetSidebarWidth} />
         </Sidebar>
         {children}
-        <SidebarControl />
+        <SidebarControl showButton={!sidebarToggleInRail} />
         <NavigationHistoryShortcuts />
         <MainAppLocationTracker />
       </SidebarProvider>

@@ -8,6 +8,7 @@
  * SidebarModeSwitcher), so the rail renders only on wider windows.
  */
 import { useAtomValue } from "@effect/atom-react";
+import { PanelLeft, PanelLeftClose } from "lucide";
 import { ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactElement, useRef } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
@@ -15,9 +16,10 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { isElectron } from "../../env";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { cn } from "../../lib/utils";
+import { MorphIcon } from "../MorphIcon";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { useUiStateStore } from "../../uiStateStore";
-import { useSidebar } from "../ui/sidebar";
+import { useSidebar, useSidebarVisibility } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { SIDEBAR_MODE_ICONS } from "./modes/SidebarModeSwitcher";
@@ -41,18 +43,22 @@ function RailTooltip(props: { label: string; children: ReactElement }) {
   );
 }
 
-export function SidebarNavRail() {
+export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boolean }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const mode = useUiStateStore((store) => store.sidebarMode);
   const setMode = useUiStateStore((store) => store.setSidebarMode);
   const agentsNeedingYou = useNavRailBadgeStore((store) => store.agentsNeedingYou);
-  const { open, setOpen } = useSidebar();
+  const { open, setOpen, toggleSidebar } = useSidebar();
+  const sidebarVisible = useSidebarVisibility();
   const navigate = useNavigate();
   const navigateToMainApp = useNavigateToMainApp();
   const pathname = useLocation({ select: (location) => location.pathname });
   const onUtilityPage = isSidebarUtilityPage(pathname);
   const onSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const onUsage = pathname === "/usage";
+  const toggleShortcut = shortcutLabelForCommand(keybindings, "sidebar.toggle", {
+    context: { usagePageOpen: onUsage },
+  });
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const selectMode = (next: SidebarMode) => {
@@ -83,20 +89,42 @@ export function SidebarNavRail() {
         "border-r border-sidebar-border",
       )}
     >
-      {/* The titlebar row: the fixed sidebar toggle sits over this space. */}
+      {/* The titlebar row. It holds the sidebar toggle, sized and centred like
+          the mode buttons; under macOS traffic lights the fixed toggle sits
+          beside them instead and this row stays empty. */}
       <div
-        aria-hidden
+        aria-hidden={showSidebarToggle ? undefined : true}
         className={cn(
-          "h-[var(--workspace-topbar-height)] w-full shrink-0",
+          "flex h-[var(--workspace-topbar-height)] w-full shrink-0 items-center justify-center",
           isElectron && "drag-region",
         )}
-      />
+      >
+        {showSidebarToggle ? (
+          <RailTooltip label={`Toggle main sidebar${toggleShortcut ? ` (${toggleShortcut})` : ""}`}>
+            <button
+              type="button"
+              aria-label="Toggle main sidebar"
+              aria-pressed={sidebarVisible}
+              data-sidebar="trigger"
+              onClick={toggleSidebar}
+              className={cn(
+                RAIL_BUTTON_CLASS,
+                railButtonTone(false),
+                "[-webkit-app-region:no-drag]",
+              )}
+            >
+              <MorphIcon icon={sidebarVisible ? PanelLeftClose : PanelLeft} />
+            </button>
+          </RailTooltip>
+        ) : null}
+      </div>
       <div
         role="tablist"
         aria-label="Sidebar view"
         aria-orientation="vertical"
         onKeyDown={handleTabsKeyDown}
-        className="flex flex-col items-center gap-1"
+        // The toggle is chrome, not a mode: a wider gap sets it apart.
+        className={cn("flex flex-col items-center gap-1", showSidebarToggle && "mt-1.5")}
       >
         {SIDEBAR_MODES.map((segment, segmentIndex) => {
           // A utility page owns the column, so no mode reads as current there.
