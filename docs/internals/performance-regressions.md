@@ -1,16 +1,12 @@
 # Performance regression checks
 
-The v2 transport has a focused regression command:
+The regular unit suite covers the v2 wire projection and client reducers:
 
 ```bash
-vp run test:perf:v2-wire
+vp run test
 ```
 
-It exercises the real v2 projection and client reducers. This matters because the older
-built-app benchmark fixtures seed v1 orchestration events; running those fixtures against a v2
-client can produce reassuring timings while missing the active transport path.
-
-The v2 checks pin these invariants:
+Keep these transport invariants when changing projections, paging, or synchronization:
 
 - Client cold opens target 75 recent timeline rows and about 1 MiB of encoded data. Required
   control records and the at-least-one-row rule can exceed the byte target; it is not a hard cap.
@@ -51,13 +47,8 @@ The v2 checks pin these invariants:
   Older servers retain projection-based validation. Explicit start sends already skipped that
   read, so this saving does not apply to every client send path.
 
-When changing projection schemas, paging, shell synchronization, or thread state, run this command
-alongside the focused package typechecks and a real-client pass on every affected surface. The
-transport performance fixtures validate contract encoding and compare pre-compression RPC JSON
-for the same synthetic workload, preserving historical application-object counts separately.
-These are neither compressed WebSocket captures nor measurements of server RSS, and command
-fixtures exclude unrelated settings calls and subscription events. Payload budgets belong in
-these tests so regressions fail locally.
+Measure payload sizes and server resource use in a running client when changing these paths.
+The unit suite checks logic; it does not measure compressed WebSocket traffic or server RSS.
 
 ## Event store and startup
 
@@ -75,9 +66,6 @@ work remains.
 Projection verification decodes canonical rows in bounded pages, including shared provider records
 and fork ancestry. Rebuild replays event pages through a fixed sequence within its transaction;
 it must not collect the entire event log before projecting it.
-
-The focused regression coverage lives in `OrchestrationEventStore.sequence.test.ts`,
-`ProjectionRecovery.test.ts`, and the provider runtime recovery tests under `apps/server/src`.
 
 ## Background work and navigation
 
@@ -114,7 +102,3 @@ Failed publications retry the latest state up to five times with exponential del
 relevant event resets the budget; successful publication, disabling, or unlinking cancels retries.
 After the budget is exhausted, publication waits for another relevant event instead of generating
 continuous traffic during an outage.
-
-Focused coverage: `ProjectionSettlement.test.ts`, `ThreadSettlementService.test.ts`,
-`runtimeLayer.test.ts`, `AgentAwarenessRelay.test.ts`, `GitVcsDriverCore.test.ts`,
-`ThreadStatusIndicators.subscriptions.test.tsx`, and `desktopLocal.test.ts`.
