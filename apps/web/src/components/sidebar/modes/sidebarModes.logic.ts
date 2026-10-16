@@ -138,3 +138,36 @@ export function createChatDateGrouper(now: Date) {
     return group;
   };
 }
+
+// Tasks ---------------------------------------------------------------------
+
+export interface TaskProjectGroup<T> {
+  readonly projectKey: string;
+  readonly threads: T[];
+}
+
+/**
+ * One block per project, the project with the most recent activity first.
+ * Rows keep the order they arrive in within their block, and blocks with the
+ * same activity keep their first-seen order.
+ */
+export function groupTasksByProject<
+  T extends { readonly latestUserMessageAt: string | null; readonly updatedAt: string },
+>(threads: ReadonlyArray<T>, projectKeyOf: (thread: T) => string): TaskProjectGroup<T>[] {
+  const groups = new Map<string, { projectKey: string; threads: T[]; latestAt: number }>();
+  for (const thread of threads) {
+    const projectKey = projectKeyOf(thread);
+    const parsed = Date.parse(chatActivityAt(thread));
+    const activityAt = Number.isNaN(parsed) ? 0 : parsed;
+    const group = groups.get(projectKey);
+    if (group) {
+      group.threads.push(thread);
+      group.latestAt = Math.max(group.latestAt, activityAt);
+    } else {
+      groups.set(projectKey, { projectKey, threads: [thread], latestAt: activityAt });
+    }
+  }
+  return [...groups.values()]
+    .toSorted((left, right) => right.latestAt - left.latestAt)
+    .map(({ projectKey, threads: groupThreads }) => ({ projectKey, threads: groupThreads }));
+}

@@ -23,7 +23,7 @@ import { AsyncResult } from "effect/reactivity";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef } from "react";
 
-import { getFallbackThreadIdAfterDelete, pinOrderKeyBetween } from "../components/Sidebar.logic";
+import { getFallbackThreadIdAfterDelete } from "../components/Sidebar.logic";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { environmentSession, readEnvironmentScope } from "../state/session";
 import { terminalEnvironment } from "../state/terminal";
@@ -38,16 +38,12 @@ import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
 import {
   readEnvironmentSupportsAutoSettleOptOut,
-  readEnvironmentSupportsPinning,
-  readEnvironmentSupportsPinReorder,
-  readEnvironmentSupportsActiveReorder,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
   readEnvironmentSupportsVisitedTracking,
   readEnvironmentThreadRefs,
   readProject,
   readThreadShell,
-  readThreadShells,
 } from "../state/entities";
 import { useUiStateStore } from "../uiStateStore";
 import { clearThreadPreviewState } from "../previewStateStore";
@@ -110,18 +106,6 @@ export class ThreadSnoozeBlockedError extends Schema.TaggedError<ThreadSnoozeBlo
   }
 }
 
-/** Key that sorts before every arranged pinned thread, so a fresh pin lands
-    at the top of the run. Undefined (keyless, sorts with the legacy block)
-    when key math can't produce one — pinning must never fail on placement. */
-function topOfPinnedRunOrderKey(): string | undefined {
-  let firstKey: string | null = null;
-  for (const shell of readThreadShells()) {
-    if (shell.pinnedAt == null || shell.pinOrderKey == null) continue;
-    if (firstKey === null || shell.pinOrderKey < firstKey) firstKey = shell.pinOrderKey;
-  }
-  return pinOrderKeyBetween(null, firstKey) ?? undefined;
-}
-
 export class ThreadAutoSettleOptOutUnsupportedError extends Schema.TaggedError<ThreadAutoSettleOptOutUnsupportedError>()(
   "ThreadAutoSettleOptOutUnsupportedError",
   {
@@ -132,62 +116,6 @@ export class ThreadAutoSettleOptOutUnsupportedError extends Schema.TaggedError<T
   override get message(): string {
     return "This environment's server does not support turning auto-settle off per thread yet. Update the server to use it.";
   }
-}
-
-export class ThreadPinningUnsupportedError extends Schema.TaggedError<ThreadPinningUnsupportedError>()(
-  "ThreadPinningUnsupportedError",
-  {
-    environmentId: EnvironmentId,
-    threadId: ThreadId,
-  },
-) {
-  override get message(): string {
-    return "This environment's server does not support pinning yet. Update the server to use Pin.";
-  }
-}
-
-export class ThreadPinReorderUnsupportedError extends Schema.TaggedError<ThreadPinReorderUnsupportedError>()(
-  "ThreadPinReorderUnsupportedError",
-  {
-    environmentId: EnvironmentId,
-    threadId: ThreadId,
-  },
-) {
-  override get message(): string {
-    return "This environment's server does not support reordering pinned threads yet. Update the server to reorder pins.";
-  }
-}
-
-export class ThreadActiveReorderUnsupportedError extends Schema.TaggedError<ThreadActiveReorderUnsupportedError>()(
-  "ThreadActiveReorderUnsupportedError",
-  {
-    environmentId: EnvironmentId,
-    threadId: ThreadId,
-  },
-) {
-  override get message(): string {
-    return "Update this environment's server to reorder active threads.";
-  }
-}
-
-export async function requestThreadUnpinConfirmation(input: {
-  enabled: boolean;
-  title: string;
-  confirm: ((message: string) => Promise<boolean>) | null;
-}) {
-  const { confirm } = input;
-  if (!input.enabled || confirm === null) {
-    return AsyncResult.success(true);
-  }
-
-  return settlePromise(() =>
-    confirm(
-      [
-        `Unpin thread "${input.title}"?`,
-        "This will move the thread out of your pinned section.",
-      ].join("\n"),
-    ),
-  );
 }
 
 /** Report navigation separately so a completed deletion can still finish worktree cleanup. */
@@ -284,19 +212,7 @@ export function useThreadActions() {
   const unsettleThreadMutation = useOrchestrationCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   });
-  const pinThreadMutation = useOrchestrationCommand(threadEnvironment.pin, {
-    reportFailure: false,
-  });
-  const unpinThreadMutation = useOrchestrationCommand(threadEnvironment.unpin, {
-    reportFailure: false,
-  });
   const setThreadAutoSettleMutation = useOrchestrationCommand(threadEnvironment.setAutoSettle, {
-    reportFailure: false,
-  });
-  const reorderPinnedThreadMutation = useOrchestrationCommand(threadEnvironment.reorderPin, {
-    reportFailure: false,
-  });
-  const reorderActiveThreadMutation = useOrchestrationCommand(threadEnvironment.reorderActive, {
     reportFailure: false,
   });
   const snoozeThreadMutation = useOrchestrationCommand(threadEnvironment.snooze, {
@@ -318,7 +234,6 @@ export function useThreadActions() {
   });
   const sidebarThreadSortOrder = useClientSettings((settings) => settings.sidebarThreadSortOrder);
   const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
-  const confirmThreadUnpin = useClientSettings((settings) => settings.confirmThreadUnpin);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
   const clearProjectDraftThreadById = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadById,
@@ -699,74 +614,6 @@ export function useThreadActions() {
     [setThreadAutoSettleMutation],
   );
 
-  const pinThread = useCallback(
-    async (target: ScopedThreadRef, opts: { orderKey?: string } = {}) => {
-      // Version skew: never send the command to a server that predates it.
-      if (!readEnvironmentSupportsPinning(target.environmentId)) {
-        return AsyncResult.failure(
-          Cause.fail(
-            new ThreadPinningUnsupportedError({
-              environmentId: target.environmentId,
-              threadId: target.threadId,
-            }),
-          ),
-        );
-      }
-      // Every pin path places the thread at the top of the arranged run:
-      // callers with a better anchor (the sidebar, which knows the displayed
-      // order) pass their own key; everyone else (chat header, context menus)
-      // gets the default so the same action never places differently.
-      // orderKey rides only to servers that decode it; pre-reorder servers
-      // get the bare pin they understand and the thread stays keyless.
-      const orderKey = readEnvironmentSupportsPinReorder(target.environmentId)
-        ? (opts.orderKey ?? topOfPinnedRunOrderKey())
-        : undefined;
-      ThreadUndo.invalidate("pin", scopedThreadKey(target));
-      return pinThreadMutation({
-        environmentId: target.environmentId,
-        input: {
-          threadId: target.threadId,
-          ...(orderKey !== undefined ? { orderKey } : {}),
-        },
-      });
-    },
-    [pinThreadMutation],
-  );
-
-  const unpinThread = useCallback(
-    async (target: ScopedThreadRef) => {
-      if (!readEnvironmentSupportsPinning(target.environmentId)) {
-        return AsyncResult.failure(
-          Cause.fail(
-            new ThreadPinningUnsupportedError({
-              environmentId: target.environmentId,
-              threadId: target.threadId,
-            }),
-          ),
-        );
-      }
-      const thread = readThreadShell(target);
-      const orderKey = thread?.pinOrderKey ?? undefined;
-      const action = ThreadUndo.begin("pin", scopedThreadKey(target));
-      const result = await unpinThreadMutation({
-        environmentId: target.environmentId,
-        input: { threadId: target.threadId },
-      });
-      if (result._tag === "Success" && action.isCurrent()) {
-        showThreadUndoNotice({
-          action: "Unpinned",
-          claim: action,
-          undo: () => pinThread(target, orderKey === undefined ? {} : { orderKey }),
-          failureTitle: "Failed to undo unpin",
-        });
-      } else {
-        action.finish();
-      }
-      return result;
-    },
-    [pinThread, unpinThreadMutation],
-  );
-
   const settleThread = useCallback(
     async (target: ScopedThreadRef) => {
       // Version skew: never send the command to a server that predates it —
@@ -785,14 +632,11 @@ export function useThreadActions() {
       const wokeAt = resolved
         ? threadWokeAt(resolved.thread, { now: new Date().toISOString() })
         : null;
-      // Settling also drops the pin and the snooze server-side, so Undo
-      // has to put those back as well.
-      const pinOrderKey = resolved?.thread.pinnedAt != null ? resolved.thread.pinOrderKey : null;
-      const wasPinned = resolved?.thread.pinnedAt != null;
+      // Settling also drops the snooze server-side, so Undo has to put it
+      // back as well.
       const snoozedUntil = resolved?.thread.snoozedUntil ?? null;
-      // An older unpin/snooze Undo would re-pin or re-snooze, and the server
-      // treats either as a promotion that un-settles; settling supersedes them.
-      ThreadUndo.invalidate("pin", scopedThreadKey(target));
+      // An older snooze Undo would re-snooze, and the server treats that as
+      // a promotion that un-settles; settling supersedes it.
       ThreadUndo.invalidate("snooze", scopedThreadKey(target));
       const action = ThreadUndo.begin("settle", scopedThreadKey(target));
       const result = await settleThreadMutation({
@@ -812,13 +656,6 @@ export function useThreadActions() {
         undo: async () => {
           const unsettled = await unsettleThread(target);
           if (unsettled._tag !== "Success") return unsettled;
-          if (wasPinned) {
-            const pinned = await pinThread(
-              target,
-              pinOrderKey == null ? {} : { orderKey: pinOrderKey },
-            );
-            if (pinned._tag !== "Success") return pinned;
-          }
           if (snoozedUntil !== null) {
             return snoozeThreadMutation({
               environmentId: target.environmentId,
@@ -833,78 +670,11 @@ export function useThreadActions() {
     },
     [
       markThreadVisited,
-      pinThread,
       resolveThreadTarget,
       settleThreadMutation,
       snoozeThreadMutation,
       unsettleThread,
     ],
-  );
-
-  const confirmAndUnpinThread = useCallback(
-    async (target: ScopedThreadRef) => {
-      const permissionFailure = threadOperationFailure(target);
-      if (permissionFailure) return permissionFailure;
-      const localApi = readLocalApi();
-      const resolved = resolveThreadTarget(target);
-      const confirmationResult = await requestThreadUnpinConfirmation({
-        enabled: confirmThreadUnpin,
-        title: resolved?.thread.title ?? "this thread",
-        confirm: localApi ? (message) => localApi.dialogs.confirm(message) : null,
-      });
-      if (confirmationResult._tag === "Failure") {
-        return confirmationResult;
-      }
-      if (!confirmationResult.value) {
-        return AsyncResult.success(undefined);
-      }
-      return unpinThread(target);
-    },
-    [confirmThreadUnpin, resolveThreadTarget, unpinThread],
-  );
-
-  const reorderPinnedThread = useCallback(
-    async (target: ScopedThreadRef, orderKey: string) => {
-      // Callers (the sidebar drag handler) only enable dragging on
-      // reorder-capable environments; this guard covers races around
-      // capability changes mid-drag.
-      if (!readEnvironmentSupportsPinReorder(target.environmentId)) {
-        return AsyncResult.failure(
-          Cause.fail(
-            new ThreadPinReorderUnsupportedError({
-              environmentId: target.environmentId,
-              threadId: target.threadId,
-            }),
-          ),
-        );
-      }
-      ThreadUndo.invalidate("pin", scopedThreadKey(target));
-      return reorderPinnedThreadMutation({
-        environmentId: target.environmentId,
-        input: { threadId: target.threadId, orderKey },
-      });
-    },
-    [reorderPinnedThreadMutation],
-  );
-
-  const reorderActiveThread = useCallback(
-    async (target: ScopedThreadRef, orderKey: string) => {
-      if (!readEnvironmentSupportsActiveReorder(target.environmentId)) {
-        return AsyncResult.failure(
-          Cause.fail(
-            new ThreadActiveReorderUnsupportedError({
-              environmentId: target.environmentId,
-              threadId: target.threadId,
-            }),
-          ),
-        );
-      }
-      return reorderActiveThreadMutation({
-        environmentId: target.environmentId,
-        input: { threadId: target.threadId, orderKey },
-      });
-    },
-    [reorderActiveThreadMutation],
   );
 
   const unsnoozeThread = useCallback(
@@ -1017,28 +787,18 @@ export function useThreadActions() {
       unsettleThread,
       snoozeThread,
       unsnoozeThread,
-      pinThread,
-      unpinThread,
-      confirmAndUnpinThread,
-      reorderPinnedThread,
-      reorderActiveThread,
       markThreadUnread,
       setThreadAutoSettle,
     }),
     [
       archiveThread,
       confirmAndDeleteThread,
-      confirmAndUnpinThread,
       deleteThread,
       markThreadUnread,
-      pinThread,
-      reorderPinnedThread,
-      reorderActiveThread,
       setThreadAutoSettle,
       settleThread,
       snoozeThread,
       unarchiveThread,
-      unpinThread,
       unsettleThread,
       unsnoozeThread,
     ],

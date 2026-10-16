@@ -1452,25 +1452,35 @@ describe("composer and thread shortcuts", () => {
   );
 
   for (const platform of ["MacIntel", "Win32", "Linux"]) {
-    it.each([
-      ["s", "thread.settle"],
-      ["p", "thread.pin"],
-    ])(`preserves the existing %s shortcut on ${platform}`, (key, command) => {
-      assert.strictEqual(
-        resolveShortcutCommand(
-          event({
-            key,
-            shiftKey: true,
-            metaKey: platform === "MacIntel",
-            ctrlKey: platform !== "MacIntel",
-          }),
-          DEFAULT_RESOLVED_KEYBINDINGS,
-          { platform },
-        ),
-        command,
-      );
-    });
+    it.each([["s", "thread.settle"]])(
+      `preserves the existing %s shortcut on ${platform}`,
+      (key, command) => {
+        assert.strictEqual(
+          resolveShortcutCommand(
+            event({
+              key,
+              shiftKey: true,
+              metaKey: platform === "MacIntel",
+              ctrlKey: platform !== "MacIntel",
+            }),
+            DEFAULT_RESOLVED_KEYBINDINGS,
+            { platform },
+          ),
+          command,
+        );
+      },
+    );
   }
+
+  it("no longer binds mod+shift+p to pinning", () => {
+    assert.isNull(
+      resolveShortcutCommand(
+        event({ key: "p", shiftKey: true, metaKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        { platform: "MacIntel" },
+      ),
+    );
+  });
 
   const altEffortBindings = compileResolvedKeybindingsConfig([
     { key: "mod+alt+e", command: "composer.effort", when: "!terminalFocus" },

@@ -117,7 +117,6 @@ describe("searchSettings", () => {
 
   it("lists thread confirmations in panel order", () => {
     expect(searchSettings("confirmation").map((item) => item.id)).toEqual([
-      "unpin-confirmation",
       "archive-confirmation",
       "delete-confirmation",
     ]);

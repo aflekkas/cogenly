@@ -420,12 +420,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["base directory folder browser path home"],
   },
   {
-    id: "unpin-confirmation",
-    title: "Unpin confirmation",
-    to: "/settings/general",
-    searchTerms: ["ask before thread pinned section"],
-  },
-  {
     id: "archive-confirmation",
     title: "Archive confirmation",
     to: "/settings/general",

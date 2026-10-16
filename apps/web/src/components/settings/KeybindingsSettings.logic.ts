@@ -356,6 +356,9 @@ export function buildWhenVariableOptions(): ReadonlyArray<WhenVariableOption> {
   });
 }
 
+// Still decodable so stored keybindings load, but no longer offered: pinning was removed.
+const RETIRED_KEYBINDING_COMMANDS: ReadonlySet<KeybindingCommand> = new Set(["thread.pin"]);
+
 export function buildKeybindingCommandOptions(
   keybindings: ResolvedKeybindingsConfig,
 ): ReadonlyArray<KeybindingCommandOption> {
@@ -363,6 +366,7 @@ export function buildKeybindingCommandOptions(
   for (const binding of keybindings) {
     commands.add(binding.command);
   }
+  for (const command of RETIRED_KEYBINDING_COMMANDS) commands.delete(command);
   return [...commands].toSorted((left, right) => compareCommands(left, right, commandLabel));
 }
 

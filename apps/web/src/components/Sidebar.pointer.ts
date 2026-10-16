@@ -1,6 +1,4 @@
-import { useLayoutEffect, type PointerEvent as ReactPointerEvent } from "react";
-import { type SensorProps } from "@dnd-kit/core";
-import { getOwnerDocument, getWindow } from "@dnd-kit/utilities";
+import { useLayoutEffect } from "react";
 
 // Search unmounts the drag context while its owning Sidebar remains mounted.
 export function SidebarDragLifecycle({ onUnmount }: { onUnmount: () => void }) {
@@ -12,34 +10,44 @@ type Options = {
   distance: number;
   onAttach: (sensor: SidebarPointerSensor) => void;
   onFinish: (started: boolean) => void;
-  /** Return true to claim the move: the sort gesture then ignores this pointer position. */
+  /** Return true to claim the move: the gesture's own onMove then ignores it. */
   onMove?: (point: { x: number; y: number }) => boolean;
-  /** Return true when the release was consumed elsewhere, so the sort is cancelled. */
+  /** Return true when the release was consumed elsewhere, so the gesture is cancelled. */
   onDrop?: (point: { x: number; y: number }) => boolean;
+};
+
+type Point = { x: number; y: number };
+
+export type SidebarPointerSensorProps = {
+  active: string;
+  event: Event;
+  options: Options;
+  onPending: (
+    active: string,
+    constraint: { distance: number },
+    initial: Point,
+    offset?: Point,
+  ) => void;
+  onStart: (coordinates: Point) => void;
+  onMove: (coordinates: Point) => void;
+  onEnd: () => void;
+  onCancel: () => void;
+  onAbort: (active: string) => void;
 };
 
 /** A sidebar gesture ends on release, cancellation, or loss of its window.
  * Own the listeners so unmounting the list can cancel the sensor too. */
 export class SidebarPointerSensor {
-  static activators = [
-    {
-      eventName: "onPointerDown" as const,
-      handler: ({ nativeEvent }: ReactPointerEvent) =>
-        nativeEvent.isPrimary && nativeEvent.button === 0,
-    },
-  ];
-  autoScrollEnabled = true;
   private phase: "pending" | "dragging" | "finished" = "pending";
   private readonly pointer: PointerEvent;
   private readonly document: Document;
   private readonly window: Window;
 
-  // The settle sweep constructs this sensor directly, outside dnd-kit, so it
-  // takes only the props the gesture reads.
-  constructor(private readonly props: Omit<SensorProps<Options>, "activeNode" | "context">) {
+  constructor(private readonly props: SidebarPointerSensorProps) {
     this.pointer = props.event as PointerEvent;
-    this.document = getOwnerDocument(this.pointer.target);
-    this.window = getWindow(this.pointer.target);
+    const target = this.pointer.target as Node | null;
+    this.document = target?.ownerDocument ?? document;
+    this.window = this.document.defaultView ?? window;
     this.document.addEventListener("pointermove", this.move, { passive: false, capture: true });
     this.document.addEventListener("pointerup", this.end, { capture: true });
     this.document.addEventListener("pointercancel", this.pointerCancel, { capture: true });
@@ -145,8 +153,6 @@ export class SidebarPointerSensor {
       this.document.addEventListener("pointerdown", this.clearClickSuppression, { capture: true });
     }
     try {
-      // Release the sidebar preview before dnd-kit clears its transforms.
-      // Its public end/cancel event can be omitted before its first layout.
       this.props.options.onFinish(!aborted);
     } finally {
       if (aborted) this.props.onAbort(this.props.active);

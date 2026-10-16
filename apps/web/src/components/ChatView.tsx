@@ -1676,7 +1676,7 @@ export default function ChatView(props: ChatViewProps) {
   const canReadTerminal = useEnvironmentScope(environmentId, AuthTerminalReadScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
-  const { settleThread, pinThread, confirmAndUnpinThread } = useThreadActions();
+  const { settleThread } = useThreadActions();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -6618,8 +6618,6 @@ export default function ChatView(props: ChatViewProps) {
 
   const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true;
   const supportsSnooze = serverConfig?.environment.capabilities.threadSnooze === true;
-  const supportsPinning = serverConfig?.environment.capabilities.threadPinning === true;
-  const activeThreadPinned = supportsPinning && activeThreadShell?.pinnedAt != null;
   const activeThreadSnoozed =
     activeThreadShell !== null &&
     supportsSnooze &&
@@ -7556,28 +7554,6 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
-      if (command === "thread.pin") {
-        if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (!isServerThread || !activeThreadRef || !supportsPinning) return;
-        const pinned = activeThreadPinned;
-        void (pinned ? confirmAndUnpinThread(activeThreadRef) : pinThread(activeThreadRef)).then(
-          (result) => {
-            if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
-            const error = squashAtomCommandFailure(result);
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: pinned ? "Failed to unpin thread" : "Failed to pin thread",
-                description: error instanceof Error ? error.message : "An error occurred.",
-              }),
-            );
-          },
-        );
-        return;
-      }
-
       if (command === "terminal.toggle") {
         if (!terminalUiState.terminalOpen && !canReadTerminal && !canOperateTerminal) return;
         event.preventDefault();
@@ -7813,7 +7789,6 @@ export default function ChatView(props: ChatViewProps) {
     canOperateTerminal,
     addTerminalSurfaceStable,
     activeThreadRef,
-    activeThreadPinned,
     activeThreadSettled,
     canInterruptRunningThread,
     terminalUiState.terminalOpen,
@@ -7834,11 +7809,8 @@ export default function ChatView(props: ChatViewProps) {
     serverConfig?.threadFind,
     onInterruptStable,
     onToggleDiffStable,
-    pinThread,
     settleThread,
-    supportsPinning,
     supportsSettlement,
-    confirmAndUnpinThread,
     copyActiveThreadReferenceStable,
     getShortcutContextStable,
     openThreadFindStable,

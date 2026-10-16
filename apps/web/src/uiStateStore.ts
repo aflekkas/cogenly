@@ -390,50 +390,6 @@ export function setProjectExpanded(
   };
 }
 
-export function reorderProjects(
-  state: UiState,
-  currentProjectOrder: readonly string[],
-  draggedProjectIds: readonly string[],
-  targetProjectIds: readonly string[],
-): UiState {
-  if (draggedProjectIds.length === 0) {
-    return state;
-  }
-  const draggedSet = new Set(draggedProjectIds);
-  const targetSet = new Set(targetProjectIds);
-  if (draggedProjectIds.every((id) => targetSet.has(id))) {
-    return state;
-  }
-
-  const originalTargetIndex = currentProjectOrder.findIndex((id) => targetSet.has(id));
-  if (originalTargetIndex < 0) {
-    return state;
-  }
-
-  const projectOrder = [...currentProjectOrder];
-
-  const removed: string[] = [];
-  let draggedBeforeTarget = 0;
-  for (let i = projectOrder.length - 1; i >= 0; i--) {
-    if (draggedSet.has(projectOrder[i]!)) {
-      removed.unshift(projectOrder.splice(i, 1)[0]!);
-      if (i < originalTargetIndex) {
-        draggedBeforeTarget++;
-      }
-    }
-  }
-  if (removed.length === 0) {
-    return state;
-  }
-
-  const insertIndex = originalTargetIndex - Math.max(0, draggedBeforeTarget - 1);
-  projectOrder.splice(insertIndex, 0, ...removed);
-  return {
-    ...state,
-    projectOrder,
-  };
-}
-
 interface UiStateStore extends UiState {
   markThreadVisited: (threadId: string, visitedAt: string) => void;
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
@@ -443,11 +399,6 @@ interface UiStateStore extends UiState {
   setSidebarMode: (mode: SidebarMode) => void;
   setPullRequestMergeMethod: (method: PullRequestMergeMethod) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
-  reorderProjects: (
-    currentProjectOrder: readonly string[],
-    draggedProjectIds: readonly string[],
-    targetProjectIds: readonly string[],
-  ) => void;
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
@@ -467,10 +418,6 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   setPullRequestMergeMethod: (method) => set((state) => setPullRequestMergeMethod(state, method)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
-  reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>
-    set((state) =>
-      reorderProjects(state, currentProjectOrder, draggedProjectIds, targetProjectIds),
-    ),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

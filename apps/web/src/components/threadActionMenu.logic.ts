@@ -10,8 +10,6 @@ export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "filter-by-project"
   | "project-settings"
-  | "pin"
-  | "unpin"
   | "settle"
   | "unsettle"
   | "auto-settle"
@@ -81,7 +79,6 @@ export interface ThreadActionMenuState {
     /** True when the list is already scoped to this thread's project. */
     readonly isActive: boolean;
   } | null;
-  readonly isPinned: boolean;
   readonly isSettled: boolean;
   /** False while the user has turned automatic settlement off for this thread. */
   readonly autoSettleEnabled: boolean;
@@ -95,7 +92,6 @@ export interface ThreadActionMenuState {
     /** Server understands thread.auto-settle.set. */
     readonly autoSettleOptOut: boolean;
     readonly snooze: boolean;
-    readonly pinning: boolean;
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
@@ -132,16 +128,6 @@ export function buildThreadActionMenuItems(
           },
         ]
       : []),
-    ...(state.supports.pinning
-      ? [
-          state.isPinned
-            ? { id: "unpin" as const, label: "Unpin thread", icon: "pin-off" }
-            : { id: "pin" as const, label: "Pin thread", icon: "pin" },
-        ]
-      : []),
-    // Both lifecycle actions stay available on pinned threads: settling
-    // clears the pin ("done" beats "keep on top"), and snoozing hides the
-    // card until wake with the pin intact.
     ...(state.supports.settlement
       ? [
           state.isSettled

@@ -2,14 +2,11 @@ import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import * as DateTime from "effect/DateTime";
 import { deriveActiveWorkStartedAt } from "../session-logic.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import {
-  animateSidebarLayoutChanges,
   archiveSelectedThreadEntries,
   buildBulkTitleRegenerationContextMenuItem,
-  buildBulkUnpinContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
   createThreadJumpHintVisibilityController,
   deleteSelectedThreadEntries,
@@ -26,7 +23,6 @@ import {
   isSidebarThreadWorking,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
-  pinOrderKeyBetween,
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
   resolveProjectStatusIndicator,
@@ -47,9 +43,6 @@ import {
   shouldRecedeSidebarThread,
   sortLogicalProjectsForSidebar,
   sortInboxThreadsByReturn,
-  resolveSidebarDropTarget,
-  planSidebarThreadDrop,
-  sortPinnedThreadsForSidebar,
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
   sortSidebarV2ProjectGroups,
@@ -59,7 +52,6 @@ import {
   type SidebarListItem,
   type SidebarListMarker,
   type SidebarSection,
-  resolveSidebarDropVerb,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { sortSettledThreads } from "@t3tools/client-runtime/state/thread-sort";
@@ -104,46 +96,11 @@ describe("resolveSidebarRowAccessibility", () => {
   });
 });
 
-describe("animateSidebarLayoutChanges", () => {
-  const baseArgs: Parameters<AnimateLayoutChanges>[0] = {
-    active: null,
-    containerId: "pinned-threads",
-    isDragging: false,
-    isSorting: false,
-    id: "thread-a",
-    index: 1,
-    items: ["thread-b", "thread-a"],
-    newIndex: 0,
-    previousItems: ["thread-a", "thread-b"],
-    previousContainerId: "pinned-threads",
-    transition: { duration: 200, easing: "ease" },
-    wasDragging: true,
-  };
-
-  it("does not replay layout movement after the pointer is released", () => {
-    expect(defaultAnimateLayoutChanges(baseArgs)).toBe(true);
-    expect(animateSidebarLayoutChanges(baseArgs)).toBe(false);
-  });
-
-  it("keeps layout movement while the user is sorting", () => {
-    expect(animateSidebarLayoutChanges({ ...baseArgs, isSorting: true })).toBe(true);
-  });
-});
-
 describe("resolveSidebarThreadSection", () => {
-  it("keeps a pinned thread in the pinned shelf", () => {
-    expect(resolveSidebarThreadSection({ snoozed: false, settled: false, pinned: true })).toBe(
-      "pinned",
-    );
-  });
-
-  it("keeps lifecycle shelves authoritative over a stale pin", () => {
-    expect(resolveSidebarThreadSection({ snoozed: true, settled: true, pinned: true })).toBe(
-      "snoozed",
-    );
-    expect(resolveSidebarThreadSection({ snoozed: false, settled: true, pinned: true })).toBe(
-      "settled",
-    );
+  it("lets snooze win over settle and leaves everything else in the inbox", () => {
+    expect(resolveSidebarThreadSection({ snoozed: true, settled: true })).toBe("snoozed");
+    expect(resolveSidebarThreadSection({ snoozed: false, settled: true })).toBe("settled");
+    expect(resolveSidebarThreadSection({ snoozed: false, settled: false })).toBe("active");
   });
 });
 
@@ -293,19 +250,6 @@ describe("archiveSelectedThreadEntries", () => {
       mutationFailure: null,
       followupFailures: [failure],
     });
-  });
-});
-
-describe("buildBulkUnpinContextMenuItem", () => {
-  it("counts only the pinned rows of a mixed selection", () => {
-    expect(buildBulkUnpinContextMenuItem({ pinnedCount: 2 })).toEqual({
-      id: "unpin",
-      label: "Unpin (2)",
-    });
-  });
-
-  it("omits the action when nothing selected is pinned", () => {
-    expect(buildBulkUnpinContextMenuItem({ pinnedCount: 0 })).toBeNull();
   });
 });
 
@@ -1953,90 +1897,6 @@ describe("resolveThreadLastVisitedAt", () => {
   });
 });
 
-describe("pinOrderKeyBetween", () => {
-  it("produces keys that sort between their bounds", () => {
-    const middle = pinOrderKeyBetween(null, null)!;
-    const top = pinOrderKeyBetween(null, middle)!;
-    const bottom = pinOrderKeyBetween(middle, null)!;
-    expect(top < middle).toBe(true);
-    expect(middle < bottom).toBe(true);
-
-    const between = pinOrderKeyBetween(top, middle)!;
-    expect(top < between && between < middle).toBe(true);
-  });
-
-  it("extends into new digits when bounds are adjacent", () => {
-    const key = pinOrderKeyBetween("g", "h")!;
-    expect("g" < key && key < "h").toBe(true);
-  });
-
-  it("stays strictly ordered under repeated top insertion", () => {
-    // Every new pin lands at the head of the arranged run; keys must keep
-    // sorting before the previous head without ever bottoming out.
-    let head: string | null = null;
-    const keys: string[] = [];
-    for (let i = 0; i < 100; i += 1) {
-      const key: string = pinOrderKeyBetween(null, head)!;
-      expect(key).not.toBeNull();
-      if (head !== null) expect(key < head).toBe(true);
-      keys.push(key);
-      head = key;
-    }
-    expect(new Set(keys).size).toBe(100);
-  });
-
-  it("stays strictly ordered under repeated middle insertion", () => {
-    let low = pinOrderKeyBetween(null, null)!;
-    let high = pinOrderKeyBetween(low, null)!;
-    for (let i = 0; i < 100; i += 1) {
-      const key: string = pinOrderKeyBetween(low, high)!;
-      expect(low < key && key < high).toBe(true);
-      if (i % 2 === 0) low = key;
-      else high = key;
-    }
-  });
-
-  it("returns null for corrupt or out-of-order bounds instead of throwing", () => {
-    expect(pinOrderKeyBetween("z", "a")).toBeNull();
-    expect(pinOrderKeyBetween("A!", null)).toBeNull();
-    expect(pinOrderKeyBetween(null, "ma")).toBeNull();
-    expect(pinOrderKeyBetween("m", "m")).toBeNull();
-  });
-});
-
-describe("sortPinnedThreadsForSidebar", () => {
-  const pinnable = (input: { id: string; createdAt: string; pinOrderKey?: string | null }) => ({
-    id: input.id,
-    createdAt: input.createdAt,
-    pinOrderKey: input.pinOrderKey ?? null,
-  });
-
-  it("sorts keyed threads by key ahead of keyless threads in creation order", () => {
-    const sorted = sortPinnedThreadsForSidebar([
-      pinnable({ id: "keyless-old", createdAt: "2026-03-09T08:00:00.000Z" }),
-      pinnable({ id: "second", createdAt: "2026-03-09T09:00:00.000Z", pinOrderKey: "t" }),
-      pinnable({ id: "keyless-new", createdAt: "2026-03-09T12:00:00.000Z" }),
-      pinnable({ id: "first", createdAt: "2026-03-09T07:00:00.000Z", pinOrderKey: "g" }),
-    ]);
-
-    expect(sorted.map((thread) => thread.id)).toEqual([
-      "first",
-      "second",
-      "keyless-new",
-      "keyless-old",
-    ]);
-  });
-
-  it("breaks equal keys by id so raced writes render identically everywhere", () => {
-    const sorted = sortPinnedThreadsForSidebar([
-      pinnable({ id: "b", createdAt: "2026-03-09T10:00:00.000Z", pinOrderKey: "m" }),
-      pinnable({ id: "a", createdAt: "2026-03-09T11:00:00.000Z", pinOrderKey: "m" }),
-    ]);
-
-    expect(sorted.map((thread) => thread.id)).toEqual(["a", "b"]);
-  });
-});
-
 describe("resolveSidebarSweepKeys", () => {
   const ordered = ["a", "b", "c", "d", "blocked"];
   const canSettle = (key: string) => key !== "blocked";
@@ -2224,117 +2084,6 @@ describe("Working shelf (beta)", () => {
           entry === waiting ? Date.parse("2026-03-09T11:05:00.000Z") : undefined,
         ).map((entry) => entry.id),
       ).toEqual(["asks-approval", "finished"]);
-    });
-  });
-
-  describe("dragging", () => {
-    const marker = (name: SidebarListMarker): SidebarListItem => ({ kind: "marker", marker: name });
-    const row = (key: string, section: SidebarSection): SidebarListItem => ({
-      kind: "thread",
-      key,
-      section,
-    });
-    // Pinned p1 | Active a1 a2 | Working w1 | Settled s1
-    const items: readonly SidebarListItem[] = [
-      marker("pinned-header"),
-      row("p1", "pinned"),
-      marker("pinned-divider"),
-      row("a1", "active"),
-      row("a2", "active"),
-      marker("working-header"),
-      row("w1", "working"),
-      marker("settled-header"),
-      row("s1", "settled"),
-    ];
-
-    it("never drops into the Working shelf, and keeps it out of the inbox order", () => {
-      expect(resolveSidebarDropTarget(items, "a1", "w1")).toBeNull();
-      expect(resolveSidebarDropTarget(items, "p1", "a2")).toEqual({
-        section: "active",
-        pinnedOrder: [],
-        activeOrder: ["a1", "a2", "p1"],
-      });
-      expect(resolveSidebarDropVerb("active", "working")).toBeNull();
-    });
-
-    it("arranges the rows it can write when another row's server cannot store an order", () => {
-      // None of the rows has a key yet, so the drop needs keys for its
-      // neighbors too. "offline" sits on a server that cannot take them.
-      const plan = planSidebarThreadDrop({
-        activeKey: "a2",
-        activeSection: "active",
-        target: {
-          section: "active",
-          pinnedOrder: [],
-          activeOrder: ["offline", "a2", "a1"],
-        },
-        pinnedOrder: [],
-        pinnedKeysById: new Map(),
-        activeOrder: ["offline", "a1", "a2"],
-        activeKeysById: new Map([
-          ["offline", null],
-          ["a1", null],
-          ["a2", null],
-        ]),
-        activeReorderableKeys: new Set(["a1", "a2"]),
-      });
-      expect(plan.kind).toBe("move-active");
-      if (plan.kind !== "move-active") return;
-      expect(plan.assignments.map(({ id }) => id)).toEqual(["a2", "a1"]);
-      const [a2, a1] = plan.assignments.map(({ orderKey }) => orderKey);
-      expect(a2! < a1!).toBe(true);
-
-      // A keyed row on that server still sorts by its key, so it stays a bound.
-      const above = planSidebarThreadDrop({
-        activeKey: "a2",
-        activeSection: "active",
-        target: { section: "active", pinnedOrder: [], activeOrder: ["a2", "offline"] },
-        pinnedOrder: [],
-        pinnedKeysById: new Map(),
-        activeOrder: ["offline", "a2"],
-        activeKeysById: new Map([
-          ["offline", "m"],
-          ["a2", "t"],
-        ]),
-        activeReorderableKeys: new Set(["a2"]),
-      });
-      expect(above.kind === "move-active" && above.assignments[0]!.orderKey < "m").toBe(true);
-    });
-
-    it("only changes lifecycle when the inbox is time-ordered", () => {
-      const base = {
-        pinnedOrder: ["p1"],
-        pinnedKeysById: new Map([["p1", "m"]]),
-        activeOrder: ["a1", "a2"],
-        activeKeysById: new Map([
-          ["a1", "f"],
-          ["a2", "t"],
-        ]),
-        activeTimeOrdered: true,
-      };
-      expect(
-        planSidebarThreadDrop({
-          ...base,
-          activeKey: "a1",
-          activeSection: "active",
-          target: { section: "active", pinnedOrder: ["p1"], activeOrder: ["a2", "a1"] },
-        }),
-      ).toEqual({ kind: "none" });
-      expect(
-        planSidebarThreadDrop({
-          ...base,
-          activeKey: "p1",
-          activeSection: "pinned",
-          target: { section: "active", pinnedOrder: [], activeOrder: ["a1", "p1", "a2"] },
-        }),
-      ).toEqual({
-        kind: "move-active",
-        order: null,
-        assignments: [],
-        unpin: true,
-        unsettle: false,
-        unsnooze: false,
-      });
     });
   });
 });

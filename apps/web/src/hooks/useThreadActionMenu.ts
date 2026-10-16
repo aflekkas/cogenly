@@ -27,7 +27,6 @@ import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope } from "../state/session";
 import {
   readEnvironmentSupportsAutoSettleOptOut,
-  readEnvironmentSupportsPinning,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
   readEnvironmentSupportsTitleRegeneration,
@@ -59,7 +58,7 @@ function failureToast(title: string, error: unknown) {
 }
 
 /**
- * The per-thread action menu (pin, settle, snooze, rename, copy, delete…) as
+ * The per-thread action menu (settle, snooze, rename, copy, delete…) as
  * a self-contained hook, for surfaces other than the sidebar row — today the
  * chat header. Renders through the native context-menu bridge and dispatches
  * through the same mutations the sidebar uses.
@@ -93,8 +92,6 @@ export function useThreadActionMenu(input: {
     unsettleThread,
     snoozeThread,
     unsnoozeThread,
-    pinThread,
-    confirmAndUnpinThread,
     setThreadAutoSettle,
     archiveThread,
     deleteThread,
@@ -142,7 +139,6 @@ export function useThreadActionMenu(input: {
           settlement: readEnvironmentSupportsSettlement(threadRef.environmentId),
           autoSettleOptOut: readEnvironmentSupportsAutoSettleOptOut(threadRef.environmentId),
           snooze: readEnvironmentSupportsSnooze(threadRef.environmentId),
-          pinning: readEnvironmentSupportsPinning(threadRef.environmentId),
           titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
@@ -151,7 +147,6 @@ export function useThreadActionMenu(input: {
           canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
           branch: thread.branch ?? null,
           projectFilter: null,
-          isPinned: thread.pinnedAt != null,
           isSettled: supports.settlement && thread.settledOverride === "settled",
           autoSettleEnabled: thread.autoSettleDisabledAt == null,
           isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
@@ -237,13 +232,6 @@ export function useThreadActionMenu(input: {
           case "unsnooze":
             await reportFailure("Failed to wake thread", () => unsnoozeThread(threadRef));
             return;
-          case "pin":
-            await reportFailure("Failed to pin thread", () => pinThread(threadRef));
-            return;
-          case "unpin": {
-            await reportFailure("Failed to unpin thread", () => confirmAndUnpinThread(threadRef));
-            return;
-          }
           case "auto-settle:enabled":
           case "auto-settle:disabled":
             await reportFailure("Failed to update auto-settle", () =>
@@ -344,7 +332,6 @@ export function useThreadActionMenu(input: {
       archiveThread,
       confirmThreadArchive,
       confirmThreadDelete,
-      confirmAndUnpinThread,
       copyBranchToClipboard,
       copyPathToClipboard,
       copyThreadIdToClipboard,
@@ -353,7 +340,6 @@ export function useThreadActionMenu(input: {
       logicalProjectKeyByPhysicalKey,
       markThreadUnread,
       onStartRename,
-      pinThread,
       projectCwd,
       projectGroupingSettings,
       projects,

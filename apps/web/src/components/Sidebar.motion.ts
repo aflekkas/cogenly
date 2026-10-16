@@ -29,9 +29,6 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
   const running = new Map<HTMLElement, { animation: Animation; offset: number }>();
   const entering = new Map<HTMLElement, { animation: Animation; travel: number }>();
   const exiting = new Map<HTMLElement, Animation>();
-  // Visual tops at drag release, relative to the list, so the release
-  // commit can glide every row from where dnd-kit left it into its slot.
-  let released: Map<HTMLElement, number> | null = null;
 
   const remainingOffset = (node: HTMLElement) => {
     const current = running.get(node);
@@ -107,7 +104,6 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     for (const node of running.keys()) cancel(node);
     clearFades();
     positions = null;
-    released = null;
   };
   const move = (node: HTMLElement, offset: number) => {
     cancel(node);
@@ -229,33 +225,11 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
           }
           const delta = movedDelta.get(node);
           // Computed progress includes the effect's easing. Only our own
-          // translate is carried forward; dnd-kit's transforms are never read.
+          // translate is carried forward.
           if (delta !== undefined) move(node, delta);
         }
       }
-      if (released !== null) {
-        if (!reducedMotion?.matches) {
-          for (const [node, position] of next) {
-            const top = released.get(node);
-            if (top !== undefined) move(node, top - position.top);
-          }
-        }
-        released = null;
-      }
       positions = next;
-    },
-    /** Called on drag release, before the commit that clears dnd-kit's
-     * transforms. Takes every row's visual top, including the lifted row
-     * under the pointer and the peers holding the label gaps open, so the
-     * next update glides each of them into its committed slot. */
-    release() {
-      suspend();
-      const origin = parent.getBoundingClientRect().top;
-      released = new Map(
-        Array.from(parent.children)
-          .filter((node): node is HTMLElement => node instanceof HTMLElement && !exiting.has(node))
-          .map((node) => [node, node.getBoundingClientRect().top - origin]),
-      );
     },
     suspend,
     dispose() {
