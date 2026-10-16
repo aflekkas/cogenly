@@ -3907,12 +3907,13 @@ export default function Sidebar() {
       <SidebarContent
         className="min-h-full"
         fixedHeader={
-          // Desktop switches modes from the navigation rail and keeps search
-          // at the foot of the list; the mobile sheet keeps both up top.
+          // Search and the add/new actions sit under the mode title, above the
+          // list. Desktop switches modes from the navigation rail; the mobile
+          // sheet keeps the segmented switcher here too.
           // Lifted above the stage backdrop, whose fade bleeds below the
           // header and would otherwise paint across the search row's outline.
-          navRailVisible ? undefined : (
-            <SidebarGroup className="z-[1]">
+          <SidebarGroup className="z-[1]">
+            {navRailVisible ? null : (
               <SidebarModeSwitcher
                 className="mb-1.5"
                 mode={sidebarMode}
@@ -3920,9 +3921,9 @@ export default function Sidebar() {
                 agentsNeedingYou={sidebarModes.agentsNeedingYou}
                 keybindings={keybindings}
               />
-              {threadHeader}
-            </SidebarGroup>
-          )
+            )}
+            {threadHeader}
+          </SidebarGroup>
         }
       >
         <SidebarGroup className="flex-1" role="presentation">
@@ -4326,7 +4327,6 @@ export default function Sidebar() {
           ) : null}
         </SidebarGroup>
       </SidebarContent>
-      {navRailVisible ? <SidebarGroup className="z-[1]">{threadHeader}</SidebarGroup> : null}
       <SidebarChromeFooter utilityMenu={!navRailVisible} />
     </>
   );
