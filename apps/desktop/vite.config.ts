@@ -1,10 +1,12 @@
 import "vite-plus/test/config";
 import { defineConfig } from "vite-plus";
+import * as NodeURL from "node:url";
 
 import { isDesktopRuntimeExternalDependency } from "../../scripts/lib/desktop-external-packages.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 
 const repoEnv = loadRepoEnv();
+const desktopDirUrl = new URL("./", import.meta.url);
 
 // The main process is bundled the same way the server CLI is: every JS
 // dependency is inlined and only packages Node must load from disk stay
@@ -145,5 +147,15 @@ export default defineConfig({
   test: {
     testTimeout: 5_000,
     setupFiles: ["../../packages/shared/src/testing/longTempDir.ts"],
+    env: {
+      // Unit tests import the `electron` package but never launch it. The package has no
+      // postinstall, so on first require it downloads and extracts the binary into
+      // node_modules -- and every test worker does that concurrently, colliding in the
+      // same dist directory ("File exists (os error 17)"). With this override,
+      // require("electron") returns a path without downloading anything.
+      ELECTRON_OVERRIDE_DIST_PATH: NodeURL.fileURLToPath(
+        new URL(".electron-test-dist", desktopDirUrl),
+      ),
+    },
   },
 });

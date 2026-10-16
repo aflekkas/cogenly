@@ -4,6 +4,13 @@ packages:
   - packages/*
   - scripts
 
+# Don't prompt before purging node_modules (agents run without a TTY, where the
+# prompt aborts the install with ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY).
+# Risk: `pnpm install` deletes and reinstalls a modules directory it would
+# otherwise ask about (e.g. one created by another package manager). That
+# content is regenerable via install, so this matches what CI=true already does.
+confirmModulesPurge: false
+
 # Successor to onlyBuiltDependencies/ignoredBuiltDependencies (pnpm 11).
 # true = allowed to run build scripts; false mirrors the pnpm 10 behavior
 # where anything outside onlyBuiltDependencies was silently not built.
