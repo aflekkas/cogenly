@@ -1,11 +1,5 @@
-import * as Schema from "effect/Schema";
 import { deriveProjectIdentity } from "../../projectIdentity";
-import { ProjectMonogram } from "../ProjectMonogram";
-import {
-  ProjectMonogramText,
-  type ProjectIconColor,
-  type ProjectIconOverride,
-} from "@t3tools/contracts";
+import type { ProjectIconColor, ProjectIconOverride } from "@t3tools/contracts";
 import { DynamicIcon, type IconName } from "lucide-react/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -31,7 +25,13 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 
 const DEFAULT_ICON: IconName = "folder-code";
-const isMonogramText = Schema.is(ProjectMonogramText);
+
+type PickerMode = "lucide" | "emoji";
+
+// Monograms are retired, so one saved earlier opens on the icon grid.
+function initialMode(current: ProjectIconOverride | null): PickerMode {
+  return current?.kind === "emoji" ? "emoji" : "lucide";
+}
 
 function iconLabel(name: string): string {
   return name
@@ -54,15 +54,12 @@ export function ProjectIconPickerDialog({
   readonly onSelect: (icon: ProjectIconOverride) => void;
 }) {
   const automatic = deriveProjectIdentity(projectName);
-  const [mode, setMode] = useState<ProjectIconOverride["kind"]>(current?.kind ?? "lucide");
+  const [mode, setMode] = useState<PickerMode>(initialMode(current));
   const [iconName, setIconName] = useState<IconName>(
     current?.kind === "lucide" ? (current.name as IconName) : DEFAULT_ICON,
   );
   const [color, setColor] = useState<ProjectIconColor>(
     current && current.kind !== "emoji" ? current.color : automatic.color,
-  );
-  const [letters, setLetters] = useState(
-    current?.kind === "monogram" ? current.text : automatic.monogram,
   );
   const [emoji, setEmoji] = useState(current?.kind === "emoji" ? current.emoji : "💻");
   const [query, setQuery] = useState("");
@@ -71,29 +68,21 @@ export function ProjectIconPickerDialog({
 
   useEffect(() => {
     if (open && !previousOpenRef.current) {
-      setMode(current?.kind ?? "lucide");
+      setMode(initialMode(current));
       setIconName(current?.kind === "lucide" ? (current.name as IconName) : DEFAULT_ICON);
       setColor(current && current.kind !== "emoji" ? current.color : automatic.color);
-      setLetters(current?.kind === "monogram" ? current.text : automatic.monogram);
       setEmoji(current?.kind === "emoji" ? current.emoji : "💻");
       setQuery("");
       setCustomEmoji("");
     }
     previousOpenRef.current = open;
-  }, [current, open, automatic.color, automatic.monogram]);
+  }, [current, open, automatic.color]);
 
   const icons = useMemo(() => filterProjectIconNames(query), [query]);
   const selectedColorClassName = projectIconColorClassName(color);
-  const monogram = letters.normalize("NFKC").trim().toUpperCase();
-  const validMonogram = isMonogramText(monogram);
   const save = () => {
-    if (mode === "monogram" && !validMonogram) return;
     onSelect(
-      mode === "monogram"
-        ? { kind: "monogram", text: monogram, color }
-        : mode === "lucide"
-          ? { kind: "lucide", name: iconName, color }
-          : { kind: "emoji", emoji },
+      mode === "lucide" ? { kind: "lucide", name: iconName, color } : { kind: "emoji", emoji },
     );
     onOpenChange(false);
   };
@@ -103,7 +92,7 @@ export function ProjectIconPickerDialog({
       <DialogPopup className="w-full sm:w-[32rem]">
         <DialogHeader>
           <DialogTitle>Choose project icon</DialogTitle>
-          <DialogDescription>Choose an icon, emoji, or monogram.</DialogDescription>
+          <DialogDescription>Pick an icon and a colour, or an emoji.</DialogDescription>
         </DialogHeader>
         <DialogPanel className="flex min-h-0 flex-col">
           <ToggleGroup
@@ -112,15 +101,14 @@ export function ProjectIconPickerDialog({
             value={[mode]}
             onValueChange={(next) => {
               const value = next[0];
-              if (value === "lucide" || value === "emoji" || value === "monogram") setMode(value);
+              if (value === "lucide" || value === "emoji") setMode(value);
             }}
           >
             <Toggle value="lucide">Icons</Toggle>
             <Toggle value="emoji">Emoji</Toggle>
-            <Toggle value="monogram">Monogram</Toggle>
           </ToggleGroup>
 
-          {mode !== "emoji" ? (
+          {mode === "lucide" ? (
             <div>
               <div className="mb-2 text-xs font-medium text-muted-foreground">Color</div>
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="Icon color">
@@ -176,30 +164,6 @@ export function ProjectIconPickerDialog({
                 <p className="py-8 text-center text-sm text-muted-foreground">No icons found.</p>
               ) : null}
             </>
-          ) : mode === "monogram" ? (
-            <div className="flex items-center gap-4 py-2">
-              <ProjectMonogram
-                text={validMonogram ? monogram : automatic.monogram}
-                color={color}
-                className="size-12"
-              />
-              <div className="flex-1 space-y-2">
-                <label htmlFor="project-monogram" className="text-sm font-medium">
-                  Letters
-                </label>
-                <Input
-                  id="project-monogram"
-                  value={letters}
-                  onChange={(event) => setLetters(event.currentTarget.value)}
-                  aria-describedby="project-monogram-hint"
-                  aria-invalid={!validMonogram}
-                  autoComplete="off"
-                />
-                <p id="project-monogram-hint" className="text-xs text-muted-foreground">
-                  One or two letters or numbers.
-                </p>
-              </div>
-            </div>
           ) : (
             <>
               <ScrollArea scrollFade className="max-h-64">
@@ -244,9 +208,7 @@ export function ProjectIconPickerDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={mode === "monogram" && !validMonogram}>
-            Save icon
-          </Button>
+          <Button onClick={save}>Save icon</Button>
         </DialogFooter>
       </DialogPopup>
     </Dialog>

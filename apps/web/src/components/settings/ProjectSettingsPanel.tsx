@@ -558,10 +558,10 @@ function ProjectDetail({
               projectIcon?.kind === "lucide"
                 ? `${projectIcon.name} · ${projectIcon.color}`
                 : projectIcon?.kind === "monogram"
-                  ? `${projectIcon.text} · ${projectIcon.color}`
+                  ? `Folder · ${projectIcon.color}`
                   : projectIcon?.kind === "emoji"
                     ? projectIcon.emoji
-                    : (faviconPath ?? "Automatic")
+                    : (faviconPath ?? "Automatic: the repository's favicon, else a folder icon")
             }
             resetAction={
               group.memberProjects.some(
