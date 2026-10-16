@@ -638,6 +638,7 @@ const make = (options?: StartupOptions) =>
       );
 
       yield* options?.activate ?? Effect.void;
+      yield* Effect.logInfo(`Fixed-time schedules run in ${serverConfig.serverTimeZone}.`);
       yield* Effect.logDebug("Accepting commands");
       yield* commandGate.signalCommandReady;
       yield* Effect.logDebug("startup phase: publishing ready event");
