@@ -175,9 +175,6 @@ If SSH reconnecting fails after an app update, retry the launch once. Removing
 the connection stops a server that Cogenly launched; a server that was already
 running is left alone.
 
-For Antigravity's Google callback on a remote host, see
-[remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
-
 ## Browser on a remote environment
 
 Browser tabs belong to the environment, so you and your agents see the same

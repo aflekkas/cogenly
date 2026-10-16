@@ -20,22 +20,4 @@ not prevent the agent from asking questions about the task.
 
 ## Provider differences
 
-Providers enforce permissions differently. Some read-only actions can proceed in **Supervised**.
-**Auto** uses automatic review on Codex, Claude, Cursor, and Grok; providers without an equivalent,
-including OpenCode and Antigravity, fall back to asking. On Grok, commands its review blocks come
-to you for approval.
-
-Muse Code offers only **Supervised** and **Full access**. A Muse thread already set to another mode
-runs in **Supervised**.
-
-Grok offers no **Auto-accept edits**. A Grok thread already set to it runs in **Supervised**. Grok
-file-change approvals offer **Allow all edits this session**. Its command approvals have no
-session-wide choice, because Grok would remember that command for the whole project.
-
-ACP Registry agents run their own tools in their own mode; Cogenly answers their approval requests
-by the permission mode. See [ACP Registry permissions](./providers-acp.md#permissions-and-terminals).
-
-Antigravity can still send native approval requests in **Full access**. It only offers remembered
-approvals for actions that support them.
-
-See the [provider guides](./install.md#providers) for setup and provider-specific limits.
+Claude and Codex enforce permissions through their native runtimes. Some read-only actions can proceed in **Supervised**. **Auto** uses the provider’s automatic review.
