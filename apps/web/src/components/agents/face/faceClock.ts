@@ -1,8 +1,9 @@
 /**
  * One requestAnimationFrame loop shared by every mounted agent face.
  *
- * Faces subscribe only while they are on screen, and the loop runs only while it
- * has subscribers and the document is visible. The clock advances by the frame
+ * Faces subscribe only while they are on screen and moving (a still idle face
+ * drops out until something wakes it), and the loop runs only while it has
+ * subscribers and the document is visible. The clock advances by the frame
  * delta, capped, so a hidden tab or a stalled frame resumes where it left off
  * instead of jumping ahead. The engine is a pure function of time, so a shared
  * clock is all a face needs.

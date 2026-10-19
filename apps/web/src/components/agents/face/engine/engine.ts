@@ -80,6 +80,9 @@ export interface Look {
 
 const NO_LOOK: Look = { yaw: 0, pitch: 0, mix: 0, spin: 0, wander: 1 };
 
+/** duree du clignement force (changement d'etat ou `blink`) */
+const FORCED_BLINK = 0.2;
+
 const lerpLook = (a: Look, b: Look, t: number): Look => ({
   yaw: lerp(a.yaw, b.yaw, t),
   pitch: lerp(a.pitch, b.pitch, t),
@@ -159,6 +162,15 @@ export class BotEngine {
   private lookAt = -10;
   /** duree de rattrapage en cours ; voir `LOOK_MORPH`, sa valeur par defaut */
   private lookMorph = 0.24;
+
+  /**
+   * true = au repos (`idle`), le bot ne vit plus tout seul : ni derive du regard,
+   * ni respiration, ni flottement, ni clignements au calendrier. L'image ne
+   * change alors plus du tout, l'appelant peut cesser de la repeindre (voir
+   * `isStill`) et declencher lui-meme les clignements avec `blink`. Les autres
+   * etats gardent leur vie ; elle fond avec le morph d'etat, sans saut.
+   */
+  restsStill = false;
 
   /** duree du morph quand on change la forme du corps */
   static readonly SHAPE_MORPH = 0.45;
@@ -356,6 +368,27 @@ export class BotEngine {
     return this.cur;
   }
 
+  /** Clignement force, date : la seule vie d'un bot qui `restsStill`. */
+  blink(now: number) {
+    this.blinkAt = now;
+  }
+
+  /**
+   * true quand `sample` rend la meme image a toute date >= `now` : bot immobile
+   * au repos, sans fondu, morph, rattrapage de regard ni clignement en cours.
+   */
+  isStill(now: number): boolean {
+    if (!this.restsStill || this.cur !== "idle") return false;
+    const fondu = this.prev !== null && now - this.tCur < STATE_BY_ID.get(this.cur)!.morph;
+    return (
+      !fondu &&
+      now - this.shapeAt >= BotEngine.SHAPE_MORPH &&
+      now - this.exprAt >= BotEngine.SHAPE_MORPH &&
+      now - this.lookAt >= this.lookMorph &&
+      now - this.blinkAt >= FORCED_BLINK
+    );
+  }
+
   /**
    * Repart sur `id` SANS etat precedent, comme un moteur neuf pose sur cet etat.
    *
@@ -451,6 +484,9 @@ export class BotEngine {
     // rejouable — relire une date d'avant la fin du fondu ne le retrouverait
     // plus. C'est l'optimisation qui parait innocente et qui casse tout.
     const origine = since < def.morph ? this.origine(now, shape, expr) : null;
+    // part de vie au repos : 0 sur un repos immobile, 1 ailleurs, fondue avec l'etat
+    const vitalite = (id: StateId) => (this.restsStill && id === "idle" ? 0 : 1);
+    let vie = vitalite(this.cur);
     if (origine) {
       // Ease-out exponentiel : c'est la courbe mesuree sur la video. Le corps
       // n'a pas d'overshoot (seuls la pastille et l'ouverture des yeux en ont).
@@ -459,6 +495,7 @@ export class BotEngine {
       // part alors trente fois trop loin.
       const ratio = easings.easeOutQuint(clamp(since / def.morph));
       pose = blendPose(origine, pose, ratio);
+      if (this.prev) vie = lerp(vitalite(this.prev), vie, ratio);
       // Le decalage des yeux suit la MEME courbe que la silhouette qui le motive. Il vient
       // de l'etat quitte, que `setState` renseigne toujours en meme temps que l'origine —
       // le test est la pour le typage, pas pour un cas reel.
@@ -475,7 +512,11 @@ export class BotEngine {
     // --- vie au repos -----------------------------------------------------
     const alive = pose.eyeAlpha > 0.01;
     const look = this.lookAtTime(now);
-    const life = liveliness(now, { wander: alive ? look.wander : 0, blink: alive });
+    const life = liveliness(now, { wander: alive ? look.wander * vie : 0, blink: alive });
+    const lifeLid = 1 - (1 - life.lid) * vie;
+    const driftX = life.driftX * vie;
+    const driftY = life.driftY * vie;
+    const breath = 1 + (life.breath - 1) * vie;
 
     const gaze = {
       // Les deux visees REMPLACENT celles de la pose au lieu de s'y ajouter (voir
@@ -490,19 +531,19 @@ export class BotEngine {
     };
 
     // clignement declenche par le changement d'etat, en plus du calendrier
-    const forced = clamp((now - this.blinkAt) / 0.2);
+    const forced = clamp((now - this.blinkAt) / FORCED_BLINK);
     const forcedLid = forced < 1 ? Math.abs(forced * 2 - 1) : 1;
-    const lid = Math.min(life.lid, forcedLid);
+    const lid = Math.min(lifeLid, forcedLid);
 
-    const offX = pose.offX + life.driftX + (look.leanX ?? 0) * look.mix;
-    const offY = pose.offY + life.driftY + (look.leanY ?? 0) * look.mix;
+    const offX = pose.offX + driftX + (look.leanX ?? 0) * look.mix;
+    const offY = pose.offY + driftY + (look.leanY ?? 0) * look.mix;
 
     // --- corps ------------------------------------------------------------
     const sil: Silhouette = {
       ...pose.sil,
       cx: pose.sil.cx + offX,
       cy: pose.sil.cy + offY,
-      sy: pose.sil.sy * life.breath,
+      sy: pose.sil.sy * breath,
     };
     const bodyPath = closedPath(toPoints(sil, R, this.pts));
 

@@ -162,6 +162,11 @@ export class FaceDirector {
     this.engine.setState(target, now);
   }
 
+  /** True once nothing is left to play: the target is idle, or a one-shot has settled. */
+  get atRest(): boolean {
+    return this.target === "idle" || this.phase === "settled";
+  }
+
   tick(now: number) {
     const def = STATE_BY_ID.get(this.target);
     if (!def || def.minDuration === undefined || this.phase === "settled") return;
@@ -432,6 +437,32 @@ export interface FaceRigFrame {
   /** Null while the indicator is fully faded out. */
   indicator: BotFrame | null;
   indicatorOpacity: number;
+  /**
+   * True when every later frame is this one until the next timed setter (a
+   * blink, a gaze, an update), so the caller can stop repainting.
+   */
+  settled: boolean;
+}
+
+/** Seconds between two blinks of a still idle face. */
+export const BLINK_MIN_SECONDS = 2.5;
+export const BLINK_SPREAD_SECONDS = 4;
+
+/**
+ * Successive delays, in seconds, between the blinks of the face seeded with
+ * `seed`. The first lands anywhere in one interval, so faces mounted together
+ * don't blink in unison.
+ */
+export function blinkSchedule(seed: string): () => number {
+  const next = createRng(hashSeed(seed) ^ 0xb1b1);
+  let first = true;
+  return () => {
+    if (first) {
+      first = false;
+      return next() * (BLINK_MIN_SECONDS + BLINK_SPREAD_SECONDS);
+    }
+    return BLINK_MIN_SECONDS + next() * BLINK_SPREAD_SECONDS;
+  };
 }
 
 /**
@@ -459,6 +490,8 @@ export class FaceRig {
     this.radii = target.radii;
     this.expression = FaceRig.expressionFor(target, layer);
     this.base = new BotEngine(RAYON, "idle", this.radii, this.expression);
+    // An idle face sits still and blinks only when told to, so it can stop repainting.
+    this.base.restsStill = true;
     this.baseDirector = new FaceDirector(
       this.base,
       layer ? "idle" : engineStateFor(target.state),
@@ -534,6 +567,11 @@ export class FaceRig {
     }
   }
 
+  /** Blinks the idle body once; other states keep their own eyes. */
+  blink(now: number) {
+    if (this.base.state === "idle") this.base.blink(now);
+  }
+
   frame(now: number): FaceRigFrame {
     this.baseDirector.tick(now);
     this.syncGaze(now, false);
@@ -543,7 +581,12 @@ export class FaceRig {
       this.indicatorDirector.tick(now);
       indicator = this.indicator.sample(now);
     }
-    return { base: this.base.sample(now), indicator, indicatorOpacity };
+    const settled =
+      this.baseDirector.atRest &&
+      this.base.isStill(now) &&
+      this.fadeTo === 0 &&
+      now - this.fadeAt >= INDICATOR_FADE_SECONDS;
+    return { base: this.base.sample(now), indicator, indicatorOpacity, settled };
   }
 }
 
@@ -557,7 +600,7 @@ export function staticFaceFrame(target: FaceRigTarget): FaceRigFrame {
   const expression = layer ? faceExpression(layer.expression) : target.expression;
   const state = layer || target.state === "created" ? "idle" : engineStateFor(target.state);
   const base = new BotEngine(RAYON, state, target.radii, expression).sample(POSES[state]);
-  if (!layer) return { base, indicator: null, indicatorOpacity: 0 };
+  if (!layer) return { base, indicator: null, indicatorOpacity: 0, settled: true };
   const indicator = new BotEngine(RAYON, layer.indicator).sample(POSES[layer.indicator]);
-  return { base, indicator, indicatorOpacity: 1 };
+  return { base, indicator, indicatorOpacity: 1, settled: true };
 }

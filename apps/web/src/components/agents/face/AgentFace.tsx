@@ -5,6 +5,7 @@ import { useMediaQuery } from "~/hooks/useMediaQuery";
 import {
   FaceRig,
   agentAppearance,
+  blinkSchedule,
   faceExpression,
   gazeToward,
   indicatorTransform,
@@ -105,6 +106,8 @@ export const AgentFace = memo(function AgentFace({
     rig: FaceRig;
     painters: FacePainters;
   } | null>(null);
+  // Starts repainting after a timed change; a no-op while hidden or under reduced motion.
+  const wakeRef = useRef<() => void>(() => {});
 
   // One rig per face (and per seed). Prop changes reach it as timed setters, so
   // shape, expression, state, and layering changes all morph or fade.
@@ -131,6 +134,7 @@ export const AgentFace = memo(function AgentFace({
     }
     // Static pose for reduced motion, and the first frame before the clock ticks.
     paintFrame(face.painters, reducedMotion ? staticFaceFrame(target) : face.rig.frame(now));
+    wakeRef.current();
   }, [seed, seeded, uid, radii, expr, state, layered, ink, reducedMotion]);
 
   // Reduced motion shows `created` already settled.
@@ -138,14 +142,43 @@ export const AgentFace = memo(function AgentFace({
     if (reducedMotion && state === "created") onSettledRef.current?.();
   }, [reducedMotion, state]);
 
+  /*
+   * The clock is subscribed only while the face is moving. A still idle face
+   * paints nothing; a prop change, the pointer, or the blink timer wakes it, and
+   * it drops the clock again on the first settled frame.
+   */
   useEffect(() => {
     if (reducedMotion) return;
     const element = baseRef.current!.ownerSVGElement!;
-    let unsubscribe: (() => void) | null = null;
+    const nextBlink = blinkSchedule(seed);
+    let visible = false;
+    let stopClock: (() => void) | null = null;
+    let stopPointer: (() => void) | null = null;
+    let blinkTimer: ReturnType<typeof setTimeout> | undefined;
+    const sleep = () => {
+      stopClock?.();
+      stopClock = null;
+    };
     // One clock subscription per face; both layers are sampled in the same tick.
     const onFrame = (clock: number) => {
       const face = live.current;
-      if (face) paintFrame(face.painters, face.rig.frame(clock + face.offset));
+      if (!face) return;
+      const frame = face.rig.frame(clock + face.offset);
+      paintFrame(face.painters, frame);
+      if (frame.settled) sleep();
+    };
+    const wake = () => {
+      if (visible && !stopClock) stopClock = subscribeFaceClock(onFrame);
+    };
+    const scheduleBlink = () => {
+      blinkTimer = setTimeout(() => {
+        const face = live.current;
+        if (face) {
+          face.rig.blink(faceClockNow() + face.offset);
+          wake();
+        }
+        scheduleBlink();
+      }, nextBlink() * 1000);
     };
     // The rig eases toward each target on the clock, so a still pointer settles.
     const onPointer = (pointer: FacePointer | null) => {
@@ -154,6 +187,7 @@ export const AgentFace = memo(function AgentFace({
       const now = faceClockNow() + face.offset;
       if (!pointer) {
         face.rig.setGaze(null, now);
+        wake();
         return;
       }
       const box = element.getBoundingClientRect();
@@ -161,26 +195,31 @@ export const AgentFace = memo(function AgentFace({
       const dx = pointer.x - (box.left + box.width / 2);
       const dy = pointer.y - (box.top + box.height / 2);
       face.rig.setGaze(gazeToward(dx, dy, box.width), now);
+      wake();
     };
-    const stopObserving = observeFaceVisibility(element, (visible) => {
-      if (visible && !unsubscribe) {
-        const stopClock = subscribeFaceClock(onFrame);
-        const stopPointer = subscribeFacePointer(onPointer);
-        unsubscribe = () => {
-          stopClock();
-          stopPointer();
-        };
-      }
-      if (!visible && unsubscribe) {
-        unsubscribe();
-        unsubscribe = null;
+    const stopObserving = observeFaceVisibility(element, (isVisible) => {
+      if (isVisible === visible) return;
+      visible = isVisible;
+      if (visible) {
+        stopPointer = subscribeFacePointer(onPointer);
+        scheduleBlink();
+        wake();
+      } else {
+        stopPointer?.();
+        stopPointer = null;
+        clearTimeout(blinkTimer);
+        sleep();
       }
     });
+    wakeRef.current = wake;
     return () => {
+      wakeRef.current = () => {};
       stopObserving();
-      unsubscribe?.();
+      stopPointer?.();
+      clearTimeout(blinkTimer);
+      sleep();
     };
-  }, [reducedMotion]);
+  }, [reducedMotion, seed]);
 
   return (
     <svg

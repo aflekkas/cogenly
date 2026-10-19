@@ -9,7 +9,10 @@ import {
   IndicatorDirector,
   REARM_REST_SECONDS,
   SEEDED_EXPRESSIONS,
+  BLINK_MIN_SECONDS,
+  BLINK_SPREAD_SECONDS,
   agentAppearance,
+  blinkSchedule,
   engineStateFor,
   faceExpression,
   eyesInsideBody,
@@ -203,6 +206,7 @@ describe("FaceRig", () => {
         shapeRadii("hexagone"),
         faceExpression(expression),
       );
+      reference.restsStill = true;
       expect(frame.base.bodyPath).toBe(reference.sample(1).bodyPath);
     },
   );
@@ -269,6 +273,97 @@ describe("FaceRig", () => {
     for (let now = 0; now < 10; now += 1 / 60) rig.frame(now);
     expect(rig.base.state).toBe("idle");
     expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("FaceRig at rest", () => {
+  const idle: FaceRigTarget = {
+    state: "idle",
+    layered: true,
+    radii: shapeRadii("goutte"),
+    expression: faceExpression("curieux"),
+  };
+  const settleTime = (rig: FaceRig, from: number) => {
+    for (let now = from; now < from + 10; now += 1 / 60) {
+      if (rig.frame(now).settled) return now;
+    }
+    return Infinity;
+  };
+
+  it("settles once idle and then draws the same frame forever", () => {
+    const rig = new FaceRig(idle, 0);
+    const at = settleTime(rig, 0);
+    expect(at).toBeLessThan(1);
+    const still = rig.frame(at).base;
+    for (const later of [at + 0.7, at + 3.4, at + 61]) {
+      const frame = rig.frame(later);
+      expect(frame.settled).toBe(true);
+      expect(frame.base).toEqual(still);
+    }
+  });
+
+  it("wakes for a blink, closes its eyes, and settles again", () => {
+    const rig = new FaceRig(idle, 0);
+    const open = rig.frame(5).base;
+    rig.blink(5);
+    const mid = rig.frame(5.1);
+    expect(mid.settled).toBe(false);
+    expect(mid.base.eyes.map((eye) => eye.matrix)).not.toEqual(open.eyes.map((eye) => eye.matrix));
+    const at = settleTime(rig, 5.1);
+    expect(at).toBeLessThan(5.5);
+    expect(rig.frame(at).base).toEqual(open);
+  });
+
+  it("wakes for a gaze change and settles on it, and again on release", () => {
+    const rig = new FaceRig(idle, 0);
+    const rest = rig.frame(5).base;
+    rig.setGaze(gazeToward(400, -100, 32), 5);
+    expect(rig.frame(5).settled).toBe(false);
+    const looked = settleTime(rig, 5);
+    expect(looked).toBeLessThan(5 + BotEngine.LOOK_MORPH + 0.05);
+    expect(rig.frame(looked).base).not.toEqual(rest);
+    rig.setGaze(null, 7);
+    expect(rig.frame(7.1).settled).toBe(false);
+    const released = settleTime(rig, 7);
+    expect(released).toBeLessThan(7 + GAZE_RELEASE_SECONDS + 0.05);
+    expect(rig.frame(released).base).toEqual(rest);
+  });
+
+  it("wakes for a prop change and settles after the morph", () => {
+    const rig = new FaceRig(idle, 0);
+    rig.update({ ...idle, radii: shapeRadii("cercle"), expression: faceExpression("fier") }, 5);
+    expect(rig.frame(5.1).settled).toBe(false);
+    expect(settleTime(rig, 5)).toBeLessThan(5 + BotEngine.SHAPE_MORPH + 0.05);
+  });
+
+  it("settles after created plays, and after a layered state fades out", () => {
+    const rig = new FaceRig({ ...idle, state: "created" }, 0);
+    expect(settleTime(rig, 0)).toBeLessThan(STATE_BY_ID.get("burst")!.duration + 1);
+    rig.update({ ...idle, state: "thinking" }, 20);
+    expect(rig.frame(22).settled).toBe(false);
+    rig.update(idle, 23);
+    expect(settleTime(rig, 23)).toBeLessThan(23 + 0.5);
+  });
+
+  it.each(["thinking", "working", "blocked", "done", "asleep"] as const)(
+    "keeps animating while %s",
+    (state) => {
+      const rig = new FaceRig({ ...idle, state }, 0);
+      expect(settleTime(rig, 0)).toBe(Infinity);
+    },
+  );
+
+  it("keeps blinks a few seconds apart, staggered per seed", () => {
+    const next = blinkSchedule("agent-1");
+    const first = next();
+    expect(first).toBeLessThan(BLINK_MIN_SECONDS + BLINK_SPREAD_SECONDS);
+    for (let index = 0; index < 20; index++) {
+      const delay = next();
+      expect(delay).toBeGreaterThanOrEqual(BLINK_MIN_SECONDS);
+      expect(delay).toBeLessThan(BLINK_MIN_SECONDS + BLINK_SPREAD_SECONDS);
+    }
+    const firsts = new Set(seeds.slice(0, 20).map((seed) => blinkSchedule(seed)()));
+    expect(firsts.size).toBe(20);
   });
 });
 
