@@ -382,15 +382,6 @@ export function AgentForm({
           onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
         />
       </label>
-      <label className="agent-toggle-row">
-        <span>
-          Enabled<small>Allow background work</small>
-        </span>
-        <Switch
-          checked={draft.enabled}
-          onCheckedChange={(enabled) => setDraft({ ...draft, enabled })}
-        />
-      </label>
       <label className="agent-cap-row">
         Daily run cap
         <input
@@ -704,7 +695,6 @@ export function CreateAgent({
                   modelSelection: model,
                   runtimeMode: "approval-required",
                   projectId,
-                  enabled: true,
                   dailyRunCap: 24,
                 }}
                 pending={pending}

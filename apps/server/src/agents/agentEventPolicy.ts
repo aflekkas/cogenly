@@ -10,8 +10,6 @@ export function canReceiveAgentEvent(
   const { agent } = access;
   return (
     task.enabled &&
-    agent.enabled &&
-    !agent.paused &&
     agent.permissions.read &&
     event.chainDepth < 2 &&
     task.projectId === agent.projectId &&

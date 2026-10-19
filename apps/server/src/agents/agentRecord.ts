@@ -7,13 +7,11 @@ const decodePayload = Schema.decodeUnknownEffect(
 );
 const decode = Schema.decodeUnknownEffect(Agent);
 
-/** Runtime columns override the saved configuration, including automatic failure pauses. */
+/** Runtime columns override the saved configuration. */
 export const decodeAgentRow = (row: {
   readonly payload_json: string;
-  readonly enabled: number;
   readonly consecutive_failures: number;
   readonly backoff_until: string | null;
-  readonly pause_reason: string | null;
   readonly daily_run_cap: number;
 }): Effect.Effect<Agent, Schema.SchemaError> =>
   Effect.gen(function* () {
@@ -35,11 +33,8 @@ export const decodeAgentRow = (row: {
       },
       notifyPolicy: "all",
       ...data,
-      paused: row.enabled !== 1,
-      enabled: row.enabled === 1,
       consecutiveFailures: row.consecutive_failures,
       backoffUntil: row.backoff_until,
-      pauseReason: row.pause_reason,
       dailyRunCap: row.daily_run_cap,
     });
   });

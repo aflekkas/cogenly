@@ -36,10 +36,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const rows = yield* sql<{
           payload_json: string;
-          enabled: number;
           consecutive_failures: number;
           backoff_until: string | null;
-          pause_reason: string | null;
           daily_run_cap: number;
         }>`SELECT * FROM agents WHERE agent_id=${agentId}`;
         if (!rows[0]) return yield* new AgentError({ message: "Agent not found." });

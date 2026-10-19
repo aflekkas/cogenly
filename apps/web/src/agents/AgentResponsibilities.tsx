@@ -4,7 +4,6 @@ import {
   BookmarkIcon,
   FlagIcon,
   FolderGit2Icon,
-  PauseIcon,
   PlayIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -141,13 +140,11 @@ export function AgentResponsibilities({
             seed={agent.avatar.seed}
             {...(agent.avatar.color ? { color: agent.avatar.color } : {})}
             size={40}
-            state={agent.enabled ? agent.state : "asleep"}
+            state={agent.state}
           />
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="truncate text-sm font-medium text-foreground">{agent.name}</span>
-            <span className="line-clamp-2 text-xs text-muted-foreground">
-              {status === "Paused" && agent.pauseReason ? `Paused · ${agent.pauseReason}` : status}
-            </span>
+            <span className="line-clamp-2 text-xs text-muted-foreground">{status}</span>
           </span>
           <ThreadDetailsControl
             part="icon"
@@ -177,32 +174,6 @@ export function AgentResponsibilities({
             onClick={() => setEditing({ kind: "name" })}
           />
         )}
-        {/* Pausing is the visible off switch: no triggers or autonomous runs, chat still works. */}
-        <div className="flex items-center gap-2.5 px-2.5 py-1.5">
-          {agent.enabled ? (
-            <PlayIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-          ) : (
-            <PauseIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-          )}
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-sm font-medium text-foreground/80">
-              {agent.enabled ? "Active" : "Paused"}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {agent.enabled
-                ? `Wakes on its triggers, up to ${agent.dailyRunCap} runs a day. You can always chat.`
-                : "No triggers or background runs. You can still chat with it."}
-            </span>
-          </span>
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={disabled}
-            onClick={() => void saveProfile({ enabled: !agent.enabled })}
-          >
-            {agent.enabled ? "Pause" : "Resume"}
-          </Button>
-        </div>
       </ThreadDetailsSection>
 
       <ThreadDetailsSection headingId="agent-mission" title="Responsibility">
@@ -526,8 +497,8 @@ export function AgentResponsibilities({
                 <ThreadDetailsControl
                   part="icon"
                   aria-label={`Run ${trigger.title} now`}
-                  title={agent.enabled ? "Run now" : "Resume the agent to run triggers"}
-                  disabled={disabled || !agent.enabled}
+                  title="Run now"
+                  disabled={disabled}
                   onClick={() => void mutate(() => client.runTrigger(agent, trigger.id))}
                 >
                   <PlayIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />

@@ -12,7 +12,7 @@ import { agentFixture } from "./agent.testkit.ts";
 const encodeUnknown = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const decodeAgent = Schema.decodeEffect(Schema.fromJsonString(Agent));
 
-it.effect("migration preserves the legacy capability ceiling without inferring label grants", () =>
+it.effect("migrations keep the legacy capability ceiling and re-enable paused agents", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* runMigrations({ toMigrationInclusive: 64 });
@@ -23,7 +23,6 @@ it.effect("migration preserves the legacy capability ceiling without inferring l
         autonomy: _autonomy,
         permissions: _permissions,
         notifyPolicy: _notifyPolicy,
-        paused: _paused,
         ...legacy
       } = agentFixture(enabled ? "enabled" : "paused");
       const payload = yield* encodeUnknown({
@@ -36,9 +35,10 @@ it.effect("migration preserves the legacy capability ceiling without inferring l
     yield* runMigrations();
     const rows = yield* sql<{
       payload_json: string;
-    }>`SELECT payload_json FROM agents ORDER BY enabled DESC`;
+      enabled: number;
+    }>`SELECT payload_json, enabled FROM agents`;
+    expect(rows.map((row) => row.enabled)).toEqual([1, 1]);
     const agents = yield* Effect.forEach(rows, (r) => decodeAgent(r.payload_json));
-    expect(agents.map((a) => a.paused)).toEqual([false, true]);
     for (const agent of agents) {
       expect(agent.autonomy).toBe("autonomous_within_policy");
       expect(Object.values(agent.permissions).every(Boolean)).toBe(true);

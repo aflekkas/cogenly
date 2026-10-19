@@ -8,7 +8,7 @@ need a separate branch and working directory.
 An agent is a persistent specialist, such as "Spawn Ops", with its own conversation,
 responsibility and permissions. The sidebar's **Agents** tab lists them under the
 projects they may access, with **Other** for the rest. Each row shows its status
-(**Needs approval**, **Needs you**, **Running**, **Paused** or **Enabled**) and a
+(**Needs approval**, **Needs you**, **Running** or **Idle**) and a
 count only when decisions are waiting on you.
 
 Choose **New agent** in the sidebar or command palette to create one. Give it a
@@ -30,10 +30,10 @@ ask it to start Work. The tabs above the chat hold the rest:
   instead to keep a record. **History** on an item lists every status change: who
   made it, when, why, and any evidence. Pending approvals sit at the top, and also appear
   in the chat.
-- **Responsibilities**: the agent's mission, instructions, model, project access,
+- **Responsibilities**: the agent's mission, instructions, project access,
   autonomy, permissions, notifications, daily run cap, triggers, memory (facts it
   proposed wait there for you to confirm; see [Memory](./memory-and-export.md#memory)),
-  **Pause**, and **Delete**.
+  and **Delete**.
 
 Project tags give an agent context only; a tag on a chat never grants access. Access
 comes from the projects granted under **Project scope**, and covers the repositories
@@ -79,8 +79,12 @@ once. Event triggers have no **Run now**; they run when the event happens. Add t
 **Responsibilities → Triggers**, when creating the agent, or in **Settings →
 Scheduled tasks**. An agent can suggest one, but it is added only if you approve.
 
-**Pause** stops triggers and background runs; you can still chat. Messages sent
-while an agent is busy use its normal queue or steering behavior.
+An agent uses the model picked in its chat, for its replies and its background runs.
+A new agent starts on the model a new chat in its workspace would get. Agents are
+always on: their triggers keep running, up to the daily run cap, and a run that fails
+waits a little longer before the next one. To stop a trigger, turn it off under
+**Triggers**. Messages sent while an agent is busy use its normal queue or steering
+behavior.
 
 Coding work an agent starts appears in **Work** with your own threads, under its
 repository and marked with the agent's name.

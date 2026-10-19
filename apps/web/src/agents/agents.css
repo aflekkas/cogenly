@@ -540,18 +540,10 @@
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
-.agent-form label.agent-toggle-row,
 .agent-form label.agent-cap-row {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-}
-.agent-toggle-row small {
-  display: block;
-  font-size: 10px;
-  color: var(--muted-foreground);
-  font-weight: 400;
-  margin-top: 4px;
 }
 .agent-form .agent-cap-row > input {
   width: 80px;

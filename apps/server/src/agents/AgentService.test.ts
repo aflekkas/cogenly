@@ -338,70 +338,32 @@ describe("agent execution", () => {
     }),
   );
 
-  it.effect("paused agents dispatch owner texts while their scheduled triggers stay stopped", () =>
+  it.effect("owner texts bypass failure backoff and the daily cap", () =>
     Effect.gen(function* () {
       const h = yield* makeHarness;
       yield* Effect.gen(function* () {
         const store = yield* Store.AgentStore;
         const agents = yield* Agents.AgentService;
         const schedules = yield* Schedules.ScheduledTaskService;
-        const sql = yield* SqlClient.SqlClient;
         yield* store.save(h.fixture);
         const { task } = yield* schedules.upsert(h.triggerInput);
-        yield* store.save({ ...h.fixture, enabled: false });
-        const result = yield* agents.send({
-          id: h.fixture.id,
-          commandId: CommandId.make("paused:owner"),
-          messageId: MessageId.make("paused:owner"),
-          text: "Are you there?",
+        expect(yield* store.reserve(h.fixture.id)).toBe(true);
+        expect(yield* store.reserve(h.fixture.id)).toBe(true);
+        for (let failure = 0; failure < 5; failure++) yield* store.outcome(h.fixture.id, false);
+        const backingOff = yield* store.get(h.fixture.id);
+        expect(backingOff.backoffUntil).not.toBeNull();
+        yield* agents.send({
+          id: backingOff.id,
+          commandId: CommandId.make("auto-paused:owner"),
+          messageId: MessageId.make("auto-paused:owner"),
+          text: "Hello",
         });
-        expect(result.threadId).toBe(h.fixture.conversationThreadId);
         expect(h.calls).toHaveLength(1);
-        expect(h.calls[0]).toMatchObject({
-          text: "Are you there?",
-          mode: "auto",
-          createdBy: "user",
-        });
-        expect(yield* store.context(result.threadId)).toContain(h.fixture.instructions);
-        expect((yield* store.get(h.fixture.id)).enabled).toBe(false);
-        expect(yield* agents.trigger(task, "paused:trigger", task.prompt)).toBe(false);
-        yield* sql`UPDATE scheduled_tasks SET next_run_at = '1969-12-20T09:00:00.000Z' WHERE task_id = ${task.id}`;
-        yield* h.jobs.get("scheduled-tasks")!;
+        expect(h.calls[0]?.threadId).toBe(backingOff.conversationThreadId);
+        expect(yield* agents.trigger(task, "backoff:trigger", task.prompt)).toBe(false);
         expect(h.launches).toEqual([]);
       }).pipe(Effect.provide(h.layer));
     }),
-  );
-
-  it.effect(
-    "owner texts bypass failure backoff and the daily cap without resuming background work",
-    () =>
-      Effect.gen(function* () {
-        const h = yield* makeHarness;
-        yield* Effect.gen(function* () {
-          const store = yield* Store.AgentStore;
-          const agents = yield* Agents.AgentService;
-          const schedules = yield* Schedules.ScheduledTaskService;
-          yield* store.save(h.fixture);
-          const { task } = yield* schedules.upsert(h.triggerInput);
-          expect(yield* store.reserve(h.fixture.id)).toBe(true);
-          expect(yield* store.reserve(h.fixture.id)).toBe(true);
-          for (let failure = 0; failure < 5; failure++) yield* store.outcome(h.fixture.id, false);
-          const paused = yield* store.get(h.fixture.id);
-          expect(paused.enabled).toBe(false);
-          expect(paused.backoffUntil).not.toBeNull();
-          yield* agents.send({
-            id: paused.id,
-            commandId: CommandId.make("auto-paused:owner"),
-            messageId: MessageId.make("auto-paused:owner"),
-            text: "Hello",
-          });
-          expect(h.calls).toHaveLength(1);
-          expect(h.calls[0]?.threadId).toBe(paused.conversationThreadId);
-          expect((yield* store.get(paused.id)).enabled).toBe(false);
-          expect(yield* agents.trigger(task, "auto-paused:trigger", task.prompt)).toBe(false);
-          expect(h.launches).toEqual([]);
-        }).pipe(Effect.provide(h.layer));
-      }),
   );
 
   it.effect("owner texts keep the conversation and queue behind active work", () =>
@@ -442,7 +404,6 @@ it.effect("legacy migration is idempotent and combines triggers bound to one con
       expect(yield* store.list()).toHaveLength(1);
       const agents = yield* store.list();
       expect(agents[0]?.conversationThreadId).toBe(legacy.threadId);
-      expect(agents[0]?.enabled).toBe(true);
       const rows = yield* sql<{
         agent_id: string;
       }>`SELECT agent_id FROM scheduled_tasks WHERE task_id IN (${first.task.id}, ${second.task.id})`;
@@ -452,7 +413,7 @@ it.effect("legacy migration is idempotent and combines triggers bound to one con
   }),
 );
 
-it.effect("posts auto-pause after five provider failures and stops dispatching jobs", () =>
+it.effect("keeps running jobs after repeated provider failures once each backoff elapses", () =>
   Effect.gen(function* () {
     const h = yield* makeHarness;
     yield* Effect.gen(function* () {
@@ -475,11 +436,11 @@ it.effect("posts auto-pause after five provider failures and stops dispatching j
         });
         yield* agents.reconcile();
       }
-      expect((yield* store.get(h.fixture.id)).enabled).toBe(false);
-      const last = h.posts.at(-1)?.events[0];
-      expect(last?.type === "message.updated" && last.payload.text).toContain("Paused after five");
-      expect(yield* agents.trigger(task, "after-pause", task.prompt)).toBe(false);
-      expect(h.launches).toHaveLength(5);
+      expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(5);
+      expect(yield* agents.trigger(task, "during-backoff", task.prompt)).toBe(false);
+      yield* sql`UPDATE agents SET backoff_until = NULL WHERE agent_id = ${h.fixture.id}`;
+      expect(yield* agents.trigger(task, "after-backoff", task.prompt)).toBe(true);
+      expect(h.launches).toHaveLength(6);
     }).pipe(Effect.provide(h.layer));
   }),
 );
@@ -509,16 +470,8 @@ it.effect("creates a conversation without a provider turn and edits the agent in
     const h = yield* makeHarness;
     yield* Effect.gen(function* () {
       const agents = yield* Agents.AgentService;
-      const {
-        name,
-        avatar,
-        instructions,
-        modelSelection,
-        runtimeMode,
-        projectId,
-        enabled,
-        dailyRunCap,
-      } = h.fixture;
+      const { name, avatar, instructions, modelSelection, runtimeMode, projectId, dailyRunCap } =
+        h.fixture;
       const input = {
         name,
         avatar,
@@ -526,7 +479,6 @@ it.effect("creates a conversation without a provider turn and edits the agent in
         modelSelection,
         runtimeMode,
         projectId,
-        enabled,
         dailyRunCap,
       };
       const created = yield* agents.upsert(input);
@@ -587,37 +539,29 @@ const scopeFor = (threadId: ThreadId): McpInvocationScope => ({
 });
 
 describe("agent scope, approvals and shared commitments", () => {
-  it.effect(
-    "new agents are conservative, retain mission separately, and paused is the inverse of enabled",
-    () =>
-      Effect.gen(function* () {
-        const h = yield* makeHarness;
-        yield* Effect.gen(function* () {
-          const agents = yield* Agents.AgentService;
-          const store = yield* Store.AgentStore;
-          const created = (yield* agents.upsert({
-            ...h.fixture,
-            id: undefined,
-            responsibility: "Monitor CI",
-            autonomy: undefined,
-            permissions: undefined,
-            notifyPolicy: undefined,
-            paused: true,
-          })).agent;
-          expect(created).toMatchObject({
-            responsibility: "Monitor CI",
-            instructions: h.fixture.instructions,
-            autonomy: "propose",
-            permissions: conservativeAgentPermissions,
-            enabled: false,
-            paused: true,
-          });
-          const edited = (yield* agents.upsert({ ...created, paused: false })).agent;
-          expect(edited.enabled).toBe(true);
-          yield* store.outcome(edited.id, false);
-          expect((yield* store.get(edited.id)).paused).toBe(false);
-        }).pipe(Effect.provide(h.layer));
-      }),
+  it.effect("new agents are conservative and retain mission separately", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const agents = yield* Agents.AgentService;
+        const store = yield* Store.AgentStore;
+        const created = (yield* agents.upsert({
+          ...h.fixture,
+          id: undefined,
+          responsibility: "Monitor CI",
+          autonomy: undefined,
+          permissions: undefined,
+          notifyPolicy: undefined,
+        })).agent;
+        expect(created).toMatchObject({
+          responsibility: "Monitor CI",
+          instructions: h.fixture.instructions,
+          autonomy: "propose",
+          permissions: conservativeAgentPermissions,
+        });
+        expect(yield* store.reserve(created.id)).toBe(true);
+      }).pipe(Effect.provide(h.layer));
+    }),
   );
 
   it.effect("an observe agent cannot start Work through either service or MCP policy", () =>
@@ -1483,7 +1427,6 @@ describe("event-driven agent triggers", () => {
   );
   it.effect.each([
     "unauthorized repository",
-    "paused",
     "tagged unauthorized repository",
     "home with unrelated tag",
   ])("uses repository authority for %s", (reason) =>
@@ -1492,8 +1435,6 @@ describe("event-driven agent triggers", () => {
       yield* Effect.gen(function* () {
         yield* prepare(h);
         const source = completedEvent(h);
-        if (reason === "paused")
-          yield* (yield* Store.AgentStore).save({ ...h.fixture, enabled: false, paused: true });
         if (reason === "unauthorized repository" || reason === "tagged unauthorized repository") {
           const p = h.projections.get(source.event.threadId)!;
           h.projections.set(source.event.threadId, {

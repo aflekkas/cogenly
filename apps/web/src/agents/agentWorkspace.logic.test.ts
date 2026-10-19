@@ -434,13 +434,10 @@ describe("scope access", () => {
 });
 
 describe("agentWorkStartPolicy", () => {
-  const base = { enabled: true, permissions: { ...conservativeAgentPermissions, execute: true } };
+  const base = { permissions: { ...conservativeAgentPermissions, execute: true } };
   it("mirrors the server gate", () => {
     expect(agentWorkStartPolicy({ ...base, autonomy: "observe" }).outcome).toBe("refused");
     expect(agentWorkStartPolicy({ ...base, autonomy: "propose" }).outcome).toBe("asks");
-    expect(
-      agentWorkStartPolicy({ ...base, autonomy: "execute_bounded", enabled: false }).outcome,
-    ).toBe("asks");
     expect(
       agentWorkStartPolicy({
         ...base,

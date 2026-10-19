@@ -216,9 +216,8 @@ describe("model availability", () => {
 });
 
 describe("agentStatusLabel", () => {
-  const status = (
-    patch: Partial<Pick<AgentContact, "state" | "enabled" | "requests" | "approvals">> = {},
-  ) => agentStatusLabel({ state: "idle", enabled: true, requests: [], ...patch });
+  const status = (patch: Partial<Pick<AgentContact, "state" | "requests" | "approvals">> = {}) =>
+    agentStatusLabel({ state: "idle", requests: [], ...patch });
   const request = (kind: "approval" | "question") => ({
     id: kind,
     kind,
@@ -227,30 +226,26 @@ describe("agentStatusLabel", () => {
     canRespond: true,
   });
 
-  it("calls an enabled agent with nothing running enabled, not active", () => {
-    expect(status()).toBe("Enabled");
-    expect(status({ state: "done" })).toBe("Enabled");
+  it("calls an agent with nothing running idle, not active", () => {
+    expect(status()).toBe("Idle");
+    expect(status({ state: "done" })).toBe("Idle");
+    expect(status({ state: "asleep" })).toBe("Idle");
   });
 
   it("reports running only while a run is live", () => {
     expect(status({ state: "thinking" })).toBe("Running");
-    expect(status({ state: "working", enabled: false })).toBe("Running");
-  });
-
-  it("says paused when autonomous triggers are off", () => {
-    expect(status({ enabled: false })).toBe("Paused");
-    expect(status({ state: "asleep", enabled: false })).toBe("Paused");
+    expect(status({ state: "working" })).toBe("Running");
   });
 
   it("puts pending approvals and questions ahead of everything", () => {
     expect(status({ state: "thinking", requests: [request("approval")] })).toBe("Needs approval");
     expect(status({ requests: [request("question")] })).toBe("Needs you");
     // The contact list knows only that a thread is waiting, not on what.
-    expect(status({ state: "blocked", enabled: false })).toBe("Needs you");
+    expect(status({ state: "blocked" })).toBe("Needs you");
   });
 
   it("asks for approval while the agent waits on an owner decision", () => {
     const approval = { id: "approval-1" } as AgentContact["approvals"][number];
-    expect(status({ enabled: false, approvals: [approval] })).toBe("Needs approval");
+    expect(status({ approvals: [approval] })).toBe("Needs approval");
   });
 });

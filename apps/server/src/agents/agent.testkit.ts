@@ -21,13 +21,10 @@ export const agentFixture = (suffix = "one"): Agent => ({
     delete: true,
   },
   notifyPolicy: "all",
-  paused: false,
-  enabled: true,
   dailyRunCap: 2,
   conversationThreadId: ThreadId.make(`conversation:${suffix}`),
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
   consecutiveFailures: 0,
   backoffUntil: null,
-  pauseReason: null,
 });

@@ -48,19 +48,16 @@ export function createMockAgentsClient(): AgentsClient {
     modelSelection: models[0]!.selection,
     runtimeMode: "approval-required" as const,
     projectId: null,
-    enabled: true,
     dailyRunCap: 24,
     createdAt: ago(2800),
     updatedAt: ago(2),
     consecutiveFailures: 0,
     backoffUntil: null,
-    pauseReason: null,
     responsibility: "",
     scope: [],
     autonomy: "propose" as const,
     permissions: conservativeAgentPermissions,
     notifyPolicy: "meaningful_changes" as const,
-    paused: false,
     memory: [],
     activity: [],
     requests: [],
@@ -278,7 +275,6 @@ export function createMockAgentsClient(): AgentsClient {
         id: AgentId.make("echo"),
         name: "Echo",
         avatar: { seed: "echo", color: "#7da9c9" },
-        enabled: false,
         state: "asleep",
         updatedAt: ago(1500),
         conversationThreadId: ThreadId.make("preview-echo"),
@@ -350,7 +346,6 @@ export function createMockAgentsClient(): AgentsClient {
     autonomy: draft.autonomy ?? current.autonomy,
     permissions: draft.permissions ?? current.permissions,
     notifyPolicy: draft.notifyPolicy ?? current.notifyPolicy,
-    paused: draft.paused ?? !draft.enabled,
   });
   const listeners = new Set<() => void>();
   const emit = () => listeners.forEach((listener) => listener());
@@ -412,7 +407,7 @@ export function createMockAgentsClient(): AgentsClient {
           ...draft,
           ...policy(draft, agent),
           id: agent.id,
-          state: draft.enabled ? (agent.enabled ? agent.state : "idle") : "asleep",
+          state: agent.state === "asleep" ? "idle" : agent.state,
           updatedAt: ago(0),
         }));
         return snapshot.agents.find((agent) => agent.id === draft.id)!;
@@ -445,7 +440,7 @@ export function createMockAgentsClient(): AgentsClient {
     send: async (agent, text) =>
       update(agent.id, (current) => ({
         ...current,
-        state: current.enabled ? "thinking" : "asleep",
+        state: "thinking",
         updatedAt: ago(0),
         preview: text,
         messages: [

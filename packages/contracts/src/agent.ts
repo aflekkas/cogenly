@@ -56,8 +56,6 @@ const AgentPolicyFields = {
   autonomy: AgentAutonomy,
   permissions: AgentPermissions,
   notifyPolicy: Schema.Literals(["action_required", "meaningful_changes", "all"]),
-  /** Alias of !enabled. Pauses background invocations; owner messages remain available. */
-  paused: Schema.Boolean,
 };
 const AgentFields = {
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
@@ -66,8 +64,6 @@ const AgentFields = {
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   projectId: Schema.NullOr(ProjectId),
-  /** Pauses autonomous triggers; owner texts remain available for recovery. */
-  enabled: Schema.Boolean,
   /** Autonomous job starts per UTC day. Owner-initiated conversation turns are not capped. */
   dailyRunCap: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })),
 };
@@ -79,8 +75,8 @@ export const Agent = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   consecutiveFailures: Schema.Int,
+  /** Failed background starts back off exponentially; agents are never paused. */
   backoffUntil: Schema.NullOr(IsoDateTime),
-  pauseReason: Schema.NullOr(Schema.String),
 });
 export type Agent = typeof Agent.Type;
 /** Omit id to create. A project is required for creation; null on edits keeps the conversation's workspace. */
@@ -92,7 +88,6 @@ export const AgentUpsertInput = Schema.Struct({
   autonomy: Schema.optional(AgentAutonomy),
   permissions: Schema.optional(AgentPermissions),
   notifyPolicy: Schema.optional(AgentPolicyFields.notifyPolicy),
-  paused: Schema.optional(Schema.Boolean),
 });
 export type AgentUpsertInput = typeof AgentUpsertInput.Type;
 export const AgentKey = Schema.Struct({ id: AgentId });

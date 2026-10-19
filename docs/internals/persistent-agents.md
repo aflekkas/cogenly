@@ -42,10 +42,11 @@ text extracts, without spending extra provider turns, and can lose nuance from l
 messages. Facts that must survive should be remembered explicitly.
 
 Autonomous job reservations are transactional, limited to one active job per agent,
-and capped per UTC day. Owner conversation turns remain available while an agent is
-paused. Failure backoff starts at one minute, doubles up to one hour, and disables
-an agent after five consecutive failures with a conversation notice. Enabling it again
-resets its failure state. Fixed-time triggers attached to an agent catch up once, then
+and capped per UTC day. Agents cannot be paused: failure backoff starts at one minute and
+doubles up to one hour, but never disables an agent, since nothing could turn it back on.
+Migration 072 re-enabled agents paused before this. The `agents.enabled` column now only
+fences reservations while deletion stops active work. Owner conversation turns bypass
+backoff and caps. Fixed-time triggers attached to an agent catch up once, then
 advance from the current time; there is no backlog replay. All scheduling runs while
 the server is up, including headless `apps/server` deployments. A VPS still needs a
 process supervisor, persistent database/secrets/workspaces, provider credentials and
@@ -64,7 +65,7 @@ agents cannot start Work. Owner-approved Work is a one-action authorization for 
 reviewed target, not a persistent scope expansion. Link/grant revocation affects subsequent
 accesses, including already-running Work's MCP calls. New agents default to propose with read/draft
 only. Migration 067 preserves existing agents' previous MCP ceiling by granting all
-operations with autonomous-within-policy, leaving runtime/interaction approvals, pause,
+operations with autonomous-within-policy, leaving runtime/interaction approvals,
 caps and backoff intact; scope starts empty and notifications remain all. Trigger and
 permission changes always require a new owner approval even for migrated agents.
 Persistent agents start tracked Work through `start_agent_work` or `work_start`; untracked child launches,

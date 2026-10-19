@@ -556,26 +556,24 @@ export function agentCanExecute(agent: Pick<Agent, "autonomy" | "permissions">) 
 
 /**
  * What happens when the agent tries to start Work, mirroring the server's gate:
- * observe agents are refused; paused, propose, or no Read or Start Work grant asks the
+ * observe agents are refused; propose, or no Read or Start Work grant asks the
  * owner; otherwise it may start Work in its home repository and in repositories linked
  * to projects granted Read & execute, and asks for any other one.
  */
-export function agentWorkStartPolicy(agent: Pick<Agent, "autonomy" | "enabled" | "permissions">): {
+export function agentWorkStartPolicy(agent: Pick<Agent, "autonomy" | "permissions">): {
   outcome: "refused" | "asks" | "scoped";
   text: string;
 } {
   if (agent.autonomy === "observe")
     return { outcome: "refused", text: "Can't start Work at this autonomy level." };
-  if (!agent.enabled || !agentCanExecute(agent))
+  if (!agentCanExecute(agent))
     return {
       outcome: "asks",
-      text: !agent.enabled
-        ? "Paused: asks you before starting Work."
-        : !agent.permissions.execute
-          ? "Asks you before starting Work (no Start Work permission)."
-          : !agent.permissions.read
-            ? "Asks you before starting Work (no Read permission)."
-            : "Asks you before starting Work.",
+      text: !agent.permissions.execute
+        ? "Asks you before starting Work (no Start Work permission)."
+        : !agent.permissions.read
+          ? "Asks you before starting Work (no Read permission)."
+          : "Asks you before starting Work.",
     };
   return {
     outcome: "scoped",

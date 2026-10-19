@@ -240,7 +240,7 @@ const make = Effect.gen(function* () {
                     ? "draft"
                     : "execute";
         if (!agent.permissions[grant]) return yield* denied(`This agent has no ${grant} grant.`);
-        if (grant !== "draft" && (!agent.enabled || agent.autonomy === "propose"))
+        if (grant !== "draft" && agent.autonomy === "propose")
           return yield* denied(
             "This action needs owner approval. Request a bounded action with request_agent_approval.",
           );

@@ -342,8 +342,7 @@ const make = Effect.gen(function* () {
       const scope = yield* access.resolve(agent.id);
       if (
         actor &&
-        (!agent.enabled ||
-          !scope.executableRepositoryIds.includes(input.projectId) ||
+        (!scope.executableRepositoryIds.includes(input.projectId) ||
           input.workspaceStrategy?.type === "existing_worktree")
       ) {
         const { approval } = yield* requestApproval(

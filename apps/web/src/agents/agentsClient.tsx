@@ -395,9 +395,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
               : shell?.runtime?.activeRunId ||
                   workThreads.some((thread) => thread.runtime?.activeRunId)
                 ? "thinking"
-                : record.enabled
-                  ? "idle"
-                  : "asleep";
+                : "idle";
           return {
             ...record,
             environmentId,
@@ -492,7 +490,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           environmentId,
           unreadCount: 0,
           latestMessage: null,
-          state: record.enabled ? "idle" : "asleep",
+          state: "idle",
           preview: "Say hello",
           messages: [],
           triggers: [],

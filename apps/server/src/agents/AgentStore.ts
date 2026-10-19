@@ -30,8 +30,6 @@ interface Row {
   payload_json: string;
   consecutive_failures: number;
   backoff_until: string | null;
-  pause_reason: string | null;
-  enabled: number;
   daily_run_cap: number;
   unread_count: number;
   latest_message_json?: string | null;
@@ -57,6 +55,8 @@ export class AgentStore extends Context.Service<
     readonly forThread: (id: ThreadId) => Effect.Effect<Agent | null, AgentError>;
     readonly save: (agent: Agent) => Effect.Effect<Agent, AgentError>;
     readonly delete: (id: AgentId) => Effect.Effect<boolean, AgentError>;
+    /** Deletion only: blocks new background reservations while active work is stopped. */
+    readonly retire: (id: AgentId) => Effect.Effect<void, AgentError>;
     readonly markRead: (input: AgentMarkReadInput) => Effect.Effect<AgentListItem, AgentError>;
     readonly memory: (id: AgentId) => Effect.Effect<ReadonlyArray<AgentMemoryNote>, AgentError>;
     readonly remember: (
@@ -229,12 +229,17 @@ const make = Effect.gen(function* () {
               if (!labels.length)
                 return yield* new AgentError({ message: "Agent scope label not found." });
             }
-            yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, ${encodeAgent(agent)}, ${agent.enabled ? 1 : 0}, ${agent.dailyRunCap}) ON CONFLICT(agent_id) DO UPDATE SET payload_json = excluded.payload_json, enabled = excluded.enabled, daily_run_cap = excluded.daily_run_cap, pause_reason = CASE WHEN excluded.enabled = 1 THEN NULL ELSE agents.pause_reason END, consecutive_failures = CASE WHEN excluded.enabled = 1 AND agents.enabled = 0 THEN 0 ELSE agents.consecutive_failures END, backoff_until = CASE WHEN excluded.enabled = 1 AND agents.enabled = 0 THEN NULL ELSE agents.backoff_until END`;
+            yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, ${encodeAgent(agent)}, 1, ${agent.dailyRunCap}) ON CONFLICT(agent_id) DO UPDATE SET payload_json = excluded.payload_json, daily_run_cap = excluded.daily_run_cap`;
             return yield* get(agent.id);
           }),
         )
         .pipe(Effect.mapError(storeError)),
 
+    retire: (id) =>
+      sql`UPDATE agents SET enabled = 0 WHERE agent_id = ${id}`.pipe(
+        Effect.asVoid,
+        Effect.mapError(storeError),
+      ),
     delete: (id) =>
       sql
         .withTransaction(
@@ -301,7 +306,7 @@ const make = Effect.gen(function* () {
           : DateTime.formatIso(
               DateTime.add(at, { seconds: Math.min(3600, 60 * 2 ** (failures - 1)) }),
             );
-        yield* sql`UPDATE agents SET payload_json = json_set(payload_json, '$.updatedAt', ${DateTime.formatIso(at)}), consecutive_failures = ${failures}, backoff_until = ${until}, enabled = CASE WHEN ${failures} >= 5 THEN 0 ELSE enabled END, pause_reason = CASE WHEN ${failures} >= 5 THEN 'Paused after five consecutive failures. Enable this agent to retry.' ELSE NULL END WHERE agent_id = ${id}`;
+        yield* sql`UPDATE agents SET payload_json = json_set(payload_json, '$.updatedAt', ${DateTime.formatIso(at)}), consecutive_failures = ${failures}, backoff_until = ${until} WHERE agent_id = ${id}`;
         return yield* get(id);
       }).pipe(Effect.mapError(storeError)),
     createRun: (run) =>

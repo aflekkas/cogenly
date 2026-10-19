@@ -148,7 +148,7 @@ describe("persistent agents", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  it.effect("enforces a daily cap, exponential backoff, auto-pause, and explicit resume", () =>
+  it.effect("enforces a daily cap and exponential backoff, and never pauses after failures", () =>
     Effect.gen(function* () {
       const store = yield* Store.AgentStore;
       const sql = yield* SqlClient.SqlClient;
@@ -163,12 +163,12 @@ describe("persistent agents", () => {
       yield* store.outcome(agent.id, false);
       yield* store.outcome(agent.id, false);
       yield* store.outcome(agent.id, false);
-      const paused = yield* store.outcome(agent.id, false);
-      expect(paused.enabled).toBe(false);
-      expect(paused.pauseReason).toContain("five");
-      const resumed = yield* store.save({ ...paused, enabled: true });
-      expect(resumed.consecutiveFailures).toBe(0);
-      expect(resumed.backoffUntil).toBeNull();
+      const failing = yield* store.outcome(agent.id, false);
+      expect(failing.consecutiveFailures).toBe(5);
+      expect(yield* store.reserve(agent.id)).toBe(false);
+      // Once the backoff elapses the agent runs again; nothing waits on the owner.
+      yield* sql`UPDATE agents SET backoff_until = NULL, run_day = '2000-01-01' WHERE agent_id = ${agent.id}`;
+      expect(yield* store.reserve(agent.id)).toBe(true);
       yield* store.outcome(agent.id, true);
       expect((yield* store.get(agent.id)).consecutiveFailures).toBe(0);
     }).pipe(Effect.provide(layer)),

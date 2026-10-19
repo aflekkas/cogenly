@@ -182,13 +182,11 @@ const make = Effect.gen(function* () {
               DateTime.toEpochMillis(yield* DateTime.now) - Date.parse(record.createdAt) >
               300000
             ) {
-              const next = yield* store.outcome(agent.id, false);
+              yield* store.outcome(agent.id, false);
               yield* store.finishRun(
                 record.id,
                 "failed",
-                ["This job was interrupted before it could start.", next.pauseReason]
-                  .filter(Boolean)
-                  .join("\n\n"),
+                "This job was interrupted before it could start.",
               );
             }
             return;
@@ -198,13 +196,11 @@ const make = Effect.gen(function* () {
             run === undefined &&
             DateTime.toEpochMillis(yield* DateTime.now) - Date.parse(record.createdAt) > 300000
           ) {
-            const next = yield* store.outcome(agent.id, false);
+            yield* store.outcome(agent.id, false);
             yield* store.finishRun(
               record.id,
               "failed",
-              ["This job was interrupted before its first turn started.", next.pauseReason]
-                .filter(Boolean)
-                .join("\n\n"),
+              "This job was interrupted before its first turn started.",
             );
             return;
           }
@@ -228,16 +224,12 @@ const make = Effect.gen(function* () {
             .trim();
           const updated = yield* sql.withTransaction(
             Effect.gen(function* () {
-              const next = yield* store.outcome(agent.id, succeeded);
-              const summary = [
+              yield* store.outcome(agent.id, succeeded);
+              const summary =
                 response.slice(0, 1200) ||
-                  (succeeded
-                    ? "Work finished."
-                    : "This run failed. Open the work details to inspect it."),
-                next.pauseReason,
-              ]
-                .filter(Boolean)
-                .join("\n\n");
+                (succeeded
+                  ? "Work finished."
+                  : "This run failed. Open the work details to inspect it.");
               yield* store.finishRun(record.id, succeeded ? "completed" : "failed", summary);
               return {
                 ...record,
@@ -329,15 +321,12 @@ const make = Effect.gen(function* () {
           autonomy: input.autonomy ?? existing?.autonomy ?? "propose",
           permissions: input.permissions ?? existing?.permissions ?? conservativeAgentPermissions,
           notifyPolicy: input.notifyPolicy ?? existing?.notifyPolicy ?? "meaningful_changes",
-          enabled: input.paused === undefined ? input.enabled : !input.paused,
-          paused: input.paused ?? !input.enabled,
           id,
           conversationThreadId,
           createdAt: existing?.createdAt ?? at,
           updatedAt: at,
           consecutiveFailures: existing?.consecutiveFailures ?? 0,
           backoffUntil: existing?.backoffUntil ?? null,
-          pauseReason: existing?.pauseReason ?? null,
         });
         if (existing !== null) {
           yield* threads.dispatch({
@@ -360,8 +349,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const agent = (yield* store.list()).find((candidate) => candidate.id === id);
         if (agent === undefined) return { deleted: false };
-        // Disable before stopping work so a due trigger cannot launch while deletion waits.
-        yield* store.save({ ...agent, enabled: false });
+        // Retire before stopping work so a due trigger cannot launch while deletion waits.
+        yield* store.retire(id);
         const runs = yield* store.runs(id);
         const threadIds = [
           agent.conversationThreadId,
@@ -386,8 +375,8 @@ const make = Effect.gen(function* () {
     send: (input) =>
       Effect.gen(function* () {
         const agent = yield* store.get(input.id);
-        // Pausing, backoff and daily caps govern background reservations only.
-        // An owner text always reaches the provider, including after auto-pause.
+        // Backoff and daily caps govern background reservations only.
+        // An owner text always reaches the provider.
         const result = yield* threads.sendToThread({
           projectId: yield* workspace(agent),
           commandId: input.commandId,
@@ -488,13 +477,11 @@ const make = Effect.gen(function* () {
         );
         if (result._tag === "Success") yield* store.markRunning(id);
         if (result._tag === "Failure") {
-          const next = yield* store.outcome(agent.id, false);
+          yield* store.outcome(agent.id, false);
           yield* store.finishRun(
             id,
             "failed",
-            ["I could not start this job. Open its work details to inspect it.", next.pauseReason]
-              .filter(Boolean)
-              .join("\n\n"),
+            "I could not start this job. Open its work details to inspect it.",
           );
         }
         yield* changed;
