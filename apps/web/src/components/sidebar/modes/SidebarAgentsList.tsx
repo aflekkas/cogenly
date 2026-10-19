@@ -1,61 +1,57 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import { useProjects, useServerConfigs } from "~/state/entities";
-import { ProjectFavicon } from "../../ProjectFavicon";
+import { useMemo } from "react";
+import { useConnectedEnvironmentIds } from "~/state/environments";
+import { ProjectColorDot } from "~/projectLabels/ProjectTag";
+import { projectLabelKey } from "~/projectLabels/projectLabels.logic";
+import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { SidebarModeGroupLabel } from "./SidebarModeGroupLabel";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { AgentContacts } from "../../../agents/AgentContacts";
 import { useAgents } from "../../../agents/agentsClient";
-import { agentContactKey, groupAgentContacts } from "../../../agents/agents.logic";
+import { agentContactKey } from "../../../agents/agents.logic";
+import { groupAgentsByScope } from "../../../agents/agentWorkspace.logic";
 
-/** Agents are contacts, grouped by project with no-project contacts first. */
+/**
+ * Agents grouped under the projects their scope grants: an agent in two projects
+ * appears under both, unscoped agents under "Other". Without any scoped agent the
+ * list has no headings.
+ */
 export function SidebarAgentsList(props: {
   activeThreadKey: string | null;
-  projectDisplayNameByKey: ReadonlyMap<string, string>;
   onOpenThread: (threadRef: ScopedThreadRef) => void;
   onCreateAgent: () => void;
 }) {
   const { agents } = useAgents();
-  const projects = useProjects();
-  const configs = useServerConfigs();
-  const projectByKey = new Map(
-    projects.map((project) => [`${project.environmentId}:${project.id}`, project]),
+  const directory = useProjectLabelDirectory(useConnectedEnvironmentIds());
+  const sections = useMemo(
+    () =>
+      groupAgentsByScope(agents, (agent) =>
+        agent.scope.flatMap((entry) => {
+          const project = directory.byKey.get(projectLabelKey(agent.environmentId, entry.labelId));
+          return project
+            ? [{ key: project.key, name: project.label.name, color: project.label.color }]
+            : [];
+        }),
+      ),
+    [agents, directory],
   );
-  const groups = groupAgentContacts(agents, (agent) => {
-    if (!agent.projectId) return null;
-    const key = `${agent.environmentId}:${agent.projectId}`;
-    const project = projectByKey.get(key);
-    if (
-      project &&
-      (project.isScratch ||
-        isScratchProject(project, configs.get(agent.environmentId)?.scratchWorkspaceRoot))
-    )
-      return null;
-    return { key, label: props.projectDisplayNameByKey.get(key) ?? project?.title ?? "Project" };
-  });
   const active = agents.find(
     (agent) => props.activeThreadKey === `${agent.environmentId}:${agent.conversationThreadId}`,
   );
   return (
     <AgentContacts
-      groups={groups.map((group) => {
-        const project = projectByKey.get(group.key);
-        return {
-          ...group,
-          heading:
-            group.label === null ? null : (
-              <SidebarModeGroupLabel
-                icon={
-                  project ? (
-                    <ProjectFavicon project={project} className="size-3.5 shrink-0" />
-                  ) : null
-                }
-              >
-                {group.label}
-              </SidebarModeGroupLabel>
-            ),
-        };
-      })}
+      groups={sections.map((section) => ({
+        key: section.project?.key ?? "other",
+        agents: section.agents,
+        heading:
+          sections.length === 1 && section.project === null ? null : (
+            <SidebarModeGroupLabel
+              icon={section.project ? <ProjectColorDot color={section.project.color} /> : null}
+            >
+              {section.project?.name ?? "Other"}
+            </SidebarModeGroupLabel>
+          ),
+      }))}
       activeKey={active ? agentContactKey(active) : null}
       onOpen={(agent) =>
         props.onOpenThread(scopeThreadRef(agent.environmentId, agent.conversationThreadId))

@@ -1,25 +1,5 @@
 import { cn, randomUUID } from "~/lib/utils";
-import {
-  ActivityIcon,
-  ArrowUpRightIcon,
-  BookmarkIcon,
-  BotIcon,
-  ChevronDownIcon,
-  CircleCheckIcon,
-  CircleXIcon,
-  GaugeIcon,
-  LoaderCircleIcon,
-  PlayIcon,
-  PlusIcon,
-  PowerIcon,
-  RefreshCwIcon,
-  ScrollTextIcon,
-  Trash2Icon,
-  UserRoundIcon,
-  XIcon,
-  ZapIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { ChevronDownIcon, GaugeIcon, RefreshCwIcon, XIcon, type LucideIcon } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -27,21 +7,23 @@ import {
   type ComponentProps,
   type KeyboardEvent,
   type ReactNode,
-  type RefObject,
 } from "react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import {
+  conservativeAgentPermissions,
+  type EnvironmentId,
+  type ProjectLabelWithRepositories,
+} from "@t3tools/contracts";
+import { ProjectLabelChips, ProjectLabelPicker } from "~/projectLabels/ProjectLabelPicker";
+import { AUTONOMY_OPTIONS, toggleScope } from "./agentWorkspace.logic";
 import { AgentFace } from "~/components/agents/face";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
-import { ThreadDetailsSection, ThreadDetailsSurface } from "~/components/chat/ThreadDetailsSection";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "~/components/chat/threadDetailsPanelStyles";
-import { THREAD_DETAILS_CARD_GAP } from "~/components/chat/threadDetailsCardLayout";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
-import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "~/components/ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import {
   Select,
@@ -54,13 +36,6 @@ import { Switch } from "~/components/ui/switch";
 import { Textarea } from "~/components/ui/textarea";
 import { Toggle } from "~/components/ui/toggle";
 import { AgentCreatedWithoutTriggerError, useAgents, useAgentsClient } from "./agentsClient";
-import {
-  agentDraft,
-  agentStatusLabel,
-  formatMessageTime,
-  modelDisplayName,
-  sameModel,
-} from "./agents.logic";
 import type { AgentContact, AgentDraft, AgentTrigger } from "./agents.types";
 
 export function AgentSheet({
@@ -108,10 +83,9 @@ export function AgentSheet({
     </dialog>
   );
 }
-type ProfilePatch = Partial<Omit<AgentDraft, "id">>;
 
 /** One details row: a muted icon, a label, and an optional trailing value or control. */
-function DetailRow({
+export function DetailRow({
   icon: Icon,
   label,
   value,
@@ -146,443 +120,9 @@ function DetailRow({
     </ThreadDetailsControl>
   );
 }
-const chevron = <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />;
+export const chevron = <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />;
 
-/** The agent's profile, triggers, memory and activity in the thread details card. */
-export function AgentDetails({
-  agent,
-  anchor,
-  onClose,
-  initialTab = "about",
-}: {
-  agent: AgentContact;
-  anchor: RefObject<Element | null>;
-  onClose: () => void;
-  initialTab?: "about" | "activity";
-}) {
-  return (
-    <Popover open onOpenChange={(open) => !open && onClose()}>
-      <PopoverPopup
-        anchor={anchor}
-        align="end"
-        // Lines the card up with the thread details card: the panel pads its card by 8px.
-        alignOffset={THREAD_DETAILS_CARD_GAP - 8}
-        side="bottom"
-        variant="panel"
-        padding="none"
-        collisionAvoidance={{ side: "shift", align: "shift", fallbackAxisSide: "none" }}
-        aria-label={`About ${agent.name}`}
-      >
-        <ThreadDetailsSurface floating data-agent-details>
-          <AgentDetailsContent agent={agent} onClose={onClose} initialTab={initialTab} />
-        </ThreadDetailsSurface>
-      </PopoverPopup>
-    </Popover>
-  );
-}
-
-function AgentDetailsContent({
-  agent,
-  onClose,
-  initialTab,
-}: {
-  agent: AgentContact;
-  onClose: () => void;
-  initialTab: "about" | "activity";
-}) {
-  const client = useAgentsClient();
-  const { models: allModels } = useAgents();
-  const models = allModels.filter(
-    (model) => !model.environmentId || model.environmentId === agent.environmentId,
-  );
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  const [editing, setEditing] = useState<
-    | { kind: "name" | "instructions" | "memory:new" | "trigger:new" | "delete" }
-    | { kind: "memory" | "trigger"; id: string }
-    | null
-  >(null);
-  const activity = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (initialTab === "activity") activity.current?.scrollIntoView({ block: "start" });
-  }, [initialTab]);
-  async function mutate(action: () => Promise<unknown>) {
-    if (pending) return false;
-    setPending(true);
-    setError(null);
-    try {
-      await action();
-      return true;
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save changes.");
-      return false;
-    } finally {
-      setPending(false);
-    }
-  }
-  const saveProfile = (patch: ProfilePatch) =>
-    mutate(() => client.save(agent.environmentId, { ...agentDraft(agent), ...patch }));
-  const close = () => setEditing(null);
-  const status = agentStatusLabel(agent);
-  const isEditing = (kind: string, id?: string) =>
-    editing?.kind === kind && (id === undefined || ("id" in editing && editing.id === id));
-  return (
-    <>
-      <ThreadDetailsSection
-        headingId="agent-details-profile"
-        title="Profile"
-        separated={false}
-        showHeading={false}
-      >
-        <div className="flex items-center gap-3 px-2.5 pt-1.5 pb-2">
-          <AgentFace
-            seed={agent.avatar.seed}
-            {...(agent.avatar.color ? { color: agent.avatar.color } : {})}
-            size={40}
-            state={agent.enabled ? agent.state : "asleep"}
-          />
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="truncate text-sm font-medium text-foreground">{agent.name}</span>
-            <span className="line-clamp-2 text-xs text-muted-foreground">
-              {status === "Paused" && agent.pauseReason ? `Paused · ${agent.pauseReason}` : status}
-            </span>
-          </span>
-          <ThreadDetailsControl
-            part="icon"
-            aria-label="New face"
-            title="New face"
-            disabled={pending}
-            onClick={() => void saveProfile({ avatar: { seed: randomUUID() } })}
-          >
-            <RefreshCwIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-          </ThreadDetailsControl>
-        </div>
-        <div className="flex flex-col">
-          {isEditing("name") ? (
-            <InlineEditor
-              label="Name"
-              initial={agent.name}
-              maxLength={200}
-              pending={pending}
-              onCancel={close}
-              onSave={async (name) => (await saveProfile({ name })) && close()}
-            />
-          ) : (
-            <DetailRow
-              icon={UserRoundIcon}
-              label="Name"
-              value={agent.name}
-              onClick={() => setEditing({ kind: "name" })}
-            />
-          )}
-          {isEditing("instructions") ? (
-            <InlineEditor
-              label="Instructions"
-              multiline
-              allowEmpty
-              initial={agent.instructions}
-              maxLength={32000}
-              placeholder="What should your agent help with? How should they talk to you?"
-              pending={pending}
-              onCancel={close}
-              onSave={async (instructions) => (await saveProfile({ instructions })) && close()}
-            />
-          ) : (
-            <DetailRow
-              icon={ScrollTextIcon}
-              label="Instructions"
-              detail={agent.instructions.trim() || "Add standing instructions"}
-              onClick={() => setEditing({ kind: "instructions" })}
-            />
-          )}
-          <Menu>
-            <MenuTrigger
-              render={
-                <DetailRow
-                  icon={BotIcon}
-                  label="Model"
-                  value={
-                    client.modelStatus?.(agent, agent.modelSelection).status === "unavailable"
-                      ? `${agent.modelSelection.model} · unavailable`
-                      : modelDisplayName(models, agent.modelSelection)
-                  }
-                  trailing={chevron}
-                  disabled={pending}
-                />
-              }
-            />
-            <MenuPopup align="start">
-              <MenuRadioGroup
-                value={`${agent.modelSelection.instanceId}\0${agent.modelSelection.model}`}
-                onValueChange={(value) => {
-                  const option = models.find(
-                    (model) => `${model.selection.instanceId}\0${model.selection.model}` === value,
-                  );
-                  if (option && !sameModel(option.selection, agent.modelSelection))
-                    void saveProfile({ modelSelection: option.selection });
-                }}
-              >
-                {models.map((model) => (
-                  <MenuRadioItem
-                    key={`${model.selection.instanceId}\0${model.selection.model}`}
-                    value={`${model.selection.instanceId}\0${model.selection.model}`}
-                  >
-                    {model.label}
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuPopup>
-          </Menu>
-          <DailyCapRow
-            cap={agent.dailyRunCap}
-            pending={pending}
-            onSave={(dailyRunCap) => saveProfile({ dailyRunCap })}
-          />
-          <ThreadDetailsControl render={<label />} className="cursor-pointer">
-            <PowerIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-            <span className={cn("min-w-0 flex-1 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
-              Background work
-            </span>
-            <Switch
-              size="sm"
-              checked={agent.enabled}
-              disabled={pending}
-              onCheckedChange={(enabled) => void saveProfile({ enabled })}
-            />
-          </ThreadDetailsControl>
-        </div>
-      </ThreadDetailsSection>
-
-      <ThreadDetailsSection
-        headingId="agent-details-triggers"
-        title="Triggers"
-        actions={
-          <ThreadDetailsControl
-            part="icon"
-            aria-label="Add a trigger"
-            onClick={() => setEditing({ kind: "trigger:new" })}
-          >
-            <PlusIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-          </ThreadDetailsControl>
-        }
-      >
-        <div className="flex flex-col">
-          {agent.triggers.length === 0 && !isEditing("trigger:new") && (
-            <DetailRow
-              icon={ZapIcon}
-              label="Add a trigger"
-              tone="muted"
-              onClick={() => setEditing({ kind: "trigger:new" })}
-            />
-          )}
-          {agent.triggers.map((trigger) =>
-            isEditing("trigger", trigger.id) ? (
-              <TriggerForm
-                key={trigger.id}
-                initial={trigger}
-                pending={pending}
-                onCancel={close}
-                onSave={(value) =>
-                  mutate(async () => {
-                    await client.saveTrigger(agent, value);
-                    close();
-                  })
-                }
-              />
-            ) : (
-              <div key={trigger.id} className="flex items-center">
-                <DetailRow
-                  icon={ZapIcon}
-                  label={trigger.title}
-                  detail={`${describeTrigger(trigger)}${trigger.enabled ? "" : " · Paused"}`}
-                  className="flex-1"
-                  onClick={() => setEditing({ kind: "trigger", id: trigger.id })}
-                />
-                <ThreadDetailsControl
-                  part="icon"
-                  aria-label={`Run ${trigger.title} now`}
-                  title="Run now"
-                  disabled={pending || !agent.enabled}
-                  onClick={() => void mutate(() => client.runTrigger(agent, trigger.id))}
-                >
-                  <PlayIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-                </ThreadDetailsControl>
-                <ThreadDetailsControl
-                  part="icon"
-                  aria-label={`Delete trigger ${trigger.title}`}
-                  title="Delete"
-                  disabled={pending}
-                  onClick={() => void mutate(() => client.deleteTrigger(agent, trigger.id))}
-                >
-                  <Trash2Icon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-                </ThreadDetailsControl>
-              </div>
-            ),
-          )}
-          {isEditing("trigger:new") && (
-            <TriggerForm
-              pending={pending}
-              onCancel={close}
-              onSave={(value) =>
-                mutate(async () => {
-                  await client.saveTrigger(agent, value);
-                  close();
-                })
-              }
-            />
-          )}
-        </div>
-      </ThreadDetailsSection>
-
-      <ThreadDetailsSection
-        headingId="agent-details-memory"
-        title="Memory"
-        actions={
-          <ThreadDetailsControl
-            part="icon"
-            aria-label="Add a memory note"
-            onClick={() => setEditing({ kind: "memory:new" })}
-          >
-            <PlusIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-          </ThreadDetailsControl>
-        }
-      >
-        <div className="flex flex-col">
-          {isEditing("memory:new") && (
-            <InlineEditor
-              label="New memory note"
-              multiline
-              initial=""
-              maxLength={8000}
-              placeholder="Something to remember"
-              saveLabel="Add note"
-              pending={pending}
-              onCancel={close}
-              onSave={(text) =>
-                mutate(async () => {
-                  await client.saveMemory(agent, { text });
-                  close();
-                })
-              }
-            />
-          )}
-          {agent.memory.length === 0 && !isEditing("memory:new") && (
-            <DetailRow
-              icon={BookmarkIcon}
-              label="No notes yet"
-              detail={`Tell ${agent.name} something to remember.`}
-              tone="muted"
-              onClick={() => setEditing({ kind: "memory:new" })}
-            />
-          )}
-          {agent.memory.map((note) =>
-            isEditing("memory", note.id) ? (
-              <InlineEditor
-                key={note.id}
-                label="Memory note"
-                multiline
-                initial={note.text}
-                maxLength={8000}
-                saveLabel="Save note"
-                pending={pending}
-                onCancel={close}
-                onDelete={() =>
-                  void mutate(async () => {
-                    await client.deleteMemory(agent, note.id);
-                    close();
-                  })
-                }
-                deleteLabel={`Forget ${note.text}`}
-                onSave={(text) =>
-                  mutate(async () => {
-                    await client.saveMemory(agent, { id: note.id, text });
-                    close();
-                  })
-                }
-              />
-            ) : (
-              <DetailRow
-                key={note.id}
-                icon={BookmarkIcon}
-                label={note.text}
-                detail={`${formatMessageTime(note.updatedAt)} · ${
-                  // Notes the agent saves itself name the conversation thread.
-                  note.source.startsWith("thread:") ? "from a conversation" : note.source
-                }`}
-                onClick={() => setEditing({ kind: "memory", id: note.id })}
-              />
-            ),
-          )}
-        </div>
-      </ThreadDetailsSection>
-
-      <ThreadDetailsSection ref={activity} headingId="agent-details-activity" title="Activity">
-        <div className="flex flex-col">
-          {agent.activity.length === 0 && (
-            <DetailRow icon={ActivityIcon} label="No background runs yet" tone="muted" disabled />
-          )}
-          {agent.activity.map((run) => (
-            <DetailRow
-              key={run.id}
-              icon={
-                run.status === "failed"
-                  ? CircleXIcon
-                  : run.status === "completed"
-                    ? CircleCheckIcon
-                    : LoaderCircleIcon
-              }
-              label={
-                agent.triggers.find((trigger) => trigger.id === run.triggerId)?.title ??
-                "Background work"
-              }
-              value={formatMessageTime(run.createdAt)}
-              detail={run.summary || "Working on it…"}
-              trailing={<ArrowUpRightIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />}
-              onClick={() => client.openWork(agent, run.workThreadId)}
-            />
-          ))}
-        </div>
-      </ThreadDetailsSection>
-
-      <ThreadDetailsSection headingId="agent-details-danger" title="Delete" showHeading={false}>
-        {isEditing("delete") ? (
-          <div className="flex flex-col">
-            <p className="px-2.5 py-2 text-xs text-muted-foreground">
-              Delete {agent.name} and its triggers? Your work threads remain.
-            </p>
-            <DetailRow
-              icon={Trash2Icon}
-              label="Delete agent"
-              tone="destructive"
-              disabled={pending}
-              onClick={() =>
-                void mutate(async () => {
-                  await client.remove(agent);
-                  onClose();
-                })
-              }
-            />
-            <DetailRow icon={XIcon} label="Keep agent" onClick={close} />
-          </div>
-        ) : (
-          <DetailRow
-            icon={Trash2Icon}
-            label="Delete agent"
-            tone="destructive"
-            onClick={() => setEditing({ kind: "delete" })}
-          />
-        )}
-      </ThreadDetailsSection>
-      {error && (
-        <p className="border-t border-border/65 px-4 py-2.5 text-xs text-destructive" role="alert">
-          {error}
-        </p>
-      )}
-    </>
-  );
-}
-
-function DailyCapRow({
+export function DailyCapRow({
   cap,
   pending,
   onSave,
@@ -645,7 +185,7 @@ function DailyCapRow({
 }
 
 /** A row that expanded into an editor; Escape cancels and ⌘/Ctrl+Enter saves. */
-function InlineEditor({
+export function InlineEditor({
   label,
   initial,
   multiline = false,
@@ -748,14 +288,18 @@ export function AgentForm({
   submitLabel,
   children,
   environmentId,
+  labels = EMPTY_LABELS,
 }: {
   environmentId?: EnvironmentId;
+  /** Projects the agent can be granted; scope is chosen here, never inferred. */
+  labels?: ReadonlyArray<ProjectLabelWithRepositories>;
   initial: AgentDraft;
   onSubmit: (draft: AgentDraft) => Promise<unknown>;
   pending: boolean;
   submitLabel: string;
   children?: ReactNode;
 }) {
+  const client = useAgentsClient();
   const { models: allModels } = useAgents();
   const models = allModels.filter(
     (model) => !environmentId || !model.environmentId || model.environmentId === environmentId,
@@ -793,6 +337,62 @@ export function AgentForm({
           placeholder="What should we call them?"
           onChange={(event) => setDraft({ ...draft, name: event.target.value })}
         />
+      </label>
+      <label>
+        Responsibility
+        <textarea
+          value={draft.responsibility ?? ""}
+          rows={3}
+          maxLength={32000}
+          placeholder="What should it own? E.g. keep track of what I owe Spawn clients and follow up."
+          onChange={(event) => setDraft({ ...draft, responsibility: event.target.value })}
+        />
+      </label>
+      <div className="agent-form-field">
+        <span>Projects it may access</span>
+        <div className="agent-form-chips">
+          <ProjectLabelChips
+            labels={labels}
+            ids={draft.scope?.map((entry) => entry.labelId) ?? []}
+          />
+          <ProjectLabelPicker
+            onManage={client.openProjectSettings}
+            labels={labels}
+            selectedIds={draft.scope?.map((entry) => entry.labelId) ?? []}
+            onToggle={(labelId, selected) =>
+              setDraft({ ...draft, scope: toggleScope(draft.scope ?? [], labelId, selected) })
+            }
+          >
+            {draft.scope?.length ? "Change" : "Add project"}
+          </ProjectLabelPicker>
+        </div>
+        <small>
+          {labels.length === 0
+            ? "No projects yet. Without one it sees only its own conversation and items."
+            : "Tags alone grant nothing; it can read and propose items only in these projects."}
+        </small>
+      </div>
+      <label>
+        Autonomy
+        <select
+          value={draft.autonomy ?? "propose"}
+          onChange={(event) => {
+            const option = AUTONOMY_OPTIONS.find((item) => item.value === event.target.value);
+            if (option) setDraft({ ...draft, autonomy: option.value });
+          }}
+        >
+          {AUTONOMY_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <small>
+          {
+            AUTONOMY_OPTIONS.find((option) => option.value === (draft.autonomy ?? "propose"))
+              ?.description
+          }
+        </small>
       </label>
       <label>
         Instructions
@@ -861,14 +461,6 @@ export function AgentForm({
       </button>
     </form>
   );
-}
-function describeTrigger(trigger: AgentTrigger) {
-  const schedule = trigger.schedule;
-  return schedule.type === "interval"
-    ? `Every ${schedule.everyMs / 60_000} minutes`
-    : schedule.type === "fixed_time"
-      ? `At ${schedule.timeOfDay}${schedule.weekdays?.length ? " on selected days" : " every day"}`
-      : "On webhook request";
 }
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const SCHEDULE_LABELS = {
@@ -1036,15 +628,22 @@ export function TriggerForm({
 
 const EMPTY_WORKSPACES: ReadonlyArray<{ id: NonNullable<AgentDraft["projectId"]>; title: string }> =
   [];
+const EMPTY_LABELS: ReadonlyArray<ProjectLabelWithRepositories> = [];
 
+/**
+ * Creating an agent is always an explicit owner decision: nothing else in the app
+ * creates one. New agents start at Propose with read and draft grants.
+ */
 export function CreateAgent({
   environmentId,
   projectId,
   workspaces = EMPTY_WORKSPACES,
+  labels = EMPTY_LABELS,
   onClose,
   onCreated,
 }: {
   environmentId: EnvironmentId;
+  labels?: ReadonlyArray<ProjectLabelWithRepositories>;
   projectId: AgentDraft["projectId"];
   workspaces?: ReadonlyArray<{ id: NonNullable<AgentDraft["projectId"]>; title: string }>;
   onClose: () => void;
@@ -1076,8 +675,13 @@ export function CreateAgent({
         <>
           <AgentForm
             environmentId={environmentId}
+            labels={labels}
             initial={{
               name: "",
+              responsibility: "",
+              scope: [],
+              autonomy: "propose",
+              permissions: conservativeAgentPermissions,
               instructions: "",
               avatar: { seed: randomUUID() },
               modelSelection: model,

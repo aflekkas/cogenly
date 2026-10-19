@@ -5,13 +5,53 @@ need a separate branch and working directory.
 
 ## Message an agent
 
-The sidebar's **Agents** tab lists your persistent agents by recent activity. Open
-one to message it, or choose **New agent** to give one a name, instructions and a
-Claude or Codex model. You can add a first trigger during creation or add one later.
+An agent is a persistent specialist, such as "Spawn Ops", with its own conversation,
+responsibility and permissions. The sidebar's **Agents** tab lists them under the
+projects they may access, with **Other** for the rest. Each row shows its status
+(**Needs approval**, **Needs you**, **Running**, **Paused** or **Enabled**) and a
+count only when decisions are waiting on you.
 
-Open the agent's name or face to edit its instructions, pause background work,
-manage triggers and memory, or inspect recent runs. Trigger results arrive in the
-same conversation; their source links open the background work. Messages sent
+Choose **New agent** in the sidebar or command palette to create one. Give it a
+name, a responsibility, the projects it may access, and an autonomy level. Nothing
+creates an agent for you.
+
+Opening an agent shows its chat. Ask it what is outstanding, give it direction, or
+ask it to start Work. The tabs above the chat hold the rest:
+
+- **Activity**: each run with what woke it (your message, a trigger, an approved
+  action, or Work), its recorded status, model and summary, and what it did, such
+  as items it proposed or Work it started. Work links open the session.
+- **Open items**: things to follow up on, owned by you, the agent or someone else,
+  with due dates, projects, and links to where they came from. Items the agent
+  finds stay **Proposed** until you confirm or dismiss them. **Mark done** asks
+  what finished it, optionally with a link as evidence; done and dismissed items
+  can be reopened. Pending approvals sit at the top, and also appear in the chat.
+- **Responsibilities**: the agent's mission, instructions, model, project access,
+  autonomy, permissions, notifications, daily run cap, triggers, memory, **Pause**,
+  and **Delete**.
+
+Project tags give an agent context only. It can read and propose items only in the
+projects granted under **Project scope**; a tag on a chat never grants access.
+
+Autonomy decides how far it goes on its own:
+
+- **Observe** reads and summarizes, and never changes anything.
+- **Propose** (the default) drafts plans and items, and asks before starting Work.
+- **Execute bounded work** starts Work in its home repository, the workspace
+  chosen when it was created, within its permissions, and asks for anything else.
+- **Autonomous within policy** also runs its recurring work within its
+  permissions without asking. Work in another repository still needs you.
+
+Permissions are separate switches: read, draft, start Work, and the high-impact
+send, create PRs, merge, deploy and delete. An agent cannot grant itself anything.
+When it wants to start Work, add a recurring trigger, or change its permissions, it
+asks, and you **Approve** or **Reject**. Approvals expire after seven days.
+
+**Start Work** in the agent's header starts a coding session in a repository linked
+to one of its granted projects. The session runs in a new worktree and appears in
+**Work** under its repository, marked with the agent's name.
+
+**Pause** stops triggers and background runs; you can still chat. Messages sent
 while an agent is busy use its normal queue or steering behavior.
 
 Coding work an agent starts appears in **Work** with your own threads, under its
@@ -217,7 +257,8 @@ The linked pull request participates in automatic settlement.
 A project, such as a client or a course, is a tag for related chats and Work. It is
 separate from the repository a thread runs in: one project can link several
 repositories, and a chat can carry several projects or none. Tags organize and
-suggest context only; they never change what an agent can access.
+suggest context only; they never change what an agent can access. An agent's access
+comes only from its own project scope.
 
 Create, recolor, describe, and delete projects, and link their repositories, in
 **Settings → Projects**, or with **New project** and **Manage projects** in the

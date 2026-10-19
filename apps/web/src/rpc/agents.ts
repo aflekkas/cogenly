@@ -3,6 +3,7 @@ import {
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
 } from "@t3tools/client-runtime/state/runtime";
+import { createAgentWorkspaceAtoms } from "@t3tools/client-runtime/state/agents";
 import { type AgentId, type EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import type { AtomRegistry } from "effect/reactivity";
@@ -63,3 +64,8 @@ export const agentsRpc = {
     refreshTrigger: (target) => list({ environmentId: target.environmentId, input: {} }),
   }),
 };
+
+/** Approvals, open items and audited activity; refreshed whenever the agents list changes. */
+export const agentWorkspaceRpc = createAgentWorkspaceAtoms(connectionAtomRuntime, {
+  refreshTrigger: (environmentId) => list({ environmentId, input: {} }),
+});
