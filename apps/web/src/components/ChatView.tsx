@@ -25,6 +25,7 @@ import {
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useStableCallback } from "../hooks/useStableCallback";
+import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import {
   latestExecutedRun,
@@ -4602,6 +4603,18 @@ export default function ChatView(props: ChatViewProps) {
     useRightPanelStore.getState().toggleThreadPanel(activeThreadRef, threadPanelPresentation);
   };
   const toggleThreadPanelStable = useStableCallback(toggleThreadPanel);
+  // An agent's conversation has no thread details of its own: the header opens the
+  // agent's settings (its Responsibilities view) instead.
+  const agentConversationViewKey =
+    activeThreadRef && activeThreadShell?.source.agent?.role === "conversation"
+      ? agentViewKey({
+          environmentId: activeThreadRef.environmentId,
+          conversationThreadId: activeThreadRef.threadId,
+        })
+      : null;
+  const openAgentSettingsStable = useStableCallback(() => {
+    if (agentConversationViewKey) requestAgentView(agentConversationViewKey, "responsibilities");
+  });
   // A thread started for a link the OS opened shows its browser maximized, like a browser window.
   useEffect(() => {
     if (!canMaximizeRightPanel) return;
@@ -6507,7 +6520,8 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "threadPanel.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        toggleThreadPanelStable();
+        if (agentConversationViewKey) openAgentSettingsStable();
+        else toggleThreadPanelStable();
         return;
       }
 
@@ -6639,6 +6653,7 @@ export default function ChatView(props: ChatViewProps) {
     activeProject,
     activeRightPanelSurface,
     activeProjectScripts,
+    agentConversationViewKey,
     canOperateTerminal,
     activeThreadRef,
     activeThreadSettled,
@@ -9422,6 +9437,7 @@ export default function ChatView(props: ChatViewProps) {
     rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
     onToggleThreadPanel: toggleThreadPanelStable,
     onToggleRightPanel: toggleRightPanelStable,
+    onOpenAgentSettings: agentConversationViewKey ? openAgentSettingsStable : undefined,
   } satisfies PanelLayoutControlsProps;
   const panelToggleControls = (
     <PanelLayoutControls
