@@ -710,6 +710,22 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+/* Status icons and labels that swap with state (sidebar row chips, pending
+   markers): key the element by its state so the new one mounts and rises a
+   couple of pixels into place while fading in. Enter only, once per mount. */
+@utility swap-motion {
+  @media (prefers-reduced-motion: no-preference) {
+    transition-property: opacity, translate;
+    transition-duration: var(--motion-duration-base);
+    transition-timing-function: --theme(--ease-standard);
+
+    @starting-style {
+      opacity: 0;
+      translate: 0 2px;
+    }
+  }
+}
+
 @utility topbar-scroll-fade {
   -webkit-mask-image:
     linear-gradient(

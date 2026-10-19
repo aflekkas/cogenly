@@ -545,7 +545,7 @@ function SnoozeMenuButton(props: {
                   aria-label="Snooze thread"
                   onClick={(event) => event.stopPropagation()}
                   onDoubleClick={(event) => event.stopPropagation()}
-                  className="inline-flex h-full cursor-pointer items-center gap-0.5 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  className="inline-flex h-full cursor-pointer items-center gap-0.5 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
                 />
               }
             />
@@ -1595,9 +1595,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           : "state-hover text-sidebar-foreground",
     // Background work fades as a whole row, status label included, so it
     // takes less attention than rows that need a human (input, approval).
-    shouldRecede &&
-      status === "working" &&
-      "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
+    shouldRecede && status === "working" && "opacity-70 hover:opacity-100 focus-within:opacity-100",
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
     isFileDragOver && !props.isActive && !isSelected && "bg-state-hover",
   );
@@ -1637,7 +1635,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       <span
         aria-hidden
         className={cn(
-          "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
+          "min-w-0 flex-1 text-sm transition-[color,opacity] duration-(--motion-duration-base) motion-reduce:transition-none",
           shouldRecede ? "font-normal" : "font-medium",
           variant === "card"
             ? cn(
@@ -1684,7 +1682,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             role="img"
             aria-label="Unsent draft"
             data-testid={`sidebar-draft-indicator-${thread.id}`}
-            className="inline-flex shrink-0 items-center"
+            className="inline-flex shrink-0 items-center swap-motion"
           />
         }
       >
@@ -1756,8 +1754,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             >
               <span
                 className={cn(
-                  "inline-flex justify-end tabular-nums text-secondary-label transition-opacity",
-                  !isWoke && "group-any-hover/sidebar-row:opacity-0",
+                  "inline-flex justify-end tabular-nums text-secondary-label transition-[opacity,translate] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
+                  !isWoke &&
+                    "group-any-hover/sidebar-row:-translate-x-1 group-any-hover/sidebar-row:opacity-0",
                 )}
               >
                 {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
@@ -1801,7 +1800,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     onClick={handleUnsnoozeClick}
                     onPointerDown={handleActionPointerDown}
                     className={cn(
-                      "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                      "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground translate-x-1 opacity-0 transition-[opacity,translate] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none hover:text-foreground focus-visible:pointer-events-auto focus-visible:translate-x-0 focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:translate-x-0 group-any-hover/sidebar-row:opacity-100",
                       isWoke && "group-any-hover/sidebar-row:static",
                     )}
                   >
@@ -1818,7 +1817,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                         onClick={handleUnsettleClick}
                         onPointerDown={handleActionPointerDown}
                         className={cn(
-                          "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                          "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground translate-x-1 opacity-0 transition-[opacity,translate] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none hover:text-foreground focus-visible:pointer-events-auto focus-visible:translate-x-0 focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:translate-x-0 group-any-hover/sidebar-row:opacity-100",
                           isWoke && "group-any-hover/sidebar-row:static",
                         )}
                       />
@@ -1835,7 +1834,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   onClick={handleSettleClick}
                   onPointerDown={handleActionPointerDown}
                   className={cn(
-                    "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                    "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground translate-x-1 opacity-0 transition-[opacity,translate] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none hover:text-foreground focus-visible:pointer-events-auto focus-visible:translate-x-0 focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:translate-x-0 group-any-hover/sidebar-row:opacity-100",
                     isWoke && "group-any-hover/sidebar-row:static",
                   )}
                 >
@@ -1934,9 +1933,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   className={cn(
                     isWokeStatus
                       ? "pointer-events-auto"
-                      : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:absolute group-any-hover/sidebar-row:right-0 group-any-hover/sidebar-row:opacity-0",
-                    "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
-                    snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
+                      : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:-translate-x-1 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:absolute group-any-hover/sidebar-row:right-0 group-any-hover/sidebar-row:-translate-x-1 group-any-hover/sidebar-row:opacity-0",
+                    "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-[opacity,translate] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
+                    snoozeMenuOpen &&
+                      "pointer-events-none absolute right-0 -translate-x-1 opacity-0",
                   )}
                 >
                   {topStatus ? (
@@ -1962,8 +1962,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       </Tooltip>
                     ) : (
                       <span
+                        // Keyed by state so a status change swaps in with a fade.
+                        key={topStatus.icon}
                         className={cn(
-                          "inline-flex items-center gap-1 font-medium",
+                          "inline-flex items-center gap-1 font-medium swap-motion",
                           topStatus.className,
                         )}
                       >
@@ -1998,7 +2000,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       </span>
                     )
                   ) : (
-                    threadTimeLabel(thread)
+                    <span key="time" className="swap-motion">
+                      {threadTimeLabel(thread)}
+                    </span>
                   )}
                 </span>
                 {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
@@ -2009,8 +2013,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       // would keep the controls pinned over the status label
                       // once the pointer moves away (e.g. after a failed
                       // settle) instead of cross-fading back.
-                      "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:static group-any-hover/sidebar-row:opacity-100",
-                      snoozeMenuOpen && "pointer-events-auto static opacity-100",
+                      "pointer-events-none absolute inset-y-0 right-0 flex translate-x-1 items-stretch opacity-0 transition-[opacity,translate] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:translate-x-0 has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:static group-any-hover/sidebar-row:translate-x-0 group-any-hover/sidebar-row:opacity-100",
+                      snoozeMenuOpen && "pointer-events-auto static translate-x-0 opacity-100",
                     )}
                   >
                     {hasUnsentDraft ? (
@@ -2021,7 +2025,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                               type="button"
                               aria-label="Discard draft"
                               onClick={handleDiscardDraftClick}
-                              className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                              className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
                             />
                           }
                         >
@@ -2047,7 +2051,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                               aria-label="Settle thread"
                               onClick={handleSettleClick}
                               onPointerDown={handleActionPointerDown}
-                              className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                              className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
                             />
                           }
                         >
