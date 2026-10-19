@@ -4811,7 +4811,7 @@ export default function Sidebar() {
             snoozedThreads.length +
             settledThreads.length ===
             0 ? (
-            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground">
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground">
               {sidebarMode === "chats" ? (
                 activeChatProjectFilter !== null ? (
                   "No chats in this project"
