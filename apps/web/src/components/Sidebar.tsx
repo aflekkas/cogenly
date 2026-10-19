@@ -1,4 +1,4 @@
-import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
+import { type EnvironmentId, type ProjectLabelId, type ScopedProjectRef } from "@t3tools/contracts";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { ThreadTerminalStatusButton } from "./ThreadStatusIndicators";
@@ -217,6 +217,7 @@ import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrom
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { ChatsProjectFilter } from "../projectLabels/ChatsProjectFilter";
 import {
+  projectLabelKey,
   scopedRepositoryKey,
   scopedThreadTagKey,
   splitTagChips,
@@ -232,6 +233,7 @@ import {
   SidebarAgentsList,
   SidebarModeGroupLabel,
   SidebarModeSwitcher,
+  SidebarProjectsList,
   CHAT_LIST_PAGE_SIZE,
   createChatDateGrouper,
   sortChatsByActivity,
@@ -2452,6 +2454,14 @@ export default function Sidebar() {
     [routeDraftThread, routeTarget],
   );
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
+  // The project view open in the main area, highlighted in the Projects list.
+  const routeProjectKey = useParams({
+    strict: false,
+    select: (params) =>
+      "labelId" in params && params.labelId && params.environmentId
+        ? projectLabelKey(params.environmentId, params.labelId)
+        : null,
+  });
   const routeTargetRef = useRef(routeTarget);
   routeTargetRef.current = routeTarget;
   // Post-settle navigation validates against the CURRENT route, not the one
@@ -2577,6 +2587,14 @@ export default function Sidebar() {
     projectDisplayNameByKey,
   });
   const sidebarMode = sidebarModes.mode;
+  // Chats and Work list threads; Agents and Projects render their own lists.
+  const modeListsThreads = sidebarMode === "chats" || sidebarMode === "tasks";
+  // Opening a project view (a row's menu, search, a link) shows the Projects
+  // list beside it, as opening a thread follows it into its mode.
+  const setSidebarMode = sidebarModes.setMode;
+  useEffect(() => {
+    if (routeProjectKey !== null) setSidebarMode("projects");
+  }, [routeProjectKey, setSidebarMode]);
   // Work rows show their projects as chips. Cached per thread and repository
   // while the directory holds, so memoized rows keep the same array.
   const workProjectTagsFor = useMemo(() => {
@@ -2645,6 +2663,15 @@ export default function Sidebar() {
     clearSelection();
   }, [clearSelection, sidebarMode]);
 
+  const openProjectView = useStableCallback(
+    (project: { environmentId: EnvironmentId; label: { id: ProjectLabelId } }) => {
+      if (isMobile) setOpenMobile(false);
+      void router.navigate({
+        to: "/project/$environmentId/$labelId",
+        params: { environmentId: project.environmentId, labelId: project.label.id },
+      });
+    },
+  );
   const openProjectSettings = useStableCallback(
     (projectGroup: SidebarProjectSnapshot, projectRef?: ScopedProjectRef) => {
       if (isMobile) {
@@ -4302,7 +4329,7 @@ export default function Sidebar() {
           />
         ) : null
       }
-      onNewProject={sidebarMode === "chats" ? null : openAddProjectCommandPalette}
+      onNewProject={sidebarMode === "tasks" ? openAddProjectCommandPalette : null}
       onNewThread={sidebarModeActions.createInMode ?? handleNewThreadClick}
       newThreadLabel={sidebarModeActions.newItemLabel}
       newThreadDisabled={sidebarMode === "tasks" && projects.length === 0}
@@ -4432,7 +4459,19 @@ export default function Sidebar() {
               onCreateAgent={sidebarModeActions.createAgent}
             />
           ) : null}
-          {!isSearchingThreads && sidebarMode !== "agents" ? (
+          {!isSearchingThreads && sidebarMode === "projects" ? (
+            <SidebarProjectsList
+              activeProjectKey={routeProjectKey}
+              environmentLabel={(entry) =>
+                labelEnvironmentIds.length > 1
+                  ? (environmentLabelById.get(entry.environmentId) ?? null)
+                  : null
+              }
+              onOpenProject={openProjectView}
+              onCreateProject={sidebarModeActions.createProject}
+            />
+          ) : null}
+          {!isSearchingThreads && modeListsThreads ? (
             <TooltipProvider
               key="sidebar-thread-tooltips-150"
               delay={150}
@@ -4690,7 +4729,7 @@ export default function Sidebar() {
             </TooltipProvider>
           ) : null}
           {!isSearchingThreads &&
-          sidebarMode !== "agents" &&
+          modeListsThreads &&
           visibleDraftSessionCount === 0 &&
           activeThreads.length +
             workingThreads.length +

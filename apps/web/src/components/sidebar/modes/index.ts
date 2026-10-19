@@ -1,6 +1,7 @@
 export { SidebarAgentsList } from "./SidebarAgentsList";
 export { SidebarModeGroupLabel } from "./SidebarModeGroupLabel";
 export { SidebarModeSwitcher } from "./SidebarModeSwitcher";
+export { SidebarProjectsList } from "./SidebarProjectsList";
 export {
   CHAT_DATE_GROUP_LABELS,
   CHAT_LIST_PAGE_SIZE,
