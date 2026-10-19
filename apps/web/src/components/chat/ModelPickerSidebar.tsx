@@ -1,6 +1,6 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@t3tools/contracts";
-import { memo, useLayoutEffect, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { SparklesIcon, StarIcon } from "lucide-react";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -109,9 +109,9 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               data-model-picker-selected-indicator="true"
               className={cn(
                 SELECTED_INDICATOR_CLASS,
-                "right-0 translate-y-0 transition-[top] duration-200 ease-out",
+                "top-0 right-0 translate-y-(--indicator-y) transition-[translate] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
               )}
-              style={{ top: selectedIndicatorTop }}
+              style={{ "--indicator-y": `${selectedIndicatorTop}px` } as CSSProperties}
             />
           ) : null}
           {/* Favorites section */}
