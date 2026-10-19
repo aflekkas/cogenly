@@ -1,5 +1,7 @@
+import { PlusIcon } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 import { AgentFace } from "~/components/agents/face";
+import { Button } from "~/components/ui/button";
 import { agentContactKey, agentStatusLabel } from "./agents.logic";
 import { agentAttentionCount } from "./agentWorkspace.logic";
 import { useAgentUnread, useAgents } from "./agentsClient";
@@ -43,9 +45,10 @@ export function AgentContacts({
           />
           <p>No agents yet</p>
           <span>Create an agent to talk to, give work to, and hear back from.</span>
-          <button className="agent-text-button" type="button" onClick={onCreate}>
+          <Button size="sm" onClick={onCreate}>
+            <PlusIcon aria-hidden />
             Create your first agent
-          </button>
+          </Button>
         </div>
       )}
       <ul aria-label="Agents">
