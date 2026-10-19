@@ -1319,7 +1319,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --secondary: --alpha(var(--color-white) / 3%);
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 3%);
-    --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
+    --muted-foreground: #a3a3a3;
     --accent: --alpha(var(--color-white) / 4%);
     --accent-foreground: var(--color-neutral-100);
     --error: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
@@ -1394,8 +1394,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --sidebar-foreground: var(--foreground);
     --sidebar-muted-foreground: var(--muted-foreground);
     --sidebar-control-surface: var(--muted);
-    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 2.5%, transparent);
-    --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 4%, transparent);
+    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 6%, transparent);
+    --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 9%, transparent);
     --sidebar-row-selected: var(--sidebar-row-active);
     --sidebar-border: var(--border);
     --state-selected-highlight: transparent;

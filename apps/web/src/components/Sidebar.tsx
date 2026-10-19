@@ -4324,7 +4324,7 @@ export default function Sidebar() {
             snoozedThreads.length +
             settledThreads.length ===
             0 ? (
-            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
+            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground">
               {projects.length === 0 ? (
                 <>
                   <span>No projects yet</span>
