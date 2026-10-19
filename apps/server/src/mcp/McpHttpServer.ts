@@ -1,3 +1,4 @@
+import * as SearchMcp from "../search/Mcp.ts";
 import { ProjectLabelsToolkit } from "./toolkits/projectLabels/tools.ts";
 import * as ProjectLabelsHandlers from "./toolkits/projectLabels/handlers.ts";
 import * as WorkMcp from "../work/WorkMcp.ts";
@@ -951,6 +952,7 @@ export const layer = Layer.mergeAll(
   layerPreviewToolkit,
   toolkitRegistration(AgentMemoryMcp.toolkit, AgentMemoryMcp.handlers),
   toolkitRegistration(WorkMcp.toolkit, WorkMcp.handlers),
+  toolkitRegistration(SearchMcp.toolkit, SearchMcp.handlers),
   toolkitRegistration(AgentWorkspaceMcp.toolkit, AgentWorkspaceMcp.handlers),
   layerOrchestratorToolkit,
   toolkitRegistration(TerminalToolkit, TerminalHandlers.layer).pipe(

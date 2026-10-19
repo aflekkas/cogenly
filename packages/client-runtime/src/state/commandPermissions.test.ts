@@ -8,6 +8,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
   AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   ThreadId,
@@ -25,7 +26,10 @@ import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { createAgentWorkspaceAtoms } from "./agents.ts";
 import { createCommandPermissions } from "./commandPermissions.ts";
-import { createEnvironmentRpcCommand } from "./runtime.ts";
+import {
+  createEnvironmentGuardedRpcQueryAtomFamily,
+  createEnvironmentRpcCommand,
+} from "./runtime.ts";
 
 vi.mock("./session.ts", () => ({
   createEnvironmentSessionAtoms: () => ({ sessionStateAtom: sessions }),
@@ -60,6 +64,91 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("executes guarded read queries only with the destination read grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        let calls = 0;
+        const supervisor = {
+          target: { environmentId: env, label: "test" },
+          state: yield* SubscriptionRef.make({ phase: "connected" }),
+          session: yield* SubscriptionRef.make(
+            Option.some({
+              client: {
+                [WS_METHODS.searchQuery]: () =>
+                  Effect.sync(() => {
+                    calls++;
+                    return { results: [] };
+                  }),
+              },
+            }),
+          ),
+        } as unknown as EnvironmentSupervisor["Service"];
+        const queryRuntime = Atom.runtime(
+          Layer.succeed(EnvironmentRegistry, {
+            run: (_id, effect) =>
+              effect.pipe(Effect.provideService(EnvironmentSupervisor, supervisor)),
+            followStream: (_id, stream) =>
+              stream.pipe(Stream.provideService(EnvironmentSupervisor, supervisor)),
+          } as EnvironmentRegistry["Service"]),
+        );
+        const query = createEnvironmentGuardedRpcQueryAtomFamily(queryRuntime, {
+          label: "test.search",
+          tag: WS_METHODS.searchQuery,
+        });
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        const denied = yield* AtomRegistry.getResult(
+          registry,
+          query({ environmentId: env, input: { query: "denied" } }),
+        ).pipe(Effect.flip);
+        expect(denied).toMatchObject({
+          _tag: "EnvironmentAuthorizationError",
+          requiredScope: AuthOrchestrationReadScope,
+        });
+        expect(calls).toBe(0);
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthOrchestrationReadScope],
+            permissions: [AuthOrchestrationReadScope],
+          }),
+        );
+        const allowed = yield* AtomRegistry.getResult(
+          registry,
+          query({ environmentId: env, input: { query: "allowed" } }),
+        );
+        expect(allowed).toEqual({ results: [] });
+        expect(calls).toBe(1);
+      }),
+    ),
+  );
+
+  it.effect("guards search with the destination read grant without requiring operate access", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const permission = createCommandPermissions(runtime, WS_METHODS.searchQuery);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(permission.permissionAtom(env))).toBe(false);
+        expect((yield* permission.authorize(registry, env).pipe(Effect.flip)).requiredScope).toBe(
+          AuthOrchestrationReadScope,
+        );
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthOrchestrationReadScope],
+            permissions: [AuthOrchestrationReadScope],
+          }),
+        );
+        expect(registry.get(permission.permissionAtom(env))).toBe(true);
+        yield* permission.authorize(registry, env);
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect(registry.get(permission.permissionAtom(other))).toBe(false);
+      }),
+    ),
+  );
   it.effect("the agent approval command refuses execution without an owner grant", () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -1,3 +1,4 @@
+import * as Search from "./search.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Work from "./work.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
@@ -483,6 +484,7 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Persistent agents and their scheduled-task triggers
+  searchQuery: "search.query",
   projectLabelsList: "projectLabels.list",
   projectLabelsSubscribe: "projectLabels.subscribe",
   projectLabelsCreate: "projectLabels.create",
@@ -1725,6 +1727,12 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const WsSearchQueryRpc = Rpc.make(WS_METHODS.searchQuery, {
+  payload: Search.SearchQueryInput,
+  success: Search.SearchQueryResult,
+  error: Schema.Union([Search.SearchError, EnvironmentAuthorizationError]),
+});
+
 const WsProjectLabelsListRpc = Rpc.make(WS_METHODS.projectLabelsList, {
   payload: Schema.Struct({}),
   success: ProjectLabels.ProjectLabelListResult,
@@ -2065,6 +2073,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
+  WsSearchQueryRpc,
   WsProjectLabelsListRpc,
   WsProjectLabelsSubscribeRpc,
   WsProjectLabelsCreateRpc,
