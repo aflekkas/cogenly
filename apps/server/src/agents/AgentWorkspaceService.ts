@@ -1,0 +1,548 @@
+import {
+  AgentError,
+  AgentId,
+  AgentApproval,
+  AgentApprovalAction,
+  AgentActivityResult,
+  AgentActivityRun,
+  AgentRunAction,
+  AgentStartWorkInput,
+  Commitment,
+  CommitmentHistory,
+  CommandId,
+  MessageId,
+  ScheduledTaskId,
+  ThreadId,
+  type Agent,
+  type AgentApprovalListInput,
+  type CommitmentCreateInput,
+  type CommitmentListInput,
+  type CommitmentStatusInput,
+  type CommitmentRef,
+} from "@t3tools/contracts";
+import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as Store from "./AgentStore.ts";
+import * as Agents from "./AgentService.ts";
+import * as Launch from "../orchestration-v2/ThreadLaunchService.ts";
+import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
+
+const isAgentError = Schema.is(AgentError);
+const decodeCommitment = Schema.decodeEffect(Schema.fromJsonString(Commitment));
+const encodeHistory = Schema.encodeEffect(Schema.fromJsonString(CommitmentHistory));
+const encodeCommitment = Schema.encodeEffect(Schema.fromJsonString(Commitment));
+const decodeApprovalAction = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentApprovalAction));
+const decodeApproval = Schema.decodeUnknownEffect(AgentApproval);
+const encodeApprovalAction = Schema.encodeEffect(Schema.fromJsonString(AgentApprovalAction));
+const decodeHistory = Schema.decodeUnknownEffect(Schema.fromJsonString(CommitmentHistory));
+const decodeJsonRecord = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+);
+const decodeActivityRun = Schema.decodeUnknownEffect(AgentActivityRun);
+const decodeRunAction = Schema.decodeUnknownEffect(AgentRunAction);
+
+type AgentActor = { readonly agent: Agent; readonly threadId: ThreadId };
+const fail = (message: string) => new AgentError({ message });
+const wrap = (cause: unknown) =>
+  isAgentError(cause)
+    ? cause
+    : new AgentError({ message: "Could not access agent workspace state.", cause });
+/** Label grants are explicit owner authorization. Repository/tag membership is never consulted. */
+const readableLabels = (agent: Agent) =>
+  agent.permissions.read ? agent.scope.filter((s) => s.permissions.read).map((s) => s.labelId) : [];
+const canSee = (agent: Agent, item: Commitment) =>
+  agent.permissions.read &&
+  (item.agentId === agent.id || item.labelIds.some((id) => readableLabels(agent).includes(id)));
+const canDraft = (agent: Agent, item: Pick<Commitment, "labelIds" | "agentId">) =>
+  agent.permissions.draft &&
+  agent.autonomy !== "observe" &&
+  (item.agentId === agent.id ||
+    item.labelIds.some((id) =>
+      agent.scope.some((s) => s.labelId === id && s.permissions.read && s.permissions.draft),
+    ));
+
+export class AgentWorkspaceService extends Context.Service<
+  AgentWorkspaceService,
+  {
+    readonly listCommitments: (
+      input: CommitmentListInput,
+      actor?: AgentActor,
+    ) => Effect.Effect<{ commitments: ReadonlyArray<Commitment> }, AgentError>;
+    readonly listOpenItems: (
+      input: CommitmentListInput,
+      actor: AgentActor,
+    ) => Effect.Effect<{ commitments: ReadonlyArray<Commitment> }, AgentError>;
+    readonly createCommitment: (
+      input: CommitmentCreateInput,
+      actor?: AgentActor,
+    ) => Effect.Effect<{ commitment: Commitment }, AgentError>;
+    readonly updateCommitmentStatus: (
+      input: CommitmentStatusInput,
+      actor?: AgentActor,
+    ) => Effect.Effect<{ commitment: Commitment }, AgentError>;
+    readonly confirmCommitment: (input: {
+      id: string;
+      why: string;
+    }) => Effect.Effect<{ commitment: Commitment }, AgentError>;
+    readonly dismissCommitment: (input: {
+      id: string;
+      why: string;
+    }) => Effect.Effect<{ commitment: Commitment }, AgentError>;
+    readonly commitmentHistory: (
+      id: string,
+    ) => Effect.Effect<{ history: ReadonlyArray<typeof CommitmentHistory.Type> }, AgentError>;
+    readonly requestApproval: (
+      agentId: AgentId,
+      action: AgentApprovalAction,
+      actor?: AgentActor,
+    ) => Effect.Effect<{ approval: AgentApproval }, AgentError>;
+    readonly listApprovals: (
+      input: typeof AgentApprovalListInput.Type,
+    ) => Effect.Effect<{ approvals: ReadonlyArray<AgentApproval> }, AgentError>;
+    readonly approve: (id: string) => Effect.Effect<{ approval: AgentApproval }, AgentError>;
+    readonly reject: (id: string) => Effect.Effect<{ approval: AgentApproval }, AgentError>;
+    readonly startWork: (
+      input: AgentStartWorkInput,
+      actor?: AgentActor,
+    ) => Effect.Effect<{ threadId: ThreadId | null; approval: AgentApproval | null }, AgentError>;
+    readonly activity: (
+      agentId: AgentId,
+    ) => Effect.Effect<typeof AgentActivityResult.Type, AgentError>;
+    readonly logAction: (
+      actor: AgentActor,
+      kind: string,
+      targetId?: string,
+    ) => Effect.Effect<void, AgentError>;
+  }
+>()("t3/agents/AgentWorkspaceService") {}
+
+const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const crypto = yield* Crypto.Crypto;
+  const store = yield* Store.AgentStore;
+  const agents = yield* Agents.AgentService;
+  const launches = yield* Launch.ThreadLaunchService;
+  const schedules = yield* Schedules.ScheduledTaskService;
+  const lock = yield* Semaphore.make(1);
+  const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
+  const uuid = (prefix: string) =>
+    crypto.randomUUIDv4().pipe(Effect.map((id) => `${prefix}:${id}`));
+  // Reload policy on every operation: an invocation cannot retain a revoked grant.
+  const current = (actor: AgentActor) =>
+    store.get(actor.agent.id).pipe(Effect.map((agent) => ({ ...actor, agent })));
+  const runIdFor = (actor: AgentActor) =>
+    sql<{
+      run_id: string;
+    }>`SELECT run_id FROM orchestration_v2_projection_runs WHERE thread_id = ${actor.threadId} AND status <> 'queued' ORDER BY CASE WHEN status IN ('running', 'waiting', 'starting', 'preparing') THEN 0 ELSE 1 END, ordinal DESC LIMIT 1`.pipe(
+      Effect.map((rows) => rows[0]?.run_id ?? null),
+    );
+  const logAction = (actor: AgentActor, kind: string, targetId?: string) =>
+    Effect.gen(function* () {
+      yield* sql`INSERT INTO agent_run_actions(id, agent_id, run_id, kind, target_id, at) VALUES (${yield* uuid("action")}, ${actor.agent.id}, ${yield* runIdFor(actor)}, ${kind}, ${targetId ?? null}, ${yield* now})`;
+    }).pipe(Effect.mapError(wrap));
+  const getCommitment = (id: string) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<{
+        payload_json: string;
+        agent_id: string | null;
+      }>`SELECT payload_json, agent_id FROM commitments WHERE id = ${id}`;
+      const row = rows[0];
+      if (!row) return yield* fail("Commitment not found.");
+      const item = yield* decodeCommitment(row.payload_json);
+      return { ...item, agentId: row.agent_id === null ? null : AgentId.make(row.agent_id) };
+    }).pipe(Effect.mapError(wrap));
+  const history = (
+    item: Commitment,
+    previous: Commitment["status"] | null,
+    who: string,
+    why: string,
+    evidenceRefs: ReadonlyArray<CommitmentRef>,
+  ) =>
+    Effect.gen(function* () {
+      const id = yield* uuid("history");
+      const entry = {
+        id,
+        commitmentId: item.id,
+        fromStatus: previous,
+        toStatus: item.status,
+        who,
+        at: item.updatedAt,
+        why,
+        evidenceRefs,
+      };
+      yield* sql`INSERT INTO commitment_history(id, commitment_id, payload_json) VALUES (${id}, ${item.id}, ${yield* encodeHistory(entry)})`;
+    });
+  const updateCommitmentStatus = (input: CommitmentStatusInput, actor?: AgentActor) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const item = yield* getCommitment(input.id);
+          const principal = actor ? yield* current(actor) : undefined;
+          if (principal && (!canSee(principal.agent, item) || !canDraft(principal.agent, item)))
+            return yield* fail("This agent cannot change this commitment.");
+          if (principal && input.status === "done" && input.evidenceRefs.length === 0)
+            return yield* fail("Completing a commitment requires evidence or owner confirmation.");
+          if (
+            principal &&
+            item.status === "proposed" &&
+            input.status !== "proposed" &&
+            input.status !== "done" &&
+            input.status !== "dismissed"
+          )
+            return yield* fail("Only the owner can confirm a proposed commitment.");
+          const commitment: Commitment = {
+            ...item,
+            status: input.status,
+            evidenceRefs: [...item.evidenceRefs, ...input.evidenceRefs],
+            updatedAt: yield* now,
+          };
+          yield* sql`UPDATE commitments SET status = ${commitment.status}, updated_at = ${commitment.updatedAt}, payload_json = ${yield* encodeCommitment(commitment)} WHERE id = ${item.id}`;
+          if (item.status !== commitment.status)
+            yield* history(
+              commitment,
+              item.status,
+              principal ? `agent:${principal.agent.id}` : "user",
+              input.why,
+              input.evidenceRefs,
+            );
+          if (principal) yield* logAction(principal, "commitment_status_changed", item.id);
+          return { commitment };
+        }),
+      )
+      .pipe(Effect.mapError(wrap));
+  const approvalFromRow = (row: Record<string, unknown>) =>
+    Effect.gen(function* () {
+      const action = yield* decodeApprovalAction(row.action_json);
+      return yield* decodeApproval({
+        id: row.id,
+        agentId: row.agent_id,
+        action,
+        actionKind: action.actionKind,
+        payload: action.payload,
+        status: row.status,
+        requestedAt: row.requested_at,
+        decidedAt: row.decided_at,
+        decidedBy: row.decided_by,
+        sourceRunId: row.source_run_id,
+        resultThreadId: row.result_thread_id,
+      });
+    }).pipe(Effect.mapError(wrap));
+  // Approval intent is deliberately short-lived; old model proposals must be reviewed afresh.
+  const expireApprovals = () =>
+    DateTime.now.pipe(
+      Effect.map((at) => DateTime.formatIso(DateTime.subtract(at, { days: 7 }))),
+      Effect.flatMap((before) =>
+        now.pipe(
+          Effect.flatMap(
+            (at) =>
+              sql`UPDATE agent_approvals SET status = 'expired', decided_at = ${at}, decided_by = 'system' WHERE status = 'pending' AND requested_at < ${before}`,
+          ),
+        ),
+      ),
+    );
+  const getApproval = (id: string) =>
+    Effect.gen(function* () {
+      yield* expireApprovals();
+      const rows = yield* sql`SELECT * FROM agent_approvals WHERE id = ${id}`;
+      if (!rows[0]) return yield* fail("Approval not found.");
+      return yield* approvalFromRow(rows[0]);
+    }).pipe(Effect.mapError(wrap));
+  const requestApproval = (agentId: AgentId, action: AgentApprovalAction, actor?: AgentActor) =>
+    Effect.gen(function* () {
+      const agent = actor ? (yield* current(actor)).agent : yield* store.get(agentId);
+      if (agent.id !== agentId)
+        return yield* fail("An agent cannot request an action for another agent.");
+      if (actor && (agent.autonomy === "observe" || !agent.permissions.draft))
+        return yield* fail("This agent can observe only.");
+      if (action.actionKind === "start_work" && action.payload.agentId !== agentId)
+        return yield* fail("Work must belong to the requesting agent.");
+      if (action.actionKind === "schedule_trigger") {
+        if (action.payload.agentId !== agentId)
+          return yield* fail("A trigger must belong to the requesting agent.");
+        const schedule = action.payload.schedule;
+        if (
+          schedule.type === "webhook" &&
+          schedule.signature &&
+          (schedule.signature.secret !== undefined || schedule.signature.secretRef !== undefined)
+        )
+          return yield* fail(
+            "Configure webhook signing secrets in owner schedule settings; approval records cannot retain secrets or one-use secret references.",
+          );
+      }
+      const id = yield* uuid("approval");
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${id}, ${agentId}, ${yield* encodeApprovalAction(action)}, 'pending', ${yield* now}, ${actor ? yield* runIdFor(actor) : null})`;
+          if (actor) yield* logAction({ ...actor, agent }, "approval_requested", id);
+        }),
+      );
+      return { approval: yield* getApproval(id) };
+    }).pipe(Effect.mapError(wrap));
+  const executeWork = (
+    input: AgentStartWorkInput,
+    key: string,
+    triggerKind: "approval" | "work",
+    sourceRunId: string | null,
+  ) =>
+    Effect.gen(function* () {
+      const agent = yield* store.get(input.agentId);
+      const id = ThreadId.make(`agent-work:${key}`);
+      // Stable launch identity and the standard launch service make approval retries safe.
+      yield* sql`INSERT OR IGNORE INTO agent_run_threads(thread_id, agent_id, trigger_kind, source_run_id) VALUES (${id}, ${agent.id}, ${triggerKind}, ${sourceRunId})`;
+      yield* launches.launch({
+        commandId: CommandId.make(`agent-work:${key}`),
+        threadId: id,
+        agent: { id: agent.id, role: "work" },
+        projectId: input.projectId,
+        title: input.title,
+        modelSelection: agent.modelSelection,
+        runtimeMode: agent.runtimeMode,
+        interactionMode: "default",
+        workspaceStrategy: input.workspaceStrategy ?? { type: "worktree", baseRef: "HEAD" },
+        createdBy: "agent",
+        creationSource: "server",
+        initialMessage: {
+          messageId: MessageId.make(`agent-work:${key}`),
+          text: input.prompt,
+          attachments: [],
+        },
+      });
+      return id;
+    }).pipe(Effect.mapError(wrap));
+  const startWork = (input: AgentStartWorkInput, actor?: AgentActor) =>
+    Effect.gen(function* () {
+      const agent = actor ? (yield* current(actor)).agent : yield* store.get(input.agentId);
+      if (actor && agent.id !== input.agentId)
+        return yield* fail("An agent cannot start Work as another agent.");
+      if (actor && agent.autonomy === "observe")
+        return yield* fail("An observe agent cannot start Work.");
+      if (actor && (!agent.enabled || agent.autonomy === "propose" || !agent.permissions.execute)) {
+        const { approval } = yield* requestApproval(
+          agent.id,
+          { actionKind: "start_work", payload: input },
+          actor,
+        );
+        return { threadId: null, approval };
+      }
+      // Labels never authorize a repository. Only the explicitly selected primary
+      // project is executable without a fresh owner decision in this first slice.
+      if (
+        actor &&
+        (input.projectId !== agent.projectId ||
+          input.workspaceStrategy?.type === "existing_worktree")
+      ) {
+        const { approval } = yield* requestApproval(
+          agent.id,
+          { actionKind: "start_work", payload: input },
+          actor,
+        );
+        return { threadId: null, approval };
+      }
+      const threadId = yield* executeWork(
+        input,
+        yield* uuid("launch"),
+        "work",
+        actor ? yield* runIdFor(actor) : null,
+      );
+      if (actor) yield* logAction({ ...actor, agent }, "work_started", threadId);
+      return { threadId, approval: null };
+    }).pipe(Effect.mapError(wrap));
+  const listCommitments = (input: CommitmentListInput, actor?: AgentActor) =>
+    Effect.gen(function* () {
+      if (actor && input.agentId !== undefined && input.agentId !== actor.agent.id)
+        return yield* fail("An agent cannot select another identity.");
+      const viewAgent = actor
+        ? (yield* current(actor)).agent
+        : input.agentId === undefined
+          ? undefined
+          : yield* store.get(input.agentId);
+      const principal = viewAgent ? { agent: viewAgent } : undefined;
+      // The owner-facing agent view includes the same shared items the agent sees.
+      // Filter in SQL before decoding; cross-label items never enter model context.
+      const labels = principal ? readableLabels(principal.agent) : [];
+      const rows = yield* sql<{ id: string }>`SELECT c.id FROM commitments c WHERE
+        (${input.status ?? null} IS NULL OR c.status = ${input.status ?? null}) AND
+        (${input.labelId ?? null} IS NULL OR EXISTS (SELECT 1 FROM commitment_labels l WHERE l.commitment_id = c.id AND l.label_id = ${input.labelId ?? null})) AND
+        (${principal ? 1 : 0} = 0 OR (${principal?.agent.permissions.read ? 1 : 0} = 1 AND (c.agent_id = ${principal?.agent.id ?? null} OR EXISTS (SELECT 1 FROM commitment_labels l WHERE l.commitment_id = c.id AND l.label_id IN ${sql.in(labels)}))))
+        ORDER BY c.updated_at DESC, c.id LIMIT 500`;
+      return { commitments: yield* Effect.forEach(rows, (r) => getCommitment(r.id)) };
+    }).pipe(Effect.mapError(wrap));
+  return AgentWorkspaceService.of({
+    logAction,
+    requestApproval,
+    startWork,
+    listCommitments,
+    listOpenItems: (input, actor) =>
+      listCommitments(input, actor).pipe(
+        Effect.map(({ commitments }) => ({
+          commitments: input.status
+            ? commitments
+            : commitments.filter((c) => c.status !== "done" && c.status !== "dismissed"),
+        })),
+      ),
+    createCommitment: (input, actor) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const principal = actor ? yield* current(actor) : undefined;
+            if (input.agentId !== null) yield* store.get(input.agentId);
+            if (
+              principal &&
+              (input.agentId !== principal.agent.id ||
+                !canDraft(principal.agent, input) ||
+                input.labelIds.some(
+                  (id) =>
+                    !principal.agent.scope.some(
+                      (s) => s.labelId === id && s.permissions.read && s.permissions.draft,
+                    ),
+                ))
+            )
+              return yield* fail("This agent cannot propose a commitment in this scope.");
+            const at = yield* now;
+            const commitment: Commitment = {
+              ...input,
+              id: yield* uuid("commitment"),
+              status: principal ? "proposed" : "open",
+              createdAt: at,
+              updatedAt: at,
+            };
+            yield* sql`INSERT INTO commitments(id, agent_id, status, payload_json, created_at, updated_at) VALUES (${commitment.id}, ${commitment.agentId}, ${commitment.status}, ${yield* encodeCommitment(commitment)}, ${at}, ${at})`;
+            for (const labelId of new Set(input.labelIds))
+              yield* sql`INSERT INTO commitment_labels(commitment_id, label_id) VALUES (${commitment.id}, ${labelId})`;
+            yield* history(
+              commitment,
+              null,
+              principal ? `agent:${principal.agent.id}` : "user",
+              principal
+                ? "Agent extraction proposed for owner review."
+                : "Owner created commitment.",
+              input.evidenceRefs,
+            );
+            if (principal) yield* logAction(principal, "commitment_proposed", commitment.id);
+            return { commitment };
+          }),
+        )
+        .pipe(Effect.mapError(wrap)),
+    updateCommitmentStatus,
+    confirmCommitment: (input) =>
+      updateCommitmentStatus({ ...input, status: "open", evidenceRefs: [] }),
+    dismissCommitment: (input) =>
+      updateCommitmentStatus({ ...input, status: "dismissed", evidenceRefs: [] }),
+    commitmentHistory: (id) =>
+      getCommitment(id).pipe(
+        Effect.andThen(
+          sql<{
+            payload_json: string;
+          }>`SELECT payload_json FROM commitment_history WHERE commitment_id = ${id} ORDER BY rowid`,
+        ),
+        Effect.flatMap((rows) => Effect.forEach(rows, (r) => decodeHistory(r.payload_json))),
+        Effect.map((history) => ({ history })),
+        Effect.mapError(wrap),
+      ),
+    listApprovals: (input) =>
+      expireApprovals().pipe(
+        Effect.andThen(
+          sql`SELECT * FROM agent_approvals WHERE (${input.agentId ?? null} IS NULL OR agent_id = ${input.agentId ?? null}) AND (${input.status ?? null} IS NULL OR status = ${input.status ?? null}) ORDER BY requested_at DESC, id LIMIT 200`,
+        ),
+        Effect.flatMap((rows) => Effect.forEach(rows, approvalFromRow)),
+        Effect.map((approvals) => ({ approvals })),
+        Effect.mapError(wrap),
+      ),
+    approve: (id) =>
+      lock
+        .withPermits(1)(
+          Effect.gen(function* () {
+            const approval = yield* getApproval(id);
+            if (approval.status === "approved") return { approval };
+            if (approval.status !== "pending")
+              return yield* fail("This approval is no longer pending.");
+            const agent = yield* store.get(approval.agentId);
+            let resultThreadId: ThreadId | null = null;
+            const action = approval.action;
+            switch (action.actionKind) {
+              case "start_work":
+                resultThreadId = yield* executeWork(
+                  action.payload,
+                  approval.id,
+                  "approval",
+                  approval.sourceRunId,
+                );
+                break;
+              case "schedule_trigger":
+                yield* schedules.upsert({
+                  ...action.payload,
+                  agentId: agent.id,
+                  id: action.payload.id ?? ScheduledTaskId.make(`agent-trigger:${approval.id}`),
+                });
+                break;
+              case "change_permissions":
+                yield* agents.upsert({ ...agent, ...action.payload });
+                break;
+            }
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                yield* sql`UPDATE agent_approvals SET status = 'approved', decided_at = ${yield* now}, decided_by = 'user', result_thread_id = ${resultThreadId} WHERE id = ${id} AND status = 'pending'`;
+                yield* sql`INSERT INTO agent_run_actions(id, agent_id, run_id, kind, target_id, at) VALUES (${`approval-action:${id}`}, ${agent.id}, ${approval.sourceRunId}, ${resultThreadId ? "work_started" : action.actionKind}, ${resultThreadId ?? id}, ${yield* now}) ON CONFLICT(id) DO NOTHING`;
+              }),
+            );
+            return { approval: yield* getApproval(id) };
+          }),
+        )
+        .pipe(Effect.mapError(wrap)),
+    reject: (id) =>
+      lock
+        .withPermits(1)(
+          Effect.gen(function* () {
+            const approval = yield* getApproval(id);
+            if (approval.status !== "pending")
+              return yield* fail("This approval is no longer pending.");
+            yield* sql`UPDATE agent_approvals SET status = 'rejected', decided_at = ${yield* now}, decided_by = 'user' WHERE id = ${id} AND status = 'pending'`;
+            return { approval: yield* getApproval(id) };
+          }),
+        )
+        .pipe(Effect.mapError(wrap)),
+    activity: (agentId) =>
+      Effect.gen(function* () {
+        const agent = yield* store.get(agentId);
+        const rows = yield* sql<{
+          run_id: string;
+          thread_id: string;
+          status: string;
+          payload_json: string;
+          trigger_kind: string | null;
+          summary: string | null;
+        }>`SELECT r.*, CASE WHEN r.ordinal = 1 THEN COALESCE(t.trigger_kind, CASE WHEN w.run_id IS NOT NULL THEN 'trigger' ELSE 'owner_message' END) ELSE 'owner_message' END AS trigger_kind,
+        (SELECT substr(json_extract(m.payload_json, '$.text'), 1, 1200) FROM orchestration_v2_projection_messages m WHERE m.thread_id = r.thread_id AND m.run_id = r.run_id AND m.role = 'assistant' AND m.streaming = 0 ORDER BY m.created_at DESC LIMIT 1) AS summary
+        FROM orchestration_v2_projection_runs r LEFT JOIN agent_run_threads t ON t.thread_id = r.thread_id LEFT JOIN agent_work_runs w ON w.work_thread_id = r.thread_id
+        WHERE r.thread_id = ${agent.conversationThreadId} OR t.agent_id = ${agentId} OR w.agent_id = ${agentId} ORDER BY r.requested_at DESC, r.run_id LIMIT 100`;
+        const runs = yield* Effect.forEach(rows, (r) =>
+          Effect.gen(function* () {
+            const data = yield* decodeJsonRecord(r.payload_json);
+            return yield* decodeActivityRun({
+              id: r.run_id,
+              agentId,
+              threadId: r.thread_id,
+              triggerKind: r.trigger_kind,
+              status: r.status,
+              startedAt: data.startedAt ?? null,
+              finishedAt: data.completedAt ?? null,
+              modelSelection: data.modelSelection,
+              summary: r.summary,
+            });
+          }),
+        );
+        const actions =
+          yield* sql`SELECT id, agent_id AS agentId, run_id AS runId, kind, target_id AS targetId, at FROM agent_run_actions WHERE agent_id = ${agentId} ORDER BY at DESC, id LIMIT 500`.pipe(
+            Effect.flatMap((rows) => Effect.forEach(rows, (r) => decodeRunAction(r))),
+          );
+        return { runs, actions };
+      }).pipe(Effect.mapError(wrap)),
+  });
+});
+export const layer = Layer.effect(AgentWorkspaceService, make);

@@ -1,3 +1,13 @@
+import * as Workspace from "./AgentWorkspaceService.ts";
+import * as Policy from "./AgentMcpPolicy.ts";
+import {
+  AgentScopeLabelId,
+  conservativeAgentPermissions,
+  EnvironmentId,
+  ProviderInstanceId,
+} from "@t3tools/contracts";
+import type { McpInvocationScope } from "../mcp/McpInvocationContext.ts";
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -28,6 +38,8 @@ import * as Secrets from "../secrets/SecretRequests.ts";
 import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import { migrateLegacyAgents } from "../persistence/Migrations/063_Agents.ts";
 import { agentFixture } from "./agent.testkit.ts";
+
+const encodeUnknown = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const makeHarness = Effect.sync(() => {
   const projections = new Map<ThreadId, OrchestrationV2ThreadProjection>();
@@ -95,6 +107,7 @@ const makeHarness = Effect.sync(() => {
         }),
     }),
     Layer.mock(Threads.ThreadManagementService)({
+      getThreadShell: (id) => Effect.succeed(projections.has(id) ? liveThreadShell(id) : null),
       sendToThread: (input) =>
         Effect.sync(() => {
           calls.push(input);
@@ -175,7 +188,13 @@ const makeHarness = Effect.sync(() => {
   const schedules = Schedules.layer.pipe(
     Layer.provide(Layer.mergeAll(boundaries, agents, store, database)),
   );
-  const layer = Layer.mergeAll(store, agents, schedules, database).pipe(
+  const workspace = Workspace.layer.pipe(
+    Layer.provide(Layer.mergeAll(store, agents, schedules, boundaries, database)),
+  );
+  const policy = Policy.layer.pipe(
+    Layer.provide(Layer.mergeAll(store, workspace, boundaries, database)),
+  );
+  const layer = Layer.mergeAll(store, agents, schedules, workspace, policy, database).pipe(
     Layer.provide(NodeServices.layer),
   );
   const triggerInput: ScheduledTaskUpsertInput = {
@@ -485,4 +504,515 @@ it.effect("recovers an interrupted job with no work thread once and delivers its
       expect(h.posts).toHaveLength(1);
     }).pipe(Effect.provide(h.layer));
   }),
+);
+
+const scopeFor = (threadId: ThreadId): McpInvocationScope => ({
+  environmentId: EnvironmentId.make("test"),
+  capabilities: new Set(["orchestration"]),
+  issuedAt: 0,
+  requestNamespace: "test",
+  client: undefined,
+  thread: {
+    threadId,
+    providerSessionId: "session",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+  },
+});
+
+describe("agent scope, approvals and shared commitments", () => {
+  it.effect(
+    "new agents are conservative, retain mission separately, and paused is the inverse of enabled",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const agents = yield* Agents.AgentService;
+          const store = yield* Store.AgentStore;
+          const created = (yield* agents.upsert({
+            ...h.fixture,
+            id: undefined,
+            responsibility: "Monitor CI",
+            autonomy: undefined,
+            permissions: undefined,
+            notifyPolicy: undefined,
+            paused: true,
+          })).agent;
+          expect(created).toMatchObject({
+            responsibility: "Monitor CI",
+            instructions: h.fixture.instructions,
+            autonomy: "propose",
+            permissions: conservativeAgentPermissions,
+            enabled: false,
+            paused: true,
+          });
+          const edited = (yield* agents.upsert({ ...created, paused: false })).agent;
+          expect(edited.enabled).toBe(true);
+          yield* store.outcome(edited.id, false);
+          expect((yield* store.get(edited.id)).paused).toBe(false);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
+  it.effect("an observe agent cannot start Work through either service or MCP policy", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const workspace = yield* Workspace.AgentWorkspaceService;
+        const policy = yield* Policy.AgentMcpPolicy;
+        const agent = yield* store.save({ ...h.fixture, autonomy: "observe" });
+        const actor = { agent, threadId: agent.conversationThreadId };
+        expect(
+          (yield* Effect.result(
+            workspace.startWork(
+              {
+                agentId: agent.id,
+                projectId: agent.projectId!,
+                title: "Fix CI",
+                prompt: "Repair tests",
+              },
+              actor,
+            ),
+          ))._tag,
+        ).toBe("Failure");
+        const denied = yield* policy
+          .beforeTool(
+            scopeFor(actor.threadId),
+            "t3_thread_launch",
+            { title: "Fix CI", message: "Repair tests" },
+            false,
+          )
+          .pipe(Effect.flip);
+        expect(denied.code).toBe("agent_permission_denied");
+        expect(h.launches).toHaveLength(0);
+        expect((yield* workspace.listApprovals({})).approvals).toHaveLength(0);
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+
+  it.effect(
+    "propose start-Work produces an approval; approval launches once through the ordinary service",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const store = yield* Store.AgentStore;
+          const workspace = yield* Workspace.AgentWorkspaceService;
+          const policy = yield* Policy.AgentMcpPolicy;
+          const agent = yield* store.save({
+            ...h.fixture,
+            autonomy: "propose",
+            permissions: conservativeAgentPermissions,
+          });
+          const denied = yield* policy
+            .beforeTool(
+              scopeFor(agent.conversationThreadId),
+              "t3_thread_launch",
+              { title: "Fix CI", message: "Repair tests" },
+              false,
+            )
+            .pipe(Effect.flip);
+          expect(denied.code).toBe("agent_approval_required");
+          expect(h.launches).toHaveLength(0);
+          const approval = (yield* workspace.listApprovals({
+            agentId: agent.id,
+            status: "pending",
+          })).approvals[0]!;
+          expect(approval.actionKind).toBe("start_work");
+          const results = yield* Effect.all(
+            [workspace.approve(approval.id), workspace.approve(approval.id)],
+            { concurrency: "unbounded" },
+          );
+          expect(results[0]!.approval.status).toBe("approved");
+          expect(results[0]!.approval.resultThreadId).toBe(results[1]!.approval.resultThreadId);
+          expect(h.launches).toHaveLength(1);
+          expect(h.launches[0]!.reuseExistingThread).toBeUndefined();
+          expect(h.launches[0]).toMatchObject({
+            agent: { id: agent.id, role: "work" },
+            initialMessage: { text: "Repair tests" },
+            workspaceStrategy: { type: "worktree", baseRef: "HEAD" },
+          });
+          const identity = yield* store.forThread(results[0]!.approval.resultThreadId!);
+          expect(identity?.id).toBe(agent.id);
+          expect((yield* workspace.activity(agent.id)).actions.map((a) => a.kind)).toEqual(
+            expect.arrayContaining(["approval_requested", "work_started"]),
+          );
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
+  it.effect(
+    "agents cannot self-grant; rejected proposals execute nothing and approved grants use owner upsert",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const store = yield* Store.AgentStore;
+          const workspace = yield* Workspace.AgentWorkspaceService;
+          const agent = yield* store.save({
+            ...h.fixture,
+            autonomy: "propose",
+            permissions: conservativeAgentPermissions,
+          });
+          const actor = { agent, threadId: agent.conversationThreadId };
+          const action = {
+            actionKind: "change_permissions" as const,
+            payload: { permissions: h.fixture.permissions, autonomy: "execute_bounded" as const },
+          };
+          const first = yield* workspace.requestApproval(agent.id, action, actor);
+          expect((yield* store.get(agent.id)).permissions.execute).toBe(false);
+          yield* workspace.reject(first.approval.id);
+          expect((yield* Effect.result(workspace.approve(first.approval.id)))._tag).toBe("Failure");
+          expect((yield* store.get(agent.id)).permissions.execute).toBe(false);
+          const second = yield* workspace.requestApproval(agent.id, action, actor);
+          yield* workspace.approve(second.approval.id);
+          expect((yield* store.get(agent.id)).permissions.execute).toBe(true);
+          expect(h.commands.map((c) => c.type)).toContain("thread.runtime-mode.set");
+          const other = yield* store.save(agentFixture("other"));
+          expect(
+            (yield* Effect.result(workspace.requestApproval(other.id, action, actor)))._tag,
+          ).toBe("Failure");
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
+  it.effect(
+    "even an autonomous agent must propose a trigger, and approval creates the owner-visible schedule",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const agent = yield* (yield* Store.AgentStore).save(h.fixture);
+          const workspace = yield* Workspace.AgentWorkspaceService;
+          const policy = yield* Policy.AgentMcpPolicy;
+          const denied = yield* policy
+            .beforeTool(
+              scopeFor(agent.conversationThreadId),
+              "schedule_task",
+              {
+                title: "Morning review",
+                prompt: "Review commitments",
+                schedule: { type: "interval", everyMs: 60000 },
+              },
+              false,
+            )
+            .pipe(Effect.flip);
+          expect(denied.code).toBe("agent_approval_required");
+          const schedules = yield* Schedules.ScheduledTaskService;
+          expect((yield* schedules.list()).tasks).toHaveLength(0);
+          const proposal = (yield* workspace.listApprovals({ status: "pending" })).approvals[0]!;
+          yield* workspace.approve(proposal.id);
+          expect((yield* schedules.list()).tasks[0]).toMatchObject({
+            agentId: agent.id,
+            title: "Morning review",
+          });
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
+  it.effect(
+    "two agents share explicitly granted label commitments, without copying memory or widening access",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const store = yield* Store.AgentStore;
+          const workspace = yield* Workspace.AgentWorkspaceService;
+          const label = AgentScopeLabelId.make("spawn");
+          const secret = AgentScopeLabelId.make("private");
+          const grants = [{ labelId: label, permissions: conservativeAgentPermissions }];
+          const a = yield* store.save({ ...h.fixture, autonomy: "propose", scope: grants });
+          const b = yield* store.save({ ...agentFixture("engineering"), scope: grants });
+          const outsider = yield* store.save({ ...agentFixture("outsider"), scope: [] });
+          const input = {
+            title: "Follow up with DSO",
+            description: "Email the contact",
+            owner: { kind: "user" as const },
+            dueAt: null,
+            reminderAt: null,
+            waitingOn: null,
+            labelIds: [label],
+            agentId: a.id,
+            sourceRefs: [{ kind: "thread" as const, id: a.conversationThreadId }],
+            evidenceRefs: [],
+          };
+          const proposed = (yield* workspace.createCommitment(input, {
+            agent: a,
+            threadId: a.conversationThreadId,
+          })).commitment;
+          expect(proposed.status).toBe("proposed");
+          expect(
+            (yield* workspace.listCommitments(
+              {},
+              { agent: b, threadId: b.conversationThreadId },
+            )).commitments.map((c) => c.id),
+          ).toEqual([proposed.id]);
+          expect(
+            (yield* workspace.listCommitments({ agentId: b.id })).commitments.map((c) => c.id),
+          ).toEqual([proposed.id]);
+          expect(
+            (yield* workspace.listCommitments(
+              { labelId: label },
+              { agent: outsider, threadId: outsider.conversationThreadId },
+            )).commitments,
+          ).toEqual([]);
+          expect(
+            (yield* Effect.result(
+              workspace.createCommitment(
+                { ...input, labelIds: [secret] },
+                { agent: a, threadId: a.conversationThreadId },
+              ),
+            ))._tag,
+          ).toBe("Failure");
+          expect(
+            (yield* Effect.result(
+              workspace.updateCommitmentStatus(
+                { id: proposed.id, status: "done", why: "Claimed done", evidenceRefs: [] },
+                { agent: b, threadId: b.conversationThreadId },
+              ),
+            ))._tag,
+          ).toBe("Failure");
+          yield* workspace.confirmCommitment({ id: proposed.id, why: "This is a real obligation" });
+          const done = yield* workspace.updateCommitmentStatus(
+            {
+              id: proposed.id,
+              status: "done",
+              why: "Contact replied",
+              evidenceRefs: [{ kind: "url", id: "https://example.com/evidence" }],
+            },
+            { agent: b, threadId: b.conversationThreadId },
+          );
+          expect(done.commitment.status).toBe("done");
+          const visible = (yield* workspace.listCommitments(
+            { status: "done" },
+            { agent: a, threadId: a.conversationThreadId },
+          )).commitments;
+          expect(visible[0]!.evidenceRefs).toEqual(done.commitment.evidenceRefs);
+          const history = (yield* workspace.commitmentHistory(proposed.id)).history;
+          expect(history.map((r) => r.toStatus)).toEqual(["proposed", "open", "done"]);
+          expect(history.at(-1)).toMatchObject({
+            who: `agent:${b.id}`,
+            why: "Contact replied",
+            evidenceRefs: done.commitment.evidenceRefs,
+          });
+          expect(yield* store.memory(b.id)).toEqual([]);
+          yield* store.save({ ...b, scope: [] });
+          expect(
+            (yield* workspace.listCommitments({}, { agent: b, threadId: b.conversationThreadId }))
+              .commitments,
+          ).toEqual([]);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
+  it.effect(
+    "activity uses real persisted process state and never invents runs from agent claims",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const agent = yield* (yield* Store.AgentStore).save(h.fixture);
+          const workspace = yield* Workspace.AgentWorkspaceService;
+          const sql = yield* SqlClient.SqlClient;
+          expect((yield* workspace.activity(agent.id)).runs).toEqual([]);
+          const run = {
+            startedAt: "2026-01-01T00:00:01.000Z",
+            completedAt: null,
+            modelSelection: agent.modelSelection,
+          };
+          const payload = yield* encodeUnknown(run);
+          yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES ('actual-run', ${agent.conversationThreadId}, 1, 'codex', 'waiting', ${agent.createdAt}, ${payload})`;
+          yield* workspace.createCommitment({
+            title: "A claim is not a run",
+            description: "Done",
+            owner: { kind: "user" },
+            dueAt: null,
+            reminderAt: null,
+            waitingOn: null,
+            labelIds: [],
+            agentId: agent.id,
+            sourceRefs: [],
+            evidenceRefs: [],
+          });
+          const activity = yield* workspace.activity(agent.id);
+          expect(activity.runs).toHaveLength(1);
+          expect(activity.runs[0]).toMatchObject({
+            id: "actual-run",
+            status: "waiting",
+            triggerKind: "owner_message",
+            startedAt: run.startedAt,
+            finishedAt: null,
+            modelSelection: agent.modelSelection,
+            summary: null,
+          });
+          expect(activity.actions).toEqual([]);
+          yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES ('queued-next', ${agent.conversationThreadId}, 2, 'codex', 'queued', ${agent.createdAt}, ${payload})`;
+          yield* workspace.logAction(
+            { agent, threadId: agent.conversationThreadId },
+            "commitment_touched",
+            "item-id",
+          );
+          expect((yield* workspace.activity(agent.id)).actions[0]).toMatchObject({
+            runId: "actual-run",
+            targetId: "item-id",
+          });
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+});
+
+it.effect(
+  "old proposals expire without executing and a revoked grant takes effect during an invocation",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const workspace = yield* Workspace.AgentWorkspaceService;
+        const policy = yield* Policy.AgentMcpPolicy;
+        const agent = yield* store.save(h.fixture);
+        const actor = { agent, threadId: agent.conversationThreadId };
+        const { approval } = yield* workspace.requestApproval(
+          agent.id,
+          {
+            actionKind: "start_work",
+            payload: {
+              agentId: agent.id,
+              projectId: agent.projectId!,
+              title: "Old intent",
+              prompt: "Outdated change",
+            },
+          },
+          actor,
+        );
+        yield* TestClock.adjust("8 days");
+        expect((yield* workspace.listApprovals({ status: "expired" })).approvals[0]!.id).toBe(
+          approval.id,
+        );
+        expect((yield* Effect.result(workspace.approve(approval.id)))._tag).toBe("Failure");
+        yield* store.save({ ...agent, autonomy: "observe" });
+        expect(
+          (yield* Effect.result(
+            workspace.startWork(
+              {
+                agentId: agent.id,
+                projectId: agent.projectId!,
+                title: "Stale authority",
+                prompt: "Do it",
+              },
+              actor,
+            ),
+          ))._tag,
+        ).toBe("Failure");
+        expect(
+          (yield* Effect.result(
+            policy.beforeTool(scopeFor(actor.threadId), "t3_pending_request_respond", {}, false),
+          ))._tag,
+        ).toBe("Failure");
+        expect(h.launches).toHaveLength(0);
+      }).pipe(Effect.provide(h.layer));
+    }),
+);
+
+it.effect(
+  "notification policy suppresses routine success and still surfaces real waiting state",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const schedules = yield* Schedules.ScheduledTaskService;
+        yield* store.save({ ...h.fixture, notifyPolicy: "action_required" });
+        const { task } = yield* schedules.upsert(h.triggerInput);
+        yield* agents.trigger(task, "quiet", task.prompt);
+        yield* agents.reconcile();
+        expect(h.posts).toHaveLength(0);
+        yield* agents.trigger(task, "needs-input", task.prompt);
+        const last = h.launches.at(-1)!;
+        const projection = h.projections.get(last.threadId!)!;
+        h.projections.set(last.threadId!, {
+          ...projection,
+          runs: projection.runs.map((r) => ({ ...r, status: "waiting" })),
+        });
+        yield* agents.reconcile();
+        expect(h.posts).toHaveLength(1);
+      }).pipe(Effect.provide(h.layer));
+    }),
+);
+
+it.effect(
+  "execute permission cannot send messages, create PRs, merge, or escape into an untracked provider thread",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const agent = yield* (yield* Store.AgentStore).save({
+          ...h.fixture,
+          autonomy: "execute_bounded",
+          permissions: { ...conservativeAgentPermissions, execute: true },
+        });
+        const policy = yield* Policy.AgentMcpPolicy;
+        for (const name of [
+          "send_message",
+          "create_pull_request",
+          "merge_pull_request",
+          "deploy",
+          "delete_project",
+          "terminal_run",
+          "create_threads",
+          "delegate_task",
+          "t3_thread_configure",
+          "t3_pending_request_respond",
+        ]) {
+          const result = yield* policy
+            .beforeTool(scopeFor(agent.conversationThreadId), name, {}, false)
+            .pipe(Effect.result);
+          expect(result._tag, name).toBe("Failure");
+        }
+        const workspace = yield* Workspace.AgentWorkspaceService;
+        const result = yield* workspace.startWork(
+          {
+            agentId: agent.id,
+            projectId: agent.projectId!,
+            title: "Bounded change",
+            prompt: "Repair CI",
+          },
+          { agent, threadId: agent.conversationThreadId },
+        );
+        expect(result.approval).toBeNull();
+        expect(result.threadId).not.toBeNull();
+        expect(
+          (yield* policy.beforeTool(
+            scopeFor(agent.conversationThreadId),
+            "start_agent_work",
+            { projectId: "another-project" },
+            false,
+          )).handled,
+        ).toBe(false);
+        expect(
+          (yield* Effect.result(
+            policy.beforeTool(
+              scopeFor(agent.conversationThreadId),
+              "t3_project_read",
+              { projectId: "another-project", labelId: "spawn" },
+              true,
+            ),
+          ))._tag,
+        ).toBe("Failure");
+        const escaped = yield* workspace.startWork(
+          {
+            agentId: agent.id,
+            projectId: agent.projectId!,
+            title: "Different path",
+            prompt: "Repair CI",
+            workspaceStrategy: { type: "existing_worktree", worktreePath: "/unapproved" },
+          },
+          { agent, threadId: agent.conversationThreadId },
+        );
+        expect(escaped.threadId).toBeNull();
+        expect(escaped.approval?.status).toBe("pending");
+        expect(h.launches).toHaveLength(1);
+      }).pipe(Effect.provide(h.layer));
+    }),
 );

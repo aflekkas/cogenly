@@ -1,5 +1,7 @@
 import {
   Agent,
+  AgentPermissions,
+  AgentScope,
   AgentError,
   AgentId,
   AgentMemoryNote,
@@ -33,6 +35,11 @@ const decodeNote = Schema.decodeUnknownEffect(AgentMemoryNote);
 const decodeRun = Schema.decodeUnknownEffect(AgentWorkRun);
 const decodeJsonRecord = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+);
+const encodePermissions = Schema.encodeEffect(Schema.fromJsonString(AgentPermissions));
+const encodeScope = Schema.encodeEffect(Schema.fromJsonString(AgentScope));
+const decodeLatestMessage = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(AgentListItem.fields.latestMessage),
 );
 const encodeAgent = Schema.encodeSync(Schema.fromJsonString(Agent));
 const storeError = (cause: unknown) =>
@@ -77,13 +84,28 @@ const make = Effect.gen(function* () {
   const fromRow = (row: Row) =>
     Effect.all([
       decodeJsonRecord(row.payload_json),
-      Schema.decodeUnknownEffect(Schema.fromJsonString(AgentListItem.fields.latestMessage))(
-        row.latest_message_json ?? "null",
-      ),
+      decodeLatestMessage(row.latest_message_json ?? "null"),
     ]).pipe(
       Effect.flatMap(([data, latestMessage]) =>
         decode({
+          // Legacy agents created by the idempotent 063 importer after startup
+          // use the same migration mapping; ordinary saves always carry policy.
+          responsibility: "",
+          scope: [],
+          autonomy: "autonomous_within_policy",
+          permissions: {
+            read: true,
+            draft: true,
+            execute: true,
+            send: true,
+            create_pr: true,
+            merge: true,
+            deploy: true,
+            delete: true,
+          },
+          notifyPolicy: "all",
           ...data,
+          paused: row.enabled !== 1,
           unreadCount: row.unread_count ?? 0,
           latestMessage,
           consecutiveFailures: row.consecutive_failures,
@@ -108,7 +130,7 @@ const make = Effect.gen(function* () {
       Effect.mapError(storeError),
     );
   const forThread = (id: ThreadId) =>
-    sql<Row>`SELECT a.* FROM agents a WHERE a.conversation_thread_id = ${id} OR EXISTS (SELECT 1 FROM agent_work_runs r WHERE r.agent_id = a.agent_id AND r.work_thread_id = ${id}) LIMIT 1`.pipe(
+    sql<Row>`SELECT a.* FROM agents a WHERE a.conversation_thread_id = ${id} OR EXISTS (SELECT 1 FROM agent_work_runs r WHERE r.agent_id = a.agent_id AND r.work_thread_id = ${id}) OR EXISTS (SELECT 1 FROM agent_run_threads r WHERE r.agent_id = a.agent_id AND r.thread_id = ${id}) LIMIT 1`.pipe(
       Effect.flatMap((rows) => (rows[0] ? fromRow(rows[0]) : Effect.succeed(null))),
       Effect.mapError(storeError),
     );
@@ -209,7 +231,7 @@ const make = Effect.gen(function* () {
         }>`SELECT summary FROM agent_conversation_context WHERE agent_id = ${agent.id}`.pipe(
           Effect.mapError(storeError),
         );
-        return `You are ${agent.name}, the owner's persistent agent.\nStanding instructions:\n${agent.instructions}\n\nAgent memory:\n${memoryContext(notes)}\nEarlier conversation summary:\n${context[0]?.summary ?? ""}\nUse memory_read, memory_remember and memory_forget to maintain durable facts. Send concise messages to the owner.`;
+        return `You are ${agent.name}, the owner's persistent agent.\nResponsibility:\n${agent.responsibility}\nAutonomy: ${agent.autonomy}. Permissions: ${yield* encodePermissions(agent.permissions).pipe(Effect.mapError(storeError))}. Scope grants: ${yield* encodeScope(agent.scope).pipe(Effect.mapError(storeError))}.\nStanding instructions:\n${agent.instructions}\n\nAgent memory:\n${memoryContext(notes)}\nEarlier conversation summary:\n${context[0]?.summary ?? ""}\nUse memory_read, memory_remember and memory_forget to maintain durable facts. Use list_open_items for shared commitments, propose_commitment for extracted obligations, and update_commitment_status with evidence. Use request_agent_approval for new triggers or permission changes; you can never approve your own requests. Use start_agent_work to start or propose repository Work. Send concise messages to the owner.`;
       }),
     carryOver: (agentId, ordinal, messages) =>
       Effect.gen(function* () {

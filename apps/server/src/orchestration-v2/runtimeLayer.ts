@@ -1,3 +1,5 @@
+import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
+import * as AgentMcpPolicy from "../agents/AgentMcpPolicy.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
@@ -306,6 +308,21 @@ const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
     ),
   ),
 );
+const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      AgentStore.layer,
+      layerAgentsProvided,
+      layerThreadLaunchProvided,
+      layerScheduledTaskProvided,
+    ),
+  ),
+);
+const layerAgentMcpPolicyProvided = AgentMcpPolicy.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(AgentStore.layer, layerAgentWorkspaceProvided, layerThreadManagementProvided),
+  ),
+);
 const layerProviderContinuationWorkerProvided = ProviderContinuationService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -380,6 +397,8 @@ export const layerProduction = Layer.mergeAll(
   layerThreadLaunchProvided,
   layerThreadLifecycleProvided,
   layerAgentsProvided,
+  layerAgentWorkspaceProvided,
+  layerAgentMcpPolicyProvided,
   AgentStore.layer,
   layerScheduledTaskProvided,
   layerSecretRequestsProvided,
