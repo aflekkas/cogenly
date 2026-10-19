@@ -1,3 +1,4 @@
+import * as Access from "./AgentAccessScope.ts";
 import { canReceiveAgentEvent } from "./agentEventPolicy.ts";
 import {
   conservativeAgentPermissions,
@@ -80,6 +81,7 @@ const make = Effect.gen(function* () {
   const events = yield* EventSink.EventSinkV2;
   const scheduler = yield* Scheduler.Scheduler;
   const sql = yield* SqlClient.SqlClient;
+  const access = yield* Access.AgentAccessScope;
   const changes = yield* PubSub.sliding<void>(1);
   const changed = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
   const list = () => store.list().pipe(Effect.map((agents) => ({ agents })));
@@ -407,6 +409,10 @@ const make = Effect.gen(function* () {
     trigger: (task, fireKey, prompt, context) =>
       Effect.gen(function* () {
         if (task.agentId == null) return false;
+        if (task.schedule.type === "event" && context === undefined)
+          return yield* new AgentError({
+            message: "Event triggers require a source event and cannot be run manually.",
+          });
         let agent = yield* store.get(task.agentId);
         const id = `agent-work:${fireKey}`;
         const workThreadId = ThreadId.make(id);
@@ -418,7 +424,8 @@ const make = Effect.gen(function* () {
               const current =
                 yield* sql`SELECT 1 FROM scheduled_tasks WHERE task_id = ${task.id} AND enabled = 1 AND agent_id = ${agent.id} AND project_id = ${task.projectId} AND created_at = ${task.createdAt} AND schedule_json = ${scheduleJson}`;
               if (current.length === 0) return false;
-              if (!canReceiveAgentEvent(agent, task, context)) return false;
+              if (!canReceiveAgentEvent(yield* access.resolve(agent.id), task, context))
+                return false;
               const prior =
                 yield* sql`SELECT 1 FROM agent_event_deliveries WHERE agent_id = ${agent.id} AND event_key = ${context.dedupKey}`;
               if (prior.length) return false;
@@ -496,4 +503,4 @@ const make = Effect.gen(function* () {
     reconcile,
   });
 });
-export const layer = Layer.effect(AgentService, make);
+export const layer = Layer.effect(AgentService, make).pipe(Layer.provide(Access.layer));

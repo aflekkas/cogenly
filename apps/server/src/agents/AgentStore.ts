@@ -1,3 +1,4 @@
+import { decodeAgentRow } from "./agentRecord.ts";
 import {
   Agent,
   AgentPermissions,
@@ -40,9 +41,6 @@ const decodeNote = Schema.decodeUnknownEffect(AgentMemoryNote);
 const decodeEventContext = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEventContext));
 const encodeEventContext = Schema.encodeSync(Schema.fromJsonString(AgentEventContext));
 const decodeRun = Schema.decodeUnknownEffect(AgentWorkRun);
-const decodeJsonRecord = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
-);
 const encodePermissions = Schema.encodeEffect(Schema.fromJsonString(AgentPermissions));
 const encodeScope = Schema.encodeEffect(Schema.fromJsonString(AgentScope));
 const decodeLatestMessage = Schema.decodeUnknownEffect(
@@ -97,37 +95,12 @@ const make = Effect.gen(function* () {
   const retrieval = yield* Retrieval.ContextRetrievalService;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const fromRow = (row: Row) =>
-    Effect.all([
-      decodeJsonRecord(row.payload_json),
-      decodeLatestMessage(row.latest_message_json ?? "null"),
-    ]).pipe(
+    Effect.all([decodeAgentRow(row), decodeLatestMessage(row.latest_message_json ?? "null")]).pipe(
       Effect.flatMap(([data, latestMessage]) =>
         decode({
-          // Legacy agents created by the idempotent 063 importer after startup
-          // use the same migration mapping; ordinary saves always carry policy.
-          responsibility: "",
-          scope: [],
-          autonomy: "autonomous_within_policy",
-          permissions: {
-            read: true,
-            draft: true,
-            execute: true,
-            send: true,
-            create_pr: true,
-            merge: true,
-            deploy: true,
-            delete: true,
-          },
-          notifyPolicy: "all",
           ...data,
-          paused: row.enabled !== 1,
           unreadCount: row.unread_count ?? 0,
           latestMessage,
-          consecutiveFailures: row.consecutive_failures,
-          backoffUntil: row.backoff_until,
-          pauseReason: row.pause_reason,
-          enabled: row.enabled === 1,
-          dailyRunCap: row.daily_run_cap,
         }),
       ),
       Effect.mapError(storeError),

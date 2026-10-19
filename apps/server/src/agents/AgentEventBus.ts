@@ -1,6 +1,6 @@
+import * as Access from "./AgentAccessScope.ts";
 import * as DateTime from "effect/DateTime";
 import { canReceiveAgentEvent, matchesAgentEvent } from "./agentEventPolicy.ts";
-import * as Store from "./AgentStore.ts";
 import { AgentError, AgentEventContext, type ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -28,8 +28,8 @@ export class AgentEventBus extends Context.Service<
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const access = yield* Access.AgentAccessScope;
   const agents = yield* Agents.AgentService;
-  const store = yield* Store.AgentStore;
   const schedules = yield* Schedules.ScheduledTaskService;
   const lock = yield* Semaphore.make(1);
   const emit: AgentEventBus["Service"]["emit"] = (event) =>
@@ -70,7 +70,7 @@ const make = Effect.gen(function* () {
       for (const task of tasks) {
         if (!matchesAgentEvent(task, event) || task.agentId == null) continue;
         const accepted = yield* schedules.triggerEvent(task.id, event);
-        if (!accepted && canReceiveAgentEvent(yield* store.get(task.agentId), task, event)) {
+        if (!accepted && canReceiveAgentEvent(yield* access.resolve(task.agentId), task, event)) {
           const prior =
             yield* sql`SELECT 1 FROM agent_event_deliveries WHERE agent_id = ${task.agentId} AND event_key = ${event.dedupKey}`;
           // Busy agents, caps and backoff defer durable events until a future tick.
@@ -82,4 +82,4 @@ const make = Effect.gen(function* () {
   }).pipe(lock.withPermits(1), Effect.mapError(failure));
   return AgentEventBus.of({ emit, drain, lineage });
 });
-export const layer = Layer.effect(AgentEventBus, make);
+export const layer = Layer.effect(AgentEventBus, make).pipe(Layer.provide(Access.layer));

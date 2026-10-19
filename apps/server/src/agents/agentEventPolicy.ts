@@ -1,11 +1,13 @@
-import type { Agent, AgentEventContext, ScheduledTask } from "@t3tools/contracts";
+import type { ResolvedAgentAccess } from "./AgentAccessScope.ts";
+import type { AgentEventContext, ScheduledTask } from "@t3tools/contracts";
 
 /** Relevance filters never add authority: repository access remains explicit. */
 export function canReceiveAgentEvent(
-  agent: Agent,
+  access: ResolvedAgentAccess,
   task: ScheduledTask,
   event: AgentEventContext,
 ): boolean {
+  const { agent } = access;
   return (
     task.enabled &&
     agent.enabled &&
@@ -14,11 +16,9 @@ export function canReceiveAgentEvent(
     event.chainDepth < 2 &&
     task.projectId === agent.projectId &&
     (event.projectId === null
-      ? event.subjectAgentId === agent.id || event.labelIds.length > 0
-      : event.projectId === agent.projectId) &&
-    event.labelIds.every((labelId) =>
-      agent.scope.some((grant) => grant.labelId === labelId && grant.permissions.read),
-    )
+      ? event.subjectAgentId === agent.id ||
+        event.labelIds.some((id) => access.readableLabelIds.includes(id))
+      : access.readableRepositoryIds.includes(event.projectId))
   );
 }
 

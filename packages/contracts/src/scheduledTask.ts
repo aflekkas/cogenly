@@ -341,6 +341,9 @@ export class ScheduledTaskError extends Schema.TaggedError<ScheduledTaskError>()
   {
     message: Schema.String,
     taskId: Schema.optional(ScheduledTaskId),
+    code: Schema.optional(
+      Schema.Literals(["event_filter_out_of_scope", "event_run_now_unsupported"]),
+    ),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}

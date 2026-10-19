@@ -1,3 +1,4 @@
+import * as Access from "../agents/AgentAccessScope.ts";
 import {
   AgentId,
   Commitment,
@@ -11,6 +12,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -63,6 +65,7 @@ export class ContextRetrievalService extends Context.Service<
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const access = yield* Access.AgentAccessScope;
   const facts = yield* Facts.FactService;
   const tags = (threadId: ThreadId) =>
     sql<{
@@ -83,16 +86,17 @@ const make = Effect.gen(function* () {
         ? Math.max(0, Math.min(16000, Math.floor(input.budgetChars)))
         : 0;
       if (budget === 0) return { items: [], text: "" };
+      const agentId =
+        input.principal === "user" ? undefined : AgentId.make(input.principal.slice(6));
+      const scope = agentId === undefined ? undefined : yield* access.resolve(agentId);
       // Tags select user relevance. An agent's grant ceiling is always resolved separately.
       let labels =
         input.principal === "user" && input.threadId !== undefined
           ? yield* tags(input.threadId)
-          : yield* facts.readableLabels(input.principal);
+          : (scope?.readableLabelIds ?? (yield* facts.readableLabels(input.principal)));
       if (input.labelIds !== undefined)
         labels = labels.filter((id) => input.labelIds!.includes(id));
       const labelSet = new Set(labels);
-      const agentId =
-        input.principal === "user" ? undefined : AgentId.make(input.principal.slice(6));
       const candidates: ContextItem[] = [];
       const selected = yield* facts.list(
         { status: "confirmed", labelIds: labels, ...(input.query ? { query: input.query } : {}) },
@@ -113,10 +117,10 @@ const make = Effect.gen(function* () {
           updatedAt: fact.updatedAt,
         });
       }
-      if (labels.length) {
+      if (labels.length || (agentId !== undefined && scope?.agent.permissions.read)) {
         const rows = yield* sql<{
           payload_json: string;
-        }>`SELECT c.payload_json FROM commitments c WHERE c.status IN ('open','in_progress','waiting') AND EXISTS (SELECT 1 FROM commitment_labels cl WHERE cl.commitment_id=c.id AND cl.label_id IN ${sql.in(labels)}) ORDER BY c.updated_at DESC,c.id LIMIT 100`;
+        }>`SELECT c.payload_json FROM commitments c WHERE c.status IN ('open','in_progress','waiting') AND (c.agent_id=${agentId ?? null} OR EXISTS (SELECT 1 FROM commitment_labels cl WHERE cl.commitment_id=c.id AND cl.label_id IN ${sql.in(labels)})) ORDER BY c.updated_at DESC,c.id LIMIT 100`;
         for (const row of rows) {
           const item = yield* decodeCommitment(row.payload_json);
           candidates.push({
@@ -128,6 +132,8 @@ const make = Effect.gen(function* () {
             updatedAt: item.updatedAt,
           });
         }
+      }
+      if (labels.length || scope?.readableRepositoryIds.length) {
         // Only observable run state and persisted PR links form Work outcomes.
         const work = yield* sql<{
           id: string;
@@ -142,7 +148,7 @@ const make = Effect.gen(function* () {
         COALESCE((SELECT json_group_array(json_object('kind','pr','id',json_extract(p.value,'$.url'))) FROM json_each(t.payload_json,'$.pullRequests') p WHERE json_extract(p.value,'$.url') IS NOT NULL AND json_extract(p.value,'$.source') <> 'stack-dismissed'),'[]') AS refs
         FROM orchestration_v2_projection_threads t JOIN orchestration_v2_projection_runs r ON r.run_id=(SELECT rr.run_id FROM orchestration_v2_projection_runs rr WHERE rr.thread_id=t.thread_id ORDER BY rr.ordinal DESC LIMIT 1)
         WHERE t.deleted_at IS NULL AND json_extract(t.payload_json,'$.workOrigin') IS NOT NULL AND r.completed_at IS NOT NULL
-        AND EXISTS (SELECT 1 FROM label_repositories lr WHERE lr.repository_id=t.project_id AND lr.label_id IN ${sql.in(labels)}) ORDER BY t.updated_at DESC,t.thread_id LIMIT 30`;
+        AND ${scope === undefined || input.labelIds !== undefined ? sql`EXISTS (SELECT 1 FROM label_repositories lr WHERE lr.repository_id=t.project_id AND lr.label_id IN ${sql.in(labels)})` : sql`t.project_id IN ${sql.in(scope.readableRepositoryIds)}`} ORDER BY t.updated_at DESC,t.thread_id LIMIT 30`;
         for (const row of work) {
           const refs = yield* decodeRefs(row.refs);
           const matchedLabels = yield* decodeLabels(row.labels);
@@ -281,4 +287,10 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.mapError(wrap)),
   });
 });
-export const layer = Layer.effect(ContextRetrievalService, make).pipe(Layer.provide(Facts.layer));
+export const layer: Layer.Layer<
+  ContextRetrievalService,
+  never,
+  SqlClient.SqlClient | Crypto.Crypto
+> = Layer.effect(ContextRetrievalService, make).pipe(
+  Layer.provide(Layer.merge(Facts.layer, Access.layer)),
+);

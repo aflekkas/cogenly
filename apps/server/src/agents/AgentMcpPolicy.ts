@@ -1,3 +1,4 @@
+import * as Access from "./AgentAccessScope.ts";
 import {
   AgentStartWorkInput,
   WorkStartInput,
@@ -52,6 +53,7 @@ const make = Effect.gen(function* () {
   const store = yield* Store.AgentStore;
   const workspace = yield* Workspace.AgentWorkspaceService;
   const sql = yield* SqlClient.SqlClient;
+  const access = yield* Access.AgentAccessScope;
   const threads = yield* Threads.ThreadManagementService;
   const actorFor = (scope: McpInvocationScope) =>
     scope.thread === undefined
@@ -66,14 +68,12 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const actor = yield* actorFor(scope);
         if (!actor) return { handled: false };
-        const { agent } = actor;
+        const resolved = yield* access.resolve(actor.agent.id);
+        const { agent } = resolved;
         const params = yield* inputRecord(input ?? {});
         if (!agent.permissions.read) return yield* denied("This agent has no read grant.");
-        const ownedThread = yield* sql<{
-          project_id: string;
-        }>`SELECT project_id FROM orchestration_v2_projection_threads WHERE thread_id = ${actor.threadId}`;
         const permittedProject = (id: unknown) =>
-          typeof id === "string" && (id === agent.projectId || id === ownedThread[0]?.project_id);
+          resolved.readableRepositoryIds.some((repositoryId) => repositoryId === id);
         // Explicit references cannot expand repository access via project tags.
         if (
           params.projectId !== undefined &&
@@ -219,6 +219,12 @@ const make = Effect.gen(function* () {
           return yield* denied(
             "Trigger changes require request_agent_approval and an owner decision.",
           );
+        const targetRepository = params.projectId ?? params.targetProjectId;
+        if (
+          targetRepository !== undefined &&
+          !resolved.executableRepositoryIds.some((id) => id === targetRepository)
+        )
+          return yield* denied("This repository needs an explicit owner decision.");
         const grant: keyof AgentPermissions = /merge/.test(name)
           ? "merge"
           : /deploy/.test(name)
@@ -289,4 +295,4 @@ const make = Effect.gen(function* () {
       ),
   });
 });
-export const layer = Layer.effect(AgentMcpPolicy, make);
+export const layer = Layer.effect(AgentMcpPolicy, make).pipe(Layer.provide(Access.layer));

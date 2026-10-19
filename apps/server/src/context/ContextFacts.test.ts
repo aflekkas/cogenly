@@ -320,6 +320,17 @@ describe("shared facts and scoped context", () => {
           budgetChars: 4000,
         });
         expect(scoped.items).toEqual([]);
+        const principal = `agent:${agent.id}` as const;
+        expect(
+          (yield* retrieval.retrieve({ principal, budgetChars: 4000 })).items.some(
+            (item) => item.id === "work",
+          ),
+        ).toBe(true);
+        yield* sql`DELETE FROM label_repositories WHERE label_id=${a} AND repository_id='repo'`;
+        const unlinked = yield* retrieval.retrieve({ principal, budgetChars: 4000 });
+        expect(unlinked.items.some((item) => item.id === "work")).toBe(false);
+        expect(unlinked.items.some((item) => item.id === "open")).toBe(true);
+        yield* sql`INSERT INTO label_repositories(label_id,repository_id) VALUES (${a},'repo')`;
         // A newer live run means the old completed run is no longer a current outcome.
         yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json) VALUES ('new-run','work',2,'codex','running',${at},'{}')`;
         expect(
