@@ -15,7 +15,7 @@ same conversation; their source links open the background work. Messages sent
 while an agent is busy use its normal queue or steering behavior.
 
 Coding work an agent starts appears in **Work** with your own threads, under its
-project and marked with the agent's name.
+repository and marked with the agent's name.
 
 ## Start a thread
 
@@ -196,6 +196,30 @@ On web and desktop, right-click a pull request link in a thread and choose
 **Link to thread** to select a different PR. Use **Unlink from thread** on the
 same link to return to the branch PR, if one exists.
 The linked pull request participates in automatic settlement.
+
+## Tag threads with projects
+
+A project, such as a client or a course, is a tag for related chats and Work. It is
+separate from the repository a thread runs in: one project can link several
+repositories, and a chat can carry several projects or none. Tags organize and
+suggest context only; they never change what an agent can access.
+
+Create, recolor, describe, and delete projects, and link their repositories, in
+**Settings → Projects**, or with **New project** and **Manage projects** in the
+command palette. Deleting a project removes its tag from threads but keeps the threads.
+
+To tag a thread, click the tag button beside its title, or run **Edit this thread's
+projects** from the command palette. Pick projects to add or remove them, type a new
+name to create one, or choose **No project** to clear them. After a thread's first
+reply, Cogenly may suggest projects from its repository and wording. Suggestions
+show outlined and do nothing until you accept them; a dismissed suggestion is not
+offered again for that thread.
+
+**Chats** stays one list by date. Each chat shows one of its projects, and the
+filter button beside search narrows the list to one project. **Work** groups
+repositories under the projects that link them, so a repository linked to two
+projects appears under both. Repositories without a project come last under
+**Other repositories**.
 
 ## Find and reference work
 

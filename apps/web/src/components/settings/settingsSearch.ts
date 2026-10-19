@@ -16,6 +16,7 @@ import {
 export type SettingsPath =
   | "/settings/projects"
   | "/settings/general"
+  | "/settings/project-tags"
   | "/settings/diagnostics"
   | "/settings/appearance"
   | "/settings/keybindings"
@@ -94,8 +95,9 @@ export interface SettingsSearchAvailability {
  */
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/diagnostics": "Diagnostics",
-  "/settings/projects": "Project",
+  "/settings/projects": "Repository",
   "/settings/general": "General",
+  "/settings/project-tags": "Projects",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",
@@ -214,10 +216,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["model workspace environments projects inheritance checkout"],
   },
   {
+    id: "project-tags",
+    title: "Projects",
+    to: "/settings/project-tags",
+    searchTerms: ["tags labels chats work repositories link group context new project"],
+  },
+  {
     id: "project-overview",
-    title: "Project overview",
+    title: "Repository overview",
     to: "/settings/projects",
-    searchTerms: ["name icon image checkout remove delete"],
+    searchTerms: ["project overview name icon image checkout remove delete"],
   },
   {
     id: "default-model",
@@ -875,6 +883,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/diagnostics": "environment",
   "/settings/projects": "project",
   "/settings/general": null,
+  "/settings/project-tags": null,
   "/settings/appearance": null,
   "/settings/snap-shot": null,
   // Keybindings fan out to the selection; Providers shows the representative

@@ -1,8 +1,8 @@
 /**
- * The sidebar header: one row holding search, add project and new thread.
+ * The sidebar header: one row holding search, add repository and new thread.
  *
- * Search owns the row's text and spans it; add-project and new-thread sit as
- * a pair of icons at the end.
+ * Search owns the row's text and spans it; add-repository and new-thread sit
+ * as a pair of icons at the end, after any mode-specific filter.
  */
 import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
@@ -19,8 +19,10 @@ import { SidebarInput, SidebarMenuButton } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface SidebarThreadHeaderProps {
-  /** Add project only shows once a project exists; the empty state offers it otherwise. */
+  /** Add repository only shows once one exists; the empty state offers it otherwise. */
   hasProjects: boolean;
+  /** Optional mode-specific control before the add/new pair, such as the Chats project filter. */
+  filterControl?: ReactNode;
   onNewProject: () => void;
   /** Receives the click so Shift+click can skip the project picker. */
   onNewThread: (event: ReactMouseEvent) => void;
@@ -43,6 +45,7 @@ export interface SidebarThreadHeaderProps {
 
 export function SidebarThreadHeader({
   hasProjects,
+  filterControl,
   onNewProject,
   onNewThread,
   newThreadLabel: newItemLabel = "New thread",
@@ -112,8 +115,9 @@ export function SidebarThreadHeader({
           hover states, and a background well reads far louder on themed
           palettes than on the base light and dark ones. */}
       <div className="flex shrink-0 items-center">
+        {filterControl}
         {hasProjects ? (
-          <SidebarHeaderIconButton label="Add project" onClick={onNewProject}>
+          <SidebarHeaderIconButton label="Add repository" onClick={onNewProject}>
             <FolderPlusIcon />
           </SidebarHeaderIconButton>
         ) : null}

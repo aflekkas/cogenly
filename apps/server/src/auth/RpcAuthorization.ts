@@ -108,6 +108,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.projectLabelsSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.projectLabelsGetThreadLabels]: AuthOrchestrationReadScope,
   [WS_METHODS.projectLabelsSubscribeThreadLabels]: AuthOrchestrationReadScope,
+  [WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels]: AuthOrchestrationReadScope,
   [WS_METHODS.agentsList]: AuthOrchestrationReadScope,
   [WS_METHODS.agentsSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.agentsMemoryList]: AuthOrchestrationReadScope,

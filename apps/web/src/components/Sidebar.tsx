@@ -212,6 +212,19 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { ChatsProjectFilter } from "../projectLabels/ChatsProjectFilter";
+import { ProjectTag } from "../projectLabels/ProjectTag";
+import {
+  groupWorkByProject,
+  scopedRepositoryKey,
+  scopedThreadTagKey,
+  workSectionThreadOrder,
+  type ProjectLabelKey,
+  type WorkProjectHeading,
+  type WorkProjectSection,
+} from "../projectLabels/projectLabels.logic";
+import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
+import { WorkProjectGroupLabel } from "./sidebar/modes/WorkProjectGroupLabel";
 import { useNavRailBadgeStore } from "./sidebar/navRailState";
 import {
   CHAT_DATE_GROUP_LABELS,
@@ -904,6 +917,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   projectDisplayName: string | null;
   // The agent that started this work thread; null for the user's own threads.
   workAgentName: string | null;
+  // Chats rows show one confirmed project tag; null everywhere else.
+  projectTag: { readonly name: string; readonly color?: string | undefined } | null;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
@@ -1456,6 +1471,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             )}
             {draftIndicator}
             {title}
+            {props.projectTag ? (
+              <ProjectTag
+                name={props.projectTag.name}
+                color={props.projectTag.color}
+                className="shrink-0"
+              />
+            ) : null}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
@@ -2253,6 +2275,15 @@ export default function Sidebar() {
     () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
     [projectGroups],
   );
+  // Projects (context tags) group Work and tag Chats rows, across environments.
+  const labelEnvironmentIds = useConnectedEnvironmentIds();
+  const projectLabelDirectory = useProjectLabelDirectory(labelEnvironmentIds);
+  const [chatProjectFilter, setChatProjectFilter] = useState<ProjectLabelKey | null>(null);
+  // A deleted project silently stops filtering instead of emptying the list.
+  const activeChatProjectFilter =
+    chatProjectFilter !== null && projectLabelDirectory.byKey.has(chatProjectFilter)
+      ? chatProjectFilter
+      : null;
   // Chats | Work | Agents: the list below shows one mode's threads at a time.
   const sidebarModes = useSidebarModeState({
     threads,
@@ -2322,7 +2353,19 @@ export default function Sidebar() {
       });
     },
   );
-  const { activeThreads, workingThreads, snoozedThreads, settledThreads, snoozeNow } =
+  const openProjectLabelSettings = useStableCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void router.navigate({ to: "/settings/project-tags" });
+  });
+  const chatProjectTagFor = (thread: Pick<EnvironmentThreadShell, "environmentId" | "id">) => {
+    const key = projectLabelDirectory.confirmedByThread.get(
+      scopedThreadTagKey(thread.environmentId, thread.id),
+    )?.[0];
+    return (key ? projectLabelDirectory.byKey.get(key)?.label : undefined) ?? null;
+  };
+  const { activeThreads, workSections, workingThreads, snoozedThreads, settledThreads, snoozeNow } =
     useMemo(() => {
       // Snooze classification uses a REAL clock, not the quantized minute:
       // wake times are second-precise and a woken thread must not linger on
@@ -2332,7 +2375,15 @@ export default function Sidebar() {
       const preciseNow = new Date().toISOString();
       // Subagent child threads live in the parent's Agents surface, not the
       // sidebar roster (v2 models them as real threads with lineage).
-      const visible = filterSidebarV2VisibleThreads(sidebarModes.modeThreads, null);
+      const roster = filterSidebarV2VisibleThreads(sidebarModes.modeThreads, null);
+      const visible =
+        sidebarMode === "chats" && activeChatProjectFilter !== null
+          ? roster.filter((thread) =>
+              projectLabelDirectory.confirmedByThread
+                .get(scopedThreadTagKey(thread.environmentId, thread.id))
+                ?.includes(activeChatProjectFilter),
+            )
+          : roster;
       inboxReturns.observe(workingShelfEnabled ? threads : null);
       const active: EnvironmentThreadShell[] = [];
       const working: EnvironmentThreadShell[] = [];
@@ -2360,21 +2411,49 @@ export default function Sidebar() {
         );
       }
       // Chats read newest first under date headings. Work keeps the inbox
-      // order inside one block per project, busiest project first.
+      // order inside one block per repository, busiest first, with the
+      // repositories under the projects that link them.
       const sortedInbox = workingShelfEnabled
         ? sortInboxThreadsByReturn(active, inboxReturns.returnedAt)
         : sortThreadsForSidebar(active);
+      const workSections: WorkProjectSection<EnvironmentThreadShell>[] | null =
+        sidebarMode === "tasks"
+          ? groupWorkByProject(
+              groupTasksByProject(sortedInbox, (thread) => {
+                const projectKey = `${thread.environmentId}:${thread.projectId}` as const;
+                return projectGroupKeyByKey.get(projectKey) ?? projectKey;
+              }),
+              (repoKey) => {
+                // A logical repository spans its checkouts on every machine.
+                const memberKeys = projectGroupByKey
+                  .get(repoKey)
+                  ?.memberProjectRefs.map((ref) =>
+                    scopedRepositoryKey(ref.environmentId, ref.projectId),
+                  ) ?? [repoKey];
+                const headings = new Map<ProjectLabelKey, WorkProjectHeading>();
+                for (const memberKey of memberKeys) {
+                  for (const entry of projectLabelDirectory.projectsByRepository.get(memberKey) ??
+                    []) {
+                    headings.set(entry.key, {
+                      key: entry.key,
+                      name: entry.label.name,
+                      color: entry.label.color,
+                    });
+                  }
+                }
+                return [...headings.values()];
+              },
+            )
+          : null;
       const sortedActive =
         sidebarMode === "chats"
           ? sortChatsByActivity(active)
-          : sidebarMode === "tasks"
-            ? groupTasksByProject(sortedInbox, (thread) => {
-                const projectKey = `${thread.environmentId}:${thread.projectId}` as const;
-                return projectGroupKeyByKey.get(projectKey) ?? projectKey;
-              }).flatMap((group) => group.threads)
+          : workSections !== null
+            ? workSectionThreadOrder(workSections)
             : sortedInbox;
       return {
         activeThreads: sortedActive,
+        workSections,
         // Newest send first; finishing and waking again do not move a row.
         workingThreads: sortWorkingThreadsBySend(working),
         // Soonest wake first: "what comes back next" is the shelf's question.
@@ -2387,8 +2466,11 @@ export default function Sidebar() {
         snoozeNow: preciseNow,
       };
     }, [
+      activeChatProjectFilter,
       nowMinute,
+      projectGroupByKey,
       projectGroupKeyByKey,
+      projectLabelDirectory,
       serverConfigs,
       sidebarMode,
       sidebarModes.modeThreads,
@@ -3493,7 +3575,7 @@ export default function Sidebar() {
         if (!api) return;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
-            [{ id: "project-settings", label: "Project settings", icon: "settings" }],
+            [{ id: "project-settings", label: "Repository settings", icon: "settings" }],
             position,
           ),
         );
@@ -3904,6 +3986,20 @@ export default function Sidebar() {
   const threadHeader = (
     <SidebarThreadHeader
       hasProjects={projectGroups.length > 0}
+      filterControl={
+        sidebarMode === "chats" ? (
+          <ChatsProjectFilter
+            labels={projectLabelDirectory.labels}
+            value={activeChatProjectFilter}
+            onChange={setChatProjectFilter}
+            environmentLabel={(entry) =>
+              labelEnvironmentIds.length > 1
+                ? (environmentLabelById.get(entry.environmentId) ?? null)
+                : null
+            }
+          />
+        ) : null
+      }
       onNewProject={openAddProjectCommandPalette}
       onNewThread={sidebarModeActions.createInMode ?? handleNewThreadClick}
       newThreadLabel={sidebarModeActions.newItemLabel}
@@ -4064,6 +4160,8 @@ export default function Sidebar() {
                     thread: EnvironmentThreadShell,
                     section: SidebarSection,
                     hideProject: boolean,
+                    // A repository under a second project renders its rows again.
+                    keyPrefix = "",
                   ) => {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
@@ -4078,7 +4176,7 @@ export default function Sidebar() {
                     return (
                       <SidebarThreadRow
                         // Fade between card and compact rows.
-                        key={`${threadKey}:${rowVariant}`}
+                        key={`${keyPrefix}${threadKey}:${rowVariant}`}
                         thread={thread}
                         variant={rowVariant}
                         // Snoozed rows wake, settled rows un-settle, and cards settle.
@@ -4127,6 +4225,7 @@ export default function Sidebar() {
                             `${thread.environmentId}:${thread.projectId}`,
                           ) ?? null
                         }
+                        projectTag={sidebarMode === "chats" ? chatProjectTagFor(thread) : null}
                         workAgentName={
                           thread.source.agent?.role === "work"
                             ? (sidebarModes.agentNameByKey.get(
@@ -4172,9 +4271,103 @@ export default function Sidebar() {
                   ];
                   const chatDateGroupOf =
                     sidebarMode === "chats" ? createChatDateGrouper(new Date()) : null;
-                  let previousTaskGroupKey: string | null = null;
+                  // Work: one heading per repository; its cards drop the
+                  // repository line the heading already shows.
+                  const renderRepositoryHeading = (
+                    thread: EnvironmentThreadShell,
+                    taskGroupKey: string,
+                    keyPrefix: string,
+                  ) => {
+                    const projectKey = `${thread.environmentId}:${thread.projectId}` as const;
+                    const project = projectByKey.get(projectKey);
+                    const projectGroup = projectGroupByKey.get(taskGroupKey) ?? null;
+                    const projectName =
+                      projectDisplayNameByKey.get(projectKey) ?? project?.title ?? "Repository";
+                    const projectRef = {
+                      environmentId: thread.environmentId,
+                      projectId: thread.projectId,
+                    };
+                    return (
+                      <SidebarModeGroupLabel
+                        key={`task-project:${keyPrefix}${taskGroupKey}`}
+                        // Repository settings live on the heading: hover
+                        // gear or right-click.
+                        onContextMenu={
+                          projectGroup
+                            ? (event) => {
+                                event.preventDefault();
+                                handleProjectHeadingContextMenu(projectGroup, projectRef, {
+                                  x: event.clientX,
+                                  y: event.clientY,
+                                });
+                              }
+                            : undefined
+                        }
+                        action={
+                          projectGroup ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <button
+                                    type="button"
+                                    aria-label={`Repository settings for ${projectName}`}
+                                    onClick={() => openProjectSettings(projectGroup, projectRef)}
+                                    className="flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground/70 outline-none state-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                                  />
+                                }
+                              >
+                                <SettingsIcon aria-hidden className="size-3.5" />
+                              </TooltipTrigger>
+                              <TooltipPopup side="top">Repository settings</TooltipPopup>
+                            </Tooltip>
+                          ) : null
+                        }
+                        icon={
+                          project ? (
+                            <ProjectFavicon project={project} className="size-3.5 shrink-0" />
+                          ) : null
+                        }
+                      >
+                        {projectName}
+                      </SidebarModeGroupLabel>
+                    );
+                  };
+                  // Work's active rows render from the project sections: a
+                  // repository linked to two projects shows under both.
+                  if (workSections !== null) {
+                    const hasProjectHeadings = workSections.some(
+                      (section) => section.project !== null,
+                    );
+                    const renderedRepositories = new Set<string>();
+                    for (const section of workSections) {
+                      if (hasProjectHeadings) {
+                        items.push(
+                          <WorkProjectGroupLabel
+                            key={`work-project:${section.project?.key ?? "other"}`}
+                            project={section.project}
+                            onManage={openProjectLabelSettings}
+                          />,
+                        );
+                      }
+                      for (const repository of section.repos) {
+                        const first = repository.threads[0];
+                        if (!first) continue;
+                        const keyPrefix = renderedRepositories.has(repository.projectKey)
+                          ? `${section.project?.key ?? "other"}:`
+                          : "";
+                        renderedRepositories.add(repository.projectKey);
+                        items.push(
+                          renderRepositoryHeading(first, repository.projectKey, keyPrefix),
+                        );
+                        for (const thread of repository.threads) {
+                          items.push(renderThreadRow(thread, "active", true, keyPrefix));
+                        }
+                      }
+                    }
+                  }
                   for (const item of sidebarListItems) {
                     if (item.kind === "thread") {
+                      if (workSections !== null && item.section === "active") continue;
                       const thread = threadByKey.get(item.key)!;
                       const dateGroup =
                         item.section === "active" ? chatDateGroupOf?.(thread) : null;
@@ -4185,77 +4378,7 @@ export default function Sidebar() {
                           </SidebarModeGroupLabel>,
                         );
                       }
-                      // Work: one heading per project; its cards drop the
-                      // project line the heading already shows.
-                      const projectKey = `${thread.environmentId}:${thread.projectId}` as const;
-                      const taskGroupKey =
-                        sidebarMode === "tasks" && item.section === "active"
-                          ? (projectGroupKeyByKey.get(projectKey) ?? projectKey)
-                          : null;
-                      if (taskGroupKey !== null && taskGroupKey !== previousTaskGroupKey) {
-                        previousTaskGroupKey = taskGroupKey;
-                        const project = projectByKey.get(projectKey);
-                        const projectGroup = projectGroupByKey.get(taskGroupKey) ?? null;
-                        const projectName =
-                          projectDisplayNameByKey.get(projectKey) ?? project?.title ?? "Project";
-                        const projectRef = {
-                          environmentId: thread.environmentId,
-                          projectId: thread.projectId,
-                        };
-                        items.push(
-                          <SidebarModeGroupLabel
-                            key={`task-project:${taskGroupKey}`}
-                            // Project settings live on the heading now that the
-                            // project picker is gone: hover gear or right-click.
-                            onContextMenu={
-                              projectGroup
-                                ? (event) => {
-                                    event.preventDefault();
-                                    handleProjectHeadingContextMenu(projectGroup, projectRef, {
-                                      x: event.clientX,
-                                      y: event.clientY,
-                                    });
-                                  }
-                                : undefined
-                            }
-                            action={
-                              projectGroup ? (
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={
-                                      <button
-                                        type="button"
-                                        aria-label={`Project settings for ${projectName}`}
-                                        onClick={() =>
-                                          openProjectSettings(projectGroup, projectRef)
-                                        }
-                                        className="flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground/70 outline-none state-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                                      />
-                                    }
-                                  >
-                                    <SettingsIcon aria-hidden className="size-3.5" />
-                                  </TooltipTrigger>
-                                  <TooltipPopup side="top">Project settings</TooltipPopup>
-                                </Tooltip>
-                              ) : null
-                            }
-                            icon={
-                              project ? (
-                                <ProjectFavicon project={project} className="size-3.5 shrink-0" />
-                              ) : null
-                            }
-                          >
-                            {projectName}
-                          </SidebarModeGroupLabel>,
-                        );
-                      }
-                      items.push(
-                        renderThreadRow(
-                          thread,
-                          item.section,
-                          taskGroupKey !== null || sidebarMode === "chats",
-                        ),
-                      );
+                      items.push(renderThreadRow(thread, item.section, sidebarMode === "chats"));
                       continue;
                     }
                     switch (item.marker) {
@@ -4345,18 +4468,22 @@ export default function Sidebar() {
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground">
               {projects.length === 0 ? (
                 <>
-                  <span>No projects yet</span>
+                  <span>No repositories yet</span>
                   <button
                     type="button"
                     onClick={openAddProjectCommandPalette}
                     className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
                   >
                     <PlusIcon className="-mx-0.5 size-3" />
-                    Add project
+                    Add repository
                   </button>
                 </>
               ) : sidebarMode === "chats" ? (
-                "No chats yet"
+                activeChatProjectFilter !== null ? (
+                  "No chats in this project"
+                ) : (
+                  "No chats yet"
+                )
               ) : (
                 "No work yet"
               )}
