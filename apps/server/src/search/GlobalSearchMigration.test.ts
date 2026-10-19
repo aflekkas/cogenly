@@ -86,6 +86,12 @@ it.effect("uses indexed prefix LIKE if the migration selected the non-FTS engine
     expect((yield* search.query({ query: "quartz" })).results[0]?.id).toBe("label");
     expect((yield* search.query({ query: "nebula" })).results[0]?.id).toBe("label");
     expect((yield* search.query({ query: "%" })).results).toEqual([]);
+    yield* sql`INSERT INTO facts(id, status, payload_json, updated_at) VALUES ('fact', 'confirmed', '{"subject":"Factprefix fallback","text":"Factbody details"}', ${at})`;
+    expect((yield* search.query({ query: "factprefix", kinds: ["fact"] })).results[0]?.id).toBe(
+      "fact",
+    );
+    yield* sql`UPDATE facts SET status = 'retracted' WHERE id = 'fact'`;
+    expect((yield* search.query({ query: "factprefix", kinds: ["fact"] })).results).toEqual([]);
     const plans = yield* sql<{
       detail: string;
     }>`EXPLAIN QUERY PLAN SELECT rowid FROM search_documents WHERE title LIKE ${"Quartz%"} ESCAPE '!' OR body LIKE ${"Quartz%"} ESCAPE '!'`;
@@ -102,4 +108,26 @@ it.effect("uses indexed prefix LIKE if the migration selected the non-FTS engine
       ).pipe(Layer.provideMerge(NodeServices.layer)),
     ),
   ),
+);
+
+it.effect("backfills confirmed facts across batches exactly once", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runMigrations({ toMigrationInclusive: 70 });
+    yield* sql`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < 503)
+      INSERT INTO facts(id, status, payload_json, updated_at)
+      SELECT 'fact:' || x, CASE WHEN x = 503 THEN 'proposed' ELSE 'confirmed' END,
+        '{"subject":"Quartz fact","text":"Nebula body"}', ${at} FROM n`;
+    expect(yield* runMigrations()).toEqual([[71, "FactSearch"]]);
+    expect(
+      (yield* sql`SELECT count(*) AS count FROM search_documents WHERE kind = 'fact'`)[0]?.count,
+    ).toBe(502);
+    expect(yield* runMigrations()).toEqual([]);
+    yield* sql`UPDATE facts SET payload_json = '{"subject":"Updated fact"}' WHERE id = 'fact:1'`;
+    expect(
+      (yield* sql`SELECT count(*) AS count FROM search_fts WHERE search_fts MATCH 'updated'`)[0]
+        ?.count,
+    ).toBe(1);
+    yield* sql`INSERT INTO search_fts(search_fts, rank) VALUES ('integrity-check', 1)`;
+  }).pipe(Effect.provide(layer)),
 );

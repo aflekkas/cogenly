@@ -9,7 +9,7 @@ import * as Search from "./GlobalSearch.ts";
 export const toolkit = Toolkit.make(
   Tool.make("search", {
     description:
-      "Search chats, Work, agents, commitments, projects and linked PRs. Results are ranked by text relevance and recency. Label filters never expand your authorized scope.",
+      "Search chats, Work, agents, facts, commitments, projects and linked PRs. Results are ranked by text relevance and recency. Label filters never expand your authorized scope.",
     parameters: SearchQueryInput,
     success: SearchQueryResult,
     failure: OrchestratorMcpFailure,

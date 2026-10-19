@@ -51,7 +51,7 @@ const definitions = [
   [
     "agentRuns",
     "agent_work_runs",
-    "run_id, agent_id, trigger_id, work_thread_id, status, created_at, completed_at, summary",
+    "run_id, agent_id, trigger_id, work_thread_id, status, created_at, completed_at, summary, trigger_kind, trigger_context_json",
     "run_id",
   ],
   [
@@ -67,7 +67,20 @@ const definitions = [
     "id, agent_id, action_json, status, requested_at, decided_at, decided_by, source_run_id, result_thread_id",
     "id",
   ],
-  ["memory", "agent_memory", "note_id, agent_id, text, source, created_at, updated_at", "note_id"],
+  [
+    "memory",
+    "facts",
+    "id, agent_id, legacy_note_id, legacy_source, status, payload_json, updated_at",
+    "id",
+  ],
+  ["factHistory", "fact_history", "sequence, fact_id, payload_json", "sequence"],
+  ["contextRefs", "context_refs", "run_id, thread_id, payload_json", "run_id"],
+  [
+    "eventDeliveries",
+    "agent_event_deliveries",
+    "agent_id, event_key, work_thread_id, context_json",
+    "agent_id",
+  ],
   [
     "commitments",
     "commitments",
@@ -115,7 +128,7 @@ function columnNames(columns: string) {
     c.includes(" AS ") ? c.slice(c.lastIndexOf(" AS ") + 4) : c,
   );
 }
-const threadKinds = new Set(["threads", "messages", "runs", "threadLabels"]);
+const threadKinds = new Set(["threads", "messages", "runs", "threadLabels", "contextRefs"]);
 const agentKinds = new Set([
   "agents",
   "triggers",
@@ -123,7 +136,20 @@ const agentKinds = new Set([
   "agentRunThreads",
   "actions",
   "approvals",
+  "eventDeliveries",
 ]);
+const legacyMemory = [
+  "memory",
+  "agent_memory",
+  "note_id, agent_id, text, source, created_at, updated_at",
+  "note_id",
+] as const;
+const legacyAgentRuns = [
+  "agentRuns",
+  "agent_work_runs",
+  "run_id, agent_id, trigger_id, work_thread_id, status, created_at, completed_at, summary",
+  "run_id",
+] as const;
 const maxRecordBytes = 4 * 1024 * 1024;
 const isExportError = Schema.is(ExportError);
 const decodeRecord = Schema.decodeUnknownSync(ExportRecord);
@@ -199,7 +225,12 @@ const make = Effect.gen(function* () {
                   const raw = parse(line);
                   decodeRecord(raw);
                   const envelope = decodeRow(raw);
-                  const definition = definitions.find((d) => d[0] === envelope.kind);
+                  const definition =
+                    manifest.schemaVersion === 1 && envelope.kind === "memory"
+                      ? legacyMemory
+                      : manifest.schemaVersion === 1 && envelope.kind === "agentRuns"
+                        ? legacyAgentRuns
+                        : definitions.find((d) => d[0] === envelope.kind);
                   if (!definition) throw new Error("Unknown record kind");
                   const row = decodeRow(envelope.data);
                   if (typeof row[definition[3]] !== "string") throw new Error("Missing identity");
@@ -275,17 +306,26 @@ const make = Effect.gen(function* () {
           label === undefined
             ? sql`SELECT id FROM commitments`
             : sql`SELECT commitment_id FROM commitment_labels WHERE label_id = ${label}`;
+        // Labels select tagged facts regardless of owner. Unlabelled agent-private
+        // facts follow only selected agents; unowned user facts require their label.
+        const facts =
+          label === undefined
+            ? sql`SELECT id FROM facts`
+            : sql`SELECT f.id FROM facts f
+          WHERE EXISTS (SELECT 1 FROM fact_labels fl WHERE fl.fact_id = f.id AND fl.label_id = ${label})
+          OR (f.agent_id IN (${agents}) AND NOT EXISTS (SELECT 1 FROM fact_labels fl WHERE fl.fact_id = f.id))`;
         yield* append("records.jsonl", "");
         for (const [kind, table, columns] of definitions) {
           if (
             threadKinds.has(kind) &&
             !input.include.some((s) => s === "chats" || s === "work") &&
-            !(kind === "runs" && input.include.includes("agents")) &&
+            !((kind === "runs" || kind === "contextRefs") && input.include.includes("agents")) &&
             !(kind === "threadLabels" && input.include.includes("projects"))
           )
             continue;
           if (agentKinds.has(kind) && !input.include.includes("agents")) continue;
-          if (kind === "memory" && !input.include.includes("memory")) continue;
+          if (["memory", "factHistory"].includes(kind) && !input.include.includes("memory"))
+            continue;
           if (
             ["commitments", "commitmentHistory"].includes(kind) &&
             !input.include.includes("commitments")
@@ -299,23 +339,32 @@ const make = Effect.gen(function* () {
           let predicate = sql`1`;
           if (threadKinds.has(kind))
             predicate = sql`thread_id IN (SELECT thread_id FROM (${threads}))`;
-          if (kind === "runs" && input.include.includes("agents"))
+          if ((kind === "runs" || kind === "contextRefs") && input.include.includes("agents"))
             predicate = sql`${predicate} OR thread_id IN (
           SELECT conversation_thread_id FROM agents WHERE agent_id IN (${agents})
           UNION SELECT thread_id FROM agent_run_threads WHERE agent_id IN (${agents})
           UNION SELECT work_thread_id FROM agent_work_runs WHERE agent_id IN (${agents})
         )`;
-          if (kind === "runs")
+          if (kind === "runs" || kind === "contextRefs")
             predicate = sql`(${predicate}) AND thread_id IN (SELECT thread_id FROM orchestration_v2_projection_threads WHERE deleted_at IS NULL)`;
-          if (kind === "runs" && label !== undefined)
+          if ((kind === "runs" || kind === "contextRefs") && label !== undefined)
             predicate = sql`(${predicate}) AND thread_id IN (SELECT thread_id FROM thread_project_labels WHERE label_id = ${label})`;
-          if (agentKinds.has(kind) || kind === "memory") predicate = sql`agent_id IN (${agents})`;
-          if (label !== undefined && (kind === "agentRuns" || kind === "agentRunThreads")) {
-            const key = sql.unsafe(kind === "agentRuns" ? "work_thread_id" : "thread_id");
+          if (agentKinds.has(kind)) predicate = sql`agent_id IN (${agents})`;
+          if (
+            label !== undefined &&
+            (kind === "agentRuns" || kind === "agentRunThreads" || kind === "eventDeliveries")
+          ) {
+            const key = sql.unsafe(
+              kind === "agentRuns" || kind === "eventDeliveries" ? "work_thread_id" : "thread_id",
+            );
             predicate = sql`${predicate} AND ${key} IN (SELECT thread_id FROM thread_project_labels WHERE label_id = ${label})`;
           }
           if (kind === "threadLabels" && input.include.includes("projects"))
             predicate = sql`thread_id IN (SELECT thread_id FROM orchestration_v2_projection_threads WHERE deleted_at IS NULL)`;
+          if (kind === "memory") predicate = sql`id IN (${facts})`;
+          if (kind === "factHistory") predicate = sql`fact_id IN (${facts})`;
+          if (kind === "contextRefs")
+            predicate = sql`${predicate} AND run_id IN (SELECT run_id FROM orchestration_v2_projection_runs)`;
           if (kind === "commitments") predicate = sql`id IN (${commitments})`;
           if (kind === "commitmentHistory") predicate = sql`commitment_id IN (${commitments})`;
           if ((kind === "labels" || kind === "repositoryLabels") && label !== undefined)
@@ -367,7 +416,7 @@ const make = Effect.gen(function* () {
           }
         }
         const manifest = {
-          schemaVersion: 1,
+          schemaVersion: 2,
           format: "cogenly-jsonl",
           createdAt: createdAt,
           ...input,

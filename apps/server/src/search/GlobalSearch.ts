@@ -100,6 +100,8 @@ const make = Effect.gen(function* () {
           CASE WHEN m.kind = 'thread' THEN coalesce(json_extract(a.payload_json, '$.name'), t.title) ELSE m.title END AS result_title,
           CASE
             WHEN m.kind = 'project' THEN json_array(m.id)
+            WHEN m.kind = 'fact' THEN (SELECT json_group_array(label_id) FROM
+              (SELECT label_id FROM fact_labels WHERE fact_id = m.id ORDER BY label_id))
             WHEN m.kind = 'commitment' THEN (SELECT json_group_array(label_id) FROM
               (SELECT label_id FROM commitment_labels WHERE commitment_id = m.id ORDER BY label_id))
             WHEN a.agent_id IS NOT NULL THEN (SELECT json_group_array(json_extract(value, '$.labelId')) FROM json_each(a.payload_json, '$.scope'))
@@ -110,6 +112,7 @@ const make = Effect.gen(function* () {
         LEFT JOIN projection_projects p ON p.project_id = t.project_id
         LEFT JOIN agents a ON (m.kind = 'agent' AND a.agent_id = m.id)
           OR (m.kind = 'thread' AND a.conversation_thread_id = m.thread_id AND coalesce(json_extract(t.payload_json, '$.agent.role'), '') <> 'work')
+        LEFT JOIN facts f ON m.kind = 'fact' AND f.id = m.id
         LEFT JOIN commitments c ON m.kind = 'commitment' AND c.id = m.id
         WHERE (m.thread_id IS NULL OR (t.thread_id IS NOT NULL AND t.deleted_at IS NULL AND t.archived_at IS NULL
           AND p.project_id IS NOT NULL AND p.deleted_at IS NULL))
@@ -117,6 +120,9 @@ const make = Effect.gen(function* () {
           (m.kind IN ('thread', 'pr') AND t.project_id IN (SELECT value FROM json_each(?))) OR
           (m.kind = 'agent' AND a.agent_id = ?) OR
           (m.kind = 'project' AND m.id IN (SELECT value FROM json_each(?))) OR
+          (m.kind = 'fact' AND (f.agent_id = ? OR (json_extract(f.payload_json, '$.visibility') = 'labels' AND EXISTS (
+            SELECT 1 FROM fact_labels fl WHERE fl.fact_id = f.id
+              AND fl.label_id IN (SELECT value FROM json_each(?)))))) OR
           (m.kind = 'commitment' AND (c.agent_id = ? OR EXISTS (
             SELECT 1 FROM commitment_labels cl WHERE cl.commitment_id = c.id
               AND cl.label_id IN (SELECT value FROM json_each(?))))))
@@ -137,6 +143,8 @@ const make = Effect.gen(function* () {
               `${config.baseDir.replace(/[\\/]$/, "")}/scratch`,
               agent?.id ?? null,
               encodeStrings(repositories),
+              agent?.id ?? null,
+              encodeStrings(readableLabels),
               agent?.id ?? null,
               encodeStrings(readableLabels),
               agent?.id ?? null,

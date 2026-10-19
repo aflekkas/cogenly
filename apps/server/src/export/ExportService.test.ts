@@ -34,7 +34,7 @@ const seed = Effect.gen(function* () {
   for (const id of ["a", "b"]) {
     yield* sql`INSERT INTO project_labels(label_id, name, created_at, updated_at) VALUES (${id}, ${id}, ${at}, ${at})`;
     yield* sql`INSERT INTO label_repositories(label_id, repository_id) VALUES (${id}, 'repo')`;
-    yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${id}, 'repo', ${id}, 'codex', 'full-access', 'default', ${at}, ${at}, ${encode({ workOrigin: "direct", branch: "main", pullRequests: [{ url: "https://github.com/org/repo/pull/1" }] })})`;
+    yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${id}, 'repo', ${id}, 'codex', 'full-access', 'default', ${at}, ${at}, ${encode({ workOrigin: "agent", sourceThreadId: "origin-thread", sourceAgentId: "origin-agent", sourceAgentRunId: "origin-run", branch: "main", pullRequests: [{ url: "https://github.com/org/repo/pull/1" }] })})`;
     yield* sql`INSERT INTO thread_project_labels(thread_id, label_id, confidence, confirmed_by_user, source) VALUES (${id}, ${id}, NULL, 1, 'user')`;
     yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id, thread_id, role, streaming, created_at, updated_at, payload_json) VALUES (${id}, ${id}, 'user', 0, ${at}, ${at}, ${encode({ text: `Message ${id}` })})`;
     yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES (${id}, ${id}, 1, 'codex', 'completed', ${at}, ${encode({ modelSelection: { instanceId: "codex", model: "gpt-5" } })})`;
@@ -43,14 +43,19 @@ const seed = Effect.gen(function* () {
       scope: [{ labelId: id, permissions: agentFixture().permissions }],
     };
     yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled) VALUES (${agent.id}, ${agent.conversationThreadId}, ${encode(agent)}, 1)`;
-    yield* sql`INSERT INTO agent_memory(note_id, agent_id, text, source, created_at, updated_at) VALUES (${id}, ${agent.id}, ${`Memory ${id}`}, 'owner', ${at}, ${at})`;
+    yield* sql`INSERT INTO facts(id, agent_id, status, payload_json, updated_at) VALUES (${id}, ${agent.id}, 'confirmed', ${encode({ subject: "Memory", text: `Memory ${id}`, agentId: agent.id, labelIds: [id], sourceRefs: [{ kind: "thread", id }], visibility: "labels" })}, ${at})`;
+    yield* sql`INSERT INTO fact_labels(fact_id, label_id) VALUES (${id}, ${id})`;
+    yield* sql`INSERT INTO fact_history(fact_id, payload_json) VALUES (${id}, ${encode({ factId: id, who: "user" })})`;
+    yield* sql`INSERT INTO context_refs(run_id, thread_id, payload_json) VALUES (${id}, ${id}, ${encode({ refs: [{ kind: "fact", id }] })})`;
+    yield* sql`INSERT INTO agent_events(event_key, payload_json, occurred_at) VALUES (${id}, '{}', ${at})`;
+    yield* sql`INSERT INTO agent_event_deliveries(agent_id, event_key, work_thread_id, context_json) VALUES (${agent.id}, ${id}, ${id}, '{"event":"work_completed"}')`;
     yield* sql`INSERT INTO commitments(id, agent_id, status, payload_json, created_at, updated_at) VALUES (${id}, ${agent.id}, 'open', ${encode({ id, title: `Item ${id}`, labelIds: [id] })}, ${at}, ${at})`;
     yield* sql`INSERT INTO commitment_labels(commitment_id, label_id) VALUES (${id}, ${id})`;
     yield* sql`INSERT INTO commitment_history(id, commitment_id, payload_json) VALUES (${id}, ${id}, ${encode({ why: "Owner confirmed" })})`;
     yield* sql`INSERT INTO agent_work_runs(run_id, agent_id, trigger_id, work_thread_id, status, created_at, completed_at, summary) VALUES (${`work:${id}`}, ${agent.id}, ${id}, ${id}, 'completed', ${at}, ${at}, 'Reviewed work')`;
     yield* sql`INSERT INTO agent_run_actions(id, agent_id, kind, at) VALUES (${id}, ${agent.id}, 'commitment_created', ${at})`;
     yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at) VALUES (${id}, ${agent.id}, '{"actionKind":"change_permissions","payload":{}}', 'pending', ${at})`;
-    yield* sql`INSERT INTO scheduled_tasks(task_id, title, prompt, enabled, schedule_json, project_id, workspace_strategy_json, model_selection_json, runtime_mode, interaction_mode, created_by, creation_source, created_at, updated_at, last_run_status, run_count, agent_id, webhook_token, webhook_secret) VALUES (${id}, 'Trigger', 'Check', 1, '{}', 'repo', '{}', '{}', 'full-access', 'default', 'user', 'web', ${at}, ${at}, 'never', 0, ${agent.id}, 'WEBHOOK_TOKEN_SENTINEL', 'WEBHOOK_SECRET_SENTINEL')`;
+    yield* sql`INSERT INTO scheduled_tasks(task_id, title, prompt, enabled, schedule_json, project_id, workspace_strategy_json, model_selection_json, runtime_mode, interaction_mode, created_by, creation_source, created_at, updated_at, last_run_status, run_count, agent_id, webhook_token, webhook_secret) VALUES (${id}, 'Trigger', 'Check', 1, '{"type":"event","event":"work_completed"}', 'repo', '{}', '{}', 'full-access', 'default', 'user', 'web', ${at}, ${at}, 'never', 0, ${agent.id}, 'WEBHOOK_TOKEN_SENTINEL', 'WEBHOOK_SECRET_SENTINEL')`;
   }
   // Auth tables, provider sessions, and filesystem secrets are never part of the allowlist.
   yield* sql`INSERT INTO auth_pairing_links(id, credential, method, scopes, subject, created_at, expires_at) VALUES ('pair', 'PAIRING_SECRET_SENTINEL', 'token', '[]', 'owner', ${at}, ${at})`;
@@ -81,6 +86,9 @@ describe("portable exports", () => {
         runs: 2,
         agents: 2,
         memory: 2,
+        factHistory: 2,
+        contextRefs: 2,
+        eventDeliveries: 2,
         commitments: 2,
         commitmentHistory: 2,
         approvals: 2,
@@ -94,6 +102,16 @@ describe("portable exports", () => {
       expect(files.filter((f) => f.endsWith(".md"))).toHaveLength(2);
       const content = yield* fs.readFileString(result.path + "/records.jsonl");
       expect(content).toContain("gpt-5");
+      expect(content).toContain('"source_thread_id":"origin-thread"');
+      expect(content).toContain('"source_agent_id":"origin-agent"');
+      expect(content).toContain('"source_agent_run_id":"origin-run"');
+      expect(content).toContain('"work_origin":"agent"');
+      expect(content).toContain('"kind":"threadLabels"');
+      expect(content).toContain('"trigger_context_json"');
+      expect(content).toContain('"kind":"contextRefs"');
+      expect(parse(yield* fs.readFileString(result.path + "/manifest.json"))).toMatchObject({
+        schemaVersion: 2,
+      });
       expect(content).toContain("https://github.com/org/repo/pull/1");
       expect(content).not.toContain("SENTINEL");
       expect(content).not.toMatch(
@@ -104,6 +122,65 @@ describe("portable exports", () => {
       expect(
         yield* fs.readFileString(result.path + "/" + files.find((f) => f.endsWith(".md"))),
       ).toMatch(/## user.*2026/);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("validates legacy v1 memory and scopes private facts to selected agents", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const sql = yield* SqlClient.SqlClient;
+      const service = yield* Exports.ExportService;
+      const fs = yield* FileSystem.FileSystem;
+      for (const [id, owner] of [
+        ["private-a", "agent:a"],
+        ["private-b", "agent:b"],
+        ["user", null],
+      ]) {
+        yield* sql`INSERT INTO facts(id, agent_id, status, payload_json, updated_at) VALUES (${id}, ${owner}, 'confirmed', '{}', ${at})`;
+      }
+      const scoped = yield* service.export({
+        include: ["memory"],
+        labelId: ProjectLabelId.make("a"),
+      });
+      expect(scoped.counts).toEqual({ memory: 2, factHistory: 1 });
+      const content = yield* fs.readFileString(scoped.path + "/records.jsonl");
+      expect(content).toContain("private-a");
+      expect(content).not.toContain("private-b");
+      expect(content).toContain("sourceRefs");
+      expect(yield* service.validate({ path: scoped.path })).toEqual({
+        counts: scoped.counts,
+        errors: [],
+      });
+      const legacy = yield* service.export({ include: [] });
+      yield* fs.writeFileString(
+        legacy.path + "/manifest.json",
+        encode({
+          schemaVersion: 1,
+          format: "cogenly-jsonl",
+          createdAt: at,
+          include: ["memory"],
+          counts: { memory: 1 },
+          contentBytes: 0,
+        }),
+      );
+      yield* fs.writeFileString(
+        legacy.path + "/records.jsonl",
+        encode({
+          kind: "memory",
+          data: {
+            note_id: "old",
+            agent_id: "agent:a",
+            text: "legacy",
+            source: "owner",
+            created_at: at,
+            updated_at: at,
+          },
+        }) + "\n",
+      );
+      expect(yield* service.validate({ path: legacy.path })).toEqual({
+        counts: { memory: 1 },
+        errors: [],
+      });
     }).pipe(Effect.provide(layer)),
   );
 
@@ -126,6 +203,8 @@ describe("portable exports", () => {
         triggers: 1,
         labels: 1,
         threadLabels: 1,
+        contextRefs: 1,
+        eventDeliveries: 1,
       });
       const content = yield* fs.readFileString(result.path + "/records.jsonl");
       expect(content).toContain("Message a");
@@ -137,7 +216,7 @@ describe("portable exports", () => {
         errors: [],
       });
       const onlyMemory = yield* service.export({ include: ["memory"] });
-      expect(onlyMemory.counts).toEqual({ memory: 2 });
+      expect(onlyMemory.counts).toEqual({ memory: 2, factHistory: 2 });
       const projectsOnly = yield* service.export({ include: ["projects"] });
       expect(projectsOnly.counts.threadLabels).toBe(2);
       const sql = yield* SqlClient.SqlClient;
@@ -253,7 +332,7 @@ describe("portable exports", () => {
         "Count mismatch: memory",
       );
       const large = "x".repeat(4 * 1024 * 1024 + 1);
-      yield* sql`UPDATE agent_memory SET text = ${large} WHERE note_id = 'a'`;
+      yield* sql`UPDATE facts SET payload_json = json_object('text', ${large}) WHERE id = 'a'`;
       expect((yield* Effect.result(service.export({ include: ["memory"] })))._tag).toBe("Failure");
       yield* fs.writeFileString(result.path + "/records.jsonl", large);
       expect((yield* service.validate({ path: result.path })).errors).toHaveLength(1);
@@ -265,8 +344,8 @@ describe("portable exports", () => {
       yield* seed;
       const sql = yield* SqlClient.SqlClient;
       yield* sql`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < 500)
-      INSERT INTO agent_memory(note_id, agent_id, text, source, created_at, updated_at)
-      SELECT 'bulk:' || x, 'agent:a', ${"q".repeat(2048)}, 'owner', ${at}, ${at} FROM n`;
+      INSERT INTO facts(id, agent_id, status, payload_json, updated_at)
+      SELECT 'bulk:' || x, 'agent:a', 'confirmed', json_object('text', ${"q".repeat(2048)}), ${at} FROM n`;
       yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind) VALUES ('a', 'agent:a', 'owner')`;
       const service = yield* Exports.ExportService;
       const result = yield* service.export({

@@ -28,7 +28,7 @@ export const ExportValidation = Schema.Struct({
 });
 export type ExportValidation = typeof ExportValidation.Type;
 export const ExportManifest = Schema.Struct({
-  schemaVersion: Schema.Literal(1),
+  schemaVersion: Schema.Literals([1, 2]),
   format: Schema.Literal("cogenly-jsonl"),
   createdAt: Schema.String,
   include: Schema.Array(ExportSection),
@@ -45,7 +45,7 @@ export class ExportError extends Schema.TaggedError<ExportError>()("ExportError"
   }
 }
 
-/** V1 portable rows. JSON columns are UTF-8 JSON strings, validated without executing them. */
+/** V1/V2 portable rows. JSON columns are UTF-8 JSON strings, validated without executing them. */
 export const ExportRecord = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("threads"),
@@ -131,6 +131,8 @@ export const ExportRecord = Schema.Union([
       created_at: Schema.String,
       completed_at: Schema.NullOr(Schema.String),
       summary: Schema.NullOr(Schema.String),
+      trigger_kind: Schema.optional(Schema.String),
+      trigger_context_json: Schema.optional(Schema.NullOr(Schema.String)),
     }),
   }),
   Schema.Struct({
@@ -176,6 +178,43 @@ export const ExportRecord = Schema.Union([
       source: Schema.String,
       created_at: Schema.String,
       updated_at: Schema.String,
+    }),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("memory"),
+    data: Schema.Struct({
+      id: Schema.String,
+      agent_id: Schema.NullOr(Schema.String),
+      legacy_note_id: Schema.NullOr(Schema.String),
+      legacy_source: Schema.NullOr(Schema.String),
+      status: Schema.String,
+      payload_json: Schema.String,
+      updated_at: Schema.String,
+    }),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("factHistory"),
+    data: Schema.Struct({
+      sequence: Schema.String,
+      fact_id: Schema.String,
+      payload_json: Schema.String,
+    }),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("contextRefs"),
+    data: Schema.Struct({
+      run_id: Schema.String,
+      thread_id: Schema.String,
+      payload_json: Schema.String,
+    }),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("eventDeliveries"),
+    data: Schema.Struct({
+      agent_id: Schema.String,
+      event_key: Schema.String,
+      work_thread_id: Schema.String,
+      context_json: Schema.String,
     }),
   }),
   Schema.Struct({
