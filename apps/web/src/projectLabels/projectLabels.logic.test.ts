@@ -1,4 +1,5 @@
 import {
+  type EnvironmentId,
   ProjectId,
   ProjectLabelId,
   ThreadId,
@@ -8,74 +9,42 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  groupWorkByProject,
   nextThreadLabelIds,
   resolveThreadTags,
   splitTagChips,
-  workSectionThreadOrder,
-  type WorkProjectHeading,
+  workRowProjectTags,
+  type ProjectLabelKey,
 } from "./projectLabels.logic";
 
-const spawn: WorkProjectHeading = { key: "env:spawn", name: "Spawn Partners", color: "green" };
-const bartr: WorkProjectHeading = { key: "env:bartr", name: "Bartr", color: "blue" };
-
-describe("groupWorkByProject", () => {
-  // Busiest-first, as groupTasksByProject delivers them.
-  const repos = [
-    { projectKey: "outreach", threads: ["fix outreach UI"] },
-    { projectKey: "scratchpad", threads: ["try a thing"] },
-    { projectKey: "shared-tools", threads: ["bump deps"] },
-    { projectKey: "booking-audit", threads: ["improve scanner", "refactor reports"] },
-    { projectKey: "bartr-app", threads: ["checkout flow"] },
-  ];
-  const links: Record<string, WorkProjectHeading[]> = {
-    outreach: [spawn],
-    "shared-tools": [bartr, spawn],
-    "booking-audit": [spawn],
-    "bartr-app": [bartr],
+describe("workRowProjectTags", () => {
+  const entry = (key: ProjectLabelKey, name: string) => ({
+    key,
+    environmentId: "env" as EnvironmentId,
+    label: { name, color: "green" } as ProjectLabelWithRepositories,
+  });
+  const spawn = entry("env:spawn", "Spawn Partners");
+  const bartr = entry("env:bartr", "Bartr");
+  const directory = {
+    byKey: new Map([
+      [spawn.key, spawn],
+      [bartr.key, bartr],
+    ]),
+    projectsByRepository: new Map([
+      ["env:server", [spawn]],
+      ["other:server", [bartr, spawn]],
+    ]),
   };
-  const sections = groupWorkByProject(repos, (key) => links[key] ?? []);
 
-  it("puts each project's linked repos beneath it, busiest project first", () => {
-    expect(sections.map((section) => section.project?.name ?? null)).toEqual([
-      "Spawn Partners",
-      "Bartr",
-      null,
-    ]);
-    expect(sections[0]!.repos.map((repo) => repo.projectKey)).toEqual([
-      "outreach",
-      "shared-tools",
-      "booking-audit",
-    ]);
+  it("merges confirmed tags with every checkout's linked projects, once each, alphabetically", () => {
+    expect(
+      workRowProjectTags(["env:spawn"], ["env:server", "other:server"], directory).map(
+        (tag) => tag.name,
+      ),
+    ).toEqual(["Bartr", "Spawn Partners"]);
   });
 
-  it("lists a repo linked to several projects under each of them", () => {
-    expect(sections[1]!.repos.map((repo) => repo.projectKey)).toEqual([
-      "shared-tools",
-      "bartr-app",
-    ]);
-  });
-
-  it("collects unlinked repos in a trailing section without a project", () => {
-    expect(sections.at(-1)).toEqual({
-      project: null,
-      repos: [{ projectKey: "scratchpad", threads: ["try a thing"] }],
-    });
-  });
-
-  it("reads like the plain repo list when no project links anything", () => {
-    expect(groupWorkByProject(repos, () => [])).toEqual([{ project: null, repos }]);
-  });
-
-  it("orders each session once, at its first appearance", () => {
-    expect(workSectionThreadOrder(sections)).toEqual([
-      "fix outreach UI",
-      "bump deps",
-      "improve scanner",
-      "refactor reports",
-      "checkout flow",
-      "try a thing",
-    ]);
+  it("drops tags whose project no longer exists and shows nothing for untagged scratch work", () => {
+    expect(workRowProjectTags(["env:gone"], [], directory)).toEqual([]);
   });
 });
 

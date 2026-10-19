@@ -5,7 +5,6 @@ import {
   classifySidebarThreadMode,
   createChatDateGrouper,
   filterThreadsForSidebarMode,
-  groupTasksByProject,
   isSidebarMode,
   newThreadShortcutTarget,
   sidebarModeForThread,
@@ -168,40 +167,6 @@ describe("sortChatsByActivity and createChatDateGrouper", () => {
   it("labels only the first row of each date group", () => {
     const groupOf = createChatDateGrouper(now);
     expect(sortChatsByActivity(chats).map(groupOf)).toEqual(["today", null, "yesterday", "older"]);
-  });
-});
-
-describe("groupTasksByProject", () => {
-  const task = (id: string, project: string, at: string) => ({
-    id,
-    project,
-    latestUserMessageAt: at,
-    updatedAt: at,
-  });
-
-  it("orders projects by their latest activity and keeps row order inside each", () => {
-    const rows = [
-      task("a1", "alpha", "2026-03-01T10:00:00.000Z"),
-      task("b1", "beta", "2026-03-01T09:00:00.000Z"),
-      task("a2", "alpha", "2026-03-01T08:00:00.000Z"),
-      task("b2", "beta", "2026-03-01T12:00:00.000Z"),
-      task("c1", "gamma", "2026-03-01T11:00:00.000Z"),
-    ];
-    const groups = groupTasksByProject(rows, (row) => row.project);
-    expect(groups.map((group) => group.projectKey)).toEqual(["beta", "gamma", "alpha"]);
-    expect(groups.map((group) => group.threads.map((row) => row.id))).toEqual([
-      ["b1", "b2"],
-      ["c1"],
-      ["a1", "a2"],
-    ]);
-  });
-
-  it("keeps first-seen order for ties and unparseable timestamps", () => {
-    const rows = [task("x", "one", "not-a-date"), task("y", "two", "not-a-date")];
-    expect(groupTasksByProject(rows, (row) => row.project).map((g) => g.projectKey)).toEqual([
-      "one",
-      "two",
-    ]);
   });
 });
 

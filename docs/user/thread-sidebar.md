@@ -311,10 +311,9 @@ offered again for that thread. Confirmed projects also give the chat
 [project context](./memory-and-export.md#project-context-in-chats).
 
 **Chats** stays one list of titles by date, and the filter button beside search
-narrows it to one project. **Work** groups
-repositories under the projects that link them, so a repository linked to two
-projects appears under both. Repositories without a project come last under
-**Other repositories**.
+narrows it to one project. **Work** is one list, newest activity first. Each row
+names its repository beside the branch and shows its projects: the ones you tagged
+and the ones linking its repository. Right-click a row for **Repository settings**.
 
 ## Find and reference work
 

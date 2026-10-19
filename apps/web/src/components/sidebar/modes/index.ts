@@ -5,7 +5,6 @@ export {
   CHAT_DATE_GROUP_LABELS,
   CHAT_LIST_PAGE_SIZE,
   createChatDateGrouper,
-  groupTasksByProject,
   sortChatsByActivity,
   windowChatList,
   type SidebarMode,
