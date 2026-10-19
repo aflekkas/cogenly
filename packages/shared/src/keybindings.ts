@@ -126,6 +126,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+1", command: "sidebar.mode.chats" },
   { key: "mod+alt+2", command: "sidebar.mode.tasks" },
   { key: "mod+alt+3", command: "sidebar.mode.agents" },
+  { key: "mod+alt+4", command: "sidebar.mode.projects" },
   { key: "mod+[", command: "navigation.back", when: "!terminalFocus" },
   { key: "mod+]", command: "navigation.forward", when: "!terminalFocus" },
   { key: "mod+alt+b", command: "rightPanel.toggle" },
