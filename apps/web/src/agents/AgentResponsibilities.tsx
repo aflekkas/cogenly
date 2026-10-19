@@ -588,88 +588,92 @@ export function AgentResponsibilities({
         )}
       </ThreadDetailsSection>
 
-      <ThreadDetailsSection
-        headingId="agent-memory"
-        title="Memory"
-        actions={
-          <ThreadDetailsControl
-            part="icon"
-            aria-label="Add a memory note"
-            disabled={!canWrite}
-            onClick={() => setEditing({ kind: "memory:new" })}
-          >
-            <PlusIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-          </ThreadDetailsControl>
-        }
-      >
-        {isEditing("memory:new") && (
-          <InlineEditor
-            label="New memory note"
-            multiline
-            initial=""
-            maxLength={8000}
-            placeholder="Something to remember"
-            saveLabel="Add note"
-            pending={pending}
-            onCancel={close}
-            onSave={(text) =>
-              mutate(async () => {
-                await client.saveMemory(agent, { text });
-                close();
-              })
-            }
-          />
-        )}
-        {agent.memory.length === 0 && !isEditing("memory:new") && (
-          <DetailRow
-            icon={BookmarkIcon}
-            label="No notes yet"
-            detail={`Tell ${agent.name} something to remember.`}
-            tone="muted"
-            disabled={!canWrite}
-            onClick={() => setEditing({ kind: "memory:new" })}
-          />
-        )}
-        {agent.memory.map((note) =>
-          isEditing("memory", note.id) ? (
+      {client.MemorySection ? (
+        <client.MemorySection agent={agent} labels={workspace.labels} />
+      ) : (
+        <ThreadDetailsSection
+          headingId="agent-memory"
+          title="Memory"
+          actions={
+            <ThreadDetailsControl
+              part="icon"
+              aria-label="Add a memory note"
+              disabled={!canWrite}
+              onClick={() => setEditing({ kind: "memory:new" })}
+            >
+              <PlusIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+            </ThreadDetailsControl>
+          }
+        >
+          {isEditing("memory:new") && (
             <InlineEditor
-              key={note.id}
-              label="Memory note"
+              label="New memory note"
               multiline
-              initial={note.text}
+              initial=""
               maxLength={8000}
-              saveLabel="Save note"
+              placeholder="Something to remember"
+              saveLabel="Add note"
               pending={pending}
               onCancel={close}
-              onDelete={() =>
-                void mutate(async () => {
-                  await client.deleteMemory(agent, note.id);
-                  close();
-                })
-              }
-              deleteLabel={`Forget ${note.text}`}
               onSave={(text) =>
                 mutate(async () => {
-                  await client.saveMemory(agent, { id: note.id, text });
+                  await client.saveMemory(agent, { text });
                   close();
                 })
               }
             />
-          ) : (
+          )}
+          {agent.memory.length === 0 && !isEditing("memory:new") && (
             <DetailRow
-              key={note.id}
               icon={BookmarkIcon}
-              label={note.text}
-              detail={`${formatMessageTime(note.updatedAt)} · ${
-                // Notes the agent saves itself name the conversation thread.
-                note.source.startsWith("thread:") ? "from a conversation" : note.source
-              }`}
+              label="No notes yet"
+              detail={`Tell ${agent.name} something to remember.`}
+              tone="muted"
               disabled={!canWrite}
-              onClick={() => setEditing({ kind: "memory", id: note.id })}
+              onClick={() => setEditing({ kind: "memory:new" })}
             />
-          ),
-        )}
-      </ThreadDetailsSection>
+          )}
+          {agent.memory.map((note) =>
+            isEditing("memory", note.id) ? (
+              <InlineEditor
+                key={note.id}
+                label="Memory note"
+                multiline
+                initial={note.text}
+                maxLength={8000}
+                saveLabel="Save note"
+                pending={pending}
+                onCancel={close}
+                onDelete={() =>
+                  void mutate(async () => {
+                    await client.deleteMemory(agent, note.id);
+                    close();
+                  })
+                }
+                deleteLabel={`Forget ${note.text}`}
+                onSave={(text) =>
+                  mutate(async () => {
+                    await client.saveMemory(agent, { id: note.id, text });
+                    close();
+                  })
+                }
+              />
+            ) : (
+              <DetailRow
+                key={note.id}
+                icon={BookmarkIcon}
+                label={note.text}
+                detail={`${formatMessageTime(note.updatedAt)} · ${
+                  // Notes the agent saves itself name the conversation thread.
+                  note.source.startsWith("thread:") ? "from a conversation" : note.source
+                }`}
+                disabled={!canWrite}
+                onClick={() => setEditing({ kind: "memory", id: note.id })}
+              />
+            ),
+          )}
+        </ThreadDetailsSection>
+      )}
 
       <ThreadDetailsSection headingId="agent-danger" title="Danger zone">
         {isEditing("delete") ? (

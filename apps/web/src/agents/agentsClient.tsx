@@ -119,6 +119,11 @@ export interface AgentsClient {
   modelStatus?: (agent: AgentContact, model: AgentModelRef) => AgentModelStatus;
   /** Model and effort pickers from the live provider catalog; absent where there is none. */
   ModelControls?: ComponentType<AgentModelControlsProps>;
+  /** The agent's facts in Responsibilities; absent where there is no facts service. */
+  MemorySection?: ComponentType<{
+    agent: AgentContact;
+    labels: AgentWorkspaceView["labels"];
+  }>;
 }
 const ClientContext = createContext<AgentsClient | null>(null);
 export const AgentsClientProvider = ClientContext.Provider;
@@ -200,6 +205,7 @@ import { readEnvironmentScope } from "~/state/session";
 import { useEnvironmentQuery } from "~/state/query";
 import { randomUUID, newMessageId } from "~/lib/utils";
 import { useAgentScheduledTasks } from "~/components/sidebar/modes/useAgentScheduledTasks";
+import { AgentFactsSection } from "~/memory/AgentFacts";
 import type { AgentRequest } from "./agents.types";
 
 function commandValue<A>(
@@ -673,6 +679,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       modelStatus: (agent, model) =>
         resolveAgentModelStatus(configs.get(agent.environmentId)?.providers, model),
       ModelControls: LiveAgentModelControls,
+      MemorySection: AgentFactsSection,
     }),
     [
       snapshot,

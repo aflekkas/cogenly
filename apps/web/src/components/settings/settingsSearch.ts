@@ -17,6 +17,7 @@ export type SettingsPath =
   | "/settings/projects"
   | "/settings/general"
   | "/settings/project-tags"
+  | "/settings/memory"
   | "/settings/diagnostics"
   | "/settings/appearance"
   | "/settings/keybindings"
@@ -26,6 +27,7 @@ export type SettingsPath =
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
   | "/settings/storage"
+  | "/settings/data"
   | "/settings/connections"
   | "/settings/archived";
 
@@ -98,6 +100,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/projects": "Repository",
   "/settings/general": "General",
   "/settings/project-tags": "Projects",
+  "/settings/memory": "Memory",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",
@@ -106,6 +109,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/scheduled-tasks": "Scheduled Tasks",
   "/settings/source-control": "Source Control",
   "/settings/storage": "Storage",
+  "/settings/data": "Data",
   "/settings/connections": "Connections",
   "/settings/archived": "Archive",
 };
@@ -220,6 +224,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Projects",
     to: "/settings/project-tags",
     searchTerms: ["tags labels chats work repositories link group context new project"],
+  },
+  {
+    id: "memory",
+    title: "Memory",
+    to: "/settings/memory",
+    searchTerms: ["facts remember forget correct context proposed confirm agents knowledge"],
+  },
+  {
+    id: "data-export",
+    title: "Export",
+    to: "/settings/data",
+    searchTerms: ["export backup download portable data jsonl validate bundle"],
   },
   {
     id: "project-overview",
@@ -884,6 +900,8 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/projects": "project",
   "/settings/general": null,
   "/settings/project-tags": null,
+  "/settings/memory": null,
+  "/settings/data": null,
   "/settings/appearance": null,
   "/settings/snap-shot": null,
   // Keybindings fan out to the selection; Providers shows the representative

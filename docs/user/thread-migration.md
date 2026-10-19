@@ -38,8 +38,9 @@ handoff is also a good choice when the old conversation contains conflicting ins
 
 ## Keeping a recovery copy
 
-Cogenly does not currently have a whole-thread export command. Before a major server update, stop
-the server and copy its `userdata` directory to a safe location. The default is
+**Settings → Data** exports chats and other records in a portable format (see
+[Export](./memory-and-export.md#export)), but it can't be imported yet. Before a major server
+update, stop the server and copy its `userdata` directory to a safe location. The default is
 `~/.cogenly/userdata`; a server started with `--home-dir <path>` uses `<path>/userdata`.
 
 If a migrated transcript is missing from the app, keep that copy unchanged. You can inspect the

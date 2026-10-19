@@ -21,6 +21,7 @@ import { AgentOpenItems, ApprovalDecision } from "./AgentOpenItems";
 import { AgentResponsibilities } from "./AgentResponsibilities";
 import { AgentStartWork } from "./AgentStartWork";
 import { watchAgentViewIntent } from "./agentViewIntent";
+import { subscribeAgentTabRequests, takeAgentTabRequest } from "./agentTabRequest";
 import { countOpenCommitments } from "./agentWorkspace.logic";
 import type { AgentContact, AgentModelRef, AgentRequest, AgentWorkspaceView } from "./agents.types";
 
@@ -61,7 +62,17 @@ function AgentView({
   onDeleted?: (() => void) | undefined;
 }) {
   const client = useAgentsClient();
-  const [tab, setTab] = useState<AgentTab>("chat");
+  const threadKey = `${agent.environmentId}:${agent.conversationThreadId}`;
+  const [tab, setTab] = useState<AgentTab>(() => takeAgentTabRequest(threadKey) ?? "chat");
+  useEffect(
+    () =>
+      subscribeAgentTabRequests((key) => {
+        if (key !== threadKey) return;
+        const requested = takeAgentTabRequest(key);
+        if (requested) setTab(requested);
+      }),
+    [threadKey],
+  );
   const [startingWork, setStartingWork] = useState(false);
   const [focusMessage, setFocusMessage] = useState<string | null>(null);
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
