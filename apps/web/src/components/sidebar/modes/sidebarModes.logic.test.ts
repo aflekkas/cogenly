@@ -7,8 +7,10 @@ import {
   filterThreadsForSidebarMode,
   groupTasksByProject,
   isSidebarMode,
+  newThreadShortcutTarget,
   sidebarModeForThread,
   sortChatsByActivity,
+  windowChatList,
   type SidebarModeThreadClassifier,
 } from "./sidebarModes.logic";
 
@@ -200,5 +202,58 @@ describe("groupTasksByProject", () => {
       "one",
       "two",
     ]);
+  });
+});
+
+describe("windowChatList", () => {
+  const chats = Array.from({ length: 7 }, (_, index) => `chat-${index}`);
+  const isOpen = (key: string | null) => (chat: string) => chat === key;
+
+  it("renders everything when the list fits the window", () => {
+    expect(windowChatList(chats, 10, isOpen(null))).toEqual({ visible: chats, hiddenCount: 0 });
+  });
+
+  it("renders the newest page and counts the rest", () => {
+    expect(windowChatList(chats, 3, isOpen(null))).toEqual({
+      visible: ["chat-0", "chat-1", "chat-2"],
+      hiddenCount: 4,
+    });
+  });
+
+  it("keeps an open chat from beyond the window, after the page", () => {
+    expect(windowChatList(chats, 3, isOpen("chat-5"))).toEqual({
+      visible: ["chat-0", "chat-1", "chat-2", "chat-5"],
+      hiddenCount: 3,
+    });
+    expect(windowChatList(chats, 3, isOpen("chat-1")).visible).toHaveLength(3);
+  });
+});
+
+describe("newThreadShortcutTarget", () => {
+  it("starts a plain chat in Chats mode, whatever the repositories", () => {
+    expect(
+      newThreadShortcutTarget({ mode: "chats", legacySidebar: false, repositoryCount: 4 }),
+    ).toBe("chat");
+    expect(
+      newThreadShortcutTarget({ mode: "chats", legacySidebar: false, repositoryCount: 1 }),
+    ).toBe("chat");
+  });
+
+  it("keeps the repository flow in Work and Agents", () => {
+    expect(
+      newThreadShortcutTarget({ mode: "tasks", legacySidebar: false, repositoryCount: 3 }),
+    ).toBe("repository-picker");
+    expect(
+      newThreadShortcutTarget({ mode: "tasks", legacySidebar: false, repositoryCount: 1 }),
+    ).toBe("current-repository");
+    expect(
+      newThreadShortcutTarget({ mode: "agents", legacySidebar: false, repositoryCount: 3 }),
+    ).toBe("repository-picker");
+  });
+
+  it("leaves the legacy sidebar on its contextual create", () => {
+    expect(
+      newThreadShortcutTarget({ mode: "chats", legacySidebar: true, repositoryCount: 3 }),
+    ).toBe("current-repository");
   });
 });

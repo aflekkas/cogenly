@@ -26,14 +26,12 @@ export function useSidebarModeActions(input: {
   const { mode, currentEnvironmentId } = input;
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
-  const { scratchEnvironmentId, startScratchThread } = useScratchProject();
+  const { startNewChat } = useScratchProject();
 
   const startChat = useCallback(() => {
-    const environmentId = scratchEnvironmentId(currentEnvironmentId);
-    if (environmentId === null) return;
     if (isMobile) setOpenMobile(false);
-    void startScratchThread(environmentId);
-  }, [currentEnvironmentId, isMobile, scratchEnvironmentId, setOpenMobile, startScratchThread]);
+    startNewChat(currentEnvironmentId);
+  }, [currentEnvironmentId, isMobile, setOpenMobile, startNewChat]);
 
   const createAgent = useCallback(() => {
     if (isMobile) setOpenMobile(false);
@@ -52,6 +50,7 @@ export function useSidebarModeActions(input: {
     newItemLabel: NEW_ITEM_LABELS[mode],
     /** Null in Work, where the sidebar's existing new-thread handler applies. */
     createInMode: mode === "chats" ? startChat : mode === "agents" ? createAgent : null,
+    startChat,
     createAgent,
     openAgentTask,
   };

@@ -151,6 +151,38 @@ export function createChatDateGrouper(now: Date) {
   };
 }
 
+/** How many chats the list renders up front, and how many more each scroll to the end reveals. */
+export const CHAT_LIST_PAGE_SIZE = 50;
+
+/**
+ * The chats the list renders: the newest `visibleCount`, plus the open chat
+ * when it sits further down, so its highlight never hides. The open chat is
+ * older than every windowed row, so appending it keeps the date groups in
+ * order. Search reads the full list, not this window.
+ */
+export function windowChatList<T>(
+  chats: ReadonlyArray<T>,
+  visibleCount: number,
+  isOpen: (chat: T) => boolean,
+): { readonly visible: ReadonlyArray<T>; readonly hiddenCount: number } {
+  if (chats.length <= visibleCount) return { visible: chats, hiddenCount: 0 };
+  const visible = chats.slice(0, visibleCount);
+  const open = chats.slice(visibleCount).find(isOpen);
+  if (open !== undefined) visible.push(open);
+  return { visible, hiddenCount: chats.length - visible.length };
+}
+
+/** What mod+n (`chat.new`) makes: Chats always starts a plain chat, never a repository draft. */
+export function newThreadShortcutTarget(input: {
+  readonly mode: SidebarMode;
+  readonly legacySidebar: boolean;
+  readonly repositoryCount: number;
+}): "chat" | "repository-picker" | "current-repository" {
+  if (input.legacySidebar) return "current-repository";
+  if (input.mode === "chats") return "chat";
+  return input.repositoryCount > 1 ? "repository-picker" : "current-repository";
+}
+
 // Work ----------------------------------------------------------------------
 
 export interface TaskProjectGroup<T> {

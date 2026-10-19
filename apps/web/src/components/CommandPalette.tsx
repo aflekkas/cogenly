@@ -1833,6 +1833,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:new-thread-without-project",
       searchTerms: [
+        "new chat",
         "new thread",
         "no project",
         "without project",
@@ -1841,7 +1842,8 @@ function OpenCommandPaletteDialog(props: {
         "none",
         "chat",
       ],
-      title: "New thread without a repository",
+      // A thread without a repository is what the Chats sidebar lists.
+      title: "New chat",
       icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "chat.newWithoutProject",
       run: () => startScratchThread(scratchTargetEnvironmentId),

@@ -2,7 +2,8 @@
  * The sidebar header: one row holding search, add repository and new thread.
  *
  * Search owns the row's text and spans it; add-repository and new-thread sit
- * as a pair of icons at the end, after any mode-specific filter.
+ * as a pair of icons at the end, after any mode-specific filter. Chats has no
+ * add-repository: repositories belong to Work.
  */
 import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
@@ -23,7 +24,8 @@ export interface SidebarThreadHeaderProps {
   hasProjects: boolean;
   /** Optional mode-specific control before the add/new pair, such as the Chats project filter. */
   filterControl?: ReactNode;
-  onNewProject: () => void;
+  /** Null hides add repository (Chats); the command palette still offers it. */
+  onNewProject: (() => void) | null;
   /** Receives the click so Shift+click can skip the project picker. */
   onNewThread: (event: ReactMouseEvent) => void;
   /** What the new button makes in the current sidebar mode; defaults to "New thread". */
@@ -116,7 +118,7 @@ export function SidebarThreadHeader({
           palettes than on the base light and dark ones. */}
       <div className="flex shrink-0 items-center">
         {filterControl}
-        {hasProjects ? (
+        {hasProjects && onNewProject ? (
           <SidebarHeaderIconButton label="Add repository" onClick={onNewProject}>
             <FolderPlusIcon />
           </SidebarHeaderIconButton>
