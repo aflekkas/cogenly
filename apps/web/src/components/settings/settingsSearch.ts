@@ -16,7 +16,6 @@ import {
 export type SettingsPath =
   | "/settings/projects"
   | "/settings/general"
-  | "/settings/project-tags"
   | "/settings/memory"
   | "/settings/diagnostics"
   | "/settings/appearance"
@@ -99,7 +98,6 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/diagnostics": "Diagnostics",
   "/settings/projects": "Repository",
   "/settings/general": "General",
-  "/settings/project-tags": "Projects",
   "/settings/memory": "Memory",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
@@ -218,12 +216,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     scope: "project-defaults",
     searchTerms: ["model workspace environments projects repositories inheritance checkout"],
-  },
-  {
-    id: "project-tags",
-    title: "Projects",
-    to: "/settings/project-tags",
-    searchTerms: ["tags labels chats work repositories link group context new project"],
   },
   {
     id: "memory",
@@ -899,7 +891,6 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/diagnostics": "environment",
   "/settings/projects": "project",
   "/settings/general": null,
-  "/settings/project-tags": null,
   "/settings/memory": null,
   "/settings/data": null,
   "/settings/appearance": null,

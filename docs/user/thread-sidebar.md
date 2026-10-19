@@ -298,8 +298,10 @@ repositories, and a chat can carry several projects or none. Tags organize and
 suggest context only; they never change what an agent can access. An agent's access
 comes only from its own project scope.
 
-Create, recolor, describe, and delete projects, and link their repositories, in
-**Settings → Projects**, or with **New project** and **Manage projects** in the
+Projects have their own sidebar view: pick **Projects** in the navigation rail (or the
+mobile switcher), or press `mod+alt+4`. Open a project to see its Work, chats and
+agents, and to rename, recolor, describe, or delete it and link its repositories with
+**Edit project**. Start one with **New project** at the top of the list or in the
 command palette. Deleting a project removes its tag from threads but keeps the threads.
 
 To tag a thread, click the tag button beside its title, or run **Edit this thread's
@@ -313,7 +315,8 @@ offered again for that thread. Confirmed projects also give the chat
 **Chats** stays one list of titles by date, and the filter button beside search
 narrows it to one project. **Work** is one list, newest activity first. Each row
 names its repository beside the branch and shows its projects: the ones you tagged
-and the ones linking its repository. Right-click a row for **Repository settings**.
+and the ones linking its repository. Right-click a row for **Repository settings** or
+to open one of its projects.
 
 ## Find and reference work
 
@@ -325,7 +328,7 @@ includes your messages and final agent responses.
 After two characters the palette also lists **Search everything** results: chats,
 Work, agents, open items, projects, and pull requests, with the matching words in
 bold. An open item opens in its agent's **Open items**, or in the thread it came
-from; a project opens **Settings → Projects**; a pull request opens in your browser.
+from; a project opens its project view; a pull request opens in your browser.
 
 Use **Settings → Keybindings** to find or customize shortcuts for searching files
 and copying a thread reference. A copied reference uses the thread's pull request

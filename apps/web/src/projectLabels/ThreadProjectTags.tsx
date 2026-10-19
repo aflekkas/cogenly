@@ -390,7 +390,7 @@ export function ThreadProjectTags(props: {
             size="xs"
             onClick={() => {
               setOpen(false);
-              void navigate({ to: "/settings/project-tags" });
+              void navigate({ to: "/project" });
             }}
           >
             <Settings2Icon />

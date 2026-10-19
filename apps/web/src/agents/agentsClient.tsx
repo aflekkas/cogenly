@@ -643,7 +643,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
         });
       },
       openProjectSettings: () => {
-        void navigate({ to: "/settings/project-tags" });
+        void navigate({ to: "/project" });
       },
       openExternal: (url) => {
         void readLocalApi()?.shell.openExternal(url);

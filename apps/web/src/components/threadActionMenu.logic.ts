@@ -10,6 +10,8 @@ export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "start-work"
   | "project-settings"
+  | "open-project"
+  | `open-project:${string}`
   | "settle"
   | "unsettle"
   | "auto-settle"
@@ -88,10 +90,13 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  /** The thread's projects, each opening its project view; omitted where the surface shows tags itself. */
+  readonly projects?: ReadonlyArray<{ readonly key: string; readonly name: string }>;
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
 export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean {
+  if (action.startsWith("open-project")) return false;
   return ![
     "new-thread-on-branch",
     "project-settings",
@@ -101,6 +106,28 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
     "copy-branch",
     "copy-thread-id",
   ].includes(action);
+}
+
+/** One project opens directly; several nest under "Open project". */
+function projectMenuItems(
+  projects: ReadonlyArray<{ readonly key: string; readonly name: string }>,
+): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
+  if (projects.length === 0) return [];
+  if (projects.length === 1)
+    return [
+      { id: `open-project:${projects[0]!.key}`, label: `Open ${projects[0]!.name}`, icon: "tag" },
+    ];
+  return [
+    {
+      id: "open-project",
+      label: "Open project",
+      icon: "tag",
+      children: projects.map((project) => ({
+        id: `open-project:${project.key}` as const,
+        label: project.name,
+      })),
+    },
+  ];
 }
 
 /**
@@ -201,6 +228,7 @@ export function buildThreadActionMenuItems(
       ],
     },
     { id: "project-settings", label: "Repository settings", icon: "settings" },
+    ...projectMenuItems(state.projects ?? []),
     // Archive removes the thread from the sidebar while keeping its
     // conversation under Settings > Archived threads — distinct from Settle
     // (stays visible in the Settled shelf) and Delete (clears history for

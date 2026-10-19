@@ -3997,6 +3997,18 @@ export default function Sidebar() {
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
+        // The projects its row shows: Work's chips, or a chat's confirmed tags.
+        const threadProjects =
+          sidebarMode === "tasks"
+            ? workProjectTagsFor(thread)
+            : (
+                projectLabelDirectory.confirmedByThread.get(
+                  scopedThreadTagKey(thread.environmentId, thread.id),
+                ) ?? []
+              ).flatMap((key) => {
+                const entry = projectLabelDirectory.byKey.get(key);
+                return entry ? [{ key, name: entry.label.name }] : [];
+              });
         const threadProjectGroup =
           projectGroupsRef.current.find((project) =>
             project.memberProjectRefs.some(
@@ -4027,11 +4039,19 @@ export default function Sidebar() {
                 titleRegeneration: supportsTitleRegeneration,
               },
               snoozePresets,
+              projects: threadProjects,
             }),
             position,
           ),
         );
         if (clicked._tag === "Failure" || clicked.value === null) return;
+        if (clicked.value.startsWith("open-project:")) {
+          const entry = projectLabelDirectory.byKey.get(
+            clicked.value.slice("open-project:".length) as ProjectLabelKey,
+          );
+          if (entry) openProjectView(entry);
+          return;
+        }
         if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
