@@ -4,6 +4,7 @@ import { followStreamInEnvironment } from "./environmentStreams.ts";
 export { runStreamInEnvironment, followStreamInEnvironment } from "./environmentStreams.ts";
 import {
   type ClientGuardedRpcTag,
+  type ClientGuardedReadRpcTag,
   EnvironmentId,
   type EnvironmentId as EnvironmentIdType,
 } from "@t3tools/contracts";
@@ -710,6 +711,30 @@ export function createEnvironmentCommand<R, ER, Input, A, E>(
         target.environmentId,
         options.execute(target.input, registry, target.environmentId),
       ),
+  });
+}
+
+/** Protected reads authorize against the destination session when the query runs. */
+export function createEnvironmentGuardedRpcQueryAtomFamily<
+  R,
+  ER,
+  TTag extends Extract<EnvironmentUnaryRpcTag, ClientGuardedReadRpcTag>,
+>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, ER>,
+  options: { readonly label: string; readonly tag: TTag },
+) {
+  return createEnvironmentQueryAtomFamily(runtime, {
+    label: options.label,
+    execute: (input: EnvironmentRpcInput<TTag>) =>
+      Effect.gen(function* () {
+        const registry = yield* AtomRegistry.AtomRegistry;
+        return yield* requestGuarded(options.tag, input).pipe(
+          Effect.provideService(RpcPermissionGuard, {
+            authorize: (id, method, payload) =>
+              createCommandPermissions(runtime, method).authorize(registry, id, payload),
+          }),
+        );
+      }),
   });
 }
 

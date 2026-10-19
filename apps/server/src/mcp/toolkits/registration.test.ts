@@ -1,3 +1,4 @@
+import * as GlobalSearch from "../../search/GlobalSearch.ts";
 import * as ProjectLabels from "../../projectLabels/ProjectLabelService.ts";
 import * as WorkHandoff from "../../work/WorkHandoffService.ts";
 import * as AgentWorkspace from "../../agents/AgentWorkspaceService.ts";
@@ -67,6 +68,7 @@ const project = {
   deletedAt: null,
 };
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(GlobalSearch.GlobalSearch)({ query: () => Effect.succeed({ results: [] }) }),
   Layer.mock(ProjectLabels.ProjectLabelService)({ list: () => Effect.succeed({ labels: [] }) }),
   Layer.mock(WorkHandoff.WorkHandoffService)({
     proposeHandoff: () =>
@@ -185,6 +187,13 @@ const decodeDeniedCall = Schema.decodeEffect(
 );
 
 const smokeCases = [
+  {
+    toolkit: "search",
+    names: ["search"],
+    tool: "search",
+    args: { query: "quartz" },
+    expected: { results: [] },
+  },
   {
     toolkit: "work",
     names: ["work_start", "work_propose_handoff"],
