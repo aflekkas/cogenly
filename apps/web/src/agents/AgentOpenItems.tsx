@@ -48,7 +48,7 @@ import type { AgentContact, AgentWorkspaceView, CommitmentHistoryView } from "./
 
 const APPROVAL_EYEBROW: Record<AgentApproval["actionKind"], string> = {
   start_work: "Wants to start Work",
-  schedule_trigger: "Wants a recurring check-in",
+  schedule_trigger: "Wants a new trigger",
   change_permissions: "Wants different permissions",
 };
 

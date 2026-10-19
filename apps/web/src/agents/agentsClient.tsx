@@ -81,6 +81,7 @@ export interface AgentsClient {
     trigger: Omit<AgentTrigger, "id"> & { id?: string },
   ) => Promise<void>;
   runTrigger: (agent: AgentContact, id: string) => Promise<void>;
+  setTriggerEnabled: (agent: AgentContact, id: string, enabled: boolean) => Promise<void>;
   deleteTrigger: (agent: AgentContact, id: string) => Promise<void>;
   loadEarlier?: (agent: AgentContact) => Promise<void>;
   canWrite?: (environmentId: EnvironmentId) => boolean;
@@ -281,6 +282,9 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
     reportFailure: false,
   });
   const runTask = useAtomCommand(serverEnvironment.runScheduledTaskNow, { reportFailure: false });
+  const setTaskEnabled = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
+    reportFailure: false,
+  });
   const registry = useContext(RegistryContext);
   const approve = useOrchestrationCommand(agentWorkspaceRpc.agentsApprove, {
     reportFailure: false,
@@ -584,6 +588,16 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           }),
         );
       },
+      setTriggerEnabled: async (agent, id, enabled) => {
+        if (!readEnvironmentScope(agent.environmentId, AuthOrchestrationOperateScope))
+          throw new Error("This connection cannot change agents.");
+        commandValue(
+          await setTaskEnabled({
+            environmentId: agent.environmentId,
+            input: { id: ScheduledTaskId.make(id), enabled },
+          }),
+        );
+      },
       deleteTrigger: async (agent, id) => {
         if (!readEnvironmentScope(agent.environmentId, AuthOrchestrationOperateScope))
           throw new Error("This connection cannot change agents.");
@@ -673,6 +687,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       persistTrigger,
       deleteTask,
       runTask,
+      setTaskEnabled,
       navigate,
       loadEarlier,
       configs,

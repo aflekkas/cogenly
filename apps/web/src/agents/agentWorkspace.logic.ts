@@ -1,4 +1,3 @@
-import type { AgentEventKind } from "@t3tools/contracts";
 /**
  * Pure helpers for an agent's Open items, Activity and Responsibilities. Status
  * and policy text mirror what the server enforces (`AgentWorkspaceService`,
@@ -7,6 +6,9 @@ import type { AgentEventKind } from "@t3tools/contracts";
 import type {
   Agent,
   AgentApproval,
+  AgentEventContext,
+  AgentEventFilter,
+  AgentEventKind,
   AgentPermissions,
   Commitment,
   CommitmentHistory,
@@ -155,6 +157,16 @@ function safeUrl(value: string) {
   }
 }
 
+/** "PR #12" linking out when the id is an http(s) URL; plain text otherwise. */
+function prRef(
+  id: string,
+): { kind: "external"; label: string; href: string } | { kind: "text"; label: string } {
+  const url = safeUrl(id);
+  const number = url?.pathname.match(/\/pull\/(\d+)/)?.[1] ?? id.match(/#(\d+)$/)?.[1];
+  const label = number ? `PR #${number}` : "Pull request";
+  return url ? { kind: "external", label, href: url.href } : { kind: "text", label };
+}
+
 /**
  * Where a source or evidence reference leads. Threads and runs open in the app,
  * messages in this agent's conversation open the chat, and PRs and URLs open
@@ -183,12 +195,8 @@ export function resolveCommitmentRef(
       const run = context.runs.find((candidate) => candidate.id === ref.id);
       return run ? toThread(run.threadId, "Run") : { kind: "text", label: "Run" };
     }
-    case "pr": {
-      const url = safeUrl(ref.id);
-      const number = url?.pathname.match(/\/pull\/(\d+)/)?.[1] ?? ref.id.match(/#(\d+)$/)?.[1];
-      const label = number ? `PR #${number}` : "Pull request";
-      return url ? { kind: "external", label, href: url.href } : { kind: "text", label };
-    }
+    case "pr":
+      return prRef(ref.id);
     case "url": {
       const url = safeUrl(ref.id);
       return url
@@ -202,15 +210,32 @@ export function resolveCommitmentRef(
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+/** Resolves the projects and repositories an event filter names. */
+export interface FilterNames {
+  labelName: (labelId: ProjectLabelId) => string | undefined;
+  repositoryName: (projectId: ProjectId) => string | undefined;
+}
+
+/**
+ * "Weekdays at 09:00", "Every hour", or for an event trigger "When PR checks fail",
+ * followed by its filter when `names` can resolve it.
+ */
 export function describeSchedule(
   schedule:
     | ScheduledTaskUpsertSchedule
     | { type: "interval"; everyMs: number }
     | { type: "fixed_time"; timeOfDay: string; weekdays?: ReadonlyArray<number> | undefined }
-    | { type: "webhook" },
+    | { type: "webhook" }
+    | { type: "event"; event: AgentEventKind; filter?: EventFilter | undefined },
+  names?: FilterNames,
 ) {
   if (schedule.type === "webhook") return "On webhook request";
-  if (schedule.type === "event") return EVENT_TRIGGER_LABEL[schedule.event];
+  if (schedule.type === "event") {
+    const filter = names ? describeEventFilter(schedule.filter, names) : null;
+    return filter
+      ? `${EVENT_TRIGGER_LABEL[schedule.event]} ${filter}`
+      : EVENT_TRIGGER_LABEL[schedule.event];
+  }
   if (schedule.type === "interval") {
     const minutes = Math.round(schedule.everyMs / 60_000);
     if (minutes % 1440 === 0)
@@ -244,7 +269,7 @@ const excerpt = (text: string, max = 240) =>
 export function describeApproval(
   approval: Pick<AgentApproval, "action">,
   context: {
-    agent: Pick<Agent, "permissions" | "scope" | "autonomy">;
+    agent: Pick<Agent, "name" | "permissions" | "scope" | "autonomy">;
     repositoryName: (projectId: ProjectId) => string | undefined;
     labelName: (labelId: ProjectLabelId) => string | undefined;
   },
@@ -259,10 +284,15 @@ export function describeApproval(
       };
     }
     case "schedule_trigger":
-      return {
-        title: `Schedule “${action.payload.title}” · ${describeSchedule(action.payload.schedule)}`,
-        details: [excerpt(action.payload.prompt)],
-      };
+      return action.payload.schedule.type === "event"
+        ? {
+            title: `${describeSchedule(action.payload.schedule, context)} → wake ${context.agent.name}`,
+            details: [`“${action.payload.title}” · ${excerpt(action.payload.prompt)}`],
+          }
+        : {
+            title: `Schedule “${action.payload.title}” · ${describeSchedule(action.payload.schedule)}`,
+            details: [excerpt(action.payload.prompt)],
+          };
     case "change_permissions":
       return {
         title: "Change its permissions",
@@ -305,6 +335,80 @@ export function policyDiff(
     for (const id of was.keys()) if (!now.has(id)) lines.push(`− Project ${name(id)}`);
   }
   return lines.length > 0 ? lines : ["No effective change"];
+}
+
+// Event triggers ---------------------------------------------------------------
+
+type EventFilter = typeof AgentEventFilter.Type;
+type EventOrigin = NonNullable<EventFilter["origin"]>;
+
+export const EVENT_TRIGGER_LABEL: Record<AgentEventKind, string> = {
+  "work.completed": "When Work finishes",
+  "work.failed": "When Work fails",
+  "work.review_ready": "When Work is ready for review",
+  "pr.updated": "When a PR is updated",
+  "pr.checks_failed": "When PR checks fail",
+  "pr.merged": "When a PR merges",
+  "commitment.due": "When an open item is due",
+};
+
+/** The event picker, most useful first. */
+export const EVENT_TRIGGER_OPTIONS: ReadonlyArray<{ value: AgentEventKind; label: string }> = [
+  { value: "pr.checks_failed", label: "PR checks fail" },
+  { value: "pr.updated", label: "A PR is updated" },
+  { value: "pr.merged", label: "A PR merges" },
+  { value: "work.review_ready", label: "Work is ready for review" },
+  { value: "work.completed", label: "Work finishes" },
+  { value: "work.failed", label: "Work fails" },
+  { value: "commitment.due", label: "An open item is due" },
+];
+
+export const EVENT_ORIGIN_LABEL: Record<EventOrigin, string> = {
+  direct: "Work you started",
+  chat: "Work started from a chat",
+  agent: "Work an agent started",
+};
+
+/** Open items carry projects but no repository or Work origin, so only projects filter them. */
+export function eventFiltersWork(event: AgentEventKind) {
+  return event !== "commitment.due";
+}
+
+/**
+ * The filter as saved: duplicates and empty lists dropped, repository and origin
+ * dropped for events they cannot match, and nothing at all when nothing narrows it.
+ */
+export function normalizeEventFilter(
+  event: AgentEventKind,
+  filter: EventFilter | undefined,
+): EventFilter | undefined {
+  const labelIds = [...new Set(filter?.labelIds ?? [])];
+  const projectIds = eventFiltersWork(event) ? [...new Set(filter?.projectIds ?? [])] : [];
+  const origin = eventFiltersWork(event) ? filter?.origin : undefined;
+  const next = {
+    ...(labelIds.length > 0 ? { labelIds } : {}),
+    ...(projectIds.length > 0 ? { projectIds } : {}),
+    ...(origin ? { origin } : {}),
+  };
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/**
+ * "in Bartr, cogenly · only Work an agent started": projects then repositories, then
+ * origin; null when the trigger reacts to every event of its kind it can read.
+ */
+export function describeEventFilter(filter: EventFilter | undefined, names: FilterNames) {
+  const places = [
+    ...new Set([
+      ...(filter?.labelIds ?? []).map((id) => names.labelName(id) ?? "a deleted project"),
+      ...(filter?.projectIds ?? []).map((id) => names.repositoryName(id) ?? "a removed repository"),
+    ]),
+  ];
+  const parts = [
+    places.length > 0 ? `in ${places.join(", ")}` : null,
+    filter?.origin ? `only ${EVENT_ORIGIN_LABEL[filter.origin]}` : null,
+  ].filter((part) => part !== null);
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 // Responsibilities -----------------------------------------------------------
@@ -563,15 +667,50 @@ export const RUN_TRIGGER_LABEL: Record<
   event: "Event",
 };
 
-const EVENT_TRIGGER_LABEL: Record<AgentEventKind, string> = {
-  "work.completed": "When Work completes",
-  "work.failed": "When Work fails",
-  "work.review_ready": "When Work is ready for review",
-  "pr.updated": "When a PR is updated",
-  "pr.checks_failed": "When PR checks fail",
-  "pr.merged": "When a PR merges",
-  "commitment.due": "When an open item is due",
+/** Activity's heading for a run: what happened for event runs, otherwise how it was woken. */
+export function runTriggerLabel(run: {
+  triggerKind: keyof typeof RUN_TRIGGER_LABEL;
+  triggerContext?: Pick<AgentEventContext, "kind"> | undefined;
+}) {
+  return run.triggerKind === "event" && run.triggerContext
+    ? EVENT_OCCURRED_LABEL[run.triggerContext.kind]
+    : RUN_TRIGGER_LABEL[run.triggerKind];
+}
+
+const EVENT_OCCURRED_LABEL: Record<AgentEventKind, string> = {
+  "work.completed": "Work finished",
+  "work.failed": "Work failed",
+  "work.review_ready": "Work ready for review",
+  "pr.updated": "PR updated",
+  "pr.checks_failed": "PR checks failed",
+  "pr.merged": "PR merged",
+  "commitment.due": "Open item due",
 };
+
+export type ResolvedEventRef =
+  | { kind: "thread"; label: string; threadId: string }
+  | { kind: "external"; label: string; href: string }
+  | { kind: "item"; label: string; commitmentId: string }
+  | { kind: "text"; label: string };
+
+/** What an event run was about: its Work thread, pull request and open item, in that order. */
+export function eventRunRefs(
+  refs: AgentEventContext["refs"],
+  commitmentTitle: (id: string) => string | undefined,
+): ResolvedEventRef[] {
+  const result: ResolvedEventRef[] = [];
+  if (refs.threadId) result.push({ kind: "thread", label: "Work", threadId: refs.threadId });
+  if (refs.prUrl) result.push(prRef(refs.prUrl));
+  if (refs.commitmentId) {
+    const title = commitmentTitle(refs.commitmentId);
+    result.push(
+      title
+        ? { kind: "item", label: title, commitmentId: refs.commitmentId }
+        : { kind: "text", label: "A removed open item" },
+    );
+  }
+  return result;
+}
 
 /** Run status as recorded by the provider run, not as the model described it. */
 export function runStatusLabel(status: string) {

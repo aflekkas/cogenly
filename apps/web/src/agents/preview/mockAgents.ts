@@ -511,6 +511,11 @@ export function createMockAgentsClient(): AgentsClient {
           : [...current.triggers, { ...trigger, id: randomUUID() }],
       })),
     runTrigger: async (agent) => update(agent.id, (current) => ({ ...current, state: "thinking" })),
+    setTriggerEnabled: async (agent, id, enabled) =>
+      update(agent.id, (current) => ({
+        ...current,
+        triggers: current.triggers.map((item) => (item.id === id ? { ...item, enabled } : item)),
+      })),
     deleteTrigger: async (agent, id) =>
       update(agent.id, (current) => ({
         ...current,

@@ -51,7 +51,9 @@ import {
   describeSchedule,
   scopeAccess,
   scopePermissions,
+  startWorkRepositories,
   toggleScope,
+  type FilterNames,
 } from "./agentWorkspace.logic";
 import { DailyCapRow, DetailRow, InlineEditor, TriggerForm, chevron } from "./AgentDetails";
 import type { AgentContact, AgentDraft, AgentWorkspaceView } from "./agents.types";
@@ -117,6 +119,28 @@ export function AgentResponsibilities({
   const setPermission = (key: keyof AgentPermissions, value: boolean) =>
     void saveProfile({ permissions: { ...agent.permissions, [key]: value } });
   const disabled = pending || !canWrite;
+  // Event triggers can name only what the agent can read: its scoped projects, its home
+  // repository and the repositories those projects link.
+  const scopedLabels = workspace.labels.filter((label) =>
+    agent.scope.some((entry) => entry.labelId === label.id),
+  );
+  const home = workspace.repositories.find((repository) => repository.id === agent.projectId);
+  const triggerRepositories = [
+    ...(home ? [home] : []),
+    ...startWorkRepositories(agent.scope, workspace.labels, workspace.repositories)
+      .filter((repository) => repository.id !== agent.projectId)
+      .map(({ id, title }) => ({ id, title })),
+  ];
+  const filterNames: FilterNames = {
+    labelName: (id) => labelsById.get(id)?.name,
+    repositoryName: (id) =>
+      workspace.repositories.find((repository) => repository.id === id)?.title,
+  };
+  const triggerFormProps = {
+    labels: scopedLabels,
+    repositories: triggerRepositories,
+    onManageProjects: client.openProjectSettings,
+  };
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col pb-10">
@@ -487,7 +511,7 @@ export function AgentResponsibilities({
           <DetailRow
             icon={ZapIcon}
             label="Add a trigger"
-            detail="Wake it on a schedule or a webhook. Each wake-up is one recorded run."
+            detail="Wake it on a schedule, when something happens, or on a webhook. Each wake-up is one recorded run."
             tone="muted"
             disabled={!canWrite}
             onClick={() => setEditing({ kind: "trigger:new" })}
@@ -497,6 +521,7 @@ export function AgentResponsibilities({
           isEditing("trigger", trigger.id) ? (
             <TriggerForm
               key={trigger.id}
+              {...triggerFormProps}
               initial={trigger}
               pending={pending}
               onCancel={close}
@@ -512,10 +537,20 @@ export function AgentResponsibilities({
               <DetailRow
                 icon={ZapIcon}
                 label={trigger.title}
-                detail={`${describeSchedule(trigger.schedule)}${trigger.enabled ? "" : " · Paused"}`}
+                detail={`${describeSchedule(trigger.schedule, filterNames)}${trigger.enabled ? "" : " · Paused"}`}
                 className="flex-1"
                 disabled={!canWrite}
                 onClick={() => setEditing({ kind: "trigger", id: trigger.id })}
+              />
+              <Switch
+                size="sm"
+                className="mx-1"
+                checked={trigger.enabled}
+                aria-label={`Enable ${trigger.title}`}
+                disabled={disabled}
+                onCheckedChange={(enabled) =>
+                  void mutate(() => client.setTriggerEnabled(agent, trigger.id, enabled))
+                }
               />
               <ThreadDetailsControl
                 part="icon"
@@ -540,6 +575,7 @@ export function AgentResponsibilities({
         )}
         {isEditing("trigger:new") && (
           <TriggerForm
+            {...triggerFormProps}
             pending={pending}
             onCancel={close}
             onSave={(value) =>

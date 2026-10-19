@@ -3,8 +3,11 @@ import {
   conservativeAgentPermissions,
   ProjectId,
   ProjectLabelId,
+  ProviderInstanceId,
+  ThreadId,
   type AgentApproval,
   type Commitment,
+  type ScheduledTaskUpsertSchedule,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
@@ -15,8 +18,11 @@ import {
   decisionsWaitingLabel,
   describeApproval,
   describeCommitmentHistory,
+  describeEventFilter,
   describeRunAction,
   describeSchedule,
+  eventRunRefs,
+  normalizeEventFilter,
   groupAgentsByScope,
   groupCommitments,
   resolveCommitmentRef,
@@ -168,10 +174,82 @@ describe("describeSchedule", () => {
 });
 
 const LABEL_NAMES = { spawn: "Spawn", bartr: "Bartr" };
+describe("event trigger filters", () => {
+  const names = {
+    labelName: (id: string) => (LABEL_NAMES as Record<string, string>)[id],
+    repositoryName: (id: string) => (id === "repo-1" ? "booking-audit" : undefined),
+  };
+  const bartr = ProjectLabelId.make("bartr");
+  const repo = ProjectId.make("repo-1");
+
+  it("summarizes projects, repositories and origin, naming what was removed", () => {
+    expect(describeEventFilter(undefined, names)).toBeNull();
+    expect(describeEventFilter({ labelIds: [], projectIds: [] }, names)).toBeNull();
+    expect(
+      describeEventFilter(
+        { labelIds: [bartr, ProjectLabelId.make("gone")], projectIds: [repo], origin: "agent" },
+        names,
+      ),
+    ).toBe("in Bartr, a deleted project, booking-audit · only Work an agent started");
+    expect(describeEventFilter({ origin: "direct" }, names)).toBe("only Work you started");
+  });
+
+  it("appends the summary to the event only when names are known", () => {
+    const schedule = {
+      type: "event" as const,
+      event: "pr.merged" as const,
+      filter: { labelIds: [bartr] },
+    };
+    expect(describeSchedule(schedule, names)).toBe("When a PR merges in Bartr");
+    expect(describeSchedule(schedule)).toBe("When a PR merges");
+  });
+
+  it("saves only filters that narrow, and drops ones the event cannot match", () => {
+    expect(normalizeEventFilter("pr.updated", { labelIds: [], projectIds: [] })).toBeUndefined();
+    expect(
+      normalizeEventFilter("pr.updated", { labelIds: [bartr, bartr], projectIds: [repo] }),
+    ).toEqual({ labelIds: [bartr], projectIds: [repo] });
+    // Open items have no repository or Work origin.
+    expect(
+      normalizeEventFilter("commitment.due", {
+        labelIds: [bartr],
+        projectIds: [repo],
+        origin: "chat",
+      }),
+    ).toEqual({ labelIds: [bartr] });
+    expect(normalizeEventFilter("commitment.due", { origin: "chat" })).toBeUndefined();
+  });
+});
+
+describe("eventRunRefs", () => {
+  it("links the Work thread, the pull request and the open item", () => {
+    const titles = (id: string) => (id === "c1" ? "Ship the fix" : undefined);
+    expect(
+      eventRunRefs(
+        {
+          threadId: ThreadId.make("work-1"),
+          prUrl: "https://github.com/acme/bartr/pull/42",
+          commitmentId: "c1",
+        },
+        titles,
+      ),
+    ).toEqual([
+      { kind: "thread", label: "Work", threadId: "work-1" },
+      { kind: "external", label: "PR #42", href: "https://github.com/acme/bartr/pull/42" },
+      { kind: "item", label: "Ship the fix", commitmentId: "c1" },
+    ]);
+    expect(eventRunRefs({ prUrl: "javascript:alert(1)", commitmentId: "gone" }, titles)).toEqual([
+      { kind: "text", label: "Pull request" },
+      { kind: "text", label: "A removed open item" },
+    ]);
+  });
+});
+
 describe("describeApproval", () => {
   const spawn = ProjectLabelId.make("spawn");
   const bartr = ProjectLabelId.make("bartr");
   const agent = {
+    name: "Bartr Engineering",
     autonomy: "propose" as const,
     permissions: conservativeAgentPermissions,
     scope: [{ labelId: spawn, permissions: scopePermissions("read") }],
@@ -198,6 +276,44 @@ describe("describeApproval", () => {
     );
     expect(description.title).toBe("Start Work in booking-audit: Fix booking checks");
     expect(description.details).toEqual(["Repair the broken path checks."]);
+  });
+
+  it("names the event, where it applies and who wakes for an event trigger", () => {
+    const trigger = (schedule: ScheduledTaskUpsertSchedule) =>
+      describeApproval(
+        approval({
+          actionKind: "schedule_trigger",
+          payload: {
+            title: "Failing checks",
+            prompt: "Find what broke.",
+            enabled: true,
+            schedule,
+            projectId: ProjectId.make("repo-1"),
+            threadId: null,
+            modelSelection: { instanceId: ProviderInstanceId.make("claude"), model: "opus" },
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            workspaceStrategy: { type: "root" },
+          },
+        }),
+        context,
+      );
+    const scoped = trigger({
+      type: "event",
+      event: "pr.checks_failed",
+      filter: { labelIds: [bartr], projectIds: [ProjectId.make("repo-1")] },
+    });
+    expect(scoped.title).toBe(
+      "When PR checks fail in Bartr, booking-audit → wake Bartr Engineering",
+    );
+    expect(scoped.details).toEqual(["“Failing checks” · Find what broke."]);
+    expect(trigger({ type: "event", event: "work.review_ready" }).title).toBe(
+      "When Work is ready for review → wake Bartr Engineering",
+    );
+    // Timed triggers keep naming the trigger and its schedule.
+    expect(
+      trigger({ type: "fixed_time", timeOfDay: "09:00", weekdays: [1, 2, 3, 4, 5] }).title,
+    ).toBe("Schedule “Failing checks” · Weekdays at 09:00");
   });
 
   it("lists every grant, autonomy and scope change", () => {
