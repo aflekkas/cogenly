@@ -192,6 +192,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --inset-shadow-control-highlight: 0 1px rgb(255 255 255 / 16%);
   --inset-shadow-control-pressed: 0 1px rgb(0 0 0 / 8%);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  /* Overlays (popup-motion, dialogs, sheets) enter on drawer and leave on
+     popup-exit, a quicker accelerating curve. */
+  --ease-popup-exit: cubic-bezier(0.4, 0, 1, 1);
   /* The composer's elevation: a soft drop pulled in under the surface, shared
      by the composer, its context strip and attached banners. */
   --shadow-composer: 0 12px 28px -18px rgb(0 0 0 / 40%);
@@ -512,7 +515,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    state-selected: a darker-than-slab fill where the top highlight and faint
    edge do the work. Apply it conditionally (or behind data-*: variants). It is
    deliberately more specific, so it wins over state-hover and plain bg-* or
-   hover:bg-* utilities when both apply. */
+   hover:bg-* utilities when both apply. Where --state-selected-indicator is on
+   (the app sidebar, or state-selected-indicator), it also draws a short
+   luminous line on the leading edge with a soft glow behind it. Everything is
+   background layers and shadows: static, no pseudo-elements, no layout. */
 @utility state-hover {
   &[data-highlighted] {
     background-color: var(--state-hover-fill);
@@ -549,12 +555,43 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* Tripled class: outranks .state-hover:hover / [data-highlighted] (0,2,0)
      and single-class bg-* utilities, whatever their order in the sheet. */
   &&& {
-    background-color: var(--state-selected-fill);
-    background-image: linear-gradient(
-      to bottom,
-      var(--state-selected-sheen-top),
-      var(--state-selected-sheen-bottom)
+    --state-selected-indicator-color: color-mix(
+      in srgb,
+      var(--state-selected-foreground)
+        calc(var(--state-selected-indicator-line) * var(--state-selected-indicator)),
+      transparent
     );
+    --state-selected-indicator-glow-color: color-mix(
+      in srgb,
+      var(--state-selected-foreground)
+        calc(var(--state-selected-indicator-glow) * var(--state-selected-indicator)),
+      transparent
+    );
+    background-color: var(--state-selected-fill);
+    background-image:
+      linear-gradient(
+        to bottom,
+        transparent,
+        var(--state-selected-indicator-color) 25% 75%,
+        transparent
+      ),
+      radial-gradient(closest-side, var(--state-selected-indicator-glow-color), transparent),
+      linear-gradient(
+        to bottom,
+        var(--state-selected-sheen-top),
+        var(--state-selected-sheen-bottom)
+      );
+    /* Line: 2px on the leading edge, centred and short enough to clear the
+       corner radius. Glow: half an ellipse bleeding in from the same edge. */
+    background-size:
+      2px min(1.25rem, 60%),
+      1.75rem min(2.5rem, 100%),
+      100% 100%;
+    background-position:
+      0 50%,
+      -0.875rem 50%,
+      0 0;
+    background-repeat: no-repeat;
     color: var(--state-selected-foreground);
     --tw-shadow:
       inset 0 1px 0 var(--state-selected-highlight), inset 0 0 0 1px var(--state-selected-edge),
@@ -562,6 +599,80 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     box-shadow:
       var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000),
       var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  }
+}
+
+/* Turns the state-selected leading line on outside the sidebar, for vertical
+   lists whose cursor is the selection (the command palette). */
+@utility state-selected-indicator {
+  --state-selected-indicator: 1;
+}
+
+/* Open/close motion for anchored popups: menus, selects, comboboxes,
+   autocompletes, popovers and tooltips. Put it on the Base UI Popup element
+   itself, with transition-[opacity,scale,translate] (plus anything else the
+   popup animates), because Base UI waits for that element's own transitions
+   before unmounting. Keep the glass fill on the same element: an opacity
+   fade on an ancestor would cut a child's backdrop-filter off from the page.
+   The popup fades in from 97% scale (origin --transform-origin) and slides a
+   few pixels out of the trigger along data-side; exits are quicker.
+   Compositor-only properties, a single transition per open or close. */
+@utility popup-motion {
+  --popup-motion-offset: 4px;
+  --tw-duration: 160ms;
+  --tw-ease: --theme(--ease-drawer);
+
+  &:is([data-starting-style], [data-ending-style]) {
+    opacity: 0;
+    scale: 0.97;
+  }
+  &[data-side="bottom"]:is([data-starting-style], [data-ending-style]) {
+    translate: 0 calc(-1 * var(--popup-motion-offset));
+  }
+  &[data-side="top"]:is([data-starting-style], [data-ending-style]) {
+    translate: 0 var(--popup-motion-offset);
+  }
+  &:is([data-side="left"], [data-side="inline-start"]):is(
+      [data-starting-style],
+      [data-ending-style]
+    ) {
+    translate: var(--popup-motion-offset) 0;
+  }
+  &:is([data-side="right"], [data-side="inline-end"]):is(
+      [data-starting-style],
+      [data-ending-style]
+    ) {
+    translate: calc(-1 * var(--popup-motion-offset)) 0;
+  }
+  &[data-ending-style] {
+    --tw-duration: 110ms;
+    --tw-ease: --theme(--ease-popup-exit);
+  }
+
+  /* Reduced motion opens and closes instantly; a zero-length transition never
+     starts, so Base UI unmounts at once too. */
+  @media (prefers-reduced-motion: reduce) {
+    &&,
+    &&[data-ending-style] {
+      --tw-duration: 0s;
+    }
+  }
+}
+
+/* Enter motion for disclosure content that mounts when opened (inline
+   "show more" panels that aren't a Collapsible): a short fade and drop in.
+   Closing unmounts at once. Uses @starting-style, so it runs once per mount
+   and never on later renders. */
+@utility reveal-motion {
+  @media (prefers-reduced-motion: no-preference) {
+    transition-property: opacity, translate;
+    transition-duration: 160ms;
+    transition-timing-function: --theme(--ease-drawer);
+
+    @starting-style {
+      opacity: 0;
+      translate: 0 -4px;
+    }
   }
 }
 
@@ -1226,6 +1337,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --state-selected-edge: transparent;
   --state-selected-shadow: 0 0 #0000;
   --state-selected-foreground: var(--contrast-foreground);
+  /* The leading indicator line and its glow, as strengths of the selected
+     foreground. --state-selected-indicator switches them on (1) where
+     selection moves through a vertical list (see state-selected-indicator).
+     Light selection is carried by the raised fill, so both stay off here. */
+  --state-selected-indicator: 0;
+  --state-selected-indicator-line: 0%;
+  --state-selected-indicator-glow: 0%;
   --foreground: var(--color-zinc-800);
   --card: var(--color-white);
   --card-foreground: var(--color-zinc-800);
@@ -1299,17 +1417,21 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --surface-raised-shadow-floating:
       0 1px 2px rgb(0 0 0 / 40%), 0 18px 44px -18px rgb(0 0 0 / 80%);
     /* Dark states are barely-there white fills; the lit top edge and faint
-       hairline carry the selection, never a gray slab. */
+       hairline carry the selection, never a gray slab. Selection borrows the
+       raised-card light: a sheen, a lit top edge, a hairline and a soft drop,
+       plus a glowing leading line in vertical lists. */
     --state-hover-fill: rgb(255 255 255 / 3.5%);
     --state-hover-sheen-top: transparent;
     --state-hover-sheen-bottom: transparent;
     --state-hover-highlight: transparent;
     --state-selected-fill: rgb(255 255 255 / 6%);
-    --state-selected-sheen-top: transparent;
+    --state-selected-sheen-top: rgb(255 255 255 / 2.5%);
     --state-selected-sheen-bottom: transparent;
-    --state-selected-highlight: transparent;
-    --state-selected-edge: transparent;
-    --state-selected-shadow: 0 0 #0000;
+    --state-selected-highlight: rgb(255 255 255 / 8%);
+    --state-selected-edge: rgb(255 255 255 / 3.5%);
+    --state-selected-shadow: 0 1px 2px rgb(0 0 0 / 35%);
+    --state-selected-indicator-line: 72%;
+    --state-selected-indicator-glow: 16%;
     --foreground: var(--color-neutral-100);
     --card: color-mix(in srgb, var(--background) 97%, var(--color-white));
     --card-foreground: var(--color-neutral-100);
@@ -1376,6 +1498,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --state-selected-shadow: 0 0 #0000;
   --state-hover-foreground: var(--contrast-sidebar-foreground);
   --state-selected-foreground: var(--contrast-sidebar-foreground);
+  --state-selected-indicator: 1;
 
   @variant dark {
     --background: #000;
@@ -1398,10 +1521,21 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 9%, transparent);
     --sidebar-row-selected: var(--sidebar-row-active);
     --sidebar-border: var(--border);
-    --state-selected-highlight: transparent;
-    --state-selected-edge: transparent;
-    --state-selected-shadow: 0 0 #0000;
+    --state-selected-highlight: rgb(255 255 255 / 8%);
+    --state-selected-edge: rgb(255 255 255 / 3.5%);
+    --state-selected-shadow: 0 1px 2px rgb(0 0 0 / 50%);
   }
+}
+
+/* Horizontal and icon controls in the sidebar (segmented toggles, pressed
+   buttons, the footer's icon row) keep the glow without the leading line. */
+[data-app-sidebar]
+  :is(
+    [data-slot="toggle"],
+    [data-slot="button"],
+    [data-slot="sidebar-menu-button"][data-size="icon"]
+  ) {
+  --state-selected-indicator: 0;
 }
 
 /* Theme files are expressed in app color roles and mapped to the existing

@@ -23,14 +23,15 @@ function CollapsiblePanel({
   animate = true,
   ...props
 }: CollapsiblePrimitive.Panel.Props & { animate?: boolean }) {
-  // Reuses the local shadcn/Base UI panel; skip height travel for reduced motion.
+  // Reuses the local shadcn/Base UI panel: height travels on Base UI's measured
+  // --collapsible-panel-height while the content fades; reduced motion skips both.
   // https://ui.shadcn.com/docs/components/base/collapsible
   return (
     <CollapsiblePrimitive.Panel
       className={cn(
         "overflow-hidden",
         animate &&
-          "h-(--collapsible-panel-height) transition-[height] duration-200 motion-reduce:transition-none data-ending-style:h-0 data-starting-style:h-0 data-open:data-ending-style:[height:var(--collapsible-panel-height)]",
+          "h-(--collapsible-panel-height) transition-[height,opacity] duration-200 ease-drawer motion-reduce:transition-none data-ending-style:h-0 data-starting-style:h-0 data-ending-style:opacity-0 data-starting-style:opacity-0 data-open:data-ending-style:[height:var(--collapsible-panel-height)] data-open:data-ending-style:opacity-100",
         className,
       )}
       data-slot="collapsible-panel"

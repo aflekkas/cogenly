@@ -115,7 +115,7 @@ function ContextUsedPanel(props: {
   onOpenExternal: (href: string) => void;
 }) {
   return (
-    <ul className="mt-1.5 flex max-w-prose flex-col gap-1.5 border-s border-border/70 ps-3 text-xs text-muted-foreground">
+    <ul className="reveal-motion mt-1.5 flex max-w-prose flex-col gap-1.5 border-s border-border/70 ps-3 text-xs text-muted-foreground">
       {props.items.map((item) => {
         const links = resolveFactRefs(item.refs).filter((ref) => ref.kind !== "text");
         return (
