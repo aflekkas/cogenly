@@ -341,28 +341,38 @@ export function AgentForm({
             : "Tags alone grant nothing; it can read and propose items only in these projects."}
         </small>
       </div>
-      <label>
-        Autonomy
-        <select
+      <div className="agent-form-field">
+        <span>Autonomy</span>
+        <Select
           value={draft.autonomy ?? "propose"}
-          onChange={(event) => {
-            const option = AUTONOMY_OPTIONS.find((item) => item.value === event.target.value);
+          onValueChange={(value) => {
+            const option = AUTONOMY_OPTIONS.find((item) => item.value === value);
             if (option) setDraft({ ...draft, autonomy: option.value });
           }}
         >
-          {AUTONOMY_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger aria-label="Autonomy">
+            <SelectValue>
+              {
+                AUTONOMY_OPTIONS.find((option) => option.value === (draft.autonomy ?? "propose"))
+                  ?.label
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            {AUTONOMY_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value} label={option.label}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
         <small>
           {
             AUTONOMY_OPTIONS.find((option) => option.value === (draft.autonomy ?? "propose"))
               ?.description
           }
         </small>
-      </label>
+      </div>
       <label>
         Instructions
         <textarea
@@ -373,40 +383,42 @@ export function AgentForm({
           onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
         />
       </label>
-      <label>
-        Model
-        <select
+      <div className="agent-form-field">
+        <span>Model</span>
+        <Select
           value={JSON.stringify(draft.modelSelection)}
-          onChange={(event) => {
-            const option = models.find(
-              (model) => JSON.stringify(model.selection) === event.target.value,
-            );
+          onValueChange={(value) => {
+            const option = models.find((model) => JSON.stringify(model.selection) === value);
             if (option) setDraft({ ...draft, modelSelection: option.selection });
           }}
         >
-          {!models.some(
-            (model) => JSON.stringify(model.selection) === JSON.stringify(draft.modelSelection),
-          ) && (
-            <option value={JSON.stringify(draft.modelSelection)}>
-              {draft.modelSelection.model}
-            </option>
-          )}
-          {models.map((model) => (
-            <option key={JSON.stringify(model.selection)} value={JSON.stringify(model.selection)}>
-              {model.label}
-            </option>
-          ))}
-        </select>
-      </label>
+          <SelectTrigger aria-label="Model">
+            <SelectValue>
+              {models.find(
+                (model) => JSON.stringify(model.selection) === JSON.stringify(draft.modelSelection),
+              )?.label ?? draft.modelSelection.model}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            {models.map((model) => (
+              <SelectItem
+                key={JSON.stringify(model.selection)}
+                value={JSON.stringify(model.selection)}
+                label={model.label}
+              >
+                {model.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </div>
       <label className="agent-toggle-row">
         <span>
           Enabled<small>Allow background work</small>
         </span>
-        <input
-          type="checkbox"
-          role="switch"
+        <Switch
           checked={draft.enabled}
-          onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })}
+          onCheckedChange={(enabled) => setDraft({ ...draft, enabled })}
         />
       </label>
       <label className="agent-cap-row">
@@ -753,29 +765,37 @@ export function CreateAgent({
                 }}
               >
                 {workspaces.length > 0 && (
-                  <label>
-                    Workspace
-                    <select
+                  <div className="agent-form-field">
+                    <span>Workspace</span>
+                    <Select
                       required
-                      value={workspaceId ?? ""}
+                      value={workspaceId ?? null}
                       disabled={createdAgent !== null}
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         setWorkspaceId(
-                          workspaces.find((workspace) => workspace.id === event.target.value)?.id ??
-                            null,
+                          workspaces.find((workspace) => workspace.id === value)?.id ?? null,
                         )
                       }
                     >
-                      <option value="" disabled>
-                        Choose a workspace
-                      </option>
-                      {workspaces.map((workspace) => (
-                        <option key={workspace.id} value={workspace.id}>
-                          {workspace.title}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      <SelectTrigger aria-label="Workspace">
+                        <SelectValue placeholder="Choose a workspace">
+                          {workspaces.find((workspace) => workspace.id === workspaceId)?.title ??
+                            "Choose a workspace"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup>
+                        {workspaces.map((workspace) => (
+                          <SelectItem
+                            key={workspace.id}
+                            value={workspace.id}
+                            label={workspace.title}
+                          >
+                            {workspace.title}
+                          </SelectItem>
+                        ))}
+                      </SelectPopup>
+                    </Select>
+                  </div>
                 )}
                 <div className="agent-first-trigger">
                   <span>

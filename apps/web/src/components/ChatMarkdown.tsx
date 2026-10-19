@@ -133,6 +133,7 @@ import {
 import { hasSpecificPierreIconForFileName, syntheticFileNameForLanguageId } from "../pierre-icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
 import { MorphIcon } from "~/components/MorphIcon";
 import { ContextChip } from "./ContextChip";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
@@ -2695,6 +2696,9 @@ function markdownHeadingRenderer(level: 1 | 2 | 3 | 4 | 5 | 6) {
 }
 
 // Keep component types stable when streaming changes the message state.
+/** GitHub-style task lists: the checkbox replaces the list marker. */
+const TASK_CHECKBOX_CLASS =
+  "ms-[calc(-1*var(--list-gutter,1.25rem))] me-[0.35em] mb-[0.15em] align-middle";
 const CHAT_MARKDOWN_COMPONENTS = {
   h1: markdownHeadingRenderer(1),
   h2: markdownHeadingRenderer(2),
@@ -2759,28 +2763,22 @@ const CHAT_MARKDOWN_COMPONENTS = {
   },
   input: function MarkdownInput({ node: _node, type, checked, disabled: _disabled, ...props }) {
     const { onTaskListChange } = use(ChatMarkdownRendererContext);
-    if (type !== "checkbox" || !onTaskListChange) {
-      return (
-        <input
-          {...props}
-          type={type}
-          checked={checked}
-          disabled={_disabled}
-          readOnly={type === "checkbox"}
-        />
-      );
-    }
+    if (type !== "checkbox") return <input {...props} type={type} disabled={_disabled} readOnly />;
+    // The checkbox keeps a hidden native input beside it, which the clipboard serializer reads.
+    if (!onTaskListChange)
+      return <Checkbox className={TASK_CHECKBOX_CLASS} checked={checked ?? false} readOnly />;
     return (
-      <input
-        {...props}
-        type="checkbox"
+      <Checkbox
+        className={TASK_CHECKBOX_CLASS}
         name="markdown-task"
         aria-label="Toggle task"
-        checked={checked}
-        onChange={(event) => {
-          const markerOffset = Number(event.currentTarget.closest("li")?.dataset.taskMarkerOffset);
+        checked={checked ?? false}
+        onCheckedChange={(next, details) => {
+          const target = details.event.target;
+          const item = target instanceof Element ? target.closest("li") : null;
+          const markerOffset = Number(item?.dataset.taskMarkerOffset);
           if (!Number.isSafeInteger(markerOffset)) return;
-          onTaskListChange({ markerOffset, checked: event.currentTarget.checked });
+          onTaskListChange({ markerOffset, checked: next });
         }}
       />
     );

@@ -20,6 +20,13 @@ import {
 import { useAgents, useAgentsClient } from "./agentsClient";
 import { AgentComposer } from "./AgentComposer";
 import { Button } from "~/components/ui/button";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
 import { Toggle, ToggleGroup } from "~/components/ui/toggle-group";
 import { AgentActivity } from "./AgentActivity";
 import { AgentOpenItems, ApprovalDecision } from "./AgentOpenItems";
@@ -513,6 +520,53 @@ function ModelSwitchLine({ name }: { name: string }) {
     </p>
   );
 }
+type RequestQuestion = NonNullable<AgentRequest["questions"]>[number];
+/** A question's fixed answers; multi-select questions keep every chosen value. */
+function QuestionOptions({
+  question,
+  answer,
+  onChange,
+}: {
+  question: RequestQuestion;
+  answer: string | string[] | undefined;
+  onChange: (answer: string | string[]) => void;
+}) {
+  const options = (question.options ?? []).map((option) => ({
+    label: option.label,
+    value: option.value ?? option.label,
+  }));
+  const labelFor = (value: string) =>
+    options.find((option) => option.value === value)?.label ?? value;
+  const items = options.map((option) => (
+    <SelectItem key={option.value} value={option.value} label={option.label}>
+      {option.label}
+    </SelectItem>
+  ));
+  if (question.multiSelect) {
+    const selected = Array.isArray(answer) ? answer : [];
+    return (
+      <Select multiple value={selected} onValueChange={(next) => onChange(next)}>
+        <SelectTrigger size="sm" aria-label={question.text}>
+          <SelectValue placeholder="Choose answers">
+            {selected.length ? selected.map(labelFor).join(", ") : "Choose answers"}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectPopup>{items}</SelectPopup>
+      </Select>
+    );
+  }
+  const selected = typeof answer === "string" && answer ? answer : null;
+  return (
+    <Select value={selected} onValueChange={(next) => next !== null && onChange(next)}>
+      <SelectTrigger size="sm" aria-label={question.text}>
+        <SelectValue placeholder="Choose an answer">
+          {selected === null ? "Choose an answer" : labelFor(selected)}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectPopup>{items}</SelectPopup>
+    </Select>
+  );
+}
 function Request({ agent, request }: { agent: AgentContact; request: AgentRequest }) {
   const client = useAgentsClient();
   const [pending, setPending] = useState(false);
@@ -565,42 +619,18 @@ function Request({ agent, request }: { agent: AgentContact; request: AgentReques
             }}
           >
             {request.questions?.map((question) => (
-              <label className="agent-question" key={question.id}>
+              <div className="agent-question" key={question.id}>
                 {question.text}
                 {question.options && (
-                  <select
-                    aria-label={question.text}
-                    multiple={question.multiSelect}
-                    value={
-                      question.multiSelect
-                        ? Array.isArray(answers[question.id])
-                          ? answers[question.id]
-                          : []
-                        : typeof answers[question.id] === "string"
-                          ? answers[question.id]
-                          : ""
-                    }
-                    onChange={(event) =>
-                      setAnswers({
-                        ...answers,
-                        [question.id]: question.multiSelect
-                          ? Array.from(event.target.selectedOptions, (option) => option.value)
-                          : event.target.value,
-                      })
-                    }
-                  >
-                    <option value="" disabled>
-                      Choose an answer
-                    </option>
-                    {question.options.map((option) => (
-                      <option key={option.label} value={option.value ?? option.label}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <QuestionOptions
+                    question={question}
+                    answer={answers[question.id]}
+                    onChange={(answer) => setAnswers({ ...answers, [question.id]: answer })}
+                  />
                 )}
                 {question.allowCustomAnswer !== false && (
                   <input
+                    aria-label={question.text}
                     required={question.required !== false && !question.options?.length}
                     value={typeof answers[question.id] === "string" ? answers[question.id] : ""}
                     placeholder="Your reply…"
@@ -609,7 +639,7 @@ function Request({ agent, request }: { agent: AgentContact; request: AgentReques
                     }
                   />
                 )}
-              </label>
+              </div>
             ))}
             <button
               className="agent-small-button"

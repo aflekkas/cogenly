@@ -363,8 +363,7 @@
   font-size: 12px;
   margin-top: 12px;
 }
-.agent-question input,
-.agent-question select {
+.agent-question > input {
   background: var(--background);
   color: var(--foreground);
   border: 1px solid var(--border);
@@ -517,9 +516,8 @@
   font-size: 11px;
   font-weight: 500;
 }
-.agent-form input:not([type="checkbox"]),
-.agent-form textarea,
-.agent-form select {
+.agent-form label > input,
+.agent-form label > textarea {
   font: inherit;
   font-weight: 400;
   font-size: 13px;
@@ -537,9 +535,8 @@
   resize: vertical;
   min-height: 70px;
 }
-.agent-form input:focus-visible,
-.agent-form textarea:focus-visible,
-.agent-form select:focus-visible {
+.agent-form label > input:focus-visible,
+.agent-form label > textarea:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
@@ -556,12 +553,7 @@
   font-weight: 400;
   margin-top: 4px;
 }
-.agent-toggle-row input {
-  accent-color: var(--primary);
-  width: 17px;
-  height: 17px;
-}
-.agent-form .agent-cap-row input {
+.agent-form .agent-cap-row > input {
   width: 80px;
 }
 .agent-form label small,
