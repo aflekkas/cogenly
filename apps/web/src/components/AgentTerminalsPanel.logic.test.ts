@@ -7,9 +7,13 @@ import { EnvironmentId, ThreadId, type TerminalSummary } from "@t3tools/contract
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  agentTerminalCounts,
   agentTerminalEntries,
-  agentTerminalExitLabel,
   isAgentTerminalRunning,
+  splitAroundSelected,
+  terminalRunState,
+  terminalRunStateLabel,
+  terminalRunStateMessage,
 } from "./AgentTerminalsPanel.logic";
 
 const environmentId = EnvironmentId.make("env-1");
@@ -63,11 +67,19 @@ describe("agentTerminalEntries", () => {
 
   it("keeps script terminals, labelled by the server", () => {
     const [entry] = agentTerminalEntries([session({ terminalId: "term-1", label: "bun dev" })]);
-    expect(entry).toMatchObject({ terminalId: "term-1", isAgent: false, label: "bun dev" });
+    expect(entry).toMatchObject({
+      terminalId: "term-1",
+      owner: "shell",
+      isAgent: false,
+      label: "bun dev",
+    });
   });
 });
 
-describe("agent terminal status", () => {
+describe("terminalRunState", () => {
+  const finished = (exitCode: number | null, exitSignal: number | null) =>
+    terminalRunState({ status: "exited", exitCode, exitSignal });
+
   it("treats starting and running as live", () => {
     expect(isAgentTerminalRunning({ status: "starting" })).toBe(true);
     expect(isAgentTerminalRunning({ status: "running" })).toBe(true);
@@ -75,17 +87,82 @@ describe("agent terminal status", () => {
   });
 
   it("labels how a command finished", () => {
-    expect(agentTerminalExitLabel({ status: "exited", exitCode: 0, exitSignal: null })).toBe(
-      "exit 0",
-    );
-    expect(agentTerminalExitLabel({ status: "exited", exitCode: 2, exitSignal: null })).toBe(
-      "exit 2",
-    );
-    expect(agentTerminalExitLabel({ status: "exited", exitCode: null, exitSignal: 9 })).toBe(
-      "killed",
-    );
-    expect(agentTerminalExitLabel({ status: "error", exitCode: null, exitSignal: null })).toBe(
-      "failed",
-    );
+    expect(terminalRunStateLabel(finished(0, null))).toBe("Exited 0");
+    expect(terminalRunStateLabel(finished(2, null))).toBe("Failed · code 2");
+    expect(terminalRunStateLabel(finished(null, 9))).toBe("Killed · SIGKILL");
+    expect(terminalRunStateLabel(finished(null, null))).toBe("Exited");
+    expect(
+      terminalRunStateLabel(
+        terminalRunState({ status: "error", exitCode: null, exitSignal: null }),
+      ),
+    ).toBe("Failed to start");
+  });
+
+  it("reports a signalled process as killed even when node-pty sends code 0", () => {
+    expect(finished(0, 15)).toEqual({ kind: "killed", signal: 15 });
+    expect(terminalRunStateMessage(finished(0, 15))).toBe("Process killed by SIGTERM");
+  });
+
+  it("ignores a zero signal on a normal exit", () => {
+    expect(finished(0, 0)).toEqual({ kind: "succeeded" });
+    expect(finished(1, 0)).toEqual({ kind: "failed", exitCode: 1 });
+  });
+
+  it("names unknown signals by number", () => {
+    expect(terminalRunStateLabel(finished(null, 31))).toBe("Killed · signal 31");
+  });
+
+  it("writes an exit line only once the process is gone", () => {
+    expect(
+      terminalRunStateMessage(
+        terminalRunState({ status: "running", exitCode: null, exitSignal: null }),
+      ),
+    ).toBeNull();
+    expect(terminalRunStateMessage(finished(0, null))).toBe("Process exited with code 0");
+    expect(terminalRunStateMessage(finished(127, null))).toBe("Process failed with exit code 127");
+  });
+
+  it("shows an alive shell without a foreground command as idle", () => {
+    const shell = { status: "running", exitCode: null, exitSignal: null, owner: "shell" } as const;
+    expect(terminalRunState({ ...shell, hasRunningSubprocess: false })).toEqual({ kind: "idle" });
+    expect(terminalRunState({ ...shell, hasRunningSubprocess: true })).toEqual({ kind: "running" });
+    // An agent command is its own process, so it is running regardless.
+    expect(terminalRunState({ ...shell, owner: "agent", hasRunningSubprocess: false })).toEqual({
+      kind: "running",
+    });
+  });
+});
+
+describe("agentTerminalCounts", () => {
+  it("counts live and failed sessions", () => {
+    const entries = agentTerminalEntries([
+      session({ terminalId: "agent-a", status: "running" }),
+      session({ terminalId: "agent-b", status: "exited", exitCode: 0 }),
+      session({ terminalId: "agent-c", status: "exited", exitCode: 1 }),
+      session({ terminalId: "agent-d", status: "exited", exitCode: 0, exitSignal: 15 }),
+      session({ terminalId: "term-1", status: "running", hasRunningSubprocess: false }),
+    ]);
+    expect(agentTerminalCounts(entries)).toEqual({ total: 5, running: 1, failed: 2 });
+  });
+});
+
+describe("splitAroundSelected", () => {
+  const entries = [{ terminalId: "a" }, { terminalId: "b" }, { terminalId: "c" }];
+
+  it("puts the selected session between the rows above and below it", () => {
+    expect(splitAroundSelected(entries, "b")).toEqual({
+      before: [{ terminalId: "a" }],
+      selected: { terminalId: "b" },
+      after: [{ terminalId: "c" }],
+    });
+  });
+
+  it("falls back to the newest session when the selection is gone", () => {
+    expect(splitAroundSelected(entries, "missing").selected).toEqual({ terminalId: "a" });
+    expect(splitAroundSelected(entries, undefined).before).toEqual([]);
+  });
+
+  it("is empty without sessions", () => {
+    expect(splitAroundSelected([], "a")).toEqual({ before: [], selected: null, after: [] });
   });
 });
