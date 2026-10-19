@@ -488,6 +488,30 @@ describe("buildThreadActionItems", () => {
     ]);
   });
 
+  it("finds agents by name only while searching, outside the recent list", () => {
+    const agent: CommandPaletteActionItem = {
+      kind: "action",
+      value: "agent:env:spawn-ops",
+      searchTerms: ["Spawn Ops", "agent"],
+      title: "Spawn Ops",
+      icon: null,
+      run: async () => undefined,
+    };
+    const search = (query: string) =>
+      filterCommandPaletteGroups({
+        activeGroups: [],
+        query,
+        isInSubmenu: false,
+        projectSearchItems: [],
+        agentSearchItems: [agent],
+        threadSearchItems: [],
+      });
+
+    expect(search("")).toEqual([]);
+    expect(search("spawn")).toEqual([{ value: "agents-search", label: "Agents", items: [agent] }]);
+    expect(search(">spawn")).toEqual([]);
+  });
+
   it("preserves thread project-name matches when there is no stronger title match", () => {
     const group: CommandPaletteGroup = {
       value: "threads-search",

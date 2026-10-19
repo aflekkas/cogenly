@@ -10,6 +10,7 @@ import {
   modelSwitches,
   modelDisplayName,
   resolveAgentModelStatus,
+  agentStatusLabel,
 } from "./agents.logic";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -211,5 +212,39 @@ describe("model availability", () => {
     expect(resolveAgentModelStatus([{ ...codex, models: [] }], pick("gpt-5.4")).status).toBe(
       "unknown",
     );
+  });
+});
+
+describe("agentStatusLabel", () => {
+  const status = (patch: Partial<Pick<AgentContact, "state" | "enabled" | "requests">> = {}) =>
+    agentStatusLabel({ state: "idle", enabled: true, requests: [], ...patch });
+  const request = (kind: "approval" | "question") => ({
+    id: kind,
+    kind,
+    text: kind,
+    createdAt: at(16, 10, 0),
+    canRespond: true,
+  });
+
+  it("calls an enabled agent with nothing running enabled, not active", () => {
+    expect(status()).toBe("Enabled");
+    expect(status({ state: "done" })).toBe("Enabled");
+  });
+
+  it("reports running only while a run is live", () => {
+    expect(status({ state: "thinking" })).toBe("Running");
+    expect(status({ state: "working", enabled: false })).toBe("Running");
+  });
+
+  it("says paused when autonomous triggers are off", () => {
+    expect(status({ enabled: false })).toBe("Paused");
+    expect(status({ state: "asleep", enabled: false })).toBe("Paused");
+  });
+
+  it("puts pending approvals and questions ahead of everything", () => {
+    expect(status({ state: "thinking", requests: [request("approval")] })).toBe("Needs approval");
+    expect(status({ requests: [request("question")] })).toBe("Needs you");
+    // The contact list knows only that a thread is waiting, not on what.
+    expect(status({ state: "blocked", enabled: false })).toBe("Needs you");
   });
 });

@@ -29,9 +29,18 @@ describe("classifySidebarThreadMode", () => {
     expect(classifySidebarThreadMode({ isAgent: false, isScratch: false })).toBe("tasks");
   });
 
-  it("lets a scheduled task binding win over the project", () => {
+  it("lets an agent conversation win over the project", () => {
     expect(classifySidebarThreadMode({ isAgent: true, isScratch: true })).toBe("agents");
     expect(classifySidebarThreadMode({ isAgent: true, isScratch: false })).toBe("agents");
+  });
+
+  it("puts agent work in tasks wherever it runs", () => {
+    expect(classifySidebarThreadMode({ isAgent: true, isScratch: true, isAgentWork: true })).toBe(
+      "tasks",
+    );
+    expect(classifySidebarThreadMode({ isAgent: true, isScratch: false, isAgentWork: true })).toBe(
+      "tasks",
+    );
   });
 });
 
@@ -60,7 +69,7 @@ describe("filterThreadsForSidebarMode", () => {
     thread("env-b", "scratch-agent", "scratch"),
   ];
 
-  it("hides agent work in scratch and project workspaces, retaining conversations", () => {
+  it("lists agent work beside user work and keeps conversations in agents", () => {
     const owned = [
       {
         ...thread("env-a", "scratch-work", "scratch"),
@@ -73,7 +82,10 @@ describe("filterThreadsForSidebarMode", () => {
       },
     ];
     expect(filterThreadsForSidebarMode(owned, "chats", classifier)).toEqual([]);
-    expect(filterThreadsForSidebarMode(owned, "tasks", classifier)).toEqual([]);
+    expect(filterThreadsForSidebarMode(owned, "tasks", classifier).map((t) => t.id)).toEqual([
+      "scratch-work",
+      "project-work",
+    ]);
     expect(filterThreadsForSidebarMode(owned, "agents", classifier).map((t) => t.id)).toEqual([
       "conversation",
     ]);

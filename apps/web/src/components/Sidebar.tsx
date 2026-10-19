@@ -51,6 +51,7 @@ import {
   AlarmClockIcon,
   AlarmClockOffIcon,
   ArrowRightLeftIcon,
+  BotIcon,
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
@@ -901,6 +902,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   scratchMachineLabel: string | null;
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
+  // The agent that started this work thread; null for the user's own threads.
+  workAgentName: string | null;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
@@ -1327,6 +1330,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     title: thread.title,
     statusLabel: topStatus?.label ?? null,
     projectDisplayName: props.projectDisplayName,
+    agentName: props.workAgentName,
     isActive: props.isActive,
   });
 
@@ -1790,6 +1794,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 props.hideProject ? "mt-1" : "mt-0.5",
               )}
             >
+              {/* Work an agent started names the agent ahead of the branch. */}
+              {props.workAgentName ? (
+                <span className="flex min-w-0 max-w-1/2 shrink-0 items-center gap-1 text-muted-foreground/60">
+                  <BotIcon aria-hidden className="size-3 shrink-0" />
+                  <span className="truncate">{props.workAgentName}</span>
+                </span>
+              ) : null}
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
@@ -2196,7 +2207,7 @@ export default function Sidebar() {
       ),
     [projectGroups],
   );
-  // Tasks group under their logical project, so a repository checked out on
+  // Work groups under its logical project, so a repository checked out on
   // two machines reads as one heading.
   const projectGroupKeyByKey = useMemo(
     () =>
@@ -2242,7 +2253,7 @@ export default function Sidebar() {
     () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
     [projectGroups],
   );
-  // Chats | Tasks | Agents: the list below shows one mode's threads at a time.
+  // Chats | Work | Agents: the list below shows one mode's threads at a time.
   const sidebarModes = useSidebarModeState({
     threads,
     projects,
@@ -2348,7 +2359,7 @@ export default function Sidebar() {
           thread,
         );
       }
-      // Chats read newest first under date headings. Tasks keep the inbox
+      // Chats read newest first under date headings. Work keeps the inbox
       // order inside one block per project, busiest project first.
       const sortedInbox = workingShelfEnabled
         ? sortInboxThreadsByReturn(active, inboxReturns.returnedAt)
@@ -4116,6 +4127,13 @@ export default function Sidebar() {
                             `${thread.environmentId}:${thread.projectId}`,
                           ) ?? null
                         }
+                        workAgentName={
+                          thread.source.agent?.role === "work"
+                            ? (sidebarModes.agentNameByKey.get(
+                                `${thread.environmentId}:${thread.source.agent.id}`,
+                              ) ?? null)
+                            : null
+                        }
                         providerEntryByInstanceId={
                           providerEntriesByEnvironment.get(thread.environmentId) ??
                           EMPTY_PROVIDER_ENTRIES
@@ -4167,7 +4185,7 @@ export default function Sidebar() {
                           </SidebarModeGroupLabel>,
                         );
                       }
-                      // Tasks: one heading per project; its cards drop the
+                      // Work: one heading per project; its cards drop the
                       // project line the heading already shows.
                       const projectKey = `${thread.environmentId}:${thread.projectId}` as const;
                       const taskGroupKey =
@@ -4340,7 +4358,7 @@ export default function Sidebar() {
               ) : sidebarMode === "chats" ? (
                 "No chats yet"
               ) : (
-                "No threads yet"
+                "No work yet"
               )}
             </div>
           ) : null}

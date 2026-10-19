@@ -54,7 +54,13 @@ import { Switch } from "~/components/ui/switch";
 import { Textarea } from "~/components/ui/textarea";
 import { Toggle } from "~/components/ui/toggle";
 import { AgentCreatedWithoutTriggerError, useAgents, useAgentsClient } from "./agentsClient";
-import { agentDraft, formatMessageTime, modelDisplayName, sameModel } from "./agents.logic";
+import {
+  agentDraft,
+  agentStatusLabel,
+  formatMessageTime,
+  modelDisplayName,
+  sameModel,
+} from "./agents.logic";
 import type { AgentContact, AgentDraft, AgentTrigger } from "./agents.types";
 
 export function AgentSheet({
@@ -217,6 +223,7 @@ function AgentDetailsContent({
   const saveProfile = (patch: ProfilePatch) =>
     mutate(() => client.save(agent.environmentId, { ...agentDraft(agent), ...patch }));
   const close = () => setEditing(null);
+  const status = agentStatusLabel(agent);
   const isEditing = (kind: string, id?: string) =>
     editing?.kind === kind && (id === undefined || ("id" in editing && editing.id === id));
   return (
@@ -237,9 +244,7 @@ function AgentDetailsContent({
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="truncate text-sm font-medium text-foreground">{agent.name}</span>
             <span className="line-clamp-2 text-xs text-muted-foreground">
-              {agent.enabled
-                ? "Always close. Ready when you are."
-                : agent.pauseReason || "Paused. Your conversation stays here."}
+              {status === "Paused" && agent.pauseReason ? `Paused · ${agent.pauseReason}` : status}
             </span>
           </span>
           <ThreadDetailsControl

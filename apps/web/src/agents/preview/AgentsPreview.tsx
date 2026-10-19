@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PlusIcon, MessageCircleIcon, CheckCheckIcon } from "lucide-react";
+import { PlusIcon, MessageCircleIcon, CodeXmlIcon } from "lucide-react";
 import { AgentContacts } from "../AgentContacts";
 import { AgentConversation } from "../AgentConversation";
 import { CreateAgent } from "../AgentDetails";
@@ -45,8 +45,8 @@ function PreviewContent() {
             Chats
           </span>
           <span>
-            <CheckCheckIcon size={13} />
-            Tasks
+            <CodeXmlIcon size={13} />
+            Work
           </span>
           <span data-selected="true">Agents</span>
         </div>

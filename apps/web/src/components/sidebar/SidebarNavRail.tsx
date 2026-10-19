@@ -1,18 +1,19 @@
 /**
  * The navigation rail: a narrow icon column at the window's left edge, beside
- * the thread list. Chats, Tasks and Agents switch the list from the top;
- * Usage and Settings sit at the bottom. It stays put while the list collapses,
- * so modes and settings remain one click away.
+ * the thread list. Chats, Work and Agents switch the list from the top;
+ * Search, Usage and Settings sit at the bottom. It stays put while the list
+ * collapses, so modes, search and settings remain one click away.
  *
  * Mobile keeps the segmented control inside the sheet instead (see
  * SidebarModeSwitcher), so the rail renders only on wider windows.
  */
 import { useAtomValue } from "@effect/atom-react";
 import { PanelLeft, PanelLeftClose } from "lucide";
-import { ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import { ChartNoAxesColumnIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactElement, useRef } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
+import { openCommandPalette } from "../../commandPaletteBus";
 import { isElectron } from "../../env";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { cn } from "../../lib/utils";
@@ -59,6 +60,7 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
   const toggleShortcut = shortcutLabelForCommand(keybindings, "sidebar.toggle", {
     context: { usagePageOpen: onUsage },
   });
+  const searchShortcut = shortcutLabelForCommand(keybindings, "commandPalette.toggle");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const selectMode = (next: SidebarMode) => {
@@ -165,6 +167,19 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
       </div>
       <div className="flex-1" />
       <div className="flex flex-col items-center gap-1">
+        {/* Search is the command palette: it finds threads in every mode,
+            agents, projects and settings, so it lives outside the modes. */}
+        <RailTooltip label={searchShortcut ? `Search (${searchShortcut})` : "Search"}>
+          <button
+            type="button"
+            aria-label="Search"
+            aria-haspopup="dialog"
+            onClick={() => openCommandPalette()}
+            className={cn(RAIL_BUTTON_CLASS, railButtonTone(false))}
+          >
+            <SearchIcon aria-hidden />
+          </button>
+        </RailTooltip>
         <RailTooltip label="Usage">
           <button
             type="button"

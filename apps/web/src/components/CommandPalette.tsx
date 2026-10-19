@@ -54,6 +54,7 @@ import {
 import { useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
+  BotIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
   ChevronRightIcon,
@@ -74,6 +75,12 @@ import {
   TextSearchIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
+import { requestAgentCreation } from "../agents/AgentsCreateHost";
+import { agentStatusLabel } from "../agents/agents.logic";
+import { useAgentsIfProvided } from "../agents/agentsClient";
+import { isSidebarUtilityPage, useNavigateToMainApp } from "./sidebar/mainAppLocation";
+import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
+import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES } from "./sidebar/modes/sidebarModes.logic";
 import {
   useCallback,
   useDeferredValue,
@@ -643,6 +650,9 @@ function OpenCommandPaletteDialog(props: {
     }
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const setSidebarMode = useUiStateStore((store) => store.setSidebarMode);
+  const navigateToMainApp = useNavigateToMainApp();
+  const agents = useAgentsIfProvided();
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { appearanceMode, setAppearanceMode } = useTheme();
@@ -1158,6 +1168,28 @@ function OpenCommandPaletteDialog(props: {
       projectEnvironmentLocationById,
       projectGroupByTargetKey,
     ],
+  );
+
+  // Opening an agent opens its conversation; the sidebar follows into Agents.
+  const agentSearchItems = useMemo(
+    (): CommandPaletteActionItem[] =>
+      agents.map((agent) => ({
+        kind: "action",
+        value: `agent:${agent.environmentId}:${agent.id}`,
+        searchTerms: [agent.name, "agent"],
+        title: agent.name,
+        description: agentStatusLabel(agent),
+        icon: <BotIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(
+              scopeThreadRef(agent.environmentId, agent.conversationThreadId),
+            ),
+          });
+        },
+      })),
+    [agents, navigate],
   );
 
   const projectThreadItems = useMemo(() => {
@@ -1768,6 +1800,36 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  actionItems.push({
+    kind: "action",
+    value: "action:new-agent",
+    searchTerms: ["new agent", "create agent", "agent", "bot"],
+    title: "New agent",
+    icon: <BotIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      requestAgentCreation(activeThread?.environmentId ?? primaryEnvironmentId);
+    },
+  });
+
+  for (const mode of SIDEBAR_MODES) {
+    const ModeIcon = SIDEBAR_MODE_ICONS[mode];
+    const label = SIDEBAR_MODE_LABELS[mode];
+    actionItems.push({
+      kind: "action",
+      value: `action:sidebar-mode:${mode}`,
+      // "tasks" keeps old muscle memory finding Work.
+      searchTerms: [`show ${label}`, "sidebar", "mode", ...(mode === "tasks" ? ["tasks"] : [])],
+      title: `Show ${label}`,
+      icon: <ModeIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: `sidebar.mode.${mode}`,
+      run: async () => {
+        setSidebarMode(mode);
+        // As from the rail: a utility page hands the column back to the list.
+        if (isSidebarUtilityPage(pathname)) await navigateToMainApp();
+      },
+    });
+  }
+
   if (activeThreadId && supportsThreadFind) {
     actionItems.push({
       kind: "action",
@@ -2108,6 +2170,7 @@ function OpenCommandPaletteDialog(props: {
     query: deferredQuery,
     isInSubmenu: currentView !== null,
     projectSearchItems: projectSearchItems,
+    agentSearchItems,
     settingsSearchItems,
     threadSearchItems:
       linkedThreadSearch?.linkedThreads && deferredQuery === linkedThreadSearch.query

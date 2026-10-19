@@ -15,7 +15,7 @@ const NEW_ITEM_LABELS: Record<SidebarMode, string> = {
 
 /**
  * Creation and navigation that differ by mode: the header's new button makes a
- * scratch chat in Chats and an agent in Agents (Tasks keeps the
+ * scratch chat in Chats and an agent in Agents (Work keeps the
  * sidebar's own new-thread flow).
  */
 export function useSidebarModeActions(input: {
@@ -50,7 +50,7 @@ export function useSidebarModeActions(input: {
 
   return {
     newItemLabel: NEW_ITEM_LABELS[mode],
-    /** Null in Tasks, where the sidebar's existing new-thread handler applies. */
+    /** Null in Work, where the sidebar's existing new-thread handler applies. */
     createInMode: mode === "chats" ? startChat : mode === "agents" ? createAgent : null,
     createAgent,
     openAgentTask,

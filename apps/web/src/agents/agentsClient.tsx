@@ -92,6 +92,18 @@ export function useAgents() {
   const agents = useMemo(() => sortAgentContacts(snapshot.agents), [snapshot.agents]);
   return { ...snapshot, agents };
 }
+const NO_AGENTS: AgentsSnapshot = { agents: [], models: [], loading: false, error: null };
+const subscribeToNothing = () => () => {};
+const readNoAgents = () => NO_AGENTS;
+/** Agents for surfaces that also render outside the provider, such as the welcome wizard's palette. */
+export function useAgentsIfProvided(): ReadonlyArray<AgentContact> {
+  const client = useContext(ClientContext);
+  const snapshot = useSyncExternalStore(
+    client?.subscribe ?? subscribeToNothing,
+    client?.getSnapshot ?? readNoAgents,
+  );
+  return useMemo(() => sortAgentContacts(snapshot.agents), [snapshot.agents]);
+}
 export function useAgent(key: string | null) {
   return useAgents().agents.find((agent) => agentContactKey(agent) === key) ?? null;
 }

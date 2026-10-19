@@ -31,6 +31,8 @@ export interface SidebarModeState {
   /** Project keys whose new-thread drafts belong in the current mode; null for all. */
   readonly draftProjectKeys: ReadonlySet<string> | null;
   readonly agentsNeedingYou: number;
+  /** Agent names by `environmentId:agentId`, for marking the Work an agent started. */
+  readonly agentNameByKey: ReadonlyMap<string, string>;
 }
 
 /**
@@ -98,6 +100,11 @@ export function useSidebarModeState(input: {
     return new Set(keys);
   }, [mode, projects, scopedProjectKeys, scratchProjectKeys]);
 
+  const agentNameByKey = useMemo(
+    () => new Map(agents.map((agent) => [`${agent.environmentId}:${agent.id}`, agent.name])),
+    [agents],
+  );
+
   const agentsNeedingYou = useMemo(
     () => agents.filter((agent) => agent.state === "blocked" || agent.state === "needsYou").length,
     [agents],
@@ -116,11 +123,7 @@ export function useSidebarModeState(input: {
       ) ?? null
     );
   }, [routeThreadRef, threads]);
-  const routeThreadMode = routeThread?.source.agent
-    ? "agents"
-    : routeThread
-      ? sidebarModeForThread(routeThread, classifier)
-      : null;
+  const routeThreadMode = routeThread ? sidebarModeForThread(routeThread, classifier) : null;
   const routeThreadKey = routeThread
     ? sidebarModeThreadKey(routeThread.environmentId, routeThread.id)
     : null;
@@ -142,5 +145,5 @@ export function useSidebarModeState(input: {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [keybindings, setMode]);
 
-  return { mode, setMode, modeThreads, draftProjectKeys, agentsNeedingYou };
+  return { mode, setMode, modeThreads, draftProjectKeys, agentsNeedingYou, agentNameByKey };
 }

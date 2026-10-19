@@ -101,7 +101,7 @@ export function SidebarBrandWidthProbe({
   );
 }
 
-// The header names where you are (Chats, Tasks, Agents, Settings or Usage) rather than the app.
+// The header names where you are (Chats, Work, Agents, Settings or Usage) rather than the app.
 function useSidebarTitle(): string {
   const mode = useUiStateStore((store) => store.sidebarMode);
   const pathname = useLocation({ select: (location) => location.pathname });
