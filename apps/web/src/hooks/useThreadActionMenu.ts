@@ -1,5 +1,6 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
+import { requestStartWork } from "../components/work/StartWorkDialog";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
@@ -146,6 +147,7 @@ export function useThreadActionMenu(input: {
         const items = buildThreadActionMenuItems({
           canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
           branch: thread.branch ?? null,
+          canStartWork: thread.source.agent === undefined,
           isSettled: supports.settlement && thread.settledOverride === "settled",
           autoSettleEnabled: thread.autoSettleDisabledAt == null,
           isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
@@ -222,6 +224,9 @@ export function useThreadActionMenu(input: {
             }
             return;
           }
+          case "start-work":
+            requestStartWork(threadRef);
+            return;
           case "settle":
             await reportFailure("Failed to settle thread", () => settleThread(threadRef));
             return;

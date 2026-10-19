@@ -8,6 +8,7 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
  */
 export type ThreadActionMenuId =
   | "new-thread-on-branch"
+  | "start-work"
   | "project-settings"
   | "settle"
   | "unsettle"
@@ -69,6 +70,8 @@ export function buildDraftActionMenuItems(options: {
 export interface ThreadActionMenuState {
   readonly canOperate: boolean;
   readonly branch: string | null;
+  /** Hand the thread off to a new Work session; agent conversations do not offer it. */
+  readonly canStartWork?: boolean;
   readonly isSettled: boolean;
   /** False while the user has turned automatic settlement off for this thread. */
   readonly autoSettleEnabled: boolean;
@@ -117,6 +120,9 @@ export function buildThreadActionMenuItems(
             icon: "message-square-plus",
           },
         ]
+      : []),
+    ...(state.canStartWork
+      ? [{ id: "start-work" as const, label: "Start Work…", icon: "code" }]
       : []),
     ...(state.supports.settlement
       ? [

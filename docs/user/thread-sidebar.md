@@ -17,12 +17,27 @@ while an agent is busy use its normal queue or steering behavior.
 Coding work an agent starts appears in **Work** with your own threads, under its
 project and marked with the agent's name.
 
+## Start Work from a chat
+
+When a chat turns into a coding task, choose **Start Work…** from the thread's title
+menu or right-click menu, run **Start Work from this thread** in the command palette,
+or press `mod+alt+s`. Cogenly drafts a title and scope from the conversation and
+suggests a repository. Edit any of them, then choose a new worktree or the local
+checkout and, optionally, a different model. The session starts from the scope you
+approved, with a link back to the chat rather than the whole transcript.
+
+The chat keeps a **Work started** line for each session it handed off. The session's
+header shows the chat or agent it came from and its status, such as **Running**,
+**Needs input**, or **Ready for review**. You don't need to return to the chat.
+
 ## Start a thread
 
 On web and desktop, a new thread keeps the current project and carries your model
 and mode selections, unless the destination project has its own model default.
-Its branch and workspace mode come from your configured defaults. To continue in
-an existing worktree, use **New thread in this worktree** from the branch toolbar.
+Its branch and workspace mode come from your configured defaults. In **Work**,
+**New work** starts in a new worktree unless the project, its `t3.json`, or
+Settings choose a workspace mode. To continue in an existing worktree, use
+**New thread in this worktree** from the branch toolbar.
 
 When you change a new thread's project, Cogenly stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.

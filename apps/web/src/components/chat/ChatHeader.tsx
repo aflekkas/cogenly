@@ -38,6 +38,7 @@ import {
   WorkspaceBreadcrumbText,
 } from "../WorkspaceBreadcrumb";
 import { observeResize } from "~/lib/observeResize";
+import { WorkThreadHeaderMeta } from "../work/WorkThreadHeaderMeta";
 import { cn } from "~/lib/utils";
 
 interface ChatHeaderProps {
@@ -445,6 +446,9 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      {isServerThread ? (
+        <WorkThreadHeaderMeta threadRef={activeThreadRef} onOpenThread={onOpenThread} />
+      ) : null}
     </div>
   );
 });

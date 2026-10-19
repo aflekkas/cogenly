@@ -408,6 +408,7 @@ import {
   useEnvironmentSupportsServerBrowser,
   useProject,
   useProjects,
+  readThreadShell,
   useThreadProjection,
   useThreadStatus,
   useThreadHistory,
@@ -467,6 +468,8 @@ import {
 } from "./chat/QueuedRunsControl";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
+import { requestStartWork } from "./work/StartWorkDialog";
+import { WorkHandoffLines } from "./work/WorkHandoffLines";
 import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
@@ -6136,6 +6139,23 @@ export default function ChatView(props: ChatViewProps) {
     isUnsnoozing,
     nowMinute,
   ]);
+  // Work this chat started, one line each ahead of the thread's own state line.
+  const activeThreadWorkHandoffs = activeThreadShell?.source.workHandoffs;
+  const threadFooterLines = useMemo(
+    () =>
+      activeThreadWorkHandoffs?.length ? (
+        <>
+          <WorkHandoffLines
+            links={activeThreadWorkHandoffs}
+            onOpenThread={onOpenRelatedThreadStable}
+          />
+          {threadStatusLine}
+        </>
+      ) : (
+        threadStatusLine
+      ),
+    [activeThreadWorkHandoffs, onOpenRelatedThreadStable, threadStatusLine],
+  );
   const activeThreadHasCompactableConversation = serverVisibleTurnItems.some(
     ({ item }) =>
       item.type === "user_message" &&
@@ -6444,6 +6464,21 @@ export default function ChatView(props: ChatViewProps) {
             }),
           );
         });
+        return;
+      }
+
+      if (command === "thread.startWork") {
+        event.preventDefault();
+        event.stopPropagation();
+        // Agent conversations hand work off through the agent, not this dialog.
+        if (
+          !event.repeat &&
+          isServerThread &&
+          activeThreadRef &&
+          !readThreadShell(activeThreadRef)?.source.agent
+        ) {
+          requestStartWork(activeThreadRef);
+        }
         return;
       }
 
@@ -9620,7 +9655,7 @@ export default function ChatView(props: ChatViewProps) {
                 isPreparingWorktree={!paintOnlyDisplayedTimeline && isPreparingWorktree}
                 footer={
                   paintOnlyDisplayedTimeline ? null : pendingHandoff === null ? (
-                    threadStatusLine
+                    threadFooterLines
                   ) : (
                     <>
                       <div className="chat-content-lane">
@@ -9630,7 +9665,7 @@ export default function ChatView(props: ChatViewProps) {
                           pending
                         />
                       </div>
-                      {threadStatusLine}
+                      {threadFooterLines}
                     </>
                   )
                 }

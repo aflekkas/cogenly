@@ -158,6 +158,8 @@ through the pages you have visited, like a browser's back and forward buttons.
 `chat.newLocal` skips that chooser. Both use your
 [new-thread defaults](./thread-sidebar.md#start-a-thread). `chat.newWithoutProject`
 (`mod+alt+n`) starts a thread [without a project](./thread-sidebar.md#start-without-a-project).
+`thread.startWork` (`mod+alt+s`) hands the open chat to a new
+[Work session](./thread-sidebar.md#start-work-from-a-chat).
 
 ## Reserved shortcuts
 

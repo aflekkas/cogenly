@@ -10,6 +10,8 @@ import {
 } from "./chat/threadContextDrag";
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
+import { requestStartWork } from "./work/StartWorkDialog";
+import { WorkRowStatusMarker } from "./work/WorkRowStatusMarker";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as Schema from "effect/Schema";
@@ -904,6 +906,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   projectDisplayName: string | null;
   // The agent that started this work thread; null for the user's own threads.
   workAgentName: string | null;
+  // Work rows add how their last run ended (paused, canceled) to the meta line.
+  showWorkStatus: boolean;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
@@ -1826,6 +1830,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 <span className="flex-1" />
               )}
               {terminalStatusIcon}
+              {props.showWorkStatus ? <WorkRowStatusMarker thread={thread} /> : null}
 
               {diff ? (
                 <span className="shrink-0 font-mono">
@@ -3606,6 +3611,7 @@ export default function Sidebar() {
                 AuthOrchestrationOperateScope,
               ),
               branch: thread.branch ?? null,
+              canStartWork: thread.source.agent === undefined,
               isSettled,
               autoSettleEnabled: thread.autoSettleDisabledAt == null,
               isSnoozed,
@@ -3664,6 +3670,9 @@ export default function Sidebar() {
             }
             return;
           }
+          case "start-work":
+            requestStartWork(threadRef);
+            return;
           case "settle":
             attemptSettle(threadRef);
             return;
@@ -4127,6 +4136,7 @@ export default function Sidebar() {
                             `${thread.environmentId}:${thread.projectId}`,
                           ) ?? null
                         }
+                        showWorkStatus={sidebarMode === "tasks"}
                         workAgentName={
                           thread.source.agent?.role === "work"
                             ? (sidebarModes.agentNameByKey.get(

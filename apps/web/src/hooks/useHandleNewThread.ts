@@ -45,6 +45,7 @@ import { readT3ProjectFile } from "../lib/t3ProjectFileDefaults";
 import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
+import { workPrefersNewWorktree } from "../components/work/work.logic";
 import { useClientSettings } from "./useSettings";
 
 interface NewThreadWorkspaceOptions {
@@ -169,13 +170,25 @@ export function useNewThreadHandler() {
         const projectFile = consultProjectFile
           ? await readT3ProjectFile(project.environmentId, project.workspaceRoot)
           : null;
+        const resolvedProjectSettings = resolveProjectSettings(
+          targetServerSettings,
+          project?.id ?? null,
+          project,
+          projectFile,
+        );
+        const preferWorktree = workPrefersNewWorktree({
+          inWorkMode: useUiStateStore.getState().sidebarMode === "tasks",
+          isScratch: project?.isScratch === true,
+          environmentDefault: targetServerSettings.defaultThreadEnvMode,
+          resolvedSource: resolvedProjectSettings.sources.defaultThreadEnvMode,
+        });
         return resolveNewThreadEnvMode({
-          projectSettings: resolveProjectSettings(
-            targetServerSettings,
-            project?.id ?? null,
-            project,
-            projectFile,
-          ),
+          projectSettings: preferWorktree
+            ? {
+                ...resolvedProjectSettings,
+                settings: { ...resolvedProjectSettings.settings, defaultThreadEnvMode: "worktree" },
+              }
+            : resolvedProjectSettings,
           workspaceRoot: project?.workspaceRoot ?? null,
           newProjectsRoot: environmentServerConfigs.get(projectRef.environmentId)?.newProjectsRoot,
           projectHasThreads: readThreadShells().some(

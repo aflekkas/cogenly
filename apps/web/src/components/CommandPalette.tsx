@@ -58,6 +58,7 @@ import {
   ChartNoAxesColumnIcon,
   CheckIcon,
   ChevronRightIcon,
+  CodeIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderGit2Icon,
@@ -76,6 +77,7 @@ import {
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
 import { requestAgentCreation } from "../agents/AgentsCreateHost";
+import { requestStartWork } from "./work/StartWorkDialog";
 import { agentStatusLabel } from "../agents/agents.logic";
 import { useAgentsIfProvided } from "../agents/agentsClient";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./sidebar/mainAppLocation";
@@ -620,6 +622,9 @@ function OpenCommandPaletteDialog(props: {
     : null;
   const activeThreadServerConfig = useServerConfigs().get(
     activeThread?.environmentId ?? ("" as EnvironmentId),
+  );
+  const canStartWork = useAtomValue(
+    serverEnvironment.startWork.permissionAtom(activeThread?.environmentId ?? null),
   );
   const activeThreadReferenceCopyTarget =
     referenceThreadRef === null
@@ -1905,6 +1910,21 @@ function OpenCommandPaletteDialog(props: {
       icon: <LinkIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.copyReference",
       run: copyActiveThreadReference,
+    });
+  }
+
+  if (referenceThreadRef !== null && activeThread?.source.agent === undefined && canStartWork) {
+    const threadRef = referenceThreadRef;
+    actionItems.push({
+      kind: "action",
+      value: "action:start-work",
+      searchTerms: ["start work", "hand off", "handoff", "coding session", "repository", "repo"],
+      title: "Start Work from this thread",
+      icon: <CodeIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "thread.startWork",
+      run: async () => {
+        requestStartWork(threadRef);
+      },
     });
   }
 

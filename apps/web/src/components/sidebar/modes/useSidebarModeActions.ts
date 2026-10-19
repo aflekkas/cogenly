@@ -9,7 +9,7 @@ import type { SidebarMode } from "./sidebarModes.logic";
 
 const NEW_ITEM_LABELS: Record<SidebarMode, string> = {
   chats: "New chat",
-  tasks: "New thread",
+  tasks: "New work",
   agents: "New agent",
 };
 
