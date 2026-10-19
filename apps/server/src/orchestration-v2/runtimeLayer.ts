@@ -1,3 +1,4 @@
+import * as WorkHandoff from "../work/WorkHandoffService.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
@@ -278,6 +279,16 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
     ),
   ),
 );
+const layerWorkHandoffProvided = WorkHandoff.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerThreadLaunchProvided,
+      layerThreadManagementProvided,
+      layerProjectService,
+      AgentStore.layer,
+    ),
+  ),
+);
 const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
@@ -378,6 +389,7 @@ export const layerProduction = Layer.mergeAll(
   layerProjectService,
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
+  layerWorkHandoffProvided,
   layerThreadLifecycleProvided,
   layerAgentsProvided,
   AgentStore.layer,

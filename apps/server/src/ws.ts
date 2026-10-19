@@ -1,3 +1,4 @@
+import * as WorkHandoff from "./work/WorkHandoffService.ts";
 import * as Agents from "./agents/AgentService.ts";
 import * as AgentStore from "./agents/AgentStore.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
@@ -1106,6 +1107,7 @@ const layerWsRpc = (
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
       const intakeContext = yield* Effect.context<
         | ThreadManagementService.ThreadManagementService
+        | WorkHandoff.WorkHandoffService
         | ThreadLaunchService.ThreadLaunchService
         | FileSystem.FileSystem
         | ServerConfig.ServerConfig
@@ -1133,6 +1135,7 @@ const layerWsRpc = (
         }
       };
       const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
+      const workHandoff = yield* WorkHandoff.WorkHandoffService;
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
       const agents = yield* Agents.AgentService;
       const agentStore = yield* AgentStore.AgentStore;
@@ -1639,6 +1642,9 @@ const layerWsRpc = (
               Effect.as(commandOutputHub.subscribe(input)),
             ),
           ),
+        [WS_METHODS.workStart]: (input) => workHandoff.start(input),
+        [WS_METHODS.workProposeHandoff]: (input) =>
+          workHandoff.proposeHandoff(input.sourceThreadId),
         [WS_METHODS.agentsList]: () => agents.list(),
         [WS_METHODS.agentsSubscribe]: () => agents.subscribe(),
         [WS_METHODS.agentsUpsert]: (input) => agents.upsert(input),

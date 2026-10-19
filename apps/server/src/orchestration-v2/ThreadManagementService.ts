@@ -93,6 +93,8 @@ export function existingThreadIdsForCommand(
     case "thread.visit":
     case "thread.mark-unread":
       return [];
+    case "work.handoff.record":
+      return [command.threadId, command.targetThreadId];
     case "thread.fork":
       return [command.sourceThreadId];
     case "thread.merge_back":

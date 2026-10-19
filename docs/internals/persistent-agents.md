@@ -5,9 +5,9 @@ Provider sessions and background work threads are execution details. The convers
 application thread ID survives native session rotation. The contracts are in
 [`agent.ts`](../../packages/contracts/src/agent.ts); `agents.*` WebSocket RPCs and the
 existing `scheduledTasks.*` RPCs are the client surface. Set a trigger's `agentId` to
-attach it. Thread shells expose `agent: { id, role }`; clients should hide `role: "work"`
-from ordinary chat/task lists and open the work thread from `agents.runs` or a
-conversation message's `senderThreadId`. Migrated conversations retain their old ID
+attach it. Thread shells expose `agent: { id, role }`; clients show `role: "work"`
+as ordinary Work sessions with agent provenance. They are also reachable from
+`agents.runs` or a conversation message's `senderThreadId`. Migrated conversations retain their old ID
 and may lack the shell annotation; agent records are authoritative.
 
 The scheduler's success means dispatch succeeded, as before. Actual provider completion

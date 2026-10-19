@@ -75,6 +75,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverReportClientActivity]: "server",
   [WS_METHODS.serverReportHostPowerState]: "server",
   [WS_METHODS.serverGetBackgroundPolicy]: "server",
+  [WS_METHODS.workStart]: "work",
+  [WS_METHODS.workProposeHandoff]: "work",
   [WS_METHODS.agentsList]: "agents",
   [WS_METHODS.agentsSubscribe]: "agents",
   [WS_METHODS.agentsUpsert]: "agents",

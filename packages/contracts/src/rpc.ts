@@ -1,3 +1,4 @@
+import * as Work from "./work.ts";
 import * as Agents from "./agent.ts";
 import {
   OrchestrationV2SearchThreadError,
@@ -480,6 +481,8 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Persistent agents and their scheduled-task triggers
+  workStart: "work.start",
+  workProposeHandoff: "work.proposeHandoff",
   agentsList: "agents.list",
   agentsSubscribe: "agents.subscribe",
   agentsUpsert: "agents.upsert",
@@ -1694,6 +1697,17 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const WsWorkStartRpc = Rpc.make(WS_METHODS.workStart, {
+  payload: Work.WorkStartInput,
+  success: Work.WorkStartResult,
+  error: Schema.Union([Work.WorkHandoffError, EnvironmentAuthorizationError]),
+});
+const WsWorkProposeHandoffRpc = Rpc.make(WS_METHODS.workProposeHandoff, {
+  payload: Work.WorkProposeHandoffInput,
+  success: Work.WorkHandoffDraft,
+  error: Schema.Union([Work.WorkHandoffError, EnvironmentAuthorizationError]),
+});
+
 const WsAgentsListRpc = Rpc.make(WS_METHODS.agentsList, {
   payload: Schema.Struct({}),
   success: Agents.AgentListResult,
@@ -1888,6 +1902,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
+  WsWorkStartRpc,
+  WsWorkProposeHandoffRpc,
   WsAgentsListRpc,
   WsAgentsSubscribeRpc,
   WsAgentsUpsertRpc,
