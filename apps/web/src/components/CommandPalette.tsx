@@ -1862,7 +1862,7 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
-  // Projects are context tags; their home is Settings → Projects.
+  // Projects are context tags; their home is the Projects sidebar and /project.
   actionItems.push({
     kind: "action",
     value: "action:new-project-label",
@@ -1870,7 +1870,13 @@ function OpenCommandPaletteDialog(props: {
     title: "New project",
     icon: <TagIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
-      await navigate({ to: "/settings/project-tags", search: { create: true } });
+      await navigate({
+        to: "/project",
+        search: {
+          create: true,
+          ...(activeThread?.environmentId ? { environmentId: activeThread.environmentId } : {}),
+        },
+      });
     },
   });
   actionItems.push({
@@ -1880,7 +1886,7 @@ function OpenCommandPaletteDialog(props: {
     title: "Manage projects",
     icon: <TagIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
-      await navigate({ to: "/settings/project-tags" });
+      await navigate({ to: "/project" });
     },
   });
   if (activeThreadId) {

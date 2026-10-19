@@ -4,11 +4,16 @@ import { Badge } from "../components/ui/badge";
 import { cn } from "../lib/utils";
 import { projectLabelColorValue } from "./projectLabels.logic";
 
-/** A project shown as a tag. Suggested tags are outlined until the user confirms them. */
+/**
+ * A project shown as a tag. Suggested tags are outlined until the user
+ * confirms them. `dot` leads with the color dot, for dense rows where the
+ * tint alone reads faintly.
+ */
 export function ProjectTag(props: {
   name: string;
   color: string | undefined;
   suggested?: boolean;
+  dot?: boolean;
   className?: string;
 }) {
   return (
@@ -18,6 +23,7 @@ export function ProjectTag(props: {
       className={cn("min-w-0 max-w-28", props.className)}
       style={{ "--label": projectLabelColorValue(props.color) } as CSSProperties}
     >
+      {props.dot ? <ProjectColorDot color={props.color} className="size-1.5" /> : null}
       <span className="min-w-0 truncate">{props.name}</span>
     </Badge>
   );

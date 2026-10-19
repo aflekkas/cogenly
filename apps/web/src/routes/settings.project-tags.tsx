@@ -1,16 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import {
-  ProjectLabelsSettings,
-  validateProjectLabelsSettingsSearch,
-} from "../components/settings/ProjectLabelsSettings";
+import { validateProjectsOverviewSearch } from "../components/projects/ProjectsOverview";
 
-function SettingsProjectTagsRoute() {
-  const search = Route.useSearch();
-  return <ProjectLabelsSettings {...search} />;
-}
-
+// Projects moved out of Settings into the sidebar; old links land on the overview.
 export const Route = createFileRoute("/settings/project-tags")({
-  validateSearch: validateProjectLabelsSettingsSearch,
-  component: SettingsProjectTagsRoute,
+  validateSearch: validateProjectsOverviewSearch,
+  beforeLoad: ({ search }) => {
+    throw redirect({ to: "/project", search, replace: true });
+  },
 });

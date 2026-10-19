@@ -205,7 +205,10 @@ export function useGlobalSearchGroups(input: {
           return;
         }
         case "project":
-          await navigate({ to: "/settings/project-tags" });
+          await navigate({
+            to: "/project/$environmentId/$labelId",
+            params: { environmentId: target.environmentId, labelId: target.labelId },
+          });
           return;
         case "memory":
           await navigate({ to: "/settings/memory" });

@@ -11,11 +11,12 @@ const NEW_ITEM_LABELS: Record<SidebarMode, string> = {
   chats: "New chat",
   tasks: "New work",
   agents: "New agent",
+  projects: "New project",
 };
 
 /**
  * Creation and navigation that differ by mode: the header's new button makes a
- * scratch chat in Chats and an agent in Agents (Work keeps the
+ * scratch chat in Chats, an agent in Agents and a project in Projects (Work keeps the
  * sidebar's own new-thread flow).
  */
 export function useSidebarModeActions(input: {
@@ -38,6 +39,17 @@ export function useSidebarModeActions(input: {
     requestAgentCreation(currentEnvironmentId);
   }, [currentEnvironmentId, isMobile, setOpenMobile]);
 
+  const createProject = useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+    void router.navigate({
+      to: "/project",
+      search: {
+        create: true,
+        ...(currentEnvironmentId !== null ? { environmentId: currentEnvironmentId } : {}),
+      },
+    });
+  }, [currentEnvironmentId, isMobile, router, setOpenMobile]);
+
   const openAgentTask = useCallback(
     (environmentId: EnvironmentId, taskId: ScheduledTaskId) => {
       if (isMobile) setOpenMobile(false);
@@ -49,9 +61,17 @@ export function useSidebarModeActions(input: {
   return {
     newItemLabel: NEW_ITEM_LABELS[mode],
     /** Null in Work, where the sidebar's existing new-thread handler applies. */
-    createInMode: mode === "chats" ? startChat : mode === "agents" ? createAgent : null,
+    createInMode:
+      mode === "chats"
+        ? startChat
+        : mode === "agents"
+          ? createAgent
+          : mode === "projects"
+            ? createProject
+            : null,
     startChat,
     createAgent,
+    createProject,
     openAgentTask,
   };
 }

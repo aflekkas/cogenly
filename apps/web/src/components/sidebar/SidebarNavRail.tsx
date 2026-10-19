@@ -1,6 +1,6 @@
 /**
  * The navigation rail: a narrow icon column at the window's left edge, beside
- * the thread list. Chats, Work and Agents switch the list from the top;
+ * the thread list. Chats, Work, Agents and Projects switch the list from the top;
  * Search, Usage and Settings sit at the bottom. It stays put while the list
  * collapses, so modes, search and settings remain one click away.
  *

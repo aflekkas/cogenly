@@ -22,7 +22,48 @@ const MODE_BY_COMMAND: Record<string, SidebarMode> = {
   "sidebar.mode.chats": "chats",
   "sidebar.mode.tasks": "tasks",
   "sidebar.mode.agents": "agents",
+  "sidebar.mode.projects": "projects",
 };
+
+/**
+ * Which mode lists each thread: agent conversations, scratch chats, or Work.
+ * Shared by the sidebar and the project view so both sort threads alike.
+ */
+export function useSidebarModeClassifier(input: {
+  readonly threads: ReadonlyArray<EnvironmentThreadShell>;
+  readonly projects: ReadonlyArray<EnvironmentProject>;
+  readonly serverConfigs: ReadonlyMap<EnvironmentId, { readonly scratchWorkspaceRoot?: string }>;
+}) {
+  const { threads, projects, serverConfigs } = input;
+  const { agents } = useAgents();
+  const scratchProjectKeys = useMemo(
+    () =>
+      new Set(
+        projects
+          .filter(
+            (project) =>
+              project.isScratch === true ||
+              isScratchProject(
+                project,
+                serverConfigs.get(project.environmentId)?.scratchWorkspaceRoot,
+              ),
+          )
+          .map((project) => `${project.environmentId}:${project.id}`),
+      ),
+    [projects, serverConfigs],
+  );
+  const classifier = useMemo((): SidebarModeThreadClassifier => {
+    const agentThreadKeys = new Set(
+      agents.map((agent) => sidebarModeThreadKey(agent.environmentId, agent.conversationThreadId)),
+    );
+    for (const thread of threads) {
+      if (thread.source.agent?.role === "conversation")
+        agentThreadKeys.add(sidebarModeThreadKey(thread.environmentId, thread.id));
+    }
+    return { agentThreadKeys, scratchProjectKeys };
+  }, [agents, scratchProjectKeys, threads]);
+  return { classifier, scratchProjectKeys };
+}
 
 export interface SidebarModeState {
   readonly mode: SidebarMode;
@@ -58,33 +99,11 @@ export function useSidebarModeState(input: {
   const setMode = useUiStateStore((store) => store.setSidebarMode);
 
   const { agents } = useAgents();
-
-  const scratchProjectKeys = useMemo(
-    () =>
-      new Set(
-        projects
-          .filter(
-            (project) =>
-              project.isScratch === true ||
-              isScratchProject(
-                project,
-                serverConfigs.get(project.environmentId)?.scratchWorkspaceRoot,
-              ),
-          )
-          .map((project) => `${project.environmentId}:${project.id}`),
-      ),
-    [projects, serverConfigs],
-  );
-  const classifier = useMemo((): SidebarModeThreadClassifier => {
-    const agentThreadKeys = new Set(
-      agents.map((agent) => sidebarModeThreadKey(agent.environmentId, agent.conversationThreadId)),
-    );
-    for (const thread of threads) {
-      if (thread.source.agent?.role === "conversation")
-        agentThreadKeys.add(sidebarModeThreadKey(thread.environmentId, thread.id));
-    }
-    return { agentThreadKeys, scratchProjectKeys };
-  }, [agents, scratchProjectKeys, threads]);
+  const { classifier, scratchProjectKeys } = useSidebarModeClassifier({
+    threads,
+    projects,
+    serverConfigs,
+  });
 
   const modeThreads = useMemo(
     () => filterThreadsForSidebarMode(threads, mode, classifier),
@@ -92,7 +111,7 @@ export function useSidebarModeState(input: {
   );
 
   const draftProjectKeys = useMemo((): ReadonlySet<string> | null => {
-    if (mode === "agents") return new Set();
+    if (mode === "agents" || mode === "projects") return new Set();
     const keys = projects
       .map((project) => `${project.environmentId}:${project.id}`)
       .filter((key) => (mode === "chats") === scratchProjectKeys.has(key))

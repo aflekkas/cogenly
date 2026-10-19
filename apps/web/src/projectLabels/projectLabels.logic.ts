@@ -119,71 +119,38 @@ export function nextThreadLabelIds(
 
 // Work sidebar ---------------------------------------------------------------
 
-export interface WorkProjectHeading {
+export interface ProjectTagSummary {
   readonly key: ProjectLabelKey;
   readonly name: string;
   readonly color: string | undefined;
 }
 
-export interface WorkRepositoryGroup<T> {
-  readonly projectKey: string;
-  readonly threads: ReadonlyArray<T>;
-}
-
-export interface WorkProjectSection<T> {
-  /** Null for repositories no project links, or for every repo when no project links any. */
-  readonly project: WorkProjectHeading | null;
-  readonly repos: ReadonlyArray<WorkRepositoryGroup<T>>;
-}
-
 /**
- * Work mode: project headings, their linked repositories beneath, then each
- * repository's sessions. A repository linked to several projects appears
- * under each. Repo groups arrive busiest-first and keep that order inside a
- * section; projects order by their busiest repository. Unlinked repositories
- * close the list in a section with no project. When no repository is
- * linked to any project, the result is one section with no heading, which
- * reads exactly like the plain per-repository list.
+ * The projects a Work row shows as chips: the thread's confirmed tags plus
+ * the projects linking its repository, under any of the repository's
+ * checkouts. Each project once, alphabetically.
  */
-export function groupWorkByProject<T>(
-  repoGroups: ReadonlyArray<WorkRepositoryGroup<T>>,
-  projectsForRepo: (repoKey: string) => ReadonlyArray<WorkProjectHeading>,
-): WorkProjectSection<T>[] {
-  const sections = new Map<
-    ProjectLabelKey,
-    { project: WorkProjectHeading; repos: WorkRepositoryGroup<T>[] }
-  >();
-  const unlinked: WorkRepositoryGroup<T>[] = [];
-  for (const repo of repoGroups) {
-    const projects = projectsForRepo(repo.projectKey);
-    if (projects.length === 0) {
-      unlinked.push(repo);
-      continue;
-    }
-    const seen = new Set<ProjectLabelKey>();
-    for (const project of projects) {
-      if (seen.has(project.key)) continue;
-      seen.add(project.key);
-      const section = sections.get(project.key);
-      if (section) section.repos.push(repo);
-      else sections.set(project.key, { project, repos: [repo] });
+export function workRowProjectTags(
+  confirmedKeys: ReadonlyArray<ProjectLabelKey>,
+  repositoryKeys: ReadonlyArray<string>,
+  directory: {
+    readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
+    readonly projectsByRepository: ReadonlyMap<string, ReadonlyArray<EnvironmentProjectLabel>>;
+  },
+): ProjectTagSummary[] {
+  const entries = new Map<ProjectLabelKey, EnvironmentProjectLabel>();
+  for (const key of confirmedKeys) {
+    const entry = directory.byKey.get(key);
+    if (entry) entries.set(key, entry);
+  }
+  for (const repositoryKey of repositoryKeys) {
+    for (const entry of directory.projectsByRepository.get(repositoryKey) ?? []) {
+      entries.set(entry.key, entry);
     }
   }
-  const result: WorkProjectSection<T>[] = [...sections.values()];
-  if (unlinked.length > 0) result.push({ project: null, repos: unlinked });
-  return result;
-}
-
-/** Each thread once, in the order it first renders; drives keyboard order and selection. */
-export function workSectionThreadOrder<T>(sections: ReadonlyArray<WorkProjectSection<T>>): T[] {
-  const seenRepos = new Set<string>();
-  const ordered: T[] = [];
-  for (const section of sections) {
-    for (const repo of section.repos) {
-      if (seenRepos.has(repo.projectKey)) continue;
-      seenRepos.add(repo.projectKey);
-      ordered.push(...repo.threads);
-    }
-  }
-  return ordered;
+  return sortProjectLabels([...entries.values()]).map((entry) => ({
+    key: entry.key,
+    name: entry.label.name,
+    color: entry.label.color,
+  }));
 }

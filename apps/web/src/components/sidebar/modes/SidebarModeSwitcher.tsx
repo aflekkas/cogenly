@@ -1,11 +1,11 @@
 /**
- * Chats | Work | Agents as a segmented control: the mobile sheet's mode row;
+ * Chats | Work | Agents | Projects as a segmented control: the mobile sheet's mode row;
  * wider windows switch modes from the navigation rail instead.
  * One pill slides between equal-width segments, so the control never reflows
  * when a badge appears. Arrow keys move between segments, as in any tablist.
  */
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { BotIcon, HammerIcon, type LucideIcon, MessageCircleIcon } from "lucide-react";
+import { BotIcon, HammerIcon, type LucideIcon, MessageCircleIcon, TagIcon } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, useRef } from "react";
 
 import { cn } from "~/lib/utils";
@@ -18,6 +18,7 @@ export const SIDEBAR_MODE_ICONS: Record<SidebarMode, LucideIcon> = {
   chats: MessageCircleIcon,
   tasks: HammerIcon,
   agents: BotIcon,
+  projects: TagIcon,
 };
 
 export function SidebarModeSwitcher(props: {
@@ -56,14 +57,14 @@ export function SidebarModeSwitcher(props: {
       aria-label="Sidebar view"
       onKeyDown={handleKeyDown}
       className={cn(
-        "@container/sidebar-modes relative grid h-8 grid-cols-3 rounded-lg bg-sidebar-foreground/[0.045] p-0.5",
+        "@container/sidebar-modes relative grid h-8 grid-cols-4 rounded-lg bg-sidebar-foreground/[0.045] p-0.5",
         props.className,
       )}
     >
       <span
         aria-hidden
         data-testid="sidebar-mode-indicator"
-        className="pointer-events-none absolute inset-y-0.5 left-0.5 w-[calc((100%-0.25rem)/3)] rounded-md state-selected transition-transform duration-(--motion-duration-slow) ease-standard motion-reduce:transition-none"
+        className="pointer-events-none absolute inset-y-0.5 left-0.5 w-[calc((100%-0.25rem)/4)] rounded-md state-selected transition-transform duration-(--motion-duration-slow) ease-standard motion-reduce:transition-none"
         style={{ transform: `translateX(${index * 100}%)` }}
       />
       {SIDEBAR_MODES.map((segment, segmentIndex) => {

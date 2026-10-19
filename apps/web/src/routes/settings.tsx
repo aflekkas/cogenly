@@ -116,9 +116,7 @@ function SettingsContentLayout() {
   useEscapeToGoBack(navigateToMainApp);
   const { search, environment } = useSettingsScope();
   const contentScopeKey =
-    location.pathname === "/settings/diagnostics" ||
-    location.pathname === "/settings/providers" ||
-    location.pathname === "/settings/project-tags"
+    location.pathname === "/settings/diagnostics" || location.pathname === "/settings/providers"
       ? environment?.environmentId
       : JSON.stringify(search);
   const [restoreSignal, setRestoreSignal] = useState(0);
@@ -156,9 +154,7 @@ function SettingsRouteLayout() {
   return (
     <SettingsScopeProvider
       search={rawSearch}
-      singleEnvironment={
-        pathname === "/settings/providers" || pathname === "/settings/project-tags"
-      }
+      singleEnvironment={pathname === "/settings/providers"}
       onChange={(next) => {
         // Send every axis so the retain middleware sees an explicit target
         // even when the choice is "all", which is the absence of a key.

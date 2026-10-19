@@ -1,4 +1,3 @@
-import { useAtomValue } from "@effect/atom-react";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import {
   isAtomCommandInterrupted,
@@ -11,20 +10,11 @@ import type {
   ProjectLabelWithRepositories,
 } from "@t3tools/contracts";
 import type * as Cause from "effect/Cause";
-import { PencilIcon, PlusIcon, TagIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
-import { requestConfirmDialog } from "../../confirmDialog";
-import { cn } from "../../lib/utils";
-import { PROJECT_LABEL_COLORS, sortProjectLabels } from "../../projectLabels/projectLabels.logic";
-import { ProjectColorDot } from "../../projectLabels/ProjectTag";
-import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
-import { useProjects, useServerConfigs } from "../../state/entities";
-import { serverEnvironment } from "../../state/server";
-import { useAtomCommand } from "../../state/use-atom-command";
-import { ProjectFavicon } from "../ProjectFavicon";
-import { Button } from "../ui/button";
-import { Checkbox } from "../ui/checkbox";
+import { ProjectFavicon } from "../components/ProjectFavicon";
+import { Button } from "../components/ui/button";
+import { Checkbox } from "../components/ui/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -34,24 +24,17 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from "../ui/dialog";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Textarea } from "../ui/textarea";
-import { toastManager } from "../ui/toast";
-import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
-
-export interface ProjectLabelsSettingsSearch {
-  readonly create?: true | undefined;
-}
-
-export function validateProjectLabelsSettingsSearch(
-  raw: Record<string, unknown>,
-): ProjectLabelsSettingsSearch {
-  return raw.create === true || raw.create === "1" || raw.create === "true" ? { create: true } : {};
-}
+} from "../components/ui/dialog";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Textarea } from "../components/ui/textarea";
+import { toastManager } from "../components/ui/toast";
+import { requestConfirmDialog } from "../confirmDialog";
+import { cn } from "../lib/utils";
+import { useProjects, useServerConfigs } from "../state/entities";
+import { serverEnvironment } from "../state/server";
+import { useAtomCommand } from "../state/use-atom-command";
+import { PROJECT_LABEL_COLORS } from "./projectLabels.logic";
 
 function reportFailure(title: string, result: { readonly cause: Cause.Cause<unknown> }) {
   const error = squashAtomCommandFailure(result);
@@ -63,7 +46,7 @@ function reportFailure(title: string, result: { readonly cause: Cause.Cause<unkn
 }
 
 /** Repositories (Cogenly projects) on one environment, minus the scratch chat workspace. */
-function useEnvironmentRepositories(environmentId: EnvironmentId | null) {
+export function useEnvironmentRepositories(environmentId: EnvironmentId | null) {
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
   return useMemo(() => {
@@ -79,131 +62,16 @@ function useEnvironmentRepositories(environmentId: EnvironmentId | null) {
 }
 
 /**
- * Settings → Projects. A project is a tag for chats and Work that can link
- * several repositories. Projects belong to one environment, so the page
- * follows the scope sentence's environment.
+ * Create or edit one project: name, color, description, linked repositories,
+ * and delete. Opened from the Projects sidebar and a project's view.
  */
-export function ProjectLabelsSettings(props: ProjectLabelsSettingsSearch) {
-  const { environment } = useSettingsScope();
-  const environmentId = environment?.environmentId ?? null;
-  const { labels, error, isLoaded } = useEnvironmentProjectLabels(environmentId);
-  const repositories = useEnvironmentRepositories(environmentId);
-  const canEdit = useAtomValue(serverEnvironment.createProjectLabel.permissionAtom(environmentId));
-  const [editor, setEditor] = useState<{ label: ProjectLabelWithRepositories | null } | null>(null);
-  const openedCreate = useRef(false);
-  useEffect(() => {
-    if (!props.create || openedCreate.current || !canEdit || environmentId === null) return;
-    openedCreate.current = true;
-    setEditor({ label: null });
-  }, [canEdit, environmentId, props.create]);
-  const repositoryById = useMemo(
-    () => new Map(repositories.map((repository) => [repository.id, repository] as const)),
-    [repositories],
-  );
-  const sorted = useMemo(
-    () => sortProjectLabels(labels.map((label) => ({ label }))).map((entry) => entry.label),
-    [labels],
-  );
-
-  return (
-    <SettingsPageContainer>
-      <SettingsSection
-        id="project-tags"
-        title="Projects"
-        headerAction={
-          <Button
-            size="xs"
-            variant="ghost-muted"
-            disabled={environmentId === null || !canEdit}
-            title={canEdit ? undefined : "You don't have permission to change projects here."}
-            onClick={() => setEditor({ label: null })}
-          >
-            <PlusIcon className="size-3" />
-            New project
-          </Button>
-        }
-      >
-        {environmentId === null ? (
-          <SettingsRow title="Choose an environment to manage its projects." />
-        ) : error !== null ? (
-          <SettingsRow title="Could not load projects" description={error} />
-        ) : !isLoaded ? (
-          <SettingsRow title="Loading projects…" />
-        ) : sorted.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <TagIcon />
-              </EmptyMedia>
-              <EmptyTitle>No projects yet</EmptyTitle>
-              <EmptyDescription>
-                Tag chats and group Work by project. A project can link several repositories.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : (
-          sorted.map((label) => {
-            const linked = label.repositoryIds.flatMap((id) => {
-              const repository = repositoryById.get(id);
-              return repository ? [repository.title] : [];
-            });
-            return (
-              <SettingsRow
-                key={label.id}
-                title={
-                  <span className="flex min-w-0 items-center gap-2">
-                    <ProjectColorDot color={label.color} />
-                    <span className="truncate">{label.name}</span>
-                  </span>
-                }
-                description={
-                  <>
-                    {label.description ? <span className="block">{label.description}</span> : null}
-                    <span className="block">
-                      {linked.length === 0
-                        ? "No linked repositories"
-                        : `Repositories: ${linked.join(", ")}`}
-                    </span>
-                  </>
-                }
-                control={
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={`Edit ${label.name}`}
-                    disabled={!canEdit}
-                    onClick={() => setEditor({ label })}
-                  >
-                    <PencilIcon />
-                  </Button>
-                }
-              />
-            );
-          })
-        )}
-      </SettingsSection>
-      <p className="px-3 text-xs text-muted-foreground sm:px-4">
-        Projects are context only. Tagging a chat or linking a repository never changes what an
-        agent is allowed to access.
-      </p>
-      {editor && environmentId !== null ? (
-        <ProjectLabelEditorDialog
-          key={editor.label?.id ?? "new"}
-          environmentId={environmentId}
-          label={editor.label}
-          repositories={repositories}
-          onClose={() => setEditor(null)}
-        />
-      ) : null}
-    </SettingsPageContainer>
-  );
-}
-
-function ProjectLabelEditorDialog(props: {
+export function ProjectLabelEditorDialog(props: {
   readonly environmentId: EnvironmentId;
   readonly label: ProjectLabelWithRepositories | null;
   readonly repositories: ReturnType<typeof useEnvironmentRepositories>;
   readonly onClose: () => void;
+  /** After a delete, so a view of the deleted project can leave. */
+  readonly onDeleted?: () => void;
 }) {
   const { environmentId, label, onClose } = props;
   const [name, setName] = useState(label?.name ?? "");
@@ -309,6 +177,7 @@ function ProjectLabelEditorDialog(props: {
       return;
     }
     onClose();
+    props.onDeleted?.();
   };
 
   return (

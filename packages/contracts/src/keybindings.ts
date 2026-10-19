@@ -61,6 +61,7 @@ export const SIDEBAR_MODE_KEYBINDING_COMMANDS = [
   "sidebar.mode.chats",
   "sidebar.mode.tasks",
   "sidebar.mode.agents",
+  "sidebar.mode.projects",
 ] as const;
 export type SidebarModeKeybindingCommand = (typeof SIDEBAR_MODE_KEYBINDING_COMMANDS)[number];
 

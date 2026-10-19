@@ -235,6 +235,46 @@ describe("workPrefersNewWorktree", () => {
   });
 });
 
+describe("Open project in the thread action menu", () => {
+  const state: ThreadActionMenuState = {
+    canOperate: false,
+    branch: null,
+    isSettled: false,
+    autoSettleEnabled: true,
+    isSnoozed: false,
+    canSnoozeNow: true,
+    isRegeneratingTitle: false,
+    isRunning: false,
+    supports: {
+      settlement: false,
+      autoSettleOptOut: false,
+      snooze: false,
+      titleRegeneration: false,
+    },
+    snoozePresets: [],
+  };
+  const projectItem = (menuState: ThreadActionMenuState) =>
+    buildThreadActionMenuItems(menuState).find((item) => item.id.startsWith("open-project"));
+
+  it("opens a single project directly and nests several, even for read-only clients", () => {
+    expect(projectItem(state)).toBeUndefined();
+    const one = projectItem({ ...state, projects: [{ key: "env:spawn", name: "Spawn" }] });
+    expect(one).toMatchObject({ id: "open-project:env:spawn", label: "Open Spawn" });
+    expect(one?.disabled).toBeUndefined();
+    const several = projectItem({
+      ...state,
+      projects: [
+        { key: "env:bartr", name: "Bartr" },
+        { key: "env:spawn", name: "Spawn" },
+      ],
+    });
+    expect(several?.children?.map((child) => child.id)).toEqual([
+      "open-project:env:bartr",
+      "open-project:env:spawn",
+    ]);
+  });
+});
+
 describe("Start Work in the thread action menu", () => {
   const state: ThreadActionMenuState = {
     canOperate: true,
