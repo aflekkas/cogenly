@@ -117,7 +117,7 @@ const WEEKDAY_SHORT = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
 
 const WORKSPACE_MODE_LABELS: Record<WorkspaceMode, string> = {
   worktree: "Create a new worktree",
-  root: "Use the project checkout",
+  root: "Use the repository checkout",
   existing_worktree: "Use a specific checkout",
 };
 
@@ -456,14 +456,14 @@ function ScheduledTaskEnvironmentList({
       {taskId && linkedState?.tasks && linkedState.error === null && !linkedTask ? (
         <SettingsRow
           title="Task unavailable"
-          description="This task no longer exists or is outside the selected project scope."
+          description="This task no longer exists or is outside the selected repository scope."
           role="status"
         />
       ) : null}
       {populated.length === 0 && loaded.length > 0 ? (
         <SettingsRow
           title="No scheduled tasks"
-          description="No tasks match this environment and project selection."
+          description="No tasks match this environment and repository selection."
         />
       ) : null}
       {Object.entries(summaries).map(([label, entries]) => {
@@ -548,14 +548,14 @@ function ScheduledTaskEnvironmentSection({
           {taskId && !linkedTask ? (
             <SettingsRow
               title="Task unavailable"
-              description="This task no longer exists or is outside the selected project scope."
+              description="This task no longer exists or is outside the selected repository scope."
               role="status"
             />
           ) : null}
           {tasks.length === 0 ? (
             <SettingsRow
               title="No scheduled tasks"
-              description="No tasks match this environment and project selection."
+              description="No tasks match this environment and repository selection."
             />
           ) : (
             tasks.map((task) => (
@@ -1051,7 +1051,7 @@ function ScheduledTaskEditorDialog({
       !projects.some((project) => project.id === selectedProjectId) ||
       selection === null
     ) {
-      reportFailure("Scheduled task is incomplete", "Add a title, prompt, project, and model.");
+      reportFailure("Scheduled task is incomplete", "Add a title, prompt, repository, and model.");
       return;
     }
     const schedule = scheduleFromDraft(draft);
@@ -1235,7 +1235,7 @@ function ScheduledTaskEditorDialog({
             </Field>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Project" htmlFor="scheduled-task-project">
+              <Field label="Repository" htmlFor="scheduled-task-project">
                 <Select
                   value={selectedProjectId}
                   onValueChange={(projectId) =>
@@ -1243,7 +1243,7 @@ function ScheduledTaskEditorDialog({
                   }
                 >
                   <SelectTrigger size="sm" id="scheduled-task-project">
-                    <SelectValue placeholder="Select a project">
+                    <SelectValue placeholder="Select a repository">
                       {selectedProject?.title}
                     </SelectValue>
                   </SelectTrigger>
@@ -1279,7 +1279,7 @@ function ScheduledTaskEditorDialog({
                   </SelectTrigger>
                   <SelectPopup>
                     <SelectItem value="worktree">Create a new worktree</SelectItem>
-                    <SelectItem value="root">Use the project checkout</SelectItem>
+                    <SelectItem value="root">Use the repository checkout</SelectItem>
                     <SelectItem value="existing_worktree">Use a specific checkout</SelectItem>
                   </SelectPopup>
                 </Select>

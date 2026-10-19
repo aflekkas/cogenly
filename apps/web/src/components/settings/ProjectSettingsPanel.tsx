@@ -136,15 +136,15 @@ export function ProjectSettingsPanel({
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
         {groups.length === 0
-          ? "Add a project from the sidebar to configure it here."
-          : "This project is no longer available."}
+          ? "Add a repository from the sidebar to configure it here."
+          : "This repository is no longer available."}
       </div>
     );
   }
   if (members.length === 0)
     return (
       <p className="p-8 text-sm text-muted-foreground">
-        This checkout is no longer available in the selected project and environment.
+        This checkout is no longer available in the selected repository and environment.
       </p>
     );
   const scopedGroup = {
@@ -226,7 +226,7 @@ function ProjectDetail({
       const result = AsyncResult.failure<void, Error>(
         Cause.fail(
           new Error(
-            `This connection cannot change projects in ${denied.environmentLabel ?? "this environment"}.`,
+            `This connection cannot change repositories in ${denied.environmentLabel ?? "this environment"}.`,
           ),
         ),
       );
@@ -292,7 +292,7 @@ function ProjectDetail({
     async (nextTitle: string, wasEdited: boolean) => {
       const title = nextTitle.trim();
       if (!title) {
-        toastManager.add({ type: "warning", title: "Project title cannot be empty" });
+        toastManager.add({ type: "warning", title: "Repository name cannot be empty" });
         return;
       }
       if (
@@ -304,7 +304,7 @@ function ProjectDetail({
       ) {
         return;
       }
-      await updateAllMembers({ title }, "Failed to rename project");
+      await updateAllMembers({ title }, "Failed to rename repository");
     },
     [group.memberProjects, updateAllMembers],
   );
@@ -320,7 +320,7 @@ function ProjectDetail({
       savingFaviconRef.current = true;
       setIsSavingFavicon(true);
       try {
-        await updateAllMembers(input, "Failed to update project icon");
+        await updateAllMembers(input, "Failed to update repository icon");
       } finally {
         savingFaviconRef.current = false;
         setIsSavingFavicon(false);
@@ -333,7 +333,7 @@ function ProjectDetail({
 
   const removeMembers = useCallback(
     async (members: ReadonlyArray<SidebarProjectGroupMember>) => {
-      if (checkProjectAccess(members, "Failed to remove project")) return;
+      if (checkProjectAccess(members, "Failed to remove repository")) return;
       const api = readLocalApi();
       if (!api) return;
 
@@ -358,26 +358,26 @@ function ProjectDetail({
                     ? [`Environment: ${singleMember.environmentLabel}`]
                     : []),
                 ]
-              : [`This removes ${members.length} grouped project entries.`]),
+              : [`This removes ${members.length} grouped repository entries.`]),
             ...(projectThreads.length > 0
               ? [
                   "This permanently clears conversation history for those threads and any archived threads.",
                 ]
               : ["This permanently clears any archived conversation history."]),
             isWholeGroup && !hasOtherMembers
-              ? "This removes only the project entries, not the files on disk."
-              : "Other entries in this grouped project are unaffected.",
+              ? "This removes only the repository entries, not the files on disk."
+              : "Other entries in this grouped repository are unaffected.",
             "This action cannot be undone.",
           ].join("\n"),
           { variant: "destructive" },
         ),
       );
       if (confirmed._tag === "Failure" || !confirmed.value) return;
-      if (checkProjectAccess(members, "Failed to remove project")) return;
+      if (checkProjectAccess(members, "Failed to remove repository")) return;
 
       const draftStore = useComposerDraftStore.getState();
       for (const member of members) {
-        if (checkProjectAccess([member], "Failed to remove project")) return;
+        if (checkProjectAccess([member], "Failed to remove repository")) return;
         const memberThreads = projectThreads.filter(
           (thread) =>
             thread.environmentId === member.environmentId && thread.projectId === member.id,
@@ -516,26 +516,27 @@ function ProjectDetail({
         <Alert variant="info">
           <InfoIcon aria-hidden />
           <AlertDescription>
-            Can't find a setting? Keep this project picked above and hop to any other settings page.
+            Can't find a setting? Keep this repository picked above and hop to any other settings
+            page.
           </AlertDescription>
         </Alert>
-        <SettingsSection id="project-overview" title="Project" hideTitle>
+        <SettingsSection id="project-overview" title="Repository" hideTitle>
           {!canEditGroup ? (
             <p className="px-3 py-2 text-sm text-muted-foreground sm:px-4">
               {group.memberProjects.length > 1
                 ? "Shared settings require permission to change every checkout in this group."
-                : "This connection cannot change this project."}
+                : "This connection cannot change this repository."}
             </p>
           ) : null}
           <SettingsRow
             title="Name"
-            description="The shared name for this project group in the sidebar and thread lists."
+            description="The shared name for this repository group in the sidebar and thread lists."
             control={
               <Input
                 key={`${group.projectKey}:${group.displayName}`}
                 size="sm"
                 className="w-full sm:w-64"
-                aria-label="Project name"
+                aria-label="Repository name"
                 disabled={!canEditGroup}
                 defaultValue={group.displayName}
                 onChange={() => {
@@ -553,7 +554,7 @@ function ProjectDetail({
             }
           />
           <SettingsRow
-            title="Project icon"
+            title="Repository icon"
             description={
               projectIcon?.kind === "lucide"
                 ? `${projectIcon.name} · ${projectIcon.color}`
@@ -568,7 +569,7 @@ function ProjectDetail({
                 (member) => member.faviconPath != null || member.projectIcon != null,
               ) ? (
                 <SettingResetButton
-                  label="project icon"
+                  label="repository icon"
                   disabled={isSavingFavicon || !canEditGroup}
                   onClick={() => void setProjectIcon({ faviconPath: null, projectIcon: null })}
                 />
@@ -581,7 +582,7 @@ function ProjectDetail({
                   size="sm"
                   variant="outline"
                   type="button"
-                  aria-label="Choose a project icon"
+                  aria-label="Choose a repository icon"
                   disabled={isSavingFavicon || !canEditGroup}
                   onClick={() => setIconPickerOpen(true)}
                 >
@@ -591,7 +592,7 @@ function ProjectDetail({
                   size="sm"
                   variant="outline"
                   type="button"
-                  aria-label="Choose a project icon file"
+                  aria-label="Choose a repository icon file"
                   disabled={isSavingFavicon || !canEditGroup}
                   onClick={() => setFaviconPickerOpen(true)}
                 >
@@ -610,15 +611,15 @@ function ProjectDetail({
               hasOtherMembers
                 ? "Remove checkout"
                 : group.memberProjects.length > 1
-                  ? "Remove this project everywhere"
-                  : "Remove project"
+                  ? "Remove this repository everywhere"
+                  : "Remove repository"
             }
             description={
               hasOtherMembers
                 ? "Deletes the selected machine's checkout entries and their threads. Other machines and files on disk are not touched."
                 : group.memberProjects.length > 1
                   ? `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
-                  : "Deletes the project entry and its threads. Files on disk are not touched."
+                  : "Deletes the repository entry and its threads. Files on disk are not touched."
             }
             control={
               <Button
@@ -632,7 +633,7 @@ function ProjectDetail({
                   ? "Remove checkout"
                   : group.memberProjects.length > 1
                     ? "Remove all entries"
-                    : "Remove project"}
+                    : "Remove repository"}
               </Button>
             }
           />

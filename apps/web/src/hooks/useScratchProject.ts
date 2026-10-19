@@ -65,7 +65,7 @@ export function useScratchProject() {
   const openScratchProject = useCallback(
     async (
       environmentId: EnvironmentId,
-      failureTitle = "Could not start without a project",
+      failureTitle = "Could not start without a repository",
     ): Promise<EnvironmentProject | null> => {
       const result = await openScratch({ environmentId, input: {} });
       if (result._tag === "Success") return result.value;
@@ -82,7 +82,7 @@ export function useScratchProject() {
       const project = await openScratchProject(environmentId);
       if (project) {
         await handleNewThread(scopeProjectRef(project.environmentId, project.id)).catch(
-          (error: unknown) => reportScratchFailure("Could not start without a project", error),
+          (error: unknown) => reportScratchFailure("Could not start without a repository", error),
         );
       }
     },

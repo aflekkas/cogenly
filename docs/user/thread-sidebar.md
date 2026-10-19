@@ -25,7 +25,9 @@ ask it to start Work. The tabs above the chat hold the rest:
   with due dates, projects, and links to where they came from. Items the agent
   finds stay **Proposed** until you confirm or dismiss them. **Mark done** asks
   what finished it, optionally with a link as evidence; done and dismissed items
-  can be reopened. Pending approvals sit at the top, and also appear in the chat.
+  can be reopened. **History** on an item lists every status change: who made it,
+  when, why, and any evidence. Pending approvals sit at the top, and also appear
+  in the chat.
 - **Responsibilities**: the agent's mission, instructions, model, project access,
   autonomy, permissions, notifications, daily run cap, triggers, memory, **Pause**,
   and **Delete**.
@@ -47,9 +49,15 @@ send, create PRs, merge, deploy and delete. An agent cannot grant itself anythin
 When it wants to start Work, add a recurring trigger, or change its permissions, it
 asks, and you **Approve** or **Reject**. Approvals expire after seven days.
 
-**Start Work** in the agent's header starts a coding session in a repository linked
-to one of its granted projects. The session runs in a new worktree and appears in
-**Work** under its repository, marked with the agent's name.
+**Start Work** in the agent's header starts a coding session in its home repository
+or a repository linked to one of its granted projects. The session runs in a new
+worktree and appears in **Work** under its repository, marked with the agent's name.
+The command palette also has **Start Work with …** and **Open items for …** for
+each agent.
+
+The badge on **Agents** counts decisions waiting for you across all agents:
+approvals they asked for, and approvals or questions inside their runs. Unread
+replies show as a dot on the agent instead.
 
 **Pause** stops triggers and background runs; you can still chat. Messages sent
 while an agent is busy use its normal queue or steering behavior.

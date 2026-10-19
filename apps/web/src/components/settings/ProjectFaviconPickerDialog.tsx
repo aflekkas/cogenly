@@ -20,7 +20,7 @@ import { toastManager } from "../ui/toast";
 
 function emptyMessage(query: string, error: string | null, isPending: boolean): string {
   if (error) return error;
-  if (isPending) return query.trim() ? "Searching project files…" : "Indexing project files…";
+  if (isPending) return query.trim() ? "Searching repository files…" : "Indexing repository files…";
   return query.trim() ? "No matching image files." : "No image files found.";
 }
 export function canPickExternalProjectFavicon(cwd: string, platform: string): boolean {
@@ -70,12 +70,12 @@ export function ProjectFaviconPickerDialog(props: {
     <CommandDialog open={props.open} onOpenChange={props.onOpenChange}>
       {props.open ? (
         <CommandDialogPopup
-          aria-label="Choose project icon"
+          aria-label="Choose repository icon"
           className="overflow-hidden"
           onBackdropPointerDown={() => props.onOpenChange(false)}
         >
           <CommandPaletteContent
-            aria-label="Choose project icon"
+            aria-label="Choose repository icon"
             autoHighlight="always"
             escapeLabel="Close"
             footerActionLabel="Select icon"

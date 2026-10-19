@@ -139,8 +139,8 @@ export function shouldOpenDefaultBrowserProfileFromMenuClick(
 
 const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the Cogenly desktop app.",
-  terminal: "Agent terminals are only available from a project thread.",
-  files: "Files are only available when a project is open.",
+  terminal: "Agent terminals are only available from a repository thread.",
+  files: "Files are only available when a repository is open.",
   diff: "Diff is only available for server threads in Git repositories.",
   device: "Devices are only available from a thread.",
 } as const;
@@ -160,8 +160,8 @@ const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
 /** One-line unavailability hints for the empty-state rows. */
 const SURFACE_UNAVAILABLE_HINTS = {
   browser: "Only available in the desktop app.",
-  terminal: "Available when a project is open.",
-  files: "Available when a project is open.",
+  terminal: "Available when a repository is open.",
+  files: "Available when a repository is open.",
   diff: "Available for Git repositories.",
   device: "Available from a thread.",
 } as const;

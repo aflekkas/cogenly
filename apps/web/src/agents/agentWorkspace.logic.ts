@@ -9,6 +9,7 @@ import type {
   AgentApproval,
   AgentPermissions,
   Commitment,
+  CommitmentHistory,
   CommitmentRef,
   ProjectId,
   ProjectLabelId,
@@ -88,6 +89,31 @@ export function commitmentOwnerLabel(
   if (owner.kind === "user") return "You";
   if (owner.kind === "person") return owner.name;
   return agentName(owner.agentId) ?? "An agent";
+}
+
+/**
+ * One line of an open item's history. The server records the actor as "user" or
+ * "agent:<id>"; anything else is shown as recorded.
+ */
+export function describeCommitmentHistory(
+  entry: Pick<CommitmentHistory, "who" | "fromStatus" | "toStatus">,
+  agentName: (agentId: string) => string | undefined,
+) {
+  const agentId = entry.who.startsWith("agent:") ? entry.who.slice("agent:".length) : null;
+  const who =
+    entry.who === "user"
+      ? "You"
+      : agentId !== null
+        ? (agentName(agentId) ?? "An agent")
+        : entry.who;
+  const to = COMMITMENT_STATUS_LABEL[entry.toStatus];
+  const change =
+    entry.fromStatus === null
+      ? `Added as ${to}`
+      : entry.fromStatus === entry.toStatus
+        ? to
+        : `${COMMITMENT_STATUS_LABEL[entry.fromStatus]} → ${to}`;
+  return { who, change };
 }
 
 const startOfDay = (date: Date) =>
@@ -419,6 +445,10 @@ export function toggleScope(scope: Scope, labelId: ProjectLabelId, selected: boo
  * explicit scope, once each, alphabetical, naming the scoped projects that link them.
  * Repositories linked only to unscoped projects never appear; tags are not grants.
  */
+/**
+ * Repositories an owner can start this agent's Work in: its home repository first,
+ * then those linked to its scoped projects, each once with the projects that link it.
+ */
 export function startWorkRepositories(
   scope: Scope,
   labels: ReadonlyArray<{
@@ -427,10 +457,14 @@ export function startWorkRepositories(
     repositoryIds: ReadonlyArray<ProjectId>;
   }>,
   repositories: ReadonlyArray<{ id: ProjectId; title: string }>,
+  homeProjectId: ProjectId | null = null,
 ) {
   const scoped = new Set(scope.map((entry) => entry.labelId));
   const byId = new Map(repositories.map((repository) => [repository.id, repository]));
-  const result = new Map<ProjectId, { id: ProjectId; title: string; projects: string[] }>();
+  const result = new Map<
+    ProjectId,
+    { id: ProjectId; title: string; projects: string[]; home: boolean }
+  >();
   for (const label of labels) {
     if (!scoped.has(label.id)) continue;
     for (const repositoryId of label.repositoryIds) {
@@ -438,11 +472,19 @@ export function startWorkRepositories(
       if (!repository) continue;
       const entry = result.get(repositoryId);
       if (entry) entry.projects.push(label.name);
-      else result.set(repositoryId, { ...repository, projects: [label.name] });
+      else
+        result.set(repositoryId, {
+          ...repository,
+          projects: [label.name],
+          home: repositoryId === homeProjectId,
+        });
     }
   }
+  const home = homeProjectId === null ? undefined : byId.get(homeProjectId);
+  if (home && !result.has(home.id)) result.set(home.id, { ...home, projects: [], home: true });
   return [...result.values()].toSorted(
     (a, b) =>
+      Number(b.home) - Number(a.home) ||
       a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) ||
       a.id.localeCompare(b.id),
   );
@@ -450,14 +492,27 @@ export function startWorkRepositories(
 
 // Sidebar --------------------------------------------------------------------
 
-/** Pending decisions only: approvals plus questions or approvals inside its runs. */
+/**
+ * Pending decisions only: approvals plus questions or approvals inside its runs.
+ * Before its requests load, a run known to be waiting counts once. Never messages.
+ */
 export function agentAttentionCount(agent: {
   approvals: ReadonlyArray<unknown>;
   requests: ReadonlyArray<unknown>;
-  state: string;
+  waitingInRun?: boolean | undefined;
 }) {
-  return agent.approvals.length + (agent.requests.length || (agent.state === "blocked" ? 1 : 0));
+  return agent.approvals.length + (agent.requests.length || (agent.waitingInRun ? 1 : 0));
 }
+
+/** The Agents badge: every decision waiting for you, across all agents. */
+export function decisionsWaitingCount(
+  agents: ReadonlyArray<Parameters<typeof agentAttentionCount>[0]>,
+) {
+  return agents.reduce((total, agent) => total + agentAttentionCount(agent), 0);
+}
+
+export const decisionsWaitingLabel = (count: number) =>
+  `${count} ${count === 1 ? "decision" : "decisions"} waiting for you`;
 
 export interface AgentScopeHeading {
   key: string;

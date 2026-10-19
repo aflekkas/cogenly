@@ -427,7 +427,7 @@ export function SettingsRow({
   const inheritance: { state: SettingInheritanceState; summary: string } = mixed
     ? { state: "mixed", summary: "Mixed across selected environments" }
     : source === "project"
-      ? { state: "overridden", summary: "Overridden for this project" }
+      ? { state: "overridden", summary: "Overridden for this repository" }
       : source === "t3.json"
         ? { state: "inherited", summary: "Inherited from the repository's t3.json" }
         : source === "environment" && scopedKeys.length > 0

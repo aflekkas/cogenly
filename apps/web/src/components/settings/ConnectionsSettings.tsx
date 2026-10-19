@@ -3431,7 +3431,7 @@ export function ConnectionsSettings() {
       <>
         <SettingsRow
           {...searchableSetting("wsl-backend")}
-          description="Run the selected WSL distro alongside Windows. Projects remain on their current filesystem."
+          description="Run the selected WSL distro alongside Windows. Repositories remain on their current filesystem."
           status={
             desktopWslError ? (
               <span className="block text-destructive">{desktopWslError}</span>
@@ -3862,14 +3862,14 @@ export function ConnectionsSettings() {
                 <AlertDialogDescription>
                   {pendingWslChange?.kind === "disable"
                     ? pendingWslChange.wasWslOnly
-                      ? "Cogenly will restart on the Windows backend. Threads and projects opened against WSL stay safe inside the distro and become available again when you re-enable WSL."
-                      : "The WSL backend will stop. Threads and projects opened against WSL stay safe inside the distro, but they'll be unavailable in Cogenly until you re-enable WSL."
+                      ? "Cogenly will restart on the Windows backend. Threads and repositories opened against WSL stay safe inside the distro and become available again when you re-enable WSL."
+                      : "The WSL backend will stop. Threads and repositories opened against WSL stay safe inside the distro, but they'll be unavailable in Cogenly until you re-enable WSL."
                     : pendingWslChange?.kind === "distro"
                       ? "Cogenly will restart the WSL backend on the new distro. Sessions still running on the current distro will be interrupted."
                       : pendingWslChange?.kind === "enable"
                         ? "Run the WSL backend alongside the Windows one, or stop the Windows backend and use only WSL? You can change this later from Settings."
                         : pendingWslChange?.nextValue
-                          ? "Cogenly will restart and start only the WSL backend. Your Windows-side projects won't be accessible until you turn this off again."
+                          ? "Cogenly will restart and start only the WSL backend. Your Windows-side repositories won't be accessible until you turn this off again."
                           : "Cogenly will restart and bring the Windows backend back up alongside WSL."}
                 </AlertDialogDescription>
               </AlertDialogHeader>

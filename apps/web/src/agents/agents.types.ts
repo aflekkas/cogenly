@@ -3,6 +3,7 @@ import type {
   AgentApproval,
   AgentListItem,
   Commitment,
+  CommitmentHistory,
   EnvironmentId,
   ProjectId,
   ProjectLabelWithRepositories,
@@ -75,6 +76,8 @@ export interface AgentContact extends AgentListItem {
   requests: ReadonlyArray<AgentRequest>;
   /** Pending owner decisions the agent asked for: Work, a trigger, or a permission change. */
   approvals: ReadonlyArray<AgentApproval>;
+  /** A run in its conversation or Work waits on an approval or answer, known before `requests` load. */
+  waitingInRun?: boolean;
 }
 /** What the agent's Activity, Open items and Responsibilities tabs read. */
 export interface AgentWorkspaceView {
@@ -87,6 +90,11 @@ export interface AgentWorkspaceView {
   loading: boolean;
   error: string | null;
   refresh: () => void;
+}
+/** An open item's status history, loaded when someone expands it. */
+export interface CommitmentHistoryView {
+  history: ReadonlyArray<CommitmentHistory> | null;
+  error: string | null;
 }
 export interface AgentModelOption {
   environmentId?: EnvironmentId;
