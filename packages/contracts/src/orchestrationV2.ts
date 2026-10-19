@@ -366,8 +366,26 @@ const AgentThreadIdentity = Schema.Struct({
   id: AgentId,
   role: Schema.Literals(["conversation", "work"]),
 });
+export const WorkOrigin = Schema.Literals(["direct", "chat", "agent"]);
+export type WorkOrigin = typeof WorkOrigin.Type;
+const WorkMetadataFields = {
+  // Optional on the wire for older servers/events. Projection replay fills the defaults.
+  workOrigin: Schema.optional(WorkOrigin),
+  sourceThreadId: Schema.optional(ThreadId),
+  sourceAgentId: Schema.optional(AgentId),
+  sourceAgentRunId: Schema.optional(TrimmedNonEmptyString),
+};
+export const WorkHandoffLink = Schema.Struct({
+  threadId: ThreadId,
+  title: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+export type WorkHandoffLink = typeof WorkHandoffLink.Type;
+
 export const OrchestrationV2AppThread = Schema.Struct({
-  /** Work threads are hidden from normal chat/task lists; open them through agents.runs. */
+  ...WorkMetadataFields,
+  workHandoffs: Schema.optional(Schema.Array(WorkHandoffLink)),
+  /** Agent identity is provenance; work threads remain ordinary visible coding threads. */
   agent: Schema.optional(AgentThreadIdentity),
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -1016,6 +1034,8 @@ export type OrchestrationV2HistoricalMessage = typeof OrchestrationV2HistoricalM
 export const OrchestrationV2ContextHandoff = Schema.Struct({
   id: ContextHandoffId,
   transferId: Schema.optional(Schema.NullOr(ContextTransferId)),
+  /** Chat/agent source of a Work handoff, delivered in the first user message. */
+  sourceThreadId: Schema.optional(ThreadId),
   threadId: ThreadId,
   targetRunId: RunId,
   fromProviderThreadIds: Schema.Array(ProviderThreadId),
@@ -1945,6 +1965,8 @@ export type OrchestrationV2LatestVisibleMessageSummary =
   typeof OrchestrationV2LatestVisibleMessageSummary.Type;
 
 export const OrchestrationV2ThreadShell = Schema.Struct({
+  ...WorkMetadataFields,
+  workHandoffs: Schema.optional(Schema.Array(WorkHandoffLink)),
   agent: Schema.optional(AgentThreadIdentity),
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -2729,6 +2751,7 @@ export type OrchestrationV2StoredEventJson = typeof OrchestrationV2StoredEventJs
 export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thread.create"),
+    ...WorkMetadataFields,
     agent: Schema.optional(AgentThreadIdentity),
     ...OrchestrationV2CreationFields,
     commandId: CommandId,
@@ -3189,6 +3212,13 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
  * send them.
  */
 const OrchestrationV2InternalCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("work.handoff.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    targetThreadId: ThreadId,
+    scopeSummary: TrimmedNonEmptyString,
+  }),
   /**
    * Records what a pull request watch saw, and wakes the agent in the same transaction when
    * `wake` is set. Rejected once the watch started at `startedAt` has ended, and a wake is

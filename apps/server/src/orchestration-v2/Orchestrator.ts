@@ -20,6 +20,7 @@ import {
   ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE,
   type ChatAttachment,
   CommandId,
+  ContextHandoffId,
   isProviderNativeSubagentThread,
   MessageId,
   type NodeId,
@@ -446,6 +447,7 @@ const threadPullRequestLinksEqual = Schema.toEquivalence(Schema.NullOr(ThreadLin
 
 function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
   switch (command.type) {
+    case "work.handoff.record":
     case "thread.create":
     case "thread.archive":
     case "thread.unarchive":
@@ -2253,6 +2255,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
     const thread: OrchestrationV2AppThread = {
+      workOrigin:
+        command.workOrigin ??
+        (command.agent?.role === "work" || command.createdBy === "agent" ? "agent" : "direct"),
+      ...(command.sourceThreadId === undefined ? {} : { sourceThreadId: command.sourceThreadId }),
+      ...(command.sourceAgentId === undefined && command.agent?.role !== "work"
+        ? {}
+        : { sourceAgentId: command.sourceAgentId ?? command.agent?.id }),
+      ...(command.sourceAgentRunId === undefined
+        ? {}
+        : { sourceAgentRunId: command.sourceAgentRunId }),
       ...(command.agent === undefined ? {} : { agent: command.agent }),
       createdBy: command.createdBy,
       creationSource: command.creationSource,
@@ -7162,6 +7174,85 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
   });
 
+  const dispatchWorkHandoffRecord = Effect.fn("orchestrationV2.dispatch.workHandoffRecord")(
+    function* (
+      command: Extract<OrchestrationV2InternalCommand, { type: "work.handoff.record" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      const source = yield* projectionStore
+        .getThread(command.threadId)
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      const target = yield* projectionStore
+        .getThreadRecords(command.targetThreadId, ["runs"])
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.targetThreadId, cause }),
+          ),
+        );
+      const run = target.runs.find((candidate) => candidate.ordinal === 1);
+      if (
+        source.deletedAt !== null ||
+        target.thread.sourceThreadId !== source.id ||
+        run?.providerThreadId == null
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Invalid Work handoff source or initial run.",
+        });
+      }
+      const now = yield* DateTime.now;
+      const emitEvent = emit(events, command);
+      yield* emitEvent({
+        type: "thread.metadata-updated",
+        threadId: source.id,
+        providerInstanceId: source.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...source,
+          updatedAt: now,
+          workHandoffs: [
+            ...(source.workHandoffs ?? []).filter((link) => link.threadId !== target.thread.id),
+            {
+              threadId: target.thread.id,
+              title: target.thread.title,
+              createdAt: DateTime.formatIso(now),
+            },
+          ],
+        },
+      });
+      // Already delivered as the initial user message. Keep the portable summary in
+      // the existing handoff projection for provenance, without injecting it twice.
+      yield* emitEvent({
+        type: "context-handoff.updated",
+        threadId: target.thread.id,
+        providerInstanceId: run.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          id: ContextHandoffId.make(`work-handoff:${command.commandId}`),
+          threadId: target.thread.id,
+          sourceThreadId: source.id,
+          targetRunId: run.id,
+          fromProviderThreadIds:
+            source.activeProviderThreadId === null ? [] : [source.activeProviderThreadId],
+          toProviderThreadId: run.providerThreadId,
+          coveredRunOrdinals: { from: run.ordinal, to: run.ordinal },
+          strategy: "manual_context",
+          status: "superseded",
+          summaryMessageId: run.userMessageId,
+          summaryText: command.scopeSummary,
+          createdByProviderInstanceId: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    },
+  );
+
   const dispatchCreatedThreadRecord = Effect.fn("orchestrationV2.dispatch.createdThreadRecord")(
     function* (
       command: Extract<OrchestrationV2Command, { readonly type: "thread.created.record" }>,
@@ -11081,6 +11172,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "delegated_task.completion-delivery.acknowledge":
       case "delegated_task.completion-delivery.dispose":
         yield* dispatchDelegatedTaskCompletionDeliveryResolution(command, events);
+        break;
+      case "work.handoff.record":
+        yield* dispatchWorkHandoffRecord(command, events);
         break;
       case "thread.created.record":
         yield* dispatchCreatedThreadRecord(command, events);

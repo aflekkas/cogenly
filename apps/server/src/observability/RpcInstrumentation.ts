@@ -87,6 +87,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.projectLabelsSetThreadLabels]: "projectLabels",
   [WS_METHODS.projectLabelsReviewSuggestion]: "projectLabels",
   [WS_METHODS.projectLabelsSuggestLabels]: "projectLabels",
+  [WS_METHODS.workStart]: "work",
+  [WS_METHODS.workProposeHandoff]: "work",
   [WS_METHODS.agentsList]: "agents",
   [WS_METHODS.agentsSubscribe]: "agents",
   [WS_METHODS.agentsUpsert]: "agents",

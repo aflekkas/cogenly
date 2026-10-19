@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./workMetadata": {
+      "types": "./src/workMetadata.ts",
+      "import": "./src/workMetadata.ts"
+    },
     "./githubMarkdownLinks": {
       "types": "./src/githubMarkdownLinks.ts",
       "import": "./src/githubMarkdownLinks.ts"

@@ -68,3 +68,4 @@ export * from "./clientRpcPermissions.ts";
 export * from "./agent.ts";
 
 export * from "./projectLabel.ts";
+export * from "./work.ts";

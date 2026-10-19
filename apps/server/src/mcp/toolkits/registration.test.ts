@@ -1,4 +1,5 @@
 import * as ProjectLabels from "../../projectLabels/ProjectLabelService.ts";
+import * as WorkHandoff from "../../work/WorkHandoffService.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import { agentFixture } from "../../agents/agent.testkit.ts";
 import * as AgentStore from "../../agents/AgentStore.ts";
@@ -60,6 +61,14 @@ const project = {
 };
 const layerStubServices = Layer.mergeAll(
   Layer.mock(ProjectLabels.ProjectLabelService)({ list: () => Effect.succeed({ labels: [] }) }),
+  Layer.mock(WorkHandoff.WorkHandoffService)({
+    proposeHandoff: () =>
+      Effect.succeed({
+        title: "Audit",
+        scopeSummary: "Implement audit validation.",
+        suggestedProjectId: null,
+      }),
+  }),
   Layer.mock(TerminalManager.TerminalManager)({ listAgents: () => Effect.succeed([]) }),
   Layer.mock(AgentStore.AgentStore)({
     forThread: () => Effect.succeed(agentFixture()),
@@ -141,6 +150,17 @@ const decodeCallPayload = Schema.decodeUnknownEffect(CallPayload);
 const decodeToolsListPayload = Schema.decodeUnknownEffect(ToolsListPayload);
 
 const smokeCases = [
+  {
+    toolkit: "work",
+    names: ["work_start", "work_propose_handoff"],
+    tool: "work_propose_handoff",
+    args: {},
+    expected: {
+      title: "Audit",
+      scopeSummary: "Implement audit validation.",
+      suggestedProjectId: null,
+    },
+  },
   {
     toolkit: "agentMemory",
     names: ["memory_read", "memory_write", "memory_remember", "memory_forget"],

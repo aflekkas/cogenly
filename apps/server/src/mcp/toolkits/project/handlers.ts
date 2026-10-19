@@ -140,6 +140,12 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           threadId,
           projectId,
           title: input.title,
+          workOrigin: "agent",
+          ...(caller === undefined ? {} : { sourceThreadId: caller.id }),
+          ...(caller?.agent === undefined ? {} : { sourceAgentId: caller.agent.id }),
+          ...(caller?.sourceAgentRunId === undefined
+            ? {}
+            : { sourceAgentRunId: caller.sourceAgentRunId }),
           modelSelection,
           runtimeMode,
           interactionMode,

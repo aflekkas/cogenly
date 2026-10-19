@@ -68,6 +68,8 @@ describe("command permissions", () => {
     WS_METHODS.projectLabelsSetThreadLabels,
     WS_METHODS.projectLabelsReviewSuggestion,
     WS_METHODS.projectLabelsSuggestLabels,
+    WS_METHODS.workStart,
+    WS_METHODS.workProposeHandoff,
     WS_METHODS.agentsUpsert,
     WS_METHODS.agentsDelete,
     WS_METHODS.agentsSend,

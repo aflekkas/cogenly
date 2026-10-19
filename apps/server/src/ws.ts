@@ -1,4 +1,5 @@
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
+import * as WorkHandoff from "./work/WorkHandoffService.ts";
 import * as Agents from "./agents/AgentService.ts";
 import * as AgentStore from "./agents/AgentStore.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
@@ -1107,6 +1108,7 @@ const layerWsRpc = (
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
       const intakeContext = yield* Effect.context<
         | ThreadManagementService.ThreadManagementService
+        | WorkHandoff.WorkHandoffService
         | ThreadLaunchService.ThreadLaunchService
         | FileSystem.FileSystem
         | ServerConfig.ServerConfig
@@ -1134,6 +1136,7 @@ const layerWsRpc = (
         }
       };
       const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
+      const workHandoff = yield* WorkHandoff.WorkHandoffService;
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
       const projectLabels = yield* ProjectLabels.ProjectLabelService;
       const agents = yield* Agents.AgentService;
@@ -1658,6 +1661,9 @@ const layerWsRpc = (
           projectLabels.reviewSuggestion(input),
         [WS_METHODS.projectLabelsSuggestLabels]: (input) =>
           projectLabels.suggestLabels(input.threadId),
+        [WS_METHODS.workStart]: (input) => workHandoff.start(input),
+        [WS_METHODS.workProposeHandoff]: (input) =>
+          workHandoff.proposeHandoff(input.sourceThreadId),
         [WS_METHODS.agentsList]: () => agents.list(),
         [WS_METHODS.agentsSubscribe]: () => agents.subscribe(),
         [WS_METHODS.agentsUpsert]: (input) => agents.upsert(input),

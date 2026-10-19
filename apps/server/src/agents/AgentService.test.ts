@@ -211,6 +211,10 @@ describe("agent execution", () => {
           expect(h.launches).toHaveLength(1);
           const work = h.launches[0]!;
           expect(work.threadId).not.toBe(h.fixture.conversationThreadId);
+          expect(work.workOrigin).toBe("agent");
+          expect(work.sourceAgentId).toBe(h.fixture.id);
+          expect(work.sourceAgentRunId).toBe(work.threadId);
+          expect(work.agent).toEqual({ id: h.fixture.id, role: "work" });
           expect(yield* store.context(work.threadId!)).toContain("green");
           expect(work.initialMessage?.text).toContain(h.triggerInput.prompt);
           yield* agents.reconcile();
