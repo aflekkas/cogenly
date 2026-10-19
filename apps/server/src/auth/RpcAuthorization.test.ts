@@ -43,6 +43,27 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("requires owner operate authority for agent decisions and commitment mutations", () => {
+    for (const method of [
+      WS_METHODS.agentsRequestApproval,
+      WS_METHODS.agentsApprove,
+      WS_METHODS.agentsReject,
+      WS_METHODS.agentsStartWork,
+      WS_METHODS.commitmentsCreate,
+      WS_METHODS.commitmentsUpdateStatus,
+      WS_METHODS.commitmentsConfirm,
+      WS_METHODS.commitmentsDismiss,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    for (const method of [
+      WS_METHODS.agentsApprovalsList,
+      WS_METHODS.agentsActivity,
+      WS_METHODS.commitmentsList,
+      WS_METHODS.commitmentsHistory,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+  });
+
   it("requires operate access to stop a workflow", () => {
     expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.stopWorkflow)).toBe(
       AuthOrchestrationOperateScope,

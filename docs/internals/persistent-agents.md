@@ -46,3 +46,16 @@ the server is up, including headless `apps/server` deployments. A VPS still need
 process supervisor, persistent database/secrets/workspaces, provider credentials and
 CLI dependencies, an explicit timezone for fixed-time schedules, backups, and secured
 remote access. There is no multi-server scheduler lease: run one writer per home.
+
+Agent scope grants authorize shared commitment retrieval explicitly; labels on data and
+repository membership never infer grants. New agents default to propose with read/draft
+only. Migration 067 preserves existing agents' previous MCP ceiling by granting all
+operations with autonomous-within-policy, leaving runtime/interaction approvals, pause,
+caps and backoff intact; scope starts empty and notifications remain all. Trigger and
+permission changes always require a new owner approval even for migrated agents.
+Persistent agents start tracked Work through `start_agent_work` or `work_start`; untracked child launches,
+forks and self-approval/configuration are explicitly refused so they cannot shed policy.
+The authenticated MCP boundary applies policy before all toolkits; generic shell,
+browser and device writes need every sensitive grant because their effects cannot be
+bounded by an execute grant. Native provider tool approval remains the provider's runtime
+boundary. Activity reads persisted provider runs and action records, never model claims.

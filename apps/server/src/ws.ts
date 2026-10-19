@@ -1,5 +1,6 @@
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as WorkHandoff from "./work/WorkHandoffService.ts";
+import * as AgentWorkspace from "./agents/AgentWorkspaceService.ts";
 import * as Agents from "./agents/AgentService.ts";
 import * as AgentStore from "./agents/AgentStore.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
@@ -1140,6 +1141,7 @@ const layerWsRpc = (
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
       const projectLabels = yield* ProjectLabels.ProjectLabelService;
       const agents = yield* Agents.AgentService;
+      const agentWorkspace = yield* AgentWorkspace.AgentWorkspaceService;
       const agentStore = yield* AgentStore.AgentStore;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
       const secretRequests = yield* SecretRequests.SecretRequests;
@@ -1666,6 +1668,20 @@ const layerWsRpc = (
         [WS_METHODS.workStart]: (input) => workHandoff.start(input),
         [WS_METHODS.workProposeHandoff]: (input) =>
           workHandoff.proposeHandoff(input.sourceThreadId),
+        [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
+        [WS_METHODS.agentsRequestApproval]: (input) =>
+          agentWorkspace.requestApproval(input.agentId, input.action),
+        [WS_METHODS.agentsApprove]: (input) => agentWorkspace.approve(input.id),
+        [WS_METHODS.agentsReject]: (input) => agentWorkspace.reject(input.id),
+        [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
+        [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
+        [WS_METHODS.commitmentsList]: (input) => agentWorkspace.listCommitments(input),
+        [WS_METHODS.commitmentsCreate]: (input) => agentWorkspace.createCommitment(input),
+        [WS_METHODS.commitmentsUpdateStatus]: (input) =>
+          agentWorkspace.updateCommitmentStatus(input),
+        [WS_METHODS.commitmentsConfirm]: (input) => agentWorkspace.confirmCommitment(input),
+        [WS_METHODS.commitmentsDismiss]: (input) => agentWorkspace.dismissCommitment(input),
+        [WS_METHODS.commitmentsHistory]: (input) => agentWorkspace.commitmentHistory(input.id),
         [WS_METHODS.agentsList]: () => agents.list(),
         [WS_METHODS.agentsSubscribe]: () => agents.subscribe(),
         [WS_METHODS.agentsUpsert]: (input) => agents.upsert(input),

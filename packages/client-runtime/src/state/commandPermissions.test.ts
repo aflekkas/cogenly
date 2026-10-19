@@ -23,6 +23,7 @@ import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import { EnvironmentRegistry } from "../connection/registry.ts";
+import { createAgentWorkspaceAtoms } from "./agents.ts";
 import { createCommandPermissions } from "./commandPermissions.ts";
 import { createEnvironmentRpcCommand } from "./runtime.ts";
 
@@ -59,6 +60,25 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("the agent approval command refuses execution without an owner grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        const commands = createAgentWorkspaceAtoms(runtime);
+        const result = yield* Effect.promise(() =>
+          commands.agentsApprove.run(registry, {
+            environmentId: env,
+            input: { id: "approval:test" },
+          }),
+        );
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure")
+          expect(Cause.pretty(result.cause)).toContain("EnvironmentAuthorizationError");
+      }),
+    ),
+  );
+
   it.effect.each([
     WS_METHODS.projectLabelsCreate,
     WS_METHODS.projectLabelsUpdate,
@@ -70,6 +90,14 @@ describe("command permissions", () => {
     WS_METHODS.projectLabelsSuggestLabels,
     WS_METHODS.workStart,
     WS_METHODS.workProposeHandoff,
+    WS_METHODS.agentsRequestApproval,
+    WS_METHODS.agentsApprove,
+    WS_METHODS.agentsReject,
+    WS_METHODS.agentsStartWork,
+    WS_METHODS.commitmentsCreate,
+    WS_METHODS.commitmentsUpdateStatus,
+    WS_METHODS.commitmentsConfirm,
+    WS_METHODS.commitmentsDismiss,
     WS_METHODS.agentsUpsert,
     WS_METHODS.agentsDelete,
     WS_METHODS.agentsSend,

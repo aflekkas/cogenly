@@ -58,6 +58,8 @@ export interface McpInvocationScope {
   readonly requestNamespace: string;
   /** Origin serving this MCP request, used for self-hosted webhook URLs. */
   readonly httpOrigin?: string | undefined;
+  /** Installed by authenticated HTTP middleware; invoked after a tool changes state. */
+  readonly onToolSuccess?: ((name: string, result: unknown) => Effect.Effect<void>) | undefined;
   readonly thread: McpThreadCaller | undefined;
   readonly client: McpClientCaller | undefined;
 }

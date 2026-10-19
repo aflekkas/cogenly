@@ -418,6 +418,10 @@
     "./pull-request-markdown": {
       "types": "./src/pullRequestMarkdown.ts",
       "default": "./src/pullRequestMarkdown.ts"
+    },
+    "./state/agents": {
+      "types": "./src/state/agents.ts",
+      "default": "./src/state/agents.ts"
     }
   },
   "scripts": {

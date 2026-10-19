@@ -8,6 +8,7 @@ import {
   type WorkStartInput,
   type WorkStartResult,
   type WorkHandoffDraft,
+  type OrchestrationV2ThreadLaunchWorkspaceStrategy,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -22,6 +23,8 @@ import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 
 /** Transport-owned provenance: RPC clients cannot impersonate an agent or choose its run. */
 export interface WorkHandoffActor {
+  readonly threadId?: ThreadId;
+  readonly workspaceStrategy?: OrchestrationV2ThreadLaunchWorkspaceStrategy;
   readonly origin: "chat" | "agent";
   readonly sourceAgentId?: AgentId;
   readonly sourceAgentRunId?: string;
@@ -83,14 +86,16 @@ const make = Effect.gen(function* () {
             ))?.id)
           : undefined;
       const workspaceStrategy =
-        input.workspace === "local"
+        actor?.workspaceStrategy ??
+        (input.workspace === "local"
           ? { type: "root" as const }
-          : { type: "worktree" as const, baseRef: "HEAD", startFromOrigin: false };
+          : { type: "worktree" as const, baseRef: "HEAD", startFromOrigin: false });
       // The existing launch service owns repository validation, provisioning, setup,
       // deferred execution, receipts and retries. No transcript is copied into Work.
       const result = yield* launches
         .launch({
           commandId: input.commandId,
+          ...(actor?.threadId === undefined ? {} : { threadId: actor.threadId }),
           projectId: input.targetProjectId,
           title: input.title,
           workOrigin: origin,
