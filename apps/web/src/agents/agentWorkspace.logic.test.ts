@@ -12,6 +12,8 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 import {
   agentAttentionCount,
+  agentReadableLabels,
+  agentRepositoryAccess,
   agentWorkStartPolicy,
   commitmentDueLabel,
   decisionsWaitingCount,
@@ -21,15 +23,19 @@ import {
   describeEventFilter,
   describeRunAction,
   describeSchedule,
+  EVENT_FILTER_OUT_OF_SCOPE_MESSAGE,
+  eventFilterChoices,
+  eventFilterOutOfScope,
   eventRunRefs,
   normalizeEventFilter,
   groupAgentsByScope,
   groupCommitments,
   resolveCommitmentRef,
   scopeAccess,
+  scopeAccessLimit,
   scopePermissions,
-  startWorkRepositories,
   toggleScope,
+  triggerErrorMessage,
 } from "./agentWorkspace.logic";
 
 const commitment = (
@@ -221,6 +227,52 @@ describe("event trigger filters", () => {
   });
 });
 
+describe("event filter scope", () => {
+  const spawn = ProjectLabelId.make("spawn");
+  const bartr = ProjectLabelId.make("bartr");
+  const home = ProjectId.make("home");
+  const site = ProjectId.make("site");
+  const other = ProjectId.make("other");
+  const labels = [
+    { id: spawn, name: "Spawn", repositoryIds: [site] },
+    { id: bartr, name: "Bartr", repositoryIds: [other] },
+  ];
+  const repositories = [
+    { id: home, title: "home" },
+    { id: site, title: "site" },
+    { id: other, title: "other" },
+  ];
+  const agent = {
+    projectId: home,
+    autonomy: "propose" as const,
+    permissions: { ...conservativeAgentPermissions, read: true },
+    scope: [{ labelId: spawn, permissions: scopePermissions("read") }],
+  };
+
+  it("offers only the readable projects and repositories", () => {
+    expect(eventFilterChoices(agent, labels, repositories)).toEqual({
+      labels: [labels[0]],
+      repositories: [
+        { id: home, title: "home" },
+        { id: site, title: "site" },
+      ],
+    });
+  });
+  it("finds saved filter entries that left the scope", () => {
+    const choices = eventFilterChoices(agent, labels, repositories);
+    expect(
+      eventFilterOutOfScope({ labelIds: [spawn, bartr], projectIds: [site, other] }, choices),
+    ).toEqual({ labelIds: [bartr], projectIds: [other] });
+    expect(eventFilterOutOfScope(undefined, choices)).toEqual({ labelIds: [], projectIds: [] });
+  });
+  it("words the server's scope codes and passes other messages through", () => {
+    const rejected = Object.assign(new Error("raw"), { code: "event_filter_out_of_scope" });
+    expect(triggerErrorMessage(rejected, "fallback")).toBe(EVENT_FILTER_OUT_OF_SCOPE_MESSAGE);
+    expect(triggerErrorMessage(new Error("Server said no"), "fallback")).toBe("Server said no");
+    expect(triggerErrorMessage("nope", "fallback")).toBe("fallback");
+  });
+});
+
 describe("eventRunRefs", () => {
   it("links the Work thread, the pull request and the open item", () => {
     const titles = (id: string) => (id === "c1" ? "Ship the fix" : undefined);
@@ -342,9 +394,12 @@ describe("describeApproval", () => {
 });
 
 describe("scope access", () => {
-  it("maps read and draft presets and keeps other mixes custom", () => {
+  it("maps read, draft and execute presets and keeps other mixes custom", () => {
     expect(scopeAccess(scopePermissions("read"))).toBe("read");
     expect(scopeAccess(scopePermissions("draft"))).toBe("draft");
+    expect(scopeAccess(scopePermissions("execute"))).toBe("execute");
+    expect(scopePermissions("execute")).toMatchObject({ read: true, draft: true, execute: true });
+    expect(scopeAccess({ ...scopePermissions("read"), execute: true })).toBe("custom");
     expect(scopeAccess({ ...scopePermissions("read"), merge: true })).toBe("custom");
     expect(scopeAccess({ ...scopePermissions("draft"), read: false })).toBe("custom");
   });
@@ -353,6 +408,28 @@ describe("scope access", () => {
     const added = toggleScope([], id, true);
     expect(added).toEqual([{ labelId: id, permissions: scopePermissions("draft") }]);
     expect(toggleScope(added, id, false)).toEqual([]);
+  });
+  it("says which agent-level settings hold a project grant back", () => {
+    const permissions = { ...conservativeAgentPermissions, read: true, draft: true };
+    expect(scopeAccessLimit({ autonomy: "propose", permissions }, "execute")).toBe(
+      "Executing here also needs autonomy Execute bounded work or higher and the Start Work permission. Until then it asks you first.",
+    );
+    expect(
+      scopeAccessLimit(
+        { autonomy: "execute_bounded", permissions: { ...permissions, execute: true } },
+        "execute",
+      ),
+    ).toBeNull();
+    expect(scopeAccessLimit({ autonomy: "observe", permissions }, "draft")).toBe(
+      "Can't propose open items at Observe autonomy.",
+    );
+    expect(
+      scopeAccessLimit(
+        { autonomy: "propose", permissions: { ...permissions, read: false } },
+        "read",
+      ),
+    ).toBe("Has no effect while the Read permission is off.");
+    expect(scopeAccessLimit({ autonomy: "propose", permissions }, "read")).toBeNull();
   });
 });
 
@@ -371,21 +448,27 @@ describe("agentWorkStartPolicy", () => {
         permissions: conservativeAgentPermissions,
       }).outcome,
     ).toBe("asks");
-    expect(agentWorkStartPolicy({ ...base, autonomy: "execute_bounded" }).outcome).toBe(
-      "home_only",
-    );
+    expect(
+      agentWorkStartPolicy({
+        ...base,
+        autonomy: "execute_bounded",
+        permissions: { ...base.permissions, read: false },
+      }).outcome,
+    ).toBe("asks");
+    expect(agentWorkStartPolicy({ ...base, autonomy: "execute_bounded" }).outcome).toBe("scoped");
   });
 });
 
-describe("startWorkRepositories", () => {
+describe("agentRepositoryAccess", () => {
   const spawn = ProjectLabelId.make("spawn");
   const bartr = ProjectLabelId.make("bartr");
+  const ops = ProjectLabelId.make("ops");
   const audit = ProjectId.make("audit");
   const site = ProjectId.make("site");
   const app = ProjectId.make("app");
   const labels = [
     { id: spawn, name: "Spawn", repositoryIds: [audit, site, ProjectId.make("gone")] },
-    { id: ProjectLabelId.make("ops"), name: "Ops", repositoryIds: [site] },
+    { id: ops, name: "Ops", repositoryIds: [site] },
     { id: bartr, name: "Bartr", repositoryIds: [app, site] },
   ];
   const repositories = [
@@ -393,32 +476,72 @@ describe("startWorkRepositories", () => {
     { id: site, title: "Website" },
     { id: app, title: "app" },
   ];
-  it("offers only repositories linked to scoped projects, once each", () => {
-    const scope = [{ labelId: spawn, permissions: scopePermissions("read") }];
-    expect(startWorkRepositories(scope, labels, repositories)).toEqual([
-      { id: audit, title: "booking-audit", projects: ["Spawn"], home: false },
-      { id: site, title: "Website", projects: ["Spawn"], home: false },
+  const executor = {
+    projectId: null,
+    autonomy: "execute_bounded" as const,
+    permissions: { ...conservativeAgentPermissions, read: true, draft: true, execute: true },
+  };
+  const summary = (entries: ReturnType<typeof agentRepositoryAccess>) =>
+    entries.map((entry) => [entry.title, entry.projects.join(","), entry.executable]);
+
+  it("offers only repositories linked to read grants, once each", () => {
+    const scope = [
+      { labelId: spawn, permissions: scopePermissions("read") },
+      { labelId: bartr, permissions: scopePermissions("draft") },
+      { labelId: ops, permissions: { ...scopePermissions("execute"), read: false } },
+    ];
+    expect(summary(agentRepositoryAccess({ ...executor, scope }, labels, repositories))).toEqual([
+      ["app", "Bartr", false],
+      ["booking-audit", "Spawn", false],
+      ["Website", "Spawn,Bartr", false],
     ]);
-    const both = [...scope, { labelId: bartr, permissions: scopePermissions("read") }];
+    expect(agentRepositoryAccess({ ...executor, scope: [] }, labels, repositories)).toEqual([]);
+  });
+  it("executes linked repositories only through a Read & execute grant", () => {
+    const scope = [
+      { labelId: spawn, permissions: scopePermissions("execute") },
+      { labelId: bartr, permissions: scopePermissions("draft") },
+    ];
     expect(
-      startWorkRepositories(both, labels, repositories).find((repo) => repo.id === site)?.projects,
-    ).toEqual(["Spawn", "Bartr"]);
-  });
-  it("offers nothing without scope", () => {
-    expect(startWorkRepositories([], labels, repositories)).toEqual([]);
-  });
-  it("offers the home repository first, even when no scoped project links it", () => {
-    expect(startWorkRepositories([], labels, repositories, app)).toEqual([
-      { id: app, title: "app", projects: [], home: true },
+      summary(agentRepositoryAccess({ ...executor, scope, projectId: app }, labels, repositories)),
+    ).toEqual([
+      ["app", "Bartr", true],
+      ["booking-audit", "Spawn", true],
+      ["Website", "Spawn,Bartr", true],
     ]);
-    const scope = [{ labelId: spawn, permissions: scopePermissions("read") }];
-    expect(startWorkRepositories(scope, labels, repositories, site)).toEqual([
-      { id: site, title: "Website", projects: ["Spawn"], home: true },
-      { id: audit, title: "booking-audit", projects: ["Spawn"], home: false },
-    ]);
+    // Without an executing autonomy nothing is executable, the home repository included.
+    const proposer = { ...executor, autonomy: "propose" as const, scope, projectId: app };
+    expect(
+      agentRepositoryAccess(proposer, labels, repositories).some((entry) => entry.executable),
+    ).toBe(false);
   });
-  it("skips a home repository that is no longer listed", () => {
-    expect(startWorkRepositories([], labels, repositories, ProjectId.make("gone"))).toEqual([]);
+  it("puts the home repository first and drops one that is no longer listed", () => {
+    expect(
+      summary(
+        agentRepositoryAccess({ ...executor, scope: [], projectId: app }, labels, repositories),
+      ),
+    ).toEqual([["app", "", true]]);
+    expect(
+      agentRepositoryAccess(
+        { ...executor, scope: [], projectId: ProjectId.make("gone") },
+        labels,
+        repositories,
+      ),
+    ).toEqual([]);
+  });
+  it("reads nothing without the agent's Read permission", () => {
+    const agent = {
+      ...executor,
+      projectId: app,
+      permissions: { ...executor.permissions, read: false },
+      scope: [{ labelId: spawn, permissions: scopePermissions("execute") }],
+    };
+    const entries = agentRepositoryAccess(agent, labels, repositories);
+    expect(entries.some((entry) => entry.readable || entry.executable)).toBe(false);
+    expect(agentReadableLabels(agent, labels)).toEqual([]);
+    expect(agentReadableLabels({ ...agent, permissions: executor.permissions }, labels)).toEqual([
+      labels[0],
+    ]);
   });
 });
 

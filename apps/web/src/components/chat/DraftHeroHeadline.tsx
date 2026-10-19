@@ -367,8 +367,9 @@ export function DraftHeroHeadline({
   // a complete sentence too. The project picker is a control rendered inline
   // in the h1; without an explicit label its widget state bleeds into the
   // announced phrase.
+  // A chat without a repository is a plain conversation, not Work.
   const headingLabel = isScratchDraft
-    ? "What should we work on?"
+    ? "What’s on your mind?"
     : hasResolvedProject
       ? `What should we build in ${activeProjectDisplayName}?`
       : canChooseProject
@@ -409,7 +410,7 @@ export function DraftHeroHeadline({
         className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
       >
         {isScratchDraft ? (
-          <>What should we work on?</>
+          <>What’s on your mind?</>
         ) : hasResolvedProject ? (
           <>What should we build in {projectSelector}?</>
         ) : canChooseProject ? (

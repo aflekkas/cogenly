@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { Switch } from "~/components/ui/switch";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { ProjectLabelPicker } from "~/projectLabels/ProjectLabelPicker";
 import { ProjectTag } from "~/projectLabels/ProjectTag";
 import { useAgents, useAgentsClient } from "./agentsClient";
@@ -45,14 +46,18 @@ import {
 } from "./agents.logic";
 import {
   AUTONOMY_OPTIONS,
+  EVENT_RUN_NOW_UNSUPPORTED_MESSAGE,
   PERMISSION_OPTIONS,
   SCOPE_ACCESS_LABEL,
+  SCOPE_ACCESS_OPTIONS,
   agentWorkStartPolicy,
   describeSchedule,
+  eventFilterChoices,
   scopeAccess,
+  scopeAccessLimit,
   scopePermissions,
-  startWorkRepositories,
   toggleScope,
+  triggerErrorMessage,
   type FilterNames,
 } from "./agentWorkspace.logic";
 import { DailyCapRow, DetailRow, InlineEditor, TriggerForm, chevron } from "./AgentDetails";
@@ -102,7 +107,7 @@ export function AgentResponsibilities({
       await action();
       return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save changes.");
+      setError(triggerErrorMessage(cause, "Could not save changes."));
       return false;
     } finally {
       setPending(false);
@@ -119,27 +124,20 @@ export function AgentResponsibilities({
   const setPermission = (key: keyof AgentPermissions, value: boolean) =>
     void saveProfile({ permissions: { ...agent.permissions, [key]: value } });
   const disabled = pending || !canWrite;
-  // Event triggers can name only what the agent can read: its scoped projects, its home
-  // repository and the repositories those projects link.
-  const scopedLabels = workspace.labels.filter((label) =>
-    agent.scope.some((entry) => entry.labelId === label.id),
-  );
-  const home = workspace.repositories.find((repository) => repository.id === agent.projectId);
-  const triggerRepositories = [
-    ...(home ? [home] : []),
-    ...startWorkRepositories(agent.scope, workspace.labels, workspace.repositories)
-      .filter((repository) => repository.id !== agent.projectId)
-      .map(({ id, title }) => ({ id, title })),
-  ];
   const filterNames: FilterNames = {
     labelName: (id) => labelsById.get(id)?.name,
     repositoryName: (id) =>
       workspace.repositories.find((repository) => repository.id === id)?.title,
   };
+  // Event triggers can name only what the agent can read, as the server enforces.
   const triggerFormProps = {
-    labels: scopedLabels,
-    repositories: triggerRepositories,
+    ...eventFilterChoices(agent, workspace.labels, workspace.repositories),
     onManageProjects: client.openProjectSettings,
+  };
+  const saveTrigger = async (value: Parameters<typeof client.saveTrigger>[1]) => {
+    // Errors stay in the form, where an out-of-scope filter can be fixed.
+    await client.saveTrigger(agent, value);
+    close();
   };
 
   return (
@@ -333,71 +331,82 @@ export function AgentResponsibilities({
         }
       >
         <p className="px-2.5 pb-2 text-xs text-muted-foreground">
-          Project tags give context only. The agent can read and record open items only in the
-          projects granted here.
+          Project tags give context only. Access comes from the projects granted here and covers the
+          repositories linked to them. Executing in a project also needs autonomy Execute bounded
+          work or higher and the Start Work permission.
         </p>
         {agent.scope.length === 0 && (
           <p className="px-2.5 py-1.5 text-xs text-muted-foreground/70">
-            No projects granted. It sees only its own conversation and items.
+            No projects granted. It sees only its home repository, its conversation and its items.
           </p>
         )}
         {agent.scope.map((entry) => {
           const label = labelsById.get(entry.labelId);
           const access = scopeAccess(entry.permissions);
+          const limit = scopeAccessLimit(agent, access);
           return (
-            <div key={entry.labelId} className="flex min-h-8 items-center gap-2 px-2.5 py-0.5">
-              {label ? (
-                <ProjectTag name={label.name} color={label.color} />
-              ) : (
-                <span className="text-xs text-muted-foreground">Deleted project</span>
-              )}
-              <span className="flex-1" />
-              <div className="w-40 shrink-0">
-                <Select
-                  value={access}
+            <div key={entry.labelId} className="flex flex-col gap-0.5 px-2.5 py-1">
+              <div className="flex min-h-8 items-center gap-2">
+                {label ? (
+                  <ProjectTag name={label.name} color={label.color} />
+                ) : (
+                  <span className="text-xs text-muted-foreground">Deleted project</span>
+                )}
+                <span className="flex-1" />
+                <div className="w-40 shrink-0">
+                  <Select
+                    value={access}
+                    disabled={disabled}
+                    onValueChange={(value) => {
+                      const option = SCOPE_ACCESS_OPTIONS.find(
+                        (candidate) => candidate.value === value,
+                      );
+                      if (!option) return;
+                      void saveProfile({
+                        scope: agent.scope.map((item) =>
+                          item.labelId === entry.labelId
+                            ? { ...item, permissions: scopePermissions(option.value) }
+                            : item,
+                        ),
+                      });
+                    }}
+                  >
+                    <SelectTrigger size="xs" aria-label={`Access to ${label?.name ?? "project"}`}>
+                      <SelectValue>{SCOPE_ACCESS_LABEL[access]}</SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {SCOPE_ACCESS_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value} label={option.label}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                      {access === "custom" && (
+                        <SelectItem value="custom" label={SCOPE_ACCESS_LABEL.custom} disabled>
+                          Custom
+                        </SelectItem>
+                      )}
+                    </SelectPopup>
+                  </Select>
+                </div>
+                <Button
+                  size="icon-xs"
+                  variant="ghost-muted"
+                  aria-label={`Remove ${label?.name ?? "project"} from scope`}
                   disabled={disabled}
-                  onValueChange={(value) => {
-                    if (value !== "read" && value !== "draft") return;
+                  onClick={() =>
                     void saveProfile({
-                      scope: agent.scope.map((item) =>
-                        item.labelId === entry.labelId
-                          ? { ...item, permissions: scopePermissions(value) }
-                          : item,
-                      ),
-                    });
-                  }}
+                      scope: toggleScope(agent.scope, entry.labelId as ProjectLabelId, false),
+                    })
+                  }
                 >
-                  <SelectTrigger size="xs" aria-label={`Access to ${label?.name ?? "project"}`}>
-                    <SelectValue>{SCOPE_ACCESS_LABEL[access]}</SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    <SelectItem value="read" label={SCOPE_ACCESS_LABEL.read}>
-                      Read
-                    </SelectItem>
-                    <SelectItem value="draft" label={SCOPE_ACCESS_LABEL.draft}>
-                      Read & draft open items
-                    </SelectItem>
-                    {access === "custom" && (
-                      <SelectItem value="custom" label={SCOPE_ACCESS_LABEL.custom} disabled>
-                        Custom
-                      </SelectItem>
-                    )}
-                  </SelectPopup>
-                </Select>
+                  <XIcon />
+                </Button>
               </div>
-              <Button
-                size="icon-xs"
-                variant="ghost-muted"
-                aria-label={`Remove ${label?.name ?? "project"} from scope`}
-                disabled={disabled}
-                onClick={() =>
-                  void saveProfile({
-                    scope: toggleScope(agent.scope, entry.labelId as ProjectLabelId, false),
-                  })
-                }
-              >
-                <XIcon />
-              </Button>
+              <span className="text-xs text-muted-foreground">
+                {SCOPE_ACCESS_OPTIONS.find((option) => option.value === access)?.description ??
+                  "A mix of grants set elsewhere. Pick a level to replace it."}
+              </span>
+              {limit && <span className="text-xs text-warning-foreground">{limit}</span>}
             </div>
           );
         })}
@@ -429,7 +438,7 @@ export function AgentResponsibilities({
         <p
           className={cn(
             "mx-2.5 mt-1.5 text-xs",
-            workStart.outcome === "home_only" ? "text-foreground/70" : "text-muted-foreground",
+            workStart.outcome === "scoped" ? "text-foreground/70" : "text-muted-foreground",
           )}
         >
           Work: {workStart.text}
@@ -525,12 +534,7 @@ export function AgentResponsibilities({
               initial={trigger}
               pending={pending}
               onCancel={close}
-              onSave={(value) =>
-                mutate(async () => {
-                  await client.saveTrigger(agent, value);
-                  close();
-                })
-              }
+              onSave={saveTrigger}
             />
           ) : (
             <div key={trigger.id} className="flex items-center">
@@ -552,15 +556,33 @@ export function AgentResponsibilities({
                   void mutate(() => client.setTriggerEnabled(agent, trigger.id, enabled))
                 }
               />
-              <ThreadDetailsControl
-                part="icon"
-                aria-label={`Run ${trigger.title} now`}
-                title={agent.enabled ? "Run now" : "Resume the agent to run triggers"}
-                disabled={disabled || !agent.enabled}
-                onClick={() => void mutate(() => client.runTrigger(agent, trigger.id))}
-              >
-                <PlayIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-              </ThreadDetailsControl>
+              {trigger.schedule.type === "event" ? (
+                // The server refuses manual runs: an event run needs a real source event.
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <ThreadDetailsControl
+                        part="icon"
+                        aria-label={`Run ${trigger.title} now`}
+                        aria-disabled
+                      />
+                    }
+                  >
+                    <PlayIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+                  </TooltipTrigger>
+                  <TooltipPopup>{EVENT_RUN_NOW_UNSUPPORTED_MESSAGE}</TooltipPopup>
+                </Tooltip>
+              ) : (
+                <ThreadDetailsControl
+                  part="icon"
+                  aria-label={`Run ${trigger.title} now`}
+                  title={agent.enabled ? "Run now" : "Resume the agent to run triggers"}
+                  disabled={disabled || !agent.enabled}
+                  onClick={() => void mutate(() => client.runTrigger(agent, trigger.id))}
+                >
+                  <PlayIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+                </ThreadDetailsControl>
+              )}
               <ThreadDetailsControl
                 part="icon"
                 aria-label={`Delete trigger ${trigger.title}`}
@@ -578,12 +600,7 @@ export function AgentResponsibilities({
             {...triggerFormProps}
             pending={pending}
             onCancel={close}
-            onSave={(value) =>
-              mutate(async () => {
-                await client.saveTrigger(agent, value);
-                close();
-              })
-            }
+            onSave={saveTrigger}
           />
         )}
       </ThreadDetailsSection>

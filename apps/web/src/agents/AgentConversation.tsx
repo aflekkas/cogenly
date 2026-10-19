@@ -5,7 +5,6 @@ import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
 import { useMessageMotion } from "./useMessageMotion";
 import {
-  agentContactKey,
   agentStatusLabel,
   conversationRows,
   modelDisplayName,
@@ -20,12 +19,10 @@ import { AgentActivity } from "./AgentActivity";
 import { AgentOpenItems, ApprovalDecision } from "./AgentOpenItems";
 import { AgentResponsibilities } from "./AgentResponsibilities";
 import { AgentStartWork } from "./AgentStartWork";
-import { watchAgentViewIntent } from "./agentViewIntent";
-import { subscribeAgentTabRequests, takeAgentTabRequest } from "./agentTabRequest";
+import { agentViewKey, takeAgentView, watchAgentView, type AgentTab } from "./agentViewIntent";
 import { countOpenCommitments } from "./agentWorkspace.logic";
 import type { AgentContact, AgentModelRef, AgentRequest, AgentWorkspaceView } from "./agents.types";
 
-export type AgentTab = "chat" | "activity" | "items" | "responsibilities";
 const TABS: ReadonlyArray<{ value: AgentTab; label: string }> = [
   { value: "chat", label: "Chat" },
   { value: "activity", label: "Activity" },
@@ -62,36 +59,31 @@ function AgentView({
   onDeleted?: (() => void) | undefined;
 }) {
   const client = useAgentsClient();
-  const threadKey = `${agent.environmentId}:${agent.conversationThreadId}`;
-  const [tab, setTab] = useState<AgentTab>(() => takeAgentTabRequest(threadKey) ?? "chat");
-  useEffect(
-    () =>
-      subscribeAgentTabRequests((key) => {
-        if (key !== threadKey) return;
-        const requested = takeAgentTabRequest(key);
-        if (requested) setTab(requested);
-      }),
-    [threadKey],
-  );
-  const [startingWork, setStartingWork] = useState(false);
-  const [focusMessage, setFocusMessage] = useState<string | null>(null);
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
+  const viewKey = agentViewKey(agent);
+  // The command palette and search can ask for a tab or Start Work before or after this mounts.
+  const [initialView] = useState(() => takeAgentView(viewKey));
+  const [tab, setTab] = useState<AgentTab>(
+    initialView && initialView !== "start-work" ? initialView : "chat",
+  );
+  const [startingWork, setStartingWork] = useState(initialView === "start-work" && canWrite);
+  const [focusMessage, setFocusMessage] = useState<string | null>(null);
   const openChat = (messageId?: string) => {
     setTab("chat");
     setFocusMessage(messageId ?? null);
   };
   const itemsCount = agent.approvals.length + countOpenCommitments(workspace.commitments);
-  // The command palette can ask for Open items or Start Work before or after this mounts.
-  const agentKey = agentContactKey(agent);
   useEffect(
     () =>
-      watchAgentViewIntent(agentKey, (view) => {
-        if (view === "items") {
-          setTab("items");
-          setFocusMessage(null);
-        } else if (canWrite) setStartingWork(true);
+      watchAgentView(viewKey, (view) => {
+        if (view === "start-work") {
+          if (canWrite) setStartingWork(true);
+          return;
+        }
+        setTab(view);
+        setFocusMessage(null);
       }),
-    [agentKey, canWrite],
+    [viewKey, canWrite],
   );
   return (
     <section className="agent-conversation" aria-label={`Conversation with ${agent.name}`}>
@@ -334,7 +326,7 @@ function ChatPane({
               This is the start of something good.<span>Say hello to {agent.name}.</span>
             </div>
           )}
-          {conversationRows(agent.messages).map(({ message, separator, grouped }) => (
+          {conversationRows(agent.messages).map(({ message, separator, grouped, endsRun }) => (
             <Fragment key={message.id}>
               {switches.before.has(message.id) && (
                 <ModelSwitchLine
@@ -371,6 +363,9 @@ function ChatPane({
                     message.text
                   )}
                 </div>
+                {endsRun && message.runId && client.MessageContext && (
+                  <client.MessageContext agent={agent} runId={message.runId} />
+                )}
                 {message.role === "user" &&
                   (message.id === lastOwner?.id ||
                     message.delivery === "failed" ||

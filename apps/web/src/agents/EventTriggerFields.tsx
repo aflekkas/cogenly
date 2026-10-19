@@ -19,6 +19,7 @@ import { ProjectLabelChips, ProjectLabelPicker } from "~/projectLabels/ProjectLa
 import {
   EVENT_ORIGIN_LABEL,
   EVENT_TRIGGER_OPTIONS,
+  eventFilterOutOfScope,
   eventFiltersWork,
   normalizeEventFilter,
 } from "./agentWorkspace.logic";
@@ -47,8 +48,8 @@ function CompactField({ label, children }: { label: string; children: ReactNode 
 
 /**
  * The event, and optionally which projects, repositories and Work origin it is
- * limited to. Filters only narrow what the agent already receives; the server
- * delivers events from repositories in its scope and wakes it once per event.
+ * limited to. Filters only narrow what the agent already receives and may name only
+ * what it can read; the server rechecks scope on save and on every delivery.
  */
 export function EventTriggerFields({
   value,
@@ -60,9 +61,9 @@ export function EventTriggerFields({
 }: {
   value: EventTriggerValue;
   onChange: (value: { event: AgentEventKind; filter?: EventTriggerValue["filter"] }) => void;
-  /** Projects the filter may name. */
+  /** Projects the filter may name: the agent's readable scope. */
   labels: ReadonlyArray<ProjectLabelWithRepositories>;
-  /** Repositories the filter may name. */
+  /** Repositories the filter may name: the agent's readable scope. */
   repositories: ReadonlyArray<{ id: ProjectId; title: string }>;
   onManageProjects?: (() => void) | undefined;
   Field?: ComponentType<{ label: string; children: ReactNode }>;
@@ -78,6 +79,9 @@ export function EventTriggerFields({
   const selectedRepositories = repositories.filter((repository) =>
     projectIds.includes(repository.id),
   );
+  // A grant removed after saving leaves the filter naming something the server rejects.
+  const outOfScope = eventFilterOutOfScope(filter, { labels, repositories });
+  const outOfScopeCount = outOfScope.labelIds.length + (work ? outOfScope.projectIds.length : 0);
   return (
     <>
       <Field label="What happens">
@@ -170,6 +174,26 @@ export function EventTriggerFields({
             <span className="text-xs font-normal text-muted-foreground">Anywhere</span>
           )}
         </div>
+        {outOfScopeCount > 0 && (
+          <div className="flex flex-wrap items-center gap-1 text-xs font-normal text-warning-foreground">
+            Also limited to {outOfScopeCount === 1 ? "one place" : `${outOfScopeCount} places`} it
+            can no longer read.
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost-muted"
+              onClick={() =>
+                update(value.event, {
+                  ...filter,
+                  labelIds: labelIds.filter((id) => !outOfScope.labelIds.includes(id)),
+                  projectIds: projectIds.filter((id) => !outOfScope.projectIds.includes(id)),
+                })
+              }
+            >
+              Remove
+            </Button>
+          </div>
+        )}
       </Field>
       {work && (
         <Field label="Started by">
@@ -198,7 +222,8 @@ export function EventTriggerFields({
         </Field>
       )}
       <p className="text-xs font-normal text-muted-foreground">
-        It only reacts to events in repositories it’s scoped to, and a repeated event wakes it once.
+        It only reacts to events in repositories and projects it can read, and a repeated event
+        wakes it once.
       </p>
     </>
   );

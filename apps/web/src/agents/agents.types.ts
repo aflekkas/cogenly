@@ -8,6 +8,7 @@ import type {
   ProjectId,
   ProjectLabelWithRepositories,
   ModelSelection,
+  RunId,
   ScheduledTaskSchedule,
   ThreadId,
 } from "@t3tools/contracts";
@@ -38,6 +39,8 @@ export interface AgentMessage {
   source?: { name: string; threadId: ThreadId };
   /** The model an owner text went to; drives the "Switched to …" lines. */
   model?: AgentModelRef;
+  /** The run that wrote an assistant reply; what retrieval added to it is shown per run. */
+  runId?: RunId;
 }
 export type AgentModelRef = Pick<ModelSelection, "instanceId" | "model">;
 export interface AgentRequest {

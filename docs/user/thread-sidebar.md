@@ -26,25 +26,31 @@ ask it to start Work. The tabs above the chat hold the rest:
   with due dates, projects, and links to where they came from. Items the agent
   finds stay **Proposed** until you confirm or dismiss them. **Mark done** asks
   what finished it, optionally with a link as evidence; done and dismissed items
-  can be reopened. **History** on an item lists every status change: who made it,
-  when, why, and any evidence. Pending approvals sit at the top, and also appear
+  can be reopened. **Delete** removes an item and its history for good; dismiss it
+  instead to keep a record. **History** on an item lists every status change: who
+  made it, when, why, and any evidence. Pending approvals sit at the top, and also appear
   in the chat.
 - **Responsibilities**: the agent's mission, instructions, model, project access,
   autonomy, permissions, notifications, daily run cap, triggers, memory (facts it
   proposed wait there for you to confirm; see [Memory](./memory-and-export.md#memory)),
   **Pause**, and **Delete**.
 
-Project tags give an agent context only. It can read and propose items only in the
-projects granted under **Project scope**; a tag on a chat never grants access.
+Project tags give an agent context only; a tag on a chat never grants access. Access
+comes from the projects granted under **Project scope**, and covers the repositories
+linked to them. Each project is granted **Read**, **Read & draft** (it may also
+propose open items), or **Read & execute** (it may also start Work there without
+asking). Executing also needs the agent's autonomy at **Execute bounded work** or
+higher and its **Start Work** permission.
 
 Autonomy decides how far it goes on its own:
 
 - **Observe** reads and summarizes, and never changes anything.
 - **Propose** (the default) drafts plans and items, and asks before starting Work.
 - **Execute bounded work** starts Work in its home repository, the workspace
-  chosen when it was created, within its permissions, and asks for anything else.
+  chosen when it was created, and in projects granted **Read & execute**, within
+  its permissions, and asks for anything else.
 - **Autonomous within policy** also runs its recurring work within its
-  permissions without asking. Work in another repository still needs you.
+  permissions without asking. Work in any other repository still needs you.
 
 Permissions are separate switches: read, draft, start Work, and the high-impact
 send, create PRs, merge, deploy and delete. An agent cannot grant itself anything.
@@ -52,8 +58,10 @@ When it wants to start Work, add a trigger, or change its permissions, it
 asks, and you **Approve** or **Reject**. Approvals expire after seven days.
 
 **Start Work** in the agent's header starts a coding session in its home repository
-or a repository linked to one of its granted projects. The session runs in a new
-worktree and appears in **Work** under its repository, marked with the agent's name.
+or a repository linked to one of its granted projects. Starting it yourself approves
+that one session; repositories the agent would have to ask about on its own are
+marked. The session runs in a new worktree and appears in **Work** under its
+repository, marked with the agent's name.
 The command palette also has **Start Work with …** and **Open items for …** for
 each agent.
 
@@ -65,8 +73,9 @@ Triggers wake an agent for one recorded run: on an interval, at a time, on a
 webhook, or **When something happens**, such as PR checks failing, a PR merging,
 Work finishing or becoming ready for review, or an open item coming due. An event
 trigger can be limited to some projects, repositories, or Work you, a chat or an
-agent started. Filters only narrow: an agent reacts only to events in repositories
-it is scoped to, and a repeated event wakes it once. Add triggers under
+agent started. Filters only narrow and can name only projects and repositories the
+agent can read: it reacts only to events it can read, and a repeated event wakes it
+once. Event triggers have no **Run now**; they run when the event happens. Add triggers under
 **Responsibilities → Triggers**, when creating the agent, or in **Settings →
 Scheduled tasks**. An agent can suggest one, but it is added only if you approve.
 

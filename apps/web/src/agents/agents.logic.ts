@@ -27,11 +27,18 @@ export function formatMessageTime(at: string, now = new Date(), locale?: string)
   return `${day} ${date.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" })}`;
 }
 
+/**
+ * Each message with its time separator and grouping. `endsRun` marks the last assistant
+ * reply of a finished run, where that run's "Context used" belongs.
+ */
 export function conversationRows(
   messages: ReadonlyArray<AgentMessage>,
   now = new Date(),
   locale?: string,
 ) {
+  const lastOfRun = new Map<string, string>();
+  for (const message of messages)
+    if (message.role === "assistant" && message.runId) lastOfRun.set(message.runId, message.id);
   return messages.map((message, index) => {
     const previous = messages[index - 1];
     const date = validDate(message.createdAt);
@@ -53,6 +60,10 @@ export function conversationRows(
         gap <= GROUP_GAP_MS &&
         !message.source &&
         !previous.source,
+      endsRun:
+        !message.streaming &&
+        message.runId !== undefined &&
+        lastOfRun.get(message.runId) === message.id,
     };
   });
 }

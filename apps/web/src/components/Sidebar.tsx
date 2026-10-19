@@ -638,6 +638,8 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   project: ProjectFaviconProject | null;
   projectDisplayName: string | null;
   isActive: boolean;
+  /** Chats rows are text only: the draft's first line and a muted "Draft". */
+  slim: boolean;
   onNavigate: (draftId: DraftId) => void;
   onDiscard: (draftId: DraftId) => void;
   onContextMenu: (draftId: DraftId, position: { x: number; y: number }) => void;
@@ -698,6 +700,54 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
     },
     [draftId, onDiscard],
   );
+  const discardButton = (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Discard draft"
+            onClick={handleDiscard}
+            className="pointer-events-none inline-flex cursor-pointer items-center rounded-md bg-transparent px-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
+          >
+            <XIcon className="size-3" />
+          </button>
+        }
+      />
+      <TooltipPopup side="top">Discard draft</TooltipPopup>
+    </Tooltip>
+  );
+  if (props.slim) {
+    return (
+      <li className="list-none">
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={accessibility.label}
+          aria-current={accessibility.current}
+          data-testid="sidebar-draft-row"
+          className={cn(
+            "group/sidebar-row relative flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+            props.isActive ? "state-selected" : "state-hover",
+          )}
+          onClick={handleActivate}
+          onContextMenu={handleContextMenu}
+          onKeyDown={handleKeyDown}
+        >
+          <span className="min-w-0 flex-1 truncate text-sm text-foreground/80">{preview}</span>
+          <span className="relative flex h-5 shrink-0 items-center justify-end">
+            <span
+              aria-hidden
+              className="text-2xs text-muted-foreground transition-opacity group-focus-within/sidebar-row:opacity-0 group-hover/sidebar-row:opacity-0"
+            >
+              Draft
+            </span>
+            <span className="absolute inset-y-0 right-0 flex items-center">{discardButton}</span>
+          </span>
+        </div>
+      </li>
+    );
+  }
   return (
     <li className="list-none py-0.5">
       <div
@@ -725,21 +775,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
               {props.projectDisplayName}
             </span>
             <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label="Discard draft"
-                      onClick={handleDiscard}
-                      className="pointer-events-none inline-flex cursor-pointer items-center rounded-md bg-transparent px-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
-                    >
-                      <XIcon className="size-3" />
-                    </button>
-                  }
-                />
-                <TooltipPopup side="top">Discard draft</TooltipPopup>
-              </Tooltip>
+              {discardButton}
             </span>
           </div>
           <div aria-hidden className="mt-0.5 truncate text-sm font-medium text-foreground/90">
@@ -766,6 +802,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   projectDisplayNameByKey: ReadonlyMap<string, string>;
   scopedProjectKeys: ReadonlySet<string> | null;
   routeDraftId: string | null;
+  slim: boolean;
   onNavigateToDraft: (draftId: DraftId) => void;
   onDraftContextMenu: (draftId: DraftId, position: { x: number; y: number }) => void;
 }) {
@@ -849,6 +886,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
             project={props.projectByKey.get(projectKey) ?? null}
             projectDisplayName={props.projectDisplayNameByKey.get(projectKey) ?? null}
             isActive={draftId === props.routeDraftId}
+            slim={props.slim}
             onNavigate={props.onNavigateToDraft}
             // The /draft/$draftId route redirects home on its own when the
             // draft it renders disappears, so discarding the open draft needs
@@ -4563,6 +4601,7 @@ export default function Sidebar() {
                       projectDisplayNameByKey={projectDisplayNameByKey}
                       scopedProjectKeys={sidebarModes.draftProjectKeys}
                       routeDraftId={routeDraftIdForRows}
+                      slim={sidebarMode === "chats"}
                       onNavigateToDraft={navigateToDraft}
                       onDraftContextMenu={handleDraftContextMenu}
                     />,

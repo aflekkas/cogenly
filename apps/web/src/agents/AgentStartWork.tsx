@@ -21,13 +21,15 @@ import {
 import { Textarea } from "~/components/ui/textarea";
 import { randomUUID } from "~/lib/utils";
 import { useAgentsClient } from "./agentsClient";
-import { startWorkRepositories } from "./agentWorkspace.logic";
+import { agentRepositoryAccess } from "./agentWorkspace.logic";
 import type { AgentContact, AgentWorkspaceView } from "./agents.types";
 
 /**
  * Start a normal Work session owned by this agent, in its home repository or one
- * linked to its granted projects. It runs in a new worktree and appears in Work. The
- * server may answer with a pending approval instead of a thread; that is said plainly.
+ * linked to its granted projects. It runs in a new worktree and appears in Work.
+ * Starting it yourself is your approval, so it starts in any listed repository; each
+ * one says whether the agent could start Work there on its own or would have to ask.
+ * The server may still answer with a pending approval; that is said plainly.
  */
 export function AgentStartWork({
   agent,
@@ -41,12 +43,7 @@ export function AgentStartWork({
   onOpenItems: () => void;
 }) {
   const client = useAgentsClient();
-  const repositories = startWorkRepositories(
-    agent.scope,
-    workspace.labels,
-    workspace.repositories,
-    agent.projectId,
-  );
+  const repositories = agentRepositoryAccess(agent, workspace.labels, workspace.repositories);
   const [projectId, setProjectId] = useState<ProjectId | null>(repositories[0]?.id ?? null);
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -125,7 +122,11 @@ export function AgentStartWork({
                         >
                           <span className="min-w-0 flex-1 truncate">{repository.title}</span>
                           <span className="text-2xs text-muted-foreground">
-                            {[repository.home ? "Home" : "", repository.projects.join(", ")]
+                            {[
+                              repository.home ? "Home" : "",
+                              repository.projects.join(", "),
+                              repository.executable ? "" : "Asks you first",
+                            ]
                               .filter(Boolean)
                               .join(" · ")}
                           </span>
@@ -133,6 +134,13 @@ export function AgentStartWork({
                       ))}
                     </SelectPopup>
                   </Select>
+                  {selected && (
+                    <span className="font-normal">
+                      {selected.executable
+                        ? `${agent.name} may start Work here on its own too.`
+                        : `On its own, ${agent.name} would ask you before starting Work here. Starting it yourself approves this one session; it doesn't widen its scope.`}
+                    </span>
+                  )}
                 </div>
                 <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
                   Title
