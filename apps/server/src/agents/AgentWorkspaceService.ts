@@ -1,3 +1,4 @@
+import * as Access from "./AgentAccessScope.ts";
 import {
   AgentError,
   AgentEventContext,
@@ -54,20 +55,6 @@ const wrap = (cause: unknown) =>
   isAgentError(cause)
     ? cause
     : new AgentError({ message: "Could not access agent workspace state.", cause });
-/** Label grants are explicit owner authorization. Repository/tag membership is never consulted. */
-const readableLabels = (agent: Agent) =>
-  agent.permissions.read ? agent.scope.filter((s) => s.permissions.read).map((s) => s.labelId) : [];
-const canSee = (agent: Agent, item: Commitment) =>
-  agent.permissions.read &&
-  (item.agentId === agent.id || item.labelIds.some((id) => readableLabels(agent).includes(id)));
-const canDraft = (agent: Agent, item: Pick<Commitment, "labelIds" | "agentId">) =>
-  agent.permissions.draft &&
-  agent.autonomy !== "observe" &&
-  (item.agentId === agent.id ||
-    item.labelIds.some((id) =>
-      agent.scope.some((s) => s.labelId === id && s.permissions.read && s.permissions.draft),
-    ));
-
 export class AgentWorkspaceService extends Context.Service<
   AgentWorkspaceService,
   {
@@ -126,11 +113,24 @@ export class AgentWorkspaceService extends Context.Service<
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const access = yield* Access.AgentAccessScope;
   const crypto = yield* Crypto.Crypto;
   const store = yield* Store.AgentStore;
   const agents = yield* Agents.AgentService;
   const work = yield* Work.WorkHandoffService;
   const schedules = yield* Schedules.ScheduledTaskService;
+  const canSee = (scope: Access.ResolvedAgentAccess, item: Commitment) =>
+    scope.agent.permissions.read &&
+    (item.agentId === scope.agent.id ||
+      item.labelIds.some((id) => scope.readableLabelIds.includes(id)));
+  const canDraft = (
+    scope: Access.ResolvedAgentAccess,
+    item: Pick<Commitment, "labelIds" | "agentId">,
+  ) =>
+    scope.agent.permissions.draft &&
+    scope.agent.autonomy !== "observe" &&
+    (item.agentId === scope.agent.id ||
+      item.labelIds.some((id) => scope.draftableLabelIds.includes(id)));
   const lock = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const uuid = (prefix: string) =>
@@ -189,7 +189,8 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const item = yield* getCommitment(input.id);
           const principal = actor ? yield* current(actor) : undefined;
-          if (principal && (!canSee(principal.agent, item) || !canDraft(principal.agent, item)))
+          const scope = principal ? yield* access.resolve(principal.agent.id) : undefined;
+          if (scope && (!canSee(scope, item) || !canDraft(scope, item)))
             return yield* fail("This agent cannot change this commitment.");
           if (principal && input.status === "done" && input.evidenceRefs.length === 0)
             return yield* fail("Completing a commitment requires evidence or owner confirmation.");
@@ -338,19 +339,11 @@ const make = Effect.gen(function* () {
       input = { ...input, sourceThreadId: actor?.threadId ?? input.sourceThreadId };
       if (actor && agent.autonomy === "observe")
         return yield* fail("An observe agent cannot start Work.");
-      if (actor && (!agent.enabled || agent.autonomy === "propose" || !agent.permissions.execute)) {
-        const { approval } = yield* requestApproval(
-          agent.id,
-          { actionKind: "start_work", payload: input },
-          actor,
-        );
-        return { threadId: null, approval };
-      }
-      // Labels never authorize a repository. Only the explicitly selected primary
-      // project is executable without a fresh owner decision in this first slice.
+      const scope = yield* access.resolve(agent.id);
       if (
         actor &&
-        (input.projectId !== agent.projectId ||
+        (!agent.enabled ||
+          !scope.executableRepositoryIds.includes(input.projectId) ||
           input.workspaceStrategy?.type === "existing_worktree")
       ) {
         const { approval } = yield* requestApproval(
@@ -382,7 +375,7 @@ const make = Effect.gen(function* () {
       const principal = viewAgent ? { agent: viewAgent } : undefined;
       // The owner-facing agent view includes the same shared items the agent sees.
       // Filter in SQL before decoding; cross-label items never enter model context.
-      const labels = principal ? readableLabels(principal.agent) : [];
+      const labels = principal ? (yield* access.resolve(principal.agent.id)).readableLabelIds : [];
       const rows = yield* sql<{ id: string }>`SELECT c.id FROM commitments c WHERE
         (${input.status ?? null} IS NULL OR c.status = ${input.status ?? null}) AND
         (${input.labelId ?? null} IS NULL OR EXISTS (SELECT 1 FROM commitment_labels l WHERE l.commitment_id = c.id AND l.label_id = ${input.labelId ?? null})) AND
@@ -409,16 +402,12 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const principal = actor ? yield* current(actor) : undefined;
             if (input.agentId !== null) yield* store.get(input.agentId);
+            const scope = principal ? yield* access.resolve(principal.agent.id) : undefined;
             if (
               principal &&
               (input.agentId !== principal.agent.id ||
-                !canDraft(principal.agent, input) ||
-                input.labelIds.some(
-                  (id) =>
-                    !principal.agent.scope.some(
-                      (s) => s.labelId === id && s.permissions.read && s.permissions.draft,
-                    ),
-                ))
+                !canDraft(scope!, input) ||
+                input.labelIds.some((id) => !scope!.draftableLabelIds.includes(id)))
             )
               return yield* fail("This agent cannot propose a commitment in this scope.");
             const at = yield* now;
@@ -495,6 +484,7 @@ const make = Effect.gen(function* () {
             const action = approval.action;
             switch (action.actionKind) {
               case "start_work":
+                // Owner approval authorizes this reviewed target once; it does not alter scope.
                 resultThreadId = yield* executeWork(
                   action.payload,
                   action.payload.commandId ?? approval.id,
@@ -579,4 +569,4 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.mapError(wrap)),
   });
 });
-export const layer = Layer.effect(AgentWorkspaceService, make);
+export const layer = Layer.effect(AgentWorkspaceService, make).pipe(Layer.provide(Access.layer));

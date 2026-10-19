@@ -1,3 +1,4 @@
+import * as Access from "../agents/AgentAccessScope.ts";
 import { SearchError, SearchQueryResult, type SearchQueryInput } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -27,6 +28,7 @@ const decodeStrings = Schema.decodeUnknownEffect(
 const decode = Schema.decodeUnknownEffect(SearchQueryResult);
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const access = yield* Access.AgentAccessScope;
   const store = yield* Store.AgentStore;
   const config = yield* Config.ServerConfig;
   const settings = yield* sql<{ engine: string }>`SELECT engine FROM search_config`.pipe(
@@ -44,21 +46,14 @@ const make = Effect.gen(function* () {
               .forThread(scope.thread.threadId)
               .pipe(Effect.mapError((cause) => new SearchError({ operation: "authorize", cause })));
       if (agent !== null && !agent.permissions.read) return { results: [] };
-      const readableLabels =
-        agent?.scope.filter((grant) => grant.permissions.read).map((grant) => grant.labelId) ?? [];
-      const callerProjects =
+      const resolved =
         agent === null
-          ? []
-          : yield* sql<{ project_id: string }>`SELECT project_id
-      FROM orchestration_v2_projection_threads WHERE thread_id = ${scope!.thread!.threadId}`.pipe(
-              Effect.mapError((cause) => new SearchError({ operation: "authorize", cause })),
-            );
-      const repositories =
-        agent === null
-          ? []
-          : [agent.projectId, ...callerProjects.map((row) => row.project_id)].filter(
-              (id): id is string => id !== null,
-            );
+          ? null
+          : yield* access
+              .resolve(agent.id)
+              .pipe(Effect.mapError((cause) => new SearchError({ operation: "authorize", cause })));
+      const readableLabels = resolved?.readableLabelIds ?? [];
+      const repositories = resolved?.readableRepositoryIds ?? [];
       const text = input.query.trim().slice(0, 500);
       // Quote every token; FTS operators, quotes and punctuation are user text.
       const tokens = text.match(/[\p{L}\p{N}_]+/gu)?.slice(0, 32) ?? [];
@@ -185,4 +180,4 @@ const make = Effect.gen(function* () {
   );
   return GlobalSearch.of({ query });
 });
-export const layer = Layer.effect(GlobalSearch, make);
+export const layer = Layer.effect(GlobalSearch, make).pipe(Layer.provide(Access.layer));

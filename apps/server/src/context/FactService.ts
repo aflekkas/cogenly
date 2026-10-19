@@ -1,3 +1,4 @@
+import * as Access from "../agents/AgentAccessScope.ts";
 import {
   AgentId,
   Fact,
@@ -58,6 +59,7 @@ export class FactService extends Context.Service<
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const access = yield* Access.AgentAccessScope;
   const crypto = yield* Crypto.Crypto;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const owner = (principal: ContextPrincipal) =>
@@ -66,31 +68,33 @@ const make = Effect.gen(function* () {
     const agentId = owner(principal);
     return (
       agentId === undefined
-        ? sql<{ label_id: string }>`SELECT label_id FROM project_labels`
-        : sql<{
-            label_id: string;
-          }>`SELECT l.label_id FROM agents a, json_each(a.payload_json,'$.scope') s JOIN project_labels l ON l.label_id = json_extract(s.value,'$.labelId') WHERE a.agent_id = ${agentId} AND json_extract(a.payload_json,'$.permissions.read') = 1 AND json_extract(s.value,'$.permissions.read') = 1`
-    ).pipe(
-      Effect.map((rows) => rows.map((r) => ProjectLabelId.make(r.label_id))),
-      Effect.mapError(failure("scope")),
-    );
+        ? sql<{ label_id: string }>`SELECT label_id FROM project_labels`.pipe(
+            Effect.map((rows) => rows.map((r) => ProjectLabelId.make(r.label_id))),
+          )
+        : access.resolve(agentId).pipe(Effect.map((scope) => scope.readableLabelIds))
+    ).pipe(Effect.mapError(failure("scope")));
   };
-  const access = (principal: ContextPrincipal) => {
-    const id = owner(principal);
-    return id === undefined
-      ? sql`1=1`
-      : sql`EXISTS (SELECT 1 FROM agents a WHERE a.agent_id = ${id} AND json_extract(a.payload_json,'$.permissions.read') = 1 AND (f.agent_id = ${id} OR (json_extract(f.payload_json,'$.visibility') = 'labels' AND EXISTS (SELECT 1 FROM fact_labels fl JOIN json_each(a.payload_json,'$.scope') s ON fl.label_id = json_extract(s.value,'$.labelId') JOIN project_labels l ON l.label_id = fl.label_id WHERE fl.fact_id = f.id AND json_extract(s.value,'$.permissions.read') = 1))))`;
-  };
+  const accessPredicate = (principal: ContextPrincipal) =>
+    Effect.gen(function* () {
+      const id = owner(principal);
+      if (id === undefined) return sql`1=1`;
+      const scope = yield* access.resolve(id);
+      return scope.agent.permissions.read
+        ? sql`(f.agent_id = ${id} OR (json_extract(f.payload_json,'$.visibility') = 'labels' AND EXISTS (SELECT 1 FROM fact_labels fl WHERE fl.fact_id=f.id AND fl.label_id IN ${sql.in(scope.readableLabelIds)})))`
+        : sql`0=1`;
+    });
   const get = (id: FactId, principal: ContextPrincipal) =>
-    sql<{
-      payload_json: string;
-    }>`SELECT f.payload_json FROM facts f WHERE f.id = ${id} AND ${access(principal)}`.pipe(
-      Effect.flatMap((rows) =>
-        rows[0]
-          ? decode(rows[0].payload_json).pipe(Effect.mapError(failure("read")))
-          : Effect.fail(new FactError({ operation: "read", reason: "not_found" })),
-      ),
-    );
+    Effect.gen(function* () {
+      return yield* sql<{
+        payload_json: string;
+      }>`SELECT f.payload_json FROM facts f WHERE f.id = ${id} AND ${yield* accessPredicate(principal)}`.pipe(
+        Effect.flatMap((rows) =>
+          rows[0]
+            ? decode(rows[0].payload_json).pipe(Effect.mapError(failure("read")))
+            : Effect.fail(new FactError({ operation: "read", reason: "not_found" })),
+        ),
+      );
+    });
   const authorizeWrite = (input: FactCreateInput, principal: ContextPrincipal) =>
     Effect.gen(function* () {
       for (const label of input.labelIds) {
@@ -104,14 +108,14 @@ const make = Effect.gen(function* () {
           return yield* new FactError({ operation: "write", reason: "not_found" });
       }
       if (id === undefined) return;
-      const grants =
-        yield* sql`SELECT 1 FROM agents a WHERE a.agent_id = ${id} AND json_extract(a.payload_json,'$.permissions.read') = 1 AND json_extract(a.payload_json,'$.permissions.draft') = 1 AND json_extract(a.payload_json,'$.autonomy') <> 'observe'`;
-      if (!grants.length || input.agentId !== id)
-        return yield* new FactError({ operation: "write", reason: "forbidden" });
-      const writable = yield* sql<{
-        label_id: string;
-      }>`SELECT json_extract(s.value,'$.labelId') AS label_id FROM agents a,json_each(a.payload_json,'$.scope') s WHERE a.agent_id = ${id} AND json_extract(s.value,'$.permissions.read') = 1 AND json_extract(s.value,'$.permissions.draft') = 1`;
-      if (input.labelIds.some((label) => !writable.some((r) => r.label_id === label)))
+      const scope = yield* access.resolve(id);
+      if (
+        !scope.agent.permissions.read ||
+        !scope.agent.permissions.draft ||
+        scope.agent.autonomy === "observe" ||
+        input.agentId !== id ||
+        input.labelIds.some((label) => !scope.draftableLabelIds.includes(label))
+      )
         return yield* new FactError({ operation: "write", reason: "forbidden" });
     });
   const persist = (fact: Fact, who: ContextPrincipal) =>
@@ -165,17 +169,21 @@ const make = Effect.gen(function* () {
   return FactService.of({
     readableLabels,
     list: (input, principal = "user") =>
-      sql<{ payload_json: string }>`SELECT f.payload_json FROM facts f WHERE ${access(principal)}
+      Effect.gen(function* () {
+        return yield* sql<{
+          payload_json: string;
+        }>`SELECT f.payload_json FROM facts f WHERE ${yield* accessPredicate(principal)}
       ${input.labelIds === undefined ? sql`` : sql`AND (${owner(principal) === undefined ? sql`0=1` : sql`f.agent_id=${owner(principal)!}`} OR EXISTS(SELECT 1 FROM fact_labels fl WHERE fl.fact_id=f.id AND fl.label_id IN ${sql.in(input.labelIds)}))`}
       ${input.agentId === undefined ? sql`` : sql`AND f.agent_id = ${input.agentId}`}
       ${input.status === undefined ? sql`` : sql`AND f.status = ${input.status}`}
       ${input.labelId === undefined ? sql`` : sql`AND EXISTS (SELECT 1 FROM fact_labels fl WHERE fl.fact_id=f.id AND fl.label_id=${input.labelId})`}
       ${!input.query ? sql`` : sql`AND instr(lower(json_extract(f.payload_json,'$.subject') || ' ' || json_extract(f.payload_json,'$.text')),lower(${input.query})) > 0`}
       ORDER BY f.updated_at DESC,f.id LIMIT 500`.pipe(
-        Effect.flatMap((rows) => Effect.forEach(rows, (r) => decode(r.payload_json))),
-        Effect.map((facts) => ({ facts })),
-        Effect.mapError(failure("list")),
-      ),
+          Effect.flatMap((rows) => Effect.forEach(rows, (r) => decode(r.payload_json))),
+          Effect.map((facts) => ({ facts })),
+          Effect.mapError(failure("list")),
+        );
+      }).pipe(Effect.mapError(failure("list"))),
     create: (input, principal = "user") =>
       sql.withTransaction(create(input, principal)).pipe(Effect.mapError(failure("create"))),
     update: (input) =>
@@ -249,4 +257,5 @@ const make = Effect.gen(function* () {
       ),
   });
 });
-export const layer = Layer.effect(FactService, make);
+export const layer: Layer.Layer<FactService, never, SqlClient.SqlClient | Crypto.Crypto> =
+  Layer.effect(FactService, make).pipe(Layer.provide(Access.layer));

@@ -1211,6 +1211,92 @@ it.effect(
     }),
 );
 
+it.effect.each([
+  "propose",
+  "execute_bounded",
+  "read_only",
+  "no_agent_execute",
+  "no_read",
+  "unlinked",
+  "observe",
+] as const)("linked-repository Work follows %s grants and autonomy", (policyKind) =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const labels = yield* Labels.ProjectLabelService;
+      const label = (yield* labels.create({ name: "Spawn Partners" })).label;
+      const repositoryId = ProjectId.make("patient-outreach");
+      yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${repositoryId},'Patient Outreach','/outreach','[]',${h.fixture.createdAt},${h.fixture.createdAt})`;
+      yield* labels.linkRepository({ labelId: label.id, repositoryId });
+      const agent = yield* (yield* Store.AgentStore).save({
+        ...h.fixture,
+        autonomy:
+          policyKind === "propose" || policyKind === "observe" ? policyKind : "execute_bounded",
+        permissions: { ...h.fixture.permissions, execute: policyKind !== "no_agent_execute" },
+        scope: [
+          {
+            labelId: label.id,
+            permissions: {
+              ...h.fixture.permissions,
+              execute: policyKind !== "read_only",
+              read: policyKind !== "no_read",
+            },
+          },
+        ],
+      });
+      const workspace = yield* Workspace.AgentWorkspaceService;
+      const policy = yield* Policy.AgentMcpPolicy;
+      const actor = { agent, threadId: agent.conversationThreadId };
+      if (policyKind === "unlinked")
+        yield* labels.unlinkRepository({ labelId: label.id, repositoryId });
+      const request = workspace.startWork(
+        { agentId: agent.id, projectId: repositoryId, title: "Repair outreach", prompt: "Fix CI" },
+        actor,
+      );
+      if (policyKind === "observe") {
+        expect((yield* request.pipe(Effect.flip)).message).toBe(
+          "An observe agent cannot start Work.",
+        );
+        expect(h.launches).toHaveLength(0);
+        return;
+      }
+      const result = yield* request;
+      if (policyKind === "execute_bounded") {
+        expect(result.approval).toBeNull();
+        expect(h.launches[0]?.projectId).toBe(repositoryId);
+        expect(
+          yield* policy.beforeTool(
+            scopeFor(agent.conversationThreadId),
+            "t3_project_read",
+            { projectId: repositoryId },
+            true,
+          ),
+        ).toEqual({ handled: false });
+        // A running Work thread cannot retain a revoked repository through its identity.
+        yield* labels.unlinkRepository({ labelId: label.id, repositoryId });
+        expect(
+          (yield* policy
+            .beforeTool(
+              scopeFor(result.threadId!),
+              "t3_project_read",
+              { projectId: repositoryId },
+              true,
+            )
+            .pipe(Effect.flip)).code,
+        ).toBe("agent_permission_denied");
+      } else {
+        expect(result.threadId).toBeNull();
+        expect(result.approval?.status).toBe("pending");
+        expect(h.launches).toHaveLength(0);
+        // The owner can grant this one reviewed action, without widening persistent scope.
+        yield* workspace.approve(result.approval!.id);
+        expect(h.launches[0]?.projectId).toBe(repositoryId);
+      }
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
 describe("event-driven agent triggers", () => {
   const setup = Effect.gen(function* () {
     const h = yield* makeHarness;
@@ -1247,6 +1333,104 @@ describe("event-driven agent triggers", () => {
         schedule: { type: "event", event },
       });
     });
+  it.effect(
+    "linked label grants wake on a second repository; unlinking and thread tags cannot grant delivery",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* setup;
+        yield* Effect.gen(function* () {
+          yield* prepare(h);
+          const sql = yield* SqlClient.SqlClient;
+          const labels = yield* Labels.ProjectLabelService;
+          const label = (yield* labels.create({ name: "Spawn Partners" })).label;
+          const repositoryId = ProjectId.make("patient-outreach");
+          yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${repositoryId},'Patient Outreach','/outreach','[]',${h.fixture.createdAt},${h.fixture.createdAt})`;
+          const store = yield* Store.AgentStore;
+          yield* store.save({
+            ...h.fixture,
+            dailyRunCap: 20,
+            scope: [{ labelId: label.id, permissions: h.fixture.permissions }],
+          });
+          const reactor = yield* EventReactor.AgentEventReactor;
+          const bus = yield* AgentEvents.AgentEventBus;
+          for (const key of ["tag-only", "linked", "unlinked"]) {
+            if (key === "linked") yield* labels.linkRepository({ labelId: label.id, repositoryId });
+            if (key === "unlinked")
+              yield* labels.unlinkRepository({ labelId: label.id, repositoryId });
+            const source = completedEvent(h, key);
+            const projection = h.projections.get(source.event.threadId)!;
+            h.projections.set(source.event.threadId, {
+              ...projection,
+              thread: { ...projection.thread, projectId: repositoryId },
+            });
+            yield* sql`INSERT INTO thread_project_labels(thread_id,label_id,confirmed_by_user,source) VALUES (${source.event.threadId},${label.id},1,'user')`;
+            yield* reactor.observe(source);
+            yield* bus.drain;
+            expect(h.launches).toHaveLength(key === "tag-only" ? 0 : 1);
+          }
+          expect((yield* store.runs(h.fixture.id))[0]?.triggerContext?.projectId).toBe(
+            repositoryId,
+          );
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
+  it.effect(
+    "event filters reject out-of-scope repositories and labels on create and update, and Run now requires a source event",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* setup;
+        yield* Effect.gen(function* () {
+          const { task } = yield* prepare(h);
+          const schedules = yield* Schedules.ScheduledTaskService;
+          const labels = yield* Labels.ProjectLabelService;
+          const granted = (yield* labels.create({ name: "Granted" })).label;
+          const blocked = (yield* labels.create({ name: "Blocked" })).label;
+          yield* (yield* Store.AgentStore).save({
+            ...h.fixture,
+            scope: [{ labelId: granted.id, permissions: h.fixture.permissions }],
+          });
+          for (const filter of [
+            { projectIds: [ProjectId.make("private-repo")] },
+            { labelIds: [granted.id, blocked.id] },
+          ]) {
+            for (const id of [undefined, task.id]) {
+              const error = yield* schedules
+                .upsert({
+                  ...h.triggerInput,
+                  ...(id ? { id } : {}),
+                  schedule: { type: "event", event: "work.completed", filter },
+                })
+                .pipe(Effect.flip);
+              expect(error).toMatchObject({
+                _tag: "ScheduledTaskError",
+                code: "event_filter_out_of_scope",
+              });
+            }
+          }
+          yield* schedules.upsert({
+            ...h.triggerInput,
+            id: task.id,
+            schedule: {
+              type: "event",
+              event: "work.completed",
+              filter: { projectIds: [h.fixture.projectId!], labelIds: [granted.id] },
+            },
+          });
+          // Restore the original filter before checking that a manual run has no side effects.
+          yield* schedules.upsert({ ...h.triggerInput, id: task.id, schedule: task.schedule });
+          expect((yield* schedules.list()).tasks).toHaveLength(1);
+          expect((yield* schedules.list()).tasks[0]?.schedule).toEqual(task.schedule);
+          expect(yield* schedules.runNow({ id: task.id }).pipe(Effect.flip)).toMatchObject({
+            _tag: "ScheduledTaskError",
+            code: "event_run_now_unsupported",
+          });
+          expect(h.launches).toHaveLength(0);
+          expect(yield* (yield* Store.AgentStore).runs(h.fixture.id)).toEqual([]);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
   it.effect(
     "Work completion matches once, persists its refs, and cursor replay after restart does not refire",
     () =>
@@ -1297,34 +1481,37 @@ describe("event-driven agent triggers", () => {
         }).pipe(Effect.provide(h.layer));
       }),
   );
-  it.effect.each(["unauthorized repository", "paused", "ungranted label"])(
-    "does not fire for %s",
-    (reason) =>
-      Effect.gen(function* () {
-        const h = yield* setup;
-        yield* Effect.gen(function* () {
-          yield* prepare(h);
-          const source = completedEvent(h);
-          if (reason === "paused")
-            yield* (yield* Store.AgentStore).save({ ...h.fixture, enabled: false, paused: true });
-          if (reason === "unauthorized repository") {
-            const p = h.projections.get(source.event.threadId)!;
-            h.projections.set(source.event.threadId, {
-              ...p,
-              thread: { ...p.thread, projectId: ProjectId.make("other") },
-            });
-          }
-          if (reason === "ungranted label") {
-            const label = (yield* (yield* Labels.ProjectLabelService).create({ name: "Private" }))
-              .label;
-            const sql = yield* SqlClient.SqlClient;
-            yield* sql`INSERT INTO thread_project_labels(thread_id, label_id, confirmed_by_user, source) VALUES (${source.event.threadId}, ${label.id}, 1, 'user')`;
-          }
-          yield* (yield* EventReactor.AgentEventReactor).observe(source);
-          yield* (yield* AgentEvents.AgentEventBus).drain;
-          expect(h.launches).toHaveLength(0);
-        }).pipe(Effect.provide(h.layer));
-      }),
+  it.effect.each([
+    "unauthorized repository",
+    "paused",
+    "tagged unauthorized repository",
+    "home with unrelated tag",
+  ])("uses repository authority for %s", (reason) =>
+    Effect.gen(function* () {
+      const h = yield* setup;
+      yield* Effect.gen(function* () {
+        yield* prepare(h);
+        const source = completedEvent(h);
+        if (reason === "paused")
+          yield* (yield* Store.AgentStore).save({ ...h.fixture, enabled: false, paused: true });
+        if (reason === "unauthorized repository" || reason === "tagged unauthorized repository") {
+          const p = h.projections.get(source.event.threadId)!;
+          h.projections.set(source.event.threadId, {
+            ...p,
+            thread: { ...p.thread, projectId: ProjectId.make("other") },
+          });
+        }
+        if (reason === "tagged unauthorized repository" || reason === "home with unrelated tag") {
+          const label = (yield* (yield* Labels.ProjectLabelService).create({ name: "Private" }))
+            .label;
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`INSERT INTO thread_project_labels(thread_id, label_id, confirmed_by_user, source) VALUES (${source.event.threadId}, ${label.id}, 1, 'user')`;
+        }
+        yield* (yield* EventReactor.AgentEventReactor).observe(source);
+        yield* (yield* AgentEvents.AgentEventBus).drain;
+        expect(h.launches).toHaveLength(reason === "home with unrelated tag" ? 1 : 0);
+      }).pipe(Effect.provide(h.layer));
+    }),
   );
   it.effect(
     "a self-triggering completion chain stops at depth two and dedups each event per agent",

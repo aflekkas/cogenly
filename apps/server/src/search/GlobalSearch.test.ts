@@ -346,13 +346,23 @@ describe("global search", () => {
         ).toBe(agent.id);
         const results = (yield* search.query({ query: "quartz" }, caller)).results;
         expect(results.map((r) => r.id).sort()).toEqual(
-          [agent.id, allowed.id, "own", "shared", "visible"].sort(),
+          [
+            agent.id,
+            allowed.id,
+            "own",
+            "shared",
+            "visible",
+            "secret",
+            "https://private.example/pull/1",
+          ].sort(),
         );
         expect(
           (yield* search.query({ query: "quartz", labelId: allowed.id }, caller)).results
             .map((r) => r.id)
             .sort(),
-        ).toEqual([agent.id, allowed.id, "shared"].sort());
+        ).toEqual(
+          [agent.id, allowed.id, "shared", "secret", "https://private.example/pull/1"].sort(),
+        );
         // Governed runs resolve to the same principal as its conversation.
         yield* thread("governed", repo, "Quartz governed Work", {
           agent: { id: agent.id, role: "work" },
@@ -364,8 +374,13 @@ describe("global search", () => {
           scope(ThreadId.make("governed")),
         )).results;
         expect(governed.some((r) => r.id === "visible")).toBe(true);
+        expect(governed.some((r) => r.id === stranger.id || r.id === "private")).toBe(false);
+        expect(governed.some((r) => r.id === "secret")).toBe(true);
+        // Tags remain after unlinking, but cannot retain repository authority.
+        yield* labels.unlinkRepository({ labelId: allowed.id, repositoryId: other });
+        const unlinked = (yield* search.query({ query: "quartz" }, caller)).results;
         expect(
-          governed.some((r) => r.id === "secret" || r.id === stranger.id || r.id === "private"),
+          unlinked.some((r) => r.id === "secret" || r.id === "https://private.example/pull/1"),
         ).toBe(false);
         yield* store.save({ ...agent, permissions: { ...agent.permissions, read: false } });
         expect((yield* search.query({ query: "quartz" }, caller)).results).toEqual([]);
