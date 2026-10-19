@@ -191,7 +191,7 @@ function CommandItem({
       // state rather than the hover one.
       highlightStates={false}
       className={cn(
-        "py-1.5 state-selected-indicator",
+        "py-1.5",
         active === undefined
           ? "data-highlighted:state-selected data-selected:state-selected"
           : cn("cursor-pointer", active && "state-selected"),

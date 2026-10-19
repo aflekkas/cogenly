@@ -1134,7 +1134,7 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
           <span
             aria-hidden
             className={cn(
-              "min-w-0 flex-1 truncate text-sm",
+              "min-w-0 flex-1 fade-truncate text-sm",
               isUnread || needsYou ? "font-medium text-foreground" : "font-normal",
               props.isActive ? "text-foreground" : !(isUnread || needsYou) && "text-foreground/80",
               thread.titleRegeneration != null && "opacity-55",
@@ -1905,7 +1905,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   {props.projectDisplayName ? (
                     <span
                       className={cn(
-                        "min-w-0 flex-1 truncate text-secondary-label text-xs",
+                        "min-w-0 flex-1 fade-truncate text-secondary-label text-xs",
                         shouldRecede ? "font-normal" : "font-medium",
                       )}
                     >
@@ -2294,7 +2294,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
             <span className="flex min-w-0 items-center gap-2.5">
               <span
                 className={cn(
-                  "min-w-0 flex-1 truncate",
+                  "min-w-0 flex-1 fade-truncate",
                   props.isSettled
                     ? "font-normal text-secondary-label/70 group-hover/sidebar-row:text-foreground"
                     : "font-medium text-foreground",
