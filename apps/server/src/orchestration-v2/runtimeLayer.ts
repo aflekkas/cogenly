@@ -1,3 +1,4 @@
+import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
@@ -380,6 +381,7 @@ export const layerProduction = Layer.mergeAll(
   layerThreadLaunchProvided,
   layerThreadLifecycleProvided,
   layerAgentsProvided,
+  ProjectLabels.layer,
   AgentStore.layer,
   layerScheduledTaskProvided,
   layerSecretRequestsProvided,

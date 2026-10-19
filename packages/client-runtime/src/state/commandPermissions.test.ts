@@ -60,6 +60,14 @@ const setup = Effect.gen(function* () {
 
 describe("command permissions", () => {
   it.effect.each([
+    WS_METHODS.projectLabelsCreate,
+    WS_METHODS.projectLabelsUpdate,
+    WS_METHODS.projectLabelsDelete,
+    WS_METHODS.projectLabelsLinkRepository,
+    WS_METHODS.projectLabelsUnlinkRepository,
+    WS_METHODS.projectLabelsSetThreadLabels,
+    WS_METHODS.projectLabelsReviewSuggestion,
+    WS_METHODS.projectLabelsSuggestLabels,
     WS_METHODS.agentsUpsert,
     WS_METHODS.agentsDelete,
     WS_METHODS.agentsSend,

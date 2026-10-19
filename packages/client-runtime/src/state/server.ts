@@ -1106,6 +1106,54 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-task:webhook-delivery",
       tag: WS_METHODS.scheduledTasksGetWebhookDelivery,
     }),
+    projectLabels: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projectLabels:projectLabels",
+      tag: WS_METHODS.projectLabelsList,
+    }),
+    projectLabelsLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:projectLabels:projectLabelsLive",
+      tag: WS_METHODS.projectLabelsSubscribe,
+    }),
+    threadProjectLabels: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projectLabels:threadProjectLabels",
+      tag: WS_METHODS.projectLabelsGetThreadLabels,
+    }),
+    threadProjectLabelsLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:projectLabels:threadProjectLabelsLive",
+      tag: WS_METHODS.projectLabelsSubscribeThreadLabels,
+    }),
+    createProjectLabel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:createProjectLabel",
+      tag: WS_METHODS.projectLabelsCreate,
+    }),
+    updateProjectLabel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:updateProjectLabel",
+      tag: WS_METHODS.projectLabelsUpdate,
+    }),
+    deleteProjectLabel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:deleteProjectLabel",
+      tag: WS_METHODS.projectLabelsDelete,
+    }),
+    linkProjectLabelRepository: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:linkProjectLabelRepository",
+      tag: WS_METHODS.projectLabelsLinkRepository,
+    }),
+    unlinkProjectLabelRepository: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:unlinkProjectLabelRepository",
+      tag: WS_METHODS.projectLabelsUnlinkRepository,
+    }),
+    setThreadProjectLabels: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:setThreadProjectLabels",
+      tag: WS_METHODS.projectLabelsSetThreadLabels,
+    }),
+    reviewThreadProjectLabelSuggestion: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:reviewThreadProjectLabelSuggestion",
+      tag: WS_METHODS.projectLabelsReviewSuggestion,
+    }),
+    suggestThreadProjectLabels: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:suggestThreadProjectLabels",
+      tag: WS_METHODS.projectLabelsSuggestLabels,
+    }),
     /** Live scheduled-task list: snapshot on subscribe, fresh list after every server-side change. */
     scheduledTasksLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:scheduled-tasks:live",

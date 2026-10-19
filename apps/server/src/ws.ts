@@ -1,3 +1,4 @@
+import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as Agents from "./agents/AgentService.ts";
 import * as AgentStore from "./agents/AgentStore.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
@@ -1134,6 +1135,7 @@ const layerWsRpc = (
       };
       const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
+      const projectLabels = yield* ProjectLabels.ProjectLabelService;
       const agents = yield* Agents.AgentService;
       const agentStore = yield* AgentStore.AgentStore;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
@@ -1639,6 +1641,23 @@ const layerWsRpc = (
               Effect.as(commandOutputHub.subscribe(input)),
             ),
           ),
+        [WS_METHODS.projectLabelsList]: () => projectLabels.list(),
+        [WS_METHODS.projectLabelsSubscribe]: () => projectLabels.subscribe(),
+        [WS_METHODS.projectLabelsCreate]: (input) => projectLabels.create(input),
+        [WS_METHODS.projectLabelsUpdate]: (input) => projectLabels.update(input),
+        [WS_METHODS.projectLabelsDelete]: (input) => projectLabels.delete(input.id),
+        [WS_METHODS.projectLabelsLinkRepository]: (input) => projectLabels.linkRepository(input),
+        [WS_METHODS.projectLabelsUnlinkRepository]: (input) =>
+          projectLabels.unlinkRepository(input),
+        [WS_METHODS.projectLabelsGetThreadLabels]: (input) =>
+          projectLabels.getThreadLabels(input.threadId),
+        [WS_METHODS.projectLabelsSubscribeThreadLabels]: (input) =>
+          projectLabels.subscribeThreadLabels(input.threadId),
+        [WS_METHODS.projectLabelsSetThreadLabels]: (input) => projectLabels.setThreadLabels(input),
+        [WS_METHODS.projectLabelsReviewSuggestion]: (input) =>
+          projectLabels.reviewSuggestion(input),
+        [WS_METHODS.projectLabelsSuggestLabels]: (input) =>
+          projectLabels.suggestLabels(input.threadId),
         [WS_METHODS.agentsList]: () => agents.list(),
         [WS_METHODS.agentsSubscribe]: () => agents.subscribe(),
         [WS_METHODS.agentsUpsert]: (input) => agents.upsert(input),
