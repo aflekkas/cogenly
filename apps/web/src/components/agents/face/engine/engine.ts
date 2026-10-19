@@ -70,6 +70,12 @@ export interface Look {
   mix: number;
   spin: number;
   wander: number;
+  /**
+   * Decalage du corps entier vers la cible, en unites de rayon de boule, pondere
+   * par `mix` : le bot se penche un peu vers ce qu'il regarde. 0 si absent.
+   */
+  leanX?: number;
+  leanY?: number;
 }
 
 const NO_LOOK: Look = { yaw: 0, pitch: 0, mix: 0, spin: 0, wander: 1 };
@@ -80,6 +86,8 @@ const lerpLook = (a: Look, b: Look, t: number): Look => ({
   mix: lerp(a.mix, b.mix, t),
   spin: lerp(a.spin, b.spin, t),
   wander: lerp(a.wander, b.wander, t),
+  leanX: lerp(a.leanX ?? 0, b.leanX ?? 0, t),
+  leanY: lerp(a.leanY ?? 0, b.leanY ?? 0, t),
 });
 
 const lerpEye = (a: Pose["eyes"][number], b: Pose["eyes"][number], t: number) => ({
@@ -250,7 +258,18 @@ export class BotEngine {
      * l'appelant. Celui-la est corrige, mais le moteur n'a pas a dependre de la
      * prudence de ses appelants pour rester rejouable.
      */
-    if (look && !Number.isFinite(look.yaw + look.pitch + look.mix + look.spin + look.wander)) {
+    if (
+      look &&
+      !Number.isFinite(
+        look.yaw +
+          look.pitch +
+          look.mix +
+          look.spin +
+          look.wander +
+          (look.leanX ?? 0) +
+          (look.leanY ?? 0),
+      )
+    ) {
       return;
     }
     this.lookPrev = this.lookAtTime(now);
@@ -475,8 +494,8 @@ export class BotEngine {
     const forcedLid = forced < 1 ? Math.abs(forced * 2 - 1) : 1;
     const lid = Math.min(life.lid, forcedLid);
 
-    const offX = pose.offX + life.driftX;
-    const offY = pose.offY + life.driftY;
+    const offX = pose.offX + life.driftX + (look.leanX ?? 0) * look.mix;
+    const offY = pose.offY + life.driftY + (look.leanY ?? 0) * look.mix;
 
     // --- corps ------------------------------------------------------------
     const sil: Silhouette = {
