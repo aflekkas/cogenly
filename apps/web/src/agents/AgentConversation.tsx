@@ -1,4 +1,10 @@
-import { ChevronLeftIcon, LoaderCircleIcon, ArrowUpRightIcon, PlayIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  LoaderCircleIcon,
+  ArrowUpRightIcon,
+  PlayIcon,
+  SettingsIcon,
+} from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -122,6 +128,19 @@ function AgentView({
           >
             <PlayIcon />
             Start Work
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost-muted"
+            aria-label="Agent settings"
+            title="Agent settings"
+            aria-pressed={tab === "responsibilities"}
+            onClick={() => {
+              setTab("responsibilities");
+              setFocusMessage(null);
+            }}
+          >
+            <SettingsIcon />
           </Button>
         </div>
         <ToggleGroup
