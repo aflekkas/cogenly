@@ -24,6 +24,7 @@ export const GLOBAL_SEARCH_KIND_ORDER: ReadonlyArray<SearchKind> = [
   "agent",
   "commitment",
   "project",
+  "fact",
   "pr",
 ];
 
@@ -33,6 +34,7 @@ export const GLOBAL_SEARCH_KIND_LABEL: Record<SearchKind, string> = {
   agent: "Agents",
   commitment: "Open items",
   project: "Projects",
+  fact: "Memory",
   pr: "Pull requests",
 };
 
@@ -156,6 +158,7 @@ export type GlobalSearchTarget =
       readonly environmentId: EnvironmentId;
       readonly labelId: ProjectLabelId;
     }
+  | { readonly kind: "memory"; readonly environmentId: EnvironmentId }
   | { readonly kind: "external"; readonly href: string }
   | { readonly kind: "unavailable"; readonly reason: string };
 
@@ -181,6 +184,8 @@ export function globalSearchTarget(
       return { kind: "commitment", environmentId, id: result.id };
     case "project":
       return { kind: "project", environmentId, labelId: result.id as ProjectLabelId };
+    case "fact":
+      return { kind: "memory", environmentId };
     case "pr": {
       const href = safeExternalUrl(result.id);
       if (href) return { kind: "external", href };

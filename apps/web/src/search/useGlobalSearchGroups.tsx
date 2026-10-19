@@ -7,6 +7,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import {
   BotIcon,
+  BrainIcon,
   CircleDotIcon,
   CodeXmlIcon,
   MessageCircleIcon,
@@ -56,6 +57,7 @@ const KIND_ICON: Record<SearchKind, LucideIcon> = {
   agent: BotIcon,
   commitment: CircleDotIcon,
   project: TagIcon,
+  fact: BrainIcon,
   pr: PullRequestGlyph.pullRequest,
 };
 
@@ -198,6 +200,9 @@ export function useGlobalSearchGroups(input: {
         }
         case "project":
           await navigate({ to: "/settings/project-tags" });
+          return;
+        case "memory":
+          await navigate({ to: "/settings/memory" });
           return;
         case "external":
           void readLocalApi()?.shell.openExternal(target.href);
