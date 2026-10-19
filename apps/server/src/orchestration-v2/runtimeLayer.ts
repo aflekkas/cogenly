@@ -1,6 +1,7 @@
 import * as GlobalSearch from "../search/GlobalSearch.ts";
 import * as Facts from "../context/FactService.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
+import * as Exports from "../export/ExportService.ts";
 import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
 import * as WorkHandoff from "../work/WorkHandoffService.ts";
 import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
@@ -416,6 +417,7 @@ export const layerProduction = Layer.mergeAll(
   layerThreadLifecycleProvided,
   layerAgentsProvided,
   GlobalSearch.layer.pipe(Layer.provide(AgentStore.layer)),
+  Exports.layer,
   ProjectLabels.layer,
   layerAgentWorkspaceProvided,
   layerAgentMcpPolicyProvided,

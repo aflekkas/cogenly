@@ -31,7 +31,7 @@ it.effect(
       const agent = agentFixture();
       yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled) VALUES (${agent.id}, 't', ${json(agent)}, 1)`;
       yield* sql`INSERT INTO commitments(id, status, payload_json, created_at, updated_at) VALUES ('item', 'open', '{"title":"Quartz item","description":"Quartz body"}', ${at}, ${at})`;
-      const migrated = yield* runMigrations();
+      const migrated = yield* runMigrations({ toMigrationInclusive: 68 });
       expect(migrated).toEqual([[68, "GlobalSearch"]]);
       expect(yield* sql`SELECT engine FROM search_config`).toEqual([{ engine: "fts5" }]);
       expect((yield* sql`SELECT count(*) AS count FROM search_documents`)[0]?.count).toBe(508);
@@ -39,7 +39,7 @@ it.effect(
         (yield* sql`SELECT count(*) AS count FROM search_fts WHERE search_fts MATCH 'quartz'`)[0]
           ?.count,
       ).toBe(507);
-      expect(yield* runMigrations()).toEqual([]);
+      expect(yield* runMigrations({ toMigrationInclusive: 68 })).toEqual([]);
       expect((yield* sql`SELECT count(*) AS count FROM search_documents`)[0]?.count).toBe(508);
       // REPLACE is used by some projection import/repair paths and must not leave
       // stale FTS postings when recursive_triggers is off.

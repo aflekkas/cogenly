@@ -419,6 +419,10 @@
       "types": "./src/pullRequestMarkdown.ts",
       "default": "./src/pullRequestMarkdown.ts"
     },
+    "./state/exports": {
+      "types": "./src/state/exports.ts",
+      "default": "./src/state/exports.ts"
+    },
     "./state/agents": {
       "types": "./src/state/agents.ts",
       "default": "./src/state/agents.ts"

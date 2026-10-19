@@ -1,5 +1,6 @@
 import * as Search from "./search.ts";
 import * as Facts from "./fact.ts";
+import * as Exports from "./export.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Work from "./work.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
@@ -486,6 +487,10 @@ export const WS_METHODS = {
 
   // Persistent agents and their scheduled-task triggers
   searchQuery: "search.query",
+  exportCreate: "export.create",
+  exportValidate: "export.validate",
+  exportList: "export.list",
+  commitmentsDelete: "commitments.delete",
   projectLabelsList: "projectLabels.list",
   projectLabelsSubscribe: "projectLabels.subscribe",
   projectLabelsCreate: "projectLabels.create",
@@ -1742,6 +1747,26 @@ const WsSearchQueryRpc = Rpc.make(WS_METHODS.searchQuery, {
   success: Search.SearchQueryResult,
   error: Schema.Union([Search.SearchError, EnvironmentAuthorizationError]),
 });
+const WsExportCreateRpc = Rpc.make(WS_METHODS.exportCreate, {
+  payload: Exports.ExportCreateInput,
+  success: Exports.ExportResult,
+  error: Schema.Union([Exports.ExportError, EnvironmentAuthorizationError]),
+});
+const WsExportValidateRpc = Rpc.make(WS_METHODS.exportValidate, {
+  payload: Exports.ExportPathInput,
+  success: Exports.ExportValidation,
+  error: Schema.Union([Exports.ExportError, EnvironmentAuthorizationError]),
+});
+const WsExportListRpc = Rpc.make(WS_METHODS.exportList, {
+  payload: Schema.Struct({}),
+  success: Schema.Struct({ exports: Schema.Array(Exports.ExportResult) }),
+  error: Schema.Union([Exports.ExportError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsDeleteRpc = Rpc.make(WS_METHODS.commitmentsDelete, {
+  payload: AgentWorkspace.CommitmentHistoryInput,
+  success: Schema.Struct({ deleted: Schema.Boolean }),
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
 
 const WsProjectLabelsListRpc = Rpc.make(WS_METHODS.projectLabelsList, {
   payload: Schema.Struct({}),
@@ -2130,6 +2155,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsSearchQueryRpc,
+  WsExportCreateRpc,
+  WsExportValidateRpc,
+  WsExportListRpc,
+  WsCommitmentsDeleteRpc,
   WsProjectLabelsListRpc,
   WsProjectLabelsSubscribeRpc,
   WsProjectLabelsCreateRpc,

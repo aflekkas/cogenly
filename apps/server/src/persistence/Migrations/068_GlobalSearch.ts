@@ -9,7 +9,7 @@ const sources = [
     key: "thread_id",
     prefix: "thread:",
     select: `SELECT 'thread:' || thread_id AS key, 'thread' AS kind, thread_id AS id,
-      thread_id, title, '' AS body, updated_at AS matched_at
+      thread_id, coalesce(title, '') AS title, '' AS body, updated_at AS matched_at
       FROM orchestration_v2_projection_threads WHERE deleted_at IS NULL`,
     updates: "title, deleted_at",
   },
@@ -28,7 +28,7 @@ const sources = [
     key: "agent_id",
     prefix: "agent:",
     select: `SELECT 'agent:' || agent_id AS key, 'agent' AS kind, agent_id AS id,
-      conversation_thread_id AS thread_id, json_extract(payload_json, '$.name') AS title,
+      conversation_thread_id AS thread_id, coalesce(json_extract(payload_json, '$.name'), '') AS title,
       coalesce(json_extract(payload_json, '$.responsibility'), '') || ' ' ||
       coalesce(json_extract(payload_json, '$.instructions'), '') AS body,
       json_extract(payload_json, '$.updatedAt') AS matched_at FROM agents`,
@@ -39,7 +39,7 @@ const sources = [
     key: "id",
     prefix: "commitment:",
     select: `SELECT 'commitment:' || id AS key, 'commitment' AS kind, id,
-      NULL AS thread_id, json_extract(payload_json, '$.title') AS title,
+      NULL AS thread_id, coalesce(json_extract(payload_json, '$.title'), '') AS title,
       coalesce(json_extract(payload_json, '$.description'), '') AS body, updated_at AS matched_at FROM commitments`,
     updates: "payload_json",
   },

@@ -1,6 +1,7 @@
 import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
+import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as WorkHandoff from "./work/WorkHandoffService.ts";
 import * as AgentWorkspace from "./agents/AgentWorkspaceService.ts";
@@ -1143,6 +1144,7 @@ const layerWsRpc = (
       const workHandoff = yield* WorkHandoff.WorkHandoffService;
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
       const globalSearch = yield* GlobalSearch.GlobalSearch;
+      const exports = yield* Exports.ExportService;
       const projectLabels = yield* ProjectLabels.ProjectLabelService;
       const agents = yield* Agents.AgentService;
       const agentWorkspace = yield* AgentWorkspace.AgentWorkspaceService;
@@ -1653,6 +1655,10 @@ const layerWsRpc = (
             ),
           ),
         [WS_METHODS.searchQuery]: (input) => globalSearch.query(input),
+        [WS_METHODS.exportCreate]: (input) => exports.export(input),
+        [WS_METHODS.exportValidate]: (input) => exports.validate(input),
+        [WS_METHODS.exportList]: () => exports.list(),
+        [WS_METHODS.commitmentsDelete]: (input) => agentWorkspace.deleteCommitment(input.id),
         [WS_METHODS.projectLabelsList]: () => projectLabels.list(),
         [WS_METHODS.projectLabelsSubscribe]: () => projectLabels.subscribe(),
         [WS_METHODS.projectLabelsCreate]: (input) => projectLabels.create(input),

@@ -34,7 +34,15 @@ describe("persistent agents", () => {
       expect(yield* store.context(agent.conversationThreadId)).toContain(agent.instructions);
       yield* store.forget(agent.id, note.id);
       expect(yield* store.memory(agent.id)).toEqual([]);
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at) VALUES ('approval:delete', ${agent.id}, '{}', 'pending', ${agent.createdAt})`;
+      yield* sql`INSERT INTO agent_run_actions(id, agent_id, kind, at) VALUES ('action:delete', ${agent.id}, 'read', ${agent.createdAt})`;
+      yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind) VALUES ('run:delete', ${agent.id}, 'owner')`;
       expect(yield* store.delete(agent.id)).toBe(true);
+      expect(yield* sql`SELECT * FROM agent_approvals`).toEqual([]);
+      expect(yield* sql`SELECT * FROM agent_run_actions`).toEqual([]);
+      expect(yield* sql`SELECT * FROM agent_run_threads`).toEqual([]);
+      expect(yield* sql`SELECT * FROM agent_memory`).toEqual([]);
       expect(yield* store.list()).toEqual([]);
     }).pipe(Effect.provide(layer)),
   );

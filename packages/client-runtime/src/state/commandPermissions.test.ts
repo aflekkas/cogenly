@@ -1,3 +1,4 @@
+import { createExportAtoms } from "./exports.ts";
 import { requestGuarded, runStreamGuarded } from "../rpc/client.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -362,6 +363,33 @@ describe("command permissions", () => {
       registry.dispose();
     }
   });
+  it.effect("exports refuse execution without the Settings grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        const commands = createExportAtoms(runtime);
+        const results = [
+          yield* Effect.promise(() =>
+            commands.exportCreate.run(registry, {
+              environmentId: env,
+              input: { include: ["chats"] },
+            }),
+          ),
+          yield* Effect.promise(() =>
+            commands.exportValidate.run(registry, {
+              environmentId: env,
+              input: { path: "/ignored" },
+            }),
+          ),
+          yield* Effect.promise(() =>
+            commands.exportList.run(registry, { environmentId: env, input: {} }),
+          ),
+        ];
+        expect(results.every((result) => result._tag === "Failure")).toBe(true);
+      }),
+    ),
+  );
 });
 
 it.effect(
