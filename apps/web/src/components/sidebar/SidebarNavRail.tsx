@@ -30,7 +30,7 @@ import { useNavRailBadgeStore } from "./navRailState";
 import { decisionsWaitingLabel } from "../../agents/agentWorkspace.logic";
 
 const RAIL_BUTTON_CLASS =
-  "relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-rail outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:size-4.5 [&_svg]:shrink-0";
+  "relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-rail outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:size-4.5 [&_svg]:shrink-0";
 
 function railButtonTone(active: boolean) {
   return active ? "state-selected" : "text-sidebar-muted-foreground state-hover";

@@ -9,7 +9,7 @@ export function WorkRowStatusMarker(props: { readonly thread: EnvironmentThreadS
   if (status === null) return null;
   const Icon = status === "paused" ? PauseIcon : CircleSlashIcon;
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground/60">
+    <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground/60 swap-motion">
       <Icon aria-hidden className="size-3" />
       {status === "paused" ? "Paused" : "Canceled"}
     </span>

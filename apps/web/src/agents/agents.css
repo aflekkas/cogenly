@@ -373,6 +373,9 @@
   min-width: 0;
 }
 @utility agent-contacts {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   width: 100%;
   padding: 6px;
   color: var(--foreground);
@@ -485,9 +488,12 @@
   border-radius: 999px;
   background: var(--primary);
 }
+/* Fills the list and sits in its vertical centre. */
 @utility agent-empty {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
+  justify-content: center;
   flex-direction: column;
   gap: 14px;
   text-align: center;
