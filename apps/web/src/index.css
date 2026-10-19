@@ -132,6 +132,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --workspace-titlebar-control-gap: 0.75rem;
   --workspace-titlebar-scroll-fade-height: 1.5rem;
   --chat-content-max-width: 46rem;
+  /* Transcript text sits this far inside the lane; the composer and user
+     bubbles share the inset so the column has one left and right edge. */
+  --chat-content-inset: 0.25rem;
   --thread-details-panel-width: 17.5rem;
   /* The prompt on phones: iOS zooms into any input under 16px on focus. */
   --font-size-prompt-touch: max(var(--font-size-prompt, 1rem), 16px);
