@@ -2296,6 +2296,7 @@ describe("batched pull request summaries", () => {
     mergedAt: "2026-08-24T00:00:00Z",
     closedAt: "2026-08-24T00:00:00Z",
     headRefName: "feat/seven",
+    headRefOid: "abc123",
     baseRefName: "main",
     author: { __typename: "Bot", login: "renovate", avatarUrl: "https://a/r.png" },
     latestReviews: { nodes: [] },
@@ -2307,6 +2308,7 @@ describe("batched pull request summaries", () => {
     const mapped = toPullRequestSummary(decodeSummary(summary({})));
     expect(mapped).toMatchObject({
       number: 7,
+      headSha: "abc123",
       state: "merged",
       mergedAt: "2026-08-24T00:00:00Z",
       author: { login: "renovate", isBot: true },

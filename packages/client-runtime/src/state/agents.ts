@@ -7,6 +7,22 @@ export function createAgentWorkspaceAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
   return {
+    agentsTriggersList: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "agents.triggersList",
+      tag: WS_METHODS.scheduledTasksList,
+    }),
+    agentsTriggersUpsert: createEnvironmentRpcCommand(runtime, {
+      label: "agents.triggersUpsert",
+      tag: WS_METHODS.scheduledTasksUpsert,
+    }),
+    agentsTriggersSetEnabled: createEnvironmentRpcCommand(runtime, {
+      label: "agents.triggersSetEnabled",
+      tag: WS_METHODS.scheduledTasksSetEnabled,
+    }),
+    agentsTriggersDelete: createEnvironmentRpcCommand(runtime, {
+      label: "agents.triggersDelete",
+      tag: WS_METHODS.scheduledTasksDelete,
+    }),
     agentsApprovalsList: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "agents.approvalsList",
       tag: WS_METHODS.agentsApprovalsList,

@@ -1,3 +1,4 @@
+import { AgentEventContext } from "./agentEvent.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 import * as Schema from "effect/Schema";
 import {
@@ -160,6 +161,8 @@ export const AgentWorkRun = Schema.Struct({
   id: TrimmedNonEmptyString,
   agentId: AgentId,
   triggerId: ScheduledTaskId,
+  triggerKind: Schema.optional(Schema.Literals(["trigger", "event"])),
+  triggerContext: Schema.optional(AgentEventContext),
   workThreadId: ThreadId,
   status: Schema.Literals(["starting", "running", "completed", "failed"]),
   createdAt: IsoDateTime,

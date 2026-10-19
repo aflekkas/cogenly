@@ -77,6 +77,7 @@ import Migration0060 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
 import Migration0061 from "./Migrations/061_PullRequestReviewGuides.ts";
 import Migration0065 from "./Migrations/065_ProjectLabels.ts";
 import Migration0066 from "./Migrations/066_WorkThreadMetadata.ts";
+import Migration0070 from "./Migrations/070_AgentEventTriggers.ts";
 import Migration0067 from "./Migrations/067_AgentScope.ts";
 import Migration0064 from "./Migrations/064_AgentReadWatermarks.ts";
 import Migration0063 from "./Migrations/063_Agents.ts";
@@ -162,6 +163,7 @@ export const migrationEntries = [
   [65, "ProjectLabels", Migration0065],
   [66, "WorkThreadMetadata", Migration0066],
   [67, "AgentScope", Migration0067],
+  [70, "AgentEventTriggers", Migration0070],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

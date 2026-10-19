@@ -1700,6 +1700,9 @@ export const make = Effect.gen(function* () {
             title: changeRequest.title,
             url: changeRequest.url,
             state: changeRequest.state,
+            ...("headSha" in changeRequest && typeof changeRequest.headSha === "string"
+              ? { headSha: changeRequest.headSha }
+              : {}),
             headBranch: changeRequest.headBranch,
             baseBranch: changeRequest.baseBranch,
             closedAt: changeRequest.closedAt ?? null,

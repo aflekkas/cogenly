@@ -59,3 +59,10 @@ The authenticated MCP boundary applies policy before all toolkits; generic shell
 browser and device writes need every sensitive grant because their effects cannot be
 bounded by an execute grant. Native provider tool approval remains the provider's runtime
 boundary. Activity reads persisted provider runs and action records, never model claims.
+
+Event triggers use the same scheduled-task identity and owner approval as timed triggers.
+Their reactor advances a durable event cursor only in the transaction that records its
+observations. Dispatch reserves the agent and the per-agent event key together before
+launching Work; replay must never mint a second launch after a crash. Busy agents, caps
+and backoff defer the persisted event. Causal depth follows governed Work and approval
+ancestry, including agent-created commitments, and stops after two event invocations.

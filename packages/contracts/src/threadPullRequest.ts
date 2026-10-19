@@ -47,6 +47,7 @@ export type ThreadPullRequestLinkSource = typeof ThreadPullRequestLinkSource.Typ
  * written before they existed still decode.
  */
 export const ThreadPullRequestSnapshot = Schema.Struct({
+  headSha: Schema.optional(TrimmedNonEmptyString),
   state: PullRequestState,
   title: TrimmedNonEmptyString,
   headBranch: TrimmedNonEmptyString,

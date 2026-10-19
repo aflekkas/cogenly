@@ -1,3 +1,8 @@
+import * as Folders from "../project/ManagedProjectFolders.ts";
+import * as Option from "effect/Option";
+import * as AgentEvents from "./AgentEventBus.ts";
+import * as EventReactor from "./AgentEventReactor.ts";
+import * as EventStore from "../orchestration-v2/EventStore.ts";
 import * as Work from "../work/WorkHandoffService.ts";
 import * as Labels from "../projectLabels/ProjectLabelService.ts";
 import * as LabelEvents from "../persistence/OrchestrationEventStore.ts";
@@ -17,6 +22,14 @@ import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
+  EventId,
+  ProjectId,
+  CheckpointId,
+  CheckpointScopeId,
+  CheckpointRef,
+  NodeId,
+  type AgentEventContext,
+  type OrchestrationV2StoredEvent,
   MessageId,
   RunId,
   ScheduledTaskId,
@@ -78,6 +91,10 @@ const makeHarness = Effect.sync(() => {
     contextHandoffId: null,
   });
   const boundaries = Layer.mergeAll(
+    Layer.mock(Folders.ManagedProjectFolders)({
+      namedProjectsRoot: "/unused",
+      scratchRoot: Effect.succeed(Option.none()),
+    }),
     Layer.mock(Launch.ThreadLaunchService)({
       launch: (input) =>
         Effect.sync(() => {
@@ -157,7 +174,10 @@ const makeHarness = Effect.sync(() => {
           : Effect.fail(new Projections.ProjectionStoreThreadNotFoundError({ threadId: id }));
       },
       getThread: (id) => Effect.succeed(projections.get(id)!.thread),
-      getThreadShell: (id) => Effect.succeed(projections.has(id) ? liveThreadShell(id) : null),
+      getThreadShell: (id) =>
+        Effect.succeed(
+          projections.has(id) ? { ...liveThreadShell(id), ...projections.get(id)!.thread } : null,
+        ),
     }),
     Layer.mock(Events.EventSinkV2)({
       commitCommand: (input) =>
@@ -207,9 +227,28 @@ const makeHarness = Effect.sync(() => {
   const policy = Policy.layer.pipe(
     Layer.provide(Layer.mergeAll(store, workspace, boundaries, database)),
   );
-  const layer = Layer.mergeAll(store, agents, schedules, workspace, policy, labels, database).pipe(
-    Layer.provide(NodeServices.layer),
+  const eventStore = EventStore.layerFromOrchestrationEventStore.pipe(
+    Layer.provide(LabelEvents.layer.pipe(Layer.provide(database))),
   );
+  const bus = AgentEvents.layer.pipe(
+    Layer.provide(Layer.mergeAll(agents, schedules, store, database)),
+  );
+  const reactor = EventReactor.layer.pipe(
+    Layer.provide(Layer.mergeAll(bus, eventStore, boundaries, database)),
+  );
+  const layer = Layer.mergeAll(
+    store,
+    agents,
+    schedules,
+    workspace,
+    policy,
+    labels,
+    database,
+    eventStore,
+    bus,
+    reactor,
+    boundaries,
+  ).pipe(Layer.provide(NodeServices.layer));
   const triggerInput: ScheduledTaskUpsertInput = {
     title: "Check colour",
     prompt: "Recall the owner's favourite colour.",
@@ -223,7 +262,18 @@ const makeHarness = Effect.sync(() => {
     runtimeMode: fixture.runtimeMode,
     interactionMode: "default",
   };
-  return { layer, fixture, launches, posts, calls, commands, jobs, triggerInput, projections };
+  return {
+    layer,
+    fixture,
+    launches,
+    posts,
+    calls,
+    commands,
+    jobs,
+    triggerInput,
+    projections,
+    runFor,
+  };
 });
 
 describe("agent execution", () => {
@@ -1147,3 +1197,410 @@ it.effect(
       }).pipe(Effect.provide(h.layer));
     }),
 );
+
+describe("event-driven agent triggers", () => {
+  const setup = Effect.gen(function* () {
+    const h = yield* makeHarness;
+    return h;
+  });
+  const completedEvent = (h: Effect.Success<typeof setup>, key = "source") => {
+    const threadId = ThreadId.make(`work:${key}`);
+    const run = h.runFor(threadId);
+    const projection = idleThreadProjection({
+      ...liveThreadShell(threadId),
+      projectId: h.fixture.projectId!,
+    });
+    h.projections.set(threadId, { ...projection, runs: [run] });
+    return {
+      sequence: 1,
+      commandId: null,
+      event: {
+        id: EventId.make(`done:${key}`),
+        type: "run.updated",
+        threadId,
+        occurredAt: DateTime.makeUnsafe("2026-01-02T00:00:00.000Z"),
+        payload: run,
+      },
+    } satisfies OrchestrationV2StoredEvent;
+  };
+  const prepare = (
+    h: Effect.Success<typeof setup>,
+    event: AgentEventContext["kind"] = "work.completed",
+  ) =>
+    Effect.gen(function* () {
+      yield* (yield* Store.AgentStore).save({ ...h.fixture, dailyRunCap: 20 });
+      return yield* (yield* Schedules.ScheduledTaskService).upsert({
+        ...h.triggerInput,
+        schedule: { type: "event", event },
+      });
+    });
+  it.effect(
+    "Work completion matches once, persists its refs, and cursor replay after restart does not refire",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* setup;
+        yield* Effect.gen(function* () {
+          const { task } = yield* prepare(h);
+          expect(task.nextRunAt).toBeNull();
+          const source = completedEvent(h);
+          const events = yield* EventStore.EventStoreV2;
+          yield* events.append({ events: [source.event] });
+          yield* (yield* EventReactor.AgentEventReactor).tick;
+          expect(h.launches).toHaveLength(1);
+          expect((yield* (yield* Schedules.ScheduledTaskService).list()).tasks[0]).toMatchObject({
+            runCount: 1,
+            lastRunStatus: "succeeded",
+          });
+          const store = yield* Store.AgentStore;
+          expect((yield* store.runs(h.fixture.id))[0]).toMatchObject({
+            triggerKind: "event",
+            triggerContext: {
+              kind: "work.completed",
+              refs: { threadId: source.event.threadId, runId: source.event.payload.id },
+            },
+          });
+          const sql = yield* SqlClient.SqlClient;
+          const workThreadId = h.launches[0]!.threadId!;
+          const payload = yield* encodeUnknown({
+            startedAt: null,
+            completedAt: null,
+            modelSelection: h.fixture.modelSelection,
+          });
+          yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES ('event-provider-run', ${workThreadId}, 1, 'codex', 'running', ${h.fixture.createdAt}, ${payload})`;
+          const activity = yield* (yield* Workspace.AgentWorkspaceService).activity(h.fixture.id);
+          expect(activity.runs[0]).toMatchObject({
+            triggerKind: "event",
+            triggerContext: { kind: "work.completed", refs: { threadId: source.event.threadId } },
+          });
+          yield* sql`UPDATE agent_events SET dispatched = 0`;
+          // Simulate process loss by recreating both event services over the same DB.
+          yield* Effect.gen(function* () {
+            const reactor = yield* EventReactor.AgentEventReactor;
+            yield* reactor.tick;
+            yield* reactor.observe(source);
+            yield* (yield* AgentEvents.AgentEventBus).drain;
+          }).pipe(Effect.provide(EventReactor.layer.pipe(Layer.provideMerge(AgentEvents.layer))));
+          expect(h.launches).toHaveLength(1);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+  it.effect.each(["unauthorized repository", "paused", "ungranted label"])(
+    "does not fire for %s",
+    (reason) =>
+      Effect.gen(function* () {
+        const h = yield* setup;
+        yield* Effect.gen(function* () {
+          yield* prepare(h);
+          const source = completedEvent(h);
+          if (reason === "paused")
+            yield* (yield* Store.AgentStore).save({ ...h.fixture, enabled: false, paused: true });
+          if (reason === "unauthorized repository") {
+            const p = h.projections.get(source.event.threadId)!;
+            h.projections.set(source.event.threadId, {
+              ...p,
+              thread: { ...p.thread, projectId: ProjectId.make("other") },
+            });
+          }
+          if (reason === "ungranted label") {
+            const label = (yield* (yield* Labels.ProjectLabelService).create({ name: "Private" }))
+              .label;
+            const sql = yield* SqlClient.SqlClient;
+            yield* sql`INSERT INTO thread_project_labels(thread_id, label_id, confirmed_by_user, source) VALUES (${source.event.threadId}, ${label.id}, 1, 'user')`;
+          }
+          yield* (yield* EventReactor.AgentEventReactor).observe(source);
+          yield* (yield* AgentEvents.AgentEventBus).drain;
+          expect(h.launches).toHaveLength(0);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+  it.effect(
+    "a self-triggering completion chain stops at depth two and dedups each event per agent",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* setup;
+        yield* Effect.gen(function* () {
+          yield* prepare(h);
+          const bus = yield* AgentEvents.AgentEventBus;
+          const reactor = yield* EventReactor.AgentEventReactor;
+          const source = completedEvent(h);
+          yield* reactor.observe(source);
+          yield* bus.drain;
+          expect(h.launches).toHaveLength(1);
+          for (let i = 0; i < 2; i++) {
+            let threadId = h.launches.at(-1)!.threadId!;
+            if (i === 1) {
+              const parent = threadId;
+              threadId = ThreadId.make("governed-child");
+              const child = completedEvent(h, "child");
+              h.projections.set(threadId, {
+                ...h.projections.get(child.event.threadId)!,
+                thread: {
+                  ...h.projections.get(child.event.threadId)!.thread,
+                  id: threadId,
+                },
+                runs: [h.runFor(threadId)],
+              });
+              const sql = yield* SqlClient.SqlClient;
+              yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind, source_run_id) VALUES (${threadId}, ${h.fixture.id}, 'work', ${parent})`;
+            }
+            const projection = h.projections.get(threadId)!;
+            h.projections.set(threadId, {
+              ...projection,
+              thread: {
+                ...projection.thread,
+                projectId: h.fixture.projectId!,
+                agent: { id: h.fixture.id, role: "work" },
+              },
+            });
+            const run = projection.runs[0]!;
+            const stored: OrchestrationV2StoredEvent = {
+              sequence: i + 2,
+              commandId: null,
+              event: {
+                type: "run.updated",
+                id: EventId.make(`chain:${i}`),
+                threadId,
+                occurredAt: DateTime.makeUnsafe("2026-01-02T00:00:00.000Z"),
+                payload: run,
+              },
+            };
+            yield* reactor.observe(stored);
+            yield* reactor.observe(stored);
+            yield* bus.drain;
+          }
+          expect(h.launches).toHaveLength(2);
+          const sql = yield* SqlClient.SqlClient;
+          const rows = yield* sql<{
+            depth: number;
+          }>`SELECT json_extract(context_json, '$.chainDepth') AS depth FROM agent_event_deliveries ORDER BY depth`;
+          expect(rows.map((r) => r.depth)).toEqual([1, 2]);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+  it.effect("PR checks failed dispatches with PR URL and head refs, once per head", () =>
+    Effect.gen(function* () {
+      const h = yield* setup;
+      yield* Effect.gen(function* () {
+        yield* prepare(h, "pr.checks_failed");
+        const source = completedEvent(h);
+        const event: OrchestrationV2StoredEvent = {
+          sequence: 1,
+          commandId: null,
+          event: {
+            type: "thread.pull-request-link-updated",
+            id: EventId.make("pr:checks"),
+            threadId: source.event.threadId,
+            occurredAt: source.event.occurredAt,
+            payload: {
+              host: "github.com",
+              repository: "owner/repo",
+              number: 42,
+              url: "https://github.com/owner/repo/pull/42",
+              source: "manual",
+              linkedAt: "2026-01-01T00:00:00.000Z",
+              stack: null,
+              snapshot: {
+                state: "open",
+                title: "Fix",
+                headBranch: "fix",
+                baseBranch: "main",
+                isDraft: false,
+                headSha: "abc123",
+                updatedAt: "2026-01-02T00:00:00.000Z",
+                syncedAt: "2026-01-02T00:00:00.000Z",
+                checksState: "failing",
+              },
+            },
+          },
+        };
+        const reactor = yield* EventReactor.AgentEventReactor;
+        const bus = yield* AgentEvents.AgentEventBus;
+        yield* reactor.observe(event);
+        yield* bus.drain;
+        yield* reactor.observe(event);
+        yield* bus.drain;
+        expect(h.launches).toHaveLength(1);
+        expect(
+          (yield* (yield* Store.AgentStore).runs(h.fixture.id))[0]?.triggerContext?.refs,
+        ).toMatchObject({
+          prUrl: "https://github.com/owner/repo/pull/42",
+          headSha: "abc123",
+          threadId: source.event.threadId,
+        });
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+  it.effect("event trigger proposals remain inert until an owner approves them", () =>
+    Effect.gen(function* () {
+      const h = yield* setup;
+      yield* Effect.gen(function* () {
+        yield* (yield* Store.AgentStore).save(h.fixture);
+        const workspace = yield* Workspace.AgentWorkspaceService;
+        const { approval } = yield* workspace.requestApproval(
+          h.fixture.id,
+          {
+            actionKind: "schedule_trigger",
+            payload: { ...h.triggerInput, schedule: { type: "event", event: "work.completed" } },
+          },
+          { agent: h.fixture, threadId: h.fixture.conversationThreadId },
+        );
+        expect((yield* (yield* Schedules.ScheduledTaskService).list()).tasks).toHaveLength(0);
+        yield* workspace.approve(approval.id);
+        yield* workspace.approve(approval.id);
+        expect((yield* (yield* Schedules.ScheduledTaskService).list()).tasks).toHaveLength(1);
+        yield* (yield* EventReactor.AgentEventReactor).observe(completedEvent(h));
+        yield* (yield* AgentEvents.AgentEventBus).drain;
+        expect(h.launches).toHaveLength(1);
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+  it.effect("due commitments fire once across ticks and completed obligations stay quiet", () =>
+    Effect.gen(function* () {
+      const h = yield* setup;
+      yield* Effect.gen(function* () {
+        yield* prepare(h, "commitment.due");
+        const workspace = yield* Workspace.AgentWorkspaceService;
+        const makeItem = (title: string) =>
+          workspace.createCommitment({
+            title,
+            description: "",
+            owner: { kind: "agent", agentId: h.fixture.id },
+            dueAt: "1970-01-01T00:00:00.000Z",
+            reminderAt: null,
+            waitingOn: null,
+            labelIds: [],
+            agentId: h.fixture.id,
+            sourceRefs: [],
+            evidenceRefs: [],
+          });
+        const done = yield* makeItem("Already done");
+        yield* workspace.updateCommitmentStatus({
+          id: done.commitment.id,
+          status: "done",
+          why: "Owner confirmed",
+          evidenceRefs: [],
+        });
+        const open = yield* makeItem("Due now");
+        const reactor = yield* EventReactor.AgentEventReactor;
+        yield* reactor.tick;
+        yield* reactor.tick;
+        expect(h.launches).toHaveLength(1);
+        expect(
+          (yield* (yield* Store.AgentStore).runs(h.fixture.id))[0]?.triggerContext,
+        ).toMatchObject({
+          kind: "commitment.due",
+          refs: { commitmentId: open.commitment.id },
+        });
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+  it.effect("busy agents and daily caps defer events durably without duplicate dispatch", () =>
+    Effect.gen(function* () {
+      const h = yield* setup;
+      yield* Effect.gen(function* () {
+        yield* prepare(h);
+        const store = yield* Store.AgentStore;
+        yield* store.save({ ...h.fixture, dailyRunCap: 1 });
+        const reactor = yield* EventReactor.AgentEventReactor;
+        const bus = yield* AgentEvents.AgentEventBus;
+        yield* reactor.observe(completedEvent(h, "first"));
+        yield* bus.drain;
+        yield* reactor.observe(completedEvent(h, "second"));
+        yield* bus.drain;
+        expect(h.launches).toHaveLength(1);
+        const sql = yield* SqlClient.SqlClient;
+        expect(yield* sql`SELECT 1 FROM agent_events WHERE dispatched = 0`).toHaveLength(1);
+        yield* TestClock.adjust("1 day");
+        yield* bus.drain;
+        yield* bus.drain;
+        expect(h.launches).toHaveLength(2);
+        expect(yield* sql`SELECT 1 FROM agent_event_deliveries`).toHaveLength(2);
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+  it.effect(
+    "filter labels, repositories and origin narrow matches and overlapping triggers dispatch once",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* setup;
+        yield* Effect.gen(function* () {
+          const { task } = yield* prepare(h);
+          const schedules = yield* Schedules.ScheduledTaskService;
+          yield* schedules.upsert({
+            ...h.triggerInput,
+            id: task.id,
+            schedule: { type: "event", event: "work.completed", filter: { origin: "agent" } },
+          });
+          const source = completedEvent(h);
+          const reactor = yield* EventReactor.AgentEventReactor;
+          const bus = yield* AgentEvents.AgentEventBus;
+          yield* reactor.observe(source);
+          yield* bus.drain;
+          expect(h.launches).toHaveLength(0);
+          const next = completedEvent(h, "matching");
+          yield* schedules.upsert({
+            ...h.triggerInput,
+            id: task.id,
+            schedule: {
+              type: "event",
+              event: "work.completed",
+              filter: { origin: "direct", projectIds: [h.fixture.projectId!] },
+            },
+          });
+          yield* schedules.upsert({
+            ...h.triggerInput,
+            schedule: { type: "event", event: "work.completed" },
+          });
+          yield* reactor.observe(next);
+          yield* bus.drain;
+          expect(h.launches).toHaveLength(1);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
+  it.effect.each(["work.failed", "work.review_ready"] as const)(
+    "derives %s from execution evidence",
+    (kind) =>
+      Effect.gen(function* () {
+        const h = yield* setup;
+        yield* Effect.gen(function* () {
+          yield* prepare(h, kind);
+          const source = completedEvent(h);
+          const threadId = source.event.threadId;
+          const projection = h.projections.get(threadId)!;
+          h.projections.set(threadId, {
+            ...projection,
+            runs:
+              kind === "work.failed"
+                ? [{ ...projection.runs[0]!, status: "failed" }]
+                : projection.runs,
+            checkpoints:
+              kind === "work.review_ready"
+                ? [
+                    {
+                      id: CheckpointId.make("ready"),
+                      threadId,
+                      scopeId: CheckpointScopeId.make("scope"),
+                      runId: projection.runs[0]!.id,
+                      nodeId: NodeId.make("node"),
+                      parentCheckpointId: null,
+                      ordinalWithinScope: 1,
+                      appRunOrdinal: 1,
+                      ref: CheckpointRef.make("refs/checkpoints/ready"),
+                      status: "ready",
+                      capturedAt: source.event.occurredAt,
+                      files: [{ path: "fix.ts", kind: "modified", additions: 1, deletions: 0 }],
+                    },
+                  ]
+                : [],
+          });
+          yield* (yield* EventReactor.AgentEventReactor).observe(source);
+          yield* (yield* AgentEvents.AgentEventBus).drain;
+          expect(h.launches).toHaveLength(1);
+          expect(
+            (yield* (yield* Store.AgentStore).runs(h.fixture.id))[0]?.triggerContext?.kind,
+          ).toBe(kind);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+});

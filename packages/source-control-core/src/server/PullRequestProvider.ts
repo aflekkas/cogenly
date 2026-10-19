@@ -113,6 +113,7 @@ export interface ProviderChangeRequest {
 
 /** The fields needed to keep a linked thread's pull request status live. */
 export interface ProviderChangeRequestSummary {
+  readonly headSha?: string | null | undefined;
   readonly number: number;
   readonly title: string;
   readonly url: string;

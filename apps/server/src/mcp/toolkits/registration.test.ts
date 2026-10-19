@@ -201,6 +201,7 @@ const smokeCases = [
     names: [
       "list_open_items",
       "propose_commitment",
+      "propose_event_trigger",
       "update_commitment_status",
       "request_agent_approval",
       "start_agent_work",

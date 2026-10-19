@@ -1,3 +1,4 @@
+import { AgentEventContext } from "./agentEvent.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 import * as Schema from "effect/Schema";
 import { AgentId, AgentPermissions, AgentScope, AgentAutonomy } from "./agent.ts";
@@ -154,7 +155,8 @@ export const AgentActivityRun = Schema.Struct({
   id: TrimmedNonEmptyString,
   agentId: AgentId,
   threadId: ThreadId,
-  triggerKind: Schema.Literals(["owner_message", "trigger", "approval", "work"]),
+  triggerContext: Schema.optional(AgentEventContext),
+  triggerKind: Schema.Literals(["owner_message", "trigger", "approval", "work", "event"]),
   status: Schema.String,
   startedAt: Schema.NullOr(IsoDateTime),
   finishedAt: Schema.NullOr(IsoDateTime),

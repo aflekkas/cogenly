@@ -1,3 +1,5 @@
+import * as AgentEvents from "../agents/AgentEventBus.ts";
+import * as AgentEventReactor from "../agents/AgentEventReactor.ts";
 import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
 import * as WorkHandoff from "../work/WorkHandoffService.ts";
 import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
@@ -320,6 +322,19 @@ const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
     ),
   ),
 );
+const layerAgentEventsProvided = AgentEvents.layer.pipe(
+  Layer.provide(Layer.mergeAll(layerAgentsProvided, layerScheduledTaskProvided, AgentStore.layer)),
+);
+const layerAgentEventReactorProvided = AgentEventReactor.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerAgentEventsProvided,
+      ProjectionStore.layer,
+      layerEventStoreProvided,
+      layerManagedProjectFoldersProvided,
+    ),
+  ),
+);
 const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -412,6 +427,7 @@ export const layerProduction = Layer.mergeAll(
   layerAgentsProvided,
   ProjectLabels.layer,
   layerAgentWorkspaceProvided,
+  layerAgentEventReactorProvided,
   layerAgentMcpPolicyProvided,
   AgentStore.layer,
   layerScheduledTaskProvided,

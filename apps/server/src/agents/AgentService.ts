@@ -1,3 +1,4 @@
+import { canReceiveAgentEvent } from "./agentEventPolicy.ts";
 import {
   conservativeAgentPermissions,
   AgentError,
@@ -7,6 +8,8 @@ import {
   MessageId,
   ThreadId,
   TurnItemId,
+  AgentEventContext,
+  ScheduledTaskSchedule,
   type Agent,
   type AgentListItem,
   type AgentMarkReadInput,
@@ -32,6 +35,8 @@ import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { conversationCarryOver } from "./context.ts";
 
+const encodeEventContext = Schema.encodeEffect(Schema.fromJsonString(AgentEventContext));
+const encodeEventSchedule = Schema.encodeEffect(Schema.fromJsonString(ScheduledTaskSchedule));
 const isAgentError = Schema.is(AgentError);
 const failure = (cause: unknown) =>
   isAgentError(cause)
@@ -59,6 +64,7 @@ export class AgentService extends Context.Service<
       task: ScheduledTask,
       fireKey: string,
       prompt: string,
+      context?: AgentEventContext,
     ) => Effect.Effect<boolean, AgentError>;
     /** Also called on startup; terminal runs with undelivered postbacks survive restarts. */
     readonly reconcile: () => Effect.Effect<void, AgentError>;
@@ -398,19 +404,42 @@ const make = Effect.gen(function* () {
           delivery: result.delivery,
         };
       }).pipe(Effect.mapError(failure)),
-    trigger: (task, fireKey, prompt) =>
+    trigger: (task, fireKey, prompt, context) =>
       Effect.gen(function* () {
         if (task.agentId == null) return false;
-        const agent = yield* store.get(task.agentId);
+        let agent = yield* store.get(task.agentId);
         const id = `agent-work:${fireKey}`;
         const workThreadId = ThreadId.make(id);
         const accepted = yield* sql.withTransaction(
           Effect.gen(function* () {
+            if (context !== undefined) {
+              agent = yield* store.get(task.agentId!);
+              const scheduleJson = yield* encodeEventSchedule(task.schedule);
+              const current =
+                yield* sql`SELECT 1 FROM scheduled_tasks WHERE task_id = ${task.id} AND enabled = 1 AND agent_id = ${agent.id} AND project_id = ${task.projectId} AND created_at = ${task.createdAt} AND schedule_json = ${scheduleJson}`;
+              if (current.length === 0) return false;
+              if (!canReceiveAgentEvent(agent, task, context)) return false;
+              const prior =
+                yield* sql`SELECT 1 FROM agent_event_deliveries WHERE agent_id = ${agent.id} AND event_key = ${context.dedupKey}`;
+              if (prior.length) return false;
+            }
             if (!(yield* store.reserve(agent.id))) return false;
+            if (context !== undefined) {
+              const inherited = {
+                ...context,
+                chainDepth: context.chainDepth + 1,
+                chainAgentIds: [...new Set([...context.chainAgentIds, agent.id])],
+              };
+              const contextJson = yield* encodeEventContext(inherited);
+              yield* sql`INSERT INTO agent_event_deliveries(agent_id, event_key, work_thread_id, context_json) VALUES (${agent.id}, ${context.dedupKey}, ${workThreadId}, ${contextJson})`;
+              yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind, source_run_id) VALUES (${workThreadId}, ${agent.id}, 'event', ${context.refs.runId ?? null})`;
+            }
             yield* store.createRun({
               id,
               agentId: agent.id,
               triggerId: task.id,
+              triggerKind: context === undefined ? "trigger" : "event",
+              ...(context === undefined ? {} : { triggerContext: context }),
               workThreadId,
               status: "starting",
               createdAt: DateTime.formatIso(yield* DateTime.now),
@@ -445,7 +474,7 @@ const make = Effect.gen(function* () {
             initialMessage: {
               messageId: MessageId.make(id),
               scheduledTaskId: task.id,
-              text: `Background job for ${agent.name}. Finish with a short owner-facing result, question, or approval request. Details stay in this work thread.\n\nConversation summary:\n${carry.summary}\nRecent conversation:\n${carry.recent}\n\nTrigger:\n${prompt}`,
+              text: `Background job for ${agent.name}. Finish with a short owner-facing result, question, or approval request. Details stay in this work thread.\n\nConversation summary:\n${carry.summary}\nRecent conversation:\n${carry.recent}\n\nTrigger:\n${prompt}${context === undefined ? "" : `\n\nEvent context:\n${yield* encodeEventContext(context)}`}`,
               attachments: [],
             },
           }),

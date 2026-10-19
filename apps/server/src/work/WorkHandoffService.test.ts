@@ -1,3 +1,8 @@
+import * as EventSink from "../orchestration-v2/EventSink.ts";
+import * as DateTime from "effect/DateTime";
+import * as AgentEventReactor from "../agents/AgentEventReactor.ts";
+import * as AgentEvents from "../agents/AgentEventBus.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
 import { expect, it } from "@effect/vitest";
 import {
   AgentId,
@@ -8,6 +13,7 @@ import {
   ThreadId,
   ProviderInstanceId,
   type OrchestrationV2Command,
+  type AgentEventContext,
   type OrchestrationV2DomainEvent,
   type Project,
   TextGenerationError,
@@ -183,6 +189,7 @@ const harness = Effect.gen(function* () {
     }),
     Layer.mock(Folders.ManagedProjectFolders)({
       namedProjectsRoot: "/unused",
+      scratchRoot: Effect.succeed(Option.none()),
       folderForThread: () => Effect.succeed(Option.none()),
     }),
     Layer.mock(Terminals.TerminalManager)({}),
@@ -418,4 +425,76 @@ it.effect("backfills old agent run provenance idempotently without rewriting the
     const stored = yield* Stream.runCollect(events.read({ threadId: sourceId }));
     expect(stored).toHaveLength(1);
   }).pipe(Effect.provide(runtime)),
+);
+
+it.effect(
+  "emits Work completion from durable terminal projection updates after effects drain",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      yield* h.orchestrator.dispatch(create(sourceId));
+      const observed: AgentEventContext[] = [];
+      const boundaries = Layer.mergeAll(
+        Layer.succeed(AgentEvents.AgentEventBus, {
+          emit: (event) =>
+            Effect.sync(() => {
+              observed.push(event);
+            }),
+          drain: Effect.void,
+          lineage: () => Effect.succeed({ chainDepth: 0, chainAgentIds: [] }),
+        }),
+        Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void }),
+        Layer.mock(Folders.ManagedProjectFolders)({
+          namedProjectsRoot: "/unused",
+          scratchRoot: Effect.succeed(Option.none()),
+        }),
+        Projections.layer,
+      );
+      yield* Effect.gen(function* () {
+        const result = yield* (yield* Work.WorkHandoffService).start(input);
+        yield* Deferred.await(h.finished);
+        yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+        const projection = yield* h.orchestrator.getThreadProjection(result.threadId);
+        const at = yield* DateTime.now;
+        const run = projection.runs.at(-1)!;
+        // Inject the provider boundary outcome into the real event sink. The
+        // projection, cursor and reactor below use persisted state, after drain.
+        yield* (yield* EventSink.EventSinkV2).write({
+          events: [
+            ...projection.providerThreads.map((providerThread): OrchestrationV2DomainEvent => ({
+              type: "provider-thread.updated",
+              id: EventId.make(`idle:${providerThread.id}`),
+              threadId: result.threadId,
+              occurredAt: at,
+              payload: { ...providerThread, status: "idle", updatedAt: at },
+            })),
+            ...projection.providerSessions.map((session): OrchestrationV2DomainEvent => ({
+              type: "provider-session.updated",
+              id: EventId.make(`ready:${session.id}`),
+              threadId: result.threadId,
+              occurredAt: at,
+              payload: { ...session, status: "ready", updatedAt: at },
+            })),
+            {
+              type: "run.updated",
+              id: EventId.make(`completed:${run.id}`),
+              threadId: result.threadId,
+              occurredAt: at,
+              payload: { ...run, status: "completed", completedAt: at },
+            },
+          ],
+        });
+        yield* Effect.gen(function* () {
+          yield* (yield* AgentEventReactor.AgentEventReactor).tick;
+        }).pipe(Effect.provide(AgentEventReactor.layer.pipe(Layer.provide(boundaries))));
+        expect(observed).toContainEqual(
+          expect.objectContaining({
+            kind: "work.completed",
+            origin: "chat",
+            projectId: targetId,
+            refs: { threadId: result.threadId, runId: projection.runs.at(-1)!.id },
+          }),
+        );
+      }).pipe(Effect.provide(h.work));
+    }).pipe(Effect.provide(runtime)),
 );

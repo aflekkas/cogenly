@@ -8,6 +8,7 @@ import {
   AgentListItem,
   type AgentMarkReadInput,
   AgentWorkRun,
+  AgentEventContext,
   ThreadId,
   type AgentMemoryWriteInput,
 } from "@t3tools/contracts";
@@ -32,6 +33,8 @@ interface Row {
 }
 const decode = Schema.decodeUnknownEffect(AgentListItem);
 const decodeNote = Schema.decodeUnknownEffect(AgentMemoryNote);
+const decodeEventContext = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEventContext));
+const encodeEventContext = Schema.encodeSync(Schema.fromJsonString(AgentEventContext));
 const decodeRun = Schema.decodeUnknownEffect(AgentWorkRun);
 const decodeJsonRecord = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
@@ -158,16 +161,24 @@ const make = Effect.gen(function* () {
     ).pipe(
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (r) =>
-          decodeRun({
-            id: r.run_id,
-            agentId: r.agent_id,
-            triggerId: r.trigger_id,
-            workThreadId: r.work_thread_id,
-            status: r.status,
-            createdAt: r.created_at,
-            completedAt: r.completed_at,
-            summary: r.summary,
-            posted: r.posted === 1,
+          Effect.gen(function* () {
+            return yield* decodeRun({
+              id: r.run_id,
+              agentId: r.agent_id,
+              triggerId: r.trigger_id,
+              triggerKind: r.trigger_kind,
+              ...(r.trigger_context_json == null
+                ? {}
+                : {
+                    triggerContext: yield* decodeEventContext(r.trigger_context_json),
+                  }),
+              workThreadId: r.work_thread_id,
+              status: r.status,
+              createdAt: r.created_at,
+              completedAt: r.completed_at,
+              summary: r.summary,
+              posted: r.posted === 1,
+            });
           }),
         ),
       ),
@@ -276,7 +287,7 @@ const make = Effect.gen(function* () {
         return yield* get(id);
       }).pipe(Effect.mapError(storeError)),
     createRun: (run) =>
-      sql`INSERT INTO agent_work_runs(run_id, agent_id, trigger_id, work_thread_id, status, created_at) VALUES (${run.id}, ${run.agentId}, ${run.triggerId}, ${run.workThreadId}, ${run.status}, ${run.createdAt})`.pipe(
+      sql`INSERT INTO agent_work_runs(run_id, agent_id, trigger_id, work_thread_id, status, created_at, trigger_kind, trigger_context_json) VALUES (${run.id}, ${run.agentId}, ${run.triggerId}, ${run.workThreadId}, ${run.status}, ${run.createdAt}, ${run.triggerKind ?? "trigger"}, ${run.triggerContext === undefined ? null : encodeEventContext(run.triggerContext)})`.pipe(
         Effect.asVoid,
         Effect.mapError(storeError),
       ),
