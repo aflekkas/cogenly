@@ -6,6 +6,7 @@ import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/process";
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
+import type { WorkScopeSummaryGeneration } from "../../textGeneration/WorkScopeSummaryGeneration.ts";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { chatGptModels } from "../CodexChatGptModels.ts";
 import { makeCodexManagedRuntime } from "../CodexManagedRuntime.ts";
@@ -259,7 +260,9 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
           }),
       ),
     );
-  const textGeneration: ProviderInstance["textGeneration"] = {
+  const textGeneration: ProviderInstance["textGeneration"] & WorkScopeSummaryGeneration = {
+    generateWorkScopeSummary: (value) =>
+      protect("generateThreadTitle", nativeGeneration.generateWorkScopeSummary(value)),
     generateCommitMessage: (value) =>
       protect("generateCommitMessage", nativeGeneration.generateCommitMessage(value)),
     generatePrContent: (value) =>

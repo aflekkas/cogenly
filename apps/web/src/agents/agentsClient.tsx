@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useContext,
-  useSyncExternalStore,
-  useCallback,
-  useRef,
-  type ComponentType,
-} from "react";
+import { useContext, useSyncExternalStore, useCallback, useRef, type ComponentType } from "react";
 import type {
   AgentApproval,
   Commitment,
@@ -39,6 +32,7 @@ import {
   type AgentModelStatus,
 } from "./agents.logic";
 import { triggerErrorMessage } from "./agentWorkspace.logic";
+import { AgentHydrationContext, AgentsClientContext } from "./agentsContext";
 
 export class AgentCreatedWithoutTriggerError extends Error {
   constructor(
@@ -131,30 +125,27 @@ export interface AgentsClient {
     labels: AgentWorkspaceView["labels"];
   }>;
 }
-const ClientContext = createContext<AgentsClient | null>(null);
-export const AgentsClientProvider = ClientContext.Provider;
+export const AgentsClientProvider = AgentsClientContext.Provider;
 export function useAgentsClient() {
-  const client = useContext(ClientContext);
+  const client = useContext(AgentsClientContext);
   if (!client) throw new Error("AgentsClientProvider is required");
   return client;
-}
-export function useAgents() {
-  const client = useAgentsClient();
-  const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
-  const agents = useMemo(() => sortAgentContacts(snapshot.agents), [snapshot.agents]);
-  return { ...snapshot, agents };
 }
 const NO_AGENTS: AgentsSnapshot = { agents: [], models: [], loading: false, error: null };
 const subscribeToNothing = () => () => {};
 const readNoAgents = () => NO_AGENTS;
-/** Agents for surfaces that also render outside the provider, such as the welcome wizard's palette. */
-export function useAgentsIfProvided(): ReadonlyArray<AgentContact> {
-  const client = useContext(ClientContext);
+/**
+ * The agents list, empty outside the provider: global surfaces (sidebar, palette,
+ * thread route) also render where it is absent, such as the welcome wizard.
+ */
+export function useAgents() {
+  const client = useContext(AgentsClientContext);
   const snapshot = useSyncExternalStore(
     client?.subscribe ?? subscribeToNothing,
     client?.getSnapshot ?? readNoAgents,
   );
-  return useMemo(() => sortAgentContacts(snapshot.agents), [snapshot.agents]);
+  const agents = useMemo(() => sortAgentContacts(snapshot.agents), [snapshot.agents]);
+  return { ...snapshot, agents };
 }
 export function useAgent(key: string | null) {
   return useAgents().agents.find((agent) => agentContactKey(agent) === key) ?? null;
@@ -191,7 +182,13 @@ import { readLocalApi } from "~/localApi";
 import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { usePrimaryEnvironmentId, useConnectedEnvironmentIds } from "~/state/environments";
-import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
+import {
+  useProjects,
+  useServerConfigs,
+  useThreadShells,
+  waitForThreadShell,
+} from "~/state/entities";
+import { openWorkWhenArrived } from "~/components/work/work.logic";
 import { useEnvironmentThread, threadEnvironment } from "~/state/threads";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "~/state/server";
 import { useEnvironmentSettings } from "~/hooks/useSettings";
@@ -636,9 +633,13 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       canWrite: (environmentId) =>
         readEnvironmentScope(environmentId, AuthOrchestrationOperateScope),
       openWork: (agent, threadId) => {
-        void navigate({
-          to: "/$environmentId/$threadId",
-          params: { environmentId: agent.environmentId, threadId },
+        void openWorkWhenArrived({
+          waitForThread: () => waitForThreadShell(scopeThreadRef(agent.environmentId, threadId)),
+          open: () =>
+            navigate({
+              to: "/$environmentId/$threadId",
+              params: { environmentId: agent.environmentId, threadId },
+            }),
         });
       },
       openProjectSettings: () => {
@@ -825,10 +826,10 @@ function LiveCommitmentHistory({
   return children({ history: query.data?.history ?? null, error: query.error });
 }
 
-type AgentConversationData = Pick<AgentContact, "messages" | "requests" | "memory" | "activity">;
-const AgentHydrationContext = createContext<
-  ((key: string, content: AgentConversationData) => void) | null
->(null);
+export type AgentConversationData = Pick<
+  AgentContact,
+  "messages" | "requests" | "memory" | "activity"
+>;
 export function useAgentConversation(agent: AgentContact | null): AgentContact | null {
   const state = useEnvironmentThread(
     agent?.environmentId ?? null,

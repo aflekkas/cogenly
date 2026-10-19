@@ -83,7 +83,7 @@ import { requestAgentCreation } from "../agents/AgentsCreateHost";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { requestStartWork } from "./work/StartWorkDialog";
 import { agentStatusLabel } from "../agents/agents.logic";
-import { useAgentsIfProvided } from "../agents/agentsClient";
+import { useAgents } from "../agents/agentsClient";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./sidebar/mainAppLocation";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES } from "./sidebar/modes/sidebarModes.logic";
@@ -662,7 +662,7 @@ function OpenCommandPaletteDialog(props: {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const setSidebarMode = useUiStateStore((store) => store.setSidebarMode);
   const navigateToMainApp = useNavigateToMainApp();
-  const agents = useAgentsIfProvided();
+  const agents = useAgents().agents;
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { appearanceMode, setAppearanceMode } = useTheme();

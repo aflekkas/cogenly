@@ -7,6 +7,7 @@ import {
   describeWorkStartFailure,
   deriveWorkRowStatus,
   listWorkRepositories,
+  openWorkWhenArrived,
   resolveStartWorkFields,
   resolveStartWorkSubmission,
   type StartWorkFields,
@@ -259,5 +260,38 @@ describe("Start Work in the thread action menu", () => {
     expect(startWork(state)).toBeUndefined();
     expect(startWork({ ...state, canStartWork: true })?.disabled).toBeUndefined();
     expect(startWork({ ...state, canStartWork: true, canOperate: false })?.disabled).toBe(true);
+  });
+});
+
+describe("openWorkWhenArrived", () => {
+  it("opens the Work thread only after it reaches this client", async () => {
+    const steps: string[] = [];
+    let arrive: (arrived: boolean) => void = () => {};
+    const opened = openWorkWhenArrived({
+      waitForThread: () =>
+        new Promise<boolean>((resolve) => {
+          steps.push("wait");
+          arrive = resolve;
+        }),
+      open: () => steps.push("open"),
+    });
+    await Promise.resolve();
+    expect(steps).toEqual(["wait"]);
+    arrive(true);
+    await expect(opened).resolves.toBe(true);
+    expect(steps).toEqual(["wait", "open"]);
+  });
+
+  it("opens nothing when the thread never arrives, so the route cannot fall back to a draft", async () => {
+    let opens = 0;
+    await expect(
+      openWorkWhenArrived({
+        waitForThread: async () => false,
+        open: () => {
+          opens += 1;
+        },
+      }),
+    ).resolves.toBe(false);
+    expect(opens).toBe(0);
   });
 });

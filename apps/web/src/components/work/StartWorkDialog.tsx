@@ -27,7 +27,12 @@ import {
   isProviderInstancePickerVisible,
   sortProviderInstanceEntries,
 } from "~/providerInstances";
-import { useProjects, useServerConfigs, useThreadShell } from "~/state/entities";
+import {
+  useProjects,
+  useServerConfigs,
+  useThreadShell,
+  waitForThreadShell,
+} from "~/state/entities";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { buildThreadRouteParams } from "~/threadRoutes";
@@ -53,6 +58,7 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import {
   describeWorkStartFailure,
   listWorkRepositories,
+  openWorkWhenArrived,
   resolveStartWorkFields,
   resolveStartWorkSubmission,
   type StartWorkEdits,
@@ -163,13 +169,24 @@ function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef })
       setError(described.message);
       return;
     }
-    closeStartWork();
     // The Work thread lists in Work; switch now rather than when its shell arrives.
     useUiStateStore.getState().setSidebarMode("tasks");
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(scopeThreadRef(environmentId, result.value.threadId)),
+    const workThreadRef = scopeThreadRef(environmentId, result.value.threadId);
+    const opened = await openWorkWhenArrived({
+      waitForThread: () => waitForThreadShell(workThreadRef),
+      open: () => {
+        closeStartWork();
+        return navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(workThreadRef),
+        });
+      },
     });
+    if (!opened) {
+      // The same command id answers a retry with this Work thread, not a second one.
+      setSubmitting(false);
+      setError("Work started, but it has not reached this window yet. Open it from Work.");
+    }
   };
 
   return (

@@ -163,18 +163,23 @@ const make = Effect.gen(function* () {
             new WorkHandoffError({ sourceThreadId: sourceThreadId, stage: "read-source", cause }),
         ),
       )).projection;
-    // Extractive draft: requirements stay attributable to the chat and editable.
-    // The text-generation interface currently offers titles, not arbitrary summaries.
-    const recent = source.messages
-      .filter((message) => !message.streaming && message.text.trim().length > 0)
-      .slice(-6);
-    const scopeSummary =
-      recent.length === 0
-        ? `Continue the work discussed in “${source.thread.title}”. Confirm the implementation scope before making changes.`
-        : recent
-            .map((message) => `${message.role}: ${message.text.trim().slice(0, 2000)}`)
-            .join("\n\n")
-            .slice(0, 12000);
+    // User messages carry the requirements. Omitting assistant replies also keeps
+    // confirmations and other meta-chatter out of both generation and fallback.
+    const requirements = source.messages
+      .filter((message) => message.role === "user" && !message.streaming && message.text.trim())
+      .slice(-6)
+      .map((message) => message.text.trim().slice(0, 2000));
+    const fallback =
+      requirements
+        .flatMap((message) => message.split(/\n+|(?<=[.!?])\s+/u))
+        .map((sentence) =>
+          sentence.replace(/^\s*(?:[-*•]\s*|\d+[.)]\s*)?(?:user:\s*|assistant:\s*)?/iu, "").trim(),
+        )
+        .filter(Boolean)
+        .slice(0, 8)
+        .map((sentence) => `- ${sentence.slice(0, 240)}`)
+        .join("\n") || "- Confirm the implementation scope before making changes.";
+    let scopeSummary = fallback;
     const repos = yield* projects.listShells().pipe(
       Effect.mapError(
         (cause) =>
@@ -191,7 +196,7 @@ const make = Effect.gen(function* () {
         (part) =>
           part !== undefined &&
           part.length > 2 &&
-          scopeSummary.toLowerCase().includes(part.toLowerCase()),
+          requirements.join("\n").toLowerCase().includes(part.toLowerCase()),
       );
     });
     const suggested =
@@ -211,6 +216,28 @@ const make = Effect.gen(function* () {
                 }),
             ),
           );
+    if (Option.isSome(project) && requirements.length > 0) {
+      const summary = yield* settings.getSettings.pipe(
+        Effect.flatMap((config) =>
+          text.generateWorkScopeSummary({
+            cwd: project.value.workspaceRoot,
+            requirements: JSON.stringify(requirements),
+            modelSelection: config.textGenerationModelSelection,
+          }),
+        ),
+        Effect.map((result) =>
+          result.summary
+            .split("\n")
+            .map((line) => line.replace(/^\s*(?:[-*•]\s*)?(?:user|assistant):\s*/iu, "").trim())
+            .filter((line) => line.length > 0 && !line.startsWith("```"))
+            .slice(0, 8)
+            .map((line) => line.slice(0, 240))
+            .join("\n"),
+        ),
+        Effect.orElseSucceed(() => ""),
+      );
+      scopeSummary = summary || fallback;
+    }
     const generated = Option.isSome(project)
       ? yield* settings.getSettings.pipe(
           Effect.flatMap((config) =>

@@ -8,6 +8,7 @@ import { TextGenerationError } from "@t3tools/contracts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
+import type { WorkScopeSummaryGeneration } from "./WorkScopeSummaryGeneration.ts";
 import * as ThreadTitleLinks from "./ThreadTitleLinks.ts";
 
 export type {
@@ -26,9 +27,10 @@ export type {
 /**
  * TextGeneration - Service tag for commit and change request text generation.
  */
-export class TextGeneration extends Context.Service<TextGeneration, ProviderTextGeneration>()(
-  "t3/textGeneration/TextGeneration",
-) {}
+export class TextGeneration extends Context.Service<
+  TextGeneration,
+  ProviderTextGeneration & WorkScopeSummaryGeneration
+>()("t3/textGeneration/TextGeneration") {}
 
 type TextGenerationOp =
   | "generateCommitMessage"
@@ -60,6 +62,21 @@ export const make = Effect.gen(function* () {
   const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
   const sourceControl = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   return TextGeneration.of({
+    generateWorkScopeSummary: (input) =>
+      resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => {
+          const generator: ProviderTextGeneration & Partial<WorkScopeSummaryGeneration> =
+            textGeneration;
+          return generator.generateWorkScopeSummary
+            ? generator.generateWorkScopeSummary(input)
+            : Effect.fail(
+                new TextGenerationError({
+                  operation: "generateThreadTitle",
+                  detail: "This provider does not support work scope summaries.",
+                }),
+              );
+        }),
+      ),
     generateCommitMessage: (input) =>
       resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateCommitMessage(input)),
