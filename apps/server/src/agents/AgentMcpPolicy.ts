@@ -120,9 +120,12 @@ const make = Effect.gen(function* () {
           return yield* denied("An observe agent cannot change workspace state.");
         // These tools implement their own finer draft/label rules and never grant authority.
         if (
-          ["request_agent_approval", "propose_commitment", "update_commitment_status"].includes(
-            name,
-          )
+          [
+            "request_agent_approval",
+            "propose_event_trigger",
+            "propose_commitment",
+            "update_commitment_status",
+          ].includes(name)
         )
           return { handled: false };
         if (name === "t3_thread_launch" || name === "work_start") {
@@ -260,6 +263,7 @@ const make = Effect.gen(function* () {
           readonly ||
           [
             "request_agent_approval",
+            "propose_event_trigger",
             "propose_commitment",
             "update_commitment_status",
             "start_agent_work",

@@ -1037,6 +1037,7 @@ export function pullRequestLookup(changeRequest: {
 }
 
 export interface GitHubPullRequestSummary {
+  readonly headSha: string;
   readonly number: number;
   readonly title: string;
   readonly url: string;
@@ -1061,6 +1062,7 @@ export interface GitHubPullRequestSummary {
 /** The summary a linked thread keeps current, from one slice of the batched read. */
 export function toPullRequestSummary(pr: SummarizedPullRequest): GitHubPullRequestSummary {
   return {
+    headSha: pr.headRefOid,
     number: pr.number,
     title: pr.title,
     url: pr.url,

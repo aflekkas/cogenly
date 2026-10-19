@@ -538,7 +538,9 @@ export function TriggerForm({
           }
         >
           <SelectTrigger size="sm" aria-label="When">
-            <SelectValue>{SCHEDULE_LABELS[schedule.type]}</SelectValue>
+            <SelectValue>
+              {schedule.type === "event" ? "On an event" : SCHEDULE_LABELS[schedule.type]}
+            </SelectValue>
           </SelectTrigger>
           <SelectPopup>
             {Object.entries(SCHEDULE_LABELS).map(([value, label]) => (

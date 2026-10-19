@@ -1,6 +1,8 @@
+import { matchesAgentEvent } from "../agents/agentEventPolicy.ts";
 import * as Agents from "../agents/AgentService.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import {
+  type AgentEventContext,
   CommandId,
   enforceRuntimeMode,
   MessageId,
@@ -247,6 +249,10 @@ export class ScheduledTaskService extends Context.Service<
     readonly delete: (
       input: ScheduledTaskDeleteInput,
     ) => Effect.Effect<ScheduledTaskDeleteResult, ScheduledTaskError>;
+    readonly triggerEvent: (
+      id: ScheduledTaskId,
+      event: AgentEventContext,
+    ) => Effect.Effect<boolean, ScheduledTaskError>;
     readonly runNow: (
       input: ScheduledTaskRunNowInput,
     ) => Effect.Effect<ScheduledTaskRunNowResult, ScheduledTaskError>;
@@ -1141,6 +1147,9 @@ export const layer = Layer.effect(
           lastRunError: existingTask?.lastRunError ?? null,
           runCount: existingTask?.runCount ?? 0,
         };
+        if (task.schedule.type === "event" && task.agentId == null) {
+          return yield* taskError("Event triggers require an agent.", { taskId: id });
+        }
         if (task.agentId != null) {
           yield* agentStore
             .get(task.agentId)
@@ -1220,6 +1229,28 @@ export const layer = Layer.effect(
         );
         return { task: next };
       });
+
+    const triggerEvent: ScheduledTaskService["Service"]["triggerEvent"] = (id, event) =>
+      Effect.gen(function* () {
+        const task = yield* findTask(id);
+        if (task === null || !matchesAgentEvent(task, event)) return false;
+        const accepted = yield* agents.trigger(
+          task,
+          `event:${task.agentId}:${event.dedupKey}`,
+          task.prompt,
+          event,
+        );
+        if (accepted) {
+          const at = iso(yield* localNow);
+          yield* sql`UPDATE scheduled_tasks SET last_run_at = ${at}, last_run_status = 'succeeded', last_run_error = NULL, run_count = run_count + 1 WHERE task_id = ${id} AND created_at = ${task.createdAt}`;
+          yield* notifyChanged;
+        }
+        return accepted;
+      }).pipe(
+        Effect.mapError((cause) =>
+          taskError("Could not dispatch event trigger.", { taskId: id, cause }),
+        ),
+      );
 
     const rotateWebhookToken: ScheduledTaskService["Service"]["rotateWebhookToken"] = (input) =>
       Effect.gen(function* () {
@@ -1712,6 +1743,7 @@ export const layer = Layer.effect(
       });
 
     return ScheduledTaskService.of({
+      triggerEvent,
       list,
       subscribeList,
       upsert,

@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./workStatus": {
+      "types": "./src/workStatus.ts",
+      "import": "./src/workStatus.ts"
+    },
     "./workMetadata": {
       "types": "./src/workMetadata.ts",
       "import": "./src/workMetadata.ts"

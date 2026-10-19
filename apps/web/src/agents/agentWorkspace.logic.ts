@@ -1,3 +1,4 @@
+import type { AgentEventKind } from "@t3tools/contracts";
 /**
  * Pure helpers for an agent's Open items, Activity and Responsibilities. Status
  * and policy text mirror what the server enforces (`AgentWorkspaceService`,
@@ -183,6 +184,7 @@ export function describeSchedule(
     | { type: "webhook" },
 ) {
   if (schedule.type === "webhook") return "On webhook request";
+  if (schedule.type === "event") return EVENT_TRIGGER_LABEL[schedule.event];
   if (schedule.type === "interval") {
     const minutes = Math.round(schedule.everyMs / 60_000);
     if (minutes % 1440 === 0)
@@ -495,13 +497,26 @@ export function groupAgentsByScope<T>(
 
 // Activity ---------------------------------------------------------------------
 
-export const RUN_TRIGGER_LABEL: Record<"owner_message" | "trigger" | "approval" | "work", string> =
-  {
-    owner_message: "Your message",
-    trigger: "Trigger",
-    approval: "Approved action",
-    work: "Work session",
-  };
+export const RUN_TRIGGER_LABEL: Record<
+  "owner_message" | "trigger" | "approval" | "work" | "event",
+  string
+> = {
+  owner_message: "Your message",
+  trigger: "Trigger",
+  approval: "Approved action",
+  work: "Work session",
+  event: "Event",
+};
+
+const EVENT_TRIGGER_LABEL: Record<AgentEventKind, string> = {
+  "work.completed": "When Work completes",
+  "work.failed": "When Work fails",
+  "work.review_ready": "When Work is ready for review",
+  "pr.updated": "When a PR is updated",
+  "pr.checks_failed": "When PR checks fail",
+  "pr.merged": "When a PR merges",
+  "commitment.due": "When an open item is due",
+};
 
 /** Run status as recorded by the provider run, not as the model described it. */
 export function runStatusLabel(status: string) {

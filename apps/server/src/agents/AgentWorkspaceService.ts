@@ -1,5 +1,6 @@
 import {
   AgentError,
+  AgentEventContext,
   AgentId,
   AgentApproval,
   AgentApprovalAction,
@@ -32,6 +33,7 @@ import * as Agents from "./AgentService.ts";
 import * as Work from "../work/WorkHandoffService.ts";
 import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
 
+const decodeEventContext = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEventContext));
 const isAgentError = Schema.is(AgentError);
 const decodeCommitment = Schema.decodeEffect(Schema.fromJsonString(Commitment));
 const encodeHistory = Schema.encodeEffect(Schema.fromJsonString(CommitmentHistory));
@@ -427,7 +429,7 @@ const make = Effect.gen(function* () {
               createdAt: at,
               updatedAt: at,
             };
-            yield* sql`INSERT INTO commitments(id, agent_id, status, payload_json, created_at, updated_at) VALUES (${commitment.id}, ${commitment.agentId}, ${commitment.status}, ${yield* encodeCommitment(commitment)}, ${at}, ${at})`;
+            yield* sql`INSERT INTO commitments(id, agent_id, status, payload_json, created_at, updated_at, source_thread_id) VALUES (${commitment.id}, ${commitment.agentId}, ${commitment.status}, ${yield* encodeCommitment(commitment)}, ${at}, ${at}, ${actor?.threadId ?? null})`;
             for (const labelId of new Set(input.labelIds))
               yield* sql`INSERT INTO commitment_labels(commitment_id, label_id) VALUES (${commitment.id}, ${labelId})`;
             yield* history(
@@ -543,7 +545,8 @@ const make = Effect.gen(function* () {
           payload_json: string;
           trigger_kind: string | null;
           summary: string | null;
-        }>`SELECT r.*, CASE WHEN r.ordinal = 1 THEN COALESCE(t.trigger_kind, CASE WHEN w.run_id IS NOT NULL THEN 'trigger' ELSE 'owner_message' END) ELSE 'owner_message' END AS trigger_kind,
+          trigger_context_json: string | null;
+        }>`SELECT r.*, CASE WHEN r.ordinal = 1 THEN w.trigger_context_json END AS trigger_context_json, CASE WHEN r.ordinal = 1 THEN COALESCE(t.trigger_kind, CASE WHEN w.run_id IS NOT NULL THEN 'trigger' ELSE 'owner_message' END) ELSE 'owner_message' END AS trigger_kind,
         (SELECT substr(json_extract(m.payload_json, '$.text'), 1, 1200) FROM orchestration_v2_projection_messages m WHERE m.thread_id = r.thread_id AND m.run_id = r.run_id AND m.role = 'assistant' AND m.streaming = 0 ORDER BY m.created_at DESC LIMIT 1) AS summary
         FROM orchestration_v2_projection_runs r LEFT JOIN agent_run_threads t ON t.thread_id = r.thread_id LEFT JOIN agent_work_runs w ON w.work_thread_id = r.thread_id
         WHERE r.thread_id = ${agent.conversationThreadId} OR t.agent_id = ${agentId} OR w.agent_id = ${agentId} ORDER BY r.requested_at DESC, r.run_id LIMIT 100`;
@@ -555,6 +558,11 @@ const make = Effect.gen(function* () {
               agentId,
               threadId: r.thread_id,
               triggerKind: r.trigger_kind,
+              ...(r.trigger_context_json == null
+                ? {}
+                : {
+                    triggerContext: yield* decodeEventContext(r.trigger_context_json),
+                  }),
               status: r.status,
               startedAt: data.startedAt ?? null,
               finishedAt: data.completedAt ?? null,

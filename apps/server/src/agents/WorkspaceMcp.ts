@@ -1,5 +1,7 @@
 import {
   AgentApprovalAction,
+  ScheduledTaskEventSchedule,
+  ScheduledTaskUpsertInput,
   AgentApprovalResult,
   AgentStartWorkInput,
   AgentStartWorkResult,
@@ -69,7 +71,18 @@ const Work = Tool.make("start_agent_work", {
   parameters: Schema.Struct(workFields),
   success: AgentStartWorkResult,
 });
-export const toolkit = Toolkit.make(List, Propose, Update, Approval, Work);
+const EventTrigger = Tool.make("propose_event_trigger", {
+  ...shared,
+  description:
+    "Propose an event-driven trigger for your own agent. The owner must approve it; this never creates or enables a trigger directly.",
+  parameters: Schema.Struct({
+    title: ScheduledTaskUpsertInput.fields.title,
+    prompt: ScheduledTaskUpsertInput.fields.prompt,
+    schedule: ScheduledTaskEventSchedule,
+  }),
+  success: AgentApprovalResult,
+});
+export const toolkit = Toolkit.make(List, Propose, Update, Approval, Work, EventTrigger);
 const hasMessage = Schema.is(Schema.Struct({ message: Schema.String }));
 const unavailable = (cause: unknown) =>
   new OrchestratorMcpFailure({
@@ -105,6 +118,35 @@ export const handlers = Access.toLayer(toolkit, {
       return yield* (yield* Workspace.AgentWorkspaceService).requestApproval(
         actor.agent.id,
         input.action,
+        actor,
+      );
+    }).pipe(Effect.mapError(unavailable)),
+  ),
+  propose_event_trigger: Access.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const actor = yield* callingAgent;
+      const agent = actor.agent;
+      if (agent.projectId === null)
+        return yield* new OrchestratorMcpFailure({
+          code: "orchestration_error",
+          message: "Choose an agent repository before proposing a trigger.",
+        });
+      return yield* (yield* Workspace.AgentWorkspaceService).requestApproval(
+        agent.id,
+        {
+          actionKind: "schedule_trigger",
+          payload: {
+            ...input,
+            agentId: agent.id,
+            enabled: true,
+            projectId: agent.projectId,
+            threadId: agent.conversationThreadId,
+            modelSelection: agent.modelSelection,
+            runtimeMode: agent.runtimeMode,
+            interactionMode: "default",
+            workspaceStrategy: { type: "root" },
+          },
+        },
         actor,
       );
     }).pipe(Effect.mapError(unavailable)),
