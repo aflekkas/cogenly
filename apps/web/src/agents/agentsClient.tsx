@@ -5,6 +5,7 @@ import type {
   CommitmentCreateInput,
   CommitmentStatusInput,
   EnvironmentId,
+  ModelSelection,
   ProjectId,
   ProviderApprovalDecision,
   RunId,
@@ -197,8 +198,10 @@ import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
   isProviderInstancePickerVisible,
+  resolveDefaultProviderModelSelection,
   sortProviderInstanceEntries,
 } from "~/providerInstances";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
 import { ComposerControlSeparator } from "~/components/chat/ComposerControl";
 import { TraitsPicker } from "~/components/chat/TraitsPicker";
@@ -1067,4 +1070,25 @@ export function useAgentCreationContext(target: EnvironmentId | null) {
       .filter((project) => project.environmentId === target)
       .map(({ id, title }) => ({ id, title })),
   };
+}
+
+/**
+ * The model a new chat in this workspace starts with: the project or environment
+ * default, else the first ready provider's default. Agents start on it and then
+ * follow whatever their chat composer picks.
+ */
+export function useDefaultAgentModel(
+  environmentId: EnvironmentId,
+  projectId: ProjectId | null,
+): ModelSelection | null {
+  const config = useServerConfigs().get(environmentId);
+  const projects = useProjects();
+  if (!config) return null;
+  const project = projects.find(
+    (candidate) => candidate.environmentId === environmentId && candidate.id === projectId,
+  );
+  return resolveDefaultProviderModelSelection(
+    config.providers,
+    resolveProjectSettings(config.settings, projectId, project).settings.defaultModelSelection,
+  );
 }

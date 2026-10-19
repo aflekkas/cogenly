@@ -135,7 +135,7 @@ const make = Effect.gen(function* () {
             params.interactionMode !== undefined
           )
             return yield* denied(
-              "Persistent agent Work uses its owner-configured model and modes. Use start_agent_work or ask the owner to update the agent.",
+              "Persistent agent Work uses the model picked in the agent's chat and its configured modes. Use start_agent_work or ask the owner to switch models.",
               "invalid_request",
             );
           if (

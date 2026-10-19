@@ -42,7 +42,12 @@ import {
 import { Switch } from "~/components/ui/switch";
 import { Textarea } from "~/components/ui/textarea";
 import { Toggle } from "~/components/ui/toggle";
-import { AgentCreatedWithoutTriggerError, useAgents, useAgentsClient } from "./agentsClient";
+import {
+  AgentCreatedWithoutTriggerError,
+  useAgents,
+  useAgentsClient,
+  useDefaultAgentModel,
+} from "./agentsClient";
 import { DEFAULT_EVENT_TRIGGER, EventTriggerFields } from "./EventTriggerFields";
 import type { AgentContact, AgentDraft, AgentTrigger } from "./agents.types";
 
@@ -82,7 +87,7 @@ export function DetailRow({
     </ThreadDetailsControl>
   );
 }
-export const chevron = <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />;
+const chevron = <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />;
 
 export function DailyCapRow({
   cap,
@@ -249,11 +254,9 @@ export function AgentForm({
   pending,
   submitLabel,
   children,
-  environmentId,
   labels = EMPTY_LABELS,
   onDraftChange,
 }: {
-  environmentId?: EnvironmentId;
   /** Projects the agent can be granted; scope is chosen here, never inferred. */
   labels?: ReadonlyArray<ProjectLabelWithRepositories>;
   initial: AgentDraft;
@@ -265,10 +268,6 @@ export function AgentForm({
   children?: ReactNode;
 }) {
   const client = useAgentsClient();
-  const { models: allModels } = useAgents();
-  const models = allModels.filter(
-    (model) => !environmentId || !model.environmentId || model.environmentId === environmentId,
-  );
   const [draft, setDraftState] = useState(initial);
   const setDraft = (next: AgentDraft) => {
     setDraftState(next);
@@ -383,35 +382,6 @@ export function AgentForm({
           onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
         />
       </label>
-      <div className="agent-form-field">
-        <span>Model</span>
-        <Select
-          value={JSON.stringify(draft.modelSelection)}
-          onValueChange={(value) => {
-            const option = models.find((model) => JSON.stringify(model.selection) === value);
-            if (option) setDraft({ ...draft, modelSelection: option.selection });
-          }}
-        >
-          <SelectTrigger aria-label="Model">
-            <SelectValue>
-              {models.find(
-                (model) => JSON.stringify(model.selection) === JSON.stringify(draft.modelSelection),
-              )?.label ?? draft.modelSelection.model}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectPopup>
-            {models.map((model) => (
-              <SelectItem
-                key={JSON.stringify(model.selection)}
-                value={JSON.stringify(model.selection)}
-                label={model.label}
-              >
-                {model.label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      </div>
       <label className="agent-toggle-row">
         <span>
           Enabled<small>Allow background work</small>
@@ -699,10 +669,11 @@ export function CreateAgent({
     labels,
     workspaces,
   );
-  // An environment without a configured model cannot create an agent.
-  const model = models.find(
-    (option) => !option.environmentId || option.environmentId === environmentId,
-  )?.selection;
+  // An environment without a ready provider cannot create an agent.
+  const model =
+    useDefaultAgentModel(environmentId, workspaceId ?? null) ??
+    models.find((option) => !option.environmentId || option.environmentId === environmentId)
+      ?.selection;
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogPopup>
@@ -721,7 +692,6 @@ export function CreateAgent({
           {model ? (
             <>
               <AgentForm
-                environmentId={environmentId}
                 labels={labels}
                 initial={{
                   name: "",
@@ -748,6 +718,7 @@ export function CreateAgent({
                       environmentId,
                       {
                         ...draft,
+                        modelSelection: model,
                         projectId: workspaceId,
                         ...(createdAgent ? { id: createdAgent.id } : {}),
                       },

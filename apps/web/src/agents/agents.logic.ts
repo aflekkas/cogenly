@@ -152,7 +152,7 @@ export function agentDraft(agent: AgentContact): AgentDraft {
 }
 
 type ModelRef = Pick<ModelSelection, "instanceId" | "model">;
-export const sameModel = (a: ModelRef, b: ModelRef) =>
+const sameModel = (a: ModelRef, b: ModelRef) =>
   a.instanceId === b.instanceId && a.model === b.model;
 
 /**

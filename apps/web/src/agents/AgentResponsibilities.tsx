@@ -2,7 +2,6 @@ import { cn, randomUUID } from "~/lib/utils";
 import {
   BellIcon,
   BookmarkIcon,
-  BotIcon,
   FlagIcon,
   FolderGit2Icon,
   PauseIcon,
@@ -23,7 +22,6 @@ import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import { ThreadDetailsSection } from "~/components/chat/ThreadDetailsSection";
 import { THREAD_DETAILS_PANEL_ICON_CLASS } from "~/components/chat/threadDetailsPanelStyles";
 import { Button } from "~/components/ui/button";
-import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "~/components/ui/menu";
 import { Radio, RadioGroup } from "~/components/ui/radio-group";
 import {
   Select,
@@ -36,14 +34,8 @@ import { Switch } from "~/components/ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { ProjectLabelPicker } from "~/projectLabels/ProjectLabelPicker";
 import { ProjectTag } from "~/projectLabels/ProjectTag";
-import { useAgents, useAgentsClient } from "./agentsClient";
-import {
-  agentDraft,
-  agentStatusLabel,
-  formatMessageTime,
-  modelDisplayName,
-  sameModel,
-} from "./agents.logic";
+import { useAgentsClient } from "./agentsClient";
+import { agentDraft, agentStatusLabel, formatMessageTime } from "./agents.logic";
 import {
   AUTONOMY_OPTIONS,
   EVENT_RUN_NOW_UNSUPPORTED_MESSAGE,
@@ -60,7 +52,7 @@ import {
   triggerErrorMessage,
   type FilterNames,
 } from "./agentWorkspace.logic";
-import { DailyCapRow, DetailRow, InlineEditor, TriggerForm, chevron } from "./AgentDetails";
+import { DailyCapRow, DetailRow, InlineEditor, TriggerForm } from "./AgentDetails";
 import type { AgentContact, AgentDraft, AgentWorkspaceView } from "./agents.types";
 
 type ProfilePatch = Partial<Omit<AgentDraft, "id">>;
@@ -91,10 +83,6 @@ export function AgentResponsibilities({
   onDeleted?: (() => void) | undefined;
 }) {
   const client = useAgentsClient();
-  const { models: allModels } = useAgents();
-  const models = allModels.filter(
-    (model) => !model.environmentId || model.environmentId === agent.environmentId,
-  );
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -260,44 +248,6 @@ export function AgentResponsibilities({
             onClick={() => setEditing({ kind: "instructions" })}
           />
         )}
-        <Menu>
-          <MenuTrigger
-            render={
-              <DetailRow
-                icon={BotIcon}
-                label="Model"
-                value={
-                  client.modelStatus?.(agent, agent.modelSelection).status === "unavailable"
-                    ? `${agent.modelSelection.model} · unavailable`
-                    : modelDisplayName(models, agent.modelSelection)
-                }
-                trailing={chevron}
-                disabled={disabled}
-              />
-            }
-          />
-          <MenuPopup align="start">
-            <MenuRadioGroup
-              value={`${agent.modelSelection.instanceId}\0${agent.modelSelection.model}`}
-              onValueChange={(value) => {
-                const option = models.find(
-                  (model) => `${model.selection.instanceId}\0${model.selection.model}` === value,
-                );
-                if (option && !sameModel(option.selection, agent.modelSelection))
-                  void saveProfile({ modelSelection: option.selection });
-              }}
-            >
-              {models.map((model) => (
-                <MenuRadioItem
-                  key={`${model.selection.instanceId}\0${model.selection.model}`}
-                  value={`${model.selection.instanceId}\0${model.selection.model}`}
-                >
-                  {model.label}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </MenuPopup>
-        </Menu>
         <DetailRow
           icon={FolderGit2Icon}
           label="Home repository"
