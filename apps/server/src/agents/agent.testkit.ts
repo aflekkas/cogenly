@@ -8,8 +8,6 @@ export const agentFixture = (suffix = "one"): Agent => ({
   runtimeMode: "approval-required",
   projectId: ProjectId.make("project:one"),
   responsibility: "Keep commitments current.",
-  scope: [],
-  autonomy: "autonomous_within_policy",
   permissions: {
     read: true,
     draft: true,

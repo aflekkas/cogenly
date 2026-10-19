@@ -128,7 +128,6 @@ const make = Effect.gen(function* () {
     item: Pick<Commitment, "labelIds" | "agentId">,
   ) =>
     scope.agent.permissions.draft &&
-    scope.agent.autonomy !== "observe" &&
     (item.agentId === scope.agent.id ||
       item.labelIds.some((id) => scope.draftableLabelIds.includes(id)));
   const lock = yield* Semaphore.make(1);
@@ -264,8 +263,8 @@ const make = Effect.gen(function* () {
       const agent = actor ? (yield* current(actor)).agent : yield* store.get(agentId);
       if (agent.id !== agentId)
         return yield* fail("An agent cannot request an action for another agent.");
-      if (actor && (agent.autonomy === "observe" || !agent.permissions.draft))
-        return yield* fail("This agent can observe only.");
+      if (actor && !agent.permissions.draft)
+        return yield* fail("This agent has no draft permission.");
       if (action.actionKind === "start_work") {
         if (action.payload.agentId !== agentId)
           return yield* fail("Work must belong to the requesting agent.");
@@ -337,8 +336,6 @@ const make = Effect.gen(function* () {
       if (actor && input.sourceThreadId !== undefined && input.sourceThreadId !== actor.threadId)
         return yield* fail("Work must reference the calling conversation.");
       input = { ...input, sourceThreadId: actor?.threadId ?? input.sourceThreadId };
-      if (actor && agent.autonomy === "observe")
-        return yield* fail("An observe agent cannot start Work.");
       const scope = yield* access.resolve(agent.id);
       if (
         actor &&

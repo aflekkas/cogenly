@@ -1,5 +1,4 @@
 import { AgentEventContext } from "./agentEvent.ts";
-import { ProjectLabelId } from "./projectLabel.ts";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
@@ -31,29 +30,23 @@ export const AgentPermissions = Schema.Struct({
   delete: Schema.Boolean,
 });
 export type AgentPermissions = typeof AgentPermissions.Type;
-export const conservativeAgentPermissions: AgentPermissions = {
+/**
+ * New agents work on their own across every project: they read, draft and start Work.
+ * The high-impact grants stay off until the owner turns them on.
+ */
+export const defaultAgentPermissions: AgentPermissions = {
   read: true,
   draft: true,
-  execute: false,
+  execute: true,
   send: false,
   create_pr: false,
   merge: false,
   deploy: false,
   delete: false,
 };
-export const AgentAutonomy = Schema.Literals([
-  "observe",
-  "propose",
-  "execute_bounded",
-  "autonomous_within_policy",
-]);
-export const AgentScope = Schema.Array(
-  Schema.Struct({ labelId: ProjectLabelId, permissions: AgentPermissions }),
-);
+/** Agents act on their own, within their permissions, across all of the owner's projects. */
 const AgentPolicyFields = {
   responsibility: Schema.String.check(Schema.isMaxLength(32000)),
-  scope: AgentScope,
-  autonomy: AgentAutonomy,
   permissions: AgentPermissions,
   notifyPolicy: Schema.Literals(["action_required", "meaningful_changes", "all"]),
 };
@@ -84,8 +77,6 @@ export const AgentUpsertInput = Schema.Struct({
   id: Schema.optional(AgentId),
   ...AgentFields,
   responsibility: Schema.optional(AgentPolicyFields.responsibility),
-  scope: Schema.optional(AgentScope),
-  autonomy: Schema.optional(AgentAutonomy),
   permissions: Schema.optional(AgentPermissions),
   notifyPolicy: Schema.optional(AgentPolicyFields.notifyPolicy),
 });

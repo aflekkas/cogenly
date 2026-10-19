@@ -1,7 +1,7 @@
 import { AgentEventContext } from "./agentEvent.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 import * as Schema from "effect/Schema";
-import { AgentId, AgentPermissions, AgentScope, AgentAutonomy } from "./agent.ts";
+import { AgentId, AgentPermissions } from "./agent.ts";
 import {
   CommandId,
   IsoDateTime,
@@ -31,11 +31,7 @@ export const AgentApprovalAction = Schema.Union([
   }),
   Schema.Struct({
     actionKind: Schema.Literal("change_permissions"),
-    payload: Schema.Struct({
-      permissions: AgentPermissions,
-      scope: Schema.optional(AgentScope),
-      autonomy: Schema.optional(AgentAutonomy),
-    }),
+    payload: Schema.Struct({ permissions: AgentPermissions }),
   }),
 ]);
 export type AgentApprovalAction = typeof AgentApprovalAction.Type;

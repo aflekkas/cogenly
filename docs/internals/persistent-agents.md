@@ -26,8 +26,8 @@ use the environment's normal read/operate grants. Memory aliases now read and mu
 the shared facts store; agent-authored notes are
 proposals until the owner confirms them. Turn startup retrieves confirmed facts,
 open commitments, recent owned messages and observable Work outcomes, bounded to
-16,000 characters for agents and 4,000 for tagged ordinary chats. Agent label
-visibility comes only from explicit readable scope, never the current thread's tags.
+16,000 characters for agents and 4,000 for tagged ordinary chats. Agents read
+labeled facts in every project; their own notes stay private to them.
 Ordinary chats require confirmed tags and can opt out through `context.setEnabled`.
 Selected references are persisted per provider run for inspection without copying
 source bodies into the audit record.
@@ -53,21 +53,15 @@ process supervisor, persistent database/secrets/workspaces, provider credentials
 CLI dependencies, an explicit timezone for fixed-time schedules, backups, and secured
 remote access. There is no multi-server scheduler lease: run one writer per home.
 
-[`AgentAccessScope`](../../apps/server/src/agents/AgentAccessScope.ts) resolves live owner
-scope grants for every access surface. With agent-level read permission, the home repository
-and non-deleted repositories linked to explicit readable label grants are readable; only
-those granted labels expose shared facts and commitments. Thread tags, caller Work
-repositories, and unrelated repository memberships never add grants. Bounded/autonomous
-execution additionally requires agent-level execute permission; the home repository is
-executable and a linked repository requires read **and execute on the same label grant**.
-Draft permits proposals, not execution. Propose agents request owner approval; observe
-agents cannot start Work. Owner-approved Work is a one-action authorization for the
-reviewed target, not a persistent scope expansion. Link/grant revocation affects subsequent
-accesses, including already-running Work's MCP calls. New agents default to propose with read/draft
-only. Migration 067 preserves existing agents' previous MCP ceiling by granting all
-operations with autonomous-within-policy, leaving runtime/interaction approvals,
-caps and backoff intact; scope starts empty and notifications remain all. Trigger and
-permission changes always require a new owner approval even for migrated agents.
+[`AgentAccessScope`](../../apps/server/src/agents/AgentAccessScope.ts) resolves access for
+every surface. Agents have no per-project grants or autonomy level: with agent-level read
+permission they read every live repository and every project label, draft adds proposals
+in all of them, and execute lets them start Work in any repository without asking.
+Without execute, Work becomes an owner approval for that one reviewed target. New agents
+default to read, draft and execute; the high-impact grants stay off. Migration 073 dropped
+the stored `scope` and `autonomy`. Trigger and permission changes still require an owner
+approval. Agents add projects through the ordinary `t3_project_create` and
+`t3_project_clone` tools, which need the execute grant.
 Persistent agents start tracked Work through `start_agent_work` or `work_start`; untracked child launches,
 forks and self-approval/configuration are explicitly refused so they cannot shed policy.
 The authenticated MCP boundary applies policy before all toolkits; generic shell,
@@ -82,10 +76,10 @@ launching Work; replay must never mint a second launch after a crash. Busy agent
 and backoff defer the persisted event. Causal depth follows governed Work and approval
 ancestry, including agent-created commitments, and stops after two event invocations.
 
-Event filters may only name readable repositories and explicitly readable labels; the server
-rejects invalid filters with `ScheduledTaskError.code = event_filter_out_of_scope`. Filters
-never add authority and delivery rechecks live scope. Repository events use repository
-access; labels on the source thread only affect relevance filters. Repository-less
+Event filters may only name live repositories and existing labels; the server rejects
+invalid filters with `ScheduledTaskError.code = event_filter_out_of_scope`. Delivery
+rechecks that the repository still exists. Labels on the source thread only affect
+relevance filters. Repository-less
 commitment events require an owned commitment or at least one readable label. Event triggers cannot use **Run now**:
 they require a real source event (`event_run_now_unsupported`), so a manual invocation
 cannot masquerade as an observed event in activity.

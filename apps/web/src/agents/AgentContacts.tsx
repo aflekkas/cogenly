@@ -1,5 +1,4 @@
 import { PlusIcon } from "lucide-react";
-import { Fragment, type ReactNode } from "react";
 import { AgentFace } from "~/components/agents/face";
 import { Button } from "~/components/ui/button";
 import { agentContactKey, agentStatusLabel } from "./agents.logic";
@@ -11,12 +10,10 @@ export function AgentContacts({
   activeKey,
   onOpen,
   onCreate,
-  groups,
 }: {
   activeKey: string | null;
   onOpen: (agent: AgentContact) => void;
   onCreate: () => void;
-  groups?: ReadonlyArray<{ key: string; heading?: ReactNode; agents: ReadonlyArray<AgentContact> }>;
 }) {
   const { agents, loading, error } = useAgents();
   return (
@@ -52,18 +49,13 @@ export function AgentContacts({
         </div>
       )}
       <ul aria-label="Agents">
-        {(groups ?? [{ key: "all", agents }]).map((group) => (
-          <Fragment key={group.key}>
-            {group.heading}
-            {group.agents.map((agent) => (
-              <Contact
-                key={agentContactKey(agent)}
-                agent={agent}
-                active={activeKey === agentContactKey(agent)}
-                onOpen={onOpen}
-              />
-            ))}
-          </Fragment>
+        {agents.map((agent) => (
+          <Contact
+            key={agentContactKey(agent)}
+            agent={agent}
+            active={activeKey === agentContactKey(agent)}
+            onOpen={onOpen}
+          />
         ))}
       </ul>
     </div>

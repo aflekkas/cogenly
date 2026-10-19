@@ -38,10 +38,7 @@ const seed = Effect.gen(function* () {
     yield* sql`INSERT INTO thread_project_labels(thread_id, label_id, confidence, confirmed_by_user, source) VALUES (${id}, ${id}, NULL, 1, 'user')`;
     yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id, thread_id, role, streaming, created_at, updated_at, payload_json) VALUES (${id}, ${id}, 'user', 0, ${at}, ${at}, ${encode({ text: `Message ${id}` })})`;
     yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES (${id}, ${id}, 1, 'codex', 'completed', ${at}, ${encode({ modelSelection: { instanceId: "codex", model: "gpt-5" } })})`;
-    const agent = {
-      ...agentFixture(id),
-      scope: [{ labelId: id, permissions: agentFixture().permissions }],
-    };
+    const agent = agentFixture(id);
     yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled) VALUES (${agent.id}, ${agent.conversationThreadId}, ${encode(agent)}, 1)`;
     yield* sql`INSERT INTO facts(id, agent_id, status, payload_json, updated_at) VALUES (${id}, ${agent.id}, 'confirmed', ${encode({ subject: "Memory", text: `Memory ${id}`, agentId: agent.id, labelIds: [id], sourceRefs: [{ kind: "thread", id }], visibility: "labels" })}, ${at})`;
     yield* sql`INSERT INTO fact_labels(fact_id, label_id) VALUES (${id}, ${id})`;

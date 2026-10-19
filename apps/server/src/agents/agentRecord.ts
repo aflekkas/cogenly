@@ -19,8 +19,6 @@ export const decodeAgentRow = (row: {
     return yield* decode({
       // The idempotent legacy importer can run after the policy migration.
       responsibility: "",
-      scope: [],
-      autonomy: "autonomous_within_policy",
       permissions: {
         read: true,
         draft: true,

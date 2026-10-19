@@ -6,14 +6,13 @@ need a separate branch and working directory.
 ## Message an agent
 
 An agent is a persistent specialist, such as "Spawn Ops", with its own conversation,
-responsibility and permissions. The sidebar's **Agents** tab lists them under the
-projects they may access, with **Other** for the rest. Each row shows its status
+responsibility and permissions. The sidebar's **Agents** tab lists them. Each row shows its status
 (**Needs approval**, **Needs you**, **Running** or **Idle**) and a
 count only when decisions are waiting on you.
 
 Choose **New agent** in the sidebar or command palette to create one. Give it a
-name, a responsibility, the projects it may access, and an autonomy level. Nothing
-creates an agent for you.
+name, a responsibility and the workspace its conversation runs in. Nothing creates an
+agent for you.
 
 Opening an agent shows its chat. Ask it what is outstanding, give it direction, or
 ask it to start Work. The tabs above the chat hold the rest:
@@ -30,37 +29,20 @@ ask it to start Work. The tabs above the chat hold the rest:
   instead to keep a record. **History** on an item lists every status change: who
   made it, when, why, and any evidence. Pending approvals sit at the top, and also appear
   in the chat.
-- **Responsibilities**: the agent's mission, instructions, project access,
-  autonomy, permissions, notifications, daily run cap, triggers, memory (facts it
+- **Responsibilities**: the agent's mission, instructions, permissions, notifications, daily run cap, triggers, memory (facts it
   proposed wait there for you to confirm; see [Memory](./memory-and-export.md#memory)),
   and **Delete**.
 
-Project tags give an agent context only; a tag on a chat never grants access. Access
-comes from the projects granted under **Project scope**, and covers the repositories
-linked to them. Each project is granted **Read**, **Read & draft** (it may also
-propose open items), or **Read & execute** (it may also start Work there without
-asking). Executing also needs the agent's autonomy at **Execute bounded work** or
-higher and its **Start Work** permission.
-
-Autonomy decides how far it goes on its own:
-
-- **Observe** reads and summarizes, and never changes anything.
-- **Propose** (the default) drafts plans and items, and asks before starting Work.
-- **Execute bounded work** starts Work in its home repository, the workspace
-  chosen when it was created, and in projects granted **Read & execute**, within
-  its permissions, and asks for anything else.
-- **Autonomous within policy** also runs its recurring work within its
-  permissions without asking. Work in any other repository still needs you.
-
-Permissions are separate switches: read, draft, start Work, and the high-impact
-send, create PRs, merge, deploy and delete. An agent cannot grant itself anything.
+Agents work on their own across all of your projects and repositories, and can add
+new projects. What they may do is set by permission switches: read, draft and start
+Work are on for a new agent; the high-impact send, create PRs, merge, deploy and
+delete stay off until you turn them on. An agent cannot grant itself anything.
 When it wants to start Work, add a trigger, or change its permissions, it
 asks, and you **Approve** or **Reject**. Approvals expire after seven days.
 
-**Start Work** in the agent's header starts a coding session in its home repository
-or a repository linked to one of its granted projects. Starting it yourself approves
-that one session; repositories the agent would have to ask about on its own are
-marked. The session runs in a new worktree and appears in **Work** under its
+**Start Work** in the agent's header starts a coding session in any repository, its
+home repository first. Without the start Work permission the agent would ask you
+first; starting it yourself approves that one session. The session runs in a new worktree and appears in **Work** under its
 repository, marked with the agent's name.
 The command palette also has **Start Work with …** and **Open items for …** for
 each agent.
@@ -73,8 +55,7 @@ Triggers wake an agent for one recorded run: on an interval, at a time, on a
 webhook, or **When something happens**, such as PR checks failing, a PR merging,
 Work finishing or becoming ready for review, or an open item coming due. An event
 trigger can be limited to some projects, repositories, or Work you, a chat or an
-agent started. Filters only narrow and can name only projects and repositories the
-agent can read: it reacts only to events it can read, and a repeated event wakes it
+agent started. Filters only narrow what wakes it, and a repeated event wakes it
 once. Event triggers have no **Run now**; they run when the event happens. Add triggers under
 **Responsibilities → Triggers**, when creating the agent, or in **Settings →
 Scheduled tasks**. An agent can suggest one, but it is added only if you approve.
@@ -299,8 +280,8 @@ The linked pull request participates in automatic settlement.
 A project, such as a client or a course, is a tag for related chats and Work. It is
 separate from the repository a thread runs in: one project can link several
 repositories, and a chat can carry several projects or none. Tags organize and
-suggest context only; they never change what an agent can access. An agent's access
-comes only from its own project scope.
+suggest context only; they never change what an agent can access, since agents reach
+every project.
 
 Create, recolor, describe, and delete projects, and link their repositories, in
 **Settings → Projects**, or with **New project** and **Manage projects** in the

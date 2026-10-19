@@ -301,7 +301,8 @@ const make = Effect.gen(function* () {
         const agents =
           label === undefined
             ? sql`SELECT agent_id FROM agents`
-            : sql`SELECT agent_id FROM agents a WHERE EXISTS (SELECT 1 FROM json_each(a.payload_json, '$.scope') s WHERE json_extract(s.value, '$.labelId') = ${label})`;
+            : // Agents reach every project; a project export carries those that worked in it.
+              sql`SELECT agent_id FROM agents a WHERE EXISTS (SELECT 1 FROM thread_project_labels x WHERE x.label_id = ${label} AND (x.thread_id = a.conversation_thread_id OR x.thread_id IN (SELECT work_thread_id FROM agent_work_runs r WHERE r.agent_id = a.agent_id) OR x.thread_id IN (SELECT thread_id FROM agent_run_threads t WHERE t.agent_id = a.agent_id)))`;
         const commitments =
           label === undefined
             ? sql`SELECT id FROM commitments`

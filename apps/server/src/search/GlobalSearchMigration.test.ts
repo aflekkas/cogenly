@@ -118,11 +118,11 @@ it.effect("backfills confirmed facts across batches exactly once", () =>
       INSERT INTO facts(id, status, payload_json, updated_at)
       SELECT 'fact:' || x, CASE WHEN x = 503 THEN 'proposed' ELSE 'confirmed' END,
         '{"subject":"Quartz fact","text":"Nebula body"}', ${at} FROM n`;
-    expect(yield* runMigrations()).toEqual([[71, "FactSearch"]]);
+    expect(yield* runMigrations({ toMigrationInclusive: 71 })).toEqual([[71, "FactSearch"]]);
     expect(
       (yield* sql`SELECT count(*) AS count FROM search_documents WHERE kind = 'fact'`)[0]?.count,
     ).toBe(502);
-    expect(yield* runMigrations()).toEqual([]);
+    expect(yield* runMigrations({ toMigrationInclusive: 71 })).toEqual([]);
     yield* sql`UPDATE facts SET payload_json = '{"subject":"Updated fact"}' WHERE id = 'fact:1'`;
     expect(
       (yield* sql`SELECT count(*) AS count FROM search_fts WHERE search_fts MATCH 'updated'`)[0]

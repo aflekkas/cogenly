@@ -304,7 +304,7 @@ describe("global search", () => {
   );
 
   it.effect(
-    "restricts agent search to repository grants and explicit commitment scope; tags never expand it",
+    "agent search reaches every live repository and project, never other agents' identities",
     () =>
       Effect.gen(function* () {
         yield* seed;
@@ -313,18 +313,13 @@ describe("global search", () => {
         const store = yield* Store.AgentStore;
         const allowed = (yield* labels.create({ name: "Quartz allowed" })).label;
         const blocked = (yield* labels.create({ name: "Quartz blocked" })).label;
-        const agent = {
-          ...agentFixture(),
-          instructions: "Quartz instructions",
-          scope: [{ labelId: allowed.id, permissions: agentFixture().permissions }],
-        };
+        const agent = { ...agentFixture(), instructions: "Quartz instructions" };
         yield* thread(agent.conversationThreadId, repo);
         yield* store.save(agent);
         yield* thread("visible", repo, "Quartz authorized");
         yield* thread("secret", other, "Quartz secret", {
           pullRequests: [pr("https://private.example/pull/1", "Quartz private PR")],
         });
-        yield* labels.linkRepository({ labelId: allowed.id, repositoryId: other });
         yield* labels.setThreadLabels({
           threadId: ThreadId.make("secret"),
           labelIds: [allowed.id],
@@ -338,19 +333,20 @@ describe("global search", () => {
         yield* store.save(stranger);
         yield* commitment("own", "Quartz own", agent.id);
         yield* commitment("shared", "Quartz shared", null, allowed.id);
-        yield* commitment("private", "Quartz private", stranger.id, blocked.id);
+        yield* commitment("elsewhere", "Quartz elsewhere", stranger.id, blocked.id);
         const caller = scope(agent.conversationThreadId);
         yield* message("agent-message", agent.conversationThreadId, "Moonstone context");
-        expect(
-          (yield* search.query({ query: "moonstone", labelId: allowed.id }, caller)).results[0]?.id,
-        ).toBe(agent.id);
+        expect((yield* search.query({ query: "moonstone" }, caller)).results[0]?.id).toBe(agent.id);
+        // No project link or grant is needed: every repository and project is in reach.
         const results = (yield* search.query({ query: "quartz" }, caller)).results;
         expect(results.map((r) => r.id).sort()).toEqual(
           [
             agent.id,
             allowed.id,
+            blocked.id,
             "own",
             "shared",
+            "elsewhere",
             "visible",
             "secret",
             "https://private.example/pull/1",
@@ -360,9 +356,7 @@ describe("global search", () => {
           (yield* search.query({ query: "quartz", labelId: allowed.id }, caller)).results
             .map((r) => r.id)
             .sort(),
-        ).toEqual(
-          [agent.id, allowed.id, "shared", "secret", "https://private.example/pull/1"].sort(),
-        );
+        ).toEqual([allowed.id, "shared", "secret", "https://private.example/pull/1"].sort());
         // Governed runs resolve to the same principal as its conversation.
         yield* thread("governed", repo, "Quartz governed Work", {
           agent: { id: agent.id, role: "work" },
@@ -374,14 +368,8 @@ describe("global search", () => {
           scope(ThreadId.make("governed")),
         )).results;
         expect(governed.some((r) => r.id === "visible")).toBe(true);
-        expect(governed.some((r) => r.id === stranger.id || r.id === "private")).toBe(false);
         expect(governed.some((r) => r.id === "secret")).toBe(true);
-        // Tags remain after unlinking, but cannot retain repository authority.
-        yield* labels.unlinkRepository({ labelId: allowed.id, repositoryId: other });
-        const unlinked = (yield* search.query({ query: "quartz" }, caller)).results;
-        expect(
-          unlinked.some((r) => r.id === "secret" || r.id === "https://private.example/pull/1"),
-        ).toBe(false);
+        expect(governed.some((r) => r.id === stranger.id)).toBe(false);
         yield* store.save({ ...agent, permissions: { ...agent.permissions, read: false } });
         expect((yield* search.query({ query: "quartz" }, caller)).results).toEqual([]);
       }).pipe(Effect.provide(layer)),

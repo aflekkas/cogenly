@@ -1,7 +1,7 @@
 import * as Access from "./AgentAccessScope.ts";
 import { canReceiveAgentEvent } from "./agentEventPolicy.ts";
 import {
-  conservativeAgentPermissions,
+  defaultAgentPermissions,
   AgentError,
   AgentId,
   CommandId,
@@ -317,9 +317,7 @@ const make = Effect.gen(function* () {
         const agent = yield* store.save({
           ...input,
           responsibility: input.responsibility ?? existing?.responsibility ?? "",
-          scope: input.scope ?? existing?.scope ?? [],
-          autonomy: input.autonomy ?? existing?.autonomy ?? "propose",
-          permissions: input.permissions ?? existing?.permissions ?? conservativeAgentPermissions,
+          permissions: input.permissions ?? existing?.permissions ?? defaultAgentPermissions,
           notifyPolicy: input.notifyPolicy ?? existing?.notifyPolicy ?? "meaningful_changes",
           id,
           conversationThreadId,

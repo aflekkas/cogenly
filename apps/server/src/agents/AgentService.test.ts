@@ -11,11 +11,7 @@ import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as Settings from "../serverSettings.ts";
 import * as Workspace from "./AgentWorkspaceService.ts";
 import * as Policy from "./AgentMcpPolicy.ts";
-import {
-  conservativeAgentPermissions,
-  EnvironmentId,
-  ProviderInstanceId,
-} from "@t3tools/contracts";
+import { defaultAgentPermissions, EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
 import type { McpInvocationScope } from "../mcp/McpInvocationContext.ts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "@effect/vitest";
@@ -539,7 +535,7 @@ const scopeFor = (threadId: ThreadId): McpInvocationScope => ({
 });
 
 describe("agent scope, approvals and shared commitments", () => {
-  it.effect("new agents are conservative and retain mission separately", () =>
+  it.effect("new agents start with read, draft and execute and retain mission separately", () =>
     Effect.gen(function* () {
       const h = yield* makeHarness;
       yield* Effect.gen(function* () {
@@ -549,60 +545,21 @@ describe("agent scope, approvals and shared commitments", () => {
           ...h.fixture,
           id: undefined,
           responsibility: "Monitor CI",
-          autonomy: undefined,
           permissions: undefined,
           notifyPolicy: undefined,
         })).agent;
         expect(created).toMatchObject({
           responsibility: "Monitor CI",
           instructions: h.fixture.instructions,
-          autonomy: "propose",
-          permissions: conservativeAgentPermissions,
+          permissions: defaultAgentPermissions,
         });
         expect(yield* store.reserve(created.id)).toBe(true);
       }).pipe(Effect.provide(h.layer));
     }),
   );
 
-  it.effect("an observe agent cannot start Work through either service or MCP policy", () =>
-    Effect.gen(function* () {
-      const h = yield* makeHarness;
-      yield* Effect.gen(function* () {
-        const store = yield* Store.AgentStore;
-        const workspace = yield* Workspace.AgentWorkspaceService;
-        const policy = yield* Policy.AgentMcpPolicy;
-        const agent = yield* store.save({ ...h.fixture, autonomy: "observe" });
-        const actor = { agent, threadId: agent.conversationThreadId };
-        expect(
-          (yield* Effect.result(
-            workspace.startWork(
-              {
-                agentId: agent.id,
-                projectId: agent.projectId!,
-                title: "Fix CI",
-                prompt: "Repair tests",
-              },
-              actor,
-            ),
-          ))._tag,
-        ).toBe("Failure");
-        const denied = yield* policy
-          .beforeTool(
-            scopeFor(actor.threadId),
-            "t3_thread_launch",
-            { title: "Fix CI", message: "Repair tests" },
-            false,
-          )
-          .pipe(Effect.flip);
-        expect(denied.code).toBe("agent_permission_denied");
-        expect(h.launches).toHaveLength(0);
-        expect((yield* workspace.listApprovals({})).approvals).toHaveLength(0);
-      }).pipe(Effect.provide(h.layer));
-    }),
-  );
-
   it.effect(
-    "propose start-Work produces an approval; approval launches once through the ordinary service",
+    "start-Work without the execute grant produces an approval; approval launches once through the ordinary service",
     () =>
       Effect.gen(function* () {
         const h = yield* makeHarness;
@@ -612,8 +569,7 @@ describe("agent scope, approvals and shared commitments", () => {
           const policy = yield* Policy.AgentMcpPolicy;
           const agent = yield* store.save({
             ...h.fixture,
-            autonomy: "propose",
-            permissions: conservativeAgentPermissions,
+            permissions: { ...defaultAgentPermissions, execute: false },
           });
           const denied = yield* policy
             .beforeTool(
@@ -654,9 +610,9 @@ describe("agent scope, approvals and shared commitments", () => {
       }),
   );
 
-  it.effect.each(["observe", "propose", "execute_bounded", "autonomous_within_policy"] as const)(
-    "work_start follows %s policy and persists Work provenance and its source run",
-    (autonomy) =>
+  it.effect.each(["execute", "no_execute"] as const)(
+    "work_start with %s persists Work provenance and its source run",
+    (grant) =>
       Effect.gen(function* () {
         const h = yield* makeHarness;
         yield* Effect.gen(function* () {
@@ -664,7 +620,10 @@ describe("agent scope, approvals and shared commitments", () => {
           const sql = yield* SqlClient.SqlClient;
           const workspace = yield* Workspace.AgentWorkspaceService;
           const policy = yield* Policy.AgentMcpPolicy;
-          const agent = yield* store.save({ ...h.fixture, autonomy });
+          const agent = yield* store.save({
+            ...h.fixture,
+            permissions: { ...h.fixture.permissions, execute: grant === "execute" },
+          });
           const runPayload = yield* encodeUnknown({ modelSelection: agent.modelSelection });
           yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES ('source-run', ${agent.conversationThreadId}, 1, 'codex', 'running', ${agent.createdAt}, ${runPayload})`;
           const input = {
@@ -680,13 +639,8 @@ describe("agent scope, approvals and shared commitments", () => {
             input,
             false,
           );
-          if (autonomy === "observe") {
-            expect((yield* invoke.pipe(Effect.flip)).code).toBe("agent_permission_denied");
-            expect(h.launches).toHaveLength(0);
-            return;
-          }
           let threadId: ThreadId;
-          if (autonomy === "propose") {
+          if (grant === "no_execute") {
             expect((yield* invoke.pipe(Effect.flip)).code).toBe("agent_approval_required");
             expect((yield* invoke.pipe(Effect.flip)).code).toBe("agent_approval_required");
             expect(h.launches).toHaveLength(0);
@@ -761,13 +715,12 @@ describe("agent scope, approvals and shared commitments", () => {
           const workspace = yield* Workspace.AgentWorkspaceService;
           const agent = yield* store.save({
             ...h.fixture,
-            autonomy: "propose",
-            permissions: conservativeAgentPermissions,
+            permissions: { ...defaultAgentPermissions, execute: false },
           });
           const actor = { agent, threadId: agent.conversationThreadId };
           const action = {
             actionKind: "change_permissions" as const,
-            payload: { permissions: h.fixture.permissions, autonomy: "execute_bounded" as const },
+            payload: { permissions: h.fixture.permissions },
           };
           const first = yield* workspace.requestApproval(agent.id, action, actor);
           expect((yield* store.get(agent.id)).permissions.execute).toBe(false);
@@ -820,127 +773,124 @@ describe("agent scope, approvals and shared commitments", () => {
       }),
   );
 
-  it.effect(
-    "two agents share explicitly granted label commitments, without copying memory or widening access",
-    () =>
-      Effect.gen(function* () {
-        const h = yield* makeHarness;
-        yield* Effect.gen(function* () {
-          const store = yield* Store.AgentStore;
-          const workspace = yield* Workspace.AgentWorkspaceService;
-          const labels = yield* Labels.ProjectLabelService;
-          const label = (yield* labels.create({ name: "Spawn" })).label.id;
-          const secret = (yield* labels.create({ name: "Private" })).label.id;
-          const sql = yield* SqlClient.SqlClient;
-          yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${h.fixture.projectId}, 'Repository', '/repo', '[]', ${h.fixture.createdAt}, ${h.fixture.createdAt})`;
-          yield* labels.linkRepository({ labelId: label, repositoryId: h.fixture.projectId! });
-          const grants = [{ labelId: label, permissions: conservativeAgentPermissions }];
-          const a = yield* store.save({ ...h.fixture, autonomy: "propose", scope: grants });
-          const b = yield* store.save({ ...agentFixture("engineering"), scope: grants });
-          const outsider = yield* store.save({ ...agentFixture("outsider"), scope: [] });
-          const input = {
-            title: "Follow up with DSO",
-            description: "Email the contact",
-            owner: { kind: "user" as const },
-            dueAt: null,
-            reminderAt: null,
-            waitingOn: null,
-            labelIds: [label],
-            agentId: a.id,
-            sourceRefs: [{ kind: "thread" as const, id: a.conversationThreadId }],
-            evidenceRefs: [],
-          };
-          const proposed = (yield* workspace.createCommitment(input, {
-            agent: a,
-            threadId: a.conversationThreadId,
-          })).commitment;
-          expect(proposed.status).toBe("proposed");
-          expect(
-            (yield* workspace.listCommitments(
-              {},
-              { agent: b, threadId: b.conversationThreadId },
-            )).commitments.map((c) => c.id),
-          ).toEqual([proposed.id]);
-          expect(
-            (yield* workspace.listCommitments({ agentId: b.id })).commitments.map((c) => c.id),
-          ).toEqual([proposed.id]);
-          expect(
-            (yield* workspace.listCommitments(
-              { labelId: label },
-              { agent: outsider, threadId: outsider.conversationThreadId },
-            )).commitments,
-          ).toEqual([]);
-          expect(
-            (yield* Effect.result(
-              workspace.createCommitment(
-                { ...input, labelIds: [secret] },
-                { agent: a, threadId: a.conversationThreadId },
-              ),
-            ))._tag,
-          ).toBe("Failure");
-          expect(
-            (yield* Effect.result(
-              workspace.updateCommitmentStatus(
-                { id: proposed.id, status: "done", why: "Claimed done", evidenceRefs: [] },
-                { agent: b, threadId: b.conversationThreadId },
-              ),
-            ))._tag,
-          ).toBe("Failure");
-          yield* workspace.confirmCommitment({ id: proposed.id, why: "This is a real obligation" });
-          const done = yield* workspace.updateCommitmentStatus(
-            {
-              id: proposed.id,
-              status: "done",
-              why: "Contact replied",
-              evidenceRefs: [{ kind: "url", id: "https://example.com/evidence" }],
-            },
+  it.effect("agents share labeled commitments in every project, without copying memory", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const workspace = yield* Workspace.AgentWorkspaceService;
+        const labels = yield* Labels.ProjectLabelService;
+        const label = (yield* labels.create({ name: "Spawn" })).label.id;
+        const other = (yield* labels.create({ name: "Private" })).label.id;
+        const sql = yield* SqlClient.SqlClient;
+        const a = yield* store.save({ ...h.fixture, permissions: defaultAgentPermissions });
+        const b = yield* store.save(agentFixture("engineering"));
+        // Agents see every project; only the read permission withholds shared items.
+        const outsider = yield* store.save({
+          ...agentFixture("outsider"),
+          permissions: { ...defaultAgentPermissions, read: false },
+        });
+        const input = {
+          title: "Follow up with DSO",
+          description: "Email the contact",
+          owner: { kind: "user" as const },
+          dueAt: null,
+          reminderAt: null,
+          waitingOn: null,
+          labelIds: [label],
+          agentId: a.id,
+          sourceRefs: [{ kind: "thread" as const, id: a.conversationThreadId }],
+          evidenceRefs: [],
+        };
+        const proposed = (yield* workspace.createCommitment(input, {
+          agent: a,
+          threadId: a.conversationThreadId,
+        })).commitment;
+        expect(proposed.status).toBe("proposed");
+        expect(
+          (yield* workspace.listCommitments(
+            {},
             { agent: b, threadId: b.conversationThreadId },
-          );
-          expect(done.commitment.status).toBe("done");
-          const visible = (yield* workspace.listCommitments(
-            { status: "done" },
-            { agent: a, threadId: a.conversationThreadId },
-          )).commitments;
-          expect(visible[0]!.evidenceRefs).toEqual(done.commitment.evidenceRefs);
-          const history = (yield* workspace.commitmentHistory(proposed.id)).history;
-          expect(history.map((r) => r.toStatus)).toEqual(["proposed", "open", "done"]);
-          expect(history.at(-1)).toMatchObject({
-            who: `agent:${b.id}`,
+          )).commitments.map((c) => c.id),
+        ).toEqual([proposed.id]);
+        expect(
+          (yield* workspace.listCommitments({ agentId: b.id })).commitments.map((c) => c.id),
+        ).toEqual([proposed.id]);
+        expect(
+          (yield* workspace.listCommitments(
+            { labelId: label },
+            { agent: outsider, threadId: outsider.conversationThreadId },
+          )).commitments,
+        ).toEqual([]);
+        const elsewhere = (yield* workspace.createCommitment(
+          { ...input, title: "Another project", labelIds: [other] },
+          { agent: a, threadId: a.conversationThreadId },
+        )).commitment;
+        expect(
+          (yield* workspace.listCommitments(
+            { labelId: other },
+            { agent: b, threadId: b.conversationThreadId },
+          )).commitments.map((c) => c.id),
+        ).toEqual([elsewhere.id]);
+        yield* workspace.deleteCommitment(elsewhere.id);
+        expect(
+          (yield* Effect.result(
+            workspace.updateCommitmentStatus(
+              { id: proposed.id, status: "done", why: "Claimed done", evidenceRefs: [] },
+              { agent: b, threadId: b.conversationThreadId },
+            ),
+          ))._tag,
+        ).toBe("Failure");
+        yield* workspace.confirmCommitment({ id: proposed.id, why: "This is a real obligation" });
+        const done = yield* workspace.updateCommitmentStatus(
+          {
+            id: proposed.id,
+            status: "done",
             why: "Contact replied",
-            evidenceRefs: done.commitment.evidenceRefs,
-          });
-          expect(yield* store.memory(b.id)).toEqual([]);
-          expect(
-            (yield* workspace.listCommitments({ agentId: outsider.id, labelId: label }))
-              .commitments,
-          ).toEqual([]);
-          const removable = (yield* workspace.createCommitment({ ...input, title: "Remove me" }))
-            .commitment;
-          expect((yield* workspace.commitmentHistory(removable.id)).history.length).toBeGreaterThan(
-            0,
-          );
-          expect(yield* workspace.deleteCommitment(removable.id)).toEqual({ deleted: true });
-          expect(yield* workspace.deleteCommitment(removable.id)).toEqual({ deleted: false });
-          expect(
-            yield* sql`SELECT * FROM commitment_history WHERE commitment_id = ${removable.id}`,
-          ).toEqual([]);
-          expect(
-            yield* sql`SELECT * FROM commitment_labels WHERE commitment_id = ${removable.id}`,
-          ).toEqual([]);
-          yield* labels.delete(label);
-          expect((yield* store.get(a.id)).scope).toEqual([]);
-          expect((yield* store.get(b.id)).scope).toEqual([]);
-          expect((yield* workspace.listCommitments({ labelId: label })).commitments).toEqual([]);
-          expect((yield* workspace.listCommitments({})).commitments[0]!.labelIds).toEqual([]);
-          expect((yield* Effect.result(store.save(b)))._tag).toBe("Failure");
-          expect((yield* Effect.result(workspace.createCommitment(input)))._tag).toBe("Failure");
-          yield* store.save({ ...b, scope: [] });
-          expect(
-            (yield* workspace.listCommitments({}, { agent: b, threadId: b.conversationThreadId }))
-              .commitments,
-          ).toEqual([]);
-        }).pipe(Effect.provide(h.layer));
-      }),
+            evidenceRefs: [{ kind: "url", id: "https://example.com/evidence" }],
+          },
+          { agent: b, threadId: b.conversationThreadId },
+        );
+        expect(done.commitment.status).toBe("done");
+        const visible = (yield* workspace.listCommitments(
+          { status: "done" },
+          { agent: a, threadId: a.conversationThreadId },
+        )).commitments;
+        expect(visible[0]!.evidenceRefs).toEqual(done.commitment.evidenceRefs);
+        const history = (yield* workspace.commitmentHistory(proposed.id)).history;
+        expect(history.map((r) => r.toStatus)).toEqual(["proposed", "open", "done"]);
+        expect(history.at(-1)).toMatchObject({
+          who: `agent:${b.id}`,
+          why: "Contact replied",
+          evidenceRefs: done.commitment.evidenceRefs,
+        });
+        expect(yield* store.memory(b.id)).toEqual([]);
+        expect(
+          (yield* workspace.listCommitments({ agentId: outsider.id, labelId: label })).commitments,
+        ).toEqual([]);
+        const removable = (yield* workspace.createCommitment({ ...input, title: "Remove me" }))
+          .commitment;
+        expect((yield* workspace.commitmentHistory(removable.id)).history.length).toBeGreaterThan(
+          0,
+        );
+        expect(yield* workspace.deleteCommitment(removable.id)).toEqual({ deleted: true });
+        expect(yield* workspace.deleteCommitment(removable.id)).toEqual({ deleted: false });
+        expect(
+          yield* sql`SELECT * FROM commitment_history WHERE commitment_id = ${removable.id}`,
+        ).toEqual([]);
+        expect(
+          yield* sql`SELECT * FROM commitment_labels WHERE commitment_id = ${removable.id}`,
+        ).toEqual([]);
+        yield* labels.delete(label);
+        expect((yield* workspace.listCommitments({ labelId: label })).commitments).toEqual([]);
+        expect((yield* workspace.listCommitments({})).commitments[0]!.labelIds).toEqual([]);
+        expect((yield* Effect.result(workspace.createCommitment(input)))._tag).toBe("Failure");
+        expect(
+          (yield* workspace.listCommitments({}, { agent: b, threadId: b.conversationThreadId }))
+            .commitments,
+        ).toEqual([]);
+      }).pipe(Effect.provide(h.layer));
+    }),
   );
 
   it.effect(
@@ -1028,20 +978,18 @@ it.effect(
           approval.id,
         );
         expect((yield* Effect.result(workspace.approve(approval.id)))._tag).toBe("Failure");
-        yield* store.save({ ...agent, autonomy: "observe" });
-        expect(
-          (yield* Effect.result(
-            workspace.startWork(
-              {
-                agentId: agent.id,
-                projectId: agent.projectId!,
-                title: "Stale authority",
-                prompt: "Do it",
-              },
-              actor,
-            ),
-          ))._tag,
-        ).toBe("Failure");
+        yield* store.save({ ...agent, permissions: { ...agent.permissions, execute: false } });
+        const stale = yield* workspace.startWork(
+          {
+            agentId: agent.id,
+            projectId: agent.projectId!,
+            title: "Stale authority",
+            prompt: "Do it",
+          },
+          actor,
+        );
+        expect(stale.threadId).toBeNull();
+        expect(stale.approval?.status).toBe("pending");
         expect(
           (yield* Effect.result(
             policy.beforeTool(scopeFor(actor.threadId), "t3_pending_request_respond", {}, false),
@@ -1087,8 +1035,7 @@ it.effect(
       yield* Effect.gen(function* () {
         const agent = yield* (yield* Store.AgentStore).save({
           ...h.fixture,
-          autonomy: "execute_bounded",
-          permissions: { ...conservativeAgentPermissions, execute: true },
+          permissions: defaultAgentPermissions,
         });
         const policy = yield* Policy.AgentMcpPolicy;
         for (const name of [
@@ -1155,90 +1102,90 @@ it.effect(
     }),
 );
 
-it.effect.each([
-  "propose",
-  "execute_bounded",
-  "read_only",
-  "no_agent_execute",
-  "no_read",
-  "unlinked",
-  "observe",
-] as const)("linked-repository Work follows %s grants and autonomy", (policyKind) =>
+it.effect("agents add projects with the execute grant, without the high-impact grants", () =>
   Effect.gen(function* () {
     const h = yield* makeHarness;
     yield* Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      const labels = yield* Labels.ProjectLabelService;
-      const label = (yield* labels.create({ name: "Spawn Partners" })).label;
-      const repositoryId = ProjectId.make("patient-outreach");
-      yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${repositoryId},'Patient Outreach','/outreach','[]',${h.fixture.createdAt},${h.fixture.createdAt})`;
-      yield* labels.linkRepository({ labelId: label.id, repositoryId });
-      const agent = yield* (yield* Store.AgentStore).save({
-        ...h.fixture,
-        autonomy:
-          policyKind === "propose" || policyKind === "observe" ? policyKind : "execute_bounded",
-        permissions: { ...h.fixture.permissions, execute: policyKind !== "no_agent_execute" },
-        scope: [
-          {
-            labelId: label.id,
-            permissions: {
-              ...h.fixture.permissions,
-              execute: policyKind !== "read_only",
-              read: policyKind !== "no_read",
-            },
-          },
-        ],
-      });
-      const workspace = yield* Workspace.AgentWorkspaceService;
+      const store = yield* Store.AgentStore;
       const policy = yield* Policy.AgentMcpPolicy;
-      const actor = { agent, threadId: agent.conversationThreadId };
-      if (policyKind === "unlinked")
-        yield* labels.unlinkRepository({ labelId: label.id, repositoryId });
-      const request = workspace.startWork(
-        { agentId: agent.id, projectId: repositoryId, title: "Repair outreach", prompt: "Fix CI" },
-        actor,
+      const agent = yield* store.save({ ...h.fixture, permissions: defaultAgentPermissions });
+      const call = (name: string) =>
+        policy.beforeTool(scopeFor(agent.conversationThreadId), name, { title: "New app" }, false);
+      for (const name of ["t3_project_create", "t3_project_clone"])
+        expect(yield* call(name), name).toEqual({ handled: false });
+      expect((yield* call("t3_project_delete").pipe(Effect.flip)).code).toBe(
+        "agent_permission_denied",
       );
-      if (policyKind === "observe") {
-        expect((yield* request.pipe(Effect.flip)).message).toBe(
-          "An observe agent cannot start Work.",
+      yield* store.save({ ...agent, permissions: { ...agent.permissions, execute: false } });
+      expect((yield* call("t3_project_create").pipe(Effect.flip)).code).toBe(
+        "agent_permission_denied",
+      );
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
+it.effect.each(["execute", "no_agent_execute", "no_read"] as const)(
+  "Work in any live repository follows the agent's %s permission",
+  (policyKind) =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        // No project tag or link: every live repository is in reach.
+        const repositoryId = ProjectId.make("patient-outreach");
+        yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${repositoryId},'Patient Outreach','/outreach','[]',${h.fixture.createdAt},${h.fixture.createdAt})`;
+        const agent = yield* (yield* Store.AgentStore).save({
+          ...h.fixture,
+          permissions: {
+            ...h.fixture.permissions,
+            execute: policyKind !== "no_agent_execute",
+            read: policyKind !== "no_read",
+          },
+        });
+        const workspace = yield* Workspace.AgentWorkspaceService;
+        const policy = yield* Policy.AgentMcpPolicy;
+        const result = yield* workspace.startWork(
+          {
+            agentId: agent.id,
+            projectId: repositoryId,
+            title: "Repair outreach",
+            prompt: "Fix CI",
+          },
+          { agent, threadId: agent.conversationThreadId },
         );
-        expect(h.launches).toHaveLength(0);
-        return;
-      }
-      const result = yield* request;
-      if (policyKind === "execute_bounded") {
-        expect(result.approval).toBeNull();
-        expect(h.launches[0]?.projectId).toBe(repositoryId);
-        expect(
-          yield* policy.beforeTool(
-            scopeFor(agent.conversationThreadId),
-            "t3_project_read",
-            { projectId: repositoryId },
-            true,
-          ),
-        ).toEqual({ handled: false });
-        // A running Work thread cannot retain a revoked repository through its identity.
-        yield* labels.unlinkRepository({ labelId: label.id, repositoryId });
-        expect(
-          (yield* policy
-            .beforeTool(
-              scopeFor(result.threadId!),
+        if (policyKind === "execute") {
+          expect(result.approval).toBeNull();
+          expect(h.launches[0]?.projectId).toBe(repositoryId);
+          expect(
+            yield* policy.beforeTool(
+              scopeFor(agent.conversationThreadId),
               "t3_project_read",
               { projectId: repositoryId },
               true,
-            )
-            .pipe(Effect.flip)).code,
-        ).toBe("agent_permission_denied");
-      } else {
-        expect(result.threadId).toBeNull();
-        expect(result.approval?.status).toBe("pending");
-        expect(h.launches).toHaveLength(0);
-        // The owner can grant this one reviewed action, without widening persistent scope.
-        yield* workspace.approve(result.approval!.id);
-        expect(h.launches[0]?.projectId).toBe(repositoryId);
-      }
-    }).pipe(Effect.provide(h.layer));
-  }),
+            ),
+          ).toEqual({ handled: false });
+          // A running Work thread cannot keep reaching a repository that was removed.
+          yield* sql`UPDATE projection_projects SET deleted_at = ${h.fixture.createdAt} WHERE project_id = ${repositoryId}`;
+          expect(
+            (yield* policy
+              .beforeTool(
+                scopeFor(result.threadId!),
+                "t3_project_read",
+                { projectId: repositoryId },
+                true,
+              )
+              .pipe(Effect.flip)).code,
+          ).toBe("agent_permission_denied");
+        } else {
+          expect(result.threadId).toBeNull();
+          expect(result.approval?.status).toBe("pending");
+          expect(h.launches).toHaveLength(0);
+          // The owner can approve this one reviewed action without changing the agent's grants.
+          yield* workspace.approve(result.approval!.id);
+          expect(h.launches[0]?.projectId).toBe(repositoryId);
+        }
+      }).pipe(Effect.provide(h.layer));
+    }),
 );
 
 describe("event-driven agent triggers", () => {
@@ -1277,50 +1224,32 @@ describe("event-driven agent triggers", () => {
         schedule: { type: "event", event },
       });
     });
-  it.effect(
-    "linked label grants wake on a second repository; unlinking and thread tags cannot grant delivery",
-    () =>
-      Effect.gen(function* () {
-        const h = yield* setup;
-        yield* Effect.gen(function* () {
-          yield* prepare(h);
-          const sql = yield* SqlClient.SqlClient;
-          const labels = yield* Labels.ProjectLabelService;
-          const label = (yield* labels.create({ name: "Spawn Partners" })).label;
-          const repositoryId = ProjectId.make("patient-outreach");
-          yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${repositoryId},'Patient Outreach','/outreach','[]',${h.fixture.createdAt},${h.fixture.createdAt})`;
-          const store = yield* Store.AgentStore;
-          yield* store.save({
-            ...h.fixture,
-            dailyRunCap: 20,
-            scope: [{ labelId: label.id, permissions: h.fixture.permissions }],
-          });
-          const reactor = yield* EventReactor.AgentEventReactor;
-          const bus = yield* AgentEvents.AgentEventBus;
-          for (const key of ["tag-only", "linked", "unlinked"]) {
-            if (key === "linked") yield* labels.linkRepository({ labelId: label.id, repositoryId });
-            if (key === "unlinked")
-              yield* labels.unlinkRepository({ labelId: label.id, repositoryId });
-            const source = completedEvent(h, key);
-            const projection = h.projections.get(source.event.threadId)!;
-            h.projections.set(source.event.threadId, {
-              ...projection,
-              thread: { ...projection.thread, projectId: repositoryId },
-            });
-            yield* sql`INSERT INTO thread_project_labels(thread_id,label_id,confirmed_by_user,source) VALUES (${source.event.threadId},${label.id},1,'user')`;
-            yield* reactor.observe(source);
-            yield* bus.drain;
-            expect(h.launches).toHaveLength(key === "tag-only" ? 0 : 1);
-          }
-          expect((yield* store.runs(h.fixture.id))[0]?.triggerContext?.projectId).toBe(
-            repositoryId,
-          );
-        }).pipe(Effect.provide(h.layer));
-      }),
+  it.effect("events in any live repository wake the agent, with no project grant", () =>
+    Effect.gen(function* () {
+      const h = yield* setup;
+      yield* Effect.gen(function* () {
+        yield* prepare(h);
+        const sql = yield* SqlClient.SqlClient;
+        const repositoryId = ProjectId.make("patient-outreach");
+        yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${repositoryId},'Patient Outreach','/outreach','[]',${h.fixture.createdAt},${h.fixture.createdAt})`;
+        const source = completedEvent(h, "elsewhere");
+        const projection = h.projections.get(source.event.threadId)!;
+        h.projections.set(source.event.threadId, {
+          ...projection,
+          thread: { ...projection.thread, projectId: repositoryId },
+        });
+        yield* (yield* EventReactor.AgentEventReactor).observe(source);
+        yield* (yield* AgentEvents.AgentEventBus).drain;
+        expect(h.launches).toHaveLength(1);
+        expect(
+          (yield* (yield* Store.AgentStore).runs(h.fixture.id))[0]?.triggerContext?.projectId,
+        ).toBe(repositoryId);
+      }).pipe(Effect.provide(h.layer));
+    }),
   );
 
   it.effect(
-    "event filters reject out-of-scope repositories and labels on create and update, and Run now requires a source event",
+    "event filters reject missing repositories and labels on create and update, and Run now requires a source event",
     () =>
       Effect.gen(function* () {
         const h = yield* setup;
@@ -1329,14 +1258,11 @@ describe("event-driven agent triggers", () => {
           const schedules = yield* Schedules.ScheduledTaskService;
           const labels = yield* Labels.ProjectLabelService;
           const granted = (yield* labels.create({ name: "Granted" })).label;
-          const blocked = (yield* labels.create({ name: "Blocked" })).label;
-          yield* (yield* Store.AgentStore).save({
-            ...h.fixture,
-            scope: [{ labelId: granted.id, permissions: h.fixture.permissions }],
-          });
+          const deleted = (yield* labels.create({ name: "Deleted" })).label;
+          yield* labels.delete(deleted.id);
           for (const filter of [
-            { projectIds: [ProjectId.make("private-repo")] },
-            { labelIds: [granted.id, blocked.id] },
+            { projectIds: [ProjectId.make("missing-repo")] },
+            { labelIds: [granted.id, deleted.id] },
           ]) {
             for (const id of [undefined, task.id]) {
               const error = yield* schedules
@@ -1425,34 +1351,32 @@ describe("event-driven agent triggers", () => {
         }).pipe(Effect.provide(h.layer));
       }),
   );
-  it.effect.each([
-    "unauthorized repository",
-    "tagged unauthorized repository",
-    "home with unrelated tag",
-  ])("uses repository authority for %s", (reason) =>
-    Effect.gen(function* () {
-      const h = yield* setup;
-      yield* Effect.gen(function* () {
-        yield* prepare(h);
-        const source = completedEvent(h);
-        if (reason === "unauthorized repository" || reason === "tagged unauthorized repository") {
-          const p = h.projections.get(source.event.threadId)!;
-          h.projections.set(source.event.threadId, {
-            ...p,
-            thread: { ...p.thread, projectId: ProjectId.make("other") },
-          });
-        }
-        if (reason === "tagged unauthorized repository" || reason === "home with unrelated tag") {
-          const label = (yield* (yield* Labels.ProjectLabelService).create({ name: "Private" }))
-            .label;
-          const sql = yield* SqlClient.SqlClient;
-          yield* sql`INSERT INTO thread_project_labels(thread_id, label_id, confirmed_by_user, source) VALUES (${source.event.threadId}, ${label.id}, 1, 'user')`;
-        }
-        yield* (yield* EventReactor.AgentEventReactor).observe(source);
-        yield* (yield* AgentEvents.AgentEventBus).drain;
-        expect(h.launches).toHaveLength(reason === "home with unrelated tag" ? 1 : 0);
-      }).pipe(Effect.provide(h.layer));
-    }),
+  it.effect.each(["missing repository", "tagged missing repository", "home with unrelated tag"])(
+    "uses repository liveness for %s",
+    (reason) =>
+      Effect.gen(function* () {
+        const h = yield* setup;
+        yield* Effect.gen(function* () {
+          yield* prepare(h);
+          const source = completedEvent(h);
+          if (reason === "missing repository" || reason === "tagged missing repository") {
+            const p = h.projections.get(source.event.threadId)!;
+            h.projections.set(source.event.threadId, {
+              ...p,
+              thread: { ...p.thread, projectId: ProjectId.make("other") },
+            });
+          }
+          if (reason === "tagged missing repository" || reason === "home with unrelated tag") {
+            const label = (yield* (yield* Labels.ProjectLabelService).create({ name: "Private" }))
+              .label;
+            const sql = yield* SqlClient.SqlClient;
+            yield* sql`INSERT INTO thread_project_labels(thread_id, label_id, confirmed_by_user, source) VALUES (${source.event.threadId}, ${label.id}, 1, 'user')`;
+          }
+          yield* (yield* EventReactor.AgentEventReactor).observe(source);
+          yield* (yield* AgentEvents.AgentEventBus).drain;
+          expect(h.launches).toHaveLength(reason === "home with unrelated tag" ? 1 : 0);
+        }).pipe(Effect.provide(h.layer));
+      }),
   );
   it.effect(
     "a self-triggering completion chain stops at depth two and dedups each event per agent",

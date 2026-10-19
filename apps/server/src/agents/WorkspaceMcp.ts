@@ -33,8 +33,7 @@ const shared = {
 };
 const List = Tool.make("list_open_items", {
   ...shared,
-  description:
-    "Read shared commitments in your explicitly authorized labels, plus your own items. Tags never grant access.",
+  description: "Read shared commitments in every project, plus your own items.",
   parameters: Schema.Struct({
     status: CommitmentListInput.fields.status,
     labelId: CommitmentListInput.fields.labelId,
@@ -67,7 +66,7 @@ const { agentId: _startAgentId, ...workFields } = AgentStartWorkInput.fields;
 const Work = Tool.make("start_agent_work", {
   ...shared,
   description:
-    "Start a normal repository Work session within your execute grant, or return a pending owner approval. Observe agents cannot start Work.",
+    "Start a normal Work session in any repository with your execute grant, or return a pending owner approval without it.",
   parameters: Schema.Struct(workFields),
   success: AgentStartWorkResult,
 });

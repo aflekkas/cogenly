@@ -112,7 +112,6 @@ const make = Effect.gen(function* () {
       if (
         !scope.agent.permissions.read ||
         !scope.agent.permissions.draft ||
-        scope.agent.autonomy === "observe" ||
         input.agentId !== id ||
         input.labelIds.some((label) => !scope.draftableLabelIds.includes(label))
       )

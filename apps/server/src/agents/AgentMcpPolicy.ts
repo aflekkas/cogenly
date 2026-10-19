@@ -74,19 +74,18 @@ const make = Effect.gen(function* () {
         if (!agent.permissions.read) return yield* denied("This agent has no read grant.");
         const permittedProject = (id: unknown) =>
           resolved.readableRepositoryIds.some((repositoryId) => repositoryId === id);
-        // Explicit references cannot expand repository access via project tags.
         if (
           params.projectId !== undefined &&
           !permittedProject(params.projectId) &&
           !["request_agent_approval", "t3_thread_launch", "start_agent_work"].includes(name)
         )
-          return yield* denied("This repository needs an explicit owner decision.");
+          return yield* denied("This repository does not exist in this environment.");
         if (typeof params.threadId === "string" && params.threadId !== actor.threadId) {
           const rows = yield* sql<{
             project_id: string;
           }>`SELECT project_id FROM orchestration_v2_projection_threads WHERE thread_id = ${params.threadId}`;
           if (!permittedProject(rows[0]?.project_id))
-            return yield* denied("This thread is outside the agent's repository grant.");
+            return yield* denied("This thread is not in a live repository.");
         }
         if (readonly) return { handled: false };
         if (["create_threads", "delegate_task", "t3_thread_fork"].includes(name))
@@ -116,8 +115,6 @@ const make = Effect.gen(function* () {
           return yield* denied(
             "An agent cannot approve its own requests or change its authority. Ask the owner.",
           );
-        if (agent.autonomy === "observe")
-          return yield* denied("An observe agent cannot change workspace state.");
         // These tools implement their own finer draft/label rules and never grant authority.
         if (
           [
@@ -224,7 +221,7 @@ const make = Effect.gen(function* () {
           targetRepository !== undefined &&
           !resolved.executableRepositoryIds.some((id) => id === targetRepository)
         )
-          return yield* denied("This repository needs an explicit owner decision.");
+          return yield* denied("This agent has no execute grant.");
         const grant: keyof AgentPermissions = /merge/.test(name)
           ? "merge"
           : /deploy/.test(name)
@@ -240,14 +237,11 @@ const make = Effect.gen(function* () {
                     ? "draft"
                     : "execute";
         if (!agent.permissions[grant]) return yield* denied(`This agent has no ${grant} grant.`);
-        if (grant !== "draft" && agent.autonomy === "propose")
-          return yield* denied(
-            "This action needs owner approval. Request a bounded action with request_agent_approval.",
-          );
         // Arbitrary shell/browser/device writes can send, merge, deploy or delete.
         // They cannot safely be reduced to an execute grant by parsing model text.
+        // Adding a project (create or clone) is ordinary execute work for an agent.
         if (
-          /^(terminal_|preview_|device_|t3_project_(?:create|clone|update|delete))/.test(name) &&
+          /^(terminal_|preview_|device_|t3_project_(?:update|delete))/.test(name) &&
           !["send", "create_pr", "merge", "deploy", "delete"].every(
             (key) => agent.permissions[key as keyof AgentPermissions],
           )

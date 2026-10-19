@@ -99,7 +99,7 @@ const make = Effect.gen(function* () {
               (SELECT label_id FROM fact_labels WHERE fact_id = m.id ORDER BY label_id))
             WHEN m.kind = 'commitment' THEN (SELECT json_group_array(label_id) FROM
               (SELECT label_id FROM commitment_labels WHERE commitment_id = m.id ORDER BY label_id))
-            WHEN a.agent_id IS NOT NULL THEN (SELECT json_group_array(json_extract(value, '$.labelId')) FROM json_each(a.payload_json, '$.scope'))
+            WHEN a.agent_id IS NOT NULL THEN json_array()
             ELSE (SELECT json_group_array(label_id) FROM
               (SELECT label_id FROM thread_project_labels WHERE thread_id = m.thread_id ORDER BY label_id)) END AS labels
         FROM matches m

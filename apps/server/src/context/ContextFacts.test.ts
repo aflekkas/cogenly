@@ -83,17 +83,14 @@ describe("shared facts and scoped context", () => {
   );
 
   it.effect(
-    "never widens an agent's scope from thread tags, requested labels or other owners",
+    "agents read shared facts in every project but never another owner's private facts",
     () =>
       Effect.gen(function* () {
         yield* seed;
         const store = yield* Store.AgentStore,
           facts = yield* Facts.FactService,
           retrieval = yield* Retrieval.ContextRetrievalService;
-        const agent = yield* store.save({
-          ...agentFixture(),
-          scope: [{ labelId: a, permissions: agentFixture().permissions }],
-        });
+        const agent = yield* store.save(agentFixture());
         const other = yield* store.save(agentFixture("other"));
         yield* facts.create(input("allowed"));
         yield* facts.create(input("unscoped", [b]));
@@ -109,21 +106,23 @@ describe("shared facts and scoped context", () => {
         yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,role,streaming,created_at,updated_at,payload_json) VALUES ('secret',${threadId},'user',0,${at},${at},'{"text":"foreign transcript"}')`;
         const principal = `agent:${agent.id}` as const;
         const visible = (yield* facts.list({}, principal)).facts.map((f) => f.text);
-        expect(visible).toEqual(expect.arrayContaining(["allowed", "own private"]));
-        expect(visible).not.toEqual(expect.arrayContaining(["unscoped"]));
+        expect(visible).toEqual(expect.arrayContaining(["allowed", "unscoped", "own private"]));
         expect(visible).not.toContain("owner private");
         expect(visible).not.toContain("other private");
         const result = yield* retrieval.retrieve({ principal, threadId, budgetChars: 16000 });
         expect(result.text).toContain("allowed");
-        expect(result.text).not.toContain("unscoped");
         expect(result.text).not.toContain("foreign transcript");
         expect(
           (yield* retrieval.retrieve({ principal, threadId, labelIds: [b], budgetChars: 16000 }))
             .text,
-        ).not.toContain("unscoped");
+        ).toContain("unscoped");
+        expect(
+          (yield* facts.create({ ...input("proposal", [b]), agentId: agent.id }, principal)).fact
+            .status,
+        ).toBe("proposed");
         expect(
           (yield* facts
-            .create({ ...input("forbidden", [b]), agentId: agent.id }, principal)
+            .create({ ...input("forbidden", [b]), agentId: other.id }, principal)
             .pipe(Effect.flip)).reason,
         ).toBe("forbidden");
         yield* store.save({ ...agent, permissions: { ...agent.permissions, read: false } });
@@ -172,10 +171,7 @@ describe("shared facts and scoped context", () => {
       const store = yield* Store.AgentStore,
         facts = yield* Facts.FactService,
         retrieval = yield* Retrieval.ContextRetrievalService;
-      const agent = yield* store.save({
-        ...agentFixture(),
-        scope: [{ labelId: a, permissions: agentFixture().permissions }],
-      });
+      const agent = yield* store.save(agentFixture());
       const principal = `agent:${agent.id}` as const;
       const proposed = (yield* facts.create({ ...input("inferred"), agentId: agent.id }, principal))
         .fact;
@@ -254,13 +250,7 @@ describe("shared facts and scoped context", () => {
         yield* seed;
         const retrieval = yield* Retrieval.ContextRetrievalService,
           sql = yield* SqlClient.SqlClient;
-        const agent = yield* (yield* Store.AgentStore).save({
-          ...agentFixture(),
-          scope: [
-            { labelId: a, permissions: agentFixture().permissions },
-            { labelId: b, permissions: { ...agentFixture().permissions, read: false } },
-          ],
-        });
+        const agent = yield* (yield* Store.AgentStore).save(agentFixture());
         yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES ('repo','Repo','/repo','[]',${at},${at})`;
         yield* sql`INSERT INTO label_repositories(label_id,repository_id) VALUES (${a},'repo')`;
         yield* sql`INSERT INTO thread_project_labels(thread_id,label_id,confirmed_by_user,source) VALUES (${threadId},${a},1,'user')`;
@@ -319,7 +309,7 @@ describe("shared facts and scoped context", () => {
           labelIds: [b],
           budgetChars: 4000,
         });
-        expect(scoped.items).toEqual([]);
+        expect(scoped.items.map((item) => item.id)).toEqual(["private"]);
         const principal = `agent:${agent.id}` as const;
         expect(
           (yield* retrieval.retrieve({ principal, budgetChars: 4000 })).items.some(
@@ -327,8 +317,9 @@ describe("shared facts and scoped context", () => {
           ),
         ).toBe(true);
         yield* sql`DELETE FROM label_repositories WHERE label_id=${a} AND repository_id='repo'`;
+        // Agents read every live repository, linked to a project tag or not.
         const unlinked = yield* retrieval.retrieve({ principal, budgetChars: 4000 });
-        expect(unlinked.items.some((item) => item.id === "work")).toBe(false);
+        expect(unlinked.items.some((item) => item.id === "work")).toBe(true);
         expect(unlinked.items.some((item) => item.id === "open")).toBe(true);
         yield* sql`INSERT INTO label_repositories(label_id,repository_id) VALUES (${a},'repo')`;
         // A newer live run means the old completed run is no longer a current outcome.

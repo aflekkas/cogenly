@@ -15,13 +15,11 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { useState } from "react";
-import type { AgentPermissions, ProjectLabelId } from "@t3tools/contracts";
+import type { AgentPermissions } from "@t3tools/contracts";
 import { AgentFace } from "~/components/agents/face";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import { ThreadDetailsSection } from "~/components/chat/ThreadDetailsSection";
 import { THREAD_DETAILS_PANEL_ICON_CLASS } from "~/components/chat/threadDetailsPanelStyles";
-import { Button } from "~/components/ui/button";
-import { Radio, RadioGroup } from "~/components/ui/radio-group";
 import {
   Select,
   SelectItem,
@@ -31,23 +29,14 @@ import {
 } from "~/components/ui/select";
 import { Switch } from "~/components/ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { ProjectLabelPicker } from "~/projectLabels/ProjectLabelPicker";
-import { ProjectTag } from "~/projectLabels/ProjectTag";
 import { useAgentsClient } from "./agentsClient";
 import { agentDraft, agentStatusLabel, formatMessageTime } from "./agents.logic";
 import {
-  AUTONOMY_OPTIONS,
   EVENT_RUN_NOW_UNSUPPORTED_MESSAGE,
   PERMISSION_OPTIONS,
-  SCOPE_ACCESS_LABEL,
-  SCOPE_ACCESS_OPTIONS,
   agentWorkStartPolicy,
   describeSchedule,
   eventFilterChoices,
-  scopeAccess,
-  scopeAccessLimit,
-  scopePermissions,
-  toggleScope,
   triggerErrorMessage,
   type FilterNames,
 } from "./agentWorkspace.logic";
@@ -226,7 +215,7 @@ export function AgentResponsibilities({
             workspace.repositories.find((repository) => repository.id === agent.projectId)?.title ??
             "None"
           }
-          detail="Where its conversation runs. Execute-level agents may start Work here without asking."
+          detail="Where its conversation runs. It can work in every repository and add new ones."
           disabled
         />
         <DailyCapRow
@@ -234,136 +223,6 @@ export function AgentResponsibilities({
           pending={disabled}
           onSave={(dailyRunCap) => saveProfile({ dailyRunCap })}
         />
-      </ThreadDetailsSection>
-
-      <ThreadDetailsSection
-        headingId="agent-scope"
-        title="Project scope"
-        actions={
-          <ProjectLabelPicker
-            onManage={client.openProjectSettings}
-            labels={workspace.labels}
-            selectedIds={agent.scope.map((entry) => entry.labelId)}
-            disabled={disabled}
-            onToggle={(labelId, selected) =>
-              void saveProfile({ scope: toggleScope(agent.scope, labelId, selected) })
-            }
-          />
-        }
-      >
-        <p className="px-2.5 pb-2 text-xs text-muted-foreground">
-          Project tags give context only. Access comes from the projects granted here and covers the
-          repositories linked to them. Executing in a project also needs autonomy Execute bounded
-          work or higher and the Start Work permission.
-        </p>
-        {agent.scope.length === 0 && (
-          <p className="px-2.5 py-1.5 text-xs text-muted-foreground/70">
-            No projects granted. It sees only its home repository, its conversation and its items.
-          </p>
-        )}
-        {agent.scope.map((entry) => {
-          const label = labelsById.get(entry.labelId);
-          const access = scopeAccess(entry.permissions);
-          const limit = scopeAccessLimit(agent, access);
-          return (
-            <div key={entry.labelId} className="flex flex-col gap-0.5 px-2.5 py-1">
-              <div className="flex min-h-8 items-center gap-2">
-                {label ? (
-                  <ProjectTag name={label.name} color={label.color} />
-                ) : (
-                  <span className="text-xs text-muted-foreground">Deleted project</span>
-                )}
-                <span className="flex-1" />
-                <div className="w-40 shrink-0">
-                  <Select
-                    value={access}
-                    disabled={disabled}
-                    onValueChange={(value) => {
-                      const option = SCOPE_ACCESS_OPTIONS.find(
-                        (candidate) => candidate.value === value,
-                      );
-                      if (!option) return;
-                      void saveProfile({
-                        scope: agent.scope.map((item) =>
-                          item.labelId === entry.labelId
-                            ? { ...item, permissions: scopePermissions(option.value) }
-                            : item,
-                        ),
-                      });
-                    }}
-                  >
-                    <SelectTrigger size="xs" aria-label={`Access to ${label?.name ?? "project"}`}>
-                      <SelectValue>{SCOPE_ACCESS_LABEL[access]}</SelectValue>
-                    </SelectTrigger>
-                    <SelectPopup>
-                      {SCOPE_ACCESS_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value} label={option.label}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                      {access === "custom" && (
-                        <SelectItem value="custom" label={SCOPE_ACCESS_LABEL.custom} disabled>
-                          Custom
-                        </SelectItem>
-                      )}
-                    </SelectPopup>
-                  </Select>
-                </div>
-                <Button
-                  size="icon-xs"
-                  variant="ghost-muted"
-                  aria-label={`Remove ${label?.name ?? "project"} from scope`}
-                  disabled={disabled}
-                  onClick={() =>
-                    void saveProfile({
-                      scope: toggleScope(agent.scope, entry.labelId as ProjectLabelId, false),
-                    })
-                  }
-                >
-                  <XIcon />
-                </Button>
-              </div>
-              <span className="text-xs text-muted-foreground">
-                {SCOPE_ACCESS_OPTIONS.find((option) => option.value === access)?.description ??
-                  "A mix of grants set elsewhere. Pick a level to replace it."}
-              </span>
-              {limit && <span className="text-xs text-warning-foreground">{limit}</span>}
-            </div>
-          );
-        })}
-      </ThreadDetailsSection>
-
-      <ThreadDetailsSection headingId="agent-autonomy" title="Autonomy">
-        <RadioGroup
-          value={agent.autonomy}
-          disabled={disabled}
-          onValueChange={(value) => {
-            const option = AUTONOMY_OPTIONS.find((candidate) => candidate.value === value);
-            if (option && option.value !== agent.autonomy)
-              void saveProfile({ autonomy: option.value });
-          }}
-        >
-          {AUTONOMY_OPTIONS.map((option) => (
-            <label
-              key={option.value}
-              className="flex cursor-pointer items-start gap-2.5 rounded-lg px-2.5 hover:bg-muted/40"
-            >
-              <Radio value={option.value} className="mt-0.5" />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-sm font-medium text-foreground/80">{option.label}</span>
-                <span className="text-xs text-muted-foreground">{option.description}</span>
-              </span>
-            </label>
-          ))}
-        </RadioGroup>
-        <p
-          className={cn(
-            "mx-2.5 mt-1.5 text-xs",
-            workStart.outcome === "scoped" ? "text-foreground/70" : "text-muted-foreground",
-          )}
-        >
-          Work: {workStart.text}
-        </p>
       </ThreadDetailsSection>
 
       <ThreadDetailsSection headingId="agent-permissions" title="Permissions">
@@ -393,6 +252,14 @@ export function AgentResponsibilities({
             />
           ))}
         </div>
+        <p
+          className={cn(
+            "mx-2.5 mt-1.5 text-xs",
+            workStart.outcome === "starts" ? "text-foreground/70" : "text-muted-foreground",
+          )}
+        >
+          Work: {workStart.text}
+        </p>
       </ThreadDetailsSection>
 
       <ThreadDetailsSection headingId="agent-notify" title="Notifications">

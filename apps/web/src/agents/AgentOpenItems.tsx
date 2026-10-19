@@ -156,7 +156,7 @@ export function AgentOpenItems({
       )}
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-2xs font-medium text-muted-foreground">
-          Open items · its own and those in its granted projects
+          Open items · its own and those in your projects
         </h3>
         <Button
           size="xs"
@@ -183,7 +183,7 @@ export function AgentOpenItems({
       ) : groups.length === 0 && !workspace.error ? (
         <p className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-center text-xs text-muted-foreground">
           Nothing recorded yet. {agent.name} proposes items it finds in your conversations and
-          granted projects for you to confirm, or add one yourself.
+          projects for you to confirm, or add one yourself.
         </p>
       ) : null}
       {groups.map((group) =>
@@ -643,10 +643,7 @@ function AddCommitment({
   const [person, setPerson] = useState("");
   const [due, setDue] = useState("");
   const [waitingOn, setWaitingOn] = useState("");
-  // New items default to the agent's granted projects so it can see them.
-  const [labelIds, setLabelIds] = useState<ProjectLabelId[]>(() =>
-    agent.scope.map((entry) => entry.labelId),
-  );
+  const [labelIds, setLabelIds] = useState<ProjectLabelId[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const valid = title.trim() && (ownerKind !== "person" || person.trim());

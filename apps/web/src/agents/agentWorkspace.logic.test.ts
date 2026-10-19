@@ -1,6 +1,6 @@
 import {
   AgentId,
-  conservativeAgentPermissions,
+  defaultAgentPermissions,
   ProjectId,
   ProjectLabelId,
   ProviderInstanceId,
@@ -12,7 +12,6 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 import {
   agentAttentionCount,
-  agentReadableLabels,
   agentRepositoryAccess,
   agentWorkStartPolicy,
   commitmentDueLabel,
@@ -28,13 +27,8 @@ import {
   eventFilterOutOfScope,
   eventRunRefs,
   normalizeEventFilter,
-  groupAgentsByScope,
   groupCommitments,
   resolveCommitmentRef,
-  scopeAccess,
-  scopeAccessLimit,
-  scopePermissions,
-  toggleScope,
   triggerErrorMessage,
 } from "./agentWorkspace.logic";
 
@@ -242,24 +236,20 @@ describe("event filter scope", () => {
     { id: site, title: "site" },
     { id: other, title: "other" },
   ];
-  const agent = {
-    projectId: home,
-    autonomy: "propose" as const,
-    permissions: { ...conservativeAgentPermissions, read: true },
-    scope: [{ labelId: spawn, permissions: scopePermissions("read") }],
-  };
+  const agent = { permissions: defaultAgentPermissions };
 
-  it("offers only the readable projects and repositories", () => {
-    expect(eventFilterChoices(agent, labels, repositories)).toEqual({
-      labels: [labels[0]],
-      repositories: [
-        { id: home, title: "home" },
-        { id: site, title: "site" },
-      ],
-    });
+  it("offers every project and repository, and none without Read", () => {
+    expect(eventFilterChoices(agent, labels, repositories)).toEqual({ labels, repositories });
+    expect(
+      eventFilterChoices(
+        { permissions: { ...defaultAgentPermissions, read: false } },
+        labels,
+        repositories,
+      ),
+    ).toEqual({ labels: [], repositories: [] });
   });
-  it("finds saved filter entries that left the scope", () => {
-    const choices = eventFilterChoices(agent, labels, repositories);
+  it("finds saved filter entries that no longer exist", () => {
+    const choices = eventFilterChoices(agent, [labels[0]!], repositories.slice(0, 2));
     expect(
       eventFilterOutOfScope({ labelIds: [spawn, bartr], projectIds: [site, other] }, choices),
     ).toEqual({ labelIds: [bartr], projectIds: [other] });
@@ -298,14 +288,8 @@ describe("eventRunRefs", () => {
 });
 
 describe("describeApproval", () => {
-  const spawn = ProjectLabelId.make("spawn");
   const bartr = ProjectLabelId.make("bartr");
-  const agent = {
-    name: "Bartr Engineering",
-    autonomy: "propose" as const,
-    permissions: conservativeAgentPermissions,
-    scope: [{ labelId: spawn, permissions: scopePermissions("read") }],
-  };
+  const agent = { name: "Bartr Engineering", permissions: defaultAgentPermissions };
   const context = {
     agent,
     repositoryName: (id: string) => (id === "repo-1" ? "booking-audit" : undefined),
@@ -368,177 +352,63 @@ describe("describeApproval", () => {
     ).toBe("Schedule “Failing checks” · Weekdays at 09:00");
   });
 
-  it("lists every grant, autonomy and scope change", () => {
+  it("lists every grant change", () => {
     const description = describeApproval(
       approval({
         actionKind: "change_permissions",
-        payload: {
-          permissions: { ...conservativeAgentPermissions, draft: false, send: true },
-          autonomy: "execute_bounded",
-          scope: [
-            { labelId: spawn, permissions: scopePermissions("draft") },
-            { labelId: bartr, permissions: scopePermissions("read") },
-          ],
-        },
+        payload: { permissions: { ...defaultAgentPermissions, draft: false, send: true } },
       }),
       context,
     );
-    expect(description.details).toEqual([
-      "Autonomy: Propose → Execute bounded work",
-      "− Draft",
-      "+ Send",
-      "Project Spawn: Read → Read & draft",
-      "+ Project Bartr (Read)",
-    ]);
-  });
-});
-
-describe("scope access", () => {
-  it("maps read, draft and execute presets and keeps other mixes custom", () => {
-    expect(scopeAccess(scopePermissions("read"))).toBe("read");
-    expect(scopeAccess(scopePermissions("draft"))).toBe("draft");
-    expect(scopeAccess(scopePermissions("execute"))).toBe("execute");
-    expect(scopePermissions("execute")).toMatchObject({ read: true, draft: true, execute: true });
-    expect(scopeAccess({ ...scopePermissions("read"), execute: true })).toBe("custom");
-    expect(scopeAccess({ ...scopePermissions("read"), merge: true })).toBe("custom");
-    expect(scopeAccess({ ...scopePermissions("draft"), read: false })).toBe("custom");
-  });
-  it("adds a project with read and draft and removes it again", () => {
-    const id = ProjectLabelId.make("spawn");
-    const added = toggleScope([], id, true);
-    expect(added).toEqual([{ labelId: id, permissions: scopePermissions("draft") }]);
-    expect(toggleScope(added, id, false)).toEqual([]);
-  });
-  it("says which agent-level settings hold a project grant back", () => {
-    const permissions = { ...conservativeAgentPermissions, read: true, draft: true };
-    expect(scopeAccessLimit({ autonomy: "propose", permissions }, "execute")).toBe(
-      "Executing here also needs autonomy Execute bounded work or higher and the Start Work permission. Until then it asks you first.",
-    );
-    expect(
-      scopeAccessLimit(
-        { autonomy: "execute_bounded", permissions: { ...permissions, execute: true } },
-        "execute",
-      ),
-    ).toBeNull();
-    expect(scopeAccessLimit({ autonomy: "observe", permissions }, "draft")).toBe(
-      "Can't propose open items at Observe autonomy.",
-    );
-    expect(
-      scopeAccessLimit(
-        { autonomy: "propose", permissions: { ...permissions, read: false } },
-        "read",
-      ),
-    ).toBe("Has no effect while the Read permission is off.");
-    expect(scopeAccessLimit({ autonomy: "propose", permissions }, "read")).toBeNull();
+    expect(description.details).toEqual(["− Draft", "+ Send"]);
   });
 });
 
 describe("agentWorkStartPolicy", () => {
-  const base = { permissions: { ...conservativeAgentPermissions, execute: true } };
   it("mirrors the server gate", () => {
-    expect(agentWorkStartPolicy({ ...base, autonomy: "observe" }).outcome).toBe("refused");
-    expect(agentWorkStartPolicy({ ...base, autonomy: "propose" }).outcome).toBe("asks");
+    expect(agentWorkStartPolicy({ permissions: defaultAgentPermissions }).outcome).toBe("starts");
     expect(
-      agentWorkStartPolicy({
-        ...base,
-        autonomy: "autonomous_within_policy",
-        permissions: conservativeAgentPermissions,
-      }).outcome,
+      agentWorkStartPolicy({ permissions: { ...defaultAgentPermissions, execute: false } }).outcome,
     ).toBe("asks");
     expect(
-      agentWorkStartPolicy({
-        ...base,
-        autonomy: "execute_bounded",
-        permissions: { ...base.permissions, read: false },
-      }).outcome,
+      agentWorkStartPolicy({ permissions: { ...defaultAgentPermissions, read: false } }).outcome,
     ).toBe("asks");
-    expect(agentWorkStartPolicy({ ...base, autonomy: "execute_bounded" }).outcome).toBe("scoped");
   });
 });
 
 describe("agentRepositoryAccess", () => {
-  const spawn = ProjectLabelId.make("spawn");
-  const bartr = ProjectLabelId.make("bartr");
-  const ops = ProjectLabelId.make("ops");
   const audit = ProjectId.make("audit");
   const site = ProjectId.make("site");
   const app = ProjectId.make("app");
-  const labels = [
-    { id: spawn, name: "Spawn", repositoryIds: [audit, site, ProjectId.make("gone")] },
-    { id: ops, name: "Ops", repositoryIds: [site] },
-    { id: bartr, name: "Bartr", repositoryIds: [app, site] },
-  ];
   const repositories = [
-    { id: audit, title: "booking-audit" },
     { id: site, title: "Website" },
+    { id: audit, title: "booking-audit" },
     { id: app, title: "app" },
   ];
-  const executor = {
-    projectId: null,
-    autonomy: "execute_bounded" as const,
-    permissions: { ...conservativeAgentPermissions, read: true, draft: true, execute: true },
-  };
   const summary = (entries: ReturnType<typeof agentRepositoryAccess>) =>
-    entries.map((entry) => [entry.title, entry.projects.join(","), entry.executable]);
+    entries.map((entry) => [entry.title, entry.home, entry.executable]);
 
-  it("offers only repositories linked to read grants, once each", () => {
-    const scope = [
-      { labelId: spawn, permissions: scopePermissions("read") },
-      { labelId: bartr, permissions: scopePermissions("draft") },
-      { labelId: ops, permissions: { ...scopePermissions("execute"), read: false } },
-    ];
-    expect(summary(agentRepositoryAccess({ ...executor, scope }, labels, repositories))).toEqual([
-      ["app", "Bartr", false],
-      ["booking-audit", "Spawn", false],
-      ["Website", "Spawn,Bartr", false],
-    ]);
-    expect(agentRepositoryAccess({ ...executor, scope: [] }, labels, repositories)).toEqual([]);
-  });
-  it("executes linked repositories only through a Read & execute grant", () => {
-    const scope = [
-      { labelId: spawn, permissions: scopePermissions("execute") },
-      { labelId: bartr, permissions: scopePermissions("draft") },
-    ];
-    expect(
-      summary(agentRepositoryAccess({ ...executor, scope, projectId: app }, labels, repositories)),
-    ).toEqual([
-      ["app", "Bartr", true],
-      ["booking-audit", "Spawn", true],
-      ["Website", "Spawn,Bartr", true],
-    ]);
-    // Without an executing autonomy nothing is executable, the home repository included.
-    const proposer = { ...executor, autonomy: "propose" as const, scope, projectId: app };
-    expect(
-      agentRepositoryAccess(proposer, labels, repositories).some((entry) => entry.executable),
-    ).toBe(false);
-  });
-  it("puts the home repository first and drops one that is no longer listed", () => {
+  it("offers every repository, home first", () => {
     expect(
       summary(
-        agentRepositoryAccess({ ...executor, scope: [], projectId: app }, labels, repositories),
+        agentRepositoryAccess(
+          { projectId: site, permissions: defaultAgentPermissions },
+          repositories,
+        ),
       ),
-    ).toEqual([["app", "", true]]);
+    ).toEqual([
+      ["Website", true, true],
+      ["app", false, true],
+      ["booking-audit", false, true],
+    ]);
+  });
+  it("marks every repository as asking first without Start Work", () => {
     expect(
       agentRepositoryAccess(
-        { ...executor, scope: [], projectId: ProjectId.make("gone") },
-        labels,
+        { projectId: null, permissions: { ...defaultAgentPermissions, execute: false } },
         repositories,
-      ),
-    ).toEqual([]);
-  });
-  it("reads nothing without the agent's Read permission", () => {
-    const agent = {
-      ...executor,
-      projectId: app,
-      permissions: { ...executor.permissions, read: false },
-      scope: [{ labelId: spawn, permissions: scopePermissions("execute") }],
-    };
-    const entries = agentRepositoryAccess(agent, labels, repositories);
-    expect(entries.some((entry) => entry.readable || entry.executable)).toBe(false);
-    expect(agentReadableLabels(agent, labels)).toEqual([]);
-    expect(agentReadableLabels({ ...agent, permissions: executor.permissions }, labels)).toEqual([
-      labels[0],
-    ]);
+      ).some((entry) => entry.executable),
+    ).toBe(false);
   });
 });
 
@@ -582,29 +452,6 @@ describe("describeCommitmentHistory", () => {
     expect(
       describeCommitmentHistory({ who: "agent:gone", fromStatus: "open", toStatus: "open" }, names),
     ).toEqual({ who: "An agent", change: "Open" });
-  });
-});
-
-describe("groupAgentsByScope", () => {
-  const spawn = { key: "spawn", name: "Spawn", color: undefined };
-  const bartr = { key: "bartr", name: "Bartr", color: undefined };
-  it("lists an agent under each scoped project and unscoped agents last", () => {
-    const scopes: Record<string, (typeof spawn)[]> = {
-      ops: [spawn],
-      eng: [spawn, bartr],
-      solo: [],
-    };
-    const sections = groupAgentsByScope(["ops", "eng", "solo"], (agent) => scopes[agent]!);
-    expect(sections.map((section) => [section.project?.name ?? null, section.agents])).toEqual([
-      ["Bartr", ["eng"]],
-      ["Spawn", ["ops", "eng"]],
-      [null, ["solo"]],
-    ]);
-  });
-  it("returns one unlabeled section when no agent has scope", () => {
-    expect(groupAgentsByScope(["a", "b"], () => [])).toEqual([
-      { project: null, agents: ["a", "b"] },
-    ]);
   });
 });
 

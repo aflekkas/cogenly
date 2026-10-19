@@ -2,18 +2,12 @@ import { cn, randomUUID } from "~/lib/utils";
 import { ChevronDownIcon, GaugeIcon, RefreshCwIcon, type LucideIcon } from "lucide-react";
 import { useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
 import {
-  conservativeAgentPermissions,
+  defaultAgentPermissions,
   type EnvironmentId,
   type ProjectId,
   type ProjectLabelWithRepositories,
 } from "@t3tools/contracts";
-import { ProjectLabelChips, ProjectLabelPicker } from "~/projectLabels/ProjectLabelPicker";
-import {
-  AUTONOMY_OPTIONS,
-  eventFilterChoices,
-  toggleScope,
-  triggerErrorMessage,
-} from "./agentWorkspace.logic";
+import { eventFilterChoices, triggerErrorMessage } from "./agentWorkspace.logic";
 import { AgentFace } from "~/components/agents/face";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import {
@@ -254,25 +248,14 @@ export function AgentForm({
   pending,
   submitLabel,
   children,
-  labels = EMPTY_LABELS,
-  onDraftChange,
 }: {
-  /** Projects the agent can be granted; scope is chosen here, never inferred. */
-  labels?: ReadonlyArray<ProjectLabelWithRepositories>;
   initial: AgentDraft;
-  /** Every edit, for callers whose other controls depend on the draft's policy. */
-  onDraftChange?: ((draft: AgentDraft) => void) | undefined;
   onSubmit: (draft: AgentDraft) => Promise<unknown>;
   pending: boolean;
   submitLabel: string;
   children?: ReactNode;
 }) {
-  const client = useAgentsClient();
-  const [draft, setDraftState] = useState(initial);
-  const setDraft = (next: AgentDraft) => {
-    setDraftState(next);
-    onDraftChange?.(next);
-  };
+  const [draft, setDraft] = useState(initial);
   return (
     <form
       className="agent-form"
@@ -316,62 +299,6 @@ export function AgentForm({
           onChange={(event) => setDraft({ ...draft, responsibility: event.target.value })}
         />
       </label>
-      <div className="agent-form-field">
-        <span>Projects it may access</span>
-        <div className="agent-form-chips">
-          <ProjectLabelChips
-            labels={labels}
-            ids={draft.scope?.map((entry) => entry.labelId) ?? []}
-          />
-          <ProjectLabelPicker
-            onManage={client.openProjectSettings}
-            labels={labels}
-            selectedIds={draft.scope?.map((entry) => entry.labelId) ?? []}
-            onToggle={(labelId, selected) =>
-              setDraft({ ...draft, scope: toggleScope(draft.scope ?? [], labelId, selected) })
-            }
-          >
-            {draft.scope?.length ? "Change" : "Add project"}
-          </ProjectLabelPicker>
-        </div>
-        <small>
-          {labels.length === 0
-            ? "No projects yet. Without one it sees only its own conversation and items."
-            : "Tags alone grant nothing; it can read and propose items only in these projects."}
-        </small>
-      </div>
-      <div className="agent-form-field">
-        <span>Autonomy</span>
-        <Select
-          value={draft.autonomy ?? "propose"}
-          onValueChange={(value) => {
-            const option = AUTONOMY_OPTIONS.find((item) => item.value === value);
-            if (option) setDraft({ ...draft, autonomy: option.value });
-          }}
-        >
-          <SelectTrigger aria-label="Autonomy">
-            <SelectValue>
-              {
-                AUTONOMY_OPTIONS.find((option) => option.value === (draft.autonomy ?? "propose"))
-                  ?.label
-              }
-            </SelectValue>
-          </SelectTrigger>
-          <SelectPopup>
-            {AUTONOMY_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value} label={option.label}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-        <small>
-          {
-            AUTONOMY_OPTIONS.find((option) => option.value === (draft.autonomy ?? "propose"))
-              ?.description
-          }
-        </small>
-      </div>
       <label>
         Instructions
         <textarea
@@ -619,7 +546,7 @@ const EMPTY_LABELS: ReadonlyArray<ProjectLabelWithRepositories> = [];
 
 /**
  * Creating an agent is always an explicit owner decision: nothing else in the app
- * creates one. New agents start at Propose with read and draft grants.
+ * creates one. New agents reach every project and start with read, draft and Start Work.
  */
 export function CreateAgent({
   environmentId,
@@ -644,19 +571,8 @@ export function CreateAgent({
   const [addTrigger, setAddTrigger] = useState(false);
   const [createdAgent, setCreatedAgent] = useState<AgentContact | null>(null);
   const [workspaceId, setWorkspaceId] = useState(projectId);
-  // The first trigger may only name what the agent will be able to read.
-  const [policy, setPolicy] = useState<Pick<AgentDraft, "scope" | "autonomy" | "permissions">>({
-    scope: [],
-    autonomy: "propose",
-    permissions: conservativeAgentPermissions,
-  });
   const triggerChoices = eventFilterChoices(
-    {
-      scope: policy.scope ?? [],
-      autonomy: policy.autonomy ?? "propose",
-      permissions: policy.permissions ?? conservativeAgentPermissions,
-      projectId: workspaceId ?? null,
-    },
+    { permissions: defaultAgentPermissions },
     labels,
     workspaces,
   );
@@ -683,13 +599,9 @@ export function CreateAgent({
           {model ? (
             <>
               <AgentForm
-                labels={labels}
                 initial={{
                   name: "",
                   responsibility: "",
-                  scope: [],
-                  autonomy: "propose",
-                  permissions: conservativeAgentPermissions,
                   instructions: "",
                   avatar: { seed: randomUUID() },
                   modelSelection: model,
@@ -698,7 +610,6 @@ export function CreateAgent({
                   dailyRunCap: 24,
                 }}
                 pending={pending}
-                onDraftChange={setPolicy}
                 submitLabel={createdAgent ? "Save agent & trigger" : "Create agent"}
                 onSubmit={async (draft) => {
                   setPending(true);

@@ -25,8 +25,8 @@ import { agentRepositoryAccess } from "./agentWorkspace.logic";
 import type { AgentContact, AgentWorkspaceView } from "./agents.types";
 
 /**
- * Start a normal Work session owned by this agent, in its home repository or one
- * linked to its granted projects. It runs in a new worktree and appears in Work.
+ * Start a normal Work session owned by this agent, in any repository. It runs in a
+ * new worktree and appears in Work.
  * Starting it yourself is your approval, so it starts in any listed repository; each
  * one says whether the agent could start Work there on its own or would have to ask.
  * The server may still answer with a pending approval; that is said plainly.
@@ -43,7 +43,7 @@ export function AgentStartWork({
   onOpenItems: () => void;
 }) {
   const client = useAgentsClient();
-  const repositories = agentRepositoryAccess(agent, workspace.labels, workspace.repositories);
+  const repositories = agentRepositoryAccess(agent, workspace.repositories);
   const [projectId, setProjectId] = useState<ProjectId | null>(repositories[0]?.id ?? null);
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -96,9 +96,7 @@ export function AgentStartWork({
               </p>
             ) : repositories.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                {agent.name} has no home repository, and none is linked to the projects it is
-                granted. Add a project to its scope in Responsibilities, and link repositories in
-                Settings → Projects.
+                There are no repositories yet. Add a project first, or ask {agent.name} to add one.
               </p>
             ) : (
               <div className="flex flex-col gap-3">
@@ -124,7 +122,6 @@ export function AgentStartWork({
                           <span className="text-2xs text-muted-foreground">
                             {[
                               repository.home ? "Home" : "",
-                              repository.projects.join(", "),
                               repository.executable ? "" : "Asks you first",
                             ]
                               .filter(Boolean)
@@ -138,7 +135,7 @@ export function AgentStartWork({
                     <span className="font-normal">
                       {selected.executable
                         ? `${agent.name} may start Work here on its own too.`
-                        : `On its own, ${agent.name} would ask you before starting Work here. Starting it yourself approves this one session; it doesn't widen its scope.`}
+                        : `On its own, ${agent.name} would ask you before starting Work here. Starting it yourself approves this one session; it doesn't change its permissions.`}
                     </span>
                   )}
                 </div>

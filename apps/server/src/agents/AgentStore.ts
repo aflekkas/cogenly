@@ -2,7 +2,6 @@ import { decodeAgentRow } from "./agentRecord.ts";
 import {
   Agent,
   AgentPermissions,
-  AgentScope,
   AgentError,
   AgentId,
   FactId,
@@ -40,7 +39,6 @@ const decodeEventContext = Schema.decodeUnknownEffect(Schema.fromJsonString(Agen
 const encodeEventContext = Schema.encodeSync(Schema.fromJsonString(AgentEventContext));
 const decodeRun = Schema.decodeUnknownEffect(AgentWorkRun);
 const encodePermissions = Schema.encodeEffect(Schema.fromJsonString(AgentPermissions));
-const encodeScope = Schema.encodeEffect(Schema.fromJsonString(AgentScope));
 const decodeLatestMessage = Schema.decodeUnknownEffect(
   Schema.fromJsonString(AgentListItem.fields.latestMessage),
 );
@@ -134,18 +132,14 @@ const make = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.gen(function* () {
-          const agent = yield* get(input.agentId);
-          const labels = agent.permissions.read
-            ? agent.scope
-                .filter((s) => s.permissions.read && (principal === "user" || s.permissions.draft))
-                .map((s) => s.labelId)
-            : [];
+          yield* get(input.agentId);
+          // An agent reads every project, so its own notes carry no project labels.
           const replacement = {
             subject: "Agent memory",
             text: input.text,
             agentId: input.agentId,
-            labelIds: labels,
-            visibility: labels.length ? ("labels" as const) : ("user" as const),
+            labelIds: [],
+            visibility: "user" as const,
             sourceRefs: input.source?.startsWith("thread:")
               ? [{ kind: "thread" as const, id: input.source.slice(7) }]
               : [],
@@ -220,20 +214,10 @@ const make = Effect.gen(function* () {
         return yield* get(agent.id);
       }).pipe(Effect.mapError(storeError)),
     save: (agent) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            for (const grant of agent.scope) {
-              const labels =
-                yield* sql`SELECT label_id FROM project_labels WHERE label_id = ${grant.labelId}`;
-              if (!labels.length)
-                return yield* new AgentError({ message: "Agent scope label not found." });
-            }
-            yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, ${encodeAgent(agent)}, 1, ${agent.dailyRunCap}) ON CONFLICT(agent_id) DO UPDATE SET payload_json = excluded.payload_json, daily_run_cap = excluded.daily_run_cap`;
-            return yield* get(agent.id);
-          }),
-        )
-        .pipe(Effect.mapError(storeError)),
+      sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, ${encodeAgent(agent)}, 1, ${agent.dailyRunCap}) ON CONFLICT(agent_id) DO UPDATE SET payload_json = excluded.payload_json, daily_run_cap = excluded.daily_run_cap`.pipe(
+        Effect.andThen(get(agent.id)),
+        Effect.mapError(storeError),
+      ),
 
     retire: (id) =>
       sql`UPDATE agents SET enabled = 0 WHERE agent_id = ${id}`.pipe(
@@ -276,7 +260,7 @@ const make = Effect.gen(function* () {
           budgetChars: agent === null ? 4000 : 16000,
         });
         if (agent === null) return context.text;
-        return `You are ${agent.name}, the owner's persistent agent.\nResponsibility:\n${agent.responsibility}\nAutonomy: ${agent.autonomy}. Permissions: ${yield* encodePermissions(agent.permissions)}. Scope grants: ${yield* encodeScope(agent.scope)}.\nStanding instructions:\n${agent.instructions}\n\n${context.text}\nUse fact_search to retrieve accessible facts, fact_propose for uncertain facts, and fact_supersede to replace proposals. memory_read, memory_remember and memory_forget remain aliases for your own facts. Only the user can confirm a proposal. Use list_open_items for shared commitments, propose_commitment for extracted obligations, and update_commitment_status with evidence. Use request_agent_approval for new triggers or permission changes; you can never approve your own requests. Use start_agent_work to start or propose repository Work. Send concise messages to the owner.`;
+        return `You are ${agent.name}, the owner's persistent agent.\nResponsibility:\n${agent.responsibility}\nYou act on your own across all of the owner's projects and repositories, within your permissions: ${yield* encodePermissions(agent.permissions)}. Use t3_project_list to see them and t3_project_create or t3_project_clone to add one.\nStanding instructions:\n${agent.instructions}\n\n${context.text}\nUse fact_search to retrieve accessible facts, fact_propose for uncertain facts, and fact_supersede to replace proposals. memory_read, memory_remember and memory_forget remain aliases for your own facts. Only the user can confirm a proposal. Use list_open_items for shared commitments, propose_commitment for extracted obligations, and update_commitment_status with evidence. Use request_agent_approval for new triggers or permission changes; you can never approve your own requests. Use start_agent_work to start or propose repository Work. Send concise messages to the owner.`;
       }).pipe(Effect.mapError(storeError)),
     carryOver: (agentId, ordinal, messages) =>
       Effect.gen(function* () {

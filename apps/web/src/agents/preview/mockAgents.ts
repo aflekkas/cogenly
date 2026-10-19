@@ -12,7 +12,7 @@ import {
   ProjectLabelId,
   ProviderInstanceId,
   ThreadId,
-  conservativeAgentPermissions,
+  defaultAgentPermissions,
   type AgentApproval,
   type Commitment,
 } from "@t3tools/contracts";
@@ -54,9 +54,7 @@ export function createMockAgentsClient(): AgentsClient {
     consecutiveFailures: 0,
     backoffUntil: null,
     responsibility: "",
-    scope: [],
-    autonomy: "propose" as const,
-    permissions: conservativeAgentPermissions,
+    permissions: defaultAgentPermissions,
     notifyPolicy: "meaningful_changes" as const,
     memory: [],
     activity: [],
@@ -73,12 +71,6 @@ export function createMockAgentsClient(): AgentsClient {
     repositoryIds: [ProjectId.make("preview-repo")],
   };
   const repositories = [{ id: ProjectId.make("preview-repo"), title: "preview-repo" }];
-  const scope = [
-    {
-      labelId: label.id,
-      permissions: { ...conservativeAgentPermissions, read: true, draft: true },
-    },
-  ];
   let commitments: Commitment[] = [
     {
       id: "preview-item-1",
@@ -148,7 +140,6 @@ export function createMockAgentsClient(): AgentsClient {
     conversationThreadId: ThreadId.make("preview-juniper"),
     state: "blocked",
     responsibility: "Keep the test suite healthy and tell me what needs a decision.",
-    scope,
     approvals: [
       {
         id: "preview-approval-1",
@@ -288,9 +279,7 @@ export function createMockAgentsClient(): AgentsClient {
   };
   const workspaceFor = (agent: AgentContact): Omit<AgentWorkspaceView, "refresh"> => ({
     commitments: commitments.filter(
-      (item) =>
-        item.agentId === agent.id ||
-        item.labelIds.some((id) => agent.scope.some((entry) => entry.labelId === id)),
+      (item) => item.agentId === agent.id || item.labelIds.length > 0,
     ),
     activity: {
       runs:
@@ -336,14 +325,9 @@ export function createMockAgentsClient(): AgentsClient {
   // Mirrors the server: omitted policy fields keep their current value.
   const policy = (
     draft: Parameters<AgentsClient["save"]>[1],
-    current: Pick<
-      AgentContact,
-      "responsibility" | "scope" | "autonomy" | "permissions" | "notifyPolicy"
-    >,
+    current: Pick<AgentContact, "responsibility" | "permissions" | "notifyPolicy">,
   ) => ({
     responsibility: draft.responsibility ?? current.responsibility,
-    scope: draft.scope ?? current.scope,
-    autonomy: draft.autonomy ?? current.autonomy,
     permissions: draft.permissions ?? current.permissions,
     notifyPolicy: draft.notifyPolicy ?? current.notifyPolicy,
   });

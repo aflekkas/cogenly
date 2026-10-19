@@ -257,11 +257,6 @@ const make = Effect.gen(function* () {
         "delete",
         { id },
         Effect.gen(function* () {
-          // Scope is stored in agent policy JSON; clean it with the tag links in
-          // this transaction so deleting a label immediately revokes its grants.
-          yield* sql`UPDATE agents SET payload_json = json_set(payload_json, '$.scope', json(
-            (SELECT json_group_array(json(s.value)) FROM json_each(agents.payload_json, '$.scope') s WHERE json_extract(s.value, '$.labelId') <> ${id})
-          )) WHERE EXISTS (SELECT 1 FROM json_each(agents.payload_json, '$.scope') s WHERE json_extract(s.value, '$.labelId') = ${id})`;
           yield* sql`UPDATE commitments SET payload_json = json_set(payload_json, '$.labelIds', json(
             (SELECT json_group_array(l.value) FROM json_each(commitments.payload_json, '$.labelIds') l WHERE l.value <> ${id})
           )) WHERE id IN (SELECT commitment_id FROM commitment_labels WHERE label_id = ${id})`;

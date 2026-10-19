@@ -18,8 +18,6 @@ import type {
   ScheduledTaskUpsertSchedule,
 } from "@t3tools/contracts";
 
-type Autonomy = Agent["autonomy"];
-type Scope = Agent["scope"];
 type CommitmentStatus = Commitment["status"];
 
 // Open items -----------------------------------------------------------------
@@ -258,7 +256,7 @@ export function describeSchedule(
 export interface ApprovalDescription {
   /** One line naming the action and its target. */
   title: string;
-  /** Supporting lines: the prompt, or each permission and scope change. */
+  /** Supporting lines: the prompt, or each permission change. */
   details: ReadonlyArray<string>;
 }
 
@@ -269,7 +267,7 @@ const excerpt = (text: string, max = 240) =>
 export function describeApproval(
   approval: Pick<AgentApproval, "action">,
   context: {
-    agent: Pick<Agent, "name" | "permissions" | "scope" | "autonomy">;
+    agent: Pick<Agent, "name" | "permissions">;
     repositoryName: (projectId: ProjectId) => string | undefined;
     labelName: (labelId: ProjectLabelId) => string | undefined;
   },
@@ -296,43 +294,21 @@ export function describeApproval(
     case "change_permissions":
       return {
         title: "Change its permissions",
-        details: policyDiff(context.agent, action.payload, context.labelName),
+        details: policyDiff(context.agent, action.payload),
       };
   }
 }
 
-/** Each change as "+ Grant", "− Grant", "Autonomy: A → B", "+ Project X", "− Project Y". */
+/** Each change as "+ Grant" or "− Grant". */
 export function policyDiff(
-  current: Pick<Agent, "permissions" | "scope" | "autonomy">,
-  next: {
-    permissions: AgentPermissions;
-    scope?: Scope | undefined;
-    autonomy?: Autonomy | undefined;
-  },
-  labelName: (labelId: ProjectLabelId) => string | undefined,
+  current: Pick<Agent, "permissions">,
+  next: { permissions: AgentPermissions },
 ) {
   const lines: string[] = [];
-  if (next.autonomy && next.autonomy !== current.autonomy)
-    lines.push(`Autonomy: ${AUTONOMY_LABEL[current.autonomy]} → ${AUTONOMY_LABEL[next.autonomy]}`);
   for (const option of PERMISSION_OPTIONS) {
     const before = current.permissions[option.key];
     const after = next.permissions[option.key];
     if (before !== after) lines.push(`${after ? "+" : "−"} ${option.label}`);
-  }
-  if (next.scope) {
-    const name = (id: ProjectLabelId) => labelName(id) ?? "a deleted project";
-    const was = new Map(current.scope.map((entry) => [entry.labelId, entry]));
-    const now = new Map(next.scope.map((entry) => [entry.labelId, entry]));
-    for (const [id, entry] of now) {
-      const previous = was.get(id);
-      if (!previous)
-        lines.push(`+ Project ${name(id)} (${SCOPE_ACCESS_LABEL[scopeAccess(entry.permissions)]})`);
-      else if (scopeAccess(previous.permissions) !== scopeAccess(entry.permissions))
-        lines.push(
-          `Project ${name(id)}: ${SCOPE_ACCESS_LABEL[scopeAccess(previous.permissions)]} → ${SCOPE_ACCESS_LABEL[scopeAccess(entry.permissions)]}`,
-        );
-    }
-    for (const id of was.keys()) if (!now.has(id)) lines.push(`− Project ${name(id)}`);
   }
   return lines.length > 0 ? lines : ["No effective change"];
 }
@@ -394,20 +370,17 @@ export function normalizeEventFilter(
 }
 
 /**
- * What an agent's event filter may name: the projects and repositories it can read,
- * which the server also enforces (`event_filter_out_of_scope`).
+ * What an agent's event filter may name: every project and repository, as long as
+ * it may read at all, which the server also enforces (`event_filter_out_of_scope`).
  */
-export function eventFilterChoices<L extends ScopeLabel>(
-  agent: Pick<Agent, "scope" | "projectId" | "permissions" | "autonomy">,
+export function eventFilterChoices<L extends { id: ProjectLabelId }>(
+  agent: Pick<Agent, "permissions">,
   labels: ReadonlyArray<L>,
   repositories: ReadonlyArray<{ id: ProjectId; title: string }>,
 ) {
-  return {
-    labels: agentReadableLabels(agent, labels),
-    repositories: agentRepositoryAccess(agent, labels, repositories)
-      .filter((repository) => repository.readable)
-      .map(({ id, title }) => ({ id, title })),
-  };
+  return agent.permissions.read
+    ? { labels: [...labels], repositories: repositories.map(({ id, title }) => ({ id, title })) }
+    : { labels: [], repositories: [] };
 }
 
 /** The ids a saved filter names that are no longer among the choices. */
@@ -427,7 +400,7 @@ export function eventFilterOutOfScope(
 }
 
 export const EVENT_FILTER_OUT_OF_SCOPE_MESSAGE =
-  "This trigger is limited to a project or repository the agent can't read. Remove it from the filter, or grant the project Read in the agent's Responsibilities.";
+  "This trigger is limited to a project or repository that no longer exists, or the agent's Read permission is off. Remove it from the filter, or turn Read back on.";
 export const EVENT_RUN_NOW_UNSUPPORTED_MESSAGE =
   "Event triggers run only when the event happens, so there is no Run now.";
 
@@ -469,41 +442,6 @@ export function describeEventFilter(filter: EventFilter | undefined, names: Filt
 
 // Responsibilities -----------------------------------------------------------
 
-export const AUTONOMY_LABEL: Record<Autonomy, string> = {
-  observe: "Observe",
-  propose: "Propose",
-  execute_bounded: "Execute bounded work",
-  autonomous_within_policy: "Autonomous within policy",
-};
-
-export const AUTONOMY_OPTIONS: ReadonlyArray<{
-  value: Autonomy;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "observe",
-    label: AUTONOMY_LABEL.observe,
-    description: "Reads and summarizes. Never changes anything.",
-  },
-  {
-    value: "propose",
-    label: AUTONOMY_LABEL.propose,
-    description: "Drafts plans and open items. Asks you before starting Work or acting.",
-  },
-  {
-    value: "execute_bounded",
-    label: AUTONOMY_LABEL.execute_bounded,
-    description:
-      "Starts Work in its home repository and projects granted Read & execute. Asks for anything else.",
-  },
-  {
-    value: "autonomous_within_policy",
-    label: AUTONOMY_LABEL.autonomous_within_policy,
-    description: "Acts on its own within the grants below. New triggers and grants still need you.",
-  },
-];
-
 type PermissionKey = keyof AgentPermissions;
 export const PERMISSION_OPTIONS: ReadonlyArray<{
   key: PermissionKey;
@@ -526,8 +464,7 @@ export const PERMISSION_OPTIONS: ReadonlyArray<{
   {
     key: "execute",
     label: "Start Work",
-    description:
-      "Start coding sessions and run tools, in its home repository and projects granted Read & execute.",
+    description: "Start coding sessions and run tools in any repository.",
     highImpact: false,
   },
   {
@@ -542,211 +479,43 @@ export const PERMISSION_OPTIONS: ReadonlyArray<{
   { key: "delete", label: "Delete", description: "Delete or remove data.", highImpact: true },
 ];
 
-const EXECUTING_AUTONOMY: ReadonlySet<Autonomy> = new Set([
-  "execute_bounded",
-  "autonomous_within_policy",
-]);
-
-/** Whether the agent's own settings let it execute anywhere: Read, Start Work and an executing autonomy. */
-export function agentCanExecute(agent: Pick<Agent, "autonomy" | "permissions">) {
-  return (
-    agent.permissions.read && agent.permissions.execute && EXECUTING_AUTONOMY.has(agent.autonomy)
-  );
+/** Whether the agent may start Work on its own: it needs both Read and Start Work. */
+export function agentCanExecute(agent: Pick<Agent, "permissions">) {
+  return agent.permissions.read && agent.permissions.execute;
 }
 
-/**
- * What happens when the agent tries to start Work, mirroring the server's gate:
- * observe agents are refused; propose, or no Read or Start Work grant asks the
- * owner; otherwise it may start Work in its home repository and in repositories linked
- * to projects granted Read & execute, and asks for any other one.
- */
-export function agentWorkStartPolicy(agent: Pick<Agent, "autonomy" | "permissions">): {
-  outcome: "refused" | "asks" | "scoped";
+/** What happens when the agent tries to start Work, mirroring the server's gate. */
+export function agentWorkStartPolicy(agent: Pick<Agent, "permissions">): {
+  outcome: "asks" | "starts";
   text: string;
 } {
-  if (agent.autonomy === "observe")
-    return { outcome: "refused", text: "Can't start Work at this autonomy level." };
   if (!agentCanExecute(agent))
     return {
       outcome: "asks",
       text: !agent.permissions.execute
         ? "Asks you before starting Work (no Start Work permission)."
-        : !agent.permissions.read
-          ? "Asks you before starting Work (no Read permission)."
-          : "Asks you before starting Work.",
+        : "Asks you before starting Work (no Read permission).",
     };
-  return {
-    outcome: "scoped",
-    text: "Starts Work on its own in its home repository and in projects granted Read & execute; asks you for any other repository.",
-  };
-}
-
-export type ScopeAccess = "read" | "draft" | "execute" | "custom";
-export const SCOPE_ACCESS_LABEL: Record<ScopeAccess, string> = {
-  read: "Read",
-  draft: "Read & draft",
-  execute: "Read & execute",
-  custom: "Custom",
-};
-/** The per-project choices, each a step up from the last. */
-export const SCOPE_ACCESS_OPTIONS: ReadonlyArray<{
-  value: Exclude<ScopeAccess, "custom">;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "read",
-    label: SCOPE_ACCESS_LABEL.read,
-    description: "Reads its repositories, facts and open items.",
-  },
-  {
-    value: "draft",
-    label: SCOPE_ACCESS_LABEL.draft,
-    description: "Also proposes open items for you to confirm. Never starts Work here.",
-  },
-  {
-    value: "execute",
-    label: SCOPE_ACCESS_LABEL.execute,
-    description: "Also starts Work in its repositories without asking, within its autonomy.",
-  },
-];
-const NO_PERMISSIONS: AgentPermissions = {
-  read: false,
-  draft: false,
-  execute: false,
-  send: false,
-  create_pr: false,
-  merge: false,
-  deploy: false,
-  delete: false,
-};
-
-/** Scope grants are read, draft and execute per project; any other mix is kept as "Custom". */
-export function scopeAccess(permissions: AgentPermissions): ScopeAccess {
-  const { read, draft, execute, ...rest } = permissions;
-  if (Object.values(rest).some(Boolean) || !read) return "custom";
-  if (execute) return draft ? "execute" : "custom";
-  return draft ? "draft" : "read";
-}
-
-export function scopePermissions(access: Exclude<ScopeAccess, "custom">): AgentPermissions {
-  return {
-    ...NO_PERMISSIONS,
-    read: true,
-    draft: access !== "read",
-    execute: access === "execute",
-  };
+  return { outcome: "starts", text: "Starts Work on its own in any repository." };
 }
 
 /**
- * Why a project's grant does less than its label says, given the agent-level settings
- * the server also requires; null when the grant takes full effect.
- */
-export function scopeAccessLimit(
-  agent: Pick<Agent, "autonomy" | "permissions">,
-  access: ScopeAccess,
-): string | null {
-  if (!agent.permissions.read) return "Has no effect while the Read permission is off.";
-  if (access === "execute" && !agentCanExecute(agent)) {
-    const needs = [
-      EXECUTING_AUTONOMY.has(agent.autonomy) ? null : "autonomy Execute bounded work or higher",
-      agent.permissions.execute ? null : "the Start Work permission",
-    ].filter((need) => need !== null);
-    return `Executing here also needs ${needs.join(" and ")}. Until then it asks you first.`;
-  }
-  if ((access === "draft" || access === "execute") && !agent.permissions.draft)
-    return "Can't propose open items while the Draft permission is off.";
-  if ((access === "draft" || access === "execute") && agent.autonomy === "observe")
-    return "Can't propose open items at Observe autonomy.";
-  return null;
-}
-
-/** Add a project with read & draft access, or remove it. Other grants are untouched. */
-export function toggleScope(scope: Scope, labelId: ProjectLabelId, selected: boolean): Scope {
-  const without = scope.filter((entry) => entry.labelId !== labelId);
-  return selected ? [...without, { labelId, permissions: scopePermissions("draft") }] : without;
-}
-
-type ScopeLabel = {
-  id: ProjectLabelId;
-  name: string;
-  repositoryIds: ReadonlyArray<ProjectId>;
-};
-
-/** Projects the agent may read, and so name in event trigger filters. */
-export function agentReadableLabels<L extends { id: ProjectLabelId }>(
-  agent: Pick<Agent, "scope" | "permissions">,
-  labels: ReadonlyArray<L>,
-): L[] {
-  if (!agent.permissions.read) return [];
-  const readable = new Set(
-    agent.scope.filter((entry) => entry.permissions.read).map((entry) => entry.labelId),
-  );
-  return labels.filter((label) => readable.has(label.id));
-}
-
-/**
- * The agent's repositories, mirroring the server's `AgentAccessScope`: its home
- * repository first, then those linked to projects it is granted Read on, each once with
- * the projects that link it. `readable` repositories can be read and named in event
- * filters; `executable` ones it may start Work in without asking, which takes Read and
- * execute on the same project grant (the home repository needs neither) plus the
- * agent's own Read, Start Work and an executing autonomy. Tags are never grants.
+ * Where Work can start, home repository first: every repository, each marked with
+ * whether the agent may start Work there on its own or would ask you first.
  */
 export function agentRepositoryAccess(
-  agent: Pick<Agent, "scope" | "projectId" | "permissions" | "autonomy">,
-  labels: ReadonlyArray<ScopeLabel>,
+  agent: Pick<Agent, "projectId" | "permissions">,
   repositories: ReadonlyArray<{ id: ProjectId; title: string }>,
 ) {
-  const grants = new Map(
-    agent.scope.filter((entry) => entry.permissions.read).map((entry) => [entry.labelId, entry]),
-  );
-  const canExecute = agentCanExecute(agent);
-  const byId = new Map(repositories.map((repository) => [repository.id, repository]));
-  const result = new Map<
-    ProjectId,
-    {
-      id: ProjectId;
-      title: string;
-      projects: string[];
-      home: boolean;
-      readable: boolean;
-      executable: boolean;
-    }
-  >();
-  const home = agent.projectId === null ? undefined : byId.get(agent.projectId);
-  if (home)
-    result.set(home.id, {
-      ...home,
-      projects: [],
-      home: true,
-      readable: agent.permissions.read,
-      executable: canExecute,
-    });
-  for (const label of labels) {
-    const grant = grants.get(label.id);
-    if (!grant) continue;
-    for (const repositoryId of label.repositoryIds) {
-      const repository = byId.get(repositoryId);
-      if (!repository) continue;
-      const entry = result.get(repositoryId) ?? {
-        ...repository,
-        projects: [],
-        home: false,
-        readable: agent.permissions.read,
-        executable: false,
-      };
-      entry.projects.push(label.name);
-      entry.executable ||= canExecute && grant.permissions.execute;
-      result.set(repositoryId, entry);
-    }
-  }
-  return [...result.values()].toSorted(
-    (a, b) =>
-      Number(b.home) - Number(a.home) ||
-      a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) ||
-      a.id.localeCompare(b.id),
-  );
+  const executable = agentCanExecute(agent);
+  return repositories
+    .map((repository) => ({ ...repository, home: repository.id === agent.projectId, executable }))
+    .toSorted(
+      (a, b) =>
+        Number(b.home) - Number(a.home) ||
+        a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) ||
+        a.id.localeCompare(b.id),
+    );
 }
 
 // Sidebar --------------------------------------------------------------------
@@ -772,42 +541,6 @@ export function decisionsWaitingCount(
 
 export const decisionsWaitingLabel = (count: number) =>
   `${count} ${count === 1 ? "decision" : "decisions"} waiting for you`;
-
-export interface AgentScopeHeading {
-  key: string;
-  name: string;
-  color: string | undefined;
-}
-
-/**
- * Agents under each project in their explicit scope (an agent in two projects
- * appears under both), alphabetical, then unscoped agents. With no scoped agent at
- * all the result is one section without a heading.
- */
-export function groupAgentsByScope<T>(
-  agents: ReadonlyArray<T>,
-  projectsOf: (agent: T) => ReadonlyArray<AgentScopeHeading>,
-): Array<{ project: AgentScopeHeading | null; agents: T[] }> {
-  const sections = new Map<string, { project: AgentScopeHeading; agents: T[] }>();
-  const other: T[] = [];
-  for (const agent of agents) {
-    const projects = projectsOf(agent);
-    if (projects.length === 0) other.push(agent);
-    for (const project of projects) {
-      const section = sections.get(project.key);
-      if (section) {
-        if (!section.agents.includes(agent)) section.agents.push(agent);
-      } else sections.set(project.key, { project, agents: [agent] });
-    }
-  }
-  const result: Array<{ project: AgentScopeHeading | null; agents: T[] }> = [
-    ...sections.values(),
-  ].toSorted((a, b) =>
-    a.project.name.localeCompare(b.project.name, undefined, { sensitivity: "base" }),
-  );
-  if (other.length > 0 || result.length === 0) result.push({ project: null, agents: other });
-  return result;
-}
 
 // Activity ---------------------------------------------------------------------
 
