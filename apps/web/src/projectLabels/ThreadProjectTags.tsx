@@ -32,6 +32,7 @@ import { useThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
+import { ProjectContextToggle } from "../context/ThreadContext";
 import {
   nextThreadLabelIds,
   PROJECT_LABEL_COLORS,
@@ -379,6 +380,9 @@ export function ThreadProjectTags(props: {
             </ComboboxItem>
           )}
         </ComboboxList>
+        {hasConfirmed ? (
+          <ProjectContextToggle environmentId={environmentId} threadId={threadId} />
+        ) : null}
         <div className="border-t border-border/70 p-1">
           <Button
             type="button"

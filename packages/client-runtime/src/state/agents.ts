@@ -24,6 +24,7 @@ export function createAgentWorkspaceAtoms<R, E>(
   return {
     factsList: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "facts.list",
+      ...refresh,
       tag: WS_METHODS.factsList,
     }),
     factsCreate: createEnvironmentRpcCommand(runtime, {

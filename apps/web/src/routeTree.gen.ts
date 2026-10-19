@@ -25,10 +25,12 @@ import { Route as SettingsProvidersRouteImport } from './routes/settings.provide
 import { Route as SettingsProjectsRouteImport } from './routes/settings.projects'
 import { Route as SettingsProjectTagsRouteImport } from './routes/settings.project-tags'
 import { Route as SettingsOpenSourceLicensesRouteImport } from './routes/settings.open-source-licenses'
+import { Route as SettingsMemoryRouteImport } from './routes/settings.memory'
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings.integrations'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
+import { Route as SettingsDataRouteImport } from './routes/settings.data'
 import { Route as SettingsConnectionsRouteImport } from './routes/settings.connections'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
@@ -117,6 +119,11 @@ const SettingsOpenSourceLicensesRoute =
     path: '/open-source-licenses',
     getParentRoute: () => SettingsRoute,
   } as any)
+const SettingsMemoryRoute = SettingsMemoryRouteImport.update({
+  id: '/memory',
+  path: '/memory',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsKeybindingsRoute = SettingsKeybindingsRouteImport.update({
   id: '/keybindings',
   path: '/keybindings',
@@ -135,6 +142,11 @@ const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
 const SettingsDiagnosticsRoute = SettingsDiagnosticsRouteImport.update({
   id: '/diagnostics',
   path: '/diagnostics',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsDataRoute = SettingsDataRouteImport.update({
+  id: '/data',
+  path: '/data',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsConnectionsRoute = SettingsConnectionsRouteImport.update({
@@ -187,10 +199,12 @@ export interface FileRoutesByFullPath {
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
+  '/settings/data': typeof SettingsDataRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/open-source-licenses': typeof SettingsOpenSourceLicensesRoute
   '/settings/project-tags': typeof SettingsProjectTagsRoute
   '/settings/projects': typeof SettingsProjectsRoute
@@ -214,10 +228,12 @@ export interface FileRoutesByTo {
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
+  '/settings/data': typeof SettingsDataRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/open-source-licenses': typeof SettingsOpenSourceLicensesRoute
   '/settings/project-tags': typeof SettingsProjectTagsRoute
   '/settings/projects': typeof SettingsProjectsRoute
@@ -244,10 +260,12 @@ export interface FileRoutesById {
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
+  '/settings/data': typeof SettingsDataRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/open-source-licenses': typeof SettingsOpenSourceLicensesRoute
   '/settings/project-tags': typeof SettingsProjectTagsRoute
   '/settings/projects': typeof SettingsProjectsRoute
@@ -275,10 +293,12 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/archived'
     | '/settings/connections'
+    | '/settings/data'
     | '/settings/diagnostics'
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/memory'
     | '/settings/open-source-licenses'
     | '/settings/project-tags'
     | '/settings/projects'
@@ -302,10 +322,12 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/archived'
     | '/settings/connections'
+    | '/settings/data'
     | '/settings/diagnostics'
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/memory'
     | '/settings/open-source-licenses'
     | '/settings/project-tags'
     | '/settings/projects'
@@ -331,10 +353,12 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/archived'
     | '/settings/connections'
+    | '/settings/data'
     | '/settings/diagnostics'
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/memory'
     | '/settings/open-source-licenses'
     | '/settings/project-tags'
     | '/settings/projects'
@@ -473,6 +497,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsOpenSourceLicensesRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/memory': {
+      id: '/settings/memory'
+      path: '/memory'
+      fullPath: '/settings/memory'
+      preLoaderRoute: typeof SettingsMemoryRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/keybindings': {
       id: '/settings/keybindings'
       path: '/keybindings'
@@ -499,6 +530,13 @@ declare module '@tanstack/react-router' {
       path: '/diagnostics'
       fullPath: '/settings/diagnostics'
       preLoaderRoute: typeof SettingsDiagnosticsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/data': {
+      id: '/settings/data'
+      path: '/data'
+      fullPath: '/settings/data'
+      preLoaderRoute: typeof SettingsDataRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/connections': {
@@ -573,10 +611,12 @@ interface SettingsRouteChildren {
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
   SettingsArchivedRoute: typeof SettingsArchivedRoute
   SettingsConnectionsRoute: typeof SettingsConnectionsRoute
+  SettingsDataRoute: typeof SettingsDataRoute
   SettingsDiagnosticsRoute: typeof SettingsDiagnosticsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
+  SettingsMemoryRoute: typeof SettingsMemoryRoute
   SettingsOpenSourceLicensesRoute: typeof SettingsOpenSourceLicensesRoute
   SettingsProjectTagsRoute: typeof SettingsProjectTagsRoute
   SettingsProjectsRoute: typeof SettingsProjectsRoute
@@ -591,10 +631,12 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAppearanceRoute: SettingsAppearanceRoute,
   SettingsArchivedRoute: SettingsArchivedRoute,
   SettingsConnectionsRoute: SettingsConnectionsRoute,
+  SettingsDataRoute: SettingsDataRoute,
   SettingsDiagnosticsRoute: SettingsDiagnosticsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
+  SettingsMemoryRoute: SettingsMemoryRoute,
   SettingsOpenSourceLicensesRoute: SettingsOpenSourceLicensesRoute,
   SettingsProjectTagsRoute: SettingsProjectTagsRoute,
   SettingsProjectsRoute: SettingsProjectsRoute,

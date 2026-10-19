@@ -122,6 +122,7 @@ import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
+import { useGlobalSearchGroups } from "../search/useGlobalSearchGroups";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useNewProject } from "../hooks/useNewProject";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
@@ -2917,7 +2918,17 @@ function OpenCommandPaletteDialog(props: {
           },
         ];
 
-  let displayedGroups: CommandPaletteView["groups"] = filteredGroups;
+  const globalSearchGroups = useGlobalSearchGroups({
+    query: deferredQuery,
+    enabled:
+      currentView === null &&
+      !isBrowsing &&
+      newProjectFlow === null &&
+      addProjectCloneFlow === null &&
+      linkedThreadSearch?.linkedThreads === undefined,
+  });
+  let displayedGroups: CommandPaletteView["groups"] =
+    globalSearchGroups.length > 0 ? [...filteredGroups, ...globalSearchGroups] : filteredGroups;
   if (newProjectFlow !== null) {
     displayedGroups = [
       ...(newProjectMachineGroup ? [newProjectMachineGroup] : []),

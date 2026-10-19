@@ -27,8 +27,9 @@ ask it to start Work. The tabs above the chat hold the rest:
   what finished it, optionally with a link as evidence; done and dismissed items
   can be reopened. Pending approvals sit at the top, and also appear in the chat.
 - **Responsibilities**: the agent's mission, instructions, model, project access,
-  autonomy, permissions, notifications, daily run cap, triggers, memory, **Pause**,
-  and **Delete**.
+  autonomy, permissions, notifications, daily run cap, triggers, memory (facts it
+  proposed wait there for you to confirm; see [Memory](./memory-and-export.md#memory)),
+  **Pause**, and **Delete**.
 
 Project tags give an agent context only. It can read and propose items only in the
 projects granted under **Project scope**; a tag on a chat never grants access.
@@ -269,7 +270,8 @@ projects** from the command palette. Pick projects to add or remove them, type a
 name to create one, or choose **No project** to clear them. After a thread's first
 reply, Cogenly may suggest projects from its repository and wording. Suggestions
 show outlined and do nothing until you accept them; a dismissed suggestion is not
-offered again for that thread.
+offered again for that thread. Confirmed projects also give the chat
+[project context](./memory-and-export.md#project-context-in-chats).
 
 **Chats** stays one list by date. Each chat shows one of its projects, and the
 filter button beside search narrows the list to one project. **Work** groups
@@ -283,6 +285,11 @@ On web and desktop, open the command palette with `Cmd/Ctrl+K` or the rail's
 **Search** button to search threads in every mode across connected environments,
 and to open an agent by name. Message search starts after two characters and
 includes your messages and final agent responses.
+
+After two characters the palette also lists **Search everything** results: chats,
+Work, agents, open items, projects, and pull requests, with the matching words in
+bold. An open item opens in its agent's **Open items**, or in the thread it came
+from; a project opens **Settings → Projects**; a pull request opens in your browser.
 
 Use **Settings → Keybindings** to find or customize shortcuts for searching files
 and copying a thread reference. A copied reference uses the thread's pull request

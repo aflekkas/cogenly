@@ -186,6 +186,7 @@ import {
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { ContextUsed, RememberMessageButton } from "../../context/ThreadContext";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { WorkspaceEntryIcon, WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
@@ -2672,6 +2673,11 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 variant="ghost"
               />
             )}
+            <RememberMessageButton
+              threadRef={ctx.threadRef}
+              messageId={row.message.id}
+              text={plainText}
+            />
             {promptLink !== null && (
               <MessageCopyButton
                 text={promptLink}
@@ -3004,13 +3010,48 @@ function AssistantMessageMeta({
   const ctx = use(TimelineRowCtx);
 
   return (
+    <ContextUsed threadRef={ctx.threadRef} runId={message.streaming ? null : message.runId}>
+      {({ trigger, panel }) => (
+        <div className={className}>
+          <div className="flex items-center gap-2">
+            <AssistantMessageMetaActions
+              projectedItem={projectedItem}
+              message={message}
+              showCopyButton={showCopyButton}
+              copyStreaming={copyStreaming}
+              alwaysVisible={alwaysVisible}
+            />
+            {trigger}
+          </div>
+          {panel}
+        </div>
+      )}
+    </ContextUsed>
+  );
+}
+
+function AssistantMessageMetaActions({
+  projectedItem,
+  message,
+  showCopyButton,
+  copyStreaming,
+  alwaysVisible,
+}: {
+  projectedItem?: Extract<TimelineRow, { kind: "message" }>["projectedItem"];
+  message: ChatMessage;
+  showCopyButton: boolean;
+  copyStreaming: boolean;
+  alwaysVisible: boolean;
+}) {
+  const ctx = use(TimelineRowCtx);
+
+  return (
     <div
       className={cn(
         "flex items-center gap-2 text-xs tabular-nums transition-opacity duration-200",
         alwaysVisible
           ? "opacity-100"
           : "opacity-0 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100",
-        className,
       )}
     >
       {projectedItem && projectedItem.item.status !== "completed" ? (
@@ -3025,6 +3066,13 @@ function AssistantMessageMeta({
       />
       {projectedItem?.item.type === "assistant_message" ? (
         <AssistantForkButton projectedItem={projectedItem} />
+      ) : null}
+      {!message.streaming ? (
+        <RememberMessageButton
+          threadRef={ctx.threadRef}
+          messageId={message.id}
+          text={message.text}
+        />
       ) : null}
       {!message.streaming && (
         <Tooltip>
