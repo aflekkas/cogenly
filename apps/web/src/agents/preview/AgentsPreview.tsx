@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PlusIcon, MessageCircleIcon, CodeXmlIcon } from "lucide-react";
+import { PlusIcon, MessageCircleIcon, HammerIcon } from "lucide-react";
 import { AgentContacts } from "../AgentContacts";
 import { AgentConversation } from "../AgentConversation";
 import { CreateAgent } from "../AgentDetails";
@@ -45,7 +45,7 @@ function PreviewContent() {
             Chats
           </span>
           <span>
-            <CodeXmlIcon size={13} />
+            <HammerIcon size={13} />
             Work
           </span>
           <span data-selected="true">Agents</span>

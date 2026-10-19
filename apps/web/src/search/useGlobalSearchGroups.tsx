@@ -9,7 +9,7 @@ import {
   BotIcon,
   BrainIcon,
   CircleDotIcon,
-  CodeXmlIcon,
+  HammerIcon,
   MessageCircleIcon,
   SearchIcon,
   TagIcon,
@@ -53,7 +53,7 @@ const MAX_ENVIRONMENTS = 4;
 
 const KIND_ICON: Record<SearchKind, LucideIcon> = {
   chat: MessageCircleIcon,
-  work: CodeXmlIcon,
+  work: HammerIcon,
   agent: BotIcon,
   commitment: CircleDotIcon,
   project: TagIcon,
