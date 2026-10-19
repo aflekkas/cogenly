@@ -20,14 +20,14 @@ describe("normalizeDesktopUpdateReleaseNotes", () => {
         "- @human made their first contribution in #8435",
         "**Full Changelog**: https://github.com/pingdotgg/t3code/compare/old...new",
       ].join("\n"),
-      "0.0.36-nightly.20260828.1213",
-      "nightly",
+      "0.0.36-staging.20260828.1213",
+      "staging",
     );
 
     expect(result).toEqual({
       releaseNotes: [
         {
-          version: "0.0.36-nightly.20260828.1213",
+          version: "0.0.36-staging.20260828.1213",
           items: [
             "fix(opencode): handle child approvals, stops, and model catalogs by @human in #8480",
             "fix(web): keep long task drawers usable on small screens by @human in #8313",
@@ -100,25 +100,25 @@ describe("normalizeDesktopUpdateReleaseNotes", () => {
     });
   });
 
-  it("drops releases from other trains before grouping on nightly", () => {
+  it("drops releases from other trains before grouping on staging", () => {
     // electron-updater's full changelog is "every version above the running
-    // one", and preview sorts above nightly, so the preview cuts come first.
+    // one", and preview sorts above staging, so the preview cuts come first.
     const releaseNotes = [
       { version: "0.0.41-preview.20260914.1683", note: "- Maintainer test build" },
       { version: "0.0.41-preview.20260913.1669", note: "- Maintainer test build" },
-      { version: "0.0.41-nightly.20260914.1707", note: "- Nightly change 2" },
-      { version: "0.0.41-nightly.20260914.1700", note: "- Nightly change 1" },
+      { version: "0.0.41-staging.20260914.1707", note: "- Staging change 2" },
+      { version: "0.0.41-staging.20260914.1700", note: "- Staging change 1" },
     ];
 
     const result = normalizeDesktopUpdateReleaseNotes(
       releaseNotes,
-      "0.0.41-nightly.20260914.1707",
-      "nightly",
+      "0.0.41-staging.20260914.1707",
+      "staging",
     );
 
     expect(result.releaseNotes.map(({ version }) => version)).toEqual([
-      "0.0.41-nightly.20260914.1707",
-      "0.0.41-nightly.20260914.1700",
+      "0.0.41-staging.20260914.1707",
+      "0.0.41-staging.20260914.1700",
     ]);
     expect(result.omittedReleaseCount).toBe(0);
   });
@@ -127,7 +127,7 @@ describe("normalizeDesktopUpdateReleaseNotes", () => {
     const result = normalizeDesktopUpdateReleaseNotes(
       [
         { version: "0.0.42", note: "- Stable change" },
-        { version: "0.0.42-nightly.20260915.1710", note: "- Nightly change" },
+        { version: "0.0.42-staging.20260915.1710", note: "- Staging change" },
       ],
       "0.0.42",
       "latest",

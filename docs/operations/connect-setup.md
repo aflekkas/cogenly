@@ -85,7 +85,7 @@ For a production macOS app with bundle ID `com.t3tools.t3code`:
    This setting also configures Electron/macOS passkeys.
 4. Check `https://<frontend-api>/.well-known/apple-app-site-association`. Its
    `webcredentials.apps` must include `<TEAM_ID>.com.t3tools.t3code`.
-5. Configure signing as described in the [release runbook](./release.md#2-apple-signing--notarization-setup-macos).
+5. Configure signing as described in the [release runbook](./release.md#signing-and-notarization).
 
 Local signed builds additionally use:
 

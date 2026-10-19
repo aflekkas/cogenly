@@ -30,11 +30,17 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
+import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import { normalizeDesktopUpdateReleaseNotes } from "./releaseNotes.ts";
-import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
+import {
+  resolveDefaultDesktopUpdateChannel,
+  resolveDesktopUpdateFeed,
+  requiresManualMacUpdate,
+  desktopUpdateDownloadUrl,
+} from "./updateChannels.ts";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -322,7 +328,7 @@ function getAutoUpdateDisabledReason(args: {
   hasUpdateFeedConfig: boolean;
 }): string | null {
   if (!args.hasUpdateFeedConfig) {
-    return "Cogenly does not update itself automatically.";
+    return "This build has no update feed configured.";
   }
   if (args.isDevelopment || !args.isPackaged) {
     return "Automatic updates are only available in packaged production builds.";
@@ -350,6 +356,21 @@ export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const electronShell = yield* ElectronShell.ElectronShell;
+  // Build metadata is deliberately conservative: old/unmarked macOS apps
+  // must download a DMG rather than attempt Squirrel's signed-only install.
+  const updatesSigned = yield* fileSystem
+    .readFileString(environment.path.join(environment.appPath, "package.json"))
+    .pipe(
+      Effect.flatMap(
+        Schema.decodeUnknownEffect(
+          Schema.fromJsonString(Schema.Struct({ cogenlyUpdatesSigned: Schema.Boolean })),
+        ),
+      ),
+      Effect.map((metadata) => metadata.cogenlyUpdatesSigned),
+      Effect.orElseSucceed(() => false),
+    );
+  const manualMacUpdate = requiresManualMacUpdate(environment.platform, updatesSigned);
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
   const activeUpdateActionRef = yield* Ref.make<Option.Option<UpdateAction>>(Option.none());
@@ -413,11 +434,9 @@ export const make = Effect.gen(function* () {
           )
       : false;
 
-  // Cogenly never updates itself: a bundled app-update.yml (or any other
-  // published feed) is ignored, so packaged builds always report "disabled".
-  // Only the local mock update server (COGENLY_DESKTOP_MOCK_UPDATES, localhost)
-  // can enable the updater, for development and tests.
-  const hasUpdateFeedConfig = Effect.succeed(config.mockUpdates);
+  const hasUpdateFeedConfig = Ref.get(appUpdateYmlConfigRef).pipe(
+    Effect.map((feed) => config.mockUpdates || Option.isSome(feed)),
+  );
 
   const resolveDisabledReason = Effect.gen(function* () {
     const hasFeedConfig = yield* hasUpdateFeedConfig;
@@ -461,8 +480,9 @@ export const make = Effect.gen(function* () {
     channel: DesktopUpdateChannel,
   ) {
     yield* Effect.annotateCurrentSpan({ channel });
-    const allowsPrerelease = channel === "nightly";
-    yield* electronUpdater.setChannel(channel);
+    const { channel: feedChannel, allowPrerelease: allowsPrerelease } =
+      resolveDesktopUpdateFeed(channel);
+    yield* electronUpdater.setChannel(feedChannel);
     yield* electronUpdater.setAllowPrerelease(allowsPrerelease);
     yield* electronUpdater.setAllowDowngrade(allowsPrerelease);
     yield* electronUpdater.setFullChangelog(allowsPrerelease);
@@ -533,6 +553,16 @@ export const make = Effect.gen(function* () {
     const state = yield* Ref.get(updateStateRef);
     if (!(yield* Ref.get(updaterConfiguredRef)) || state.status !== "available") {
       return { accepted: false, completed: false };
+    }
+
+    if (state.manualDownloadUrl) {
+      const opened = yield* electronShell.openExternal(state.manualDownloadUrl);
+      if (!opened)
+        yield* updateState((current) => ({
+          ...current,
+          message: "Could not open the update download. Try again.",
+        }));
+      return { accepted: true, completed: opened };
     }
 
     if (!(yield* tryStartUpdateAction("download"))) {
@@ -714,6 +744,7 @@ export const make = Effect.gen(function* () {
               if (
                 (yield* Ref.get(desktopState.quitting)) ||
                 !(yield* Ref.get(updaterConfiguredRef)) ||
+                manualMacUpdate ||
                 !hasExpectedDownload
               ) {
                 return "refused" as const;
@@ -879,20 +910,33 @@ export const make = Effect.gen(function* () {
           }
 
           const checkedAt = yield* currentIsoTimestamp;
+          const feed = yield* Ref.get(appUpdateYmlConfigRef);
+          const downloadBaseUrl = config.mockUpdates
+            ? `http://localhost:${config.mockUpdateServerPort}`
+            : Option.isSome(feed) && feed.value.provider === "generic"
+              ? feed.value.url
+              : undefined;
           const { releaseNotes, omittedReleaseCount } = normalizeDesktopUpdateReleaseNotes(
             info.releaseNotes,
             info.version,
             state.channel,
           );
-          yield* setState(
-            reduceDesktopUpdateStateOnUpdateAvailable(
+          yield* setState({
+            ...reduceDesktopUpdateStateOnUpdateAvailable(
               state,
               info.version,
               checkedAt,
               releaseNotes,
               omittedReleaseCount,
             ),
-          );
+            ...(manualMacUpdate
+              ? {
+                  manualDownloadUrl: desktopUpdateDownloadUrl(info.version, downloadBaseUrl),
+                  message:
+                    "Update available — download. Unsigned macOS builds require installing the DMG manually.",
+                }
+              : {}),
+          });
           yield* Ref.set(lastLoggedDownloadMilestoneRef, -1);
           yield* logUpdaterInfo("update available", {
             version: info.version,

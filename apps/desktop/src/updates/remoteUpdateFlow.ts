@@ -52,6 +52,14 @@ export function nextRemoteDesktopUpdateStep(
       reason: disabledReason ?? "Automatic updates are disabled on this machine.",
     };
   }
+  if (state.manualDownloadUrl && state.availableVersion !== null) {
+    return {
+      action: "done",
+      outcome: "failed",
+      reason:
+        "This macOS app is unsigned. Download and install the update from Settings on that Mac.",
+    };
+  }
   // An install of this version already failed to apply here. Installing it
   // again from afar would stop the app's threads for nothing, so only the user
   // on this machine retries it.

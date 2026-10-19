@@ -378,7 +378,9 @@ function AboutVersionSection() {
     actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for Updates";
   const description =
     action === "download" || action === "install"
-      ? "Update available."
+      ? updateState?.manualDownloadUrl
+        ? "Update available — download and install the DMG."
+        : "Update available."
       : "Current version of the application.";
 
   return (
@@ -408,7 +410,7 @@ function AboutVersionSection() {
       {hasDesktopBridge ? (
         <SettingsRow
           {...searchableSetting("update-track")}
-          description="Use stable releases or nightly builds. Switch back anytime."
+          description="Use prod releases or opt in to staging builds. Switch back anytime."
           control={
             <Select
               value={selectedUpdateChannel}
@@ -423,15 +425,15 @@ function AboutVersionSection() {
                 disabled={isChangingUpdateChannel}
               >
                 <SelectValue>
-                  {selectedUpdateChannel === "nightly" ? "Nightly" : "Stable"}
+                  {selectedUpdateChannel === "staging" ? "Staging" : "Prod"}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem hideIndicator value="latest">
-                  Stable
+                  Prod
                 </SelectItem>
-                <SelectItem hideIndicator value="nightly">
-                  Nightly
+                <SelectItem hideIndicator value="staging">
+                  Staging
                 </SelectItem>
               </SelectPopup>
             </Select>

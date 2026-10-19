@@ -11,7 +11,7 @@ import * as String from "effect/String";
 import { Command, Flag } from "effect/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-const ReleaseChannel = Schema.Literals(["stable", "nightly", "preview"]);
+const ReleaseChannel = Schema.Literals(["prod", "staging", "stable", "nightly", "preview"]);
 type ReleaseChannel = typeof ReleaseChannel.Type;
 
 export class InvalidReleaseTagError extends Schema.TaggedError<InvalidReleaseTagError>()(
@@ -151,10 +151,8 @@ const parseStableTag = (tag: string): StableVersion | undefined => {
   if (!major || !minor || !patch) return undefined;
 
   const prereleaseIdentifiers = prerelease ? prerelease.split(".") : [];
-  // Nightly and preview tags also start with `v` and carry their channel as
-  // the prerelease identifier. They must not be considered stable candidates
-  // when resolving the previous stable tag.
-  if (prereleaseIdentifiers[0] === "nightly" || prereleaseIdentifiers[0] === "preview") {
+  // Prod release notes must never compare against a prerelease tag.
+  if (prereleaseIdentifiers.length > 0) {
     return undefined;
   }
 
@@ -176,7 +174,7 @@ const compareNightlyVersions = (left: NightlyVersion, right: NightlyVersion): nu
 
 const parseNightlyTag = (
   tag: string,
-  channel: "nightly" | "preview" = "nightly",
+  channel: "staging" | "nightly" | "preview" = "nightly",
 ): NightlyVersion | undefined => {
   // Accept both the current `v<semver>` format and the legacy `nightly-v<semver>`
   // format so release note diffs keep working across the tag-format transition.
@@ -203,7 +201,7 @@ export const resolvePreviousReleaseTag = (
   tags: ReadonlyArray<string>,
 ) =>
   Effect.gen(function* () {
-    if (channel === "stable") {
+    if (channel === "stable" || channel === "prod") {
       const current = parseStableTag(currentTag);
       if (!current) {
         return yield* new InvalidReleaseTagError({ channel, currentTag });
