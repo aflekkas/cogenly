@@ -311,7 +311,7 @@ function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef })
               ) : null}
               {repositories.length === 0 ? (
                 <p className="text-muted-foreground text-xs">
-                  Work runs in a repository. Add a project on this machine first.
+                  Work runs in a repository. Add one on this machine first.
                 </p>
               ) : null}
               {!canStart ? (

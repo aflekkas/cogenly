@@ -11,6 +11,7 @@ import { type KeyboardEvent as ReactKeyboardEvent, useRef } from "react";
 import { cn } from "~/lib/utils";
 import { shortcutLabelForCommand } from "../../../keybindings";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
+import { decisionsWaitingLabel } from "../../../agents/agentWorkspace.logic";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./sidebarModes.logic";
 
 export const SIDEBAR_MODE_ICONS: Record<SidebarMode, LucideIcon> = {
@@ -23,11 +24,11 @@ export function SidebarModeSwitcher(props: {
   mode: SidebarMode;
   onModeChange: (mode: SidebarMode) => void;
   /** Agents waiting on the user; shows an amber count on the Agents segment. */
-  agentsNeedingYou: number;
+  decisionsWaiting: number;
   keybindings: ResolvedKeybindingsConfig;
   className?: string;
 }) {
-  const { mode, onModeChange, agentsNeedingYou, keybindings } = props;
+  const { mode, onModeChange, decisionsWaiting, keybindings } = props;
   const index = SIDEBAR_MODES.indexOf(mode);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -70,7 +71,7 @@ export function SidebarModeSwitcher(props: {
         const label = SIDEBAR_MODE_LABELS[segment];
         const Icon = SIDEBAR_MODE_ICONS[segment];
         const shortcut = shortcutLabelForCommand(keybindings, `sidebar.mode.${segment}`);
-        const badge = segment === "agents" && agentsNeedingYou > 0 ? agentsNeedingYou : null;
+        const badge = segment === "agents" && decisionsWaiting > 0 ? decisionsWaiting : null;
         return (
           <Tooltip key={segment}>
             <TooltipTrigger
@@ -108,15 +109,21 @@ export function SidebarModeSwitcher(props: {
               />
               <span className="truncate">{label}</span>
               {badge !== null ? (
-                <span
-                  aria-label={`${badge} ${badge === 1 ? "agent needs" : "agents need"} you`}
-                  className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-warning px-1 text-3xs font-semibold leading-none text-background tabular-nums"
-                >
-                  {badge > 9 ? "9+" : badge}
-                </span>
+                <>
+                  <span
+                    aria-hidden
+                    className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-warning px-1 text-3xs font-semibold leading-none text-background tabular-nums"
+                  >
+                    {badge > 9 ? "9+" : badge}
+                  </span>
+                  <span className="sr-only">, {decisionsWaitingLabel(badge)}</span>
+                </>
               ) : null}
             </TooltipTrigger>
-            <TooltipPopup side="bottom">{shortcut ? `${label} (${shortcut})` : label}</TooltipPopup>
+            <TooltipPopup side="bottom">
+              {shortcut ? `${label} (${shortcut})` : label}
+              {badge !== null ? ` · ${decisionsWaitingLabel(badge)}` : null}
+            </TooltipPopup>
           </Tooltip>
         );
       })}

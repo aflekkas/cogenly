@@ -55,7 +55,7 @@ export function buildDraftActionMenuItems(options: {
       ],
     },
     ...(options.hasProject
-      ? [{ id: "project-settings" as const, label: "Project settings", icon: "settings" }]
+      ? [{ id: "project-settings" as const, label: "Repository settings", icon: "settings" }]
       : []),
     {
       id: "discard",
@@ -200,7 +200,7 @@ export function buildThreadActionMenuItems(
         { id: "copy-thread-id", label: "Thread ID", icon: "hash" },
       ],
     },
-    { id: "project-settings", label: "Project settings", icon: "settings" },
+    { id: "project-settings", label: "Repository settings", icon: "settings" },
     // Archive removes the thread from the sidebar while keeping its
     // conversation under Settings > Archived threads — distinct from Settle
     // (stays visible in the Settled shelf) and Delete (clears history for

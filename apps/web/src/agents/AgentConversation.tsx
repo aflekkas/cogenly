@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
 import { useMessageMotion } from "./useMessageMotion";
 import {
+  agentContactKey,
   agentStatusLabel,
   conversationRows,
   modelDisplayName,
@@ -19,6 +20,7 @@ import { AgentActivity } from "./AgentActivity";
 import { AgentOpenItems, ApprovalDecision } from "./AgentOpenItems";
 import { AgentResponsibilities } from "./AgentResponsibilities";
 import { AgentStartWork } from "./AgentStartWork";
+import { watchAgentViewIntent } from "./agentViewIntent";
 import { countOpenCommitments } from "./agentWorkspace.logic";
 import type { AgentContact, AgentModelRef, AgentRequest, AgentWorkspaceView } from "./agents.types";
 
@@ -68,6 +70,18 @@ function AgentView({
     setFocusMessage(messageId ?? null);
   };
   const itemsCount = agent.approvals.length + countOpenCommitments(workspace.commitments);
+  // The command palette can ask for Open items or Start Work before or after this mounts.
+  const agentKey = agentContactKey(agent);
+  useEffect(
+    () =>
+      watchAgentViewIntent(agentKey, (view) => {
+        if (view === "items") {
+          setTab("items");
+          setFocusMessage(null);
+        } else if (canWrite) setStartingWork(true);
+      }),
+    [agentKey, canWrite],
+  );
   return (
     <section className="agent-conversation" aria-label={`Conversation with ${agent.name}`}>
       <header className="agent-contact-header">

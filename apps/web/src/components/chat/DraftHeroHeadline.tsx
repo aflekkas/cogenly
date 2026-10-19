@@ -184,7 +184,7 @@ export function DraftHeroHeadline({
   const pickerItems = useMemo<readonly PickerItem[]>(
     () => [
       ...menuEntries.map(({ group }) => ({ value: group.projectKey, label: group.displayName })),
-      { value: ADD_PROJECT_VALUE, label: "Add project" },
+      { value: ADD_PROJECT_VALUE, label: "Add repository" },
     ],
     [menuEntries],
   );
@@ -309,7 +309,7 @@ export function DraftHeroHeadline({
           }
         >
           <span className="min-w-0 truncate">
-            {isScratchDraft ? "No project" : (activeProjectDisplayName ?? "Choose a project")}
+            {isScratchDraft ? "No repository" : (activeProjectDisplayName ?? "Choose a repository")}
           </span>
         </TooltipTrigger>
         {activeProjectDisplayName && !isScratchDraft ? (
@@ -318,12 +318,12 @@ export function DraftHeroHeadline({
       </Tooltip>
       <ComboboxPopup align="center" className="w-72 overflow-hidden">
         <ComboboxSearchInput
-          aria-label="Search projects"
-          placeholder="Search projects..."
+          aria-label="Search repositories"
+          placeholder="Search repositories..."
           value={pickerQuery}
           onChange={(event) => setPickerQuery(event.target.value)}
         />
-        <ComboboxEmpty>No matching projects.</ComboboxEmpty>
+        <ComboboxEmpty>No matching repositories.</ComboboxEmpty>
         <ComboboxList>
           {(item: PickerItem) => {
             const entry = projectEntryByKey.get(item.value);
@@ -359,7 +359,7 @@ export function DraftHeroHeadline({
       onClick={openAddProject}
       className="pointer-events-auto inline cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
-      {activeProjectTitle ?? "Add a project"}
+      {activeProjectTitle ?? "Add a repository"}
     </button>
   );
 
@@ -372,8 +372,8 @@ export function DraftHeroHeadline({
     : hasResolvedProject
       ? `What should we build in ${activeProjectDisplayName}?`
       : canChooseProject
-        ? `${activeProjectDisplayName ?? "Choose a project"} to start`
-        : "Add a project to start";
+        ? `${activeProjectDisplayName ?? "Choose a repository"} to start`
+        : "Add a repository to start";
 
   // One click out of the project, phrased as the alternative to the question
   // above it. Focus moves to the project picker once this line has gone.
@@ -396,7 +396,7 @@ export function DraftHeroHeadline({
             />
           }
         >
-          or start without a project
+          or start without a repository
         </TooltipTrigger>
         {noProjectShortcut ? <TooltipPopup side="bottom">{noProjectShortcut}</TooltipPopup> : null}
       </Tooltip>
@@ -415,7 +415,7 @@ export function DraftHeroHeadline({
         ) : canChooseProject ? (
           <>{projectSelector} to start</>
         ) : (
-          <>Add a project to start</>
+          <>Add a repository to start</>
         )}
       </h1>
       {/* Reserved whenever threads can skip a project, so the heading does not

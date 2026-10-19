@@ -1,4 +1,5 @@
 import { useAgents } from "../../../agents/agentsClient";
+import { decisionsWaitingCount } from "../../../agents/agentWorkspace.logic";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -30,7 +31,8 @@ export interface SidebarModeState {
   readonly modeThreads: ReadonlyArray<EnvironmentThreadShell>;
   /** Project keys whose new-thread drafts belong in the current mode; null for all. */
   readonly draftProjectKeys: ReadonlySet<string> | null;
-  readonly agentsNeedingYou: number;
+  /** Approvals and run questions waiting on you across agents; never unread messages. */
+  readonly decisionsWaiting: number;
   /** Agent names by `environmentId:agentId`, for marking the Work an agent started. */
   readonly agentNameByKey: ReadonlyMap<string, string>;
 }
@@ -105,10 +107,7 @@ export function useSidebarModeState(input: {
     [agents],
   );
 
-  const agentsNeedingYou = useMemo(
-    () => agents.filter((agent) => agent.state === "blocked" || agent.state === "needsYou").length,
-    [agents],
-  );
+  const decisionsWaiting = useMemo(() => decisionsWaitingCount(agents), [agents]);
 
   // Opening a thread that another mode lists (search, notification, link)
   // switches to that mode. Keyed on the thread's own mode, so picking a
@@ -145,5 +144,5 @@ export function useSidebarModeState(input: {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [keybindings, setMode]);
 
-  return { mode, setMode, modeThreads, draftProjectKeys, agentsNeedingYou, agentNameByKey };
+  return { mode, setMode, modeThreads, draftProjectKeys, decisionsWaiting, agentNameByKey };
 }

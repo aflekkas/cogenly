@@ -210,10 +210,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-defaults",
-    title: "Project defaults and overrides",
+    title: "Repository defaults and overrides",
     to: "/settings/general",
     scope: "project-defaults",
-    searchTerms: ["model workspace environments projects inheritance checkout"],
+    searchTerms: ["model workspace environments projects repositories inheritance checkout"],
   },
   {
     id: "project-tags",
@@ -225,7 +225,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "project-overview",
     title: "Repository overview",
     to: "/settings/projects",
-    searchTerms: ["project overview name icon image checkout remove delete"],
+    searchTerms: ["project repository repo overview name icon image checkout remove delete"],
   },
   {
     id: "default-model",
@@ -244,15 +244,15 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-grouping",
-    title: "Project grouping",
+    title: "Repository grouping",
     to: "/settings/general",
-    searchTerms: ["combine matching repositories environments sidebar"],
+    searchTerms: ["project grouping combine matching repositories environments sidebar"],
   },
   {
     id: "project-order",
-    title: "Project order",
+    title: "Repository order",
     to: "/settings/general",
-    searchTerms: ["sort projects sidebar manual created recent"],
+    searchTerms: ["project order sort projects repositories sidebar manual created recent"],
   },
   {
     id: "snooze-limited-threads",
@@ -424,10 +424,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "add-project-starts-in",
-    title: "Add project starts in",
+    title: "Add repository starts in",
     to: "/settings/general",
     scope: "environment-defaults",
-    searchTerms: ["base directory folder browser path home"],
+    searchTerms: ["add project base directory folder browser path home"],
   },
   {
     id: "archive-confirmation",

@@ -3,7 +3,7 @@
  * page (preview/main.tsx). Never imported by the app; nothing here reaches a server.
  */
 import { randomUUID } from "~/lib/utils";
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
 import {
   AgentId,
   ScheduledTaskId,
@@ -377,6 +377,31 @@ export function createMockAgentsClient(): AgentsClient {
     useSyncExternalStore(subscribe, () => snapshot);
     return children({ ...workspaceFor(agent), refresh: () => {} });
   }
+  // The preview has no audit log; it shows the one entry every item starts with.
+  function MockCommitmentHistory({
+    commitment,
+    children,
+  }: ComponentProps<AgentsClient["CommitmentHistory"]>) {
+    useSyncExternalStore(subscribe, () => snapshot);
+    const item = commitments.find((candidate) => candidate.id === commitment.id);
+    return children({
+      history: item
+        ? [
+            {
+              id: `${item.id}:created`,
+              commitmentId: item.id,
+              fromStatus: null,
+              toStatus: "proposed",
+              who: item.agentId ? `agent:${item.agentId}` : "user",
+              at: item.createdAt,
+              why: "Found in the conversation.",
+              evidenceRefs: item.sourceRefs,
+            },
+          ]
+        : [],
+      error: null,
+    });
+  }
   return {
     subscribe,
     getSnapshot: () => snapshot,
@@ -498,6 +523,7 @@ export function createMockAgentsClient(): AgentsClient {
       window.open(url, "_blank", "noopener,noreferrer");
     },
     Workspace: MockWorkspace,
+    CommitmentHistory: MockCommitmentHistory,
     decideApproval: async (agent, id, decision) => {
       const approval = agent.approvals.find((item) => item.id === id)!;
       update(agent.id, (current) => ({

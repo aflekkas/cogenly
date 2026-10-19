@@ -11,7 +11,10 @@ import {
   agentAttentionCount,
   agentWorkStartPolicy,
   commitmentDueLabel,
+  decisionsWaitingCount,
+  decisionsWaitingLabel,
   describeApproval,
+  describeCommitmentHistory,
   describeRunAction,
   describeSchedule,
   groupAgentsByScope,
@@ -277,8 +280,8 @@ describe("startWorkRepositories", () => {
   it("offers only repositories linked to scoped projects, once each", () => {
     const scope = [{ labelId: spawn, permissions: scopePermissions("read") }];
     expect(startWorkRepositories(scope, labels, repositories)).toEqual([
-      { id: audit, title: "booking-audit", projects: ["Spawn"] },
-      { id: site, title: "Website", projects: ["Spawn"] },
+      { id: audit, title: "booking-audit", projects: ["Spawn"], home: false },
+      { id: site, title: "Website", projects: ["Spawn"], home: false },
     ]);
     const both = [...scope, { labelId: bartr, permissions: scopePermissions("read") }];
     expect(
@@ -288,14 +291,61 @@ describe("startWorkRepositories", () => {
   it("offers nothing without scope", () => {
     expect(startWorkRepositories([], labels, repositories)).toEqual([]);
   });
+  it("offers the home repository first, even when no scoped project links it", () => {
+    expect(startWorkRepositories([], labels, repositories, app)).toEqual([
+      { id: app, title: "app", projects: [], home: true },
+    ]);
+    const scope = [{ labelId: spawn, permissions: scopePermissions("read") }];
+    expect(startWorkRepositories(scope, labels, repositories, site)).toEqual([
+      { id: site, title: "Website", projects: ["Spawn"], home: true },
+      { id: audit, title: "booking-audit", projects: ["Spawn"], home: false },
+    ]);
+  });
+  it("skips a home repository that is no longer listed", () => {
+    expect(startWorkRepositories([], labels, repositories, ProjectId.make("gone"))).toEqual([]);
+  });
 });
 
 describe("agentAttentionCount", () => {
   it("counts pending approvals and requests, never messages", () => {
-    expect(agentAttentionCount({ approvals: [1, 2], requests: [], state: "idle" })).toBe(2);
-    expect(agentAttentionCount({ approvals: [], requests: [], state: "blocked" })).toBe(1);
-    expect(agentAttentionCount({ approvals: [1], requests: [1, 2], state: "blocked" })).toBe(3);
-    expect(agentAttentionCount({ approvals: [], requests: [], state: "thinking" })).toBe(0);
+    expect(agentAttentionCount({ approvals: [1, 2], requests: [] })).toBe(2);
+    expect(agentAttentionCount({ approvals: [], requests: [], waitingInRun: true })).toBe(1);
+    expect(agentAttentionCount({ approvals: [1], requests: [1, 2], waitingInRun: true })).toBe(3);
+    expect(agentAttentionCount({ approvals: [], requests: [] })).toBe(0);
+  });
+  it("does not count an approval twice while the run waits on nothing else", () => {
+    expect(agentAttentionCount({ approvals: [1], requests: [], waitingInRun: false })).toBe(1);
+  });
+  it("sums decisions across agents for the Agents badge", () => {
+    expect(
+      decisionsWaitingCount([
+        { approvals: [1], requests: [] },
+        { approvals: [], requests: [], waitingInRun: true },
+        { approvals: [], requests: [] },
+      ]),
+    ).toBe(2);
+    expect(decisionsWaitingLabel(1)).toBe("1 decision waiting for you");
+    expect(decisionsWaitingLabel(3)).toBe("3 decisions waiting for you");
+  });
+});
+
+describe("describeCommitmentHistory", () => {
+  const names = (id: string) => (id === "juniper" ? "Juniper" : undefined);
+  it("names who changed it and the status change", () => {
+    expect(
+      describeCommitmentHistory({ who: "user", fromStatus: "open", toStatus: "done" }, names),
+    ).toEqual({ who: "You", change: "Open → Done" });
+    expect(
+      describeCommitmentHistory(
+        { who: "agent:juniper", fromStatus: null, toStatus: "proposed" },
+        names,
+      ),
+    ).toEqual({ who: "Juniper", change: "Added as Proposed" });
+  });
+  it("falls back for removed agents and unchanged status", () => {
+    expect(
+      describeCommitmentHistory({ who: "agent:gone", fromStatus: "open", toStatus: "open" }, names),
+    ).toEqual({ who: "An agent", change: "Open" });
   });
 });
 

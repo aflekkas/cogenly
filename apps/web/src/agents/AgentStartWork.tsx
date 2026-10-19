@@ -25,9 +25,9 @@ import { startWorkRepositories } from "./agentWorkspace.logic";
 import type { AgentContact, AgentWorkspaceView } from "./agents.types";
 
 /**
- * Start a normal Work session owned by this agent, in a repository linked to one of
- * its granted projects. It runs in a new worktree and appears in Work. The server
- * may answer with a pending approval instead of a thread; that is said plainly.
+ * Start a normal Work session owned by this agent, in its home repository or one
+ * linked to its granted projects. It runs in a new worktree and appears in Work. The
+ * server may answer with a pending approval instead of a thread; that is said plainly.
  */
 export function AgentStartWork({
   agent,
@@ -41,7 +41,12 @@ export function AgentStartWork({
   onOpenItems: () => void;
 }) {
   const client = useAgentsClient();
-  const repositories = startWorkRepositories(agent.scope, workspace.labels, workspace.repositories);
+  const repositories = startWorkRepositories(
+    agent.scope,
+    workspace.labels,
+    workspace.repositories,
+    agent.projectId,
+  );
   const [projectId, setProjectId] = useState<ProjectId | null>(repositories[0]?.id ?? null);
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -94,8 +99,9 @@ export function AgentStartWork({
               </p>
             ) : repositories.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No repository is linked to the projects {agent.name} is granted. Add a project to
-                its scope in Responsibilities, and link repositories in Settings → Projects.
+                {agent.name} has no home repository, and none is linked to the projects it is
+                granted. Add a project to its scope in Responsibilities, and link repositories in
+                Settings → Projects.
               </p>
             ) : (
               <div className="flex flex-col gap-3">
@@ -119,7 +125,9 @@ export function AgentStartWork({
                         >
                           <span className="min-w-0 flex-1 truncate">{repository.title}</span>
                           <span className="text-2xs text-muted-foreground">
-                            {repository.projects.join(", ")}
+                            {[repository.home ? "Home" : "", repository.projects.join(", ")]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </span>
                         </SelectItem>
                       ))}

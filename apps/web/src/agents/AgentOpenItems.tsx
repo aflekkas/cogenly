@@ -40,10 +40,11 @@ import {
   commitmentDueLabel,
   commitmentOwnerLabel,
   describeApproval,
+  describeCommitmentHistory,
   groupCommitments,
   resolveCommitmentRef,
 } from "./agentWorkspace.logic";
-import type { AgentContact, AgentWorkspaceView } from "./agents.types";
+import type { AgentContact, AgentWorkspaceView, CommitmentHistoryView } from "./agents.types";
 
 const APPROVAL_EYEBROW: Record<AgentApproval["actionKind"], string> = {
   start_work: "Wants to start Work",
@@ -243,14 +244,13 @@ function CommitmentRow({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<"done" | "dismiss" | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
   const due = commitmentDueLabel(item.dueAt);
-  const owner = commitmentOwnerLabel(
-    item.owner,
-    (id) =>
-      agents.find(
-        (candidate) => candidate.environmentId === agent.environmentId && candidate.id === id,
-      )?.name,
-  );
+  const agentName = (id: string) =>
+    agents.find(
+      (candidate) => candidate.environmentId === agent.environmentId && candidate.id === id,
+    )?.name;
+  const owner = commitmentOwnerLabel(item.owner, agentName);
   const labels = workspace.labels.filter((label) => item.labelIds.includes(label.id));
   const closed = item.status === "done" || item.status === "dismissed";
   async function run(action: () => Promise<void>) {
@@ -349,6 +349,29 @@ function CommitmentRow({
         refs={item.evidenceRefs}
         onOpenChat={onOpenChat}
       />
+      <Button
+        size="xs"
+        variant="ghost-muted"
+        className="self-start"
+        aria-expanded={showHistory}
+        onClick={() => setShowHistory((value) => !value)}
+      >
+        {showHistory ? <ChevronDownIcon /> : <ChevronRightIcon />}
+        History
+      </Button>
+      {showHistory && (
+        <client.CommitmentHistory agent={agent} commitment={item}>
+          {(view) => (
+            <CommitmentHistoryList
+              agent={agent}
+              workspace={workspace}
+              view={view}
+              agentName={agentName}
+              onOpenChat={onOpenChat}
+            />
+          )}
+        </client.CommitmentHistory>
+      )}
       {item.status === "proposed" && (
         <div className="flex items-center gap-1.5">
           <Button
@@ -404,6 +427,64 @@ function CommitmentRow({
         </p>
       )}
     </article>
+  );
+}
+
+/** Who changed an item, when, from what to what, why, and the evidence they gave. */
+function CommitmentHistoryList({
+  agent,
+  workspace,
+  view,
+  agentName,
+  onOpenChat,
+}: {
+  agent: AgentContact;
+  workspace: AgentWorkspaceView;
+  view: CommitmentHistoryView;
+  agentName: (agentId: string) => string | undefined;
+  onOpenChat: (messageId?: string) => void;
+}) {
+  if (view.error)
+    return (
+      <p className="text-xs text-destructive" role="alert">
+        {view.error}
+      </p>
+    );
+  if (view.history === null)
+    return (
+      <p className="text-xs text-muted-foreground" role="status">
+        Loading history…
+      </p>
+    );
+  if (view.history.length === 0)
+    return <p className="text-xs text-muted-foreground">No changes recorded.</p>;
+  return (
+    <ol className="flex flex-col gap-2 border-l border-border/70 pl-3" aria-label="History">
+      {view.history.map((entry) => {
+        const { who, change } = describeCommitmentHistory(entry, agentName);
+        return (
+          <li key={entry.id} className="flex flex-col gap-0.5">
+            <span className="text-xs text-foreground">
+              {change}
+              <span className="text-muted-foreground">
+                {" "}
+                · {who} · <time dateTime={entry.at}>{formatMessageTime(entry.at)}</time>
+              </span>
+            </span>
+            {entry.why.trim() && (
+              <span className="text-xs whitespace-pre-wrap text-muted-foreground">{entry.why}</span>
+            )}
+            <RefList
+              agent={agent}
+              workspace={workspace}
+              title="Evidence"
+              refs={entry.evidenceRefs}
+              onOpenChat={onOpenChat}
+            />
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

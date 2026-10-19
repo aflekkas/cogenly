@@ -1942,7 +1942,7 @@ export default function ChatView(props: ChatViewProps) {
             variant="ghost"
             onClick={() => void removeClonedProject({ environmentId, projectId })}
           >
-            Remove project
+            Remove repository
           </Button>
           <Button
             size="xs"
@@ -2200,7 +2200,7 @@ export default function ChatView(props: ChatViewProps) {
     envMode: DraftThreadEnvMode;
   }) => {
     if (!activeProject) {
-      throw new Error("No active project is available for this pull request.");
+      throw new Error("No active repository is available for this pull request.");
     }
     const activeProjectRef = scopeProjectRef(activeProject.environmentId, activeProject.id);
     const logicalProjectKey = deriveLogicalProjectKeyFromSettings(
@@ -6196,7 +6196,7 @@ export default function ChatView(props: ChatViewProps) {
     ? !canOperateThread
       ? "This connection cannot change threads."
       : !activeProject
-        ? "Choose a project before compacting"
+        ? "Choose a repository before compacting"
         : !manualCompactionProviderAvailable
           ? "Compaction is unavailable for this provider"
           : "Compacting is unavailable right now"
@@ -7150,7 +7150,7 @@ export default function ChatView(props: ChatViewProps) {
           type: "warning",
           title: "Choose models and a base branch",
           description:
-            "Multiple models need a new thread in a Git project. Each gets its own worktree.",
+            "Multiple models need a new thread in a Git repository. Each gets its own worktree.",
         }),
       );
       return;
@@ -7516,8 +7516,8 @@ export default function ChatView(props: ChatViewProps) {
       toastManager.add(
         stackedThreadToast({
           type: "warning",
-          title: "Choose a project first",
-          description: "This draft no longer points to an available project.",
+          title: "Choose a repository first",
+          description: "This draft no longer points to an available repository.",
         }),
       );
       return;

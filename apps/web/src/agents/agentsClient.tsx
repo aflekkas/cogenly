@@ -8,6 +8,7 @@ import {
 } from "react";
 import type {
   AgentApproval,
+  Commitment,
   CommitmentCreateInput,
   CommitmentStatusInput,
   EnvironmentId,
@@ -25,6 +26,7 @@ import type {
   AgentModelRef,
   AgentTrigger,
   AgentWorkspaceView,
+  CommitmentHistoryView,
 } from "./agents.types";
 import {
   agentContactKey,
@@ -91,6 +93,12 @@ export interface AgentsClient {
   Workspace: ComponentType<{
     agent: AgentContact;
     children: (view: AgentWorkspaceView) => ReactNode;
+  }>;
+  /** Renders its children with one open item's history; mount it only when shown. */
+  CommitmentHistory: ComponentType<{
+    agent: AgentContact;
+    commitment: Pick<Commitment, "id" | "updatedAt">;
+    children: (view: CommitmentHistoryView) => ReactNode;
   }>;
   decideApproval: (
     agent: AgentContact,
@@ -355,12 +363,13 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           const approvals = pendingApprovals.filter(
             (approval) => approval.agentId === record.id && approval.status === "pending",
           );
-          const state =
-            approvals.length ||
+          const waitingInRun = Boolean(
             shell?.hasPendingApprovals ||
             shell?.hasPendingUserInput ||
-            cached?.requests.length ||
-            workThreads.some((thread) => thread.hasPendingApprovals || thread.hasPendingUserInput)
+            workThreads.some((thread) => thread.hasPendingApprovals || thread.hasPendingUserInput),
+          );
+          const state =
+            approvals.length || waitingInRun || cached?.requests.length
               ? "blocked"
               : shell?.runtime?.activeRunId ||
                   workThreads.some((thread) => thread.runtime?.activeRunId)
@@ -394,6 +403,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
             activity: cached?.activity ?? [],
             requests: cached?.requests ?? [],
             approvals,
+            waitingInRun,
           };
         });
       }),
@@ -428,7 +438,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       const projectId =
         agent.projectId ??
         projects.find((project) => project.environmentId === agent.environmentId)?.id;
-      if (!projectId) throw new Error("Choose a project before adding a trigger.");
+      if (!projectId) throw new Error("Choose a repository before adding a trigger.");
       if (!readEnvironmentScope(agent.environmentId, AuthOrchestrationOperateScope))
         throw new Error("This connection cannot change agents.");
       const { id: _triggerId, ...triggerFields } = trigger;
@@ -607,6 +617,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
         void readLocalApi()?.shell.openExternal(url);
       },
       Workspace: LiveAgentWorkspace,
+      CommitmentHistory: LiveCommitmentHistory,
       decideApproval: async (agent, id, decision) => {
         const command = decision === "approve" ? approve : reject;
         const { approval } = commandValue(
@@ -747,6 +758,32 @@ function useLiveAgentWorkspace(agent: AgentContact): AgentWorkspaceView {
     error: commitments.error ?? activity.error ?? labelsError,
     refresh,
   };
+}
+
+function LiveCommitmentHistory({
+  agent,
+  commitment,
+  children,
+}: {
+  agent: AgentContact;
+  commitment: Pick<Commitment, "id" | "updatedAt">;
+  children: (view: CommitmentHistoryView) => ReactNode;
+}) {
+  const query = useEnvironmentQuery(
+    agentWorkspaceRpc.commitmentsHistory({
+      environmentId: agent.environmentId,
+      input: { id: commitment.id },
+    }),
+  );
+  // Any status change, by you or the agent, moves updatedAt; read the new entry.
+  const { refresh } = query;
+  const seenUpdatedAt = useRef(commitment.updatedAt);
+  useEffect(() => {
+    if (seenUpdatedAt.current === commitment.updatedAt) return;
+    seenUpdatedAt.current = commitment.updatedAt;
+    refresh();
+  }, [commitment.updatedAt, refresh]);
+  return children({ history: query.data?.history ?? null, error: query.error });
 }
 
 type AgentConversationData = Pick<AgentContact, "messages" | "requests" | "memory" | "activity">;

@@ -52,7 +52,7 @@ function summarize(
     value: {
       prompt: link.value.prompt,
       details: [
-        repository ? `Repository ${repository.owner}/${repository.name}` : "No project",
+        repository ? `Repository ${repository.owner}/${repository.name}` : "No repository",
         ...(provider ? [`Model ${model ? `${provider} ${model}` : provider}`] : []),
       ],
     },

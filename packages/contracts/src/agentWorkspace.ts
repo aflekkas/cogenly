@@ -139,6 +139,7 @@ export const CommitmentHistory = Schema.Struct({
   why: Schema.String,
   evidenceRefs: Schema.Array(CommitmentRef),
 });
+export type CommitmentHistory = typeof CommitmentHistory.Type;
 export const CommitmentHistoryInput = Schema.Struct({ id: TrimmedNonEmptyString });
 export const CommitmentHistoryResult = Schema.Struct({ history: Schema.Array(CommitmentHistory) });
 export const AgentRunAction = Schema.Struct({

@@ -2872,13 +2872,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (composerTriggerKind === "pull-request") {
       if (pullRequestProjectId === null || pullRequestRepository === null) {
-        return "Pull requests are not available for this project.";
+        return "Pull requests are not available for this repository.";
       }
       if (
         pullRequestLookup.error !== null ||
         pullRequestLookup.data?.errors.some((error) => error.projectId === pullRequestProjectId)
       ) {
-        return "Pull requests could not be read for this project.";
+        return "Pull requests could not be read for this repository.";
       }
       return composerTrigger?.query
         ? `No pull request matches ${composerTrigger.query}.`
@@ -7360,7 +7360,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           : showPlanFollowUpPrompt && activeProposedPlan
                             ? "Add feedback to refine the plan, or leave this blank to implement it"
                             : projectSelectionRequired
-                              ? "Choose a project above to start a thread"
+                              ? "Choose a repository above to start a thread"
                               : showProviderUnavailable
                                 ? "Enable a provider in Settings to send a message"
                                 : phase === "disconnected"

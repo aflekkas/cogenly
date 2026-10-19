@@ -302,13 +302,15 @@ function ProjectScopeMenu({ value, groups, environments, onChange }: SettingsSco
   }));
   return (
     <ScopeMenu
-      ariaLabel="Project scope"
+      ariaLabel="Repository scope"
       icon={selected ? <ProjectFavicon project={selected} className="size-3.5 shrink-0" /> : null}
-      label={selected?.displayName ?? (value.project ? "Unavailable project" : "All projects")}
+      label={
+        selected?.displayName ?? (value.project ? "Unavailable repository" : "All repositories")
+      }
       value={projectAxisValue(value)}
       onChange={(next) => onChange(selectProjectAxis(value, next))}
-      searchLabel="Search projects"
-      allOption={{ value: ALL_PROJECTS_VALUE, label: "All projects" }}
+      searchLabel="Search repositories"
+      allOption={{ value: ALL_PROJECTS_VALUE, label: "All repositories" }}
       options={projects.map(({ group, machines }) => {
         const sameName = projects.filter(
           (other) =>

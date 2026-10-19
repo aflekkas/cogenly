@@ -2300,10 +2300,10 @@ export default function Sidebar() {
     projectDisplayNameByKey,
   });
   const sidebarMode = sidebarModes.mode;
-  const setNavRailAgentsNeedingYou = useNavRailBadgeStore((store) => store.setAgentsNeedingYou);
+  const setNavRailDecisionsWaiting = useNavRailBadgeStore((store) => store.setDecisionsWaiting);
   useEffect(() => {
-    setNavRailAgentsNeedingYou(sidebarModes.agentsNeedingYou);
-  }, [setNavRailAgentsNeedingYou, sidebarModes.agentsNeedingYou]);
+    setNavRailDecisionsWaiting(sidebarModes.decisionsWaiting);
+  }, [setNavRailDecisionsWaiting, sidebarModes.decisionsWaiting]);
   const sidebarModeActions = useSidebarModeActions({
     mode: sidebarMode,
     currentEnvironmentId: routeThreadRef?.environmentId ?? primaryEnvironmentId,
@@ -4053,7 +4053,7 @@ export default function Sidebar() {
                 className="mb-1.5"
                 mode={sidebarMode}
                 onModeChange={sidebarModes.setMode}
-                agentsNeedingYou={sidebarModes.agentsNeedingYou}
+                decisionsWaiting={sidebarModes.decisionsWaiting}
                 keybindings={keybindings}
               />
             )}

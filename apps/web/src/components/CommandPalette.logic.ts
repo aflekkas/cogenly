@@ -468,7 +468,7 @@ export function filterCommandPaletteGroups(input: {
     if (input.projectSearchItems.length > 0) {
       searchableGroups.push({
         value: "projects-search",
-        label: "Projects",
+        label: "Repositories",
         items: input.projectSearchItems,
       });
     }
@@ -617,9 +617,9 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search threads, agents, projects, and commands...";
+      return "Search threads, agents, repositories, and commands...";
     case "root-browse":
-      return "Enter project path (e.g. ~/projects/my-app)";
+      return "Enter repository path (e.g. ~/projects/my-app)";
     case "submenu":
       return "Search...";
     case "submenu-browse":
