@@ -52,6 +52,11 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.agentsApprove,
       WS_METHODS.agentsReject,
       WS_METHODS.agentsStartWork,
+      WS_METHODS.factsCreate,
+      WS_METHODS.factsUpdate,
+      WS_METHODS.factsSupersede,
+      WS_METHODS.factsRetract,
+      WS_METHODS.contextSetEnabled,
       WS_METHODS.commitmentsCreate,
       WS_METHODS.commitmentsUpdateStatus,
       WS_METHODS.commitmentsConfirm,
@@ -61,6 +66,10 @@ describe("RPC authorization scopes", () => {
     for (const method of [
       WS_METHODS.agentsApprovalsList,
       WS_METHODS.agentsActivity,
+      WS_METHODS.factsList,
+      WS_METHODS.factsHistory,
+      WS_METHODS.contextForRun,
+      WS_METHODS.contextSettings,
       WS_METHODS.commitmentsList,
       WS_METHODS.commitmentsHistory,
     ])

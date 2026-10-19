@@ -72,3 +72,4 @@ export * from "./work.ts";
 export * from "./agentWorkspace.ts";
 
 export * from "./search.ts";
+export * from "./fact.ts";

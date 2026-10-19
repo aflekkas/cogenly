@@ -1,4 +1,6 @@
 import * as GlobalSearch from "./search/GlobalSearch.ts";
+import * as Facts from "./context/FactService.ts";
+import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as WorkHandoff from "./work/WorkHandoffService.ts";
 import * as AgentWorkspace from "./agents/AgentWorkspaceService.ts";
@@ -1145,6 +1147,8 @@ const layerWsRpc = (
       const agents = yield* Agents.AgentService;
       const agentWorkspace = yield* AgentWorkspace.AgentWorkspaceService;
       const agentStore = yield* AgentStore.AgentStore;
+      const facts = yield* Facts.FactService;
+      const retrieval = yield* Retrieval.ContextRetrievalService;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
       const secretRequests = yield* SecretRequests.SecretRequests;
       const pullRequests = yield* PullRequestService.PullRequestService;
@@ -1678,6 +1682,15 @@ const layerWsRpc = (
         [WS_METHODS.agentsReject]: (input) => agentWorkspace.reject(input.id),
         [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
         [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
+        [WS_METHODS.factsList]: (input) => facts.list(input),
+        [WS_METHODS.factsCreate]: (input) => facts.create(input),
+        [WS_METHODS.factsUpdate]: (input) => facts.update(input),
+        [WS_METHODS.factsSupersede]: (input) => facts.supersede(input),
+        [WS_METHODS.factsRetract]: (input) => facts.retract(input.id),
+        [WS_METHODS.factsHistory]: (input) => facts.history(input.id),
+        [WS_METHODS.contextForRun]: (input) => retrieval.forRun(input.runId),
+        [WS_METHODS.contextSettings]: (input) => retrieval.settings(input.threadId),
+        [WS_METHODS.contextSetEnabled]: (input) => retrieval.setEnabled(input),
         [WS_METHODS.commitmentsList]: (input) => agentWorkspace.listCommitments(input),
         [WS_METHODS.commitmentsCreate]: (input) => agentWorkspace.createCommitment(input),
         [WS_METHODS.commitmentsUpdateStatus]: (input) =>

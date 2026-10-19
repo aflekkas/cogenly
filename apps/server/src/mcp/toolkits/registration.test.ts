@@ -1,4 +1,5 @@
 import * as GlobalSearch from "../../search/GlobalSearch.ts";
+import * as FactService from "../../context/FactService.ts";
 import * as ProjectLabels from "../../projectLabels/ProjectLabelService.ts";
 import * as WorkHandoff from "../../work/WorkHandoffService.ts";
 import * as AgentWorkspace from "../../agents/AgentWorkspaceService.ts";
@@ -99,6 +100,7 @@ const layerStubServices = Layer.mergeAll(
     memory: () => Effect.succeed([]),
   }),
   Layer.mock(Orchestrator.OrchestratorV2)({ getThreadShell: () => Effect.succeed(shell) }),
+  Layer.mock(FactService.FactService)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
     list: Effect.succeed({
@@ -220,7 +222,15 @@ const smokeCases = [
   },
   {
     toolkit: "agentMemory",
-    names: ["memory_read", "memory_write", "memory_remember", "memory_forget"],
+    names: [
+      "memory_read",
+      "memory_write",
+      "memory_remember",
+      "memory_forget",
+      "fact_search",
+      "fact_propose",
+      "fact_supersede",
+    ],
     tool: "memory_read",
     args: {},
     expected: { notes: [] },

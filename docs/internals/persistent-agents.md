@@ -22,10 +22,15 @@ thread history remains available.
 Memory tools never accept an agent ID. The MCP invocation credential's thread resolves
 to either an agent conversation or one of its work records. Outside MCP clients and
 unrelated threads cannot select another identity. Owner RPCs accept explicit IDs and
-use the environment's normal read/operate grants. All small memory is injected at
-provider turn start; beyond 16,000 characters it uses recent full facts plus an extractive
-summary of older notes. Full notes stay available through `memory_read` and owner RPCs.
-This bounds prompt size, rather than deleting durable facts.
+use the environment's normal read/operate grants. Memory aliases now read and mutate
+the shared facts store; agent-authored notes are
+proposals until the owner confirms them. Turn startup retrieves confirmed facts,
+open commitments, recent owned messages and observable Work outcomes, bounded to
+16,000 characters for agents and 4,000 for tagged ordinary chats. Agent label
+visibility comes only from explicit readable scope, never the current thread's tags.
+Ordinary chats require confirmed tags and can opt out through `context.setEnabled`.
+Selected references are persisted per provider run for inspection without copying
+source bodies into the audit record.
 
 After forty conversation runs since the last full handoff, startup opens a fresh native
 session through the existing resume-fallback and `full_thread_summary` delivery path.

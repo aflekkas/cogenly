@@ -22,6 +22,43 @@ export function createAgentWorkspaceAtoms<R, E>(
       }
     : {};
   return {
+    factsList: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "facts.list",
+      tag: WS_METHODS.factsList,
+    }),
+    factsCreate: createEnvironmentRpcCommand(runtime, {
+      label: "facts.create",
+      tag: WS_METHODS.factsCreate,
+    }),
+    factsUpdate: createEnvironmentRpcCommand(runtime, {
+      label: "facts.update",
+      tag: WS_METHODS.factsUpdate,
+    }),
+    factsSupersede: createEnvironmentRpcCommand(runtime, {
+      label: "facts.supersede",
+      tag: WS_METHODS.factsSupersede,
+    }),
+    factsRetract: createEnvironmentRpcCommand(runtime, {
+      label: "facts.retract",
+      tag: WS_METHODS.factsRetract,
+    }),
+    factsHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "facts.history",
+      tag: WS_METHODS.factsHistory,
+    }),
+    contextForRun: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "context.forRun",
+      tag: WS_METHODS.contextForRun,
+    }),
+    contextSettings: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "context.settings",
+      tag: WS_METHODS.contextSettings,
+    }),
+    contextSetEnabled: createEnvironmentRpcCommand(runtime, {
+      label: "context.setEnabled",
+      tag: WS_METHODS.contextSetEnabled,
+    }),
+
     agentsApprovalsList: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "agents.approvalsList",
       ...refresh,

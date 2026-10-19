@@ -1,3 +1,4 @@
+import * as Facts from "../context/FactService.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EventId, ProjectId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
@@ -241,5 +242,27 @@ describe("project labels", () => {
           expect((yield* Queue.take(live)).labels).toEqual([]);
         }),
       ).pipe(Effect.provide(layer)),
+  );
+  it.effect("removes deleted label metadata from facts while preserving change history", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const labels = yield* Labels.ProjectLabelService;
+      const facts = yield* Facts.FactService.pipe(
+        Effect.provide(Facts.layer.pipe(Layer.provide(NodeServices.layer))),
+      );
+      const label = (yield* labels.create({ name: "Context" })).label;
+      const fact = (yield* facts.create({
+        subject: "Decision",
+        text: "Keep evidence",
+        labelIds: [label.id],
+        visibility: "labels",
+        sourceRefs: [],
+      })).fact;
+      yield* labels.delete(label.id);
+      expect((yield* facts.list({})).facts[0]?.labelIds).toEqual([]);
+      const history = (yield* facts.history(fact.id)).history;
+      expect(history.map((h) => h.fact.labelIds)).toEqual([[label.id], []]);
+      expect((yield* facts.retract(fact.id)).fact.status).toBe("retracted");
+    }).pipe(Effect.provide(layer)),
   );
 });
