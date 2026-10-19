@@ -8,12 +8,13 @@
 /**
  * Cogenly publishes no CLI releases yet, so there is no default download
  * origin: nothing is fetched unless `COGENLY_RELEASE_BASE_URL` names a mirror.
- * Set this to `"<owner>/<repo>"` once Cogenly ships GitHub Releases.
+ * Set this to `"<owner>/<repo>"` once Cogenly ships CLI archives and checksums.
  */
 const CLI_RELEASE_REPOSITORY: string | null = null;
 /** Whether a default release origin exists to check for updates against. */
 export const CLI_RELEASES_PUBLISHED: boolean = CLI_RELEASE_REPOSITORY !== null;
-export const CLI_RELEASES_UNAVAILABLE_MESSAGE = "Updates are not available for Cogenly yet.";
+export const CLI_RELEASES_UNAVAILABLE_MESSAGE =
+  "Standalone CLI updates are not published yet. Update the desktop app through Settings or install from source.";
 export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 /** Overrides the download origin for mirrors and air-gapped installs. */
 export const CLI_RELEASE_BASE_URL_ENV = "COGENLY_RELEASE_BASE_URL";
@@ -94,23 +95,18 @@ export function parseChecksums(text: string): ReadonlyMap<string, string> {
   return checksums;
 }
 
-export type CliReleaseChannel = "stable" | "nightly" | "preview";
-export const CLI_RELEASE_CHANNELS: ReadonlyArray<CliReleaseChannel> = [
-  "stable",
-  "nightly",
-  "preview",
-];
+export type CliReleaseChannel = "prod" | "staging";
+export const CLI_RELEASE_CHANNELS: ReadonlyArray<CliReleaseChannel> = ["prod", "staging"];
 
 /** The release train a version was published on, derived from its prerelease tag. */
 export function cliReleaseChannelOf(version: string): CliReleaseChannel {
-  const channel = /^[^-+]+-(nightly|preview)\.\d{8}\.\d+$/.exec(version)?.[1];
-  return channel === "nightly" || channel === "preview" ? channel : "stable";
+  return /^[^-+]+-staging\.\d{8}\.\d+$/.test(version) ? "staging" : "prod";
 }
 
 /**
  * One page of GitHub's list-releases endpoint, newest first. Callers walk pages
- * until a channel match turns up; a busy nightly train can push the newest
- * preview or stable release past any single page.
+ * until a channel match turns up; a busy staging train can push the newest
+ * prod release past any single page.
  */
 export function cliReleaseIndexPageUrl(page: number): string | null {
   return CLI_RELEASE_REPOSITORY === null
@@ -121,7 +117,7 @@ export function cliReleaseIndexPageUrl(page: number): string | null {
 /**
  * Picks the newest version on a channel from the release index. Tags are
  * `v<version>`; the channel is decided by the same rule the runtime uses, so
- * a preview tag never satisfies a nightly lookup and vice versa. Drafts are
+ * staging tags never satisfy a prod lookup. Drafts are
  * skipped because their assets are not downloadable.
  */
 export function newestCliReleaseVersion(
@@ -134,7 +130,11 @@ export function newestCliReleaseVersion(
   for (const release of releases) {
     if (release.draft) continue;
     const version = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(release.tag_name)?.[1];
-    if (version === undefined) continue;
+    if (
+      version === undefined ||
+      (!/^\d+\.\d+\.\d+$/.test(version) && !/^[^-+]+-staging\.\d{8}\.\d+$/.test(version))
+    )
+      continue;
     if (cliReleaseChannelOf(version) === channel) return version;
   }
   return undefined;

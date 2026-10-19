@@ -1,0 +1,250 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      staging_tag:
+        description: "Verified staging tag to promote (vX.Y.Z-staging.YYYYMMDD.run)"
+        required: true
+        type: string
+      version:
+        description: "Prod X.Y.Z override; defaults to the staging build's base version"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# Retain every successful main build and serialize publication.
+# Adapted from T3 Code's release queue.
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && 'prod' || 'staging' }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  prepare:
+    name: Resolve release
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      channel: ${{ steps.plan.outputs.channel }}
+      environment: ${{ steps.plan.outputs.environment }}
+      source_tag: ${{ steps.plan.outputs.source_tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Resolve verified source and version
+        id: plan
+        uses: actions/github-script@v8
+        env:
+          STAGING_TAG: ${{ inputs.staging_tag }}
+          VERSION: ${{ inputs.version }}
+        with:
+          script: |
+            if (context.eventName === 'workflow_dispatch' && context.ref !== 'refs/heads/main') {
+              throw new Error('Promote must be dispatched from main.');
+            }
+            const { releasePlan } = require('./.github/scripts/release-plan.cjs');
+            const channel = context.eventName === 'workflow_dispatch' ? 'prod' : 'staging';
+            const stagingTag = process.env.STAGING_TAG;
+            // Validate input before using it as a Git ref or shell argument.
+            let plan = channel === 'prod' ? releasePlan({ channel, stagingTag, version: process.env.VERSION }) : null;
+            let sha = context.payload.workflow_run?.head_sha;
+            if (channel === 'prod') {
+              const { data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag: stagingTag });
+              if (release.draft || !release.prerelease) throw new Error('Source must be a published staging prerelease.');
+              // Our publisher records the exact commit, never a moving branch.
+              sha = release.target_commitish;
+              if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Staging release does not record an exact source commit.');
+            }
+            if (!/^[a-f0-9]{40}$/.test(sha || '')) throw new Error('Missing exact source SHA.');
+            const { data: manifest } = await github.rest.repos.getContent({ ...context.repo, path: 'apps/desktop/package.json', ref: sha });
+            const packageVersion = JSON.parse(Buffer.from(manifest.content, 'base64').toString()).version;
+            plan ??= releasePlan({ channel, packageVersion, date: new Date().toISOString().slice(0, 10).replaceAll('-', ''), runNumber: context.runNumber });
+            if (channel === 'prod') {
+              try {
+                const { data: latest } = await github.rest.repos.getLatestRelease(context.repo);
+                const { assertProdVersionAdvances } = require('./.github/scripts/release-plan.cjs');
+                assertProdVersionAdvances(plan.version, latest.tag_name);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+            try {
+              await github.rest.repos.getReleaseByTag({ ...context.repo, tag: plan.tag });
+              throw new Error(`${plan.tag} already exists. Releases are never overwritten.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            for (const [key, value] of Object.entries({ ...plan, sha, source_tag: channel === 'prod' ? stagingTag : '' })) core.setOutput(key, value);
+            core.notice(`${channel}: ${plan.tag} from ${sha}${stagingTag ? ` (verified ${stagingTag})` : ''}`);
+
+  desktop:
+    name: Build macOS arm64
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: mac
+            arch: arm64
+            target: dmg
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - run: vp run --filter @t3tools/desktop ensure:electron
+      - name: Stamp package versions
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: node scripts/update-release-package-versions.ts "$VERSION"
+      # Packaging builds the web/server/desktop pipeline itself, as in upstream.
+      - name: Build desktop (automatic signing when configured)
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--platform '${{ matrix.platform }}' --target '${{ matrix.target }}' --arch '${{ matrix.arch }}' --build-version "$VERSION" --verbose)
+          mode=unsigned
+          if [[ -n "$CSC_LINK" && -n "$CSC_KEY_PASSWORD" && -n "$APPLE_API_KEY" && -n "$APPLE_API_KEY_ID" && -n "$APPLE_API_ISSUER" ]]; then
+            key_path="$RUNNER_TEMP/AuthKey.p8"
+            printf '%s' "$APPLE_API_KEY" > "$key_path"
+            chmod 600 "$key_path"
+            export APPLE_API_KEY="$key_path"
+            args+=(--signed)
+            mode=signed-and-notarized
+          else
+            # Do not discover a partial signing setup or use runner identities.
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          echo "::notice::macOS release mode: $mode"
+          vp run dist:desktop:artifact "${args[@]}"
+          mkdir -p release-publish
+          cp release/*.dmg release/*.zip release/*.blockmap release-publish/
+          channel='${{ needs.prepare.outputs.channel }}'
+          manifest=latest-mac.yml
+          if [[ "$channel" == staging ]]; then manifest=staging-mac.yml; fi
+          cp "release/$manifest" release-publish/
+          printf '%s\n' "$mode" > release-publish/signing-mode.txt
+          cd release-publish
+          shasum -a 256 ./*.dmg ./*.zip ./*.blockmap ./*.yml > SHA256SUMS
+      - name: Verify macOS release payload
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          set -euo pipefail
+          (cd release-publish && shasum -a 256 -c SHA256SUMS)
+          unzip -t "release-publish/Cogenly-$VERSION-arm64.zip" > /dev/null
+          manifest=latest-mac.yml
+          if [[ "$CHANNEL" == staging ]]; then manifest=staging-mac.yml; fi
+          grep -F "version: $VERSION" "release-publish/$manifest"
+          # The same zip is consumed by Squirrel.Mac on signed installs.
+          if [[ "$(cat release-publish/signing-mode.txt)" == signed-and-notarized ]]; then
+            check_dir="$RUNNER_TEMP/release-signature-check"
+            mkdir -p "$check_dir"
+            unzip -q "release-publish/Cogenly-$VERSION-arm64.zip" -d "$check_dir"
+            app="$(find "$check_dir" -maxdepth 1 -name '*.app' -print -quit)"
+            test -n "$app"
+            codesign --verify --deep --strict "$app"
+            xcrun stapler validate "$app"
+            spctl --assess --type execute "$app"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release-publish/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [prepare, desktop]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.prepare.outputs.environment }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: release-publish
+          merge-multiple: true
+      - name: Generate same-channel notes and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+          SOURCE_TAG: ${{ needs.prepare.outputs.source_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(node scripts/resolve-previous-release-tag.ts --channel "$CHANNEL" --current-tag "$TAG")"
+          previous="${previous#previous_tag=}"
+          if [[ -n "$previous" ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+              -f "tag_name=$TAG" -f "target_commitish=$SHA" \
+              -f "previous_tag_name=$previous" --jq .body > release-notes.md
+          else
+            # GitHub otherwise guesses a previous tag from a different channel.
+            printf 'First %s release.\n\n' "$CHANNEL" > release-notes.md
+            git log --first-parent --format="* %s (%h)" "$SHA" >> release-notes.md
+          fi
+          mode="$(cat release-publish/signing-mode.txt)"
+          # shellcheck disable=SC2016
+          printf '\nBuild: `%s` • Channel: **%s** • Signing: **%s**\n' "$SHA" "$CHANNEL" "$mode" >> release-notes.md
+          if [[ "$mode" == unsigned ]]; then
+            printf '\n**Unsigned macOS build.** Gatekeeper may block first launch. In-app updates open the DMG download; install it manually.\n' >> release-notes.md
+          fi
+          # shellcheck disable=SC2016
+          if [[ -n "$SOURCE_TAG" ]]; then printf '\nPromoted from verified staging `%s`; rebuilt from the same commit with prod version metadata.\n' "$SOURCE_TAG" >> release-notes.md; fi
+          rm release-publish/signing-mode.txt
+          args=("$TAG" --target "$SHA" --title "Cogenly $TAG ($CHANNEL)" --notes-file release-notes.md)
+          if [[ "$CHANNEL" == staging ]]; then args+=(--prerelease --latest=false); else args+=(--latest); fi
+          # Upload to a draft first: a failed upload never exposes a partial feed.
+          gh release create "${args[@]}" --draft release-publish/*
+          if [[ "$CHANNEL" == staging ]]; then
+            gh release edit "$TAG" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$TAG" --draft=false --prerelease=false --latest
+          fi

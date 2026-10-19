@@ -2,9 +2,7 @@ import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/con
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
-// Cogenly publishes no desktop releases and never updates itself, so there is
-// no release page to link to. Both helpers report "no link".
-const DESKTOP_RELEASE_HISTORY_URL: string | null = null;
+const DESKTOP_RELEASE_HISTORY_URL = "https://github.com/aflekkas/cogenly/releases";
 
 /**
  * The main process fills `downloadedVersion` from the updater's `update-downloaded`
@@ -18,7 +16,7 @@ export function getDesktopUpdateDownloadedVersion(state: DesktopUpdateState): st
 /** Release notes for an exact downloaded build; null when there is no release page. */
 export function getDesktopUpdateReleaseUrl(version: string | null): string | null {
   const normalizedVersion = version?.trim();
-  if (!normalizedVersion || DESKTOP_RELEASE_HISTORY_URL === null) return null;
+  if (!normalizedVersion) return null;
   return `${DESKTOP_RELEASE_HISTORY_URL}/tag/v${encodeURIComponent(normalizedVersion)}`;
 }
 
@@ -26,11 +24,6 @@ export function getDesktopUpdateReleaseHistoryUrl(): string | null {
   return DESKTOP_RELEASE_HISTORY_URL;
 }
 
-/**
- * Whether this app's own (local) desktop update control should show. Cogenly's
- * desktop updater always reports `disabled`, so this is false in practice and the
- * sidebar pill only appears for provider or remote-server updates.
- */
 export function shouldShowLocalDesktopUpdateControl(state: DesktopUpdateState | null): boolean {
   return state !== null && state.enabled && state.status !== "disabled";
 }
@@ -87,6 +80,9 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
     getDesktopUpdateDownloadedVersion(state) === state.notAppliedVersion
   ) {
     return `Update ${state.notAppliedVersion} did not apply. Click to retry.`;
+  }
+  if (state.status === "available" && state.manualDownloadUrl) {
+    return "Update available — download. Install the DMG manually; this macOS app is unsigned.";
   }
   if (state.status === "available") {
     return `Update ${state.availableVersion ?? "available"} ready to download`;

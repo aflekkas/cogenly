@@ -50,6 +50,14 @@ export function showDesktopUpdateDownloadedToast(
   shell: DesktopUpdateShell,
   state: DesktopUpdateState,
 ): void {
+  if (state.manualDownloadUrl) {
+    toastManager.add({
+      type: "success",
+      title: "Update download opened",
+      description: "Install the DMG manually to update this unsigned macOS app.",
+    });
+    return;
+  }
   const releaseUrl = getDesktopUpdateReleaseUrl(getDesktopUpdateDownloadedVersion(state));
   toastManager.add({
     type: "success",
