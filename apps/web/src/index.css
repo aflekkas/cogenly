@@ -137,6 +137,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --motion-duration-fast: 150ms;
   --motion-duration-base: 200ms;
   --motion-duration-slow: 250ms;
+  /* ease-standard for inline transitions and scripts (the theme token is
+     inlined into utilities, so it has no runtime variable). */
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --chat-content-max-width: 46rem;
   /* Transcript text sits this far inside the lane; the composer and user
      bubbles share the inset so the column has one left and right edge. */
