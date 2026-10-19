@@ -519,8 +519,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    edge do the work. Apply it conditionally (or behind data-*: variants). It is
    deliberately more specific, so it wins over state-hover and plain bg-* or
    hover:bg-* utilities when both apply. Where --state-selected-indicator is on
-   (the app sidebar, or state-selected-indicator), it also draws a short
-   luminous line on the leading edge with a soft glow behind it. Everything is
+   (state-selected-indicator, the command palette), it also draws a short
+   luminous line on the leading edge with a soft glow behind it. The app
+   sidebar leaves it off: its selection is the fill alone. Everything is
    background layers and shadows: static, no pseudo-elements, no layout. */
 @utility state-hover {
   &[data-highlighted] {
@@ -1501,7 +1502,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --state-selected-shadow: 0 0 #0000;
   --state-hover-foreground: var(--contrast-sidebar-foreground);
   --state-selected-foreground: var(--contrast-sidebar-foreground);
-  --state-selected-indicator: 1;
 
   @variant dark {
     --background: #000;
@@ -1528,17 +1528,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --state-selected-edge: rgb(255 255 255 / 3.5%);
     --state-selected-shadow: 0 1px 2px rgb(0 0 0 / 50%);
   }
-}
-
-/* Horizontal and icon controls in the sidebar (segmented toggles, pressed
-   buttons, the footer's icon row) keep the glow without the leading line. */
-[data-app-sidebar]
-  :is(
-    [data-slot="toggle"],
-    [data-slot="button"],
-    [data-slot="sidebar-menu-button"][data-size="icon"]
-  ) {
-  --state-selected-indicator: 0;
 }
 
 /* Theme files are expressed in app color roles and mapped to the existing
