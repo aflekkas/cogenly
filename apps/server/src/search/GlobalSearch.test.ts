@@ -84,6 +84,78 @@ const commitment = Effect.fnUntraced(function* (
 });
 
 describe("global search", () => {
+  it.effect(
+    "indexes only confirmed facts, enforces owner/label visibility, and cleans up retractions and cascades",
+    () =>
+      Effect.gen(function* () {
+        yield* seed;
+        const sql = yield* SqlClient.SqlClient;
+        const search = yield* Search.GlobalSearch;
+        const label = (yield* (yield* Labels.ProjectLabelService).create({ name: "Shared" })).label;
+        const agent = {
+          ...agentFixture(),
+          scope: [{ labelId: label.id, permissions: agentFixture().permissions }],
+        };
+        const stranger = agentFixture("stranger");
+        for (const a of [agent, stranger]) {
+          yield* thread(a.conversationThreadId, repo);
+          yield* (yield* Store.AgentStore).save(a);
+        }
+        for (const [id, owner, visibility, status] of [
+          ["own", agent.id, "user", "confirmed"],
+          ["shared", stranger.id, "labels", "confirmed"],
+          ["private", stranger.id, "user", "confirmed"],
+          ["proposed", agent.id, "labels", "proposed"],
+          ["user", null, "user", "confirmed"],
+        ] as const) {
+          yield* sql`INSERT INTO facts(id, agent_id, status, payload_json, updated_at) VALUES (${id}, ${owner}, ${status}, ${json({ subject: "Quartz memory", text: "Nebula details", visibility })}, ${at})`;
+          yield* sql`INSERT INTO fact_labels(fact_id, label_id) VALUES (${id}, ${label.id})`;
+        }
+        expect((yield* search.query({ query: "quartz", kinds: ["fact"] })).results).toHaveLength(4);
+        const scoped = (yield* search.query(
+          { query: "nebula", kinds: ["fact"], labelId: label.id },
+          scope(agent.conversationThreadId),
+        )).results;
+        expect(new Set(scoped.map((r) => r.id))).toEqual(new Set(["own", "shared"]));
+        expect(scoped.every((r) => r.labelIds.includes(label.id))).toBe(true);
+        yield* (yield* Store.AgentStore).save({
+          ...agent,
+          permissions: { ...agent.permissions, read: false },
+        });
+        expect(
+          (yield* search.query(
+            { query: "quartz", kinds: ["fact"] },
+            scope(agent.conversationThreadId),
+          )).results,
+        ).toEqual([]);
+        yield* (yield* Store.AgentStore).save(agent);
+        yield* sql`UPDATE facts SET status = 'confirmed' WHERE id = 'proposed'`;
+        expect((yield* search.query({ query: "quartz", kinds: ["fact"] })).results).toHaveLength(5);
+        yield* sql`UPDATE facts SET status = 'retracted' WHERE id = 'proposed'`;
+        yield* sql`UPDATE facts SET status = 'retracted' WHERE id = 'own'`;
+        yield* sql`UPDATE facts SET status = 'superseded' WHERE id = 'shared'`;
+        yield* sql`DELETE FROM facts WHERE id = 'user'`;
+        yield* sql`DELETE FROM agents WHERE agent_id = ${stranger.id}`;
+        expect((yield* search.query({ query: "quartz", kinds: ["fact"] })).results).toEqual([]);
+        expect(yield* sql`SELECT * FROM search_documents WHERE kind = 'fact'`).toEqual([]);
+        yield* commitment("delete-me", "Quartz deleted", agent.id);
+        yield* sql`DELETE FROM commitments WHERE id = 'delete-me'`;
+        yield* commitment("cascade-me", "Quartz cascade", agent.id);
+        yield* sql`DELETE FROM agents WHERE agent_id = ${agent.id}`;
+        // Commitments intentionally survive agent deletion (ON DELETE SET NULL).
+        expect(
+          (yield* search.query({ query: "quartz", kinds: ["commitment"] })).results.map(
+            (r) => r.id,
+          ),
+        ).toEqual(["cascade-me"]);
+        yield* sql`DELETE FROM commitments WHERE id = 'cascade-me'`;
+        expect((yield* search.query({ query: "quartz", kinds: ["commitment"] })).results).toEqual(
+          [],
+        );
+        yield* sql`INSERT INTO search_fts(search_fts, rank) VALUES ('integrity-check', 1)`;
+      }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("indexes all six kinds on their writes, updates text, and bounds snippets", () =>
     Effect.gen(function* () {
       yield* seed;

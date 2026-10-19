@@ -79,6 +79,7 @@ import Migration0065 from "./Migrations/065_ProjectLabels.ts";
 import Migration0066 from "./Migrations/066_WorkThreadMetadata.ts";
 import Migration0068 from "./Migrations/068_GlobalSearch.ts";
 import Migration0069 from "./Migrations/069_ContextFacts.ts";
+import Migration0071 from "./Migrations/071_FactSearch.ts";
 import Migration0070 from "./Migrations/070_AgentEventTriggers.ts";
 import Migration0067 from "./Migrations/067_AgentScope.ts";
 import Migration0064 from "./Migrations/064_AgentReadWatermarks.ts";
@@ -168,6 +169,7 @@ export const migrationEntries = [
   [68, "GlobalSearch", Migration0068],
   [69, "ContextFacts", Migration0069],
   [70, "AgentEventTriggers", Migration0070],
+  [71, "FactSearch", Migration0071],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

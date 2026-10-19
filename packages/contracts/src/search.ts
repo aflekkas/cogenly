@@ -2,11 +2,19 @@ import * as Schema from "effect/Schema";
 import { IsoDateTime, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 
-export const SearchKind = Schema.Literals(["chat", "work", "agent", "commitment", "project", "pr"]);
+export const SearchKind = Schema.Literals([
+  "chat",
+  "work",
+  "agent",
+  "commitment",
+  "project",
+  "pr",
+  "fact",
+]);
 export type SearchKind = typeof SearchKind.Type;
 export const SearchQueryInput = Schema.Struct({
   query: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
-  kinds: Schema.optional(Schema.Array(SearchKind).check(Schema.isMaxLength(6))),
+  kinds: Schema.optional(Schema.Array(SearchKind).check(Schema.isMaxLength(7))),
   labelId: Schema.optional(ProjectLabelId),
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
 });
