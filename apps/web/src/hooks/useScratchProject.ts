@@ -89,5 +89,33 @@ export function useScratchProject() {
     [handleNewThread, openScratchProject],
   );
 
-  return { scratchWorkspaceRootFor, scratchEnvironmentId, openScratchProject, startScratchThread };
+  /**
+   * New chat from Chats mode: always a plain chat on the current machine,
+   * never a repository draft. Says so when that machine offers none.
+   */
+  const startNewChat = useCallback(
+    (current: EnvironmentId | null) => {
+      const environmentId = scratchEnvironmentId(current);
+      if (environmentId === null) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "info",
+            title: "Chats aren't available here",
+            description: "This machine can't start a chat without a repository right now.",
+          }),
+        );
+        return;
+      }
+      void startScratchThread(environmentId);
+    },
+    [scratchEnvironmentId, startScratchThread],
+  );
+
+  return {
+    scratchWorkspaceRootFor,
+    scratchEnvironmentId,
+    openScratchProject,
+    startScratchThread,
+    startNewChat,
+  };
 }

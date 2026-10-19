@@ -101,6 +101,16 @@ Settings choose a workspace mode. To continue in an existing worktree, use
 When you change a new thread's project, Cogenly stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
 
+### Chats
+
+The **Chats** tab lists threads without a project, newest first under **Today**,
+**Yesterday**, **Previous 7 days** and **Older**. **New chat** beside search, `mod+n`
+while Chats is open, and **New chat** in the command palette all start one without a
+project; they never open a repository. A small dot marks a chat that is still running
+or waiting on you. Rename, archive, delete and **Start Work…** are in each chat's
+right-click menu. Older chats load as you scroll, and search covers all of them. Add
+repositories from **Work** or the command palette.
+
 ### Start without a project
 
 A thread does not need a project. To start one without a project, click **or
@@ -291,8 +301,8 @@ show outlined and do nothing until you accept them; a dismissed suggestion is no
 offered again for that thread. Confirmed projects also give the chat
 [project context](./memory-and-export.md#project-context-in-chats).
 
-**Chats** stays one list by date. Each chat shows one of its projects, and the
-filter button beside search narrows the list to one project. **Work** groups
+**Chats** stays one list of titles by date, and the filter button beside search
+narrows it to one project. **Work** groups
 repositories under the projects that link them, so a repository linked to two
 projects appears under both. Repositories without a project come last under
 **Other repositories**.

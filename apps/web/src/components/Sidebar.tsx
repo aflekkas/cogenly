@@ -215,7 +215,6 @@ import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { ChatsProjectFilter } from "../projectLabels/ChatsProjectFilter";
-import { ProjectTag } from "../projectLabels/ProjectTag";
 import {
   groupWorkByProject,
   scopedRepositoryKey,
@@ -233,11 +232,13 @@ import {
   SidebarAgentsList,
   SidebarModeGroupLabel,
   SidebarModeSwitcher,
+  CHAT_LIST_PAGE_SIZE,
   createChatDateGrouper,
   groupTasksByProject,
   sortChatsByActivity,
   useSidebarModeActions,
   useSidebarModeState,
+  windowChatList,
 } from "./sidebar/modes";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -889,6 +890,236 @@ const sweepActionBadge: Record<SidebarSweepAction, ReactNode> = {
   ),
 };
 
+// How far below the visible list the next page of chats starts rendering.
+const CHAT_LIST_REVEAL_MARGIN_PX = 320;
+
+/** Sits after the last rendered chat and asks for the next page as it nears the viewport. */
+function ChatListRevealSentinel(props: { onReveal: () => void }) {
+  const { onReveal } = props;
+  const [sentinel, setSentinel] = useState<HTMLLIElement | null>(null);
+  useEffect(() => {
+    if (sentinel === null) return;
+    if (typeof IntersectionObserver === "undefined") {
+      onReveal();
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onReveal();
+      },
+      {
+        root: sentinel.closest<HTMLElement>('[data-slot="scroll-area-viewport"]'),
+        rootMargin: `0px 0px ${CHAT_LIST_REVEAL_MARGIN_PX}px 0px`,
+      },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [onReveal, sentinel]);
+  return <li ref={setSentinel} aria-hidden className="h-px list-none" />;
+}
+
+/**
+ * A Chats row: the title on one line, nothing else. A chat that is running or
+ * waiting on you carries a small static dot; an unread reply makes the title
+ * heavier. Everything else (rename, archive, Start Work) lives in the context
+ * menu.
+ */
+const SidebarChatRow = memo(function SidebarChatRow(props: {
+  thread: SidebarThreadSummary;
+  isActive: boolean;
+  jumpLabel: string | null;
+  isRenaming: boolean;
+  renamingTitle: string;
+  onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
+  onThreadActivate: (threadRef: ScopedThreadRef) => void;
+  onStartRename: (threadRef: ScopedThreadRef, title: string) => void;
+  onRenameTitleChange: (title: string) => void;
+  onCommitRename: (threadRef: ScopedThreadRef, title: string, originalTitle: string) => void;
+  onCancelRename: () => void;
+  onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
+  onContextDragStart: (threadRef: ScopedThreadRef, event: PointerEvent) => void;
+}) {
+  const {
+    isRenaming,
+    onCancelRename,
+    onCommitRename,
+    onContextDragStart,
+    onContextMenu,
+    onRenameTitleChange,
+    onStartRename,
+    onThreadActivate,
+    onThreadClick,
+    renamingTitle,
+    thread,
+  } = props;
+  const threadRef = useMemo(
+    () => scopeThreadRef(thread.environmentId, thread.id),
+    [thread.environmentId, thread.id],
+  );
+  const threadKey = scopedThreadKey(threadRef);
+  const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
+  useEffect(() => {
+    if (!canOperateThread && isRenaming) onCancelRename();
+  }, [canOperateThread, isRenaming, onCancelRename]);
+  const localLastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
+  const lastVisitedAt = resolveThreadLastVisitedAt(thread.lastVisitedAt, localLastVisitedAt);
+  const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
+  const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
+  const status = resolveSidebarThreadStatus(thread);
+  const needsYou = status === "approval" || status === "input";
+  const isRunning = status === "working" || status === "waiting";
+  const statusLabel =
+    status === "working"
+      ? "Working"
+      : status === "waiting"
+        ? "Waiting"
+        : status === "approval"
+          ? "Needs approval"
+          : status === "input"
+            ? "Needs input"
+            : isUnread
+              ? "Unread"
+              : null;
+  const accessibility = resolveSidebarRowAccessibility({
+    title: thread.title,
+    statusLabel,
+    projectDisplayName: null,
+    isActive: props.isActive,
+  });
+
+  const handleClick = useCallback(
+    (event: ReactMouseEvent) => onThreadClick(event, threadRef),
+    [onThreadClick, threadRef],
+  );
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent) => {
+      event.preventDefault();
+      onContextMenu(threadRef, { x: event.clientX, y: event.clientY });
+    },
+    [onContextMenu, threadRef],
+  );
+  const handleKeyDown = useCallback(
+    (event: ReactKeyboardEvent) => {
+      if (event.target !== event.currentTarget) return;
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      onThreadActivate(threadRef);
+    },
+    [onThreadActivate, threadRef],
+  );
+  const handleDoubleClick = useCallback(
+    (event: ReactMouseEvent) => {
+      if (
+        !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) ||
+        isRenaming ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+      if ((event.target as HTMLElement).closest("button, a, input")) return;
+      event.preventDefault();
+      onStartRename(threadRef, thread.title);
+    },
+    [isRenaming, onStartRename, thread.title, threadRef],
+  );
+  const handleRowPointerDown = useCallback(
+    (event: ReactPointerEvent) => {
+      if (isRenaming || !event.isPrimary || event.button !== 0) return;
+      onContextDragStart(threadRef, event.nativeEvent);
+    },
+    [isRenaming, onContextDragStart, threadRef],
+  );
+  const renameCommittedRef = useRef(false);
+  useEffect(() => {
+    if (isRenaming) renameCommittedRef.current = false;
+  }, [isRenaming]);
+  const handleRenameKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLInputElement>) => {
+      event.stopPropagation();
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        renameCommittedRef.current = true;
+        onCommitRename(threadRef, renamingTitle, thread.title);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        renameCommittedRef.current = true;
+        onCancelRename();
+      }
+    },
+    [onCancelRename, onCommitRename, renamingTitle, thread.title, threadRef],
+  );
+  const handleRenameBlur = useCallback(() => {
+    if (!renameCommittedRef.current) onCommitRename(threadRef, renamingTitle, thread.title);
+  }, [onCommitRename, renamingTitle, thread.title, threadRef]);
+
+  return (
+    <li
+      data-thread-item={threadKey}
+      onPointerDown={handleRowPointerDown}
+      // Matches the h-8 row so unrendered rows never shift the list when they paint.
+      className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_32px]"
+    >
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={accessibility.label}
+        aria-current={accessibility.current}
+        data-testid="sidebar-row-chat"
+        aria-busy={thread.titleRegeneration != null || undefined}
+        className={cn(
+          "relative flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          props.isActive || isSelected ? "state-selected" : "state-hover",
+        )}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        onKeyDown={handleKeyDown}
+        onContextMenu={handleContextMenu}
+      >
+        {isRenaming && canOperateThread ? (
+          <input
+            autoFocus
+            value={renamingTitle}
+            aria-label="Chat title"
+            onChange={(event) => onRenameTitleChange(event.target.value)}
+            onFocus={(event) => event.currentTarget.select()}
+            onKeyDown={handleRenameKeyDown}
+            onBlur={handleRenameBlur}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm text-card-foreground outline-none focus:border-foreground"
+          />
+        ) : (
+          <span
+            aria-hidden
+            className={cn(
+              "min-w-0 flex-1 truncate text-sm",
+              isUnread || needsYou ? "font-medium text-foreground" : "font-normal",
+              props.isActive ? "text-foreground" : !(isUnread || needsYou) && "text-foreground/80",
+              thread.titleRegeneration != null && "opacity-55",
+            )}
+          >
+            {thread.title}
+          </span>
+        )}
+        {isRunning || needsYou ? (
+          <span
+            aria-hidden
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              needsYou ? "bg-warning" : "bg-sidebar-muted-foreground/60",
+            )}
+          />
+        ) : null}
+        {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+      </div>
+    </li>
+  );
+});
+
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
   variant: "card" | "slim";
@@ -899,8 +1130,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   settlementSupported: boolean;
   // Same contract for thread.snooze/unsnooze.
   snoozeSupported: boolean;
-  // Cards under a project heading leave the project line to the heading;
-  // slim rows drop the project icon (Chats mode).
+  // Cards under a project heading leave the project line to the heading.
   hideProject: boolean;
   // The action this row will take when the sweep is released.
   sweepAction: SidebarSweepAction | null;
@@ -919,8 +1149,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   projectDisplayName: string | null;
   // The agent that started this work thread; null for the user's own threads.
   workAgentName: string | null;
-  // Chats rows show one confirmed project tag; null everywhere else.
-  projectTag: { readonly name: string; readonly color?: string | undefined } | null;
   // Work rows add how their last run ended (paused, canceled) to the meta line.
   showWorkStatus: boolean;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
@@ -1457,9 +1685,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           >
             {accessibleTitle}
             {/* Settled history recedes: dimmed favicon at rest, restored on
-              hover so the tail stays scannable when you're hunting. Chats
-              rows carry no icon: nearly all are scratch chats, so it would
-              repeat the same "no project" glyph down the whole list. */}
+              hover so the tail stays scannable when you're hunting. */}
             {props.hideProject ? null : (
               <span
                 className={cn(
@@ -1475,13 +1701,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             )}
             {draftIndicator}
             {title}
-            {props.projectTag ? (
-              <ProjectTag
-                name={props.projectTag.name}
-                color={props.projectTag.color}
-                className="shrink-0"
-              />
-            ) : null}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
@@ -2364,12 +2583,6 @@ export default function Sidebar() {
     }
     void router.navigate({ to: "/settings/project-tags" });
   });
-  const chatProjectTagFor = (thread: Pick<EnvironmentThreadShell, "environmentId" | "id">) => {
-    const key = projectLabelDirectory.confirmedByThread.get(
-      scopedThreadTagKey(thread.environmentId, thread.id),
-    )?.[0];
-    return (key ? projectLabelDirectory.byKey.get(key)?.label : undefined) ?? null;
-  };
   const { activeThreads, workSections, workingThreads, snoozedThreads, settledThreads, snoozeNow } =
     useMemo(() => {
       // Snooze classification uses a REAL clock, not the quantized minute:
@@ -2399,6 +2612,12 @@ export default function Sidebar() {
       const snoozed: EnvironmentThreadShell[] = [];
       const settled: EnvironmentThreadShell[] = [];
       for (const thread of visible) {
+        // Chats are one plain list by date: no working, snoozed or settled
+        // shelves, so a chat never hides behind lifecycle it can't show.
+        if (sidebarMode === "chats") {
+          active.push(thread);
+          continue;
+        }
         const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
         // Threads on servers without the settlement capability (old server,
         // or descriptor not loaded yet) never classify as settled: the user
@@ -2483,6 +2702,42 @@ export default function Sidebar() {
       threads,
       workingShelfEnabled,
     ]);
+
+  // Chats render a page at a time; the sentinel after the last row reveals
+  // the next page as it scrolls into view. Every chat summary is already in
+  // the shell, so this only bounds rendering. A mode or filter change starts
+  // over at the first page.
+  const chatWindowResetKey = `${sidebarMode}:${activeChatProjectFilter ?? ""}`;
+  const [chatWindowState, setChatWindowState] = useState({
+    resetKey: chatWindowResetKey,
+    count: CHAT_LIST_PAGE_SIZE,
+  });
+  const chatVisibleCount =
+    chatWindowState.resetKey === chatWindowResetKey ? chatWindowState.count : CHAT_LIST_PAGE_SIZE;
+  const chatWindow = useMemo(
+    () =>
+      sidebarMode === "chats"
+        ? windowChatList(
+            activeThreads,
+            chatVisibleCount,
+            (thread) =>
+              routeThreadKey !== null &&
+              scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+          )
+        : null,
+    [activeThreads, chatVisibleCount, routeThreadKey, sidebarMode],
+  );
+  const renderedActiveThreads = chatWindow?.visible ?? activeThreads;
+  const revealMoreChats = useCallback(
+    () =>
+      setChatWindowState((previous) => ({
+        resetKey: chatWindowResetKey,
+        count:
+          (previous.resetKey === chatWindowResetKey ? previous.count : CHAT_LIST_PAGE_SIZE) +
+          CHAT_LIST_PAGE_SIZE,
+      })),
+    [chatWindowResetKey],
+  );
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -2644,12 +2899,12 @@ export default function Sidebar() {
 
   const orderedThreads = useMemo(
     () => [
-      ...activeThreads,
+      ...renderedActiveThreads,
       ...visibleWorkingThreads,
       ...visibleSnoozedThreads,
       ...renderedSettledThreads,
     ],
-    [activeThreads, visibleWorkingThreads, visibleSnoozedThreads, renderedSettledThreads],
+    [renderedActiveThreads, visibleWorkingThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -3205,7 +3460,8 @@ export default function Sidebar() {
     ) {
       return [];
     }
-    const items: SidebarListItem[] = rowsOf(activeThreads, "active");
+    const items: SidebarListItem[] = rowsOf(renderedActiveThreads, "active");
+    if (sidebarMode === "chats") return items;
     if (workingThreads.length > 0) {
       items.push({ kind: "marker", marker: "working-header" });
       items.push(...rowsOf(visibleWorkingThreads, "working"));
@@ -3218,8 +3474,10 @@ export default function Sidebar() {
     items.push(...rowsOf(renderedSettledThreads, "settled"));
     return items;
   }, [
-    activeThreads,
+    activeThreads.length,
+    renderedActiveThreads,
     renderedSettledThreads,
+    sidebarMode,
     settledThreads.length,
     snoozedThreads.length,
     visibleSnoozedThreads,
@@ -3355,11 +3613,14 @@ export default function Sidebar() {
       const settlingThreads = selectedThreads.filter(
         (thread) => thread.settledOverride !== "settled",
       );
-      const canSnoozeSelection = selectedThreads.every(
-        (thread) =>
-          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true &&
-          canSnooze(thread, { now: selectionNow.toISOString() }),
-      );
+      const offersLifecycle = sidebarMode !== "chats";
+      const canSnoozeSelection =
+        offersLifecycle &&
+        selectedThreads.every(
+          (thread) =>
+            serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze ===
+              true && canSnooze(thread, { now: selectionNow.toISOString() }),
+        );
       const titleRegenerationThreads = selectedThreads.filter(
         (thread) =>
           serverConfigs.get(thread.environmentId)?.environment.capabilities
@@ -3376,11 +3637,15 @@ export default function Sidebar() {
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
           [
-            {
-              id: "settle",
-              label: `Settle (${count})`,
-              disabled: settlingThreads.length === 0 || !canOperateThreads(settlingThreads),
-            },
+            ...(offersLifecycle
+              ? [
+                  {
+                    id: "settle",
+                    label: `Settle (${count})`,
+                    disabled: settlingThreads.length === 0 || !canOperateThreads(settlingThreads),
+                  },
+                ]
+              : []),
             ...(canSnoozeSelection
               ? [
                   {
@@ -3660,13 +3925,18 @@ export default function Sidebar() {
           projectByKey.get(`${thread.environmentId}:${thread.projectId}`)?.workspaceRoot ??
           null;
         // Environments without the settlement capability get no lifecycle
-        // items at all.
+        // items at all, and neither do chats: their list has no shelves to
+        // show a settled or snoozed chat in.
+        const offersLifecycle = sidebarMode !== "chats";
         const supportsSettlement =
+          offersLifecycle &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
-          true;
+            true;
         const supportsSnooze =
+          offersLifecycle &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
         const supportsAutoSettleOptOut =
+          offersLifecycle &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities
             .threadAutoSettleOptOut === true;
         const supportsTitleRegeneration =
@@ -4009,7 +4279,7 @@ export default function Sidebar() {
           />
         ) : null
       }
-      onNewProject={openAddProjectCommandPalette}
+      onNewProject={sidebarMode === "chats" ? null : openAddProjectCommandPalette}
       onNewThread={sidebarModeActions.createInMode ?? handleNewThreadClick}
       newThreadLabel={sidebarModeActions.newItemLabel}
       newThreadDisabled={sidebarMode === "tasks" && projects.length === 0}
@@ -4179,8 +4449,28 @@ export default function Sidebar() {
                     // from users (or the auto rules) actually parking work,
                     // not from the sidebar second-guessing what still matters.
                     // Working rows stay cards so their live status shows.
+                    if (sidebarMode === "chats") {
+                      return (
+                        <SidebarChatRow
+                          key={`${keyPrefix}${threadKey}`}
+                          thread={thread}
+                          isActive={routeThreadKey === threadKey}
+                          jumpLabel={showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
+                          isRenaming={renamingThreadKey === threadKey}
+                          renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
+                          onThreadClick={handleThreadClick}
+                          onThreadActivate={navigateToThread}
+                          onStartRename={startThreadRename}
+                          onRenameTitleChange={setRenamingTitle}
+                          onCommitRename={commitThreadRename}
+                          onCancelRename={cancelThreadRename}
+                          onContextMenu={handleThreadContextMenu}
+                          onContextDragStart={startThreadContextDrag}
+                        />
+                      );
+                    }
                     const isCard = section === "active" || section === "working";
-                    const rowVariant = isCard && sidebarMode !== "chats" ? "card" : "slim";
+                    const rowVariant = isCard ? "card" : "slim";
                     return (
                       <SidebarThreadRow
                         // Fade between card and compact rows.
@@ -4233,7 +4523,6 @@ export default function Sidebar() {
                             `${thread.environmentId}:${thread.projectId}`,
                           ) ?? null
                         }
-                        projectTag={sidebarMode === "chats" ? chatProjectTagFor(thread) : null}
                         showWorkStatus={sidebarMode === "tasks"}
                         workAgentName={
                           thread.source.agent?.role === "work"
@@ -4387,7 +4676,7 @@ export default function Sidebar() {
                           </SidebarModeGroupLabel>,
                         );
                       }
-                      items.push(renderThreadRow(thread, item.section, sidebarMode === "chats"));
+                      items.push(renderThreadRow(thread, item.section, false));
                       continue;
                     }
                     switch (item.marker) {
@@ -4451,6 +4740,11 @@ export default function Sidebar() {
                   }
                   return items;
                 })()}
+                {chatWindow !== null && chatWindow.hiddenCount > 0 ? (
+                  // Remounts after each page, so a sentinel still in view
+                  // after a reveal asks for the next page too.
+                  <ChatListRevealSentinel key={chatVisibleCount} onReveal={revealMoreChats} />
+                ) : null}
                 {settledShelfExpanded && hiddenSettledCount > 0 ? (
                   <li className="list-none">
                     <button
@@ -4475,7 +4769,24 @@ export default function Sidebar() {
             settledThreads.length ===
             0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground">
-              {projects.length === 0 ? (
+              {sidebarMode === "chats" ? (
+                activeChatProjectFilter !== null ? (
+                  "No chats in this project"
+                ) : (
+                  // Chats need no repository, so the empty list offers a chat.
+                  <>
+                    <span>No chats yet</span>
+                    <button
+                      type="button"
+                      onClick={sidebarModeActions.startChat}
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
+                    >
+                      <SquarePenIcon className="-mx-0.5 size-3" />
+                      New chat
+                    </button>
+                  </>
+                )
+              ) : projects.length === 0 ? (
                 <>
                   <span>No repositories yet</span>
                   <button
@@ -4487,12 +4798,6 @@ export default function Sidebar() {
                     Add repository
                   </button>
                 </>
-              ) : sidebarMode === "chats" ? (
-                activeChatProjectFilter !== null ? (
-                  "No chats in this project"
-                ) : (
-                  "No chats yet"
-                )
               ) : (
                 "No work yet"
               )}
