@@ -31,6 +31,7 @@ import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { ThreadProjectTags } from "~/projectLabels/ThreadProjectTags";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -443,6 +444,15 @@ export const ChatHeader = memo(function ChatHeader({
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
             </Tooltip>
           )}
+          {/* Drafts have no thread to tag until the first send creates it. */}
+          {isServerThread && renamingTitle === null ? (
+            <span className="ml-2 flex shrink-0 items-center">
+              <ThreadProjectTags
+                environmentId={activeThreadEnvironmentId}
+                threadId={activeThreadId}
+              />
+            </span>
+          ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
     </div>

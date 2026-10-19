@@ -49,6 +49,8 @@ export class ProjectLabelService extends Context.Service<
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly getThreadLabels: (threadId: ThreadId) => Effect.Effect<Tags, ProjectLabelError>;
     readonly subscribeThreadLabels: (threadId: ThreadId) => Stream.Stream<Tags, ProjectLabelError>;
+    /** Confirmed tags across every live thread, so list views need one stream, not one per row. */
+    readonly subscribeConfirmedThreadLabels: () => Stream.Stream<Tags, ProjectLabelError>;
     /** MCP explicit edits are not human confirmations. */
     readonly setThreadLabels: (
       input: SetThreadProjectLabelsInput,
@@ -125,6 +127,16 @@ const make = Effect.gen(function* () {
       ),
       Effect.map((labels) => ({ labels })),
       Effect.mapError(failure("threadLabels")),
+    );
+  const confirmedTags = () =>
+    sql`SELECT t.thread_id AS threadId, t.label_id AS labelId, t.confidence, t.confirmed_by_user AS confirmedByUser, t.source FROM thread_project_labels t JOIN orchestration_v2_projection_threads p ON p.thread_id = t.thread_id AND p.deleted_at IS NULL WHERE t.confirmed_by_user = 1 ORDER BY t.thread_id, t.label_id`.pipe(
+      Effect.flatMap((rows) =>
+        Effect.forEach(rows, (row) =>
+          decodeTag({ ...row, confirmedByUser: row.confirmedByUser === 1 }),
+        ),
+      ),
+      Effect.map((labels) => ({ labels })),
+      Effect.mapError(failure("confirmedThreadLabels")),
     );
   const getThreadLabels = (threadId: ThreadId) =>
     requireThread(threadId).pipe(
@@ -213,6 +225,11 @@ const make = Effect.gen(function* () {
             ),
           ),
         ),
+      ),
+    subscribeConfirmedThreadLabels: () =>
+      subscribe(
+        confirmedTags,
+        (stored) => "event" in stored && stored.event.type === "thread.deleted",
       ),
     create: (input) =>
       mutate(

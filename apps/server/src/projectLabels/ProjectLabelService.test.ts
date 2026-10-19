@@ -218,4 +218,28 @@ describe("project labels", () => {
       }),
     ).pipe(Effect.provide(layer)),
   );
+  it.effect(
+    "streams only confirmed tags across threads, updating as suggestions are reviewed",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* seed;
+          const service = yield* Labels.ProjectLabelService;
+          const repoLabel = (yield* service.create({ name: "Spawn" })).label;
+          const explicit = (yield* service.create({ name: "Explicit" })).label;
+          yield* service.linkRepository({ labelId: repoLabel.id, repositoryId: repoA });
+          const live = yield* service
+            .subscribeConfirmedThreadLabels()
+            .pipe(Stream.toQueue({ capacity: 16 }));
+          expect((yield* Queue.take(live)).labels).toEqual([]);
+          yield* service.suggestLabels(threadId);
+          expect((yield* Queue.take(live)).labels).toEqual([]);
+          yield* service.reviewSuggestion({ threadId, labelId: repoLabel.id, accept: true });
+          expect((yield* Queue.take(live)).labels.map((t) => t.labelId)).toEqual([repoLabel.id]);
+          // MCP assignments are not human confirmations, so list surfaces skip them.
+          yield* service.setThreadLabels({ threadId, labelIds: [explicit.id] }, false);
+          expect((yield* Queue.take(live)).labels).toEqual([]);
+        }),
+      ).pipe(Effect.provide(layer)),
+  );
 });

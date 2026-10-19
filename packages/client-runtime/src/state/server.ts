@@ -1122,6 +1122,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:threadProjectLabelsLive",
       tag: WS_METHODS.projectLabelsSubscribeThreadLabels,
     }),
+    /** Confirmed tags of every live thread; list rows read this instead of one stream per row. */
+    confirmedThreadProjectLabelsLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:projectLabels:confirmedThreadProjectLabelsLive",
+      tag: WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels,
+    }),
     createProjectLabel: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:createProjectLabel",
       tag: WS_METHODS.projectLabelsCreate,

@@ -72,9 +72,11 @@ import {
   SettingsIcon,
   SquarePenIcon,
   SunIcon,
+  TagIcon,
   TextSearchIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
+import { requestThreadProjectTagsOpen } from "../projectLabels/projectTagsActionBus";
 import { requestAgentCreation } from "../agents/AgentsCreateHost";
 import { agentStatusLabel } from "../agents/agents.logic";
 import { useAgentsIfProvided } from "../agents/agentsClient";
@@ -1810,6 +1812,40 @@ function OpenCommandPaletteDialog(props: {
       requestAgentCreation(activeThread?.environmentId ?? primaryEnvironmentId);
     },
   });
+
+  // Projects are context tags; their home is Settings → Projects.
+  actionItems.push({
+    kind: "action",
+    value: "action:new-project-label",
+    searchTerms: ["new project", "create project", "project tag", "label"],
+    title: "New project",
+    icon: <TagIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/settings/project-tags", search: { create: true } });
+    },
+  });
+  actionItems.push({
+    kind: "action",
+    value: "action:manage-project-labels",
+    searchTerms: ["manage projects", "projects", "project tags", "labels", "link repository"],
+    title: "Manage projects",
+    icon: <TagIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/settings/project-tags" });
+    },
+  });
+  if (activeThreadId) {
+    actionItems.push({
+      kind: "action",
+      value: "action:edit-thread-project-labels",
+      searchTerms: ["tag", "projects", "add to project", "set project", "no project"],
+      title: "Edit this thread's projects",
+      icon: <TagIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        requestThreadProjectTagsOpen();
+      },
+    });
+  }
 
   for (const mode of SIDEBAR_MODES) {
     const ModeIcon = SIDEBAR_MODE_ICONS[mode];

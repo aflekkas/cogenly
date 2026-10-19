@@ -1653,6 +1653,8 @@ const layerWsRpc = (
           projectLabels.getThreadLabels(input.threadId),
         [WS_METHODS.projectLabelsSubscribeThreadLabels]: (input) =>
           projectLabels.subscribeThreadLabels(input.threadId),
+        [WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels]: () =>
+          projectLabels.subscribeConfirmedThreadLabels(),
         [WS_METHODS.projectLabelsSetThreadLabels]: (input) => projectLabels.setThreadLabels(input),
         [WS_METHODS.projectLabelsReviewSuggestion]: (input) =>
           projectLabels.reviewSuggestion(input),

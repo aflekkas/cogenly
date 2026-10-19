@@ -490,6 +490,7 @@ export const WS_METHODS = {
   projectLabelsUnlinkRepository: "projectLabels.unlinkRepository",
   projectLabelsGetThreadLabels: "projectLabels.getThreadLabels",
   projectLabelsSubscribeThreadLabels: "projectLabels.subscribeThreadLabels",
+  projectLabelsSubscribeConfirmedThreadLabels: "projectLabels.subscribeConfirmedThreadLabels",
   projectLabelsSetThreadLabels: "projectLabels.setThreadLabels",
   projectLabelsReviewSuggestion: "projectLabels.reviewSuggestion",
   projectLabelsSuggestLabels: "projectLabels.suggestLabels",
@@ -1757,6 +1758,16 @@ const WsProjectLabelsSubscribeThreadLabelsRpc = Rpc.make(
     stream: true,
   },
 );
+/** Confirmed tags of every live thread, for list surfaces such as the sidebar. */
+const WsProjectLabelsSubscribeConfirmedThreadLabelsRpc = Rpc.make(
+  WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels,
+  {
+    payload: Schema.Struct({}),
+    success: ProjectLabels.ThreadProjectLabelsResult,
+    error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+    stream: true,
+  },
+);
 const WsProjectLabelsSetThreadLabelsRpc = Rpc.make(WS_METHODS.projectLabelsSetThreadLabels, {
   payload: ProjectLabels.SetThreadProjectLabelsInput,
   success: ProjectLabels.ThreadProjectLabelsResult,
@@ -1976,6 +1987,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsUnlinkRepositoryRpc,
   WsProjectLabelsGetThreadLabelsRpc,
   WsProjectLabelsSubscribeThreadLabelsRpc,
+  WsProjectLabelsSubscribeConfirmedThreadLabelsRpc,
   WsProjectLabelsSetThreadLabelsRpc,
   WsProjectLabelsReviewSuggestionRpc,
   WsProjectLabelsSuggestLabelsRpc,
