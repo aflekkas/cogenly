@@ -32,6 +32,17 @@ import {
 import * as RpcAuthorization from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
+  it.each([WS_METHODS.exportCreate, WS_METHODS.exportValidate, WS_METHODS.exportList])(
+    "requires the owner Settings grant for %s",
+    (method) => {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthSettingsWriteScope);
+    },
+  );
+  it("protects permanent commitment deletion", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.commitmentsDelete)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });

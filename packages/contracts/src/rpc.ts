@@ -1,3 +1,4 @@
+import * as Exports from "./export.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Work from "./work.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
@@ -483,6 +484,10 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Persistent agents and their scheduled-task triggers
+  exportCreate: "export.create",
+  exportValidate: "export.validate",
+  exportList: "export.list",
+  commitmentsDelete: "commitments.delete",
   projectLabelsList: "projectLabels.list",
   projectLabelsSubscribe: "projectLabels.subscribe",
   projectLabelsCreate: "projectLabels.create",
@@ -1725,6 +1730,27 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const WsExportCreateRpc = Rpc.make(WS_METHODS.exportCreate, {
+  payload: Exports.ExportCreateInput,
+  success: Exports.ExportResult,
+  error: Schema.Union([Exports.ExportError, EnvironmentAuthorizationError]),
+});
+const WsExportValidateRpc = Rpc.make(WS_METHODS.exportValidate, {
+  payload: Exports.ExportPathInput,
+  success: Exports.ExportValidation,
+  error: Schema.Union([Exports.ExportError, EnvironmentAuthorizationError]),
+});
+const WsExportListRpc = Rpc.make(WS_METHODS.exportList, {
+  payload: Schema.Struct({}),
+  success: Schema.Struct({ exports: Schema.Array(Exports.ExportResult) }),
+  error: Schema.Union([Exports.ExportError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsDeleteRpc = Rpc.make(WS_METHODS.commitmentsDelete, {
+  payload: AgentWorkspace.CommitmentHistoryInput,
+  success: Schema.Struct({ deleted: Schema.Boolean }),
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+
 const WsProjectLabelsListRpc = Rpc.make(WS_METHODS.projectLabelsList, {
   payload: Schema.Struct({}),
   success: ProjectLabels.ProjectLabelListResult,
@@ -2065,6 +2091,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
+  WsExportCreateRpc,
+  WsExportValidateRpc,
+  WsExportListRpc,
+  WsCommitmentsDeleteRpc,
   WsProjectLabelsListRpc,
   WsProjectLabelsSubscribeRpc,
   WsProjectLabelsCreateRpc,

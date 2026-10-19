@@ -31,6 +31,10 @@ export function createAgentWorkspaceAtoms<R, E>(
       label: "agents.activity",
       tag: WS_METHODS.agentsActivity,
     }),
+    commitmentsDelete: createEnvironmentRpcCommand(runtime, {
+      label: "commitments.delete",
+      tag: WS_METHODS.commitmentsDelete,
+    }),
     commitmentsList: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "commitments.list",
       tag: WS_METHODS.commitmentsList,

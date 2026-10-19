@@ -23,6 +23,7 @@ import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import { EnvironmentRegistry } from "../connection/registry.ts";
+import { createExportAtoms } from "./exports.ts";
 import { createAgentWorkspaceAtoms } from "./agents.ts";
 import { createCommandPermissions } from "./commandPermissions.ts";
 import { createEnvironmentRpcCommand } from "./runtime.ts";
@@ -60,6 +61,34 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("exports refuse execution without the Settings grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        const commands = createExportAtoms(runtime);
+        const results = [
+          yield* Effect.promise(() =>
+            commands.exportCreate.run(registry, {
+              environmentId: env,
+              input: { include: ["chats"] },
+            }),
+          ),
+          yield* Effect.promise(() =>
+            commands.exportValidate.run(registry, {
+              environmentId: env,
+              input: { path: "/ignored" },
+            }),
+          ),
+          yield* Effect.promise(() =>
+            commands.exportList.run(registry, { environmentId: env, input: {} }),
+          ),
+        ];
+        expect(results.every((result) => result._tag === "Failure")).toBe(true);
+      }),
+    ),
+  );
+
   it.effect("the agent approval command refuses execution without an owner grant", () =>
     Effect.scoped(
       Effect.gen(function* () {

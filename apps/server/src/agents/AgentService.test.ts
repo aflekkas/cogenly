@@ -920,6 +920,19 @@ describe("agent scope, approvals and shared commitments", () => {
             (yield* workspace.listCommitments({ agentId: outsider.id, labelId: label }))
               .commitments,
           ).toEqual([]);
+          const removable = (yield* workspace.createCommitment({ ...input, title: "Remove me" }))
+            .commitment;
+          expect((yield* workspace.commitmentHistory(removable.id)).history.length).toBeGreaterThan(
+            0,
+          );
+          expect(yield* workspace.deleteCommitment(removable.id)).toEqual({ deleted: true });
+          expect(yield* workspace.deleteCommitment(removable.id)).toEqual({ deleted: false });
+          expect(
+            yield* sql`SELECT * FROM commitment_history WHERE commitment_id = ${removable.id}`,
+          ).toEqual([]);
+          expect(
+            yield* sql`SELECT * FROM commitment_labels WHERE commitment_id = ${removable.id}`,
+          ).toEqual([]);
           yield* labels.delete(label);
           expect((yield* store.get(a.id)).scope).toEqual([]);
           expect((yield* store.get(b.id)).scope).toEqual([]);

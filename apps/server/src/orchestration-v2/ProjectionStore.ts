@@ -1970,6 +1970,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 deleted_at = excluded.deleted_at,
                 payload_json = excluded.payload_json
             `;
+            if (event.type === "thread.deleted") {
+              yield* sql`DELETE FROM agent_run_threads WHERE thread_id = ${event.threadId}`;
+            }
             break;
           }
           case "run.created":

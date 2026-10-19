@@ -93,6 +93,7 @@ export class AgentWorkspaceService extends Context.Service<
       id: string;
       why: string;
     }) => Effect.Effect<{ commitment: Commitment }, AgentError>;
+    readonly deleteCommitment: (id: string) => Effect.Effect<{ deleted: boolean }, AgentError>;
     readonly commitmentHistory: (
       id: string,
     ) => Effect.Effect<{ history: ReadonlyArray<typeof CommitmentHistory.Type> }, AgentError>;
@@ -448,6 +449,17 @@ const make = Effect.gen(function* () {
       updateCommitmentStatus({ ...input, status: "open", evidenceRefs: [] }),
     dismissCommitment: (input) =>
       updateCommitmentStatus({ ...input, status: "dismissed", evidenceRefs: [] }),
+    deleteCommitment: (id) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* sql`DELETE FROM commitment_labels WHERE commitment_id = ${id}`;
+            yield* sql`DELETE FROM commitment_history WHERE commitment_id = ${id}`;
+            const rows = yield* sql`DELETE FROM commitments WHERE id = ${id} RETURNING id`;
+            return { deleted: rows.length > 0 };
+          }),
+        )
+        .pipe(Effect.mapError(wrap)),
     commitmentHistory: (id) =>
       getCommitment(id).pipe(
         Effect.andThen(

@@ -1,3 +1,4 @@
+import * as Exports from "../export/ExportService.ts";
 import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
 import * as WorkHandoff from "../work/WorkHandoffService.ts";
 import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
@@ -410,6 +411,7 @@ export const layerProduction = Layer.mergeAll(
   layerWorkHandoffProvided,
   layerThreadLifecycleProvided,
   layerAgentsProvided,
+  Exports.layer,
   ProjectLabels.layer,
   layerAgentWorkspaceProvided,
   layerAgentMcpPolicyProvided,
