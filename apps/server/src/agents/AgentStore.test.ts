@@ -9,7 +9,6 @@ import * as Sqlite from "../persistence/Sqlite.ts";
 import {
   agentSessionSeedItems,
   conversationCarryOver,
-  memoryContext,
   shouldRotateAgentSession,
 } from "./context.ts";
 import { callingAgent } from "./MemoryMcp.ts";
@@ -242,18 +241,4 @@ describe("persistent agents", () => {
         expect(seed).not.toContain("item:current");
       }).pipe(Effect.provide(layer)),
   );
-
-  it("injects all small memory and bounds large memory with recent facts and older summaries", () => {
-    const notes = Array.from({ length: 30 }, (_, i) => ({
-      id: `note:${i}`,
-      text: `fact ${i} ${"x".repeat(100)}`,
-      source: "owner",
-      updatedAt: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`,
-    }));
-    expect(memoryContext(notes.slice(0, 2))).toContain("fact 0");
-    const context = memoryContext(notes, 1500);
-    expect(context.length).toBeLessThanOrEqual(1500);
-    expect(context).toContain("fact 29");
-    expect(context).toContain("Older memory summary");
-  });
 });

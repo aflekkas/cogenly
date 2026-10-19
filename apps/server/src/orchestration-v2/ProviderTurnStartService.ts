@@ -1016,11 +1016,11 @@ export const layer: Layer.Layer<
       const routableSubagents = projection.subagents.filter((subagent) =>
         RunExecutionService.canRouteRelatedSubagent(subagent.status),
       );
-      const agentContext = yield* agentStore
-        .context(input.threadId)
+      const turnContext = yield* agentStore
+        .context(input.threadId, runId)
         .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })));
       const userText = [
-        agentContext,
+        turnContext,
         projectComposerContextForProvider({
           text: message.text,
           records: message.context?.records ?? [],

@@ -266,6 +266,11 @@ const make = Effect.gen(function* () {
             (SELECT json_group_array(l.value) FROM json_each(commitments.payload_json, '$.labelIds') l WHERE l.value <> ${id})
           )) WHERE id IN (SELECT commitment_id FROM commitment_labels WHERE label_id = ${id})`;
           yield* sql`DELETE FROM commitment_labels WHERE label_id = ${id}`;
+          const at = yield* now;
+          yield* sql`UPDATE facts SET updated_at=${at},payload_json = json_set(payload_json, '$.updatedAt',${at},'$.labelIds', json(
+            (SELECT json_group_array(l.value) FROM json_each(facts.payload_json, '$.labelIds') l WHERE l.value <> ${id})
+          )) WHERE id IN (SELECT fact_id FROM fact_labels WHERE label_id = ${id})`;
+          yield* sql`INSERT INTO fact_history(fact_id,payload_json) SELECT f.id,json_object('id',${yield* crypto.randomUUIDv4()} || ':' || f.id,'factId',f.id,'who','user','at',${at},'fact',json(f.payload_json)) FROM facts f WHERE f.id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
           const rows =
             yield* sql`DELETE FROM project_labels WHERE label_id = ${id} RETURNING label_id`;
           return { deleted: rows.length > 0 };

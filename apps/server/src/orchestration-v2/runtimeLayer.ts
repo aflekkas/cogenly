@@ -1,3 +1,5 @@
+import * as Facts from "../context/FactService.ts";
+import * as Retrieval from "../context/ContextRetrievalService.ts";
 import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
 import * as WorkHandoff from "../work/WorkHandoffService.ts";
 import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
@@ -403,6 +405,8 @@ export const layer = Layer.mergeAll(
 );
 
 export const layerProduction = Layer.mergeAll(
+  Facts.layer,
+  Retrieval.layer,
   layer.pipe(Layer.provide(layerProjectService)),
   layerProjectService,
   layerManagedProjectFoldersProvided,

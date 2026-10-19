@@ -1,3 +1,4 @@
+import * as Facts from "./fact.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Work from "./work.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
@@ -514,6 +515,15 @@ export const WS_METHODS = {
   agentsReject: "agents.reject",
   agentsStartWork: "agents.startWork",
   agentsActivity: "agents.activity",
+  factsList: "facts.list",
+  factsCreate: "facts.create",
+  factsUpdate: "facts.update",
+  factsSupersede: "facts.supersede",
+  factsRetract: "facts.retract",
+  factsHistory: "facts.history",
+  contextForRun: "context.forRun",
+  contextSettings: "context.settings",
+  contextSetEnabled: "context.setEnabled",
   commitmentsList: "commitments.list",
   commitmentsCreate: "commitments.create",
   commitmentsUpdateStatus: "commitments.updateStatus",
@@ -1841,6 +1851,52 @@ const WsAgentsActivityRpc = Rpc.make(WS_METHODS.agentsActivity, {
   success: AgentWorkspace.AgentActivityResult,
   error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
 });
+const WsFactsListRpc = Rpc.make(WS_METHODS.factsList, {
+  payload: Facts.FactListInput,
+  success: Facts.FactListResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsFactsCreateRpc = Rpc.make(WS_METHODS.factsCreate, {
+  payload: Facts.FactCreateInput,
+  success: Facts.FactResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsFactsUpdateRpc = Rpc.make(WS_METHODS.factsUpdate, {
+  payload: Facts.FactUpdateInput,
+  success: Facts.FactResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsFactsSupersedeRpc = Rpc.make(WS_METHODS.factsSupersede, {
+  payload: Facts.FactSupersedeInput,
+  success: Facts.FactResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsFactsRetractRpc = Rpc.make(WS_METHODS.factsRetract, {
+  payload: Facts.FactKey,
+  success: Facts.FactResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsFactsHistoryRpc = Rpc.make(WS_METHODS.factsHistory, {
+  payload: Facts.FactKey,
+  success: Facts.FactHistoryResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsContextForRunRpc = Rpc.make(WS_METHODS.contextForRun, {
+  payload: Facts.ContextForRunInput,
+  success: Facts.ContextForRunResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsContextSettingsRpc = Rpc.make(WS_METHODS.contextSettings, {
+  payload: Facts.ContextThreadInput,
+  success: Facts.ContextSettingsResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsContextSetEnabledRpc = Rpc.make(WS_METHODS.contextSetEnabled, {
+  payload: Facts.ContextSetEnabledInput,
+  success: Facts.ContextSettingsResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+
 const WsCommitmentsListRpc = Rpc.make(WS_METHODS.commitmentsList, {
   payload: AgentWorkspace.CommitmentListInput,
   success: AgentWorkspace.CommitmentListResult,
@@ -2086,6 +2142,15 @@ export const WsRpcGroup = RpcGroup.make(
   WsAgentsRejectRpc,
   WsAgentsStartWorkRpc,
   WsAgentsActivityRpc,
+  WsFactsListRpc,
+  WsFactsCreateRpc,
+  WsFactsUpdateRpc,
+  WsFactsSupersedeRpc,
+  WsFactsRetractRpc,
+  WsFactsHistoryRpc,
+  WsContextForRunRpc,
+  WsContextSettingsRpc,
+  WsContextSetEnabledRpc,
   WsCommitmentsListRpc,
   WsCommitmentsCreateRpc,
   WsCommitmentsUpdateStatusRpc,

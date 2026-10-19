@@ -4,6 +4,9 @@ import {
   AgentScope,
   AgentError,
   AgentId,
+  FactId,
+  type RunId,
+  type ContextPrincipal,
   AgentMemoryNote,
   AgentListItem,
   type AgentMarkReadInput,
@@ -11,14 +14,15 @@ import {
   ThreadId,
   type AgentMemoryWriteInput,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import { conversationCarryOver, memoryContext } from "./context.ts";
+import * as Facts from "../context/FactService.ts";
+import * as Retrieval from "../context/ContextRetrievalService.ts";
+import { conversationCarryOver } from "./context.ts";
 
 interface Row {
   payload_json: string;
@@ -54,9 +58,16 @@ export class AgentStore extends Context.Service<
     readonly delete: (id: AgentId) => Effect.Effect<boolean, AgentError>;
     readonly markRead: (input: AgentMarkReadInput) => Effect.Effect<AgentListItem, AgentError>;
     readonly memory: (id: AgentId) => Effect.Effect<ReadonlyArray<AgentMemoryNote>, AgentError>;
-    readonly remember: (input: AgentMemoryWriteInput) => Effect.Effect<AgentMemoryNote, AgentError>;
-    readonly forget: (agentId: AgentId, id: string) => Effect.Effect<boolean, AgentError>;
-    readonly context: (threadId: ThreadId) => Effect.Effect<string, AgentError>;
+    readonly remember: (
+      input: AgentMemoryWriteInput,
+      principal?: ContextPrincipal,
+    ) => Effect.Effect<AgentMemoryNote, AgentError>;
+    readonly forget: (
+      agentId: AgentId,
+      id: string,
+      principal?: ContextPrincipal,
+    ) => Effect.Effect<boolean, AgentError>;
+    readonly context: (threadId: ThreadId, runId?: RunId) => Effect.Effect<string, AgentError>;
     readonly carryOver: (
       agentId: AgentId,
       ordinal: number,
@@ -78,8 +89,9 @@ export class AgentStore extends Context.Service<
 >()("t3/agents/AgentStore") {}
 
 const make = Effect.gen(function* () {
-  const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
+  const facts = yield* Facts.FactService;
+  const retrieval = yield* Retrieval.ContextRetrievalService;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const fromRow = (row: Row) =>
     Effect.all([
@@ -137,20 +149,46 @@ const make = Effect.gen(function* () {
   const memory = (id: AgentId) =>
     get(id).pipe(
       Effect.andThen(
-        sql`SELECT note_id AS id, agent_id AS agentId, text, source, created_at AS createdAt, updated_at AS updatedAt FROM agent_memory WHERE agent_id = ${id} ORDER BY updated_at DESC, note_id`,
+        sql`SELECT COALESCE(f.legacy_note_id,f.id) AS id,f.agent_id AS agentId,json_extract(f.payload_json,'$.text') AS text,COALESCE(f.legacy_source,CASE WHEN json_extract(f.payload_json,'$.createdBy')='user' THEN 'owner' ELSE json_extract(f.payload_json,'$.createdBy') END) AS source,json_extract(f.payload_json,'$.createdAt') AS createdAt,f.updated_at AS updatedAt FROM facts f WHERE f.agent_id=${id} AND f.status IN ('proposed','confirmed') AND NOT EXISTS (SELECT 1 FROM facts newer WHERE newer.agent_id=f.agent_id AND COALESCE(newer.legacy_note_id,newer.id)=COALESCE(f.legacy_note_id,f.id) AND newer.status IN ('proposed','confirmed') AND newer.rowid>f.rowid) ORDER BY f.updated_at DESC,f.id`,
       ),
       Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeNote(row))),
       Effect.mapError(storeError),
     );
-  const remember = (input: AgentMemoryWriteInput) =>
-    Effect.gen(function* () {
-      yield* get(input.agentId);
-      const at = yield* now;
-      const id = input.id ?? `memory:${yield* crypto.randomUUIDv4()}`;
-      yield* sql`INSERT INTO agent_memory(note_id, agent_id, text, source, created_at, updated_at) VALUES (${id}, ${input.agentId}, ${input.text}, ${input.source ?? "owner"}, ${at}, ${at}) ON CONFLICT(agent_id, note_id) DO UPDATE SET text = excluded.text, source = excluded.source, updated_at = excluded.updated_at`;
-      const notes = yield* memory(input.agentId);
-      return notes.find((n) => n.id === id)!;
-    }).pipe(Effect.mapError(storeError));
+  const remember = (input: AgentMemoryWriteInput, principal: ContextPrincipal = "user") =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const agent = yield* get(input.agentId);
+          const labels = agent.permissions.read
+            ? agent.scope
+                .filter((s) => s.permissions.read && (principal === "user" || s.permissions.draft))
+                .map((s) => s.labelId)
+            : [];
+          const replacement = {
+            subject: "Agent memory",
+            text: input.text,
+            agentId: input.agentId,
+            labelIds: labels,
+            visibility: labels.length ? ("labels" as const) : ("user" as const),
+            sourceRefs: input.source?.startsWith("thread:")
+              ? [{ kind: "thread" as const, id: input.source.slice(7) }]
+              : [],
+          };
+          const existing =
+            input.id === undefined
+              ? []
+              : yield* sql<{
+                  id: string;
+                }>`SELECT id FROM facts WHERE agent_id=${input.agentId} AND (legacy_note_id=${input.id} OR id=${input.id}) AND status IN ('proposed','confirmed') ORDER BY rowid DESC LIMIT 1`;
+          const { fact } = existing[0]
+            ? yield* facts.supersede({ id: FactId.make(existing[0].id), replacement }, principal)
+            : yield* facts.create(replacement, principal);
+          const noteId = input.id ?? fact.id;
+          yield* sql`UPDATE facts SET legacy_note_id=${noteId},legacy_source=${input.source ?? "owner"} WHERE id=${fact.id}`;
+          return (yield* memory(input.agentId)).find((note) => note.id === noteId)!;
+        }),
+      )
+      .pipe(Effect.mapError(storeError));
   const runs = (id?: AgentId) =>
     (id === undefined
       ? sql`SELECT * FROM agent_work_runs WHERE posted = 0 ORDER BY created_at`
@@ -227,23 +265,30 @@ const make = Effect.gen(function* () {
           }),
         )
         .pipe(Effect.mapError(storeError)),
-    forget: (agentId, id) =>
-      sql`DELETE FROM agent_memory WHERE agent_id = ${agentId} AND note_id = ${id} RETURNING note_id`.pipe(
-        Effect.map((r) => r.length > 0),
-        Effect.mapError(storeError),
-      ),
-    context: (threadId) =>
+    forget: (agentId, id, principal = "user") =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* sql<{
+              id: string;
+            }>`SELECT id FROM facts WHERE agent_id=${agentId} AND (legacy_note_id=${id} OR id=${id}) AND status IN ('proposed','confirmed')`;
+            for (const row of rows) yield* facts.retract(FactId.make(row.id), principal);
+            return rows.length > 0;
+          }),
+        )
+        .pipe(Effect.mapError(storeError)),
+    context: (threadId, runId) =>
       Effect.gen(function* () {
         const agent = yield* forThread(threadId);
-        if (agent === null) return "";
-        const notes = yield* memory(agent.id);
-        const context = yield* sql<{
-          summary: string;
-        }>`SELECT summary FROM agent_conversation_context WHERE agent_id = ${agent.id}`.pipe(
-          Effect.mapError(storeError),
-        );
-        return `You are ${agent.name}, the owner's persistent agent.\nResponsibility:\n${agent.responsibility}\nAutonomy: ${agent.autonomy}. Permissions: ${yield* encodePermissions(agent.permissions).pipe(Effect.mapError(storeError))}. Scope grants: ${yield* encodeScope(agent.scope).pipe(Effect.mapError(storeError))}.\nStanding instructions:\n${agent.instructions}\n\nAgent memory:\n${memoryContext(notes)}\nEarlier conversation summary:\n${context[0]?.summary ?? ""}\nUse memory_read, memory_remember and memory_forget to maintain durable facts. Use list_open_items for shared commitments, propose_commitment for extracted obligations, and update_commitment_status with evidence. Use request_agent_approval for new triggers or permission changes; you can never approve your own requests. Use start_agent_work to start or propose repository Work. Send concise messages to the owner.`;
-      }),
+        const context = yield* retrieval.forTurn({
+          threadId,
+          ...(runId === undefined ? {} : { runId }),
+          principal: agent === null ? "user" : `agent:${agent.id}`,
+          budgetChars: agent === null ? 4000 : 16000,
+        });
+        if (agent === null) return context.text;
+        return `You are ${agent.name}, the owner's persistent agent.\nResponsibility:\n${agent.responsibility}\nAutonomy: ${agent.autonomy}. Permissions: ${yield* encodePermissions(agent.permissions)}. Scope grants: ${yield* encodeScope(agent.scope)}.\nStanding instructions:\n${agent.instructions}\n\n${context.text}\nUse fact_search to retrieve accessible facts, fact_propose for uncertain facts, and fact_supersede to replace proposals. memory_read, memory_remember and memory_forget remain aliases for your own facts. Only the user can confirm a proposal. Use list_open_items for shared commitments, propose_commitment for extracted obligations, and update_commitment_status with evidence. Use request_agent_approval for new triggers or permission changes; you can never approve your own requests. Use start_agent_work to start or propose repository Work. Send concise messages to the owner.`;
+      }).pipe(Effect.mapError(storeError)),
     carryOver: (agentId, ordinal, messages) =>
       Effect.gen(function* () {
         const rows = yield* sql<{
@@ -301,4 +346,6 @@ const make = Effect.gen(function* () {
       ),
   });
 });
-export const layer = Layer.effect(AgentStore, make);
+export const layer = Layer.effect(AgentStore, make).pipe(
+  Layer.provide(Layer.merge(Facts.layer, Retrieval.layer)),
+);
