@@ -131,7 +131,12 @@ function AgentView({
       {tab !== "chat" && (
         <div className="agent-message-scroll">
           {tab === "activity" ? (
-            <AgentActivity agent={agent} workspace={workspace} onOpenChat={() => openChat()} />
+            <AgentActivity
+              agent={agent}
+              workspace={workspace}
+              onOpenChat={() => openChat()}
+              onOpenItems={() => setTab("items")}
+            />
           ) : tab === "items" ? (
             <AgentOpenItems agent={agent} workspace={workspace} onOpenChat={openChat} />
           ) : (

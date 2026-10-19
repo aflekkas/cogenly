@@ -10,7 +10,13 @@ import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 import { useAgents, useAgentsClient } from "./agentsClient";
 import { formatMessageTime, modelDisplayName } from "./agents.logic";
-import { RUN_TRIGGER_LABEL, describeRunAction, runStatusLabel } from "./agentWorkspace.logic";
+import {
+  describeRunAction,
+  eventRunRefs,
+  runStatusLabel,
+  runTriggerLabel,
+  type ResolvedEventRef,
+} from "./agentWorkspace.logic";
 import type { AgentContact, AgentWorkspaceView } from "./agents.types";
 
 const LIVE_STATUSES = new Set(["preparing", "starting", "running", "waiting"]);
@@ -31,10 +37,13 @@ export function AgentActivity({
   agent,
   workspace,
   onOpenChat,
+  onOpenItems,
 }: {
   agent: AgentContact;
   workspace: AgentWorkspaceView;
   onOpenChat: () => void;
+  /** Shows the Open items tab, where an event's open item lives. */
+  onOpenItems?: (() => void) | undefined;
 }) {
   const client = useAgentsClient();
   const { models } = useAgents();
@@ -104,9 +113,7 @@ export function AgentActivity({
             />
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                <span className="font-medium text-foreground">
-                  {RUN_TRIGGER_LABEL[run.triggerKind]}
-                </span>
+                <span className="font-medium text-foreground">{runTriggerLabel(run)}</span>
                 <span className="text-xs text-muted-foreground">
                   {runStatusLabel(run.status)}
                   {run.startedAt ? ` · ${formatMessageTime(run.startedAt)}` : ""}
@@ -114,6 +121,14 @@ export function AgentActivity({
                   {` · ${modelDisplayName(models, run.modelSelection)}`}
                 </span>
               </div>
+              {run.triggerContext && (
+                <EventRefs
+                  refs={eventRunRefs(run.triggerContext.refs, commitmentTitle)}
+                  onOpenThread={open}
+                  onOpenItems={onOpenItems}
+                  onOpenExternal={client.openExternal}
+                />
+              )}
               {run.summary && (
                 <p className="line-clamp-3 text-xs whitespace-pre-wrap text-muted-foreground">
                   {run.summary}
@@ -188,5 +203,51 @@ function ActionLine({
         </Button>
       )}
     </li>
+  );
+}
+
+/** The Work thread, pull request and open item an event run was woken by. */
+function EventRefs({
+  refs,
+  onOpenThread,
+  onOpenItems,
+  onOpenExternal,
+}: {
+  refs: ReadonlyArray<ResolvedEventRef>;
+  onOpenThread: (threadId: string) => void;
+  onOpenItems: (() => void) | undefined;
+  onOpenExternal: (url: string) => void;
+}) {
+  if (refs.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+      <span>From</span>
+      {refs.map((ref) => {
+        const key = `${ref.kind}:${ref.label}`;
+        if (ref.kind === "text" || (ref.kind === "item" && !onOpenItems))
+          return (
+            <span key={key} className="text-foreground/75">
+              {ref.label}
+            </span>
+          );
+        return (
+          <Button
+            key={key}
+            size="xs"
+            variant="ghost-muted"
+            onClick={() =>
+              ref.kind === "thread"
+                ? onOpenThread(ref.threadId)
+                : ref.kind === "external"
+                  ? onOpenExternal(ref.href)
+                  : onOpenItems?.()
+            }
+          >
+            {ref.label}
+            {ref.kind !== "item" && <ArrowUpRightIcon />}
+          </Button>
+        );
+      })}
+    </div>
   );
 }

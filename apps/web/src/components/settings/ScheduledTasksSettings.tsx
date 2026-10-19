@@ -28,6 +28,7 @@ import type {
 } from "@t3tools/contracts";
 import { DEFAULT_WEBHOOK_PROMPT } from "@t3tools/client-runtime/scheduled-task-webhook";
 import {
+  AgentId,
   MAX_WEBHOOK_DELIVERY_AGE_MINUTES,
   MIN_SCHEDULED_TASK_INTERVAL_MS,
   ProviderInstanceId,
@@ -66,10 +67,15 @@ import { ConnectionStatusDot, connectionPhaseDotClassName } from "../ConnectionS
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { readEnvironmentScope } from "~/state/session";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { useAgents } from "../../agents/agentsClient";
+import { describeSchedule } from "../../agents/agentWorkspace.logic";
+import { EventTriggerFields } from "../../agents/EventTriggerFields";
+import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { EnvironmentRow, environmentTransportLabel } from "./EnvironmentRow";
 import { SettingsGroup } from "./SettingsGroup";
 import { settingsScopeEnvironmentLabel, settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import {
+  DEFAULT_DRAFT_EVENT,
   WEBHOOK_SIGNATURE_DEFAULTS,
   matchesScheduledTaskScope,
   scheduleFromDraft,
@@ -144,6 +150,8 @@ const EMPTY_DRAFT: DraftState = {
   ...WEBHOOK_SIGNATURE_DEFAULTS,
   signatureSecret: "",
   maxDeliveryAgeMinutes: "",
+  agentId: null,
+  event: DEFAULT_DRAFT_EVENT,
 };
 
 /** Labelled field: a caption sitting above its control. */
@@ -180,9 +188,12 @@ function splitModelKey(value: string): ModelSelection | null {
   };
 }
 
-export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
+export function scheduleLabel(
+  schedule: ScheduledTaskSchedule,
+  names?: Parameters<typeof describeSchedule>[1],
+): string {
   if (schedule.type === "webhook") return "On webhook";
-  if (schedule.type === "event") return `On ${schedule.event.replace(".", " ").replace("_", " ")}`;
+  if (schedule.type === "event") return describeSchedule(schedule, names);
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / 60_000;
     return Number.isInteger(minutes)
@@ -588,6 +599,15 @@ function ScheduledTaskRow({
   const [busy, setBusy] = useState(false);
   const [deliveriesOpen, setDeliveriesOpen] = useState(false);
   const isWebhook = task.schedule.type === "webhook";
+  const isEvent = task.schedule.type === "event";
+  const { labels } = useEnvironmentProjectLabels(isEvent ? environmentId : null);
+  const allProjects = useProjects();
+  const filterNames = {
+    labelName: (id: string) => labels.find((label) => label.id === id)?.name,
+    repositoryName: (id: string) =>
+      allProjects.find((project) => project.environmentId === environmentId && project.id === id)
+        ?.title,
+  };
   const toggle = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
     label: "scheduled task enabled",
   });
@@ -624,10 +644,10 @@ function ScheduledTaskRow({
       status={
         <div className="flex flex-wrap items-center gap-2">
           <span>
-            {scheduleLabel(task.schedule)} ·{" "}
+            {scheduleLabel(task.schedule, filterNames)} ·{" "}
             {!task.enabled
               ? "Paused"
-              : isWebhook
+              : isWebhook || isEvent
                 ? "Listening"
                 : task.nextRunAt
                   ? `Next run ${relativeLabel(task.nextRunAt)}`
@@ -1054,6 +1074,10 @@ function ScheduledTaskEditorDialog({
       reportFailure("Scheduled task is incomplete", "Add a title, prompt, project, and model.");
       return;
     }
+    if (draft.scheduleMode === "event" && draft.agentId === null) {
+      reportFailure("Choose an agent", "An event trigger wakes one of your agents.");
+      return;
+    }
     const schedule = scheduleFromDraft(draft);
     if (schedule === null) {
       reportFailure(
@@ -1107,6 +1131,9 @@ function ScheduledTaskEditorDialog({
       prompt: draft.prompt.trim(),
       enabled: draft.enabled,
       schedule,
+      ...(draft.scheduleMode === "event" && draft.agentId
+        ? { agentId: AgentId.make(draft.agentId) }
+        : {}),
       projectId: selectedProjectId as ProjectId,
       threadId: draft.threadId ? (draft.threadId as ThreadId) : null,
       workspaceStrategy,
@@ -1141,8 +1168,8 @@ function ScheduledTaskEditorDialog({
         <DialogHeader>
           <DialogTitle>{draft.editingId ? "Edit task" : "New task"}</DialogTitle>
           <DialogDescription>
-            Run a prompt automatically — on an interval, at a fixed time, or when a webhook is
-            called.
+            Run a prompt automatically — on an interval, at a fixed time, when a webhook is called,
+            or when something happens in Work.
           </DialogDescription>
         </DialogHeader>
 
@@ -1238,6 +1265,8 @@ function ScheduledTaskEditorDialog({
               <Field label="Project" htmlFor="scheduled-task-project">
                 <Select
                   value={selectedProjectId}
+                  // An event trigger runs in its agent's repository.
+                  disabled={draft.scheduleMode === "event" && draft.agentId !== null}
                   onValueChange={(projectId) =>
                     setDraft((current) => ({ ...current, projectId: projectId ?? "" }))
                   }
@@ -1365,7 +1394,12 @@ function ScheduledTaskEditorDialog({
                   value={[draft.scheduleMode]}
                   onValueChange={(values) => {
                     const mode = values[0] as ScheduleMode | undefined;
-                    if (mode === "fixed" || mode === "interval" || mode === "webhook")
+                    if (
+                      mode === "fixed" ||
+                      mode === "interval" ||
+                      mode === "webhook" ||
+                      mode === "event"
+                    )
                       setDraft((current) => ({
                         ...current,
                         scheduleMode: mode,
@@ -1379,10 +1413,19 @@ function ScheduledTaskEditorDialog({
                   <Toggle value="fixed">At a time</Toggle>
                   <Toggle value="interval">Every interval</Toggle>
                   <Toggle value="webhook">On webhook</Toggle>
+                  <Toggle value="event">On event</Toggle>
                 </ToggleGroup>
               </div>
 
-              {draft.scheduleMode === "webhook" ? (
+              {draft.scheduleMode === "event" ? (
+                <EventScheduleFields
+                  environmentId={environmentId}
+                  draft={draft}
+                  repositories={projects}
+                  agentLocked={task?.agentId != null}
+                  onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+                />
+              ) : draft.scheduleMode === "webhook" ? (
                 <div className="space-y-4">
                   <WebhookEndpointField environmentId={environmentId} task={liveTask} />
                   <p className="text-xs text-muted-foreground">
@@ -1585,5 +1628,77 @@ function ScheduledTaskEditorDialog({
         </DialogFooter>
       </DialogPopup>
     </Dialog>
+  );
+}
+
+/**
+ * Which agent an event trigger wakes and what wakes it. Choosing the agent binds the
+ * task to its conversation, repository and model, as triggers made from the agent are.
+ */
+function EventScheduleFields({
+  environmentId,
+  draft,
+  repositories,
+  agentLocked,
+  onChange,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly draft: DraftState;
+  readonly repositories: ReadonlyArray<{ id: ProjectId; title: string }>;
+  /** An agent's own trigger keeps its agent. */
+  readonly agentLocked: boolean;
+  readonly onChange: (patch: Partial<DraftState>) => void;
+}) {
+  const { agents } = useAgents();
+  const { labels } = useEnvironmentProjectLabels(environmentId);
+  const candidates = agents.filter((agent) => agent.environmentId === environmentId);
+  const selected = candidates.find((agent) => agent.id === draft.agentId);
+  return (
+    <div className="space-y-4">
+      <Field label="Wakes" htmlFor="scheduled-task-agent">
+        <Select
+          value={draft.agentId ?? ""}
+          disabled={agentLocked}
+          onValueChange={(id) => {
+            const agent = candidates.find((candidate) => candidate.id === id);
+            if (!agent) return;
+            onChange({
+              agentId: agent.id,
+              threadId: agent.conversationThreadId,
+              ...(agent.projectId ? { projectId: agent.projectId } : {}),
+              workspaceMode: "root",
+              runtimeMode: agent.runtimeMode,
+              modelKey: `${agent.modelSelection.instanceId}:${agent.modelSelection.model}`,
+              baseModelSelection: agent.modelSelection,
+            });
+          }}
+        >
+          <SelectTrigger size="sm" id="scheduled-task-agent">
+            <SelectValue placeholder="Choose an agent">
+              {selected?.name ?? (draft.agentId ? "Unknown agent" : undefined)}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            {candidates.map((agent) => (
+              <SelectItem key={agent.id} value={agent.id} label={agent.name}>
+                {agent.name}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </Field>
+      {candidates.length === 0 && draft.agentId === null ? (
+        <p className="text-xs text-muted-foreground">
+          Events wake an agent. Create one in Agents first.
+        </p>
+      ) : null}
+      <EventTriggerFields
+        value={draft.event}
+        labels={labels}
+        repositories={repositories}
+        Field={Field}
+        onChange={(event) => onChange({ event })}
+      />
+    </div>
   );
 }

@@ -18,9 +18,10 @@ creates an agent for you.
 Opening an agent shows its chat. Ask it what is outstanding, give it direction, or
 ask it to start Work. The tabs above the chat hold the rest:
 
-- **Activity**: each run with what woke it (your message, a trigger, an approved
-  action, or Work), its recorded status, model and summary, and what it did, such
-  as items it proposed or Work it started. Work links open the session.
+- **Activity**: each run with what woke it (your message, a trigger, an event, an
+  approved action, or Work), its recorded status, model and summary, and what it
+  did, such as items it proposed or Work it started. Work links open the session;
+  event runs also link the Work, pull request or open item the event was about.
 - **Open items**: things to follow up on, owned by you, the agent or someone else,
   with due dates, projects, and links to where they came from. Items the agent
   finds stay **Proposed** until you confirm or dismiss them. **Mark done** asks
@@ -44,12 +45,21 @@ Autonomy decides how far it goes on its own:
 
 Permissions are separate switches: read, draft, start Work, and the high-impact
 send, create PRs, merge, deploy and delete. An agent cannot grant itself anything.
-When it wants to start Work, add a recurring trigger, or change its permissions, it
+When it wants to start Work, add a trigger, or change its permissions, it
 asks, and you **Approve** or **Reject**. Approvals expire after seven days.
 
 **Start Work** in the agent's header starts a coding session in a repository linked
 to one of its granted projects. The session runs in a new worktree and appears in
 **Work** under its repository, marked with the agent's name.
+
+Triggers wake an agent for one recorded run: on an interval, at a time, on a
+webhook, or **When something happens**, such as PR checks failing, a PR merging,
+Work finishing or becoming ready for review, or an open item coming due. An event
+trigger can be limited to some projects, repositories, or Work you, a chat or an
+agent started. Filters only narrow: an agent reacts only to events in repositories
+it is scoped to, and a repeated event wakes it once. Add triggers under
+**Responsibilities → Triggers**, when creating the agent, or in **Settings →
+Scheduled tasks**. An agent can suggest one, but it is added only if you approve.
 
 **Pause** stops triggers and background runs; you can still chat. Messages sent
 while an agent is busy use its normal queue or steering behavior.

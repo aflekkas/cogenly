@@ -11,6 +11,7 @@ import {
 import {
   conservativeAgentPermissions,
   type EnvironmentId,
+  type ProjectId,
   type ProjectLabelWithRepositories,
 } from "@t3tools/contracts";
 import { ProjectLabelChips, ProjectLabelPicker } from "~/projectLabels/ProjectLabelPicker";
@@ -36,6 +37,7 @@ import { Switch } from "~/components/ui/switch";
 import { Textarea } from "~/components/ui/textarea";
 import { Toggle } from "~/components/ui/toggle";
 import { AgentCreatedWithoutTriggerError, useAgents, useAgentsClient } from "./agentsClient";
+import { DEFAULT_EVENT_TRIGGER, EventTriggerFields } from "./EventTriggerFields";
 import type { AgentContact, AgentDraft, AgentTrigger } from "./agents.types";
 
 export function AgentSheet({
@@ -466,19 +468,29 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const SCHEDULE_LABELS = {
   interval: "On an interval",
   fixed_time: "At a fixed time",
+  event: "When something happens",
   webhook: "On a webhook request",
 } as const;
+const NO_REPOSITORIES: ReadonlyArray<{ id: ProjectId; title: string }> = [];
 
 export function TriggerForm({
   initial,
   pending,
   onSave,
   onCancel,
+  labels = EMPTY_LABELS,
+  repositories = NO_REPOSITORIES,
+  onManageProjects,
 }: {
   initial?: AgentTrigger | undefined;
   pending: boolean;
   onSave: (trigger: Omit<AgentTrigger, "id"> & { id?: string }) => Promise<unknown>;
   onCancel: () => void;
+  /** Projects an event trigger may be limited to. */
+  labels?: ReadonlyArray<ProjectLabelWithRepositories>;
+  /** Repositories an event trigger may be limited to. */
+  repositories?: ReadonlyArray<{ id: ProjectId; title: string }>;
+  onManageProjects?: (() => void) | undefined;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [prompt, setPrompt] = useState(initial?.prompt ?? "");
@@ -508,7 +520,7 @@ export function TriggerForm({
           size="sm"
           required
           maxLength={200}
-          placeholder="Nightly audit"
+          placeholder={schedule.type === "event" ? "Failing checks" : "Nightly audit"}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
         />
@@ -520,7 +532,11 @@ export function TriggerForm({
           rows={2}
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
-          placeholder="Check the project and send me the highlights."
+          placeholder={
+            schedule.type === "event"
+              ? "Look at what failed and tell me only if it needs me."
+              : "Check the project and send me the highlights."
+          }
         />
       </label>
       <div className={field}>
@@ -533,14 +549,14 @@ export function TriggerForm({
                 ? { type: "interval", everyMs: 3_600_000 }
                 : type === "fixed_time"
                   ? { type: "fixed_time", timeOfDay: "09:00" }
-                  : { type: "webhook", signature: null },
+                  : type === "event"
+                    ? DEFAULT_EVENT_TRIGGER
+                    : { type: "webhook", signature: null },
             )
           }
         >
           <SelectTrigger size="sm" aria-label="When">
-            <SelectValue>
-              {schedule.type === "event" ? "On an event" : SCHEDULE_LABELS[schedule.type]}
-            </SelectValue>
+            <SelectValue>{SCHEDULE_LABELS[schedule.type]}</SelectValue>
           </SelectTrigger>
           <SelectPopup>
             {Object.entries(SCHEDULE_LABELS).map(([value, label]) => (
@@ -605,6 +621,15 @@ export function TriggerForm({
             </div>
           </fieldset>
         </>
+      )}
+      {schedule.type === "event" && (
+        <EventTriggerFields
+          value={schedule}
+          labels={labels}
+          repositories={repositories}
+          onManageProjects={onManageProjects}
+          onChange={(value) => setSchedule({ type: "event", ...value })}
+        />
       )}
       {schedule.type === "webhook" && (
         <p className="text-xs text-muted-foreground">
@@ -767,6 +792,9 @@ export function CreateAgent({
           {addTrigger && (
             <AgentSheet title="First trigger" onClose={() => setAddTrigger(false)}>
               <TriggerForm
+                labels={labels}
+                repositories={workspaces}
+                onManageProjects={client.openProjectSettings}
                 pending={false}
                 onCancel={() => setAddTrigger(false)}
                 onSave={async (value) => {
