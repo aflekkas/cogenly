@@ -6,6 +6,7 @@ import {
   FaceRig,
   agentAppearance,
   faceExpression,
+  gazeToward,
   indicatorTransform,
   resolveFaceColor,
   shapeRadii,
@@ -20,6 +21,7 @@ import { DEMI_VIEWBOX } from "./engine/repere";
 import type { ShapeId } from "./engine/skins";
 import { faceClockNow, observeFaceVisibility, subscribeFaceClock } from "./faceClock";
 import { FacePainter } from "./facePainter";
+import { subscribeFacePointer, type FacePointer } from "./facePointer";
 
 /**
  * Half-size of the visible box, in engine units (ball radius = 100). Tighter than
@@ -145,8 +147,30 @@ export const AgentFace = memo(function AgentFace({
       const face = live.current;
       if (face) paintFrame(face.painters, face.rig.frame(clock + face.offset));
     };
+    // The rig eases toward each target on the clock, so a still pointer settles.
+    const onPointer = (pointer: FacePointer | null) => {
+      const face = live.current;
+      if (!face) return;
+      const now = faceClockNow() + face.offset;
+      if (!pointer) {
+        face.rig.setGaze(null, now);
+        return;
+      }
+      const box = element.getBoundingClientRect();
+      if (box.width === 0) return;
+      const dx = pointer.x - (box.left + box.width / 2);
+      const dy = pointer.y - (box.top + box.height / 2);
+      face.rig.setGaze(gazeToward(dx, dy, box.width), now);
+    };
     const stopObserving = observeFaceVisibility(element, (visible) => {
-      if (visible && !unsubscribe) unsubscribe = subscribeFaceClock(onFrame);
+      if (visible && !unsubscribe) {
+        const stopClock = subscribeFaceClock(onFrame);
+        const stopPointer = subscribeFacePointer(onPointer);
+        unsubscribe = () => {
+          stopClock();
+          stopPointer();
+        };
+      }
       if (!visible && unsubscribe) {
         unsubscribe();
         unsubscribe = null;

@@ -4,6 +4,7 @@ import {
   AGENT_FACE_STATES,
   FaceDirector,
   FaceRig,
+  GAZE_RELEASE_SECONDS,
   INDICATOR_FADE_SECONDS,
   IndicatorDirector,
   REARM_REST_SECONDS,
@@ -11,6 +12,10 @@ import {
   agentAppearance,
   engineStateFor,
   faceExpression,
+  eyesInsideBody,
+  gazeFit,
+  gazeLook,
+  gazeToward,
   indicatorTransform,
   resolveFaceColor,
   shapeRadii,
@@ -18,7 +23,7 @@ import {
   type AgentFaceState,
   type FaceRigTarget,
 } from "./agentFace.logic";
-import { BotEngine } from "./engine/engine";
+import { BotEngine, type BotFrame } from "./engine/engine";
 import { EXPRESSIONS } from "./engine/expressions";
 import { SHAPES } from "./engine/skins";
 import { STATE_BY_ID } from "./engine/states";
@@ -297,5 +302,131 @@ describe("indicatorTransform", () => {
     expect(indicatorTransform(64)).toBe(indicatorTransform(96));
     expect(indicatorTransform(28)).toBe(indicatorTransform(32));
     expect(indicatorTransform(32)).toMatch(/scale\(0\.700\)$/);
+  });
+});
+
+describe("gazeToward", () => {
+  it("looks straight out when the pointer is on the face's centre", () => {
+    expect(gazeToward(0, 0, 32)).toEqual({ x: 0, y: 0 });
+  });
+
+  it("turns right and up toward a pointer up and to the right", () => {
+    const look = gazeLook(gazeToward(200, -200, 32));
+    expect(look.yaw).toBeGreaterThan(0);
+    expect(look.pitch).toBeGreaterThan(0);
+    expect(look.leanX).toBeGreaterThan(0);
+    expect(look.leanY).toBeLessThan(0);
+    const mirrored = gazeLook(gazeToward(-200, 200, 32));
+    expect(mirrored.yaw).toBeCloseTo(-look.yaw);
+    expect(mirrored.pitch).toBeCloseTo(-look.pitch);
+  });
+
+  it("looks further the further away the pointer is, up to full reach", () => {
+    const near = gazeToward(40, 0, 32).x;
+    const far = gazeToward(400, 0, 32).x;
+    expect(near).toBeLessThan(far);
+    expect(far).toBeLessThan(gazeToward(1e7, 0, 32).x);
+    for (let angle = 0; angle < Math.PI * 2; angle += 0.3) {
+      const gaze = gazeToward(Math.cos(angle) * 1e7, Math.sin(angle) * 1e7, 32);
+      expect(Math.hypot(gaze.x, gaze.y)).toBeCloseTo(1);
+    }
+  });
+
+  it("needs the pointer further away for a big face than a small one", () => {
+    expect(gazeToward(150, 0, 160).x).toBeLessThan(gazeToward(150, 0, 24).x);
+  });
+});
+
+describe("FaceRig gaze", () => {
+  const settled = 30;
+  const rigFor = (shape: string, expression: string) =>
+    new FaceRig(
+      {
+        state: "idle",
+        layered: true,
+        radii: shapeRadii(shape),
+        expression: faceExpression(expression),
+      },
+      0,
+    );
+  const eyeX = (frame: BotFrame) => {
+    const matrix = frame.eyes[0]!.matrix.slice(7, -1).split(",").map(Number);
+    return matrix[4]!;
+  };
+
+  it("keeps both eye holes inside the body at full reach in every direction", () => {
+    const clipped: string[] = [];
+    for (const shape of SHAPES) {
+      for (const expression of SEEDED_EXPRESSIONS) {
+        // Twice as many directions as the fit measures, so in-between ones are covered too.
+        for (let step = 0; step < 24; step++) {
+          const angle = (step / 24) * Math.PI * 2;
+          const rig = rigFor(shape.id, expression);
+          rig.setGaze(gazeToward(Math.cos(angle) * 1e7, Math.sin(angle) * 1e7, 32), settled);
+          for (const t of [settled + 1, settled + 2.3, settled + 4.1]) {
+            if (!eyesInsideBody(rig.frame(t).base))
+              clipped.push(`${shape.id} ${expression} ${step}`);
+          }
+        }
+      }
+    }
+    expect(clipped).toEqual([]);
+  });
+
+  it("gives round shapes the full reach and narrow ones less", () => {
+    const round = gazeFit(shapeRadii("cercle"), faceExpression("neutre"));
+    const cloud = gazeFit(shapeRadii("nuage"), faceExpression("timide"));
+    expect(Math.min(...round)).toBeGreaterThan(0.8);
+    expect(Math.min(...cloud)).toBeLessThan(Math.min(...round));
+    expect(Math.min(...cloud)).toBeGreaterThan(0);
+  });
+
+  it("eases toward a new target and settles on it", () => {
+    const rig = rigFor("cercle", "neutre");
+    const start = eyeX(rig.frame(settled).base);
+    rig.setGaze(gazeToward(1e7, 0, 32), settled);
+    const midway = eyeX(rig.frame(settled + BotEngine.LOOK_MORPH / 4).base);
+    const end = eyeX(rig.frame(settled + BotEngine.LOOK_MORPH).base);
+    const later = eyeX(rig.frame(settled + BotEngine.LOOK_MORPH + 0.5).base);
+    expect(midway).not.toBeCloseTo(start, 1);
+    expect(Math.abs(midway - end)).toBeGreaterThan(0.1);
+    expect(Math.abs(later - end)).toBeLessThan(1.5);
+  });
+
+  it("looks left of a pointer to its left", () => {
+    const left = rigFor("cercle", "neutre");
+    const right = rigFor("cercle", "neutre");
+    left.setGaze(gazeToward(-500, 0, 32), settled);
+    right.setGaze(gazeToward(500, 0, 32), settled);
+    const t = settled + 1;
+    expect(eyeX(left.frame(t).base)).toBeLessThan(eyeX(right.frame(t).base) - 20);
+  });
+
+  it("eases back to its own gaze when the pointer is released", () => {
+    const free = rigFor("cercle", "neutre");
+    const rig = rigFor("cercle", "neutre");
+    rig.setGaze(gazeToward(-1e7, 0, 32), settled);
+    rig.setGaze(null, settled + 1);
+    const released = settled + 1 + GAZE_RELEASE_SECONDS;
+    expect(rig.frame(released).base.eyes[0]!.matrix).toBe(
+      free.frame(released).base.eyes[0]!.matrix,
+    );
+  });
+
+  it("leaves non-idle states their own eyes, and picks the pointer back up after", () => {
+    const target: FaceRigTarget = {
+      state: "done",
+      layered: true,
+      radii: null,
+      expression: null,
+    };
+    const tracked = new FaceRig(target, 0);
+    const free = new FaceRig(target, 0);
+    tracked.setGaze(gazeToward(-1e7, 0, 32), 0);
+    expect(tracked.frame(2).base.eyes[0]?.matrix).toBe(free.frame(2).base.eyes[0]?.matrix);
+    tracked.update({ ...target, state: "idle" }, 3);
+    free.update({ ...target, state: "idle" }, 3);
+    tracked.frame(4);
+    expect(eyeX(tracked.frame(6).base)).toBeLessThan(eyeX(free.frame(6).base) - 20);
   });
 });
