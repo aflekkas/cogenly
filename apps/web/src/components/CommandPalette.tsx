@@ -80,7 +80,7 @@ import {
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
 import { requestThreadProjectTagsOpen } from "../projectLabels/projectTagsActionBus";
 import { requestAgentCreation } from "../agents/AgentsCreateHost";
-import { requestAgentView } from "../agents/agentViewIntent";
+import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { requestStartWork } from "./work/StartWorkDialog";
 import { agentStatusLabel } from "../agents/agents.logic";
 import { useAgentsIfProvided } from "../agents/agentsClient";
@@ -1209,7 +1209,7 @@ function OpenCommandPaletteDialog(props: {
         title: `Start Work with ${agent.name}…`,
         icon: <CodeIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
-          requestAgentView(agent, "start-work");
+          requestAgentView(agentViewKey(agent), "start-work");
           await openAgent(agent);
         },
       },
@@ -1220,7 +1220,7 @@ function OpenCommandPaletteDialog(props: {
         title: `Open items for ${agent.name}`,
         icon: <ListTodoIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
-          requestAgentView(agent, "items");
+          requestAgentView(agentViewKey(agent), "items");
           await openAgent(agent);
         },
       },

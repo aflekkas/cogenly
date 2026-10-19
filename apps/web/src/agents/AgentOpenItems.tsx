@@ -15,13 +15,14 @@ import {
   EllipsisIcon,
   LinkIcon,
   PlusIcon,
+  Trash2Icon,
   UserRoundIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "~/components/ui/menu";
 import {
   Select,
   SelectItem,
@@ -30,6 +31,7 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { Textarea } from "~/components/ui/textarea";
+import { requestConfirmDialog } from "~/confirmDialog";
 import { cn } from "~/lib/utils";
 import { ProjectLabelChips, ProjectLabelPicker } from "~/projectLabels/ProjectLabelPicker";
 import { ProjectTag } from "~/projectLabels/ProjectTag";
@@ -270,6 +272,13 @@ function CommitmentRow({
     why: string,
     evidenceRefs: CommitmentRef[] = [],
   ) => run(() => client.setCommitmentStatus(agent, { id: item.id, status, why, evidenceRefs }));
+  // Dismissing keeps the item and its history; deleting removes both for good.
+  const remove = async () => {
+    const message = `Delete “${item.title}”?\nIt and its history are removed for good. Dismiss it instead to keep a record.`;
+    const confirmed =
+      (await requestConfirmDialog(message, { variant: "destructive" })) ?? window.confirm(message);
+    if (confirmed) await run(() => client.deleteCommitment(agent, item.id));
+  };
   const disabled = pending || !canWrite;
   return (
     <article
@@ -291,35 +300,42 @@ function CommitmentRow({
         <Badge variant={item.status === "proposed" ? "outline" : "secondary"} size="sm">
           {COMMITMENT_STATUS_LABEL[item.status]}
         </Badge>
-        {!closed && item.status !== "proposed" && (
-          <Menu>
-            <MenuTrigger
-              disabled={disabled}
-              render={<Button size="icon-xs" variant="ghost-muted" aria-label="Change status" />}
-            >
-              <EllipsisIcon />
-            </MenuTrigger>
-            <MenuPopup align="end">
-              {item.status !== "open" && (
-                <MenuItem onClick={() => void setStatus("open", "Reopened by the owner.")}>
-                  Mark open
-                </MenuItem>
-              )}
-              {item.status !== "in_progress" && (
-                <MenuItem onClick={() => void setStatus("in_progress", "Started by the owner.")}>
-                  Mark in progress
-                </MenuItem>
-              )}
-              {item.status !== "waiting" && (
-                <MenuItem onClick={() => void setStatus("waiting", "Waiting, set by the owner.")}>
-                  Mark waiting
-                </MenuItem>
-              )}
-              <MenuItem onClick={() => setForm("done")}>Mark done…</MenuItem>
-              <MenuItem onClick={() => setForm("dismiss")}>Dismiss…</MenuItem>
-            </MenuPopup>
-          </Menu>
-        )}
+        <Menu>
+          <MenuTrigger
+            disabled={disabled}
+            render={<Button size="icon-xs" variant="ghost-muted" aria-label="Item actions" />}
+          >
+            <EllipsisIcon />
+          </MenuTrigger>
+          <MenuPopup align="end">
+            {!closed && item.status !== "proposed" && (
+              <>
+                {item.status !== "open" && (
+                  <MenuItem onClick={() => void setStatus("open", "Reopened by the owner.")}>
+                    Mark open
+                  </MenuItem>
+                )}
+                {item.status !== "in_progress" && (
+                  <MenuItem onClick={() => void setStatus("in_progress", "Started by the owner.")}>
+                    Mark in progress
+                  </MenuItem>
+                )}
+                {item.status !== "waiting" && (
+                  <MenuItem onClick={() => void setStatus("waiting", "Waiting, set by the owner.")}>
+                    Mark waiting
+                  </MenuItem>
+                )}
+                <MenuItem onClick={() => setForm("done")}>Mark done…</MenuItem>
+                <MenuItem onClick={() => setForm("dismiss")}>Dismiss…</MenuItem>
+                <MenuSeparator />
+              </>
+            )}
+            <MenuItem variant="destructive" onClick={() => void remove()}>
+              <Trash2Icon />
+              Delete…
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <Meta icon={<UserRoundIcon className="size-3" />}>{owner}</Meta>

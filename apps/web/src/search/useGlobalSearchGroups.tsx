@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useAgentsIfProvided } from "../agents/agentsClient";
 import { PullRequestGlyph } from "../components/changeRequestIcons";
-import { requestAgentTab } from "../agents/agentTabRequest";
+import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import {
   ITEM_ICON_CLASS,
   type CommandPaletteActionItem,
@@ -178,7 +178,13 @@ export function useGlobalSearchGroups(input: {
           });
           return;
         case "agent":
-          requestAgentTab(`${target.environmentId}:${target.threadId}`, target.tab);
+          requestAgentView(
+            agentViewKey({
+              environmentId: target.environmentId,
+              conversationThreadId: target.threadId,
+            }),
+            target.tab,
+          );
           await navigate({
             to: "/$environmentId/$threadId",
             params: buildThreadRouteParams(scopeThreadRef(target.environmentId, target.threadId)),

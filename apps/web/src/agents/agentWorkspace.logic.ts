@@ -394,6 +394,62 @@ export function normalizeEventFilter(
 }
 
 /**
+ * What an agent's event filter may name: the projects and repositories it can read,
+ * which the server also enforces (`event_filter_out_of_scope`).
+ */
+export function eventFilterChoices<L extends ScopeLabel>(
+  agent: Pick<Agent, "scope" | "projectId" | "permissions" | "autonomy">,
+  labels: ReadonlyArray<L>,
+  repositories: ReadonlyArray<{ id: ProjectId; title: string }>,
+) {
+  return {
+    labels: agentReadableLabels(agent, labels),
+    repositories: agentRepositoryAccess(agent, labels, repositories)
+      .filter((repository) => repository.readable)
+      .map(({ id, title }) => ({ id, title })),
+  };
+}
+
+/** The ids a saved filter names that are no longer among the choices. */
+export function eventFilterOutOfScope(
+  filter: EventFilter | undefined,
+  choices: {
+    labels: ReadonlyArray<{ id: ProjectLabelId }>;
+    repositories: ReadonlyArray<{ id: ProjectId }>;
+  },
+) {
+  const labels = new Set(choices.labels.map((label) => label.id));
+  const repositories = new Set(choices.repositories.map((repository) => repository.id));
+  return {
+    labelIds: (filter?.labelIds ?? []).filter((id) => !labels.has(id)),
+    projectIds: (filter?.projectIds ?? []).filter((id) => !repositories.has(id)),
+  };
+}
+
+export const EVENT_FILTER_OUT_OF_SCOPE_MESSAGE =
+  "This trigger is limited to a project or repository the agent can't read. Remove it from the filter, or grant the project Read in the agent's Responsibilities.";
+export const EVENT_RUN_NOW_UNSUPPORTED_MESSAGE =
+  "Event triggers run only when the event happens, so there is no Run now.";
+
+/** The `ScheduledTaskError.code` the server attached to a failure, if any. */
+export function scheduledTaskErrorCode(cause: unknown) {
+  return typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    typeof cause.code === "string"
+    ? cause.code
+    : null;
+}
+
+/** A failed trigger save or run in words: the known scope codes plainly, else the server's message. */
+export function triggerErrorMessage(cause: unknown, fallback: string) {
+  const code = scheduledTaskErrorCode(cause);
+  if (code === "event_filter_out_of_scope") return EVENT_FILTER_OUT_OF_SCOPE_MESSAGE;
+  if (code === "event_run_now_unsupported") return EVENT_RUN_NOW_UNSUPPORTED_MESSAGE;
+  return cause instanceof Error && cause.message ? cause.message : fallback;
+}
+
+/**
  * "in Bartr, cogenly · only Work an agent started": projects then repositories, then
  * origin; null when the trigger reacts to every event of its kind it can read.
  */
@@ -438,7 +494,8 @@ export const AUTONOMY_OPTIONS: ReadonlyArray<{
   {
     value: "execute_bounded",
     label: AUTONOMY_LABEL.execute_bounded,
-    description: "Starts Work in its home repository within its grants. Asks for anything else.",
+    description:
+      "Starts Work in its home repository and projects granted Read & execute. Asks for anything else.",
   },
   {
     value: "autonomous_within_policy",
@@ -469,7 +526,8 @@ export const PERMISSION_OPTIONS: ReadonlyArray<{
   {
     key: "execute",
     label: "Start Work",
-    description: "Start coding sessions and run tools.",
+    description:
+      "Start coding sessions and run tools, in its home repository and projects granted Read & execute.",
     highImpact: false,
   },
   {
@@ -484,38 +542,76 @@ export const PERMISSION_OPTIONS: ReadonlyArray<{
   { key: "delete", label: "Delete", description: "Delete or remove data.", highImpact: true },
 ];
 
+const EXECUTING_AUTONOMY: ReadonlySet<Autonomy> = new Set([
+  "execute_bounded",
+  "autonomous_within_policy",
+]);
+
+/** Whether the agent's own settings let it execute anywhere: Read, Start Work and an executing autonomy. */
+export function agentCanExecute(agent: Pick<Agent, "autonomy" | "permissions">) {
+  return (
+    agent.permissions.read && agent.permissions.execute && EXECUTING_AUTONOMY.has(agent.autonomy)
+  );
+}
+
 /**
  * What happens when the agent tries to start Work, mirroring the server's gate:
- * observe agents are refused; paused, propose or no execute grant asks the owner;
- * otherwise it may start Work in its home repository and asks for any other one.
+ * observe agents are refused; paused, propose, or no Read or Start Work grant asks the
+ * owner; otherwise it may start Work in its home repository and in repositories linked
+ * to projects granted Read & execute, and asks for any other one.
  */
 export function agentWorkStartPolicy(agent: Pick<Agent, "autonomy" | "enabled" | "permissions">): {
-  outcome: "refused" | "asks" | "home_only";
+  outcome: "refused" | "asks" | "scoped";
   text: string;
 } {
   if (agent.autonomy === "observe")
     return { outcome: "refused", text: "Can't start Work at this autonomy level." };
-  if (!agent.enabled || agent.autonomy === "propose" || !agent.permissions.execute)
+  if (!agent.enabled || !agentCanExecute(agent))
     return {
       outcome: "asks",
       text: !agent.enabled
         ? "Paused: asks you before starting Work."
         : !agent.permissions.execute
-          ? "Asks you before starting Work (no Start Work grant)."
-          : "Asks you before starting Work.",
+          ? "Asks you before starting Work (no Start Work permission)."
+          : !agent.permissions.read
+            ? "Asks you before starting Work (no Read permission)."
+            : "Asks you before starting Work.",
     };
   return {
-    outcome: "home_only",
-    text: "Starts Work in its home repository on its own; asks you for any other repository.",
+    outcome: "scoped",
+    text: "Starts Work on its own in its home repository and in projects granted Read & execute; asks you for any other repository.",
   };
 }
 
-export type ScopeAccess = "read" | "draft" | "custom";
+export type ScopeAccess = "read" | "draft" | "execute" | "custom";
 export const SCOPE_ACCESS_LABEL: Record<ScopeAccess, string> = {
   read: "Read",
   draft: "Read & draft",
+  execute: "Read & execute",
   custom: "Custom",
 };
+/** The per-project choices, each a step up from the last. */
+export const SCOPE_ACCESS_OPTIONS: ReadonlyArray<{
+  value: Exclude<ScopeAccess, "custom">;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "read",
+    label: SCOPE_ACCESS_LABEL.read,
+    description: "Reads its repositories, facts and open items.",
+  },
+  {
+    value: "draft",
+    label: SCOPE_ACCESS_LABEL.draft,
+    description: "Also proposes open items for you to confirm. Never starts Work here.",
+  },
+  {
+    value: "execute",
+    label: SCOPE_ACCESS_LABEL.execute,
+    description: "Also starts Work in its repositories without asking, within its autonomy.",
+  },
+];
 const NO_PERMISSIONS: AgentPermissions = {
   read: false,
   draft: false,
@@ -527,15 +623,44 @@ const NO_PERMISSIONS: AgentPermissions = {
   delete: false,
 };
 
-/** Scope grants are read and draft per project; any other mix is kept as "Custom". */
+/** Scope grants are read, draft and execute per project; any other mix is kept as "Custom". */
 export function scopeAccess(permissions: AgentPermissions): ScopeAccess {
-  const { read, draft, ...rest } = permissions;
+  const { read, draft, execute, ...rest } = permissions;
   if (Object.values(rest).some(Boolean) || !read) return "custom";
+  if (execute) return draft ? "execute" : "custom";
   return draft ? "draft" : "read";
 }
 
 export function scopePermissions(access: Exclude<ScopeAccess, "custom">): AgentPermissions {
-  return { ...NO_PERMISSIONS, read: true, draft: access === "draft" };
+  return {
+    ...NO_PERMISSIONS,
+    read: true,
+    draft: access !== "read",
+    execute: access === "execute",
+  };
+}
+
+/**
+ * Why a project's grant does less than its label says, given the agent-level settings
+ * the server also requires; null when the grant takes full effect.
+ */
+export function scopeAccessLimit(
+  agent: Pick<Agent, "autonomy" | "permissions">,
+  access: ScopeAccess,
+): string | null {
+  if (!agent.permissions.read) return "Has no effect while the Read permission is off.";
+  if (access === "execute" && !agentCanExecute(agent)) {
+    const needs = [
+      EXECUTING_AUTONOMY.has(agent.autonomy) ? null : "autonomy Execute bounded work or higher",
+      agent.permissions.execute ? null : "the Start Work permission",
+    ].filter((need) => need !== null);
+    return `Executing here also needs ${needs.join(" and ")}. Until then it asks you first.`;
+  }
+  if ((access === "draft" || access === "execute") && !agent.permissions.draft)
+    return "Can't propose open items while the Draft permission is off.";
+  if ((access === "draft" || access === "execute") && agent.autonomy === "observe")
+    return "Can't propose open items at Observe autonomy.";
+  return null;
 }
 
 /** Add a project with read & draft access, or remove it. Other grants are untouched. */
@@ -544,48 +669,80 @@ export function toggleScope(scope: Scope, labelId: ProjectLabelId, selected: boo
   return selected ? [...without, { labelId, permissions: scopePermissions("draft") }] : without;
 }
 
+type ScopeLabel = {
+  id: ProjectLabelId;
+  name: string;
+  repositoryIds: ReadonlyArray<ProjectId>;
+};
+
+/** Projects the agent may read, and so name in event trigger filters. */
+export function agentReadableLabels<L extends { id: ProjectLabelId }>(
+  agent: Pick<Agent, "scope" | "permissions">,
+  labels: ReadonlyArray<L>,
+): L[] {
+  if (!agent.permissions.read) return [];
+  const readable = new Set(
+    agent.scope.filter((entry) => entry.permissions.read).map((entry) => entry.labelId),
+  );
+  return labels.filter((label) => readable.has(label.id));
+}
+
 /**
- * Repositories an agent's Start Work dialog offers: those linked to a project in its
- * explicit scope, once each, alphabetical, naming the scoped projects that link them.
- * Repositories linked only to unscoped projects never appear; tags are not grants.
+ * The agent's repositories, mirroring the server's `AgentAccessScope`: its home
+ * repository first, then those linked to projects it is granted Read on, each once with
+ * the projects that link it. `readable` repositories can be read and named in event
+ * filters; `executable` ones it may start Work in without asking, which takes Read and
+ * execute on the same project grant (the home repository needs neither) plus the
+ * agent's own Read, Start Work and an executing autonomy. Tags are never grants.
  */
-/**
- * Repositories an owner can start this agent's Work in: its home repository first,
- * then those linked to its scoped projects, each once with the projects that link it.
- */
-export function startWorkRepositories(
-  scope: Scope,
-  labels: ReadonlyArray<{
-    id: ProjectLabelId;
-    name: string;
-    repositoryIds: ReadonlyArray<ProjectId>;
-  }>,
+export function agentRepositoryAccess(
+  agent: Pick<Agent, "scope" | "projectId" | "permissions" | "autonomy">,
+  labels: ReadonlyArray<ScopeLabel>,
   repositories: ReadonlyArray<{ id: ProjectId; title: string }>,
-  homeProjectId: ProjectId | null = null,
 ) {
-  const scoped = new Set(scope.map((entry) => entry.labelId));
+  const grants = new Map(
+    agent.scope.filter((entry) => entry.permissions.read).map((entry) => [entry.labelId, entry]),
+  );
+  const canExecute = agentCanExecute(agent);
   const byId = new Map(repositories.map((repository) => [repository.id, repository]));
   const result = new Map<
     ProjectId,
-    { id: ProjectId; title: string; projects: string[]; home: boolean }
+    {
+      id: ProjectId;
+      title: string;
+      projects: string[];
+      home: boolean;
+      readable: boolean;
+      executable: boolean;
+    }
   >();
+  const home = agent.projectId === null ? undefined : byId.get(agent.projectId);
+  if (home)
+    result.set(home.id, {
+      ...home,
+      projects: [],
+      home: true,
+      readable: agent.permissions.read,
+      executable: canExecute,
+    });
   for (const label of labels) {
-    if (!scoped.has(label.id)) continue;
+    const grant = grants.get(label.id);
+    if (!grant) continue;
     for (const repositoryId of label.repositoryIds) {
       const repository = byId.get(repositoryId);
       if (!repository) continue;
-      const entry = result.get(repositoryId);
-      if (entry) entry.projects.push(label.name);
-      else
-        result.set(repositoryId, {
-          ...repository,
-          projects: [label.name],
-          home: repositoryId === homeProjectId,
-        });
+      const entry = result.get(repositoryId) ?? {
+        ...repository,
+        projects: [],
+        home: false,
+        readable: agent.permissions.read,
+        executable: false,
+      };
+      entry.projects.push(label.name);
+      entry.executable ||= canExecute && grant.permissions.execute;
+      result.set(repositoryId, entry);
     }
   }
-  const home = homeProjectId === null ? undefined : byId.get(homeProjectId);
-  if (home && !result.has(home.id)) result.set(home.id, { ...home, projects: [], home: true });
   return [...result.values()].toSorted(
     (a, b) =>
       Number(b.home) - Number(a.home) ||

@@ -1,35 +1,42 @@
-import { create } from "zustand";
-import { agentContactKey } from "./agents.logic";
-import type { AgentContact } from "./agents.types";
+export type AgentTab = "chat" | "activity" | "items" | "responsibilities";
+export type AgentView = AgentTab | "start-work";
 
 /**
- * What to show when an agent's view opens: its Open items tab or the Start Work
- * dialog. The command palette sets it, then navigates to the agent's conversation;
- * the view takes it once, whether it mounts afterwards or is already open.
+ * What to show the next time an agent's view mounts or while it is already showing: a tab,
+ * or the Start Work dialog. The command palette and search ask here, then navigate to the
+ * agent's conversation thread, since the tab is view state rather than part of the route.
+ * Only the latest request is kept, so one that never reaches its view can't fire later.
  */
-interface AgentViewIntent {
-  key: string;
-  view: "items" | "start-work";
+let pending: { key: string; view: AgentView } | null = null;
+const listeners = new Set<() => void>();
+
+/** Requests are keyed by the agent's conversation thread, the route an agent view lives on. */
+export const agentViewKey = (agent: { environmentId: string; conversationThreadId: string }) =>
+  `${agent.environmentId}:${agent.conversationThreadId}`;
+
+export function requestAgentView(key: string, view: AgentView) {
+  pending = { key, view };
+  for (const listener of listeners) listener();
 }
 
-const useAgentViewIntentStore = create<{ intent: AgentViewIntent | null }>(() => ({
-  intent: null,
-}));
-
-export function requestAgentView(
-  agent: Pick<AgentContact, "environmentId" | "id">,
-  view: AgentViewIntent["view"],
-) {
-  useAgentViewIntentStore.setState({ intent: { key: agentContactKey(agent), view } });
+/** Takes a pending request for this view, so it applies once. */
+export function takeAgentView(key: string): AgentView | null {
+  if (pending?.key !== key) return null;
+  const { view } = pending;
+  pending = null;
+  return view;
 }
 
-/** Calls `apply` with a pending and every later request for this agent; returns the unsubscribe. */
-export function watchAgentViewIntent(key: string, apply: (view: AgentViewIntent["view"]) => void) {
-  const take = (intent: AgentViewIntent | null) => {
-    if (intent?.key !== key) return;
-    useAgentViewIntentStore.setState({ intent: null });
-    apply(intent.view);
+/** Calls `apply` with every later request for this view; returns the unsubscribe. */
+export function watchAgentView(key: string, apply: (view: AgentView) => void) {
+  const listener = () => {
+    const view = takeAgentView(key);
+    if (view) apply(view);
   };
-  take(useAgentViewIntentStore.getState().intent);
-  return useAgentViewIntentStore.subscribe((state) => take(state.intent));
+  listeners.add(listener);
+  // A request made between the first render and this subscription still applies.
+  listener();
+  return () => {
+    listeners.delete(listener);
+  };
 }

@@ -15,7 +15,12 @@ import {
   type ProjectLabelWithRepositories,
 } from "@t3tools/contracts";
 import { ProjectLabelChips, ProjectLabelPicker } from "~/projectLabels/ProjectLabelPicker";
-import { AUTONOMY_OPTIONS, toggleScope } from "./agentWorkspace.logic";
+import {
+  AUTONOMY_OPTIONS,
+  eventFilterChoices,
+  toggleScope,
+  triggerErrorMessage,
+} from "./agentWorkspace.logic";
 import { AgentFace } from "~/components/agents/face";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import {
@@ -291,11 +296,14 @@ export function AgentForm({
   children,
   environmentId,
   labels = EMPTY_LABELS,
+  onDraftChange,
 }: {
   environmentId?: EnvironmentId;
   /** Projects the agent can be granted; scope is chosen here, never inferred. */
   labels?: ReadonlyArray<ProjectLabelWithRepositories>;
   initial: AgentDraft;
+  /** Every edit, for callers whose other controls depend on the draft's policy. */
+  onDraftChange?: ((draft: AgentDraft) => void) | undefined;
   onSubmit: (draft: AgentDraft) => Promise<unknown>;
   pending: boolean;
   submitLabel: string;
@@ -306,7 +314,11 @@ export function AgentForm({
   const models = allModels.filter(
     (model) => !environmentId || !model.environmentId || model.environmentId === environmentId,
   );
-  const [draft, setDraft] = useState(initial);
+  const [draft, setDraftState] = useState(initial);
+  const setDraft = (next: AgentDraft) => {
+    setDraftState(next);
+    onDraftChange?.(next);
+  };
   return (
     <form
       className="agent-form"
@@ -498,19 +510,30 @@ export function TriggerForm({
     initial?.schedule ?? { type: "interval", everyMs: 3_600_000 },
   );
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const field = "flex flex-col gap-1.5 text-xs font-medium text-muted-foreground";
   return (
     <form
       className="flex flex-col gap-2.5 px-2.5 py-2"
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
-        void onSave({
-          ...(initial ? { id: initial.id } : {}),
-          title: title.trim(),
-          prompt: prompt.trim(),
-          schedule,
-          enabled,
-        });
+        if (saving) return;
+        setSaving(true);
+        setError(null);
+        try {
+          await onSave({
+            ...(initial ? { id: initial.id } : {}),
+            title: title.trim(),
+            prompt: prompt.trim(),
+            schedule,
+            enabled,
+          });
+        } catch (cause) {
+          setError(triggerErrorMessage(cause, "Could not save this trigger."));
+        } finally {
+          setSaving(false);
+        }
       }}
     >
       <label className={field}>
@@ -641,11 +664,20 @@ export function TriggerForm({
         Enabled
         <Switch size="sm" checked={enabled} onCheckedChange={setEnabled} />
       </label>
+      {error && (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
       <div className="flex items-center justify-end gap-1.5">
         <Button type="button" size="xs" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" size="xs" disabled={pending || !title.trim() || !prompt.trim()}>
+        <Button
+          type="submit"
+          size="xs"
+          disabled={pending || saving || !title.trim() || !prompt.trim()}
+        >
           Save trigger
         </Button>
       </div>
@@ -684,6 +716,22 @@ export function CreateAgent({
   const [addTrigger, setAddTrigger] = useState(false);
   const [createdAgent, setCreatedAgent] = useState<AgentContact | null>(null);
   const [workspaceId, setWorkspaceId] = useState(projectId);
+  // The first trigger may only name what the agent will be able to read.
+  const [policy, setPolicy] = useState<Pick<AgentDraft, "scope" | "autonomy" | "permissions">>({
+    scope: [],
+    autonomy: "propose",
+    permissions: conservativeAgentPermissions,
+  });
+  const triggerChoices = eventFilterChoices(
+    {
+      scope: policy.scope ?? [],
+      autonomy: policy.autonomy ?? "propose",
+      permissions: policy.permissions ?? conservativeAgentPermissions,
+      projectId: workspaceId ?? null,
+    },
+    labels,
+    workspaces,
+  );
   // An environment without a configured model cannot create an agent.
   const model = models.find(
     (option) => !option.environmentId || option.environmentId === environmentId,
@@ -718,6 +766,7 @@ export function CreateAgent({
               dailyRunCap: 24,
             }}
             pending={pending}
+            onDraftChange={setPolicy}
             submitLabel={createdAgent ? "Save agent & trigger" : "Create agent"}
             onSubmit={async (draft) => {
               setPending(true);
@@ -736,7 +785,7 @@ export function CreateAgent({
                 onClose();
               } catch (cause) {
                 if (cause instanceof AgentCreatedWithoutTriggerError) setCreatedAgent(cause.agent);
-                setError(cause instanceof Error ? cause.message : "Could not create agent.");
+                setError(triggerErrorMessage(cause, "Could not create agent."));
               } finally {
                 setPending(false);
               }
@@ -792,8 +841,7 @@ export function CreateAgent({
           {addTrigger && (
             <AgentSheet title="First trigger" onClose={() => setAddTrigger(false)}>
               <TriggerForm
-                labels={labels}
-                repositories={workspaces}
+                {...triggerChoices}
                 onManageProjects={client.openProjectSettings}
                 pending={false}
                 onCancel={() => setAddTrigger(false)}

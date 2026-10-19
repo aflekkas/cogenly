@@ -68,7 +68,14 @@ import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { readEnvironmentScope } from "~/state/session";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useAgents } from "../../agents/agentsClient";
-import { describeSchedule } from "../../agents/agentWorkspace.logic";
+import {
+  EVENT_FILTER_OUT_OF_SCOPE_MESSAGE,
+  EVENT_RUN_NOW_UNSUPPORTED_MESSAGE,
+  describeSchedule,
+  eventFilterChoices,
+  scheduledTaskErrorCode,
+  triggerErrorMessage,
+} from "../../agents/agentWorkspace.logic";
 import { EventTriggerFields } from "../../agents/EventTriggerFields";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { EnvironmentRow, environmentTransportLabel } from "./EnvironmentRow";
@@ -632,7 +639,10 @@ function ScheduledTaskRow({
         stackedThreadToast({
           type: "error",
           title: "Could not update scheduled task",
-          description: String(squashAtomCommandFailure(result)),
+          description: triggerErrorMessage(
+            squashAtomCommandFailure(result),
+            "The server rejected the change.",
+          ),
         }),
       );
     }
@@ -689,6 +699,17 @@ function ScheduledTaskRow({
                 <MenuItem onClick={() => setDeliveriesOpen(true)}>
                   <InboxIcon />
                   Deliveries
+                </MenuItem>
+              ) : isEvent ? (
+                // The server refuses manual runs: an event run needs a real source event.
+                <MenuItem disabled>
+                  <PlayIcon />
+                  <span className="flex flex-col">
+                    Run now
+                    <span className="text-xs text-muted-foreground">
+                      {EVENT_RUN_NOW_UNSUPPORTED_MESSAGE}
+                    </span>
+                  </span>
                 </MenuItem>
               ) : (
                 <MenuItem onClick={() => void act("run")}>
@@ -1001,6 +1022,8 @@ function ScheduledTaskEditorDialog({
     task ? taskToDraft(task) : { ...EMPTY_DRAFT, projectId: projects[0]?.id ?? "" },
   );
   const [saving, setSaving] = useState(false);
+  // Shown beside the event filter, where an out-of-scope project or repository is fixed.
+  const [eventFilterError, setEventFilterError] = useState<string | null>(null);
   const submissionPending = useRef(false);
   const editingTaskMissing =
     draft.editingId !== null &&
@@ -1145,12 +1168,16 @@ function ScheduledTaskEditorDialog({
     // Lock before React renders, and keep successful creates locked until the form closes.
     submissionPending.current = true;
     setSaving(true);
+    setEventFilterError(null);
     const result = await upsertTask({ environmentId, input });
     setSaving(false);
     if (result._tag === "Failure") {
       submissionPending.current = false;
       if (!isAtomCommandInterrupted(result)) {
-        reportFailure("Could not save scheduled task", squashAtomCommandFailure(result));
+        const failure = squashAtomCommandFailure(result);
+        if (scheduledTaskErrorCode(failure) === "event_filter_out_of_scope")
+          setEventFilterError(EVENT_FILTER_OUT_OF_SCOPE_MESSAGE);
+        else reportFailure("Could not save scheduled task", failure);
       }
       return;
     }
@@ -1423,7 +1450,11 @@ function ScheduledTaskEditorDialog({
                   draft={draft}
                   repositories={projects}
                   agentLocked={task?.agentId != null}
-                  onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+                  error={eventFilterError}
+                  onChange={(patch) => {
+                    setEventFilterError(null);
+                    setDraft((current) => ({ ...current, ...patch }));
+                  }}
                 />
               ) : draft.scheduleMode === "webhook" ? (
                 <div className="space-y-4">
@@ -1640,6 +1671,7 @@ function EventScheduleFields({
   draft,
   repositories,
   agentLocked,
+  error,
   onChange,
 }: {
   readonly environmentId: EnvironmentId;
@@ -1647,12 +1679,18 @@ function EventScheduleFields({
   readonly repositories: ReadonlyArray<{ id: ProjectId; title: string }>;
   /** An agent's own trigger keeps its agent. */
   readonly agentLocked: boolean;
+  /** Why the server rejected the filter, shown under it. */
+  readonly error: string | null;
   readonly onChange: (patch: Partial<DraftState>) => void;
 }) {
   const { agents } = useAgents();
   const { labels } = useEnvironmentProjectLabels(environmentId);
   const candidates = agents.filter((agent) => agent.environmentId === environmentId);
   const selected = candidates.find((agent) => agent.id === draft.agentId);
+  // The filter may name only what the chosen agent can read; nothing before one is chosen.
+  const choices = selected
+    ? eventFilterChoices(selected, labels, repositories)
+    : { labels: [], repositories: [] };
   return (
     <div className="space-y-4">
       <Field label="Wakes" htmlFor="scheduled-task-agent">
@@ -1694,11 +1732,15 @@ function EventScheduleFields({
       ) : null}
       <EventTriggerFields
         value={draft.event}
-        labels={labels}
-        repositories={repositories}
+        {...choices}
         Field={Field}
         onChange={(event) => onChange({ event })}
       />
+      {error ? (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -14,6 +14,7 @@ import type {
   EnvironmentId,
   ProjectId,
   ProviderApprovalDecision,
+  RunId,
   ThreadId,
 } from "@t3tools/contracts";
 import type {
@@ -37,6 +38,7 @@ import {
   resolveAgentModelStatus,
   type AgentModelStatus,
 } from "./agents.logic";
+import { triggerErrorMessage } from "./agentWorkspace.logic";
 
 export class AgentCreatedWithoutTriggerError extends Error {
   constructor(
@@ -44,7 +46,7 @@ export class AgentCreatedWithoutTriggerError extends Error {
     cause: unknown,
   ) {
     super(
-      `Agent created, but the first trigger was not saved. ${cause instanceof Error ? cause.message : "Try saving the trigger again."}`,
+      `Agent created, but the first trigger was not saved. ${triggerErrorMessage(cause, "Try saving the trigger again.")}`,
     );
   }
 }
@@ -115,10 +117,14 @@ export interface AgentsClient {
   setCommitmentStatus: (agent: AgentContact, input: CommitmentStatusInput) => Promise<void>;
   confirmCommitment: (agent: AgentContact, id: string, why: string) => Promise<void>;
   dismissCommitment: (agent: AgentContact, id: string, why: string) => Promise<void>;
+  /** Removes an open item and its history for good; dismissing keeps both. */
+  deleteCommitment: (agent: AgentContact, id: string) => Promise<void>;
   /** Whether a model can run on the agent's environment; absent where there is no catalog. */
   modelStatus?: (agent: AgentContact, model: AgentModelRef) => AgentModelStatus;
   /** Model and effort pickers from the live provider catalog; absent where there is none. */
   ModelControls?: ComponentType<AgentModelControlsProps>;
+  /** "Context used (N)" under the reply that closes a run; absent where there is no retrieval. */
+  MessageContext?: ComponentType<{ agent: AgentContact; runId: RunId }>;
   /** The agent's facts in Responsibilities; absent where there is no facts service. */
   MemorySection?: ComponentType<{
     agent: AgentContact;
@@ -206,6 +212,8 @@ import { useEnvironmentQuery } from "~/state/query";
 import { randomUUID, newMessageId } from "~/lib/utils";
 import { useAgentScheduledTasks } from "~/components/sidebar/modes/useAgentScheduledTasks";
 import { AgentFactsSection } from "~/memory/AgentFacts";
+import { ContextUsed } from "~/context/ThreadContext";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { AgentRequest } from "./agents.types";
 
 function commandValue<A>(
@@ -309,6 +317,9 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
     reportFailure: false,
   });
   const dismissCommitment = useOrchestrationCommand(agentWorkspaceRpc.commitmentsDismiss, {
+    reportFailure: false,
+  });
+  const deleteCommitment = useOrchestrationCommand(agentWorkspaceRpc.commitmentsDelete, {
     reportFailure: false,
   });
   const deleteTask = useAtomCommand(serverEnvironment.deleteScheduledTask, {
@@ -676,10 +687,15 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
         );
         refreshWorkspace(registry, agent);
       },
+      deleteCommitment: async (agent, id) => {
+        commandValue(await deleteCommitment({ environmentId: agent.environmentId, input: { id } }));
+        refreshWorkspace(registry, agent);
+      },
       modelStatus: (agent, model) =>
         resolveAgentModelStatus(configs.get(agent.environmentId)?.providers, model),
       ModelControls: LiveAgentModelControls,
       MemorySection: AgentFactsSection,
+      MessageContext: AgentMessageContext,
     }),
     [
       snapshot,
@@ -706,6 +722,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       updateCommitment,
       confirmCommitment,
       dismissCommitment,
+      deleteCommitment,
     ],
   );
   return (
@@ -895,6 +912,7 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
           streaming: message.streaming,
           delivery: messageDelivery(run),
           ...(message.role === "user" && run ? { model: run.modelSelection } : {}),
+          ...(message.role === "assistant" && message.runId ? { runId: message.runId } : {}),
           ...(message.scheduledTaskId && message.senderThreadId
             ? {
                 source: {
@@ -1015,6 +1033,25 @@ function LiveAgentModelControls({
         </>
       )}
     </>
+  );
+}
+
+/** The same "Context used (N)" disclosure chat turns show, for one agent run. */
+function AgentMessageContext({ agent, runId }: { agent: AgentContact; runId: RunId }) {
+  return (
+    <ContextUsed
+      threadRef={scopeThreadRef(agent.environmentId, agent.conversationThreadId)}
+      runId={runId}
+    >
+      {({ trigger, panel }) =>
+        trigger ? (
+          <div className="flex flex-col items-start pt-1">
+            {trigger}
+            {panel}
+          </div>
+        ) : null
+      }
+    </ContextUsed>
   );
 }
 

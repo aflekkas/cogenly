@@ -193,6 +193,7 @@ describe("command permissions", () => {
     WS_METHODS.commitmentsUpdateStatus,
     WS_METHODS.commitmentsConfirm,
     WS_METHODS.commitmentsDismiss,
+    WS_METHODS.commitmentsDelete,
     WS_METHODS.agentsUpsert,
     WS_METHODS.agentsDelete,
     WS_METHODS.agentsSend,

@@ -17,6 +17,7 @@ import {
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { cn } from "../../lib/utils";
 import { relativeLabel, scheduleLabel } from "../settings/ScheduledTasksSettings";
+import { EVENT_RUN_NOW_UNSUPPORTED_MESSAGE } from "../../agents/agentWorkspace.logic";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -214,16 +215,24 @@ export function ThreadAutomationsPanel(props: {
                       variant="ghost"
                       part="icon"
                       aria-label={`Run ${task.title} now`}
-                      disabled={
-                        !canOperate || busyTaskId !== null || task.lastRunStatus === "running"
-                      }
-                      onClick={() => void runNow(task)}
+                      // An event run needs a real source event; the server refuses manual runs.
+                      {...(task.schedule.type === "event"
+                        ? { "aria-disabled": true }
+                        : {
+                            disabled:
+                              !canOperate ||
+                              busyTaskId !== null ||
+                              task.lastRunStatus === "running",
+                            onClick: () => void runNow(task),
+                          })}
                     >
                       <PlayIcon className="size-3.5" />
                     </ThreadDetailsControl>
                   }
                 />
-                <TooltipPopup>Run now</TooltipPopup>
+                <TooltipPopup>
+                  {task.schedule.type === "event" ? EVENT_RUN_NOW_UNSUPPORTED_MESSAGE : "Run now"}
+                </TooltipPopup>
               </Tooltip>
             )}
             <Switch

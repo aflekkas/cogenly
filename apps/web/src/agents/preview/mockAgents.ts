@@ -562,5 +562,10 @@ export function createMockAgentsClient(): AgentsClient {
       setCommitment(id, (item) => ({ ...item, status: "open", updatedAt: ago(0) })),
     dismissCommitment: async (_agent, id) =>
       setCommitment(id, (item) => ({ ...item, status: "dismissed", updatedAt: ago(0) })),
+    deleteCommitment: async (_agent, id) => {
+      commitments = commitments.filter((item) => item.id !== id);
+      snapshot = { ...snapshot };
+      emit();
+    },
   };
 }
