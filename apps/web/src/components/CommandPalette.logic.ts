@@ -440,6 +440,7 @@ export function filterCommandPaletteGroups(input: {
   query: string;
   isInSubmenu: boolean;
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  agentSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
   settingsSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
@@ -469,6 +470,13 @@ export function filterCommandPaletteGroups(input: {
         value: "projects-search",
         label: "Projects",
         items: input.projectSearchItems,
+      });
+    }
+    if (input.agentSearchItems && input.agentSearchItems.length > 0) {
+      searchableGroups.push({
+        value: "agents-search",
+        label: "Agents",
+        items: input.agentSearchItems,
       });
     }
     if (input.settingsSearchItems && input.settingsSearchItems.length > 0) {
@@ -609,7 +617,7 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return "Search threads, agents, projects, and commands...";
     case "root-browse":
       return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":

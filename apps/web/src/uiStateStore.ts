@@ -41,7 +41,7 @@ export interface PersistedUiState {
 export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
-  // Which list the sidebar shows: Chats, Tasks or Agents.
+  // Which list the sidebar shows: Chats, Work (id `tasks`) or Agents.
   sidebarMode: SidebarMode;
 }
 

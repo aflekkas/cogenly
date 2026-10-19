@@ -1,11 +1,11 @@
 /**
- * Chats | Tasks | Agents as a segmented control: the mobile sheet's mode row;
+ * Chats | Work | Agents as a segmented control: the mobile sheet's mode row;
  * wider windows switch modes from the navigation rail instead.
  * One pill slides between equal-width segments, so the control never reflows
  * when a badge appears. Arrow keys move between segments, as in any tablist.
  */
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { BotIcon, ListChecksIcon, type LucideIcon, MessageCircleIcon } from "lucide-react";
+import { BotIcon, CodeXmlIcon, type LucideIcon, MessageCircleIcon } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, useRef } from "react";
 
 import { cn } from "~/lib/utils";
@@ -15,7 +15,7 @@ import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./sidebarM
 
 export const SIDEBAR_MODE_ICONS: Record<SidebarMode, LucideIcon> = {
   chats: MessageCircleIcon,
-  tasks: ListChecksIcon,
+  tasks: CodeXmlIcon,
   agents: BotIcon,
 };
 

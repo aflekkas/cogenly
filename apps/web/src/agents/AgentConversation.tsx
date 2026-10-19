@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
 import { useMessageMotion } from "./useMessageMotion";
 import {
+  agentStatusLabel,
   conversationRows,
   modelDisplayName,
   modelSwitches,
@@ -114,15 +115,7 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
             size={74}
           />
           <span>{agent.name}</span>
-          <small>
-            {agent.requests.length
-              ? "Needs you"
-              : busy
-                ? "Thinking…"
-                : !agent.enabled
-                  ? "Background work paused"
-                  : "Your always-on agent"}
-          </small>
+          <small>{agentStatusLabel(agent)}</small>
         </button>
         <button
           type="button"

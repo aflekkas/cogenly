@@ -2,8 +2,10 @@
  * The sidebar lists one of three kinds of work at a time:
  *
  * - Chats: threads in an environment's scratch ("No project") project.
- * - Tasks: threads in real projects.
- * - Agents: persistent agent conversations. Background work opens from Activity.
+ * - Work: coding threads in real projects, plus every thread an agent started
+ *   to do work, wherever it runs. Shown as "Work"; the id stays `tasks`
+ *   because persisted settings and keybindings store it.
+ * - Agents: persistent agent conversations.
  *
  * Every visible thread belongs to one mode, so a thread never shows twice and
  * opening one from anywhere (search, a notification, a link) can switch the
@@ -17,7 +19,7 @@ export const SIDEBAR_MODES: ReadonlyArray<SidebarMode> = ["chats", "tasks", "age
 
 export const SIDEBAR_MODE_LABELS: Record<SidebarMode, string> = {
   chats: "Chats",
-  tasks: "Tasks",
+  tasks: "Work",
   agents: "Agents",
 };
 
@@ -34,11 +36,16 @@ export function sidebarModeThreadKey(
   return `${environmentId}:${threadId}`;
 }
 
-/** Agents win over chats: an agent conversation in a scratch project is still an agent. */
+/**
+ * Agent work wins over everything: an agent's coding run is Work, even in a
+ * scratch project. Agent conversations win over chats.
+ */
 export function classifySidebarThreadMode(input: {
   readonly isAgent: boolean;
   readonly isScratch: boolean;
+  readonly isAgentWork?: boolean;
 }): SidebarMode {
+  if (input.isAgentWork) return "tasks";
   if (input.isAgent) return "agents";
   return input.isScratch ? "chats" : "tasks";
 }
@@ -60,6 +67,7 @@ export function sidebarModeForThread(
   classifier: SidebarModeThreadClassifier,
 ): SidebarMode {
   return classifySidebarThreadMode({
+    isAgentWork: thread.source?.agent?.role === "work",
     isAgent:
       thread.source?.agent !== undefined ||
       classifier.agentThreadKeys.has(sidebarModeThreadKey(thread.environmentId, thread.id)),
@@ -75,10 +83,7 @@ export function filterThreadsForSidebarMode<
     readonly source?: { readonly agent?: { readonly role: "conversation" | "work" } | undefined };
   },
 >(threads: ReadonlyArray<T>, mode: SidebarMode, classifier: SidebarModeThreadClassifier): T[] {
-  return threads.filter(
-    (thread) =>
-      thread.source?.agent?.role !== "work" && sidebarModeForThread(thread, classifier) === mode,
-  );
+  return threads.filter((thread) => sidebarModeForThread(thread, classifier) === mode);
 }
 
 // Chats ---------------------------------------------------------------------
@@ -146,7 +151,7 @@ export function createChatDateGrouper(now: Date) {
   };
 }
 
-// Tasks ---------------------------------------------------------------------
+// Work ----------------------------------------------------------------------
 
 export interface TaskProjectGroup<T> {
   readonly projectKey: string;

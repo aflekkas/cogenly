@@ -69,6 +69,23 @@ export function sortAgentContacts(agents: ReadonlyArray<AgentContact>) {
 export const agentContactKey = (agent: Pick<AgentContact, "environmentId" | "id">) =>
   `${agent.environmentId}:${agent.id}`;
 
+export type AgentStatusLabel = "Needs approval" | "Needs you" | "Running" | "Paused" | "Enabled";
+
+/**
+ * What an agent is doing, from its requests, runs and settings. It claims
+ * activity only while a run is live: an enabled agent with nothing running is
+ * "Enabled", never "online" or "thinking".
+ */
+export function agentStatusLabel(
+  agent: Pick<AgentContact, "state" | "enabled" | "requests">,
+): AgentStatusLabel {
+  if (agent.requests.some((request) => request.kind === "approval")) return "Needs approval";
+  if (agent.requests.length > 0 || agent.state === "blocked" || agent.state === "needsYou")
+    return "Needs you";
+  if (agent.state === "thinking" || agent.state === "working") return "Running";
+  return agent.enabled ? "Enabled" : "Paused";
+}
+
 /** Preserve viewed history while the shell receives a message in a closed conversation. */
 export function mergeLatestMessage(
   messages: ReadonlyArray<AgentMessage>,

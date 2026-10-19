@@ -31,7 +31,7 @@ export function AgentContacts({
       {!loading && agents.length === 0 && (
         <div className="agent-empty">
           <AgentFace seed="new-friend" state="asleep" size={48} />
-          <p>A little help, always close.</p>
+          <p>No agents yet</p>
           <span>Create an agent to talk to, give work to, and hear back from.</span>
           <button className="agent-text-button" type="button" onClick={onCreate}>
             Create your first agent

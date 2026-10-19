@@ -14,6 +14,9 @@ manage triggers and memory, or inspect recent runs. Trigger results arrive in th
 same conversation; their source links open the background work. Messages sent
 while an agent is busy use its normal queue or steering behavior.
 
+Coding work an agent starts appears in **Work** with your own threads, under its
+project and marked with the agent's name.
+
 ## Start a thread
 
 On web and desktop, a new thread keeps the current project and carries your model
@@ -196,8 +199,9 @@ The linked pull request participates in automatic settlement.
 
 ## Find and reference work
 
-On web and desktop, open the command palette with `Cmd/Ctrl+K` to search threads
-across connected environments. Message search starts after two characters and
+On web and desktop, open the command palette with `Cmd/Ctrl+K` or the rail's
+**Search** button to search threads in every mode across connected environments,
+and to open an agent by name. Message search starts after two characters and
 includes your messages and final agent responses.
 
 Use **Settings → Keybindings** to find or customize shortcuts for searching files
