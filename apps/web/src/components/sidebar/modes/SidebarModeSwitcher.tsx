@@ -63,7 +63,7 @@ export function SidebarModeSwitcher(props: {
       <span
         aria-hidden
         data-testid="sidebar-mode-indicator"
-        className="pointer-events-none absolute inset-y-0.5 left-0.5 w-[calc((100%-0.25rem)/3)] rounded-md state-selected transition-transform duration-250 ease-out motion-reduce:transition-none"
+        className="pointer-events-none absolute inset-y-0.5 left-0.5 w-[calc((100%-0.25rem)/3)] rounded-md state-selected transition-transform duration-(--motion-duration-slow) ease-standard motion-reduce:transition-none"
         style={{ transform: `translateX(${index * 100}%)` }}
       />
       {SIDEBAR_MODES.map((segment, segmentIndex) => {

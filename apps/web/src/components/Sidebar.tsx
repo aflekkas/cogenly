@@ -585,7 +585,7 @@ function SnoozeMenuButton(props: {
 
 // Unsent work shares one look: the new-thread draft rows and thread rows
 // with unsent composer text both use this tint and pen so they read alike.
-const draftSurfaceClassName = "bg-warning/4 hover:bg-warning/8";
+const draftSurfaceClassName = "state-fade bg-warning/4 hover:bg-warning/8";
 const draftPenClassName = "size-3 shrink-0 text-warning-foreground";
 
 // Pointer travel before a press on a row starts a context drag, or a press on
