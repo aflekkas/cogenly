@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import { AgentFace } from "~/components/agents/face";
-import { agentContactKey } from "./agents.logic";
+import { agentContactKey, agentStatusLabel } from "./agents.logic";
+import { agentAttentionCount } from "./agentWorkspace.logic";
 import { useAgentUnread, useAgents } from "./agentsClient";
 import type { AgentContact } from "./agents.types";
 
@@ -66,6 +67,9 @@ function Contact({
   onOpen: (agent: AgentContact) => void;
 }) {
   const unread = useAgentUnread(agent);
+  const status = agentStatusLabel(agent);
+  // Only decisions waiting on the owner earn a count; unread replies get a dot.
+  const attention = agentAttentionCount(agent);
   return (
     <li>
       <button
@@ -84,14 +88,19 @@ function Contact({
         <span className="agent-contact-copy">
           <span className="agent-contact-name">
             <span>{agent.name}</span>
+            <small className="agent-contact-status" data-status={status}>
+              {status}
+            </small>
           </span>
           <span className="agent-contact-preview">
             <span>{agent.preview || "Say hello"}</span>
-            {unread > 0 && (
-              <span className="agent-unread" aria-label={`${unread} unread messages`}>
-                {unread > 99 ? "99+" : unread}
+            {attention > 0 ? (
+              <span className="agent-unread" aria-label={`${attention} waiting on you`}>
+                {attention > 99 ? "99+" : attention}
               </span>
-            )}
+            ) : unread > 0 ? (
+              <span className="agent-unread-dot" aria-label="Unread reply" />
+            ) : null}
           </span>
         </span>
       </button>

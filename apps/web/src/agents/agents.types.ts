@@ -1,6 +1,11 @@
 import type {
+  AgentActivityResult,
+  AgentApproval,
   AgentListItem,
+  Commitment,
   EnvironmentId,
+  ProjectId,
+  ProjectLabelWithRepositories,
   ModelSelection,
   ScheduledTaskSchedule,
   ThreadId,
@@ -68,6 +73,20 @@ export interface AgentContact extends AgentListItem {
   memory: ReadonlyArray<AgentMemoryNote>;
   activity: ReadonlyArray<AgentWorkRun>;
   requests: ReadonlyArray<AgentRequest>;
+  /** Pending owner decisions the agent asked for: Work, a trigger, or a permission change. */
+  approvals: ReadonlyArray<AgentApproval>;
+}
+/** What the agent's Activity, Open items and Responsibilities tabs read. */
+export interface AgentWorkspaceView {
+  commitments: ReadonlyArray<Commitment>;
+  activity: typeof AgentActivityResult.Type | null;
+  /** The environment's projects (labels) with their linked repositories. */
+  labels: ReadonlyArray<ProjectLabelWithRepositories>;
+  /** The environment's repositories (Cogenly projects). */
+  repositories: ReadonlyArray<{ id: ProjectId; title: string }>;
+  loading: boolean;
+  error: string | null;
+  refresh: () => void;
 }
 export interface AgentModelOption {
   environmentId?: EnvironmentId;
