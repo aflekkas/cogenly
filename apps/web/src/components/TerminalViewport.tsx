@@ -51,6 +51,7 @@ import { terminalEnvironment } from "../state/terminal";
 import { useEnvironmentScope } from "../state/session";
 import { openTerminalLinkInPreview } from "./preview/openTerminalLinkInPreview";
 import { useAtomCommand } from "../state/use-atom-command";
+import { terminalRunState, terminalRunStateMessage } from "./AgentTerminalsPanel.logic";
 
 function writeSystemMessage(terminal: GhosttyTerminalSurface, message: string): void {
   terminal.write(`\r\n[terminal] ${message}\r\n`);
@@ -437,16 +438,41 @@ export function TerminalViewport({
   const terminalStatus = terminalSession.status;
   const outputCursorRef = useRef<TerminalOutputCursor>(INITIAL_TERMINAL_OUTPUT_CURSOR);
   const synchronizedStatusRef = useRef<TerminalSessionState["status"]>("closed");
+  const terminalSummary = terminalSession.summary;
+  // The exit code arrives with the metadata summary, which can trail the
+  // attach stream's "exited" event; hold the exit line until it says how the
+  // process ended rather than printing a generic one.
+  const exitMessagePendingRef = useRef(false);
+  const flushExitMessage = useEffectEvent((terminal: GhosttyTerminalSurface) => {
+    if (!exitMessagePendingRef.current) return;
+    const message =
+      terminalSummary === null
+        ? "Process exited"
+        : terminalRunStateMessage(terminalRunState(terminalSummary));
+    if (message === null) return;
+    exitMessagePendingRef.current = false;
+    writeSystemMessage(terminal, message);
+  });
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (terminal) flushExitMessage(terminal);
+  }, [terminalSummary]);
   const synchronizeTerminalStatus = useEffectEvent(
     (terminal: GhosttyTerminalSurface, status: TerminalSessionState["status"], version: number) => {
       const synchronized = synchronizedStatusRef.current;
       if (version > 0 && status === "running") {
         hasHandledExitRef.current = false;
+        exitMessagePendingRef.current = false;
       } else if (
         shouldHandleTerminalExit(status, synchronized, hasHandledExitRef.current, version)
       ) {
         hasHandledExitRef.current = true;
-        writeSystemMessage(terminal, status === "closed" ? "Terminal closed" : "Process exited");
+        if (status === "closed") {
+          writeSystemMessage(terminal, "Terminal closed");
+        } else {
+          exitMessagePendingRef.current = true;
+          flushExitMessage(terminal);
+        }
         window.setTimeout(() => {
           if (hasHandledExitRef.current) {
             handleSessionExited();
