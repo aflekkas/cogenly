@@ -452,14 +452,17 @@ function CommitmentHistoryList({
     );
   if (view.history === null)
     return (
-      <p className="text-xs text-muted-foreground" role="status">
+      <p className="reveal-motion text-xs text-muted-foreground" role="status">
         Loading history…
       </p>
     );
   if (view.history.length === 0)
-    return <p className="text-xs text-muted-foreground">No changes recorded.</p>;
+    return <p className="reveal-motion text-xs text-muted-foreground">No changes recorded.</p>;
   return (
-    <ol className="flex flex-col gap-2 border-l border-border/70 pl-3" aria-label="History">
+    <ol
+      className="reveal-motion flex flex-col gap-2 border-l border-border/70 pl-3"
+      aria-label="History"
+    >
       {view.history.map((entry) => {
         const { who, change } = describeCommitmentHistory(entry, agentName);
         return (

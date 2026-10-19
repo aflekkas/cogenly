@@ -16,7 +16,7 @@ function SheetBackdrop({ className, ...props }: SheetPrimitive.Backdrop.Props) {
   return (
     <SheetPrimitive.Backdrop
       className={cn(
-        "fixed inset-0 z-(--z-sheet) bg-background/60 backdrop-blur-xs transition-all duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0",
+        "fixed inset-0 z-(--z-sheet) bg-background/60 backdrop-blur-xs transition-all duration-200 ease-out data-ending-style:duration-150 data-ending-style:ease-popup-exit motion-reduce:transition-none data-ending-style:opacity-0 data-starting-style:opacity-0",
         className,
       )}
       data-slot="sheet-backdrop"
@@ -87,7 +87,7 @@ function SheetPopup({
       <SheetViewport side={side} variant={variant}>
         <SheetPrimitive.Popup
           className={cn(
-            "surface-raised surface-raised-floating relative flex max-h-full min-h-0 w-full min-w-0 flex-col bg-popover text-popover-foreground transition-[opacity,translate] duration-200 ease-in-out will-change-transform data-ending-style:opacity-0 data-starting-style:opacity-0",
+            "surface-raised surface-raised-floating relative flex max-h-full min-h-0 w-full min-w-0 flex-col bg-popover text-popover-foreground transition-[opacity,translate] duration-200 ease-drawer data-ending-style:duration-150 data-ending-style:ease-popup-exit motion-reduce:transition-none will-change-transform data-ending-style:opacity-0 data-starting-style:opacity-0",
             side === "bottom" &&
               "row-start-2 border-t data-ending-style:translate-y-8 data-starting-style:translate-y-8",
             side === "top" &&

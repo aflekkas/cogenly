@@ -283,7 +283,7 @@ function FactHistory({ fact, context }: { fact: Fact; context: FactListContext }
       </ol>
     );
   return (
-    <div className="ms-0.5 border-s border-border/70 ps-3 text-xs text-muted-foreground">
+    <div className="reveal-motion ms-0.5 border-s border-border/70 ps-3 text-xs text-muted-foreground">
       {body}
     </div>
   );

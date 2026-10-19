@@ -517,6 +517,27 @@
 .agent-sheet::backdrop {
   background: #0003;
 }
+/* The sheet mounts open, so it slides in from the right edge once per open;
+   closing unmounts it. */
+@media (prefers-reduced-motion: no-preference) {
+  .agent-sheet[open] {
+    transition:
+      translate 200ms --theme(--ease-drawer),
+      opacity 200ms --theme(--ease-drawer);
+  }
+  .agent-sheet[open]::backdrop {
+    transition: opacity 200ms ease-out;
+  }
+  @starting-style {
+    .agent-sheet[open] {
+      translate: 1.5rem 0;
+      opacity: 0;
+    }
+    .agent-sheet[open]::backdrop {
+      opacity: 0;
+    }
+  }
+}
 @utility agent-sheet-content {
   padding: 22px 25px 35px;
 }
