@@ -1,13 +1,6 @@
 import { cn, randomUUID } from "~/lib/utils";
-import { ChevronDownIcon, GaugeIcon, RefreshCwIcon, XIcon, type LucideIcon } from "lucide-react";
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ComponentProps,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { ChevronDownIcon, GaugeIcon, RefreshCwIcon, type LucideIcon } from "lucide-react";
+import { useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
 import {
   conservativeAgentPermissions,
   type EnvironmentId,
@@ -29,6 +22,14 @@ import {
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "~/components/chat/threadDetailsPanelStyles";
 import { Button } from "~/components/ui/button";
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "~/components/ui/dialog";
 import { Input } from "~/components/ui/input";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import {
@@ -44,52 +45,6 @@ import { Toggle } from "~/components/ui/toggle";
 import { AgentCreatedWithoutTriggerError, useAgents, useAgentsClient } from "./agentsClient";
 import { DEFAULT_EVENT_TRIGGER, EventTriggerFields } from "./EventTriggerFields";
 import type { AgentContact, AgentDraft, AgentTrigger } from "./agents.types";
-
-export function AgentSheet({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const element = dialog.current;
-    element?.showModal();
-    return () => element?.close();
-  }, []);
-  return (
-    <dialog
-      ref={dialog}
-      className="agent-sheet surface-raised surface-raised-floating"
-      aria-label={title}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="agent-sheet-content">
-        <div className="agent-sheet-heading">
-          <h2>{title}</h2>
-          <button
-            type="button"
-            className="agent-icon-button"
-            aria-label="Close details"
-            onClick={onClose}
-          >
-            <XIcon size={18} />
-          </button>
-        </div>
-        {children}
-      </div>
-    </dialog>
-  );
-}
 
 /** One details row: a muted icon, a label, and an optional trailing value or control. */
 export function DetailRow({
@@ -737,125 +692,138 @@ export function CreateAgent({
     (option) => !option.environmentId || option.environmentId === environmentId,
   )?.selection;
   return (
-    <AgentSheet title="Someone in your corner" onClose={onClose}>
-      <p className="agent-section-intro">
-        Give your agent a name and a little direction. You can figure out the rest together.
-      </p>
-      {error && (
-        <p className="agent-error" role="alert">
-          {error}
-        </p>
-      )}
-      {model ? (
-        <>
-          <AgentForm
-            environmentId={environmentId}
-            labels={labels}
-            initial={{
-              name: "",
-              responsibility: "",
-              scope: [],
-              autonomy: "propose",
-              permissions: conservativeAgentPermissions,
-              instructions: "",
-              avatar: { seed: randomUUID() },
-              modelSelection: model,
-              runtimeMode: "approval-required",
-              projectId,
-              enabled: true,
-              dailyRunCap: 24,
-            }}
-            pending={pending}
-            onDraftChange={setPolicy}
-            submitLabel={createdAgent ? "Save agent & trigger" : "Create agent"}
-            onSubmit={async (draft) => {
-              setPending(true);
-              setError(null);
-              try {
-                const agent = await client.save(
-                  environmentId,
-                  {
-                    ...draft,
-                    projectId: workspaceId,
-                    ...(createdAgent ? { id: createdAgent.id } : {}),
-                  },
-                  trigger,
-                );
-                onCreated(agent);
-                onClose();
-              } catch (cause) {
-                if (cause instanceof AgentCreatedWithoutTriggerError) setCreatedAgent(cause.agent);
-                setError(triggerErrorMessage(cause, "Could not create agent."));
-              } finally {
-                setPending(false);
-              }
-            }}
-          >
-            {workspaces.length > 0 && (
-              <label>
-                Workspace
-                <select
-                  required
-                  value={workspaceId ?? ""}
-                  disabled={createdAgent !== null}
-                  onChange={(event) =>
-                    setWorkspaceId(
-                      workspaces.find((workspace) => workspace.id === event.target.value)?.id ??
-                        null,
-                    )
-                  }
-                >
-                  <option value="" disabled>
-                    Choose a workspace
-                  </option>
-                  {workspaces.map((workspace) => (
-                    <option key={workspace.id} value={workspace.id}>
-                      {workspace.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <div className="agent-first-trigger">
-              <span>
-                {trigger ? `First trigger: ${trigger.title}` : "First trigger · optional"}
-              </span>
-              <button
-                className="agent-text-button"
-                type="button"
-                onClick={() => setAddTrigger(true)}
-              >
-                {trigger ? "Change" : "Add"}
-              </button>
-              {trigger && (
-                <button
-                  className="agent-text-button"
-                  type="button"
-                  onClick={() => setTrigger(undefined)}
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-          </AgentForm>
-          {addTrigger && (
-            <AgentSheet title="First trigger" onClose={() => setAddTrigger(false)}>
-              <TriggerForm
-                {...triggerChoices}
-                onManageProjects={client.openProjectSettings}
-                pending={false}
-                onCancel={() => setAddTrigger(false)}
-                onSave={async (value) => {
-                  setTrigger(value);
-                  setAddTrigger(false);
-                }}
-              />
-            </AgentSheet>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogPopup>
+        <DialogHeader>
+          <DialogTitle>Someone in your corner</DialogTitle>
+          <DialogDescription>
+            Give your agent a name and a little direction. You can figure out the rest together.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          {error && (
+            <p className="agent-error" role="alert">
+              {error}
+            </p>
           )}
-        </>
-      ) : (
-        <p className="agent-muted">Connect a provider in Settings to create an agent.</p>
-      )}
-    </AgentSheet>
+          {model ? (
+            <>
+              <AgentForm
+                environmentId={environmentId}
+                labels={labels}
+                initial={{
+                  name: "",
+                  responsibility: "",
+                  scope: [],
+                  autonomy: "propose",
+                  permissions: conservativeAgentPermissions,
+                  instructions: "",
+                  avatar: { seed: randomUUID() },
+                  modelSelection: model,
+                  runtimeMode: "approval-required",
+                  projectId,
+                  enabled: true,
+                  dailyRunCap: 24,
+                }}
+                pending={pending}
+                onDraftChange={setPolicy}
+                submitLabel={createdAgent ? "Save agent & trigger" : "Create agent"}
+                onSubmit={async (draft) => {
+                  setPending(true);
+                  setError(null);
+                  try {
+                    const agent = await client.save(
+                      environmentId,
+                      {
+                        ...draft,
+                        projectId: workspaceId,
+                        ...(createdAgent ? { id: createdAgent.id } : {}),
+                      },
+                      trigger,
+                    );
+                    onCreated(agent);
+                    onClose();
+                  } catch (cause) {
+                    if (cause instanceof AgentCreatedWithoutTriggerError)
+                      setCreatedAgent(cause.agent);
+                    setError(triggerErrorMessage(cause, "Could not create agent."));
+                  } finally {
+                    setPending(false);
+                  }
+                }}
+              >
+                {workspaces.length > 0 && (
+                  <label>
+                    Workspace
+                    <select
+                      required
+                      value={workspaceId ?? ""}
+                      disabled={createdAgent !== null}
+                      onChange={(event) =>
+                        setWorkspaceId(
+                          workspaces.find((workspace) => workspace.id === event.target.value)?.id ??
+                            null,
+                        )
+                      }
+                    >
+                      <option value="" disabled>
+                        Choose a workspace
+                      </option>
+                      {workspaces.map((workspace) => (
+                        <option key={workspace.id} value={workspace.id}>
+                          {workspace.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <div className="agent-first-trigger">
+                  <span>
+                    {trigger ? `First trigger: ${trigger.title}` : "First trigger · optional"}
+                  </span>
+                  <button
+                    className="agent-text-button"
+                    type="button"
+                    onClick={() => setAddTrigger(true)}
+                  >
+                    {trigger ? "Change" : "Add"}
+                  </button>
+                  {trigger && (
+                    <button
+                      className="agent-text-button"
+                      type="button"
+                      onClick={() => setTrigger(undefined)}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </AgentForm>
+              <Dialog open={addTrigger} onOpenChange={setAddTrigger}>
+                <DialogPopup>
+                  <DialogHeader>
+                    <DialogTitle>First trigger</DialogTitle>
+                  </DialogHeader>
+                  <DialogPanel>
+                    <TriggerForm
+                      {...triggerChoices}
+                      onManageProjects={client.openProjectSettings}
+                      pending={false}
+                      onCancel={() => setAddTrigger(false)}
+                      onSave={async (value) => {
+                        setTrigger(value);
+                        setAddTrigger(false);
+                      }}
+                    />
+                  </DialogPanel>
+                </DialogPopup>
+              </Dialog>
+            </>
+          ) : (
+            <p className="agent-muted">Connect a provider in Settings to create an agent.</p>
+          )}
+        </DialogPanel>
+      </DialogPopup>
+    </Dialog>
   );
 }
