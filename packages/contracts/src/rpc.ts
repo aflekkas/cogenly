@@ -1,3 +1,4 @@
+import * as ProjectLabels from "./projectLabel.ts";
 import * as Agents from "./agent.ts";
 import {
   OrchestrationV2SearchThreadError,
@@ -480,6 +481,18 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Persistent agents and their scheduled-task triggers
+  projectLabelsList: "projectLabels.list",
+  projectLabelsSubscribe: "projectLabels.subscribe",
+  projectLabelsCreate: "projectLabels.create",
+  projectLabelsUpdate: "projectLabels.update",
+  projectLabelsDelete: "projectLabels.delete",
+  projectLabelsLinkRepository: "projectLabels.linkRepository",
+  projectLabelsUnlinkRepository: "projectLabels.unlinkRepository",
+  projectLabelsGetThreadLabels: "projectLabels.getThreadLabels",
+  projectLabelsSubscribeThreadLabels: "projectLabels.subscribeThreadLabels",
+  projectLabelsSetThreadLabels: "projectLabels.setThreadLabels",
+  projectLabelsReviewSuggestion: "projectLabels.reviewSuggestion",
+  projectLabelsSuggestLabels: "projectLabels.suggestLabels",
   agentsList: "agents.list",
   agentsSubscribe: "agents.subscribe",
   agentsUpsert: "agents.upsert",
@@ -1694,6 +1707,72 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const WsProjectLabelsListRpc = Rpc.make(WS_METHODS.projectLabelsList, {
+  payload: Schema.Struct({}),
+  success: ProjectLabels.ProjectLabelListResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsSubscribeRpc = Rpc.make(WS_METHODS.projectLabelsSubscribe, {
+  payload: Schema.Struct({}),
+  success: ProjectLabels.ProjectLabelListResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsProjectLabelsCreateRpc = Rpc.make(WS_METHODS.projectLabelsCreate, {
+  payload: ProjectLabels.ProjectLabelCreateInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsUpdateRpc = Rpc.make(WS_METHODS.projectLabelsUpdate, {
+  payload: ProjectLabels.ProjectLabelUpdateInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsDeleteRpc = Rpc.make(WS_METHODS.projectLabelsDelete, {
+  payload: ProjectLabels.ProjectLabelKey,
+  success: ProjectLabels.ProjectLabelDeleteResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsLinkRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsLinkRepository, {
+  payload: ProjectLabels.ProjectLabelRepository,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsUnlinkRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsUnlinkRepository, {
+  payload: ProjectLabels.ProjectLabelRepository,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsGetThreadLabelsRpc = Rpc.make(WS_METHODS.projectLabelsGetThreadLabels, {
+  payload: ProjectLabels.ThreadProjectLabelsInput,
+  success: ProjectLabels.ThreadProjectLabelsResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsSubscribeThreadLabelsRpc = Rpc.make(
+  WS_METHODS.projectLabelsSubscribeThreadLabels,
+  {
+    payload: ProjectLabels.ThreadProjectLabelsInput,
+    success: ProjectLabels.ThreadProjectLabelsResult,
+    error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+    stream: true,
+  },
+);
+const WsProjectLabelsSetThreadLabelsRpc = Rpc.make(WS_METHODS.projectLabelsSetThreadLabels, {
+  payload: ProjectLabels.SetThreadProjectLabelsInput,
+  success: ProjectLabels.ThreadProjectLabelsResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsReviewSuggestionRpc = Rpc.make(WS_METHODS.projectLabelsReviewSuggestion, {
+  payload: ProjectLabels.ReviewThreadProjectLabelInput,
+  success: ProjectLabels.ThreadProjectLabelsResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsSuggestLabelsRpc = Rpc.make(WS_METHODS.projectLabelsSuggestLabels, {
+  payload: ProjectLabels.ThreadProjectLabelsInput,
+  success: ProjectLabels.ThreadProjectLabelsResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+
 const WsAgentsListRpc = Rpc.make(WS_METHODS.agentsList, {
   payload: Schema.Struct({}),
   success: Agents.AgentListResult,
@@ -1888,6 +1967,18 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
+  WsProjectLabelsListRpc,
+  WsProjectLabelsSubscribeRpc,
+  WsProjectLabelsCreateRpc,
+  WsProjectLabelsUpdateRpc,
+  WsProjectLabelsDeleteRpc,
+  WsProjectLabelsLinkRepositoryRpc,
+  WsProjectLabelsUnlinkRepositoryRpc,
+  WsProjectLabelsGetThreadLabelsRpc,
+  WsProjectLabelsSubscribeThreadLabelsRpc,
+  WsProjectLabelsSetThreadLabelsRpc,
+  WsProjectLabelsReviewSuggestionRpc,
+  WsProjectLabelsSuggestLabelsRpc,
   WsAgentsListRpc,
   WsAgentsSubscribeRpc,
   WsAgentsUpsertRpc,

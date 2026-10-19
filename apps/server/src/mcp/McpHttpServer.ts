@@ -1,3 +1,5 @@
+import { ProjectLabelsToolkit } from "./toolkits/projectLabels/tools.ts";
+import * as ProjectLabelsHandlers from "./toolkits/projectLabels/handlers.ts";
 import * as AgentMemoryMcp from "../agents/MemoryMcp.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -841,6 +843,10 @@ export const layerEnvironmentToolkit = toolkitRegistration(
   EnvironmentHandlers.layer,
 ).pipe(Layer.provide(ThreadCommandExecutor.layer));
 
+const layerProjectLabelsRegistration = toolkitRegistration(
+  ProjectLabelsToolkit,
+  ProjectLabelsHandlers.layer,
+);
 const layerProjectRegistration = toolkitRegistration(ProjectToolkit, ProjectHandlers.layer);
 
 export const layerAttachmentToolkit = toolkitRegistration(
@@ -887,6 +893,7 @@ export const layer = Layer.mergeAll(
   layerThreadToolkit,
   layerAttachmentToolkit,
   layerProjectRegistration,
+  layerProjectLabelsRegistration,
   layerEnvironmentToolkit,
   layerPreviewControlsRegistration,
   layerWorktreeToolkitRegistration,

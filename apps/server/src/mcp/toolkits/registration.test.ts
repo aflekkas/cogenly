@@ -1,3 +1,4 @@
+import * as ProjectLabels from "../../projectLabels/ProjectLabelService.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import { agentFixture } from "../../agents/agent.testkit.ts";
 import * as AgentStore from "../../agents/AgentStore.ts";
@@ -58,6 +59,7 @@ const project = {
   deletedAt: null,
 };
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(ProjectLabels.ProjectLabelService)({ list: () => Effect.succeed({ labels: [] }) }),
   Layer.mock(TerminalManager.TerminalManager)({ listAgents: () => Effect.succeed([]) }),
   Layer.mock(AgentStore.AgentStore)({
     forThread: () => Effect.succeed(agentFixture()),
@@ -194,6 +196,13 @@ const smokeCases = [
         height: 120,
       },
     },
+  },
+  {
+    toolkit: "projectLabels",
+    names: ["t3_project_label_list", "t3_project_label_read", "t3_thread_set_project_labels"],
+    tool: "t3_project_label_list",
+    args: {},
+    expected: { labels: [] },
   },
   {
     toolkit: "project",
