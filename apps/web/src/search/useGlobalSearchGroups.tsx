@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { useAgentsIfProvided } from "../agents/agentsClient";
+import { useAgents } from "../agents/agentsClient";
 import { PullRequestGlyph } from "../components/changeRequestIcons";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import {
@@ -111,7 +111,7 @@ export function useGlobalSearchGroups(input: {
   readonly enabled: boolean;
 }): ReadonlyArray<CommandPaletteGroup> {
   const navigate = useNavigate();
-  const agents = useAgentsIfProvided();
+  const agents = useAgents().agents;
   const allEnvironmentIds = useConnectedEnvironmentIds();
   const environmentIds = useMemo(
     () => allEnvironmentIds.slice(0, MAX_ENVIRONMENTS),

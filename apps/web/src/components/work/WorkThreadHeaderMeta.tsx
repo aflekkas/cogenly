@@ -5,7 +5,7 @@ import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { BotIcon, MessageSquareIcon } from "lucide-react";
 import { useMemo } from "react";
 
-import { useAgentsIfProvided } from "~/agents/agentsClient";
+import { useAgents } from "~/agents/agentsClient";
 import {
   useProjects,
   useServerConfigs,
@@ -61,7 +61,7 @@ export function WorkThreadHeaderMeta(props: {
     [isWork, sourceThreadId, threadRef.environmentId],
   );
   const sourceThread = useThreadShell(sourceThreadRef);
-  const agents = useAgentsIfProvided();
+  const agents = useAgents().agents;
   if (!isWork) return null;
 
   const sourceAgentId = thread.source.sourceAgentId;

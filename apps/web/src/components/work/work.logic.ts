@@ -139,6 +139,21 @@ export function resolveStartWorkSubmission(input: {
 }
 
 /**
+ * Opens a Work thread the server just started. The thread route reads a thread
+ * this client has not received yet as missing and sends the user home, where a
+ * fresh draft opens in its place, so opening waits for the thread to arrive.
+ * Resolves false, without opening anything, when it never does.
+ */
+export async function openWorkWhenArrived(input: {
+  readonly waitForThread: () => Promise<boolean>;
+  readonly open: () => unknown;
+}): Promise<boolean> {
+  if (!(await input.waitForThread())) return false;
+  await input.open();
+  return true;
+}
+
+/**
  * What a failed start tells the user, and whether retrying must reuse the
  * command id. A failure to record the chat's link means the session exists, so
  * the same id repairs the link instead of starting another session; the other

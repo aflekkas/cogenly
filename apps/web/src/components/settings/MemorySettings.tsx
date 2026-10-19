@@ -2,7 +2,7 @@ import type { AgentId, ProjectLabelId } from "@t3tools/contracts";
 import { BrainIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { useAgentsIfProvided } from "../../agents/agentsClient";
+import { useAgents } from "../../agents/agentsClient";
 import { FACT_STATUS_FILTERS, filterFacts, type FactStatusFilter } from "../../memory/facts.logic";
 import { FactEditorDialog, FactList, factInputFromDraft } from "../../memory/FactList";
 import { useFactActions, useFactNavigation, useFacts } from "../../memory/useFacts";
@@ -29,7 +29,7 @@ export function MemorySettings() {
     () => sortProjectLabels(labels.map((label) => ({ label }))).map((entry) => entry.label),
     [labels],
   );
-  const agents = useAgentsIfProvided().filter((agent) => agent.environmentId === environmentId);
+  const agents = useAgents().agents.filter((agent) => agent.environmentId === environmentId);
   const [labelId, setLabelId] = useState<string>(ALL);
   const [agentId, setAgentId] = useState<string>(ALL);
   const [status, setStatus] = useState<FactStatusFilter>("current");
