@@ -69,3 +69,4 @@ export * from "./agent.ts";
 
 export * from "./projectLabel.ts";
 export * from "./work.ts";
+export * from "./agentWorkspace.ts";

@@ -1,5 +1,6 @@
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Work from "./work.ts";
+import * as AgentWorkspace from "./agentWorkspace.ts";
 import * as Agents from "./agent.ts";
 import {
   OrchestrationV2SearchThreadError,
@@ -506,6 +507,19 @@ export const WS_METHODS = {
   agentsMemoryWrite: "agents.memoryWrite",
   agentsMemoryForget: "agents.memoryForget",
   agentsRuns: "agents.runs",
+  agentsApprovalsList: "agents.approvalsList",
+  agentsRequestApproval: "agents.requestApproval",
+  agentsApprove: "agents.approve",
+  agentsReject: "agents.reject",
+  agentsStartWork: "agents.startWork",
+  agentsActivity: "agents.activity",
+  commitmentsList: "commitments.list",
+  commitmentsCreate: "commitments.create",
+  commitmentsUpdateStatus: "commitments.updateStatus",
+  commitmentsConfirm: "commitments.confirm",
+  commitmentsDismiss: "commitments.dismiss",
+  commitmentsHistory: "commitments.history",
+
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1786,6 +1800,66 @@ const WsWorkProposeHandoffRpc = Rpc.make(WS_METHODS.workProposeHandoff, {
   error: Schema.Union([Work.WorkHandoffError, EnvironmentAuthorizationError]),
 });
 
+const WsAgentsApprovalsListRpc = Rpc.make(WS_METHODS.agentsApprovalsList, {
+  payload: AgentWorkspace.AgentApprovalListInput,
+  success: AgentWorkspace.AgentApprovalListResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsRequestApprovalRpc = Rpc.make(WS_METHODS.agentsRequestApproval, {
+  payload: AgentWorkspace.AgentApprovalRequestInput,
+  success: AgentWorkspace.AgentApprovalResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsApproveRpc = Rpc.make(WS_METHODS.agentsApprove, {
+  payload: AgentWorkspace.AgentApprovalKey,
+  success: AgentWorkspace.AgentApprovalResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsRejectRpc = Rpc.make(WS_METHODS.agentsReject, {
+  payload: AgentWorkspace.AgentApprovalKey,
+  success: AgentWorkspace.AgentApprovalResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsStartWorkRpc = Rpc.make(WS_METHODS.agentsStartWork, {
+  payload: AgentWorkspace.AgentStartWorkInput,
+  success: AgentWorkspace.AgentStartWorkResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsActivityRpc = Rpc.make(WS_METHODS.agentsActivity, {
+  payload: AgentWorkspace.AgentActivityInput,
+  success: AgentWorkspace.AgentActivityResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsListRpc = Rpc.make(WS_METHODS.commitmentsList, {
+  payload: AgentWorkspace.CommitmentListInput,
+  success: AgentWorkspace.CommitmentListResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsCreateRpc = Rpc.make(WS_METHODS.commitmentsCreate, {
+  payload: AgentWorkspace.CommitmentCreateInput,
+  success: AgentWorkspace.CommitmentResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsUpdateStatusRpc = Rpc.make(WS_METHODS.commitmentsUpdateStatus, {
+  payload: AgentWorkspace.CommitmentStatusInput,
+  success: AgentWorkspace.CommitmentResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsConfirmRpc = Rpc.make(WS_METHODS.commitmentsConfirm, {
+  payload: AgentWorkspace.CommitmentKey,
+  success: AgentWorkspace.CommitmentResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsDismissRpc = Rpc.make(WS_METHODS.commitmentsDismiss, {
+  payload: AgentWorkspace.CommitmentKey,
+  success: AgentWorkspace.CommitmentResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsHistoryRpc = Rpc.make(WS_METHODS.commitmentsHistory, {
+  payload: AgentWorkspace.CommitmentHistoryInput,
+  success: AgentWorkspace.CommitmentHistoryResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
 const WsAgentsListRpc = Rpc.make(WS_METHODS.agentsList, {
   payload: Schema.Struct({}),
   success: Agents.AgentListResult,
@@ -1994,6 +2068,18 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsSuggestLabelsRpc,
   WsWorkStartRpc,
   WsWorkProposeHandoffRpc,
+  WsAgentsApprovalsListRpc,
+  WsAgentsRequestApprovalRpc,
+  WsAgentsApproveRpc,
+  WsAgentsRejectRpc,
+  WsAgentsStartWorkRpc,
+  WsAgentsActivityRpc,
+  WsCommitmentsListRpc,
+  WsCommitmentsCreateRpc,
+  WsCommitmentsUpdateStatusRpc,
+  WsCommitmentsConfirmRpc,
+  WsCommitmentsDismissRpc,
+  WsCommitmentsHistoryRpc,
   WsAgentsListRpc,
   WsAgentsSubscribeRpc,
   WsAgentsUpsertRpc,

@@ -352,7 +352,10 @@ it.effect("records agent-initiated Work with the same launch and handoff paths",
         origin: "agent",
         sourceAgentId: AgentId.make("agent:owner"),
         sourceAgentRunId: "agent:trigger-run",
+        threadId: ThreadId.make("agent-work:stable"),
+        workspaceStrategy: { type: "root" },
       });
+      expect(result.threadId).toBe("agent-work:stable");
       yield* Deferred.await(h.finished);
       const projection = yield* h.orchestrator.getThreadProjection(result.threadId);
       expect(projection.thread.workOrigin).toBe("agent");

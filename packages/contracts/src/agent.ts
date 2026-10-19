@@ -1,3 +1,4 @@
+import { ProjectLabelId } from "./projectLabel.ts";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
@@ -18,6 +19,45 @@ export const AgentAvatar = Schema.Struct({
   seed: TrimmedNonEmptyString,
   color: Schema.optional(TrimmedNonEmptyString),
 });
+export const AgentPermissions = Schema.Struct({
+  read: Schema.Boolean,
+  draft: Schema.Boolean,
+  execute: Schema.Boolean,
+  send: Schema.Boolean,
+  create_pr: Schema.Boolean,
+  merge: Schema.Boolean,
+  deploy: Schema.Boolean,
+  delete: Schema.Boolean,
+});
+export type AgentPermissions = typeof AgentPermissions.Type;
+export const conservativeAgentPermissions: AgentPermissions = {
+  read: true,
+  draft: true,
+  execute: false,
+  send: false,
+  create_pr: false,
+  merge: false,
+  deploy: false,
+  delete: false,
+};
+export const AgentAutonomy = Schema.Literals([
+  "observe",
+  "propose",
+  "execute_bounded",
+  "autonomous_within_policy",
+]);
+export const AgentScope = Schema.Array(
+  Schema.Struct({ labelId: ProjectLabelId, permissions: AgentPermissions }),
+);
+const AgentPolicyFields = {
+  responsibility: Schema.String.check(Schema.isMaxLength(32000)),
+  scope: AgentScope,
+  autonomy: AgentAutonomy,
+  permissions: AgentPermissions,
+  notifyPolicy: Schema.Literals(["action_required", "meaningful_changes", "all"]),
+  /** Alias of !enabled. Pauses background invocations; owner messages remain available. */
+  paused: Schema.Boolean,
+};
 const AgentFields = {
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   avatar: AgentAvatar,
@@ -33,6 +73,7 @@ const AgentFields = {
 export const Agent = Schema.Struct({
   id: AgentId,
   ...AgentFields,
+  ...AgentPolicyFields,
   conversationThreadId: ThreadId,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -42,7 +83,16 @@ export const Agent = Schema.Struct({
 });
 export type Agent = typeof Agent.Type;
 /** Omit id to create. A project is required for creation; null on edits keeps the conversation's workspace. */
-export const AgentUpsertInput = Schema.Struct({ id: Schema.optional(AgentId), ...AgentFields });
+export const AgentUpsertInput = Schema.Struct({
+  id: Schema.optional(AgentId),
+  ...AgentFields,
+  responsibility: Schema.optional(AgentPolicyFields.responsibility),
+  scope: Schema.optional(AgentScope),
+  autonomy: Schema.optional(AgentAutonomy),
+  permissions: Schema.optional(AgentPermissions),
+  notifyPolicy: Schema.optional(AgentPolicyFields.notifyPolicy),
+  paused: Schema.optional(Schema.Boolean),
+});
 export type AgentUpsertInput = typeof AgentUpsertInput.Type;
 export const AgentKey = Schema.Struct({ id: AgentId });
 export const AgentListItem = Schema.Struct({
@@ -105,7 +155,7 @@ export const AgentMemoryForgetInput = Schema.Struct({
   agentId: AgentId,
   id: TrimmedNonEmptyString,
 });
-/** Work threads are backend-owned. Clients exclude these from normal chat lists and open them from run details. */
+/** Trigger runs retain their backend-owned Work threads. Clients show them in Work and can open them from agent activity. */
 export const AgentWorkRun = Schema.Struct({
   id: TrimmedNonEmptyString,
   agentId: AgentId,

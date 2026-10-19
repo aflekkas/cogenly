@@ -1,6 +1,8 @@
 import { ProjectLabelsToolkit } from "./toolkits/projectLabels/tools.ts";
 import * as ProjectLabelsHandlers from "./toolkits/projectLabels/handlers.ts";
 import * as WorkMcp from "../work/WorkMcp.ts";
+import * as AgentWorkspaceMcp from "../agents/WorkspaceMcp.ts";
+import * as AgentMcpPolicy from "../agents/AgentMcpPolicy.ts";
 import * as AgentMemoryMcp from "../agents/MemoryMcp.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -129,6 +131,20 @@ type AuthenticatedHttpEffect = Effect.Effect<
   McpInvocationContext.McpInvocationContext
 >;
 
+// Unknown tools fail closed as writes. Toolkit registration supplies each read hint.
+const agentToolReads = new Map<string, boolean>([
+  ["preview_snapshot", true],
+  ["device_screenshot", true],
+  ["html_preview", true],
+]);
+const AgentToolRequest = Schema.Struct({
+  id: Schema.Unknown,
+  method: Schema.Literal("tools/call"),
+  params: Schema.Struct({ name: Schema.String, arguments: Schema.optional(Schema.Unknown) }),
+});
+
+const isAgentToolRequest = Schema.is(AgentToolRequest);
+
 type McpAuthMiddleware = (
   httpEffect: AuthenticatedHttpEffect,
 ) => Effect.Effect<
@@ -154,6 +170,7 @@ const looksLikeProviderToken = (token: string) => token.length > 0 && !token.inc
 
 const makeMcpAuthMiddleware = Effect.gen(function* () {
   const registry = yield* McpSessionRegistry.McpSessionRegistry;
+  const agentPolicy = yield* AgentMcpPolicy.AgentMcpPolicy;
   const clients = yield* Effect.serviceOption(McpClientAuthenticator);
   return Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -180,9 +197,54 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         offerOAuth: Option.isSome(clients) && !looksLikeProviderToken(token),
       });
     }
+    const toolRequest =
+      request.method === "POST" ? yield* request.json.pipe(Effect.orElseSucceed(() => null)) : null;
+    if (Array.isArray(toolRequest))
+      return HttpServerResponse.jsonUnsafe({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32600, message: "Batch MCP requests are not supported." },
+      });
+    const call = isAgentToolRequest(toolRequest) ? toolRequest : null;
+    if (call) {
+      const readonly = agentToolReads.get(call.params.name) ?? false;
+      const decision = yield* agentPolicy
+        .beforeTool(invocation, call.params.name, call.params.arguments, readonly)
+        .pipe(Effect.result);
+      if (decision._tag === "Failure" || decision.success.handled) {
+        const result =
+          decision._tag === "Failure"
+            ? {
+                isError: true,
+                content: [
+                  {
+                    type: "text",
+                    text: encodeJsonText({
+                      code: decision.failure.code,
+                      message: decision.failure.message,
+                    }),
+                  },
+                ],
+              }
+            : {
+                isError: false,
+                structuredContent: decision.success.result,
+                content: [{ type: "text", text: encodeJsonText(decision.success.result) }],
+              };
+        return HttpServerResponse.jsonUnsafe({ jsonrpc: "2.0", id: call.id, result });
+      }
+    }
     return yield* httpEffect.pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,
+        onToolSuccess: (name, result) =>
+          agentPolicy
+            .afterTool(invocation, name, agentToolReads.get(name) ?? false, result)
+            .pipe(
+              Effect.catch(() =>
+                Effect.logWarning("Could not persist agent tool activity", { toolName: name }),
+              ),
+            ),
         httpOrigin: HttpServerRequest.toURL(request).pipe(
           Option.map((url) => url.origin),
           Option.getOrUndefined,
@@ -786,6 +848,8 @@ export const toolkitRegistration = <Tools extends Record<string, Tool.Any>, EX, 
   toolkit: Toolkit.Toolkit<Tools>,
   handlers: McpToolAccess.HandlersLayer<Tools, EX, RX>,
 ) => {
+  for (const tool of Object.values(toolkit.tools))
+    agentToolReads.set(tool.name, Context.get(tool.annotations, Tool.Readonly));
   const registration = McpServer.toolkit(toolkit);
   // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off - the auth middleware provides it per request.
   const registered = registration as Layer.Layer<
@@ -887,6 +951,7 @@ export const layer = Layer.mergeAll(
   layerPreviewToolkit,
   toolkitRegistration(AgentMemoryMcp.toolkit, AgentMemoryMcp.handlers),
   toolkitRegistration(WorkMcp.toolkit, WorkMcp.handlers),
+  toolkitRegistration(AgentWorkspaceMcp.toolkit, AgentWorkspaceMcp.handlers),
   layerOrchestratorToolkit,
   toolkitRegistration(TerminalToolkit, TerminalHandlers.layer).pipe(
     Layer.provide(TerminalMcpService.layer),

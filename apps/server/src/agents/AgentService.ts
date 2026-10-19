@@ -1,4 +1,5 @@
 import {
+  conservativeAgentPermissions,
   AgentError,
   AgentId,
   CommandId,
@@ -82,6 +83,14 @@ const make = Effect.gen(function* () {
   // A stable command receipt makes replay after a crash exactly-once in the conversation.
   const post = (agent: Agent, run: AgentWorkRun) =>
     Effect.gen(function* () {
+      if (agent.notifyPolicy !== "all" && run.status === "completed") {
+        const changes =
+          yield* sql`SELECT 1 FROM agent_run_actions a JOIN orchestration_v2_projection_runs r ON r.run_id = a.run_id WHERE r.thread_id = ${run.workThreadId} LIMIT 1`;
+        if (agent.notifyPolicy === "action_required" || changes.length === 0) {
+          yield* store.markPosted(run.id);
+          return;
+        }
+      }
       const at = yield* DateTime.now;
       const commandId = CommandId.make(`agent-post:${run.id}`);
       const messageId = MessageId.make(`agent-post:${run.id}`);
@@ -307,6 +316,13 @@ const make = Effect.gen(function* () {
         }
         const agent = yield* store.save({
           ...input,
+          responsibility: input.responsibility ?? existing?.responsibility ?? "",
+          scope: input.scope ?? existing?.scope ?? [],
+          autonomy: input.autonomy ?? existing?.autonomy ?? "propose",
+          permissions: input.permissions ?? existing?.permissions ?? conservativeAgentPermissions,
+          notifyPolicy: input.notifyPolicy ?? existing?.notifyPolicy ?? "meaningful_changes",
+          enabled: input.paused === undefined ? input.enabled : !input.paused,
+          paused: input.paused ?? !input.enabled,
           id,
           conversationThreadId,
           createdAt: existing?.createdAt ?? at,
