@@ -1,4 +1,3 @@
-import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -7,23 +6,19 @@ import {
 import type {
   ContextItem,
   EnvironmentId,
-  MessageId,
   ProjectLabelId,
   RunId,
   ScopedThreadRef,
   ThreadId,
 } from "@t3tools/contracts";
-import { ArrowUpRightIcon, BookmarkPlusIcon, ChevronDownIcon, LibraryIcon } from "lucide-react";
+import { ArrowUpRightIcon, ChevronDownIcon, LibraryIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import { toastManager } from "../components/ui/toast";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
-import { factSubjectFrom, rememberMessageInput, resolveFactRefs } from "../memory/facts.logic";
-import { FactEditorDialog, factInputFromDraft } from "../memory/FactList";
-import { useFactActions, useFactNavigation } from "../memory/useFacts";
-import { useEnvironmentProjectLabels } from "../projectLabels/useProjectLabels";
+import { resolveFactRefs } from "../memory/facts.logic";
+import { useFactNavigation } from "../memory/useFacts";
 import { agentWorkspaceRpc } from "../rpc/agents";
 import { useThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
@@ -196,77 +191,4 @@ export function ContextUsed(props: {
       <ContextUsedPanel environmentId={environmentId} items={items} {...navigation} />
     ) : null;
   return props.children({ trigger, panel });
-}
-
-/**
- * Saves a chat message as a confirmed fact citing it. The editor opens prefilled so the
- * wording and projects can be adjusted; projects default to the thread's confirmed tags.
- */
-export function RememberMessageButton(props: {
-  readonly threadRef: ScopedThreadRef | null;
-  readonly messageId: MessageId;
-  readonly text: string;
-}) {
-  const environmentId = props.threadRef?.environmentId ?? null;
-  const threadId = props.threadRef?.threadId ?? null;
-  const confirmed = useThreadConfirmedLabelIds(environmentId, threadId);
-  const { labels } = useEnvironmentProjectLabels(environmentId);
-  const actions = useFactActions(environmentId);
-  const [editing, setEditing] = useState(false);
-  if (threadId === null || !props.text.trim()) return null;
-  const input = rememberMessageInput({
-    text: props.text,
-    threadId,
-    messageId: props.messageId,
-    labelIds: confirmed,
-  });
-  if (!input) return null;
-  return (
-    <>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              type="button"
-              size="xs"
-              variant="ghost-muted"
-              aria-label="Remember this"
-              disabled={!actions.canWrite}
-              onClick={() => setEditing(true)}
-            />
-          }
-        >
-          <BookmarkPlusIcon className="size-3" />
-        </TooltipTrigger>
-        <TooltipPopup>
-          {actions.canWrite ? "Remember this" : "This connection cannot change memory."}
-        </TooltipPopup>
-      </Tooltip>
-      <OverlayPresence when={editing}>
-        {() => (
-          <FactEditorDialog
-            title="Remember this"
-            description="Saved as a confirmed fact that links back to this message. Manage it in Settings → Memory."
-            labels={labels}
-            initial={{
-              subject: factSubjectFrom(input.text),
-              text: input.text,
-              labelIds: confirmed,
-            }}
-            saveLabel="Remember"
-            onClose={() => setEditing(false)}
-            onSave={async (draft) => {
-              const saved = await actions.create(
-                factInputFromDraft(draft, { sourceRefs: input.sourceRefs }),
-              );
-              if (saved) {
-                setEditing(false);
-                toastManager.add({ type: "success", title: "Remembered" });
-              }
-            }}
-          />
-        )}
-      </OverlayPresence>
-    </>
-  );
 }

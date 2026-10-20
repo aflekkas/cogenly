@@ -3,7 +3,6 @@ import type {
   ContextPrincipal,
   Fact,
   FactCreateInput,
-  MessageId,
   ProjectLabelId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -116,46 +115,6 @@ export function resolveFactRefs(refs: ReadonlyArray<CommitmentRef>): ResolvedFac
     }
   }
   return resolved;
-}
-
-const SUBJECT_LIMIT = 80;
-const TEXT_LIMIT = 16_000;
-
-/** A short subject from the first line of what to remember. */
-export function factSubjectFrom(text: string): string {
-  const firstLine =
-    text
-      .split("\n")
-      .map((line) => line.replace(/^[#>*\-\s]+/, "").trim())
-      .find((line) => line.length > 0) ?? "";
-  return firstLine.length > SUBJECT_LIMIT
-    ? `${firstLine.slice(0, SUBJECT_LIMIT - 1).trimEnd()}…`
-    : firstLine;
-}
-
-/**
- * A confirmed user fact from a chat message, citing the message and its thread.
- * Tagged facts are readable in those projects' context; untagged ones stay private.
- */
-export function rememberMessageInput(input: {
-  readonly text: string;
-  readonly threadId: ThreadId;
-  readonly messageId: MessageId;
-  readonly labelIds: ReadonlyArray<ProjectLabelId>;
-}): FactCreateInput | null {
-  const text = input.text.trim().slice(0, TEXT_LIMIT);
-  const subject = factSubjectFrom(text);
-  if (!text || !subject) return null;
-  return {
-    subject,
-    text,
-    labelIds: [...input.labelIds],
-    visibility: input.labelIds.length > 0 ? "labels" : "user",
-    sourceRefs: [
-      { kind: "thread", id: input.threadId },
-      { kind: "message", id: input.messageId },
-    ],
-  };
 }
 
 /** The replacement a correction saves: same scope and sources, new wording. */

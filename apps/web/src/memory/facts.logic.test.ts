@@ -1,13 +1,7 @@
-import { FactId, MessageId, ProjectLabelId, ThreadId, type Fact } from "@t3tools/contracts";
+import { FactId, type Fact } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  factSubjectFrom,
-  filterFacts,
-  principalLabel,
-  rememberMessageInput,
-  resolveFactRefs,
-} from "./facts.logic";
+import { filterFacts, principalLabel, resolveFactRefs } from "./facts.logic";
 
 const fact = (id: string, status: Fact["status"], updatedAt: string, text = id): Fact => ({
   id: FactId.make(id),
@@ -45,35 +39,6 @@ describe("filterFacts", () => {
     expect(
       filterFacts(facts, { status: "all", query: " thursday " }).map((entry) => entry.id),
     ).toEqual(["new"]);
-  });
-});
-
-describe("rememberMessageInput", () => {
-  const threadId = ThreadId.make("t1");
-  const messageId = MessageId.make("m1");
-
-  it("cites the message and its thread and keeps untagged facts private", () => {
-    expect(
-      rememberMessageInput({ text: "## Plan\n\nShip Friday", threadId, messageId, labelIds: [] }),
-    ).toEqual({
-      subject: "Plan",
-      text: "## Plan\n\nShip Friday",
-      labelIds: [],
-      visibility: "user",
-      sourceRefs: [
-        { kind: "thread", id: "t1" },
-        { kind: "message", id: "m1" },
-      ],
-    });
-  });
-
-  it("shares tagged facts with those projects and skips empty text", () => {
-    const labelId = ProjectLabelId.make("spawn");
-    expect(
-      rememberMessageInput({ text: "Use pnpm", threadId, messageId, labelIds: [labelId] }),
-    ).toMatchObject({ visibility: "labels", labelIds: [labelId] });
-    expect(rememberMessageInput({ text: "  ", threadId, messageId, labelIds: [] })).toBeNull();
-    expect(factSubjectFrom("x".repeat(200))).toHaveLength(80);
   });
 });
 

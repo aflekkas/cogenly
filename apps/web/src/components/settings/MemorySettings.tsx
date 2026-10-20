@@ -149,7 +149,7 @@ export function MemorySettings() {
                   <EmptyDescription>
                     {filtered
                       ? "Try another project, agent or status."
-                      : "Use Remember this on a chat message, or add something here. Agents can propose facts for you to confirm."}
+                      : "Add something here. Agents can propose facts for you to confirm."}
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>

@@ -184,7 +184,7 @@ import {
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
-import { ContextUsed, RememberMessageButton } from "../../context/ThreadContext";
+import { ContextUsed } from "../../context/ThreadContext";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { WorkspaceEntryIcon, WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
@@ -2665,11 +2665,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 variant="ghost"
               />
             )}
-            <RememberMessageButton
-              threadRef={ctx.threadRef}
-              messageId={row.message.id}
-              text={plainText}
-            />
             {promptLink !== null && (
               <MessageCopyButton
                 text={promptLink}
@@ -3052,13 +3047,6 @@ function AssistantMessageMetaActions({
       />
       {projectedItem?.item.type === "assistant_message" ? (
         <AssistantForkButton projectedItem={projectedItem} />
-      ) : null}
-      {!message.streaming ? (
-        <RememberMessageButton
-          threadRef={ctx.threadRef}
-          messageId={message.id}
-          text={message.text}
-        />
       ) : null}
       {!message.streaming && (
         <Tooltip>
