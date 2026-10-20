@@ -1421,8 +1421,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     color-scheme: dark;
     /* Keep controls and floating surfaces close to the neutral-black canvas.
        Borders and hover states provide separation without milky gray fills. */
-    --background: var(--color-neutral-950);
-    --surface-raised: color-mix(in srgb, var(--background) 97%, var(--color-white));
+    /* Sampled from the reference: one cool near-black canvas, with surfaces
+       stepping up from it in faintly blue-tinted greys. */
+    --background: #0d0d0f;
+    --surface-raised: #16171b;
+    /* Blended at the glass opacity over the canvas, this lands on #131416. */
+    --composer-surface: #141517;
     --surface-raised-sheen-top: rgb(255 255 255 / 3%);
     --surface-raised-sheen-bottom: rgb(255 255 255 / 1%);
     --surface-raised-edge-top: rgb(255 255 255 / 10%);
@@ -1432,30 +1436,32 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --surface-raised-shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 10px 28px -14px rgb(0 0 0 / 70%);
     --surface-raised-shadow-floating:
       0 1px 2px rgb(0 0 0 / 40%), 0 18px 44px -18px rgb(0 0 0 / 80%);
-    /* Dark states are barely-there white fills; the lit top edge and faint
-       hairline carry the selection, never a gray slab. Selection borrows the
-       raised-card light: a sheen, a lit top edge, a hairline and a soft drop. */
+    /* Dark states are flat: a selected surface is one fill step brighter with
+       a faint hairline edge. No sheen, lit top edge or drop shadow; those stay
+       on floating surfaces (popovers, the details card). */
     --state-hover-fill: rgb(255 255 255 / 3.5%);
     --state-hover-sheen-top: transparent;
     --state-hover-sheen-bottom: transparent;
     --state-hover-highlight: transparent;
-    --state-selected-fill: rgb(255 255 255 / 6%);
-    --state-selected-sheen-top: rgb(255 255 255 / 2.5%);
+    --state-selected-fill: rgb(255 255 255 / 7%);
+    --state-selected-sheen-top: transparent;
     --state-selected-sheen-bottom: transparent;
-    --state-selected-highlight: rgb(255 255 255 / 8%);
-    --state-selected-edge: rgb(255 255 255 / 3.5%);
-    --state-selected-shadow: 0 1px 2px rgb(0 0 0 / 35%);
-    --foreground: var(--color-neutral-100);
-    --card: color-mix(in srgb, var(--background) 97%, var(--color-white));
-    --card-foreground: var(--color-neutral-100);
-    --popover: color-mix(in srgb, var(--background) 97%, var(--color-white));
-    --popover-foreground: var(--color-neutral-100);
+    --state-selected-highlight: transparent;
+    --state-selected-edge: rgb(255 255 255 / 6%);
+    --state-selected-shadow: 0 0 #0000;
+    --foreground: #e7e8ec;
+    --card: #16171b;
+    --card-foreground: #e7e8ec;
+    --popover: #16171b;
+    --popover-foreground: #e7e8ec;
     --primary: oklch(0.571 0.21 264);
     --secondary: --alpha(var(--color-white) / 3%);
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 3%);
-    --muted-foreground: #a3a3a3;
+    --muted-foreground: #7c7d81;
     --accent: --alpha(var(--color-white) / 4%);
+    /* User bubbles sit one step above the page, like the reference cards. */
+    --message-surface: #141519;
     --accent-foreground: var(--color-neutral-100);
     --error: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
     --error-foreground: var(--color-red-400);
@@ -1503,6 +1509,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --sidebar-border: var(--color-zinc-200);
   /* The icon rail sits a step below the list so the two read as separate columns. */
   --nav-rail: var(--color-zinc-100);
+  --nav-rail-muted: var(--sidebar-muted-foreground);
+  --nav-rail-selected: var(--sidebar-row-active);
   /* Light navigation selects with a white raised pill on the zinc-50 list. */
   --state-hover-fill: var(--sidebar-row-hover);
   --state-selected-fill: var(--sidebar-row-active);
@@ -1513,30 +1521,40 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --state-selected-foreground: var(--contrast-sidebar-foreground);
 
   @variant dark {
-    --background: #000;
-    --foreground: #f1f3f7;
-    --card: #000;
+    --background: #0d0d0f;
+    --foreground: #e7e8ec;
+    --card: #0d0d0f;
     --card-foreground: var(--foreground);
     --accent: #191a1d;
     --accent-foreground: #f7f9ff;
-    --muted: #0a0a0a;
-    --muted-foreground: #a3a3a3;
+    --muted: #0a0b0d;
+    --muted-foreground: #7c7d81;
     --border: rgb(255 255 255 / 8%);
     --input: rgb(255 255 255 / 18%);
-    /* Rail (black) < list < main pane: three distinct steps, each with a hairline. */
-    --sidebar: #070708;
-    --nav-rail: #000;
+    /* Seamless shell: rail, list and main pane share one surface with no
+       dividers. Rows are cards; selection is one fill step up plus a hairline. */
+    --sidebar: #0d0d0f;
+    --nav-rail: #0d0d0f;
+    /* The rail's active button is quieter than a selected card. */
+    --nav-rail-muted: #88898e;
+    --nav-rail-selected: #141519;
     --sidebar-foreground: var(--foreground);
     --sidebar-muted-foreground: var(--muted-foreground);
-    --sidebar-control-surface: var(--muted);
-    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 6%, transparent);
-    --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 9%, transparent);
+    --sidebar-control-surface: rgb(255 255 255 / 3.5%);
+    --sidebar-card: #101113;
+    --sidebar-row-hover: #151619;
+    --sidebar-row-active: #1a1b1f;
     --sidebar-row-selected: var(--sidebar-row-active);
     --sidebar-border: var(--border);
-    --state-selected-highlight: rgb(255 255 255 / 8%);
-    --state-selected-edge: rgb(255 255 255 / 3.5%);
-    --state-selected-shadow: 0 1px 2px rgb(0 0 0 / 50%);
+    --state-selected-highlight: transparent;
+    --state-selected-edge: #23252b;
+    --state-selected-shadow: 0 0 #0000;
   }
+}
+
+[data-app-sidebar][data-nav-rail] {
+  --sidebar-muted-foreground: var(--nav-rail-muted);
+  --state-selected-fill: var(--nav-rail-selected);
 }
 
 /* Theme files are expressed in app color roles and mapped to the existing
@@ -1978,6 +1996,12 @@ body {
 :root {
   --surface-grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
   --surface-grain-size: 256px 256px;
+}
+
+/* The default dark shell is one flat canvas: grain would lift the rail and
+   sidebar a step above the main pane, which has an opaque fill over it. */
+html.dark:not([data-theme-id]) {
+  --surface-grain: none;
 }
 
 /* The live T3 Chat texture is a 128px grayscale tile with a constant 7/255

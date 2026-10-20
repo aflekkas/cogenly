@@ -1606,15 +1606,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // a useful hierarchy nor a reliable hover cue. Status now lives in the row
   // content; surface is reserved for interaction (hover, multi-select, route).
   const rowSurfaceClassName = cn(
-    "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-lg text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+    "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-[10px] text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     props.isActive || isSelected || props.sweepAction !== null
       ? "state-selected"
       : hasUnsentDraft
         ? cn(draftSurfaceClassName, "text-sidebar-foreground")
         : shouldRecede
-          ? "state-hover text-sidebar-muted-foreground/75"
-          : "state-hover text-sidebar-foreground",
+          ? "state-hover bg-(--sidebar-card) text-sidebar-muted-foreground/75"
+          : "state-hover bg-(--sidebar-card) text-sidebar-foreground",
     // Background work fades as a whole row, status label included, so it
     // takes less attention than rows that need a human (input, approval).
     shouldRecede && status === "working" && "opacity-70 hover:opacity-100 focus-within:opacity-100",
@@ -1661,14 +1661,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           shouldRecede ? "font-normal" : "font-medium",
           variant === "card"
             ? cn(
-                "truncate",
+                // Cards rest in grey and brighten when selected or asking for you.
+                "fade-truncate",
                 shouldRecede
                   ? "text-secondary-label"
-                  : isUnread || isWoke || status === "input"
+                  : props.isActive || isUnread || isWoke || status === "input"
                     ? "text-foreground"
-                    : status === "failed"
-                      ? "text-foreground/95"
-                      : "text-foreground/90",
+                    : "text-muted-foreground group-hover/sidebar-row:text-foreground",
               )
             : cn(
                 "truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
@@ -1894,8 +1893,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onPointerDown={handleRowPointerDown}
       {...(fileDropHandlers ?? {})}
       className={cn(
-        // Matches the h-14 content box; the py-0.5 padding is added on top.
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_56px]",
+        // Matches the h-14 content box; the py-1 gap between cards is added on top.
+        "list-none py-1 [content-visibility:auto] [contain-intrinsic-size:auto_64px]",
       )}
     >
       <Tooltip disabled={snoozeMenuOpen}>
@@ -2084,10 +2083,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 Regenerating title
               </span>
             ) : null}
-            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+            {/* Barely there at rest (#2b2c2e on the card), a step up when selected. */}
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
               {/* Work an agent started names the agent ahead of the branch. */}
               {props.workAgentName ? (
-                <span className="flex min-w-0 max-w-1/2 shrink-0 items-center gap-1 text-muted-foreground/60">
+                <span className="flex min-w-0 max-w-1/2 shrink-0 items-center gap-1">
                   <BotIcon aria-hidden className="size-3 shrink-0" />
                   <span className="truncate">{props.workAgentName}</span>
                 </span>
@@ -2102,12 +2102,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   {thread.worktreePath?.trim() ? (
                     <ThreadWorktreeIndicator thread={thread} />
                   ) : props.repositoryName ? (
-                    <FolderIcon aria-hidden className="size-3 shrink-0 text-muted-foreground/40" />
+                    <FolderIcon aria-hidden className="size-3 shrink-0" />
                   ) : null}
-                  <span className="min-w-0 flex-1 fade-truncate text-muted-foreground/40">
-                    {props.repositoryName ? (
-                      <span className="text-muted-foreground/60">{props.repositoryName}</span>
-                    ) : null}
+                  <span className="min-w-0 flex-1 fade-truncate">
+                    {props.repositoryName ? <span>{props.repositoryName}</span> : null}
                     {props.repositoryName && thread.branch ? " · " : null}
                     {thread.branch}
                   </span>
@@ -2117,11 +2115,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   <EnvironmentMachineIcon
                     aria-hidden
                     kind={props.environmentMachine}
-                    className="size-3 shrink-0 text-muted-foreground/40"
+                    className="size-3 shrink-0"
                   />
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground/40">
-                    {props.scratchMachineLabel}
-                  </span>
+                  <span className="min-w-0 flex-1 fade-truncate">{props.scratchMachineLabel}</span>
                 </>
               ) : (
                 <span className="flex-1" />
@@ -4458,26 +4454,28 @@ export default function Sidebar() {
       <SidebarContent
         className="min-h-full"
         fixedHeader={
-          // Search and the add/new actions sit under the mode title, above the
-          // list. Desktop switches modes from the navigation rail; the mobile
-          // sheet keeps the segmented switcher here too.
-          // Lifted above the stage backdrop, whose fade bleeds below the
-          // header and would otherwise paint across the search row's outline.
-          <SidebarGroup className="z-[1]">
-            {navRailVisible ? null : (
+          // Desktop switches modes from the navigation rail; the mobile sheet
+          // keeps the segmented switcher above the list.
+          navRailVisible ? null : (
+            <SidebarGroup className="z-[1]">
               <SidebarModeSwitcher
-                className="mb-1.5"
                 mode={sidebarMode}
                 onModeChange={sidebarModes.selectMode}
                 decisionsWaiting={sidebarModes.decisionsWaiting}
                 keybindings={keybindings}
               />
-            )}
-            {threadHeader}
-          </SidebarGroup>
+            </SidebarGroup>
+          )
+        }
+        fixedFooter={
+          // Search and the add/new actions dock under the list, which stacks
+          // up from the bottom toward them.
+          // Lifted above the stage backdrop, whose fade would otherwise paint
+          // across the search field's outline.
+          <SidebarGroup className="z-[1]">{threadHeader}</SidebarGroup>
         }
       >
-        <SidebarGroup ref={sidebarModeListRef} className="flex-1" role="presentation">
+        <SidebarGroup ref={sidebarModeListRef} className="flex-1 justify-end" role="presentation">
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -4584,7 +4582,8 @@ export default function Sidebar() {
                 role="presentation"
                 className={cn(
                   "relative flex flex-col gap-1",
-                  sidebarListItems.length > 0 && "flex-1",
+                  // The list stacks up from the bottom, against the search dock.
+                  sidebarListItems.length > 0 && "flex-1 justify-end",
                   // An action sweep owns the pointer: rows it passes over
                   // neither show hover actions nor open tooltips, even
                   // controls that opt back in, like the Woke pill.
@@ -4749,7 +4748,6 @@ export default function Sidebar() {
                           <SidebarSectionHeader
                             key="working-shelf-header"
                             marker="working-header"
-                            className="mt-auto"
                             label={
                               workingShelfExpanded
                                 ? "Working"
@@ -4767,7 +4765,6 @@ export default function Sidebar() {
                           <SidebarSectionHeader
                             key="snoozed-shelf-header"
                             marker="snoozed-header"
-                            className={cn(workingThreads.length === 0 && "mt-auto")}
                             label={
                               snoozedShelfExpanded
                                 ? "Snoozed"
@@ -4785,9 +4782,6 @@ export default function Sidebar() {
                           <SidebarSectionHeader
                             key="settled-shelf-header"
                             marker="settled-header"
-                            className={cn(
-                              workingThreads.length + snoozedThreads.length === 0 && "mt-auto",
-                            )}
                             label={
                               settledShelfExpanded
                                 ? "Settled"

@@ -102,12 +102,11 @@ export function SidebarNavRail({
   return (
     <nav
       aria-label="Workspace"
-      // Shares the sidebar's palette scope, one step darker than the list.
+      // Shares the sidebar's palette scope, with its own muted and selected tones.
       data-app-sidebar=""
+      data-nav-rail=""
       className={cn(
         "relative z-20 hidden h-full w-(--nav-rail-width) shrink-0 flex-col items-center bg-nav-rail surface-grain pb-2 text-sidebar-foreground md:flex",
-        // A hairline separates the rail from the list, and from the main pane when collapsed.
-        "border-r border-sidebar-border",
       )}
     >
       {/* The titlebar row. It holds the sidebar toggle, sized and centred like

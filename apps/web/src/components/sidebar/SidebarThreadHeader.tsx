@@ -1,5 +1,6 @@
 /**
- * The sidebar header: one row holding search, add repository and new thread.
+ * The sidebar search dock: one boxed row holding search, add repository and
+ * new thread, pinned under the list.
  *
  * Search owns the row's text and spans it; add-repository and new-thread sit
  * as a pair of icons at the end, after any mode-specific filter. Chats has no
@@ -74,8 +75,8 @@ export function SidebarThreadHeader({
     : newItemLabel;
 
   return (
-    <div className="flex items-center gap-1">
-      <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground state-hover">
+    <div className="flex h-10 items-center gap-1 rounded-[10px] border border-white/[0.06] bg-(--sidebar-card) pr-1 pl-2.5">
+      <div className="flex h-8 min-w-0 flex-1 items-center gap-2 text-sm font-medium text-sidebar-muted-foreground">
         <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
         <SidebarInput
           ref={searchInputRef}
