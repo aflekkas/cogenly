@@ -414,6 +414,7 @@ import {
   RightPanelMaximizeControl,
 } from "./chat/PanelLayoutControls";
 import { ThreadDetailsMenu } from "./chat/ThreadDetailsMenu";
+import { ThreadDetailsMenu } from "./chat/ThreadDetailsMenu";
 import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import {
@@ -9091,6 +9092,12 @@ export default function ChatView(props: ChatViewProps) {
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel && rightPanelSupported
             ? panelLayoutControls
             : null}
+          {isServerThread && activeThreadRef ? (
+            <ThreadDetailsMenu
+              environmentId={activeThreadRef.environmentId}
+              threadId={activeThreadRef.threadId}
+            />
+          ) : null}
           {isServerThread && activeThreadRef ? (
             <ThreadDetailsMenu
               environmentId={activeThreadRef.environmentId}
