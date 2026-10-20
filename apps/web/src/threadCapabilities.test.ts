@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   classifyThreadKind,
+  hasRightPanel,
   threadCapabilities,
   threadKindForSidebarMode,
 } from "./threadCapabilities";
@@ -24,6 +25,8 @@ describe("threadCapabilities", () => {
       repositorySettings: false,
       git: false,
       terminal: false,
+      browser: false,
+      device: false,
       files: false,
       agentSettings: false,
     });
@@ -46,6 +49,8 @@ describe("threadCapabilities", () => {
       repositorySettings: true,
       git: true,
       terminal: true,
+      browser: true,
+      device: true,
       files: true,
       agentSettings: false,
     });
@@ -68,6 +73,8 @@ describe("threadCapabilities", () => {
       repositorySettings: false,
       git: false,
       terminal: false,
+      browser: true,
+      device: true,
       files: false,
       agentSettings: true,
     });
@@ -102,5 +109,13 @@ describe("classifyThreadKind", () => {
     expect(threadKindForSidebarMode("chats")).toBe("chat");
     expect(threadKindForSidebarMode("tasks")).toBe("work");
     expect(threadKindForSidebarMode("agents")).toBe("agentConversation");
+  });
+});
+
+describe("hasRightPanel", () => {
+  it("leaves a chat without a right panel and keeps it for Work and agents", () => {
+    expect(hasRightPanel(threadCapabilities("chat"))).toBe(false);
+    expect(hasRightPanel(threadCapabilities("work"))).toBe(true);
+    expect(hasRightPanel(threadCapabilities("agentConversation"))).toBe(true);
   });
 });

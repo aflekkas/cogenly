@@ -130,7 +130,9 @@ interface RightPanelTabsProps {
 }
 
 export interface SupportedRightPanelSurfaces {
+  readonly browser: boolean;
   readonly terminal: boolean;
+  readonly device: boolean;
 }
 
 export function shouldOpenDefaultBrowserProfileFromMenuClick(
@@ -321,7 +323,7 @@ function RightPanelEmptyState(props: {
       shortcut: "B",
       available: props.browserAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.browser,
-      supported: true,
+      supported: props.supportedSurfaces.browser,
       onClick: props.onAddBrowser,
     },
     {
@@ -340,7 +342,7 @@ function RightPanelEmptyState(props: {
       shortcut: "M",
       available: props.deviceAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
-      supported: true,
+      supported: props.supportedSurfaces.device,
       onClick: props.onAddDevice,
     },
   ] as const;
@@ -752,7 +754,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       shortcut: "B",
       available: props.browserAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.browser,
-      supported: true,
+      supported: props.supportedSurfaces.browser,
       onClick: props.onAddBrowser,
     },
     {
@@ -770,7 +772,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       shortcut: "M",
       available: props.deviceAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.device,
-      supported: true,
+      supported: props.supportedSurfaces.device,
       onClick: props.onAddDevice,
     },
   ] as const;

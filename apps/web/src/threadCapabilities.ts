@@ -46,6 +46,10 @@ export interface ThreadCapabilities {
   /** Branch, worktree and git actions, the composer's workspace and branch pickers, and new thread on branch. */
   readonly git: boolean;
   readonly terminal: boolean;
+  /** The in-app browser: panel tabs, the floating player and the header button. */
+  readonly browser: boolean;
+  /** Simulator and emulator streams, as panel tabs or floating. */
+  readonly device: boolean;
   /** Files panel, go to file and repository search. */
   readonly files: boolean;
   readonly agentSettings: boolean;
@@ -71,6 +75,9 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     repositorySettings: false,
     git: false,
     terminal: false,
+    // Chats stay a plain conversation: no right panel surfaces at all.
+    browser: false,
+    device: false,
     files: false,
     agentSettings: false,
   },
@@ -90,6 +97,8 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     repositorySettings: true,
     git: true,
     terminal: true,
+    browser: true,
+    device: true,
     files: true,
     agentSettings: false,
   },
@@ -112,6 +121,8 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     repositorySettings: false,
     git: false,
     terminal: false,
+    browser: true,
+    device: true,
     files: false,
     agentSettings: true,
   },
@@ -119,6 +130,14 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
 
 export function threadCapabilities(kind: ThreadKind): ThreadCapabilities {
   return CAPABILITIES[kind];
+}
+
+/**
+ * Whether the thread has a right panel at all: its toggle, tabs, maximize
+ * control and shortcuts exist only when it offers one of the panel surfaces.
+ */
+export function hasRightPanel(capabilities: ThreadCapabilities): boolean {
+  return capabilities.browser || capabilities.terminal || capabilities.device;
 }
 
 /** The sidebar mode that lists a thread names its kind. */

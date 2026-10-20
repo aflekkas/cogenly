@@ -1,4 +1,4 @@
-import { PanelRightIcon, SettingsIcon } from "lucide-react";
+import { Globe2, PanelRightIcon, SettingsIcon, Smartphone, TerminalSquare } from "lucide-react";
 import { Maximize2, Minimize2 } from "lucide";
 import { MorphIcon } from "~/components/MorphIcon";
 import { memo } from "react";
@@ -7,11 +7,32 @@ import { Button } from "../ui/button";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
+export type ThreadSurfaceButtonId = "browser" | "terminal" | "device";
+
+/** One of the Work header's surface buttons: it opens, focuses or hides its right-panel tab. */
+export interface ThreadSurfaceButton {
+  readonly id: ThreadSurfaceButtonId;
+  /** Its tab is the one the open panel shows. */
+  readonly active: boolean;
+  readonly available: boolean;
+  readonly unavailableLabel: string;
+  readonly shortcutLabel: string | null;
+  readonly onToggle: () => void;
+}
+
+const SURFACE_BUTTON_PRESENTATION = {
+  browser: { label: "Browser", Icon: Globe2 },
+  terminal: { label: "Terminal", Icon: TerminalSquare },
+  device: { label: "Device", Icon: Smartphone },
+} as const;
+
 export interface PanelLayoutControlsProps {
   /** The thread's own header controls; off where the panel's tab bar hosts the layout toggle. */
   showThreadControls?: boolean;
   showRightPanelControl?: boolean;
   agentSettingsShortcutLabel: string | null;
+  /** Browser, Terminal and Device, in that order, for threads that offer them. */
+  surfaceButtons?: readonly ThreadSurfaceButton[] | undefined;
   rightPanelAvailable: boolean;
   rightPanelOpen: boolean;
   rightPanelShortcutLabel: string | null;
@@ -25,6 +46,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
   showThreadControls = true,
   showRightPanelControl = true,
   agentSettingsShortcutLabel,
+  surfaceButtons,
   rightPanelAvailable,
   rightPanelOpen,
   rightPanelShortcutLabel,
@@ -58,6 +80,9 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
           </TooltipPopup>
         </Tooltip>
       ) : null}
+      {showThreadControls
+        ? surfaceButtons?.map((button) => <SurfaceButton key={button.id} {...button} />)
+        : null}
       {showRightPanelControl ? (
         <Tooltip>
           <TooltipTrigger render={<span className="flex shrink-0" />}>
@@ -83,6 +108,33 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
     </div>
   );
 });
+
+function SurfaceButton(props: ThreadSurfaceButton) {
+  const { label, Icon } = SURFACE_BUTTON_PRESENTATION[props.id];
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="flex shrink-0" />}>
+        <Toggle
+          className="shrink-0 [-webkit-app-region:no-drag]"
+          pressed={props.active}
+          onPressedChange={props.onToggle}
+          aria-label={label}
+          variant="ghost"
+          size="sm"
+          disabled={!props.available}
+          data-thread-surface-button={props.id}
+        >
+          <Icon className="size-4" />
+        </Toggle>
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">
+        {props.available
+          ? `${label}${props.shortcutLabel ? ` (${props.shortcutLabel})` : ""}`
+          : props.unavailableLabel}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
 
 export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl({
   maximized,

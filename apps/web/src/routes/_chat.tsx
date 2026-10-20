@@ -17,6 +17,8 @@ import { selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useReadRouteThreadKind } from "../hooks/useThreadKind";
+import { threadCapabilities } from "../threadCapabilities";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { isPreviewFocused } from "../lib/previewFocus";
@@ -42,6 +44,7 @@ function ChatRouteGlobalShortcuts() {
     AuthPreviewOperateScope,
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const readRouteThreadKind = useReadRouteThreadKind();
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projects = useProjects();
@@ -153,6 +156,9 @@ function ChatRouteGlobalShortcuts() {
       }
 
       if (command === "preview.toggle") {
+        // A chat has no browser, so the chord keeps whatever else it means there.
+        const kind = readRouteThreadKind();
+        if (kind !== null && !threadCapabilities(kind).browser) return;
         event.preventDefault();
         event.stopPropagation();
         if (!routeThreadRef || (!canOperatePreview && !previewOpen)) return;
@@ -211,6 +217,7 @@ function ChatRouteGlobalShortcuts() {
     defaultProjectRef,
     previewOpen,
     primaryEnvironmentId,
+    readRouteThreadKind,
     projectGroupCount,
     routeThreadRef,
     scratchEnvironmentId,

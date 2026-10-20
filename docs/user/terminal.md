@@ -1,6 +1,7 @@
 # Terminal
 
-Open **Terminal** from the right panel's **+** menu. It has two sections:
+In a Work thread, open **Terminal** with the terminal button at the top right or from the right
+panel's **+** menu. Chats have no terminal. It has two sections:
 
 - **Agent runs** lists every command the agent ran in the thread. Running
   commands stay at the top; select one to see its full command, working

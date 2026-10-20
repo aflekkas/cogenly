@@ -108,7 +108,8 @@ repositories from **Work** or the command palette.
 A chat is a conversation; Work is a coding session in a repository. So a chat's
 menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
 which always asks first, while settling, snoozing, archiving, repository settings
-and the branch, worktree, diff, terminal and files controls belong to Work. When a
+and the branch and worktree controls, the right panel, and its browser, terminal and device
+belong to Work. When a
 chat turns into code, **Start Work…** hands it to a new Work session. An agent's
 conversation belongs to the agent: rename it or remove it from the agent's
 **Responsibilities**.
@@ -126,7 +127,7 @@ Each thread without a project works in its own folder under `~/.cogenly/scratch`
 `scratch` folder of your T3 data directory), named after its date, the first words
 of its first message, and a short id, like
 `2026-09-25-convert-these-pngs-to-webp-a1b2c3d4`. Deleting a thread keeps its
-folder, so the files the agent wrote stay until you delete them. Branch, worktree, and diff controls stay hidden because
+folder, so the files the agent wrote stay until you delete them. Branch and worktree controls stay hidden because
 these folders are not Git repositories. This is unavailable when the data
 directory itself sits inside a Git checkout.
 

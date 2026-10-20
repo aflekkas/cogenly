@@ -7,7 +7,8 @@ yourself. Agents get the same device through `device_*` tools and the
 
 ## Open a device
 
-Open the right panel in a project thread and choose **Device**. On first use,
+In a Work thread, click the device button at the top right, or choose **Device** from the right
+panel's **+** menu. Chats have no devices. On first use,
 the panel walks through three steps: starting the device hub, checking iOS and
 Android support, and choosing whether agents may control devices. Opening the
 panel alone does not download or start anything. If the hub is already

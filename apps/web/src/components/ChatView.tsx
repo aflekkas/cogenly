@@ -417,6 +417,7 @@ import {
 import {
   PanelLayoutControls,
   type PanelLayoutControlsProps,
+  type ThreadSurfaceButton,
   RightPanelMaximizeControl,
 } from "./chat/PanelLayoutControls";
 import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -448,7 +449,7 @@ import {
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 import { requestStartWork } from "./work/StartWorkDialog";
-import { classifyThreadKind, threadCapabilities } from "../threadCapabilities";
+import { classifyThreadKind, hasRightPanel, threadCapabilities } from "../threadCapabilities";
 import { WorkHandoffLines } from "./work/WorkHandoffLines";
 import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
 import { ComposerSurface } from "./chat/ComposerSurface";
@@ -1664,14 +1665,38 @@ export default function ChatView(props: ChatViewProps) {
     if (!anchorRunSettled) return;
     setTimelineAnchor({ threadKey: activeThreadKey, messageId: null });
   }, [anchorRunSettled, activeThreadKey]);
+  const activeProjectRef = useMemo(
+    () =>
+      activeThread ? scopeProjectRef(activeThread.environmentId, activeThread.projectId) : null,
+    [activeThread?.environmentId, activeThread?.projectId],
+  );
+  const activeProject = useProject(activeProjectRef);
+  const { scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
+  const activeProjectIsScratch =
+    activeProject !== null &&
+    isScratchProject(
+      activeProject,
+      environmentById.get(activeProject.environmentId)?.serverConfig?.scratchWorkspaceRoot ?? null,
+    );
+  // What this thread's kind offers: a chat has no repository controls, an
+  // agent's conversation leaves its lifecycle to the agent.
+  const activeThreadSurface = activeThreadShell?.source.surface ?? draftThread?.surface;
+  const activeThreadKind = classifyThreadKind({
+    agentRole: activeThreadShell?.source.agent?.role ?? null,
+    surface: activeThreadSurface,
+    isScratch: activeProjectIsScratch,
+  });
+  const activeThreadCapabilities = threadCapabilities(activeThreadKind);
+  // A chat has no right panel: nothing below opens, shows or toggles one for it.
+  const rightPanelSupported = hasRightPanel(activeThreadCapabilities);
   const activeRightPanelKind = useRightPanelStore((state) =>
-    selectActiveRightPanel(state.byThreadKey, activeThreadRef),
+    rightPanelSupported ? selectActiveRightPanel(state.byThreadKey, activeThreadRef) : null,
   );
   const rightPanelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, activeThreadRef),
   );
   const activeRightPanelSurface = useRightPanelStore((state) =>
-    selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef),
+    rightPanelSupported ? selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef) : null,
   );
   const activePreviewState = useThreadPreviewState(activeThreadRef);
   const activePreviewServerEpoch = activePreviewState.serverEpoch;
@@ -1696,7 +1721,7 @@ export default function ChatView(props: ChatViewProps) {
         : randomUUID(),
     );
   const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
-  const rightPanelOpen = rightPanelState.isOpen;
+  const rightPanelOpen = rightPanelState.isOpen && rightPanelSupported;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const rightPanelPresenceValue = useMemo(
@@ -1787,12 +1812,6 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeActivityRun, activePlan, activeRuntime]);
   const activeComposerTaskSteps =
     activeComposerTasksProgress && activePlan ? activePlan.steps : null;
-  const activeProjectRef = useMemo(
-    () =>
-      activeThread ? scopeProjectRef(activeThread.environmentId, activeThread.projectId) : null,
-    [activeThread?.environmentId, activeThread?.projectId],
-  );
-  const activeProject = useProject(activeProjectRef);
   // Environment settings with the active project's overrides applied.
   const activeProjectSettings = useMemo(
     () => resolveProjectSettings(settings, activeProject?.id ?? null, activeProject ?? undefined),
@@ -2047,22 +2066,6 @@ export default function ChatView(props: ChatViewProps) {
   const handleDisconnectActiveEnvironmentStable = useStableCallback(
     handleDisconnectActiveEnvironment,
   );
-  const { scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
-  const activeProjectIsScratch =
-    activeProject !== null &&
-    isScratchProject(
-      activeProject,
-      environmentById.get(activeProject.environmentId)?.serverConfig?.scratchWorkspaceRoot ?? null,
-    );
-  // What this thread's kind offers: a chat has no repository controls, an
-  // agent's conversation leaves its lifecycle to the agent.
-  const activeThreadSurface = activeThreadShell?.source.surface ?? draftThread?.surface;
-  const activeThreadKind = classifyThreadKind({
-    agentRole: activeThreadShell?.source.agent?.role ?? null,
-    surface: activeThreadSurface,
-    isScratch: activeProjectIsScratch,
-  });
-  const activeThreadCapabilities = threadCapabilities(activeThreadKind);
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const envs: EnvironmentOption[] = [];
@@ -2963,6 +2966,10 @@ export default function ChatView(props: ChatViewProps) {
   };
   const downloadFileAttachmentStable = useStableCallback(downloadFileAttachment);
   const openFileAttachment = (attachment: ChatFileAttachment) => {
+    if (!rightPanelSupported) {
+      void downloadFileAttachment(attachment);
+      return;
+    }
     if (activeThreadRef) {
       useRightPanelStore.getState().openAttachment(activeThreadRef, attachment);
       return;
@@ -4004,7 +4011,7 @@ export default function ChatView(props: ChatViewProps) {
     AuthPreviewOperateScope,
   );
   const createBrowserSurface = (profileId?: string) => {
-    if (!activeThreadRef || !canOperatePreview) return;
+    if (!activeThreadRef || !canOperatePreview || !activeThreadCapabilities.browser) return;
     void addBrowserSurface({
       threadRef: activeThreadRef,
       openPreview,
@@ -4030,7 +4037,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const [deviceSetupThread, setDeviceSetupThread] = useState<ScopedThreadRef | null>(null);
   const addDeviceSurface = () => {
-    if (!activeThreadRef) return;
+    if (!activeThreadRef || !activeThreadCapabilities.device) return;
     if (!deviceState.onboardingCompleted || deviceState.hostStatus === "disabled") {
       setDeviceSetupThread(activeThreadRef);
       return;
@@ -4175,7 +4182,7 @@ export default function ChatView(props: ChatViewProps) {
   };
   const closePreviewPanelStable = useStableCallback(closePreviewPanel);
   const togglePreviewPanel = () => {
-    if (!activeThreadRef || !browserAvailable) return;
+    if (!activeThreadRef || !browserAvailable || !activeThreadCapabilities.browser) return;
     if (previewPanelOpen) {
       closePreviewPanel();
       return;
@@ -4191,7 +4198,7 @@ export default function ChatView(props: ChatViewProps) {
   const togglePreviewPanelStable = useStableCallback(togglePreviewPanel);
   // Shows the thread's terminals; opening the surface never starts a shell by itself.
   const openTerminalSurface = () => {
-    if (!activeThreadRef || !activeProject) return;
+    if (!activeThreadRef || !activeProject || !activeThreadCapabilities.terminal) return;
     useRightPanelStore.getState().openTerminal(activeThreadRef);
     setTerminalFocusRequestId((value) => value + 1);
   };
@@ -4212,8 +4219,26 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
   const activateRightPanelSurfaceStable = useStableCallback(activateRightPanelSurface);
-  const toggleRightPanel = () => {
+  // The Work header's Terminal and Device buttons. Pressed, the tab is showing,
+  // and pressing again hides the panel like the Browser button does.
+  const toggleTerminalSurface = () => {
+    if (activeRightPanelKind === "terminal") closePreviewPanel();
+    else openTerminalSurface();
+  };
+  const toggleTerminalSurfaceStable = useStableCallback(toggleTerminalSurface);
+  const toggleDeviceSurface = () => {
     if (!activeThreadRef) return;
+    if (activeRightPanelKind === "device") {
+      closePreviewPanel();
+      return;
+    }
+    const existing = rightPanelState.surfaces.find((surface) => surface.kind === "device");
+    if (existing) activateRightPanelSurface(existing);
+    else addDeviceSurface();
+  };
+  const toggleDeviceSurfaceStable = useStableCallback(toggleDeviceSurface);
+  const toggleRightPanel = () => {
+    if (!activeThreadRef || !rightPanelSupported) return;
     if (rightPanelOpen) {
       closePreviewPanel();
       return;
@@ -6119,6 +6144,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "rightPanel.toggle") {
+        if (!rightPanelSupported) return;
         event.preventDefault();
         event.stopPropagation();
         toggleRightPanelStable();
@@ -6126,6 +6152,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "rightPanel.toggleMaximized") {
+        if (!rightPanelSupported) return;
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) toggleRightPanelMaximizedStable();
@@ -6288,6 +6315,7 @@ export default function ChatView(props: ChatViewProps) {
     isThreadFindActive,
     toggleRightPanelStable,
     toggleRightPanelMaximizedStable,
+    rightPanelSupported,
     composerRef,
     draftId,
     environmentId,
@@ -8979,6 +9007,32 @@ export default function ChatView(props: ChatViewProps) {
       </Suspense>
     ) : null
   ) : null;
+  const workSurfaceButtons: ThreadSurfaceButton[] = [
+    {
+      id: "browser",
+      active: activeRightPanelKind === "preview",
+      available: canOperatePreview && browserAvailable,
+      unavailableLabel: "Browser previews are only available in the Cogenly desktop app.",
+      shortcutLabel: shortcutLabelForCommand(keybindings, "preview.toggle"),
+      onToggle: togglePreviewPanelStable,
+    },
+    {
+      id: "terminal",
+      active: activeRightPanelKind === "terminal",
+      available: activeProject !== null && (canReadTerminal || canOperateTerminal),
+      unavailableLabel: "Terminals are only available from a repository thread.",
+      shortcutLabel: null,
+      onToggle: toggleTerminalSurfaceStable,
+    },
+    {
+      id: "device",
+      active: activeRightPanelKind === "device",
+      available: true,
+      unavailableLabel: "Devices are only available from a thread.",
+      shortcutLabel: null,
+      onToggle: toggleDeviceSurfaceStable,
+    },
+  ];
   const panelToggleControlProps = {
     agentSettingsShortcutLabel: shortcutLabelForCommand(keybindings, "threadPanel.toggle"),
     rightPanelAvailable: activeProject !== null,
@@ -8986,6 +9040,7 @@ export default function ChatView(props: ChatViewProps) {
     rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
     onToggleRightPanel: toggleRightPanelStable,
     onOpenAgentSettings: agentConversationViewKey ? openAgentSettingsStable : undefined,
+    surfaceButtons: activeThreadKind === "work" ? workSurfaceButtons : undefined,
   } satisfies PanelLayoutControlsProps;
   const panelToggleControls = (
     <PanelLayoutControls
@@ -9106,7 +9161,11 @@ export default function ChatView(props: ChatViewProps) {
               className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
             />
           ) : null}
-          {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
+          {!rightPanelControlsAtRoot &&
+          !rightPanelControlsInPanel &&
+          (rightPanelSupported || agentConversationViewKey)
+            ? panelLayoutControls
+            : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
           {/* No breadcrumb or visible title, as in the reference: the sidebar names
               the thread, its right-click menu renames it, and the details card holds
@@ -9654,7 +9713,9 @@ export default function ChatView(props: ChatViewProps) {
             {activeThreadRef &&
             activePreviewMiniPlayer &&
             previewMiniPlayerVisible &&
-            (activePreviewMiniPlayer.source.kind === "device" || canOperatePreview) ? (
+            (activePreviewMiniPlayer.source.kind === "device"
+              ? activeThreadCapabilities.device
+              : activeThreadCapabilities.browser && canOperatePreview) ? (
               <ThreadPreviewMiniPlayer
                 key={`${activeThreadKey}:${previewMiniPlayerSourceKey(activePreviewMiniPlayer.source)}`}
                 threadRef={activeThreadRef}
