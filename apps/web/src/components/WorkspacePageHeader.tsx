@@ -8,7 +8,7 @@ import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../workspaceTitlebar";
 // sits where it does in Chats and Work. Three attributes outrank the collapsed
 // inset, which also applies when the column was collapsed before.
 const LIST_COLUMN_HIDDEN_TITLE_INSET_CLASS =
-  "[[data-nav-rail][data-list-column-hidden][data-sidebar-state]_&]:pl-[max(var(--sidebar-content-inset),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width)))]";
+  "[[data-nav-rail][data-list-column-hidden][data-sidebar-state]_&]:pl-list-column-hidden-title-inset";
 
 /**
  * Shared workspace top-bar geometry. The height is `!important` so callers cannot

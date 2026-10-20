@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { webSearchQueries } from "./itemDetail";
+import { webSearchQueries } from "./itemDetail.ts";
 
 describe("webSearchQueries", () => {
   it("lists a query the provider repeated once", () => {

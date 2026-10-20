@@ -394,6 +394,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 /* Solid surfaces. No backdrop blur anywhere in the app: floating surfaces are
    opaque fills from the same tokens. */
+/* Leading title inset beside the nav rail with no list column. The vars are set
+   on a descendant of :root, so this must be a utility, not a root-level token. */
+@utility pl-list-column-hidden-title-inset {
+  padding-left: max(
+    var(--sidebar-content-inset),
+    calc(var(--workspace-titlebar-content-left) - var(--nav-rail-width))
+  );
+}
+
 @utility surface-glass {
   background: var(--background);
 }
