@@ -956,31 +956,60 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     var(--app-scrollbar-width) 100%;
 }
 
+/* The in-progress shimmer: one soft band sweeping across live text. Every
+   variant shares this band profile and timing so they read as one effect.
+   Peak brightness stays around 65% of the way from muted to foreground. */
+:root {
+  --shimmer-band: 7rem;
+  --shimmer-duration: 2.2s;
+  --shimmer-ease: cubic-bezier(0.4, 0.15, 0.6, 0.85);
+}
+
+:where(.live-activity-focus, .live-tool-shine) {
+  --shimmer-gradient: linear-gradient(
+    to right,
+    transparent 0%,
+    color-mix(in srgb, var(--shimmer-ink) 4%, transparent) 10%,
+    color-mix(in srgb, var(--shimmer-ink) 14%, transparent) 20%,
+    color-mix(in srgb, var(--shimmer-ink) 33%, transparent) 30%,
+    color-mix(in srgb, var(--shimmer-ink) 55%, transparent) 40%,
+    color-mix(in srgb, var(--shimmer-ink) 65%, transparent) 50%,
+    color-mix(in srgb, var(--shimmer-ink) 55%, transparent) 60%,
+    color-mix(in srgb, var(--shimmer-ink) 33%, transparent) 70%,
+    color-mix(in srgb, var(--shimmer-ink) 14%, transparent) 80%,
+    color-mix(in srgb, var(--shimmer-ink) 4%, transparent) 90%,
+    transparent 100%
+  );
+}
+
 @keyframes live-tool-shine {
   from {
     background-position:
-      -4.5rem 0,
+      calc(-1 * var(--shimmer-band)) 0,
       0 0;
   }
   to {
     background-position:
-      calc(100% + 4.5rem) 0,
+      calc(100% + var(--shimmer-band)) 0,
       0 0;
   }
 }
 
+/* Single-element fallback for rows that cannot render the overlay. It paints,
+   so it advances in steps to cap repaints; prefer live-activity-focus. */
 @utility live-tool-shine {
   @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+    --shimmer-ink: var(--contrast-foreground);
     color: transparent;
     background-image:
-      linear-gradient(to right, transparent, var(--contrast-foreground), transparent),
+      var(--shimmer-gradient),
       linear-gradient(var(--contrast-secondary-label), var(--contrast-secondary-label));
     background-size:
-      4.5rem 100%,
+      var(--shimmer-band) 100%,
       100% 100%;
     background-repeat: no-repeat;
     background-clip: text;
-    animation: live-tool-shine 2.2s steps(30) infinite;
+    animation: live-tool-shine var(--shimmer-duration) steps(30) infinite;
     animation-play-state: var(--visible-animation-state, paused);
   }
 }
@@ -1018,37 +1047,23 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent);
 }
 
+/* Compositor-only shimmer: a masked copy of the text in foreground slides
+   across with transform while its inner copy counter-slides to stay aligned.
+   The band travels from just before the text to just past it, so each pass
+   starts and ends out of view and the loop has no seam. */
 @utility live-activity-focus {
-  --live-activity-focus-width: 4.5rem;
+  --shimmer-ink: black;
 
   right: auto;
-  left: calc(-1 * var(--live-activity-focus-width));
-  width: calc(100% + var(--live-activity-focus-width) + var(--live-activity-focus-width));
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    rgb(0 0 0 / 12%) 0.675rem,
-    rgb(0 0 0 / 55%) 1.575rem,
-    black 2.25rem,
-    rgb(0 0 0 / 55%) 2.925rem,
-    rgb(0 0 0 / 12%) 3.825rem,
-    transparent var(--live-activity-focus-width),
-    transparent 100%
-  );
+  left: calc(-1 * var(--shimmer-band));
+  width: calc(100% + var(--shimmer-band));
+  -webkit-mask-image: var(--shimmer-gradient);
+  -webkit-mask-size: var(--shimmer-band) 100%;
   -webkit-mask-repeat: no-repeat;
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    rgb(0 0 0 / 12%) 0.675rem,
-    rgb(0 0 0 / 55%) 1.575rem,
-    black 2.25rem,
-    rgb(0 0 0 / 55%) 2.925rem,
-    rgb(0 0 0 / 12%) 3.825rem,
-    transparent var(--live-activity-focus-width),
-    transparent 100%
-  );
+  mask-image: var(--shimmer-gradient);
+  mask-size: var(--shimmer-band) 100%;
   mask-repeat: no-repeat;
-  animation: live-activity-focus 2.2s steps(30) infinite;
+  animation: live-activity-focus var(--shimmer-duration) var(--shimmer-ease) infinite;
   animation-play-state: var(--visible-animation-state, paused);
   will-change: var(--visible-animation-will-change, auto);
 
@@ -1061,7 +1076,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 @utility live-activity-focus-counter {
   width: 100%;
-  animation: live-activity-focus-counter 2.2s steps(30) infinite;
+  animation: live-activity-focus-counter var(--shimmer-duration) var(--shimmer-ease) infinite;
   animation-play-state: var(--visible-animation-state, paused);
   will-change: var(--visible-animation-will-change, auto);
 
@@ -1072,8 +1087,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 }
 
 @utility live-activity-focus-aligned {
-  width: calc(100% - var(--live-activity-focus-width) - var(--live-activity-focus-width));
-  margin-left: var(--live-activity-focus-width);
+  width: calc(100% - var(--shimmer-band));
+  margin-left: var(--shimmer-band);
 }
 
 @property --assistant-citation-highlight-opacity {
