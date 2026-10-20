@@ -63,26 +63,6 @@ describe("texting timeline", () => {
     expect(rows[1]?.separator).toBe("Today 7:40 AM");
     expect(rows[2]?.grouped).toBe(false);
   });
-  it("marks the last finished reply of each run for its context", () => {
-    const run = (id: string, runId: string, streaming = false) => ({
-      ...message(id, "assistant", at(16, 7, 10)),
-      runId: runId as NonNullable<AgentMessage["runId"]>,
-      streaming,
-    });
-    const rows = conversationRows(
-      [
-        run("a", "r1"),
-        message("q", "user", at(16, 7, 11)),
-        run("b", "r1"),
-        run("c", "r2"),
-        message("d", "assistant", at(16, 7, 12)),
-        run("e", "r3", true),
-      ],
-      now,
-      "en-US",
-    );
-    expect(rows.map((row) => row.endsRun)).toEqual([false, false, true, true, false, false]);
-  });
   it("formats local today, yesterday, older dates, and invalid dates", () => {
     expect(formatMessageTime(at(16, 7, 13), now, "en-US")).toBe("Today 7:13 AM");
     expect(formatMessageTime(at(15, 19, 5), now, "en-US")).toBe("Yesterday 7:05 PM");

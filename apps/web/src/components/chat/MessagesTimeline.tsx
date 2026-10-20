@@ -216,7 +216,6 @@ import {
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
-import { ContextUsedButton } from "../../context/ThreadContext";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { WorkspaceEntryIcon, WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
@@ -3247,9 +3246,6 @@ function AssistantMessageMetaActions({
         ) : null}
         {!message.streaming ? <StartWorkFromMessageButton id={message.id} /> : null}
       </BranchActions>
-      {!message.streaming ? (
-        <ContextUsedButton threadRef={ctx.threadRef} runId={message.runId} />
-      ) : null}
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>

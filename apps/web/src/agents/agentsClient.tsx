@@ -8,7 +8,6 @@ import type {
   ModelSelection,
   ProjectId,
   ProviderApprovalDecision,
-  RunId,
   ThreadId,
 } from "@t3tools/contracts";
 import type {
@@ -118,8 +117,6 @@ export interface AgentsClient {
   modelStatus?: (agent: AgentContact, model: AgentModelRef) => AgentModelStatus;
   /** Model and effort pickers from the live provider catalog; absent where there is none. */
   ModelControls?: ComponentType<AgentModelControlsProps>;
-  /** The "Context used" icon under the reply that closes a run; absent where there is no retrieval. */
-  MessageContext?: ComponentType<{ agent: AgentContact; runId: RunId }>;
   /** The agent's facts in Responsibilities; absent where there is no facts service. */
   MemorySection?: ComponentType<{
     agent: AgentContact;
@@ -217,7 +214,6 @@ import { useEnvironmentQuery } from "~/state/query";
 import { randomUUID, newMessageId } from "~/lib/utils";
 import { useAgentScheduledTasks } from "~/components/sidebar/modes/useAgentScheduledTasks";
 import { AgentFactsSection } from "~/memory/AgentFacts";
-import { ContextUsedButton } from "~/context/ThreadContext";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { AgentRequest } from "./agents.types";
 
@@ -702,7 +698,6 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
         resolveAgentModelStatus(configs.get(agent.environmentId)?.providers, model),
       ModelControls: LiveAgentModelControls,
       MemorySection: AgentFactsSection,
-      MessageContext: AgentMessageContext,
     }),
     [
       snapshot,
@@ -1040,18 +1035,6 @@ function LiveAgentModelControls({
         </>
       )}
     </>
-  );
-}
-
-/** The same "Context used" icon and dialog chat replies show, for one agent run. */
-function AgentMessageContext({ agent, runId }: { agent: AgentContact; runId: RunId }) {
-  return (
-    <div className="flex empty:hidden">
-      <ContextUsedButton
-        threadRef={scopeThreadRef(agent.environmentId, agent.conversationThreadId)}
-        runId={runId}
-      />
-    </div>
   );
 }
 

@@ -355,7 +355,7 @@ function ChatPane({
               This is the start of something good.<span>Say hello to {agent.name}.</span>
             </div>
           )}
-          {conversationRows(agent.messages).map(({ message, separator, grouped, endsRun }) => (
+          {conversationRows(agent.messages).map(({ message, separator, grouped }) => (
             <Fragment key={message.id}>
               {switches.before.has(message.id) && (
                 <ModelSwitchLine
@@ -392,9 +392,6 @@ function ChatPane({
                     message.text
                   )}
                 </div>
-                {endsRun && message.runId && client.MessageContext && (
-                  <client.MessageContext agent={agent} runId={message.runId} />
-                )}
                 {message.role === "user" &&
                   (message.id === lastOwner?.id ||
                     message.delivery === "failed" ||
