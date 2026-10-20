@@ -1,4 +1,8 @@
-import type { EnvironmentId, PullRequestLinkedThreadsResult } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  PullRequestLinkedThreadsResult,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 
 export interface CommandPaletteLinkedThreads {
   readonly environmentId: EnvironmentId;
@@ -10,7 +14,9 @@ export interface CommandPaletteLinkedThreads {
 const COMMAND_PALETTE_OPEN_EVENT = "cogenly:open-command-palette";
 
 export interface CommandPaletteOpenDetail {
-  readonly open?: "add-project" | "new-thread-in";
+  readonly open?: "add-project" | "new-thread-in" | "start-work";
+  /** With `open: "start-work"`: the chat that hands off. */
+  readonly threadRef?: ScopedThreadRef;
   readonly query?: string;
   readonly linkedThreads?: CommandPaletteLinkedThreads;
 }

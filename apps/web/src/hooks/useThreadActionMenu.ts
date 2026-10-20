@@ -1,6 +1,6 @@
 import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
-import { requestStartWork } from "../components/work/StartWorkDialog";
+import { openCommandPalette } from "../commandPaletteBus";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
@@ -310,7 +310,7 @@ export function useThreadActionMenu(input: {
             return;
           }
           case "start-work":
-            requestStartWork(threadRef);
+            openCommandPalette({ open: "start-work", threadRef });
             return;
           case "settle":
             await reportFailure("Failed to settle thread", () => settleThread(threadRef));

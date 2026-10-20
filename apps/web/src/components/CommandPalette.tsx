@@ -45,6 +45,7 @@ import {
   type EnvironmentMachineKind,
   type FilesystemBrowseResult,
   type ProjectId,
+  type ScopedThreadRef,
   type SourceControlDiscoveryResult,
   SourceControlProviderKind,
   type SourceControlRepositoryInfo,
@@ -84,7 +85,8 @@ import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
 import { requestAgentCreation } from "../agents/AgentsCreateHost";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
-import { requestStartWork } from "./work/StartWorkDialog";
+import { useStartWork, WorkPickerChoiceIcon } from "./work/StartWork";
+import { ADD_REPOSITORY, listWorkPickerChoices, listWorkRepositories } from "./work/work.logic";
 import { agentStatusLabel } from "../agents/agents.logic";
 import { useAgents } from "../agents/agentsClient";
 import { useSelectSidebarMode } from "./sidebar/modes/useSelectSidebarMode";
@@ -148,7 +150,7 @@ import {
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
-import { onOpenCommandPalette } from "../commandPaletteBus";
+import { onOpenCommandPalette, openCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -484,6 +486,8 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       onOpenCommandPalette((detail) => {
         if (detail.open === "new-thread-in") {
           openNewThreadIn();
+        } else if (detail.open === "start-work" && detail.threadRef) {
+          dispatch({ _tag: "OpenStartWork", threadRef: detail.threadRef });
         } else if (detail.open === "add-project") {
           openAddProject();
         } else if (detail.query !== undefined) {
@@ -688,6 +692,37 @@ function OpenCommandPaletteDialog(props: {
   const selectSidebarMode = useSelectSidebarMode();
   const agents = useAgents().agents;
   const threads = useThreadShells();
+  const serverConfigs = useServerConfigs();
+  const startWork = useStartWork();
+  /** Every place a chat can start Work, as palette rows; picking one starts it. */
+  const startWorkItems = useCallback(
+    (threadRef: ScopedThreadRef): CommandPaletteActionItem[] => {
+      const scratchWorkspaceRoot = serverConfigs.get(threadRef.environmentId)?.scratchWorkspaceRoot;
+      const source = threads.find(
+        (thread) =>
+          thread.environmentId === threadRef.environmentId && thread.id === threadRef.threadId,
+      );
+      return listWorkPickerChoices({
+        repositories: listWorkRepositories(projects, threadRef.environmentId, scratchWorkspaceRoot),
+        sourceProjectId: source?.projectId ?? null,
+        canRunWithoutRepository: scratchWorkspaceRoot != null,
+      }).map((choice) => ({
+        kind: "action" as const,
+        value: `start-work:${choice.value}`,
+        searchTerms: [choice.label],
+        title: choice.label,
+        icon: <WorkPickerChoiceIcon choice={choice} className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          if (choice.value === ADD_REPOSITORY) {
+            openCommandPalette({ open: "add-project" });
+            return;
+          }
+          await startWork({ threadRef, choice: choice.value, announce: true });
+        },
+      }));
+    },
+    [projects, serverConfigs, startWork, threads],
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { appearanceMode, setAppearanceMode } = useTheme();
   const providers = useAtomValue(primaryServerProvidersAtom);
@@ -1822,6 +1857,22 @@ function OpenCommandPaletteDialog(props: {
     });
   }, [clearOpenIntent, browseNavigation, openIntent, projectThreadItems, pushPaletteView]);
 
+  useLayoutEffect(() => {
+    if (openIntent?.kind !== "start-work") return;
+    clearOpenIntent();
+    browseNavigation.invalidate();
+    setAddProjectCloneFlow(null);
+    setNewProjectFlow(null);
+    setViewStack([]);
+    setQuery("");
+    pushPaletteView({
+      addonIcon: <HammerIcon className={ADDON_ICON_CLASS} />,
+      groups: [
+        { value: "projects", label: "Repositories", items: startWorkItems(openIntent.threadRef) },
+      ],
+    });
+  }, [browseNavigation, clearOpenIntent, openIntent, pushPaletteView, startWorkItems]);
+
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
@@ -2086,15 +2137,14 @@ function OpenCommandPaletteDialog(props: {
   if (referenceThreadRef !== null && activeCapabilities?.startWork === true && canStartWork) {
     const threadRef = referenceThreadRef;
     actionItems.push({
-      kind: "action",
+      kind: "submenu",
       value: "action:start-work",
       searchTerms: ["start work", "hand off", "handoff", "coding session", "repository", "repo"],
-      title: "Start Work from this thread",
+      title: "Start Work from this thread in...",
       icon: <HammerIcon className={ITEM_ICON_CLASS} />,
+      addonIcon: <HammerIcon className={ADDON_ICON_CLASS} />,
       shortcutCommand: "thread.startWork",
-      run: async () => {
-        requestStartWork(threadRef);
-      },
+      groups: [{ value: "projects", label: "Repositories", items: startWorkItems(threadRef) }],
     });
   }
 

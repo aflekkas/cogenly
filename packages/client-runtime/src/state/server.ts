@@ -1275,10 +1275,6 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:work:start",
       tag: WS_METHODS.workStart,
     }),
-    proposeWorkHandoff: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:work:propose-handoff",
-      tag: WS_METHODS.workProposeHandoff,
-    }),
     upsertScheduledTask: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:upsert",
       tag: WS_METHODS.scheduledTasksUpsert,

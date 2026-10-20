@@ -178,7 +178,6 @@ describe("command permissions", () => {
     WS_METHODS.projectLabelsMoveThread,
     WS_METHODS.projectLabelsSetThreadLabels,
     WS_METHODS.workStart,
-    WS_METHODS.workProposeHandoff,
     WS_METHODS.agentsRequestApproval,
     WS_METHODS.agentsApprove,
     WS_METHODS.agentsReject,

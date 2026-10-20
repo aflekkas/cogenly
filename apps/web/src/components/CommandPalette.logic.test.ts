@@ -254,6 +254,13 @@ describe("reduceCommandPaletteUiState", () => {
       mode: "command",
       openIntent: { kind: "new-thread-in" },
     });
+    // Start Work names the chat it hands off, which need not be the open one.
+    const threadRef = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("chat") };
+    expect(reduceCommandPaletteUiState(filesOpen, { _tag: "OpenStartWork", threadRef })).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: { kind: "start-work", threadRef },
+    });
   });
 
   it("preserves the mode on close and resets it on open", () => {

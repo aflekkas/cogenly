@@ -10,7 +10,6 @@ import {
 } from "./chat/threadContextDrag";
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
-import { requestStartWork } from "./work/StartWorkDialog";
 import { WorkRowStatusMarker } from "./work/WorkRowStatusMarker";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
@@ -4146,7 +4145,7 @@ export default function Sidebar() {
             return;
           }
           case "start-work":
-            requestStartWork(threadRef);
+            openCommandPalette({ open: "start-work", threadRef });
             return;
           case "settle":
             attemptSettle(threadRef);

@@ -233,7 +233,7 @@ import {
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
-import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { settleAndAdvance } from "../settleAndAdvance";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
@@ -445,7 +445,6 @@ import {
 } from "./chat/QueuedRunsControl";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
-import { requestStartWork } from "./work/StartWorkDialog";
 import { classifyThreadKind, hasRightPanel, threadCapabilities } from "../threadCapabilities";
 import { WorkHandoffLines } from "./work/WorkHandoffLines";
 import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
@@ -6152,7 +6151,7 @@ export default function ChatView(props: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat && isServerThread && activeThreadRef) {
-          requestStartWork(activeThreadRef);
+          openCommandPalette({ open: "start-work", threadRef: activeThreadRef });
         }
         return;
       }

@@ -1,18 +1,15 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import { EnvironmentId, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  ADD_REPOSITORY,
   describeWorkStartFailure,
   deriveWorkRowStatus,
-  groupWorkRepositories,
   NO_REPOSITORY,
+  listWorkPickerChoices,
   listWorkRepositories,
   openWorkWhenArrived,
-  resolveStartWorkFields,
-  resolveStartWorkSubmission,
-  startWorkExcerpt,
-  type StartWorkFields,
   workPrefersNewWorktree,
   workStatusPresentation,
 } from "./work.logic";
@@ -56,161 +53,27 @@ describe("listWorkRepositories", () => {
   });
 });
 
-describe("startWorkExcerpt", () => {
-  it("quotes the first real line without Markdown, cut to length", () => {
-    expect(startWorkExcerpt("\n\n## **Plan** for `audit`\nMore")).toBe("Plan for audit");
-    expect(startWorkExcerpt("- first bullet")).toBe("first bullet");
-    expect(startWorkExcerpt("x".repeat(100), 10)).toBe("xxxxxxxxx…");
-    expect(startWorkExcerpt("   ")).toBe("");
-  });
-});
+describe("listWorkPickerChoices", () => {
+  const repositories = [project(envA, "api", "api"), project(envA, "web", "web")];
 
-describe("groupWorkRepositories", () => {
-  it("puts the most recently active repositories first, then the rest by title", () => {
-    const repositories = ["api", "booking", "docs", "web", "zeta"].map((id) =>
-      project(envA, id, id),
-    );
-    const activity = new Map([
-      [ProjectId.make("web"), "2026-10-03T00:00:00.000Z"],
-      [ProjectId.make("zeta"), "2026-10-05T00:00:00.000Z"],
-      [ProjectId.make("docs"), "2026-10-04T00:00:00.000Z"],
-      [ProjectId.make("api"), "2026-10-01T00:00:00.000Z"],
-    ]);
-    const groups = groupWorkRepositories(repositories, activity);
-    expect(groups.recent.map((repository) => repository.id)).toEqual(["zeta", "docs", "web"]);
-    expect(groups.others.map((repository) => repository.id)).toEqual(["api", "booking"]);
-    expect(groupWorkRepositories(repositories, new Map()).recent).toEqual([]);
-  });
-});
-
-describe("resolveStartWorkFields", () => {
-  const repositories = [{ id: ProjectId.make("booking") }, { id: ProjectId.make("web") }];
-  const sourceThread = { title: "Booking chat", projectId: ProjectId.make("scratch") };
-  const proposal = {
-    title: "Fix booking path checks",
-    scopeSummary: "Make the booking path checks reject stale slots.",
-    suggestedProjectId: ProjectId.make("booking"),
-  };
-
-  it("starts from the chat title while the proposal is loading", () => {
+  it("puts the chat's own repository first, then the rest, no repository and add", () => {
     expect(
-      resolveStartWorkFields({ edits: {}, proposal: null, repositories, sourceThread }),
-    ).toEqual({ title: "Booking chat", scopeSummary: "", projectId: null });
-  });
-
-  it("fills untouched fields from the proposal and keeps the user's edits", () => {
-    expect(
-      resolveStartWorkFields({
-        edits: { title: "My title", projectId: ProjectId.make("web") },
-        proposal,
+      listWorkPickerChoices({
         repositories,
-        sourceThread,
-      }),
-    ).toEqual({
-      title: "My title",
-      scopeSummary: proposal.scopeSummary,
-      projectId: ProjectId.make("web"),
-    });
+        sourceProjectId: ProjectId.make("web"),
+        canRunWithoutRepository: true,
+      }).map((choice) => choice.value),
+    ).toEqual(["web", "api", NO_REPOSITORY, ADD_REPOSITORY]);
   });
 
-  it("keeps an emptied field empty instead of refilling it", () => {
+  it("offers no repository only where the machine has a scratch folder", () => {
     expect(
-      resolveStartWorkFields({ edits: { scopeSummary: "" }, proposal, repositories, sourceThread })
-        .scopeSummary,
-    ).toBe("");
-  });
-
-  it("ignores a suggestion outside the repository list", () => {
-    const fields = resolveStartWorkFields({
-      edits: {},
-      proposal: { ...proposal, suggestedProjectId: ProjectId.make("scratch") },
-      repositories,
-      sourceThread,
-    });
-    expect(fields.projectId).toBeNull();
-  });
-
-  it("keeps a No repository pick, which no suggestion replaces", () => {
-    expect(
-      resolveStartWorkFields({
-        edits: { projectId: NO_REPOSITORY },
-        proposal,
+      listWorkPickerChoices({
         repositories,
-        sourceThread,
-      }).projectId,
-    ).toBe(NO_REPOSITORY);
-  });
-
-  it("falls back to the thread's own repository, then the only repository", () => {
-    expect(
-      resolveStartWorkFields({
-        edits: {},
-        proposal: { ...proposal, suggestedProjectId: null },
-        repositories,
-        sourceThread: { ...sourceThread, projectId: ProjectId.make("web") },
-      }).projectId,
-    ).toBe(ProjectId.make("web"));
-    expect(
-      resolveStartWorkFields({
-        edits: {},
-        proposal: { ...proposal, suggestedProjectId: null },
-        repositories: [repositories[0]!],
-        sourceThread,
-      }).projectId,
-    ).toBe(ProjectId.make("booking"));
-  });
-});
-
-describe("resolveStartWorkSubmission", () => {
-  const fields: StartWorkFields = {
-    title: "  Fix booking  ",
-    scopeSummary: " Reject stale slots. ",
-    projectId: ProjectId.make("booking"),
-  };
-
-  it("trims the fields and keeps the chat's model unless one was picked", () => {
-    expect(
-      resolveStartWorkSubmission({ fields, workspace: "worktree", modelSelection: null }),
-    ).toEqual({
-      ok: true,
-      input: {
-        targetProjectId: ProjectId.make("booking"),
-        title: "Fix booking",
-        scopeSummary: "Reject stale slots.",
-        workspace: "worktree",
-      },
-    });
-    const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6" };
-    const submission = resolveStartWorkSubmission({ fields, workspace: "local", modelSelection });
-    expect(submission.ok && submission.input.modelSelection).toEqual(modelSelection);
-  });
-
-  it("runs Work without a repository locally, for the caller to place in scratch", () => {
-    const submission = resolveStartWorkSubmission({
-      fields: { ...fields, projectId: NO_REPOSITORY },
-      workspace: "worktree",
-      modelSelection: null,
-    });
-    expect(submission.ok && submission.input).toMatchObject({
-      targetProjectId: null,
-      workspace: "local",
-    });
-  });
-
-  it("explains what is missing", () => {
-    const reason = (overrides: Partial<typeof fields>) => {
-      const submission = resolveStartWorkSubmission({
-        fields: { ...fields, ...overrides },
-        workspace: "worktree",
-        modelSelection: null,
-      });
-      return submission.ok ? null : submission.reason;
-    };
-    expect(reason({ projectId: null })).toBe("Choose a repository.");
-    expect(reason({ title: "   " })).toBe("Add a title.");
-    expect(reason({ scopeSummary: "" })).toBe("Describe the scope.");
-    expect(reason({ title: "x".repeat(201) })).toMatch(/title/);
-    expect(reason({ scopeSummary: "x".repeat(16001) })).toMatch(/too long/);
+        sourceProjectId: null,
+        canRunWithoutRepository: false,
+      }).map((choice) => choice.value),
+    ).toEqual(["api", "web", ADD_REPOSITORY]);
   });
 });
 

@@ -1,49 +1,39 @@
-import type {
-  EnvironmentId,
-  ModelSelection,
-  ProjectId,
-  ThreadEnvMode,
-  WorkHandoffDraft,
-  WorkHandoffError,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId, ThreadEnvMode, WorkHandoffError } from "@t3tools/contracts";
 import type { ProjectSettingSource } from "@t3tools/shared/projectSettings";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type { WorkStatus } from "@t3tools/client-runtime/state/work-status";
 
-// Mirrors the limits in packages/contracts/src/work.ts, so the dialog explains
-// a rejection before the server makes one.
-export const WORK_TITLE_MAX_LENGTH = 200;
-export const WORK_SCOPE_MAX_LENGTH = 16000;
-
-export type WorkWorkspace = "worktree" | "local";
-
 /** The picker's "No repository" choice: Work runs in the environment's scratch project. */
 export const NO_REPOSITORY = "no-repository";
 export type WorkRepositoryChoice = ProjectId | typeof NO_REPOSITORY;
+/** The picker's "Add repository" row: an action, not a place to start Work. */
+export const ADD_REPOSITORY = "add-repository";
+
+export interface WorkPickerChoice {
+  readonly value: WorkRepositoryChoice | typeof ADD_REPOSITORY;
+  readonly label: string;
+}
 
 /**
- * The picker's repository groups: up to `recentLimit` repositories with the
- * newest thread activity first, then the rest by title. `activity` holds each
- * repository's latest thread `updatedAt`; repositories without threads are
- * never recent.
+ * The Start Work picker's rows: the chat's own repository first, so Enter
+ * starts there, then the rest in the given order, "No repository" when the
+ * machine offers it, and "Add repository".
  */
-export function groupWorkRepositories<T extends Pick<EnvironmentProject, "id" | "title">>(
-  repositories: ReadonlyArray<T>,
-  activity: ReadonlyMap<ProjectId, string>,
-  recentLimit = 3,
-): { readonly recent: T[]; readonly others: T[] } {
-  const recent = repositories
-    .filter((repository) => activity.has(repository.id))
-    .toSorted((left, right) => activity.get(right.id)!.localeCompare(activity.get(left.id)!))
-    .slice(0, recentLimit);
-  const recentIds = new Set(recent.map((repository) => repository.id));
-  return {
-    recent,
-    others: repositories
-      .filter((repository) => !recentIds.has(repository.id))
-      .toSorted((left, right) => left.title.localeCompare(right.title)),
-  };
+export function listWorkPickerChoices(input: {
+  readonly repositories: ReadonlyArray<Pick<EnvironmentProject, "id" | "title">>;
+  readonly sourceProjectId: ProjectId | null;
+  readonly canRunWithoutRepository: boolean;
+}): WorkPickerChoice[] {
+  const own = input.repositories.filter((repository) => repository.id === input.sourceProjectId);
+  const others = input.repositories.filter((repository) => repository.id !== input.sourceProjectId);
+  return [
+    ...[...own, ...others].map((repository) => ({ value: repository.id, label: repository.title })),
+    ...(input.canRunWithoutRepository
+      ? [{ value: NO_REPOSITORY, label: "No repository" } as const]
+      : []),
+    { value: ADD_REPOSITORY, label: "Add repository…" },
+  ];
 }
 
 /**
@@ -84,111 +74,6 @@ export function workPrefersNewWorktree(input: {
     input.environmentDefault === null &&
     input.resolvedSource === "environment"
   );
-}
-
-/**
- * The line the Start Work dialog quotes for a message it starts from: its first
- * non-empty line, without Markdown markers, cut to `maxLength` characters.
- */
-export function startWorkExcerpt(text: string, maxLength = 80): string {
-  const line =
-    text
-      .split("\n")
-      .map((candidate) =>
-        candidate
-          .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*|\d+[.)]\s+)/u, "")
-          .replace(/[*_`]/gu, "")
-          .trim(),
-      )
-      .find(Boolean) ?? "";
-  return line.length > maxLength ? `${line.slice(0, maxLength - 1).trimEnd()}…` : line;
-}
-
-/** Fields the user changed in the dialog; absent means "still the suggestion". */
-export interface StartWorkEdits {
-  readonly title?: string;
-  readonly scopeSummary?: string;
-  readonly projectId?: WorkRepositoryChoice;
-}
-
-export interface StartWorkFields {
-  readonly title: string;
-  readonly scopeSummary: string;
-  readonly projectId: WorkRepositoryChoice | null;
-}
-
-/**
- * What the dialog shows. The proposal arrives after the dialog opens, so it
- * fills only the fields the user has not touched yet. The repository falls
- * back from the user's pick to the suggestion, the chat's own repository, and
- * finally the only repository there is; anything outside the list is ignored.
- * "No repository" is only ever the user's pick, never a guess.
- */
-export function resolveStartWorkFields(input: {
-  readonly edits: StartWorkEdits;
-  readonly proposal: WorkHandoffDraft | null;
-  readonly repositories: ReadonlyArray<Pick<EnvironmentProject, "id">>;
-  readonly sourceThread: { readonly title: string; readonly projectId: ProjectId } | null;
-}): StartWorkFields {
-  const { edits, proposal, repositories, sourceThread } = input;
-  const listed = (id: ProjectId | null | undefined): id is ProjectId =>
-    id != null && repositories.some((repository) => repository.id === id);
-  const projectId =
-    edits.projectId === NO_REPOSITORY
-      ? NO_REPOSITORY
-      : [edits.projectId, proposal?.suggestedProjectId, sourceThread?.projectId].find(listed);
-  return {
-    title: edits.title ?? proposal?.title ?? sourceThread?.title ?? "",
-    scopeSummary: edits.scopeSummary ?? proposal?.scopeSummary ?? "",
-    projectId: projectId ?? (repositories.length === 1 ? repositories[0]!.id : null),
-  };
-}
-
-export type StartWorkSubmission =
-  | {
-      readonly ok: true;
-      readonly input: {
-        /** Null is "No repository": the caller resolves the scratch project. */
-        readonly targetProjectId: ProjectId | null;
-        readonly title: string;
-        readonly scopeSummary: string;
-        readonly workspace: WorkWorkspace;
-        readonly modelSelection?: ModelSelection;
-      };
-    }
-  | { readonly ok: false; readonly reason: string };
-
-/**
- * Validates the dialog against the wire limits. A null model keeps the chat's.
- * Work without a repository runs locally: there is no git to make a worktree from.
- */
-export function resolveStartWorkSubmission(input: {
-  readonly fields: StartWorkFields;
-  readonly workspace: WorkWorkspace;
-  readonly modelSelection: ModelSelection | null;
-}): StartWorkSubmission {
-  const title = input.fields.title.trim();
-  const scopeSummary = input.fields.scopeSummary.trim();
-  if (input.fields.projectId === null) return { ok: false, reason: "Choose a repository." };
-  if (title.length === 0) return { ok: false, reason: "Add a title." };
-  if (title.length > WORK_TITLE_MAX_LENGTH) {
-    return { ok: false, reason: `Keep the title under ${WORK_TITLE_MAX_LENGTH} characters.` };
-  }
-  if (scopeSummary.length === 0) return { ok: false, reason: "Describe the scope." };
-  if (scopeSummary.length > WORK_SCOPE_MAX_LENGTH) {
-    return { ok: false, reason: "The scope is too long. Trim it and reference the chat instead." };
-  }
-  const noRepository = input.fields.projectId === NO_REPOSITORY;
-  return {
-    ok: true,
-    input: {
-      targetProjectId: noRepository ? null : input.fields.projectId,
-      title,
-      scopeSummary,
-      workspace: noRepository ? "local" : input.workspace,
-      ...(input.modelSelection === null ? {} : { modelSelection: input.modelSelection }),
-    },
-  };
 }
 
 /**

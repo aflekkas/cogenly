@@ -50,11 +50,8 @@ describe("RPC authorization scopes", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });
 
-  it("requires operate access to start Work or generate a handoff draft", () => {
+  it("requires operate access to start Work", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.workStart)).toBe(AuthOrchestrationOperateScope);
-    expect(requiredScopeForRpcMethod(WS_METHODS.workProposeHandoff)).toBe(
-      AuthOrchestrationOperateScope,
-    );
   });
 
   it("requires owner operate authority for agent decisions and commitment mutations", () => {

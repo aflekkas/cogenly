@@ -72,12 +72,13 @@ repository and marked with the agent's name.
 
 ## Start Work from a chat
 
-When a chat turns into a coding task, choose **Start Work…** from the thread's title
-menu or right-click menu, run **Start Work from this thread** in the command palette,
-or press `mod+alt+s`. Cogenly drafts a title and scope from the conversation and
-suggests a repository. Edit any of them, then choose a new worktree or the local
-checkout and, optionally, a different model. The session starts from the scope you
-approved, with a link back to the chat rather than the whole transcript.
+When a chat turns into a coding task, hover a message and choose the hammer to hand
+off the chat up to that message, or hand off the whole chat with **Start Work…** in
+the thread's title or right-click menu, **Start Work from this thread in...** in the
+command palette, or `mod+alt+s`. Pick a repository, or **No repository**, and the
+session starts right away with the chat's model: in a new worktree when the
+repository uses git, otherwise in its folder. It carries your recent requests from
+the chat and a link back to it, and names itself like any new thread.
 
 The chat keeps a **Work started** line for each session it handed off. The session's
 header shows the chat or agent it came from and its status, such as **Running**,

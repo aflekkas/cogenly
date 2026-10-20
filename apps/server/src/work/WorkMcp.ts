@@ -4,7 +4,8 @@ import {
   WorkStartInput,
   WorkStartResult,
   WorkHandoffDraft,
-  WorkProposeHandoffInput,
+  WorkScopeSummary,
+  WorkTitle,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -27,12 +28,13 @@ const shared = {
 const Start = Tool.make("work_start", {
   ...shared,
   description:
-    "Start a normal coding Work session from this conversation in the chosen repository, with a concise approved scope and source link. Defaults to a new worktree. Pass throughMessageId to hand off only the conversation up to that message. Reuse commandId when retrying. Agent identity comes from the calling thread.",
+    "Start a normal coding Work session from this conversation in the chosen repository, with a concise approved scope and source link. Defaults to a new worktree when the repository uses git, else its checkout. Pass throughMessageId to hand off only the conversation up to that message. Reuse commandId when retrying. Agent identity comes from the calling thread.",
   parameters: Schema.Struct({
     commandId: WorkStartInput.fields.commandId,
     targetProjectId: WorkStartInput.fields.targetProjectId,
-    title: WorkStartInput.fields.title,
-    scopeSummary: WorkStartInput.fields.scopeSummary,
+    // An agent writes its own title and scope; only the web hands off the raw chat.
+    title: WorkTitle,
+    scopeSummary: WorkScopeSummary,
     workspace: WorkStartInput.fields.workspace,
     modelSelection: WorkStartInput.fields.modelSelection,
     throughMessageId: WorkStartInput.fields.throughMessageId,
@@ -44,7 +46,7 @@ const Propose = Tool.make("work_propose_handoff", {
   description:
     "Draft an editable Work title, scope and repository suggestion from this conversation, or from it up to throughMessageId. Does not launch Work.",
   parameters: Schema.Struct({
-    throughMessageId: WorkProposeHandoffInput.fields.throughMessageId,
+    throughMessageId: WorkStartInput.fields.throughMessageId,
   }),
   success: WorkHandoffDraft,
 });

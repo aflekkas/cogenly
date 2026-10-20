@@ -150,6 +150,8 @@ const makeHarness = (
     messages?: OrchestrationV2ThreadProjection["messages"];
     /** Makes `scratch` the scratch project, so Work can target "No repository". */
     scratch?: boolean;
+    /** Whether the target repository is under git; defaults to true. */
+    git?: boolean;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -190,6 +192,8 @@ const makeHarness = (
         listShells: () => Effect.succeed([{ ...repo, repositoryIdentity: null }]),
       }),
       Layer.mock(Git.GitWorkflowService)({
+        isRepository: (cwd) =>
+          Effect.succeed((options.git ?? true) && cwd !== scratch.workspaceRoot),
         hasCommit: () => Effect.succeed(false),
         createWorktree: (request) =>
           Effect.sync(() => {
@@ -760,6 +764,59 @@ it.effect("starts Work without a repository at the scratch root and names the cu
       expect(
         (yield* h.orchestrator.getThreadProjection(sourceId)).thread.workHandoffs?.[0]?.threadId,
       ).toBe(result.threadId);
+      yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("hands the chat over as is when no title or scope is given, and titles itself", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness({
+      messages: [
+        message("user", "Add booking-audit validation.", 0),
+        message("assistant", "Plan: validate dates first, then totals.", 1),
+        message("user", "Unrelated: rename the marketing page.", 2),
+      ],
+    });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      const result = yield* service.start({
+        commandId: CommandId.make("handoff:raw"),
+        sourceThreadId: sourceId,
+        targetProjectId: targetId,
+        throughMessageId: MessageId.make("scope:1"),
+      });
+      yield* Deferred.await(h.finished);
+      const projection = yield* h.orchestrator.getThreadProjection(result.threadId);
+      const text = projection.messages[0]?.text ?? "";
+      // The chat's words through the cut-off, including the reply it stops at.
+      expect(text).toContain("1. Add booking-audit validation.");
+      expect(text).toContain("Plan: validate dates first, then totals.");
+      expect(text).not.toContain("marketing page");
+      expect(text).toContain(`t3-thread://v1/${sourceId}`);
+      expect(projection.contextHandoffs[0]?.summaryText).toContain("Add booking-audit validation.");
+      // A git repository with no workspace choice gets its own worktree.
+      expect(projection.runs[0]?.workspacePreparation?.type).toBe("worktree");
+      // Titled like a new thread: the chat's title holds until the generated one lands.
+      expect(projection.thread.title).toBe("Audit design");
+      expect(projection.thread.titleRegeneration).not.toBeNull();
+      yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("starts in the checkout when the repository has no git and no workspace is chosen", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness({ git: false });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      const result = yield* service.start(input);
+      yield* Deferred.await(h.finished);
+      const projection = yield* h.orchestrator.getThreadProjection(result.threadId);
+      expect(projection.runs[0]?.workspacePreparation?.type).toBe("root");
+      expect(h.worktrees).toEqual([]);
       yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
     }).pipe(Effect.provide(h.work));
   }).pipe(Effect.provide(runtime)),

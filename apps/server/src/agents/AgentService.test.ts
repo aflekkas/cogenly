@@ -4,6 +4,7 @@ import * as AgentEvents from "./AgentEventBus.ts";
 import * as EventReactor from "./AgentEventReactor.ts";
 import * as EventStore from "../orchestration-v2/EventStore.ts";
 import * as Work from "../work/WorkHandoffService.ts";
+import * as Git from "../git/GitWorkflowService.ts";
 import * as Labels from "../projectLabels/ProjectLabelService.ts";
 import * as LabelEvents from "../persistence/OrchestrationEventStore.ts";
 import * as Projects from "../project/ProjectService.ts";
@@ -206,6 +207,7 @@ const makeHarness = Effect.sync(() => {
         }),
     }),
     Layer.mock(Secrets.SecretRequests)({}),
+    Layer.mock(Git.GitWorkflowService)({ isRepository: () => Effect.succeed(true) }),
   );
   const database = Sqlite.layerMemory;
   const store = Store.layer.pipe(Layer.provide(database));

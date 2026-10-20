@@ -1588,10 +1588,6 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsMoveThread]: (input) => projectLabels.moveThread(input),
       [WS_METHODS.projectLabelsSetThreadLabels]: (input) => projectLabels.setThreadLabels(input),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
-      [WS_METHODS.workProposeHandoff]: (input) =>
-        workHandoff.proposeHandoff(input.sourceThreadId, {
-          throughMessageId: input.throughMessageId,
-        }),
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>
         agentWorkspace.requestApproval(input.agentId, input.action),

@@ -11,6 +11,7 @@ import {
   type WorkHandoffDraft,
   type OrchestrationV2ThreadLaunchWorkspaceStrategy,
   type OrchestrationV2ThreadProjection,
+  type Project,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -21,6 +22,7 @@ import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Launch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Projects from "../project/ProjectService.ts";
 import * as ManagedFolders from "../project/ManagedProjectFolders.ts";
+import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -35,6 +37,37 @@ export interface WorkHandoffActor {
   readonly runtimeMode?: RuntimeMode;
   readonly interactionMode?: ProviderInteractionMode;
 }
+type ChatMessages = OrchestrationV2ThreadProjection["messages"];
+
+const settledText = (messages: ChatMessages) =>
+  messages.filter((message) => !message.streaming && message.text.trim());
+
+/**
+ * The scope a handoff carries when the caller wrote none: the chat's own words,
+ * so Work can start at once. The user's latest requests, oldest first, and the
+ * assistant's reply when the handoff stops at one (often the plan to build).
+ */
+export function chatHandoffScope(messages: ChatMessages): string {
+  const settled = settledText(messages);
+  const requests = settled
+    .filter((message) => message.role === "user")
+    .slice(-6)
+    .map((message, index) => `${index + 1}. ${message.text.trim().slice(0, 1500)}`);
+  const last = settled.at(-1);
+  const sections = [
+    ...(requests.length > 0
+      ? [`Requests from the chat, oldest first:\n\n${requests.join("\n\n")}`]
+      : []),
+    ...(last?.role === "assistant"
+      ? [`The chat's reply this handoff starts from:\n\n${last.text.trim().slice(0, 6000)}`]
+      : []),
+  ];
+  return (sections.join("\n\n") || "Continue the work discussed in the source conversation.").slice(
+    0,
+    16000,
+  );
+}
+
 export class WorkHandoffService extends Context.Service<
   WorkHandoffService,
   {
@@ -58,6 +91,7 @@ const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const agents = yield* AgentStore.AgentStore;
   const folders = yield* ManagedFolders.ManagedProjectFolders;
+  const git = yield* GitWorkflow.GitWorkflowService;
   const sourceThread = Effect.fn("WorkHandoffService.sourceThread")(function* (
     sourceThreadId: ThreadId,
   ) {
@@ -94,18 +128,37 @@ const make = Effect.gen(function* () {
           : undefined;
       // Work with no repository runs in the scratch project, which has no git
       // to make a worktree from, so it always launches at the root (its own folder).
+      // Without an explicit workspace, Work gets a worktree only where there is git to make one.
       const scratchRoot = yield* folders.scratchRoot;
+      const chooseByGit = input.workspace === undefined && actor?.workspaceStrategy === undefined;
+      const target =
+        Option.isSome(scratchRoot) || chooseByGit
+          ? yield* projects
+              .getById(input.targetProjectId)
+              .pipe(Effect.orElseSucceed(() => Option.none<Project>()))
+          : Option.none<Project>();
       const targetIsScratch =
         Option.isSome(scratchRoot) &&
-        (yield* projects.getById(input.targetProjectId).pipe(
-          Effect.map(Option.exists((project) => project.workspaceRoot === scratchRoot.value)),
-          Effect.orElseSucceed(() => false),
-        ));
+        Option.exists(target, (project) => project.workspaceRoot === scratchRoot.value);
+      const useWorktree =
+        input.workspace === "worktree" ||
+        (chooseByGit &&
+          (Option.isNone(target) ||
+            (yield* git
+              .isRepository(target.value.workspaceRoot)
+              .pipe(Effect.orElseSucceed(() => true)))));
       const workspaceStrategy =
         actor?.workspaceStrategy ??
-        (input.workspace === "local" || targetIsScratch
+        (!useWorktree || targetIsScratch
           ? { type: "root" as const }
           : { type: "worktree" as const, baseRef: "HEAD", startFromOrigin: false });
+      // No scope or title from the caller: carry the chat's own words over and
+      // let the Work thread title itself from them, as a new thread does.
+      const scopeSummary =
+        input.scopeSummary ??
+        chatHandoffScope(
+          (yield* chatThrough(input.sourceThreadId, input.throughMessageId)).messages,
+        );
       const cutOff =
         input.throughMessageId === undefined
           ? ""
@@ -117,7 +170,8 @@ const make = Effect.gen(function* () {
           commandId: input.commandId,
           ...(actor?.threadId === undefined ? {} : { threadId: actor.threadId }),
           projectId: input.targetProjectId,
-          title: input.title,
+          title: input.title ?? source.thread.title,
+          ...(input.title === undefined ? { generateTitle: true } : {}),
           surface: "work" as const,
           workOrigin: origin,
           sourceThreadId: input.sourceThreadId,
@@ -134,7 +188,7 @@ const make = Effect.gen(function* () {
           createdBy: origin === "agent" ? "agent" : "user",
           creationSource: origin === "agent" ? "mcp" : "web",
           initialMessage: {
-            text: `${input.scopeSummary}\n\nSource conversation: [${source.thread.title}](t3-thread://v1/${input.sourceThreadId})\nSource thread ID: ${input.sourceThreadId}${cutOff}\nUse this approved scope; follow the source reference if more context is needed.`,
+            text: `${scopeSummary}\n\nSource conversation: [${source.thread.title}](t3-thread://v1/${input.sourceThreadId})\nSource thread ID: ${input.sourceThreadId}${cutOff}\n${input.scopeSummary === undefined ? "These are the chat's own words; read the source conversation for the rest of its context before making changes." : "Use this approved scope; follow the source reference if more context is needed."}`,
             senderThreadId: input.sourceThreadId,
             attachments: [],
           },
@@ -157,7 +211,7 @@ const make = Effect.gen(function* () {
           commandId: CommandId.make(`${input.commandId}:work-handoff`),
           threadId: input.sourceThreadId,
           targetThreadId: result.threadId,
-          scopeSummary: input.scopeSummary,
+          scopeSummary,
         })
         .pipe(
           Effect.mapError(
@@ -179,7 +233,7 @@ const make = Effect.gen(function* () {
    */
   const messagesThrough = Effect.fn("WorkHandoffService.messagesThrough")(function* (
     sourceThreadId: ThreadId,
-    recent: OrchestrationV2ThreadProjection["messages"],
+    recent: ChatMessages,
     throughMessageId: MessageId | undefined,
   ) {
     if (throughMessageId === undefined) return recent;
@@ -200,29 +254,30 @@ const make = Effect.gen(function* () {
           .filter((message) => DateTime.isLessThanOrEqualTo(message.createdAt, cutOff.createdAt))
           .concat(cutOff);
   });
-  const proposeHandoff: WorkHandoffService["Service"]["proposeHandoff"] = Effect.fn(
-    "WorkHandoffService.proposeHandoff",
-  )(function* (sourceThreadId, options) {
-    yield* sourceThread(sourceThreadId);
+  /** The chat's recent window, and its messages through `throughMessageId`. */
+  const chatThrough = Effect.fn("WorkHandoffService.chatThrough")(function* (
+    sourceThreadId: ThreadId,
+    throughMessageId: MessageId | undefined,
+  ) {
     const readSourceError = (cause?: unknown) =>
       new WorkHandoffError({ sourceThreadId, stage: "read-source", cause });
     const source = (yield* threads
       .getThreadSnapshotWindow(sourceThreadId, { rowLimit: 30, userTurnLimit: 3 })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new WorkHandoffError({ sourceThreadId: sourceThreadId, stage: "read-source", cause }),
-        ),
-      )).projection;
-    const messages = yield* messagesThrough(
-      sourceThreadId,
-      source.messages,
-      options?.throughMessageId,
-    ).pipe(Effect.mapError(readSourceError));
+      .pipe(Effect.mapError(readSourceError))).projection;
+    const messages = yield* messagesThrough(sourceThreadId, source.messages, throughMessageId).pipe(
+      Effect.mapError(readSourceError),
+    );
+    return { source, messages };
+  });
+  const proposeHandoff: WorkHandoffService["Service"]["proposeHandoff"] = Effect.fn(
+    "WorkHandoffService.proposeHandoff",
+  )(function* (sourceThreadId, options) {
+    yield* sourceThread(sourceThreadId);
+    const { source, messages } = yield* chatThrough(sourceThreadId, options?.throughMessageId);
     // User messages carry the requirements. Omitting assistant replies also keeps
     // confirmations and other meta-chatter out of both generation and fallback.
-    const requirements = messages
-      .filter((message) => message.role === "user" && !message.streaming && message.text.trim())
+    const requirements = settledText(messages)
+      .filter((message) => message.role === "user")
       .slice(-6)
       .map((message) => message.text.trim().slice(0, 2000));
     const fallback =

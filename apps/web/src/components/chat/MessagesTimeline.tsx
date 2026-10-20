@@ -172,7 +172,7 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { useThreadShell } from "../../state/entities";
-import { useStartWorkFromMessage } from "../work/StartWorkDialog";
+import { StartWorkPicker, useCanStartWork } from "../work/StartWork";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
   readTimelinePosition,
@@ -321,10 +321,8 @@ interface TimelineRowSharedState {
   runs: ReadonlyArray<HandoffTimelineRun>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
-  /** Hands the chat up to a message to a new Work session; null outside chats. */
-  onStartWorkFromMessage:
-    | ((message: { readonly id: MessageId; readonly text: string }) => void)
-    | null;
+  /** The chat a message can start Work from; null where Work cannot start. */
+  startWorkThreadRef: ScopedThreadRef | null;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   /** Sends text an MCP App asked to post, after the user approved it. */
   onSendAppMessage: ((text: string) => Promise<void>) | undefined;
@@ -659,7 +657,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   }
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
   const openPullRequest = useOpenPrLink(citationThreadRef ?? undefined);
-  const startWorkFromMessage = useStartWorkFromMessage(paintOnly ? null : citationThreadRef);
+  const canStartWork = useCanStartWork(paintOnly ? null : citationThreadRef);
+  const startWorkThreadRef = canStartWork ? citationThreadRef : null;
   const expandCitedRun = useCallback((runId: RunId) => {
     setExpandedRunIds((current) => (current.has(runId) ? current : new Set([...current, runId])));
   }, []);
@@ -1331,7 +1330,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       runs,
       activeThreadEnvironmentId,
       onRevertToTurnCount,
-      onStartWorkFromMessage: startWorkFromMessage,
+      startWorkThreadRef,
       onRunShellCommand,
       findActive,
       onImageExpand,
@@ -1369,7 +1368,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       runs,
       activeThreadEnvironmentId,
       onRevertToTurnCount,
-      startWorkFromMessage,
+      startWorkThreadRef,
       onRunShellCommand,
       findActive,
       onImageExpand,
@@ -2618,9 +2617,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             {typeof revertTurnCount === "number" && (
               <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
             )}
-            {!row.message.streaming && (
-              <StartWorkFromMessageButton id={row.message.id} text={resolvedContext.text} />
-            )}
+            {!row.message.streaming && <StartWorkFromMessageButton id={row.message.id} />}
             {resolvedContext.text && (
               <MessageCopyButton
                 // Structured paste needs the canonical links to retain their positions.
@@ -2928,36 +2925,22 @@ function AssistantForkButton({
 }
 
 /**
- * "Start Work from here": hands the chat, through this message, to a new Work
- * session. Distinct from forking, which continues the conversation as a chat.
+ * "Start Work from here": picks a repository and hands the chat, through this
+ * message, to a new Work session. Distinct from forking, which continues the
+ * conversation as a chat.
  */
-function StartWorkFromMessageButton({
-  id,
-  text,
-}: {
-  readonly id: MessageId;
-  readonly text: string;
-}) {
-  const ctx = use(TimelineRowCtx);
-  const startWork = ctx.onStartWorkFromMessage;
-  if (startWork === null) return null;
+function StartWorkFromMessageButton({ id }: { readonly id: MessageId }) {
+  const threadRef = use(TimelineRowCtx).startWorkThreadRef;
+  if (threadRef === null) return null;
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            onClick={() => startWork({ id, text })}
-            aria-label="Start Work from here"
-          />
-        }
-      >
-        <HammerIcon className="size-3" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">Start Work from here</TooltipPopup>
-    </Tooltip>
+    <StartWorkPicker
+      threadRef={threadRef}
+      throughMessageId={id}
+      tooltip="Start Work from here"
+      trigger={<Button type="button" size="xs" variant="ghost" aria-label="Start Work from here" />}
+    >
+      {(pending) => (pending ? <Spinner className="size-3" /> : <HammerIcon className="size-3" />)}
+    </StartWorkPicker>
   );
 }
 
@@ -3055,9 +3038,7 @@ function AssistantMessageMetaActions({
       {projectedItem?.item.type === "assistant_message" ? (
         <AssistantForkButton projectedItem={projectedItem} />
       ) : null}
-      {!message.streaming ? (
-        <StartWorkFromMessageButton id={message.id} text={message.text} />
-      ) : null}
+      {!message.streaming ? <StartWorkFromMessageButton id={message.id} /> : null}
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>

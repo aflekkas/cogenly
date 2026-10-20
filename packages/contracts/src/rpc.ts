@@ -504,7 +504,6 @@ export const WS_METHODS = {
   projectLabelsMoveThread: "projectLabels.moveThread",
   projectLabelsSetThreadLabels: "projectLabels.setThreadLabels",
   workStart: "work.start",
-  workProposeHandoff: "work.proposeHandoff",
   agentsList: "agents.list",
   agentsSubscribe: "agents.subscribe",
   agentsUpsert: "agents.upsert",
@@ -1842,11 +1841,6 @@ const WsWorkStartRpc = Rpc.make(WS_METHODS.workStart, {
   success: Work.WorkStartResult,
   error: Schema.Union([Work.WorkHandoffError, EnvironmentAuthorizationError]),
 });
-const WsWorkProposeHandoffRpc = Rpc.make(WS_METHODS.workProposeHandoff, {
-  payload: Work.WorkProposeHandoffInput,
-  success: Work.WorkHandoffDraft,
-  error: Schema.Union([Work.WorkHandoffError, EnvironmentAuthorizationError]),
-});
 
 const WsAgentsApprovalsListRpc = Rpc.make(WS_METHODS.agentsApprovalsList, {
   payload: AgentWorkspace.AgentApprovalListInput,
@@ -2166,7 +2160,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsMoveThreadRpc,
   WsProjectLabelsSetThreadLabelsRpc,
   WsWorkStartRpc,
-  WsWorkProposeHandoffRpc,
   WsAgentsApprovalsListRpc,
   WsAgentsRequestApprovalRpc,
   WsAgentsApproveRpc,
