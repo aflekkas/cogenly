@@ -4748,22 +4748,28 @@ export default function Sidebar() {
                       />
                     );
                   };
-                  const items: ReactNode[] = [
-                    <SidebarDraftBlock
-                      key="draft-sessions"
-                      projectByKey={projectByKey}
-                      projectDisplayNameByKey={projectDisplayNameByKey}
-                      scopedProjectKeys={sidebarModes.draftProjectKeys}
-                      routeDraftId={routeDraftIdForRows}
-                      slim={sidebarMode === "chats"}
-                      onNavigateToDraft={navigateToDraft}
-                      onDraftContextMenu={handleDraftContextMenu}
-                    />,
-                  ];
+                  // In Work the count bar filters the list: the first segment
+                  // shows active work (and drafts), each other one only its shelf.
+                  const shownSection = sidebarMode === "tasks" ? (openShelf ?? "active") : null;
+                  const items: ReactNode[] = [];
+                  if (shownSection === null || shownSection === "active")
+                    items.push(
+                      <SidebarDraftBlock
+                        key="draft-sessions"
+                        projectByKey={projectByKey}
+                        projectDisplayNameByKey={projectDisplayNameByKey}
+                        scopedProjectKeys={sidebarModes.draftProjectKeys}
+                        routeDraftId={routeDraftIdForRows}
+                        slim={sidebarMode === "chats"}
+                        onNavigateToDraft={navigateToDraft}
+                        onDraftContextMenu={handleDraftContextMenu}
+                      />,
+                    );
                   const chatDateGroupOf =
                     sidebarMode === "chats" ? createChatDateGrouper(new Date()) : null;
                   for (const item of sidebarListItems) {
                     if (item.kind === "thread") {
+                      if (shownSection !== null && item.section !== shownSection) continue;
                       const thread = threadByKey.get(item.key)!;
                       const dateGroup =
                         item.section === "active" ? chatDateGroupOf?.(thread) : null;
@@ -4779,8 +4785,8 @@ export default function Sidebar() {
                     }
                     switch (item.marker) {
                       case "working-header":
-                        // In Work the count bar stands in for a closed shelf's header.
-                        if (sidebarMode === "tasks" && !workingShelfExpanded) break;
+                        // In Work the count bar labels the lists, so shelves have no header.
+                        if (shownSection !== null) break;
                         items.push(
                           <SidebarSectionHeader
                             key="working-shelf-header"
@@ -4798,8 +4804,8 @@ export default function Sidebar() {
                         );
                         break;
                       case "snoozed-header":
-                        // In Work the count bar stands in for a closed shelf's header.
-                        if (sidebarMode === "tasks" && !snoozedShelfExpanded) break;
+                        // In Work the count bar labels the lists, so shelves have no header.
+                        if (shownSection !== null) break;
                         items.push(
                           <SidebarSectionHeader
                             key="snoozed-shelf-header"
@@ -4817,8 +4823,8 @@ export default function Sidebar() {
                         );
                         break;
                       case "settled-header":
-                        // In Work the count bar stands in for a closed shelf's header.
-                        if (sidebarMode === "tasks" && !settledShelfExpanded) break;
+                        // In Work the count bar labels the lists, so shelves have no header.
+                        if (shownSection !== null) break;
                         items.push(
                           <SidebarSectionHeader
                             key="settled-shelf-header"
@@ -4835,6 +4841,28 @@ export default function Sidebar() {
                           />,
                         );
                         break;
+                    }
+                  }
+                  if (shownSection !== null && shownSection !== "active") {
+                    const shelfCount =
+                      shownSection === "working"
+                        ? workingThreads.length
+                        : shownSection === "snoozed"
+                          ? snoozedThreads.length
+                          : settledThreads.length;
+                    if (shelfCount === 0) {
+                      items.push(
+                        <li
+                          key="empty-shelf"
+                          className="list-none px-2 py-6 text-center text-muted-foreground text-xs"
+                        >
+                          {shownSection === "working"
+                            ? "Nothing working right now"
+                            : shownSection === "snoozed"
+                              ? "Nothing snoozed"
+                              : "Nothing settled yet"}
+                        </li>,
+                      );
                     }
                   }
                   return items;

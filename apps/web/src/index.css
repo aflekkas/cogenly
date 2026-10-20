@@ -1457,16 +1457,22 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --surface-raised-sheen-bottom: rgb(255 255 255 / 1%);
     /* Floating cards (details card, popovers) get a soft edge about nine
        levels over their fill, as in the reference. */
+    /* Measured against the reference's details card: the border sits over
+       the canvas, lit along the sides and softer at the bottom, where the
+       drop shadow takes over. The top's brightness comes from the inset
+       highlight just inside it. */
     --surface-raised-edge-top: rgb(255 255 255 / 4%);
-    --surface-raised-edge-side: rgb(255 255 255 / 3.5%);
-    --surface-raised-edge-bottom: rgb(255 255 255 / 3%);
+    --surface-raised-edge-side: rgb(255 255 255 / 8%);
+    --surface-raised-edge-bottom: rgb(255 255 255 / 5%);
     /* In-page surfaces (bubbles, composer, search dock) rest on a faint edge a
        few levels over their fill, with a fainter ring outside it: a soft glow
        rather than a drawn line. */
     --surface-edge: rgb(255 255 255 / 1.5%);
     --surface-halo: 0 0 0 1px rgb(255 255 255 / 1%);
     --surface-raised-highlight: rgb(255 255 255 / 3%);
-    --surface-raised-shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 10px 28px -14px rgb(0 0 0 / 70%);
+    --surface-raised-shadow:
+      0 -1px 4px rgb(255 255 255 / 2.5%), 0 1px 2px rgb(0 0 0 / 35%),
+      0 10px 28px -14px rgb(0 0 0 / 70%);
     --surface-raised-shadow-floating:
       0 1px 2px rgb(0 0 0 / 40%), 0 18px 44px -18px rgb(0 0 0 / 80%);
     /* Dark states are flat: a selected surface is one fill step brighter with
@@ -1584,9 +1590,14 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --sidebar-row-active: #181818;
     --sidebar-row-selected: var(--sidebar-row-active);
     --sidebar-border: var(--border);
-    --state-selected-highlight: transparent;
-    --state-selected-edge: #1b1b1b;
-    --state-selected-shadow: 0 0 #0000;
+    /* Lit from above, as in the reference: a faint top and side edge, a soft
+       glow just above the card and a short dark shadow under it, with no
+       bright line along the bottom. */
+    --state-selected-edge: transparent;
+    --state-selected-highlight: rgb(255 255 255 / 1.5%);
+    --state-selected-shadow:
+      inset 1px 0 0 rgb(255 255 255 / 1.2%), inset -1px 0 0 rgb(255 255 255 / 1.2%),
+      0 -1px 6px rgb(255 255 255 / 2%), 0 2px 3px rgb(0 0 0 / 45%);
   }
 }
 
