@@ -70,11 +70,10 @@ describe("agentTerminalEntries", () => {
     expect(entries.every((entry) => entry.isAgent)).toBe(true);
   });
 
-  it("keeps script terminals, labelled by the server", () => {
+  it("keeps terminals the agent did not start, labelled by the server", () => {
     const [entry] = agentTerminalEntries([session({ terminalId: "term-1", label: "bun dev" })]);
     expect(entry).toMatchObject({
       terminalId: "term-1",
-      owner: "shell",
       isAgent: false,
       label: "bun dev",
     });
@@ -126,20 +125,10 @@ describe("terminalRunState", () => {
     expect(terminalRunStateMessage(finished(0, null))).toBe("Process exited with code 0");
     expect(terminalRunStateMessage(finished(127, null))).toBe("Process failed with exit code 127");
   });
-
-  it("shows an alive shell without a foreground command as idle", () => {
-    const shell = { status: "running", exitCode: null, exitSignal: null, owner: "shell" } as const;
-    expect(terminalRunState({ ...shell, hasRunningSubprocess: false })).toEqual({ kind: "idle" });
-    expect(terminalRunState({ ...shell, hasRunningSubprocess: true })).toEqual({ kind: "running" });
-    // An agent command is its own process, so it is running regardless.
-    expect(terminalRunState({ ...shell, owner: "agent", hasRunningSubprocess: false })).toEqual({
-      kind: "running",
-    });
-  });
 });
 
 describe("terminalSections", () => {
-  it("pins live runs above finished ones and keeps shells in tab order", () => {
+  it("pins live runs above finished ones and leaves out terminals the agent did not start", () => {
     const sections = terminalSections(
       agentTerminalEntries([
         session({
@@ -169,7 +158,7 @@ describe("terminalSections", () => {
       "agent-mid-failed",
     ]);
     expect(sections.liveRunCount).toBe(1);
-    expect(sections.shells.map((entry) => entry.terminalId)).toEqual(["term-2", "term-10"]);
+    expect(sections).not.toHaveProperty("shells");
   });
 });
 

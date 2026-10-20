@@ -41,7 +41,16 @@ import { Button } from "~/components/ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { AndroidIcon, AppleIcon } from "~/components/Icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { Menu, MenuItem, MenuPopup } from "~/components/ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuShortcut,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "~/components/ui/menu";
 import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { faviconUrlForOrigin } from "~/lib/favicon";
@@ -56,11 +65,32 @@ import { previewBridge } from "./preview/previewBridge";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { observeResize } from "~/lib/observeResize";
 
+export type RightPanelAddKind = "browser" | "terminal" | "device" | "files";
+
+/** One thing the strip's "+" can open as a new tab. */
+export interface RightPanelAddOption {
+  readonly kind: RightPanelAddKind;
+  readonly shortcutLabel: string | null;
+  readonly available: boolean;
+  /** Why it is greyed out, for the menu entry. */
+  readonly unavailableLabel: string;
+  readonly onSelect: () => void;
+  /** Browser only: open the tab in one of the configured profiles. */
+  readonly onSelectInProfile?: (profileId: string) => void;
+}
+
+const ADD_OPTION_PRESENTATION = {
+  browser: { label: "Browser", Icon: Globe2 },
+  terminal: { label: "Terminal", Icon: TerminalSquare },
+  device: { label: "Device", Icon: Smartphone },
+  files: { label: "Files", Icon: Files },
+} as const;
+
 /**
  * The right panel's frame: one row of tabs for the surfaces in the active
  * group (browser tabs, device streams, open files), then the surface itself.
- * Switching between groups is the Work header's job, so the row never offers
- * other kinds; its only "new" action is another browser tab.
+ * The strip's "+" is the one place to add: it lists every kind of tab the
+ * thread offers, and the open tabs say their kind by their icon.
  */
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -74,12 +104,6 @@ interface RightPanelTabsProps {
   defaultWidth?: number;
   inlineSize?: PreviewPanelInlineSize;
   layoutControls?: ReactNode;
-  /**
-   * How many titlebar controls the window pins over the inline tab bar's
-   * right end (surface switchers, maximize, panel toggle). The strip keeps
-   * that much clear; without `layoutControls` it has no other way to know.
-   */
-  trailingControlCount?: number;
   surfaces: readonly RightPanelSurface[];
   /** Fallback environment for surfaces that do not carry their own. */
   environmentId: EnvironmentId | null;
@@ -102,14 +126,8 @@ interface RightPanelTabsProps {
   /** Tabs are draggable only when the owner can persist the new order. */
   onMoveSurface?: (surfaceId: string, toIndex: number) => void;
   onCopyFilePath: (relativePath: string) => void;
-  onAddBrowser: () => void;
-  /**
-   * Separate from `onAddBrowser` on purpose: that one is passed directly as a
-   * DOM click handler, and a `(profileId?: string)` signature would silently
-   * accept the MouseEvent as a profile id.
-   */
-  onAddBrowserInProfile: (profileId: string) => void;
-  browserAvailable: boolean;
+  /** What "+" offers, in menu order. */
+  addOptions: readonly RightPanelAddOption[];
   children: ReactNode;
 }
 
@@ -332,24 +350,46 @@ function SortableTab({
   );
 }
 
-/** Shown only when an open panel has nothing in it; the header is the way in. */
-function RightPanelEmptyState() {
+/** Shown only when an open panel has nothing in it: the same choices as "+", as buttons. */
+function RightPanelEmptyState({ options }: { options: readonly RightPanelAddOption[] }) {
+  const offered = options.filter((option) => option.available);
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-6 pb-(--workspace-topbar-height) text-center">
       <PanelRight className="mb-1 size-4 text-muted-foreground" />
       <p className="text-sm font-medium text-foreground">Nothing open</p>
       <p className="text-xs text-muted-foreground">
-        Open Browser, Terminal or Device from the header.
+        {offered.length > 0 ? "Open something in this panel." : "This thread has nothing to open."}
       </p>
+      {offered.length > 0 ? (
+        <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+          {offered.map((option) => {
+            const { label, Icon } = ADD_OPTION_PRESENTATION[option.kind];
+            return (
+              <Button
+                key={option.kind}
+                size="xs"
+                variant="outline"
+                onClick={option.onSelect}
+                data-right-panel-add={option.kind}
+              >
+                <Icon />
+                {label}
+              </Button>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/** Pinned controls are 1.75rem wide with 0.25rem between them, inset by the window's control offset. */
-function trailingControlsInset(count: number): string {
-  const gaps = Math.max(count - 1, 0);
-  return `calc(var(--workspace-controls-right) + 1px + ${count} * var(--workspace-titlebar-control-size) + ${gaps} * 0.25rem + 0.5rem)`;
-}
+/**
+ * The window pins two controls over the inline strip's right end (maximize
+ * and the panel toggle): 1.75rem each with 0.25rem between, inset by the
+ * window's control offset. The strip keeps that much clear.
+ */
+const TRAILING_CONTROLS_INSET =
+  "calc(var(--workspace-controls-right) + 1px + 2 * var(--workspace-titlebar-control-size) + 0.25rem + 0.5rem)";
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
@@ -373,10 +413,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         : props.surfaces.filter((surface) => surfaceGroupOf(surface) === activeGroup),
     [activeGroup, props.surfaces],
   );
-  const canAddBrowser = activeGroup === "browser" && props.browserAvailable;
+  const offeredOptions = props.addOptions.filter((option) => option.available);
+  const browserOption = offeredOptions.find((option) => option.kind === "browser") ?? null;
+  const canAdd = offeredOptions.length > 0;
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
 
+  // rightPanel.new opens a browser tab, the common case; a thread without a
+  // browser gets the "+" menu instead so the shortcut still adds something.
   const onNewTabKeyDown = useEffectEvent((event: KeyboardEvent) => {
-    if (event.defaultPrevented || event.isComposing || !canAddBrowser) return;
+    if (event.defaultPrevented || event.isComposing || !canAdd) return;
     if (
       resolveShortcutCommand(event, props.keybindings, {
         context: { ...props.getShortcutContext(), rightPanelOpen: true },
@@ -386,7 +431,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     if (document.querySelector(SHORTCUT_BLOCKING_LAYERS)) return;
     event.preventDefault();
     event.stopPropagation();
-    if (!event.repeat) props.onAddBrowser();
+    if (event.repeat) return;
+    if (browserOption) browserOption.onSelect();
+    else setAddMenuOpen(true);
   });
   useEffect(() => {
     if (props.open === false) return;
@@ -607,46 +654,83 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     };
   }, []);
 
-  // "+" opens a tab in the default profile in one click; with more profiles
-  // to choose from, a right-click (or the ContextMenu key) offers them.
-  const newTabRef = useRef<HTMLButtonElement>(null);
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  // "+" lists what the thread can open; the menu is a Base UI menu, so arrows,
+  // Home/End, typeahead and Enter work. A browser with several profiles opens
+  // as a submenu of them.
   const hasProfileChoice = browserProfiles.length > 1;
-  if (!canAddBrowser && profileMenuOpen) setProfileMenuOpen(false);
+  if (!canAdd && addMenuOpen) setAddMenuOpen(false);
   const newTabButton = (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            ref={newTabRef}
-            aria-label="New browser tab"
-            // Sits in the tab lane, after the last tab, like a browser's "+".
-            className={cn(
-              "mb-1 ml-0.5 shrink-0 self-end",
-              ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
-            )}
-            size="icon-xs"
-            variant="ghost-muted"
-            onClick={props.onAddBrowser}
-            onContextMenu={(event) => {
-              if (!hasProfileChoice) return;
-              event.preventDefault();
-              setProfileMenuOpen(true);
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== "ContextMenu" || !hasProfileChoice) return;
-              event.preventDefault();
-              setProfileMenuOpen(true);
-            }}
-          />
-        }
-      >
-        <Plus className="size-3.5" />
-      </TooltipTrigger>
-      <TooltipPopup>
-        {hasProfileChoice ? "New tab · right-click for a profile" : "New tab"}
-      </TooltipPopup>
-    </Tooltip>
+    <Menu open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <MenuTrigger
+              render={
+                <Button
+                  aria-label="New tab"
+                  // Sits in the tab lane, after the last tab, like a browser's "+".
+                  className={cn(
+                    "mb-1 ml-0.5 shrink-0 self-end",
+                    ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
+                  )}
+                  size="icon-xs"
+                  variant="ghost-muted"
+                  data-right-panel-add-trigger
+                />
+              }
+            />
+          }
+        >
+          <Plus className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipPopup>New tab</TooltipPopup>
+      </Tooltip>
+      <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-48">
+        {props.addOptions.map((option) => {
+          const { label, Icon } = ADD_OPTION_PRESENTATION[option.kind];
+          const shortcut = option.shortcutLabel ? (
+            <MenuShortcut>{option.shortcutLabel}</MenuShortcut>
+          ) : null;
+          if (option.kind === "browser" && option.available && hasProfileChoice) {
+            return (
+              <MenuSub key={option.kind}>
+                <MenuSubTrigger data-right-panel-add={option.kind}>
+                  <Icon />
+                  {label}
+                </MenuSubTrigger>
+                <MenuSubPopup className="max-w-56">
+                  {browserProfiles.map((profile) => (
+                    <MenuItem
+                      key={profile.id}
+                      onClick={() =>
+                        option.onSelectInProfile
+                          ? option.onSelectInProfile(profile.id)
+                          : option.onSelect()
+                      }
+                    >
+                      <span className="min-w-0 truncate">{profile.name}</span>
+                    </MenuItem>
+                  ))}
+                </MenuSubPopup>
+              </MenuSub>
+            );
+          }
+          return (
+            <MenuItem
+              key={option.kind}
+              disabled={!option.available}
+              onClick={option.onSelect}
+              aria-description={option.available ? undefined : option.unavailableLabel}
+              data-right-panel-add={option.kind}
+            >
+              <Icon />
+              {label}
+              {shortcut}
+            </MenuItem>
+          );
+        })}
+      </MenuPopup>
+    </Menu>
   );
 
   return (
@@ -678,7 +762,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         )}
         style={
           props.mode === "inline" && !props.layoutControls
-            ? { paddingRight: trailingControlsInset(props.trailingControlCount ?? 2) }
+            ? { paddingRight: TRAILING_CONTROLS_INSET }
             : undefined
         }
         data-right-panel-tabbar
@@ -864,31 +948,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   </SortableTab>
                 );
               })}
-              {canAddBrowser && props.open !== false ? (
-                <>
-                  {newTabButton}
-                  {hasProfileChoice ? (
-                    <Menu open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
-                      <MenuPopup
-                        anchor={newTabRef}
-                        align="start"
-                        side="bottom"
-                        sideOffset={6}
-                        className="max-w-56"
-                      >
-                        {browserProfiles.map((profile) => (
-                          <MenuItem
-                            key={profile.id}
-                            onClick={() => props.onAddBrowserInProfile(profile.id)}
-                          >
-                            <span className="min-w-0 truncate">{profile.name}</span>
-                          </MenuItem>
-                        ))}
-                      </MenuPopup>
-                    </Menu>
-                  ) : null}
-                </>
-              ) : null}
+              {canAdd && props.open !== false ? newTabButton : null}
             </div>
           </SortableTabList>
         </ScrollArea>
@@ -915,7 +975,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             }
           : {})}
       >
-        {props.surfaces.length === 0 ? <RightPanelEmptyState /> : props.children}
+        {props.surfaces.length === 0 ? (
+          <RightPanelEmptyState options={props.addOptions} />
+        ) : (
+          props.children
+        )}
       </div>
     </PreviewPanelShell>
   );

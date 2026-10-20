@@ -9,12 +9,8 @@ export function isAgentTerminalId(terminalId: string): boolean {
   return terminalId.startsWith("agent-");
 }
 
-/** Who started a terminal: a command the agent ran, or a shell opened for the thread. */
-export type AgentTerminalOwner = "agent" | "shell";
-
 export interface AgentTerminalEntry {
   readonly terminalId: string;
-  readonly owner: AgentTerminalOwner;
   readonly isAgent: boolean;
   /** The command for agent terminals; the server's title for anything else. */
   readonly label: string;
@@ -24,7 +20,7 @@ export interface AgentTerminalEntry {
   readonly hasRunningSubprocess: boolean;
   readonly cwd: string;
   readonly worktreePath: string | null;
-  /** When an agent command started; null for shells. */
+  /** When an agent command started; null for a terminal the server did not time. */
   readonly startedAt: string | null;
   /** The last metadata change; for a finished command, roughly when it exited. */
   readonly updatedAt: string;
@@ -44,7 +40,6 @@ export function agentTerminalEntries(
       return [
         {
           terminalId: summary.terminalId,
-          owner: isAgent ? "agent" : "shell",
           isAgent,
           label:
             isAgent && label.startsWith(AGENT_LABEL_PREFIX)
@@ -80,8 +75,6 @@ export function isAgentTerminalRunning(entry: Pick<AgentTerminalEntry, "status">
 export type TerminalRunState =
   | { readonly kind: "starting" }
   | { readonly kind: "running" }
-  /** A shell that is alive but has no foreground command. */
-  | { readonly kind: "idle" }
   | { readonly kind: "succeeded" }
   | { readonly kind: "failed"; readonly exitCode: number }
   | { readonly kind: "killed"; readonly signal: number }
@@ -93,18 +86,13 @@ export type TerminalRunState =
 export type TerminalRunTone = "live" | "muted" | "success" | "danger";
 
 export function terminalRunState(
-  terminal: Pick<TerminalSummary, "status" | "exitCode" | "exitSignal"> & {
-    readonly hasRunningSubprocess?: boolean;
-    readonly owner?: AgentTerminalOwner;
-  },
+  terminal: Pick<TerminalSummary, "status" | "exitCode" | "exitSignal">,
 ): TerminalRunState {
   switch (terminal.status) {
     case "starting":
       return { kind: "starting" };
     case "running":
-      return terminal.owner === "shell" && terminal.hasRunningSubprocess === false
-        ? { kind: "idle" }
-        : { kind: "running" };
+      return { kind: "running" };
     case "error":
       return { kind: "error" };
     case "exited":
@@ -138,8 +126,6 @@ export function terminalRunStateLabel(state: TerminalRunState): string {
       return "Starting";
     case "running":
       return "Running";
-    case "idle":
-      return "Idle";
     case "succeeded":
       return "Exited 0";
     case "failed":
@@ -158,7 +144,6 @@ export function terminalRunStateMessage(state: TerminalRunState): string | null 
   switch (state.kind) {
     case "starting":
     case "running":
-    case "idle":
       return null;
     case "succeeded":
       return "Process exited with code 0";
@@ -178,7 +163,6 @@ export function terminalRunStateTone(state: TerminalRunState): TerminalRunTone {
     case "starting":
     case "running":
       return "live";
-    case "idle":
     case "ended":
       return "muted";
     case "succeeded":
@@ -194,26 +178,22 @@ export interface TerminalSections {
   /** Agent commands, live ones first, each group newest first. */
   readonly runs: ReadonlyArray<AgentTerminalEntry>;
   readonly liveRunCount: number;
-  /** User shells and project-script terminals, oldest first so tabs keep their place. */
-  readonly shells: ReadonlyArray<AgentTerminalEntry>;
 }
 
-/** Splits a thread's terminals into the panel's two sections. Expects `agentTerminalEntries` order. */
+/**
+ * The agent's runs from a thread's terminals, in the panel's order. Expects
+ * `agentTerminalEntries` order. Terminals the agent did not start (a shell
+ * from an older client, say) are not the panel's business and are left out.
+ */
 export function terminalSections(entries: ReadonlyArray<AgentTerminalEntry>): TerminalSections {
   const live: AgentTerminalEntry[] = [];
   const finished: AgentTerminalEntry[] = [];
-  const shells: AgentTerminalEntry[] = [];
   for (const entry of entries) {
-    if (!entry.isAgent) shells.push(entry);
-    else if (isAgentTerminalRunning(entry)) live.push(entry);
+    if (!entry.isAgent) continue;
+    if (isAgentTerminalRunning(entry)) live.push(entry);
     else finished.push(entry);
   }
-  const compare = new Intl.Collator(undefined, { numeric: true }).compare;
-  return {
-    runs: [...live, ...finished],
-    liveRunCount: live.length,
-    shells: shells.toSorted((left, right) => compare(left.terminalId, right.terminalId)),
-  };
+  return { runs: [...live, ...finished], liveRunCount: live.length };
 }
 
 /**

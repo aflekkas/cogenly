@@ -40,7 +40,6 @@ export function RunStateGlyph({ state }: { state: TerminalRunState }) {
           <span className="size-1.5 rounded-full bg-success ring-3 ring-success/15" />
         </span>
       );
-    case "idle":
     case "ended":
       return (
         <span aria-hidden className={box}>

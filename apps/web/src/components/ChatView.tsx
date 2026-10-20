@@ -80,7 +80,6 @@ import {
   resolveEnvironmentMachineKind,
   resolveProjectProviderInstanceEnabled,
   RuntimeMode,
-  TerminalOpenInput,
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import { type EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
@@ -129,11 +128,7 @@ import {
   resolvePromptInjectedEffort,
   resolveSelectableModel,
 } from "@t3tools/shared/model";
-import {
-  projectScriptCwd,
-  projectScriptRuntimeEnv,
-  resolveProjectScripts,
-} from "@t3tools/shared/projectScripts";
+import { projectScriptCwd, resolveProjectScripts } from "@t3tools/shared/projectScripts";
 import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import {
@@ -144,7 +139,6 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import { truncate } from "@t3tools/shared/String";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
-import { nextTerminalId } from "@t3tools/shared/terminalLabels";
 import { AgentTerminalsPanel } from "./AgentTerminalsPanel";
 import { agentTerminalEntries, isAgentTerminalId } from "./AgentTerminalsPanel.logic";
 import { Debouncer } from "@tanstack/react-pacer";
@@ -271,7 +265,7 @@ import {
   selectThreadPreviewMiniPlayer,
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
-import { RightPanelTabs } from "./RightPanelTabs";
+import { RightPanelTabs, type RightPanelAddOption } from "./RightPanelTabs";
 import { useDeviceState } from "~/state/device";
 import { DeviceSetup } from "./device/DeviceSetup";
 import { Dialog } from "./ui/dialog";
@@ -296,7 +290,6 @@ import {
 import { cn, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { registerFaviconProjectForThread } from "~/browserFaviconStore";
 import { getProviderModelCapabilities } from "../providerModels";
@@ -416,7 +409,6 @@ import { ScrollToEndButton } from "./chat/ScrollToEndButton";
 import {
   PanelLayoutControls,
   type PanelLayoutControlsProps,
-  type ThreadSurfaceButton,
   RightPanelMaximizeControl,
 } from "./chat/PanelLayoutControls";
 import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -770,8 +762,6 @@ function formatOutgoingPrompt(params: {
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
   return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
-const SCRIPT_TERMINAL_COLS = 120;
-const SCRIPT_TERMINAL_ROWS = 30;
 
 function isCompactCommandMessage(message: ChatMessage): boolean {
   const text = message.text.trim().toLowerCase();
@@ -1013,8 +1003,6 @@ export default function ChatView(props: ChatViewProps) {
   } = props;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
-  const hasTerminalWriteAccess = () =>
-    readEnvironmentScope(environmentId, AuthTerminalOperateScope);
   const canReadTerminal = useEnvironmentScope(environmentId, AuthTerminalReadScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
@@ -1031,8 +1019,6 @@ export default function ChatView(props: ChatViewProps) {
       currentRouteThreadKeyRef.current = null;
     };
   }, [routeThreadKey]);
-  const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
-  const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const createThread = useOrchestrationCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useOrchestrationCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
@@ -1709,15 +1695,6 @@ export default function ChatView(props: ChatViewProps) {
   const activePreviewMiniPlayer = usePreviewMiniPlayerStore((state) =>
     selectThreadPreviewMiniPlayer(state.byThreadKey, activeThreadRef),
   );
-  // Project scripts run in their own terminals, listed beside the agent's commands.
-  const allocateScriptTerminalId = () =>
-    nextTerminalId(
-      activeServerOrderedTerminalIds,
-      activeThreadKnownSessionsRaw !== null &&
-        readEnvironmentScope(environmentId, AuthTerminalReadScope)
-        ? undefined
-        : randomUUID(),
-    );
   const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
   const rightPanelOpen = rightPanelState.isOpen && rightPanelSupported;
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
@@ -3906,107 +3883,6 @@ export default function ChatView(props: ChatViewProps) {
     composerRef.current?.addTerminalContext(selection);
   };
   const addTerminalContextToDraftStable = useStableCallback(addTerminalContextToDraft);
-  const runProjectScript = async (
-    script: ProjectScript,
-    options?: {
-      cwd?: string;
-      env?: Record<string, string>;
-      worktreePath?: string | null;
-    },
-  ) => {
-    if (!hasTerminalWriteAccess() || !activeThreadId || !activeProject || !activeThread) return;
-    const targetCwd = options?.cwd ?? gitCwd ?? activeProject.workspaceRoot;
-    const targetWorktreePath = options?.worktreePath ?? activeThread.worktreePath ?? null;
-    if (!activeThreadRef) {
-      return;
-    }
-
-    const runtimeEnv = projectScriptRuntimeEnv({
-      project: {
-        cwd: activeProject.workspaceRoot,
-      },
-      worktreePath: targetWorktreePath,
-      ...(options?.env ? { extraEnv: options.env } : {}),
-    });
-    // Every run gets its own terminal in the right panel, so it never types into a busy one.
-    const targetTerminalId = allocateScriptTerminalId();
-    const openTerminalInput: TerminalOpenInput = {
-      threadId: activeThreadId,
-      terminalId: targetTerminalId,
-      cwd: targetCwd,
-      ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
-      env: runtimeEnv,
-      cols: SCRIPT_TERMINAL_COLS,
-      rows: SCRIPT_TERMINAL_ROWS,
-    };
-    useRightPanelStore.getState().openTerminal(activeThreadRef, targetTerminalId);
-    setTerminalFocusRequestId((value) => value + 1);
-
-    const openResult = await openTerminal({ environmentId, input: openTerminalInput });
-    if (openResult._tag === "Failure") {
-      if (!isAtomCommandInterrupted(openResult)) {
-        const error = squashAtomCommandFailure(openResult);
-        setThreadError(
-          activeThreadId,
-          error instanceof Error ? error.message : `Failed to run script "${script.name}".`,
-        );
-      }
-      return;
-    }
-
-    if (!hasTerminalWriteAccess()) return;
-    const writeResult = await writeTerminal({
-      environmentId,
-      input: {
-        threadId: activeThreadId,
-        terminalId: targetTerminalId,
-        data: `${script.command}\r`,
-      },
-    });
-    if (writeResult._tag === "Failure") {
-      if (!isAtomCommandInterrupted(writeResult)) {
-        const error = squashAtomCommandFailure(writeResult);
-        setThreadError(
-          activeThreadId,
-          error instanceof Error ? error.message : `Failed to run script "${script.name}".`,
-        );
-      }
-      return;
-    }
-    if (script.autoOpenPreview && script.previewUrl && isPreviewSupportedInRuntime()) {
-      const previewResult = await openUrlInPreview({
-        threadRef: activeThreadRef,
-        url: resolveDiscoveredServerUrl(activeThreadRef.environmentId, script.previewUrl),
-        openPreview,
-      });
-      if (previewResult._tag === "Failure" && !isAtomCommandInterrupted(previewResult)) {
-        const error = squashAtomCommandFailure(previewResult);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not open preview",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
-          }),
-        );
-      }
-    }
-  };
-  const runProjectScriptStable = useStableCallback(runProjectScript);
-
-  const runProjectScriptRef = useRef(runProjectScriptStable);
-  useLayoutEffect(() => {
-    runProjectScriptRef.current = runProjectScriptStable;
-  }, [runProjectScriptStable]);
-  const runShellCommand = (command: string) => {
-    void runProjectScriptRef.current({
-      id: "chat-code-block",
-      name: "Chat code block",
-      command,
-      icon: "play",
-      runOnWorktreeCreate: false,
-    });
-  };
-  const runShellCommandStable = useStableCallback(runShellCommand);
 
   const handleInteractionModeChange = (mode: ProviderInteractionMode) => {
     if (mode === "plan" && !interactionModeEnabled) return;
@@ -4266,37 +4142,13 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
   const activateRightPanelSurfaceStable = useStableCallback(activateRightPanelSurface);
-  // The Work header's Terminal and Device buttons. Pressed, the tab is showing,
-  // and pressing again hides the panel like the Browser button does.
-  const toggleTerminalSurface = () => {
-    if (activeRightPanelKind === "terminal") closePreviewPanel();
-    else openTerminalSurface();
-  };
-  const toggleTerminalSurfaceStable = useStableCallback(toggleTerminalSurface);
-  const toggleDeviceSurface = () => {
-    if (!activeThreadRef) return;
-    if (activeRightPanelKind === "device") {
-      closePreviewPanel();
-      return;
-    }
-    const existing = selectGroupSurface(rightPanelState, "device");
-    if (existing) activateRightPanelSurface(existing);
-    else addDeviceSurface();
-  };
-  const toggleDeviceSurfaceStable = useStableCallback(toggleDeviceSurface);
-  // Files has no way to create a surface from the header: the button only
-  // exists while a file or the explorer is open, and returns to it.
-  const toggleFilesSurface = () => {
-    if (!activeThreadRef) return;
-    const activeGroup = activeRightPanelSurface ? surfaceGroupOf(activeRightPanelSurface) : null;
-    if (activeGroup === "files") {
-      closePreviewPanel();
-      return;
-    }
+  // Files opens the thread's explorer as a tab, or returns to the one already open.
+  const openFilesSurface = () => {
+    if (!activeThreadRef || !activeThreadCapabilities.files) return;
     const existing = selectGroupSurface(rightPanelState, "files");
     if (existing) activateRightPanelSurface(existing);
+    else useRightPanelStore.getState().open(activeThreadRef, "files");
   };
-  const toggleFilesSurfaceStable = useStableCallback(toggleFilesSurface);
   // The panel toggle restores whatever was showing; with nothing to restore it
   // opens the first surface the thread offers, so it never shows an empty panel.
   const toggleRightPanel = () => {
@@ -6330,15 +6182,6 @@ export default function ChatView(props: ChatViewProps) {
         void onInterruptStable();
         return;
       }
-
-      const scriptId = projectScriptIdFromCommand(command);
-      if (!scriptId || !activeProject || !canOperateTerminal || !activeThreadCapabilities.terminal)
-        return;
-      const script = activeProjectScripts.find((entry) => entry.id === scriptId);
-      if (!script) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void runProjectScriptStable(script);
     };
     const dismissFind = (event: KeyboardEvent) => {
       if (
@@ -6363,17 +6206,12 @@ export default function ChatView(props: ChatViewProps) {
       window.removeEventListener("keydown", dismissFind);
     };
   }, [
-    activeProject,
     activeRightPanelSurface,
-    activeProjectScripts,
-    agentConversationViewKey,
-    canOperateTerminal,
     activeThreadRef,
     activeThreadSettled,
     canInterruptRunningThread,
     activeThreadId,
     closeRightPanelSurfaceStable,
-    runProjectScriptStable,
     keybindings,
     scriptKeybindings,
     handleUnsettleActiveThreadStable,
@@ -9000,8 +8838,6 @@ export default function ChatView(props: ChatViewProps) {
         visible={rightPanelOpen}
         threadRef={activeThreadRef}
         activeTerminalId={renderedRightPanelSurface.activeTerminalId}
-        shellCwd={gitCwd}
-        shellWorktreePath={activeThread.worktreePath ?? null}
         focusRequestId={terminalFocusRequestId}
         onSelectTerminal={selectPanelTerminalStable}
         onAddTerminalContext={addTerminalContextToDraftStable}
@@ -9078,78 +8914,53 @@ export default function ChatView(props: ChatViewProps) {
       </Suspense>
     ) : null
   ) : null;
-  const filesSurfaceOpen = rightPanelState.surfaces.some(
-    (surface) => surfaceGroupOf(surface) === "files",
-  );
-  // Every thread with a right panel gets the switcher for the surfaces it
-  // offers: Work has all three, an agent's conversation its browser and device.
-  const allSurfaceButtons: ThreadSurfaceButton[] = [
+  // What the strip's "+" offers, one entry per kind of tab the thread can
+  // hold. A kind the thread cannot offer at all is left out; one it offers
+  // but cannot open right now is listed greyed, with the reason.
+  const rightPanelAddOptions: RightPanelAddOption[] = [
     {
-      id: "browser",
-      active: activeRightPanelKind === "preview",
+      offered: activeThreadCapabilities.browser,
+      kind: "browser" as const,
       available: canOperatePreview && browserAvailable,
       unavailableLabel: "Browser previews are only available in the Cogenly desktop app.",
-      shortcutLabel: shortcutLabelForCommand(keybindings, "preview.toggle"),
-      onToggle: togglePreviewPanelStable,
+      shortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.new"),
+      onSelect: () => createBrowserSurface(),
+      onSelectInProfile: createBrowserSurfaceStable,
     },
     {
-      id: "terminal",
-      active: activeRightPanelKind === "terminal",
+      offered: activeThreadCapabilities.terminal,
+      kind: "terminal" as const,
       available: activeProject !== null && (canReadTerminal || canOperateTerminal),
       unavailableLabel: "Terminals are only available from a repository thread.",
       shortcutLabel: null,
-      onToggle: toggleTerminalSurfaceStable,
+      onSelect: openTerminalSurface,
     },
     {
-      id: "device",
-      active: activeRightPanelKind === "device",
+      offered: activeThreadCapabilities.device,
+      kind: "device" as const,
       available: true,
       unavailableLabel: "Devices are only available from a thread.",
       shortcutLabel: null,
-      onToggle: toggleDeviceSurfaceStable,
+      onSelect: addDeviceSurface,
     },
-    ...(filesSurfaceOpen
-      ? [
-          {
-            id: "files" as const,
-            active:
-              activeRightPanelSurface !== null &&
-              surfaceGroupOf(activeRightPanelSurface) === "files",
-            available: true,
-            unavailableLabel: "Files are only available from a repository thread.",
-            shortcutLabel: null,
-            onToggle: toggleFilesSurfaceStable,
-          },
-        ]
-      : []),
-  ];
-  const workSurfaceButtons = allSurfaceButtons.filter((button) =>
-    button.id === "browser"
-      ? activeThreadCapabilities.browser
-      : button.id === "terminal"
-        ? activeThreadCapabilities.terminal
-        : button.id === "device"
-          ? activeThreadCapabilities.device
-          : activeThreadCapabilities.files,
-  );
+    {
+      offered: activeThreadCapabilities.files,
+      kind: "files" as const,
+      available: activeProject !== null,
+      unavailableLabel: "Files are only available from a repository thread.",
+      shortcutLabel: null,
+      onSelect: openFilesSurface,
+    },
+  ].flatMap(({ offered, ...option }) => (offered ? [option] : []));
   const panelToggleControlProps = {
-    agentSettingsShortcutLabel: shortcutLabelForCommand(keybindings, "threadPanel.toggle"),
     rightPanelAvailable: activeProject !== null,
     rightPanelOpen,
     rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
     onToggleRightPanel: toggleRightPanelStable,
-    onOpenAgentSettings: agentConversationViewKey ? openAgentSettingsStable : undefined,
-    surfaceButtons: rightPanelSupported ? workSurfaceButtons : undefined,
   } satisfies PanelLayoutControlsProps;
-  // One cluster at the window's top-right, open or closed: the surface
-  // switchers, then maximize and the panel toggle. Open, that corner is the
-  // panel's tab strip, so the controls sit with the panel they switch.
+  // Pinned at the window's top-right, open or closed, beside maximize. Open,
+  // that corner is the panel's tab strip, whose "+" chooses what to show.
   const panelToggleControls = <PanelLayoutControls {...panelToggleControlProps} />;
-  const rightPanelTitlebarControlCount =
-    (panelToggleControlProps.onOpenAgentSettings ? 1 : 0) +
-    (panelToggleControlProps.surfaceButtons?.length ?? 0) +
-    (shouldUsePlanSidebarSheet ? 0 : 1) +
-    1;
   const panelLayoutControls = (
     <div
       className={cn(
@@ -9253,9 +9064,7 @@ export default function ChatView(props: ChatViewProps) {
               className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
             />
           ) : null}
-          {!rightPanelControlsAtRoot &&
-          !rightPanelControlsInPanel &&
-          (rightPanelSupported || agentConversationViewKey)
+          {!rightPanelControlsAtRoot && !rightPanelControlsInPanel && rightPanelSupported
             ? panelLayoutControls
             : null}
           {/* No breadcrumb or visible title, as in the reference: the sidebar names
@@ -9337,7 +9146,6 @@ export default function ChatView(props: ChatViewProps) {
                   {...(!paintOnlyDisplayedTimeline
                     ? {
                         onCiteAssistantText: citeAssistantTextStable,
-                        ...(activeProject ? { onRunShellCommand: runShellCommandStable } : {}),
                       }
                     : {})}
                   isWorking={!paintOnlyDisplayedTimeline && isWorking}
@@ -9860,7 +9668,6 @@ export default function ChatView(props: ChatViewProps) {
           getShortcutContext={getShortcutContextStable}
           maximized={rightPanelMaximized}
           inlineSize={previewPanelInlineSize}
-          trailingControlCount={rightPanelTitlebarControlCount}
           surfaces={renderedRightPanelSurfaces}
           environmentId={activeThreadRef.environmentId}
           activeSurfaceId={renderedRightPanelSurface?.id ?? null}
@@ -9879,9 +9686,7 @@ export default function ChatView(props: ChatViewProps) {
           onCloseAllSurfaces={closeAllRightPanelSurfacesStable}
           onMoveSurface={moveRightPanelSurfaceStable}
           onCopyFilePath={copyRightPanelFilePathStable}
-          onAddBrowser={() => createBrowserSurface()}
-          onAddBrowserInProfile={createBrowserSurfaceStable}
-          browserAvailable={canOperatePreview && browserAvailable}
+          addOptions={rightPanelAddOptions}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -9925,9 +9730,7 @@ export default function ChatView(props: ChatViewProps) {
             onCloseAllSurfaces={closeAllRightPanelSurfacesStable}
             onMoveSurface={moveRightPanelSurfaceStable}
             onCopyFilePath={copyRightPanelFilePathStable}
-            onAddBrowser={() => createBrowserSurface()}
-            onAddBrowserInProfile={createBrowserSurfaceStable}
-            browserAvailable={canOperatePreview && browserAvailable}
+            addOptions={rightPanelAddOptions}
           >
             {rightPanelContent}
           </RightPanelTabs>

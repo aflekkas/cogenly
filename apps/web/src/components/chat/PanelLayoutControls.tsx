@@ -1,145 +1,55 @@
-import {
-  Files,
-  Globe2,
-  PanelRightIcon,
-  SettingsIcon,
-  Smartphone,
-  TerminalSquare,
-} from "lucide-react";
+import { PanelRightIcon } from "lucide-react";
 import { Maximize2, Minimize2 } from "lucide";
 import { MorphIcon } from "~/components/MorphIcon";
 import { memo } from "react";
 
-import { Button } from "../ui/button";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-export type ThreadSurfaceButtonId = "browser" | "terminal" | "device" | "files";
-
-/** One of the Work header's surface buttons: it opens, focuses or hides its right-panel tab. */
-export interface ThreadSurfaceButton {
-  readonly id: ThreadSurfaceButtonId;
-  /** Its tab is the one the open panel shows. */
-  readonly active: boolean;
-  readonly available: boolean;
-  readonly unavailableLabel: string;
-  readonly shortcutLabel: string | null;
-  readonly onToggle: () => void;
-}
-
-const SURFACE_BUTTON_PRESENTATION = {
-  browser: { label: "Browser", Icon: Globe2 },
-  terminal: { label: "Terminal", Icon: TerminalSquare },
-  device: { label: "Device", Icon: Smartphone },
-  files: { label: "Files", Icon: Files },
-} as const;
-
 export interface PanelLayoutControlsProps {
-  showRightPanelControl?: boolean;
-  agentSettingsShortcutLabel: string | null;
-  /** Browser, Terminal and Device, then Files while a file is open, for threads that offer them. */
-  surfaceButtons?: readonly ThreadSurfaceButton[] | undefined;
   rightPanelAvailable: boolean;
   rightPanelOpen: boolean;
   rightPanelShortcutLabel: string | null;
   rightPanelUnavailableLabel?: string;
   onToggleRightPanel: () => void;
-  /** Set on an agent's conversation: the header opens the agent's settings. */
-  onOpenAgentSettings?: (() => void) | undefined;
 }
 
+/** The right panel's toggle. What the panel holds is chosen from its own tab strip. */
 export const PanelLayoutControls = memo(function PanelLayoutControls({
-  showRightPanelControl = true,
-  agentSettingsShortcutLabel,
-  surfaceButtons,
   rightPanelAvailable,
   rightPanelOpen,
   rightPanelShortcutLabel,
   rightPanelUnavailableLabel = "Right panel is unavailable",
   onToggleRightPanel,
-  onOpenAgentSettings,
 }: PanelLayoutControlsProps) {
   return (
     <div
       className="flex h-full shrink-0 items-center gap-1 [-webkit-app-region:no-drag]"
       data-panel-layout-controls
     >
-      {onOpenAgentSettings ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                className="shrink-0 [-webkit-app-region:no-drag]"
-                aria-label="Agent settings"
-                variant="ghost"
-                size="icon-sm"
-                onClick={onOpenAgentSettings}
-              />
-            }
+      <Tooltip>
+        <TooltipTrigger render={<span className="flex shrink-0" />}>
+          <Toggle
+            className="shrink-0 [-webkit-app-region:no-drag]"
+            pressed={rightPanelOpen}
+            onPressedChange={onToggleRightPanel}
+            aria-label="Toggle right panel"
+            variant="ghost"
+            size="sm"
+            disabled={!rightPanelAvailable}
           >
-            <SettingsIcon className="size-4" />
-          </TooltipTrigger>
-          <TooltipPopup side="bottom">
-            Agent settings
-            {agentSettingsShortcutLabel ? ` (${agentSettingsShortcutLabel})` : ""}
-          </TooltipPopup>
-        </Tooltip>
-      ) : null}
-      {surfaceButtons?.map((button) => (
-        <SurfaceButton key={button.id} {...button} />
-      ))}
-      {showRightPanelControl ? (
-        <Tooltip>
-          <TooltipTrigger render={<span className="flex shrink-0" />}>
-            <Toggle
-              className="shrink-0 [-webkit-app-region:no-drag]"
-              pressed={rightPanelOpen}
-              onPressedChange={onToggleRightPanel}
-              aria-label="Toggle right panel"
-              variant="ghost"
-              size="sm"
-              disabled={!rightPanelAvailable}
-            >
-              <PanelRightIcon className="size-4" />
-            </Toggle>
-          </TooltipTrigger>
-          <TooltipPopup side="bottom">
-            {rightPanelAvailable
-              ? `Toggle right panel${rightPanelShortcutLabel ? ` (${rightPanelShortcutLabel})` : ""}`
-              : rightPanelUnavailableLabel}
-          </TooltipPopup>
-        </Tooltip>
-      ) : null}
+            <PanelRightIcon className="size-4" />
+          </Toggle>
+        </TooltipTrigger>
+        <TooltipPopup side="bottom">
+          {rightPanelAvailable
+            ? `Toggle right panel${rightPanelShortcutLabel ? ` (${rightPanelShortcutLabel})` : ""}`
+            : rightPanelUnavailableLabel}
+        </TooltipPopup>
+      </Tooltip>
     </div>
   );
 });
-
-function SurfaceButton(props: ThreadSurfaceButton) {
-  const { label, Icon } = SURFACE_BUTTON_PRESENTATION[props.id];
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="flex shrink-0" />}>
-        <Toggle
-          className="shrink-0 [-webkit-app-region:no-drag]"
-          pressed={props.active}
-          onPressedChange={props.onToggle}
-          aria-label={label}
-          variant="ghost"
-          size="sm"
-          disabled={!props.available}
-          data-thread-surface-button={props.id}
-        >
-          <Icon className="size-4" />
-        </Toggle>
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">
-        {props.available
-          ? `${label}${props.shortcutLabel ? ` (${props.shortcutLabel})` : ""}`
-          : props.unavailableLabel}
-      </TooltipPopup>
-    </Tooltip>
-  );
-}
 
 export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl({
   maximized,
