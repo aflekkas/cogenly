@@ -1,4 +1,12 @@
-import type { EnvironmentId, ProjectId, ThreadEnvMode, WorkHandoffError } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  MessageId,
+  ProjectId,
+  RunId,
+  ThreadEnvMode,
+  WorkHandoffError,
+  WorkHandoffLink,
+} from "@t3tools/contracts";
 import type { ProjectSettingSource } from "@t3tools/shared/projectSettings";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
@@ -193,5 +201,111 @@ export function deriveWorkRowStatus(thread: {
       return "canceled";
     default:
       return null;
+  }
+}
+
+export interface WorkHandoffAnchors {
+  /** Links to show right after the given message, oldest first. */
+  readonly byMessageId: ReadonlyMap<MessageId, ReadonlyArray<WorkHandoffLink>>;
+  /** Links with no message to sit beside; shown after the last message. */
+  readonly unanchored: ReadonlyArray<WorkHandoffLink>;
+}
+
+/**
+ * Where each Work handoff marker sits in its chat: after the message it was
+ * started from. A link without that message (the whole chat was handed over,
+ * an older link, or the message is gone) sits after the turn that had ended
+ * when the Work started, at that turn's last reply rather than mid-turn
+ * commentary.
+ */
+export function anchorWorkHandoffs(
+  links: ReadonlyArray<WorkHandoffLink>,
+  messages: ReadonlyArray<{
+    readonly id: MessageId;
+    readonly role: "user" | "assistant" | "system";
+    readonly runId: RunId | null;
+    readonly createdAt: string;
+  }>,
+): WorkHandoffAnchors {
+  const byMessageId = new Map<MessageId, WorkHandoffLink[]>();
+  const unanchored: WorkHandoffLink[] = [];
+  const messageIds = new Set(messages.map((message) => message.id));
+  const ordered = links.toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
+  for (const link of ordered) {
+    const anchor =
+      link.throughMessageId !== undefined && messageIds.has(link.throughMessageId)
+        ? link.throughMessageId
+        : fallbackAnchor(link.createdAt, messages);
+    if (anchor === null) {
+      unanchored.push(link);
+      continue;
+    }
+    byMessageId.set(anchor, [...(byMessageId.get(anchor) ?? []), link]);
+  }
+  return { byMessageId, unanchored };
+}
+
+function fallbackAnchor(
+  createdAt: string,
+  messages: Parameters<typeof anchorWorkHandoffs>[1],
+): MessageId | null {
+  const before = messages.findLast(
+    (message) => message.role !== "system" && message.createdAt <= createdAt,
+  );
+  if (before === undefined) return null;
+  if (before.role !== "assistant" || before.runId === null) return before.id;
+  return (
+    messages.findLast((message) => message.role === "assistant" && message.runId === before.runId)
+      ?.id ?? before.id
+  );
+}
+
+export type WorkHandoffStatus = "running" | "attention" | "done" | "stopped";
+
+/**
+ * A Work session's state as its chat's handoff marker shows it, from the
+ * thread shell alone so a marker never loads the Work thread's history.
+ * Null when it has not started a run yet.
+ */
+export function deriveWorkHandoffStatus(thread: {
+  readonly latestRun: { readonly status: string } | null;
+  readonly runtime: { readonly status: string } | null;
+  readonly hasPendingApprovals: boolean;
+  readonly hasPendingUserInput: boolean;
+  readonly archivedAt: string | null;
+  readonly settledOverride: "settled" | "active" | null;
+  readonly settledAt: string | null;
+}): WorkHandoffStatus | null {
+  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "attention";
+  const runtimeStatus = thread.runtime?.status;
+  if (
+    runtimeStatus === "preparing" ||
+    runtimeStatus === "queued" ||
+    runtimeStatus === "starting" ||
+    runtimeStatus === "running" ||
+    runtimeStatus === "waiting"
+  ) {
+    return "running";
+  }
+  if (
+    thread.archivedAt !== null ||
+    thread.settledOverride === "settled" ||
+    thread.settledAt !== null
+  ) {
+    return "done";
+  }
+  switch (thread.latestRun?.status) {
+    case undefined:
+      return null;
+    case "completed":
+      return "done";
+    case "failed":
+      return "attention";
+    case "interrupted":
+    case "cancelled":
+    case "rolled_back":
+      return "stopped";
+    default:
+      return "running";
   }
 }

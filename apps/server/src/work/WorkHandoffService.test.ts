@@ -761,9 +761,10 @@ it.effect("starts Work without a repository at the scratch root and names the cu
       expect(projection.thread.worktreePath).toBe(`${scratch.workspaceRoot}/own-folder`);
       expect(h.worktrees).toEqual([]);
       expect(projection.messages[0]?.text).toContain("through message scope:1");
+      // The chat's link remembers the message it was started from, to sit beside it.
       expect(
-        (yield* h.orchestrator.getThreadProjection(sourceId)).thread.workHandoffs?.[0]?.threadId,
-      ).toBe(result.threadId);
+        (yield* h.orchestrator.getThreadProjection(sourceId)).thread.workHandoffs?.[0],
+      ).toMatchObject({ threadId: result.threadId, throughMessageId: "scope:1" });
       yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
     }).pipe(Effect.provide(h.work));
   }).pipe(Effect.provide(runtime)),

@@ -294,6 +294,7 @@ import {
 } from "./V2LifecycleRow";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
+import { WorkHandoffMarkersAfterRow } from "../work/WorkHandoffMarkers";
 
 import { SkillChipIcon, SkillInlineText } from "./SkillInlineText";
 import * as DateTime from "effect/DateTime";
@@ -483,9 +484,13 @@ interface MessagesTimelineProps {
   /** The rows are a held snapshot of the previous thread while the next one loads. */
   paintOnly?: boolean;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
+  /** The thread this one came from, shown above its first message. Defaults to a subagent's parent. */
   parentThreadLink?: {
     readonly threadId: ThreadId;
     readonly title: string;
+    readonly label?: string;
+    readonly icon?: LucideIcon;
+    readonly actionLabel?: string;
   } | null;
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
@@ -1491,10 +1496,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
         <div className="messages-timeline-row-frame">
           <div className="chat-content-lane pt-1 sm:pt-2">
             <TimelineSystemDivider
-              label="Subagent of"
+              label={parentThreadLink.label ?? "Subagent of"}
               detail={parentThreadLink.title}
-              icon={BotIcon}
-              actionLabel="Open parent thread"
+              icon={parentThreadLink.icon ?? BotIcon}
+              actionLabel={parentThreadLink.actionLabel ?? "Open parent thread"}
               onAction={() => onOpenThread(parentThreadLink.threadId)}
             />
           </div>
@@ -2229,6 +2234,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
       {row.kind === "event" ? <V2EventTimelineRow row={row} /> : null}
+      <WorkHandoffMarkersAfterRow row={row} />
     </div>
   );
 });

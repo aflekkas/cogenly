@@ -7222,6 +7222,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               threadId: target.thread.id,
               title: target.thread.title,
               createdAt: DateTime.formatIso(now),
+              ...(command.throughMessageId === undefined
+                ? {}
+                : { throughMessageId: command.throughMessageId }),
             },
           ],
         },

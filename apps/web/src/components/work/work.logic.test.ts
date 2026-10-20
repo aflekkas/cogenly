@@ -1,10 +1,12 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   ADD_REPOSITORY,
+  anchorWorkHandoffs,
   describeWorkStartFailure,
+  deriveWorkHandoffStatus,
   deriveWorkRowStatus,
   NO_REPOSITORY,
   listWorkPickerChoices,
@@ -180,5 +182,88 @@ describe("openWorkWhenArrived", () => {
       }),
     ).resolves.toBe(false);
     expect(opens).toBe(0);
+  });
+});
+
+describe("anchorWorkHandoffs", () => {
+  const run1 = RunId.make("run-1");
+  const messages = [
+    { id: MessageId.make("u1"), role: "user", runId: run1, createdAt: "2026-10-01T10:00:00Z" },
+    // Commentary mid-turn, then the turn's last reply.
+    { id: MessageId.make("a1"), role: "assistant", runId: run1, createdAt: "2026-10-01T10:01:00Z" },
+    { id: MessageId.make("a2"), role: "assistant", runId: run1, createdAt: "2026-10-01T10:05:00Z" },
+    { id: MessageId.make("u2"), role: "user", runId: null, createdAt: "2026-10-01T11:00:00Z" },
+  ] as const;
+  const link = (id: string, createdAt: string, throughMessageId?: string) => ({
+    threadId: ThreadId.make(id),
+    title: id,
+    createdAt,
+    ...(throughMessageId === undefined
+      ? {}
+      : { throughMessageId: MessageId.make(throughMessageId) }),
+  });
+
+  it("puts each marker after the message its Work was started from", () => {
+    const anchors = anchorWorkHandoffs(
+      [link("w2", "2026-10-01T12:00:00Z", "u2"), link("w1", "2026-10-01T12:00:00Z", "u1")],
+      messages,
+    );
+    expect(anchors.byMessageId.get(MessageId.make("u1"))?.map((l) => l.threadId)).toEqual(["w1"]);
+    expect(anchors.byMessageId.get(MessageId.make("u2"))?.map((l) => l.threadId)).toEqual(["w2"]);
+    expect(anchors.unanchored).toEqual([]);
+  });
+
+  it("anchors a link without its message to the end of the turn before it", () => {
+    // Started while the commentary was the latest message: still after the reply.
+    const anchors = anchorWorkHandoffs(
+      [link("w1", "2026-10-01T10:02:00Z"), link("w2", "2026-10-01T10:30:00Z", "deleted")],
+      messages,
+    );
+    expect(anchors.byMessageId.get(MessageId.make("a2"))?.map((l) => l.threadId)).toEqual([
+      "w1",
+      "w2",
+    ]);
+  });
+
+  it("leaves a link from before every loaded message unanchored", () => {
+    const anchors = anchorWorkHandoffs([link("w1", "2026-09-01T00:00:00Z")], messages);
+    expect(anchors.byMessageId.size).toBe(0);
+    expect(anchors.unanchored.map((l) => l.threadId)).toEqual(["w1"]);
+  });
+});
+
+describe("deriveWorkHandoffStatus", () => {
+  const idle = {
+    latestRun: null,
+    runtime: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+  } as const;
+
+  it("reads running, attention, done and stopped from the shell", () => {
+    expect(deriveWorkHandoffStatus(idle)).toBeNull();
+    expect(deriveWorkHandoffStatus({ ...idle, runtime: { status: "running" } })).toBe("running");
+    expect(
+      deriveWorkHandoffStatus({
+        ...idle,
+        runtime: { status: "waiting" },
+        hasPendingApprovals: true,
+      }),
+    ).toBe("attention");
+    expect(deriveWorkHandoffStatus({ ...idle, latestRun: { status: "failed" } })).toBe("attention");
+    expect(deriveWorkHandoffStatus({ ...idle, latestRun: { status: "completed" } })).toBe("done");
+    expect(
+      deriveWorkHandoffStatus({
+        ...idle,
+        latestRun: { status: "interrupted" },
+        settledAt: "2026-10-01T00:00:00Z",
+      }),
+    ).toBe("done");
+    expect(deriveWorkHandoffStatus({ ...idle, latestRun: { status: "cancelled" } })).toBe(
+      "stopped",
+    );
   });
 });

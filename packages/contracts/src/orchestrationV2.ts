@@ -388,6 +388,8 @@ export const WorkHandoffLink = Schema.Struct({
   threadId: ThreadId,
   title: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
+  /** The chat message the Work was started from. Absent: the whole chat, or an older link. */
+  throughMessageId: Schema.optional(MessageId),
 });
 export type WorkHandoffLink = typeof WorkHandoffLink.Type;
 
@@ -3235,6 +3237,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     threadId: ThreadId,
     targetThreadId: ThreadId,
     scopeSummary: TrimmedNonEmptyString,
+    throughMessageId: Schema.optional(MessageId),
   }),
   /**
    * Records what a pull request watch saw, and wakes the agent in the same transaction when

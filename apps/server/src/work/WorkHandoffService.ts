@@ -212,6 +212,9 @@ const make = Effect.gen(function* () {
           threadId: input.sourceThreadId,
           targetThreadId: result.threadId,
           scopeSummary,
+          ...(input.throughMessageId === undefined
+            ? {}
+            : { throughMessageId: input.throughMessageId }),
         })
         .pipe(
           Effect.mapError(
