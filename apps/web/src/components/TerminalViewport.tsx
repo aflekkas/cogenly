@@ -337,6 +337,8 @@ interface TerminalViewportProps {
   /** Called once the process exits; omit to keep the finished output on screen. */
   onSessionExited?: () => void;
   onAddTerminalContext?: (selection: TerminalContextSelection) => void;
+  /** Writes "[terminal] Process exited…" into the output; off when the host shows status itself. */
+  showExitMessage?: boolean;
   focusRequestId: number;
   autoFocus: boolean;
   visible: boolean;
@@ -355,6 +357,7 @@ export function TerminalViewport({
   providerInstanceId,
   onSessionExited,
   onAddTerminalContext,
+  showExitMessage = true,
   focusRequestId,
   autoFocus,
   visible,
@@ -445,6 +448,10 @@ export function TerminalViewport({
   const exitMessagePendingRef = useRef(false);
   const flushExitMessage = useEffectEvent((terminal: GhosttyTerminalSurface) => {
     if (!exitMessagePendingRef.current) return;
+    if (!showExitMessage) {
+      exitMessagePendingRef.current = false;
+      return;
+    }
     const message =
       terminalSummary === null
         ? "Process exited"
@@ -468,7 +475,7 @@ export function TerminalViewport({
       ) {
         hasHandledExitRef.current = true;
         if (status === "closed") {
-          writeSystemMessage(terminal, "Terminal closed");
+          if (showExitMessage) writeSystemMessage(terminal, "Terminal closed");
         } else {
           exitMessagePendingRef.current = true;
           flushExitMessage(terminal);

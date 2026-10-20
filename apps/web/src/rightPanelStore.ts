@@ -5,8 +5,8 @@
  * surface descriptors and the active surface, while each feature continues to
  * own its durable resource state. Browser surfaces point at preview tab ids,
  * file surfaces point at workspace paths, and diff/files/terminal remain
- * singleton surfaces. The terminal surface lists the thread's agent commands
- * and remembers which one is selected.
+ * singleton surfaces. The terminal surface holds the thread's agent runs and
+ * shells and remembers which one is selected.
  */
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { type ScopedThreadRef } from "@t3tools/contracts";
@@ -131,7 +131,8 @@ interface RightPanelStoreState {
   openTerminal: (ref: ScopedThreadRef, terminalId?: string) => void;
   /**
    * Show a terminal the agent just started. Automatic, so it does not count as
-   * a user panel choice; it never moves keyboard focus.
+   * a user panel choice; it never moves keyboard focus, and it leaves a selected
+   * shell selected so a new command cannot pull the user out of their own shell.
    */
   revealAgentTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
   activateSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
@@ -232,6 +233,13 @@ const showTerminal = (
         )
       : [...current.surfaces, surface],
   };
+};
+
+// Shell ids are client-chosen `term-N`; agent commands are server-allocated `agent-*`.
+const isShowingShell = (current: ThreadRightPanelState): boolean => {
+  const surface = current.surfaces.find((entry) => entry.kind === "terminal");
+  const terminalId = surface?.kind === "terminal" ? surface.activeTerminalId : undefined;
+  return terminalId !== undefined && !terminalId.startsWith("agent-");
 };
 
 const upsertSurface = (
@@ -675,7 +683,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
       revealAgentTerminal: (ref, terminalId) =>
         set((state) =>
           automaticUpdate(state, scopedThreadKey(ref), (current) =>
-            showTerminal(current, terminalId),
+            showTerminal(current, isShowingShell(current) ? undefined : terminalId),
           ),
         ),
       activateSurface: (ref, surfaceId) =>
