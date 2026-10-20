@@ -88,28 +88,34 @@
       }
 
       #boot-shell-logo {
-        position: relative;
+        position: absolute;
+        inset: 0;
         display: block;
         width: 100%;
         height: 100%;
-        /* The dot's orbit reaches past the glyph's 128 box. */
-        overflow: visible;
       }
 
-      /* Loading loop for the mark (assets/brand/cogenly-mark.svg), 2.4s: the dot steps well out of
-         the "c" (orbit radius 70 of 128, clear of its outer edge at 36), circles it once, then glides back into the opening on a plain ease-out (no
-         overshoot) and rests. Transform-only; it ends when src/bootSplash.ts settles it and
-         removes the splash. */
-      #boot-shell-logo * {
-        transform-box: view-box;
-      }
-
-      #boot-shell-logo .boot-mark-arm {
-        transform-origin: 63px 64px;
+      /* Loading loop for the mark (assets/brand/cogenly-mark.svg), 2.4s: the dot steps well
+         out of the "c" (orbit radius 70 of 128, clear of its outer edge at 36), circles it
+         once, then glides back into the opening on a plain ease-out and rests. The dot and its
+         arm are HTML boxes, not SVG, so these transform animations run on the compositor and
+         keep moving while the bundle evaluates. Positions are the SVG's 128 box as percents:
+         the c's center is (63, 64) and the docked dot is r 9 at (91, 64). */
+      #boot-shell-arm {
+        position: absolute;
+        inset: 0;
+        transform-origin: 49.22% 50%;
         animation: boot-mark-orbit 2.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
       }
 
-      #boot-shell-logo .boot-mark-dot {
+      #boot-shell-dot {
+        position: absolute;
+        left: 64.06%;
+        top: 42.97%;
+        width: 14.06%;
+        height: 14.06%;
+        border-radius: 50%;
+        background: #ffffff;
         animation: boot-mark-reach 2.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
       }
 
@@ -123,15 +129,16 @@
         }
       }
 
+      /* 42 of 128 out from the docked radius; the dot is 18 wide, so 233.33% of itself. */
       @keyframes boot-mark-reach {
         0% {
           transform: translateX(0);
         }
         14% {
-          transform: translateX(42px);
+          transform: translateX(233.33%);
         }
         52% {
-          transform: translateX(42px);
+          transform: translateX(233.33%);
           animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
         }
         88%,
@@ -141,7 +148,8 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
-        #boot-shell-logo * {
+        #boot-shell-arm,
+        #boot-shell-dot {
           animation: none;
         }
       }
@@ -176,8 +184,8 @@
     <div id="boot-shell" role="status" aria-label="Cogenly is loading">
       <canvas id="boot-shell-pixels" aria-hidden="true"></canvas>
       <div id="boot-shell-mark">
-        <!-- The white glyph of assets/brand/cogenly-mark.svg, inline so it animates before any fetch.
-           Its 128 box matches the mark's tile, so scaling it onto the sidebar mark lines up. -->
+        <!-- The white glyph of assets/brand/cogenly-mark.svg, inline so it paints before any
+             fetch: the "c" as SVG, the dot as an HTML box so its orbit is composited. -->
         <svg
           id="boot-shell-logo"
           aria-hidden="true"
@@ -186,16 +194,13 @@
           xmlns="http://www.w3.org/2000/svg"
         >
           <path
-            class="boot-mark-c"
             d="M79.85 41.64A28 28 0 1 0 79.85 86.36"
             stroke="#FFFFFF"
             stroke-width="16"
             stroke-linecap="round"
           />
-          <g class="boot-mark-arm">
-            <circle class="boot-mark-dot" cx="91" cy="64" r="9" fill="#FFFFFF" />
-          </g>
         </svg>
+        <div id="boot-shell-arm"><div id="boot-shell-dot"></div></div>
       </div>
     </div>
     <script>
@@ -207,8 +212,10 @@
       // on evenly spaced 19fps ticks. Blocks are ordered by height plus an ordered dither
       // (a soft band about 30% of the window tall), then spread over the ticks along a
       // trapezoidal density, so each tick clears a small, even batch. A block shows one
-      // deeper frame on its tick and is gone after, revealing the app; the glyph steps out
-      // in six opacity steps as the band crosses its rows. The loop stops when
+      // deeper frame on its tick and is gone after, revealing the app. The glyph pixelates
+      // first: on the opening ticks it is redrawn as ever chunkier white blocks, up to the
+      // mosaic's own block size (a pre-sized device-resolution canvas), then those blocks step out the
+      // same way. Nothing fades. The loop stops when
       // the canvas is removed. Reduced motion draws one static frame.
       (() => {
         const shell = document.getElementById("boot-shell");
@@ -217,7 +224,9 @@
         const context = canvas && canvas.getContext("2d");
         if (!shell || !context) return;
         const FRAME_MS = 66;
-        const TICK_MS = 52;
+        const TICK_MS = 50;
+        const TICK_SLACK_MS = 4;
+        const GLYPH_STEP_TICKS = 2;
         const TONES = [
           [255, 128, 64],
           [250, 108, 52],
@@ -230,7 +239,18 @@
         const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
         // Height of the dissolving band, as a share of the window.
         const BAND = 0.3;
-        const GLYPH_STEPS = 6;
+        // The glyph's "c" path in its 128 box, and the in-between tone of its white blocks.
+        const GLYPH_PATH = new Path2D("M79.85 41.64A28 28 0 1 0 79.85 86.36");
+        const GLYPH_FADE = [255, 196, 168];
+        const glyphCanvas = document.createElement("canvas");
+        const glyphContext = glyphCanvas.getContext("2d");
+        Object.assign(glyphCanvas.style, {
+          position: "absolute",
+          inset: "0",
+          visibility: "hidden",
+          pointerEvents: "none",
+        });
+        shell.append(glyphCanvas);
         const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
         let cell = 64;
         let cols = 0;
@@ -250,6 +270,13 @@
           canvas.style.width = cols * cell + "px";
           canvas.style.height = rows * cell + "px";
           image = context.createImageData(cols, rows);
+          // Sized ahead of the exit so its first tick does no allocation.
+          const ratio = devicePixelRatio || 1;
+          glyphCanvas.width = Math.round(innerWidth * ratio);
+          glyphCanvas.height = Math.round(innerHeight * ratio);
+          glyphCanvas.style.width = innerWidth + "px";
+          glyphCanvas.style.height = innerHeight + "px";
+          glyphContext.setTransform(ratio, 0, 0, ratio, 0, 0);
           const taken = new Uint8Array(cols * rows);
           blocks = [];
           for (let y = 0; y < rows; y++) {
@@ -271,8 +298,6 @@
                   1 -
                   t +
                   BAND * (0.8 * ((BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16) + 0.2 * Math.random()),
-                top: y * cell,
-                bottom: (y + (merge ? 2 : 1)) * cell,
                 // A jittered quantization gives the tone bands ragged, mosaic edges.
                 tone: Math.round(t * (TONES.length - 1) + (Math.random() - 0.5) * 1.1),
                 phase: Math.random() * 6.2832,
@@ -332,20 +357,104 @@
           context.putImageData(image, 0, 0);
         }
 
-        // Ticks run on a fixed schedule from the exit's start, so a late frame never shifts
-        // or doubles one.
+        // The glyph's pixelation, sampled ahead of the exit (on load and resize) so no step
+        // pays for it: the "c" as white blocks at each size, on grids aligned with the mosaic.
+        let glyphLevels = null;
+        const glyphSizes = () => [Math.round(cell / 4), Math.round(cell / 2), cell];
+        const coverageFor = (size) => (size >= cell / 2 ? 0.28 : 0.4);
+
+        function sampleGlyph() {
+          if (!mark) return;
+          const box = mark.getBoundingClientRect();
+          const scale = box.width / 128;
+          const left = Math.floor(box.left);
+          const top = Math.floor(box.top);
+          const side = Math.ceil(box.width) + 1;
+          const sample = document.createElement("canvas");
+          sample.width = side;
+          sample.height = side;
+          const pen = sample.getContext("2d");
+          pen.setTransform(scale, 0, 0, scale, box.left - left, box.top - top);
+          pen.strokeStyle = "#fff";
+          pen.lineWidth = 16;
+          pen.lineCap = "round";
+          pen.stroke(GLYPH_PATH);
+          const alpha = pen.getImageData(0, 0, side, side).data;
+          glyphLevels = glyphSizes().map((size) => {
+            const found = [];
+            for (let y = Math.floor(top / size) * size; y < top + side; y += size) {
+              for (let x = Math.floor(left / size) * size; x < left + side; x += size) {
+                let covered = 0;
+                let total = 0;
+                for (let sy = Math.max(y, top); sy < Math.min(y + size, top + side); sy += 2) {
+                  for (let sx = Math.max(x, left); sx < Math.min(x + size, left + side); sx += 2) {
+                    total++;
+                    if (alpha[((sy - top) * side + (sx - left)) * 4 + 3] > 127) covered++;
+                  }
+                }
+                if (total && covered / total >= coverageFor(size)) found.push({ x, y, size });
+              }
+            }
+            return found;
+          });
+        }
+
+        // The dot moves, so its blocks are found at the exit, analytically (a handful).
+        function dotBlocks(size, cx, cy, radius) {
+          const found = [];
+          for (let y = Math.floor((cy - radius) / size) * size; y < cy + radius; y += size) {
+            for (let x = Math.floor((cx - radius) / size) * size; x < cx + radius; x += size) {
+              let covered = 0;
+              for (let i = 0; i < 8; i++) {
+                for (let j = 0; j < 8; j++) {
+                  const dx = x + (i + 0.5) * (size / 8) - cx;
+                  const dy = y + (j + 0.5) * (size / 8) - cy;
+                  if (dx * dx + dy * dy <= radius * radius) covered++;
+                }
+              }
+              if (covered / 64 >= coverageFor(size)) found.push({ x, y, size });
+            }
+          }
+          return found;
+        }
+
+        // Pixelation steps, GLYPH_STEP_TICKS ticks each: a quarter, half, then a full mosaic
+        // block. On the two ticks after, the full-size blocks step out like the mosaic's (one
+        // in-between frame, then gone).
+        function drawGlyph(tick) {
+          if (!exit.glyph) return;
+          const step = Math.floor(tick / GLYPH_STEP_TICKS);
+          const level = exit.glyph[Math.min(step, exit.glyph.length - 1)];
+          const outFrom = exit.glyph.length * GLYPH_STEP_TICKS;
+          glyphContext.clearRect(0, 0, innerWidth, innerHeight);
+          for (const block of level) {
+            const out = outFrom + block.lag;
+            if (tick > out) continue;
+            const color = tick === out ? GLYPH_FADE : [255, 255, 255];
+            glyphContext.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`;
+            glyphContext.fillRect(block.x, block.y, block.size, block.size);
+          }
+          if (tick === 0) {
+            glyphCanvas.style.visibility = "visible";
+            mark.style.visibility = "hidden";
+          }
+          exit.log.push(["glyph", tick, step, Math.round(exit.now * 10) / 10]);
+        }
+
+        // Ticks run on a fixed schedule from the exit's first frame, so a late frame never
+        // shifts or doubles one. TICK_MS is a whole number of 60Hz (and 120Hz) frames, and a
+        // little slack absorbs rAF timestamp jitter, so every tick lasts the same 3 frames.
         function exitTick(time) {
-          const tick = Math.floor((time - exit.start) / TICK_MS);
+          if (exit.start === null) exit.start = time;
+          const tick = Math.floor((time - exit.start + TICK_SLACK_MS) / TICK_MS);
           if (tick === exit.tick) return false;
           exit.tick = tick;
+          exit.now = time - exit.start;
+          exit.log.push(["tick", tick, Math.round(exit.now * 10) / 10]);
           draw(time);
-          if (mark) {
-            const share = (tick - exit.glyphFrom + 1) / (exit.glyphTo - exit.glyphFrom + 1);
-            const step = Math.min(GLYPH_STEPS, Math.max(0, Math.round(share * GLYPH_STEPS)));
-            mark.style.opacity = String(1 - step / GLYPH_STEPS);
-          }
+          drawGlyph(tick);
           if (tick > exit.lastTick) {
-            exit.done(exit.counts);
+            exit.done({ counts: exit.counts, log: exit.log });
             return true;
           }
           return false;
@@ -371,17 +480,19 @@
           if (exit) return;
           resize();
           draw(performance.now());
+          sampleGlyph();
         }
 
         resize();
         draw(performance.now());
+        sampleGlyph();
         shell.dataset.pixels = "ready";
         addEventListener("resize", onResize);
         if (!reduceMotion) requestAnimationFrame(tick);
 
         window.cogenlyBootSplash = {
           // Runs the exit dissolve; resolves after its last tick with the blocks cleared per
-          // tick.
+          // tick and a log of when each tick and glyph step drew.
           dissolve(duration) {
             const ticks = Math.max(2, Math.round(duration / TICK_MS));
             const ordered = blocks.slice().sort((a, b) => a.order - b.order);
@@ -391,19 +502,33 @@
               block.tick = Math.min(ticks - 1, Math.floor(at * ticks));
               counts[block.tick]++;
             });
-            // The glyph steps out over the ticks that clear the blocks behind it.
-            const glyph = mark ? mark.getBoundingClientRect() : null;
-            const behind = glyph
-              ? blocks.filter((block) => block.bottom > glyph.top && block.top < glyph.bottom)
-              : [];
-            const glyphTicks = behind.map((block) => block.tick);
+            // The precomputed "c" levels plus the dot where its orbit has it now.
+            let glyph = null;
+            if (mark && glyphLevels) {
+              const dot = document.getElementById("boot-shell-dot").getBoundingClientRect();
+              const radius = (9 * mark.getBoundingClientRect().width) / 128;
+              const sizes = glyphSizes();
+              glyph = glyphLevels.map((level, index) =>
+                level
+                  .concat(
+                    dotBlocks(
+                      sizes[index],
+                      dot.left + dot.width / 2,
+                      dot.top + dot.height / 2,
+                      radius,
+                    ),
+                  )
+                  .map((block) => ({ ...block, lag: Math.random() < 0.5 ? 0 : 1 })),
+              );
+            }
             return new Promise((resolve) => {
               exit = {
-                start: performance.now(),
+                start: null,
+                now: 0,
+                log: [],
                 tick: -1,
                 lastTick: ticks - 1,
-                glyphFrom: glyphTicks.length ? Math.min(...glyphTicks) : 0,
-                glyphTo: glyphTicks.length ? Math.max(...glyphTicks) : ticks - 1,
+                glyph,
                 counts,
                 done: resolve,
               };
