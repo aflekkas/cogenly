@@ -13,7 +13,7 @@ function Shell({
       data-slot="composer-shell"
       data-with-context={contextStrip || undefined}
       className={cn(
-        "chat-lane @container/composer-surface group/composer-surface relative isolate mx-auto w-full max-w-(--chat-content-max-width)",
+        "@container/composer-surface group/composer-surface relative isolate mx-auto w-full max-w-(--chat-content-max-width)",
         "[--chat-composer-drawer-inset:1.375rem] [--chat-composer-glass-surface:var(--card)] [--chat-composer-outline:rgb(0_0_0/8%)]",
         "dark:[--chat-composer-glass-surface:var(--composer-surface,var(--surface-raised))] dark:[--surface-raised-sheen-top:transparent] dark:[--surface-raised-sheen-bottom:transparent] dark:[--chat-composer-highlight:transparent] dark:[--surface-raised-edge-top:var(--surface-edge)] dark:[--surface-raised-edge-side:var(--surface-edge)] dark:[--surface-raised-edge-bottom:var(--surface-edge)] dark:[--chat-composer-outline:var(--surface-edge,rgb(255_255_255/5%))]",
         "[html[data-theme-id]_&]:[--chat-composer-glass-surface:var(--app-theme-surface-raised)] [html[data-theme-id]_&]:[--chat-composer-outline:var(--app-theme-toolbar-border)]",

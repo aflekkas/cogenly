@@ -1170,30 +1170,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     max-width: var(--chat-content-max-width);
   }
 
-  /* With the floating details card open, every centered lane steps left by up
-     to 174px (measured against the reference at 2000px), but never so far
-     that it leaves the pane's 1.5rem gutter. */
-  [data-chat-lane-reserve] {
-    --chat-lane-shift: clamp(
-      0px,
-      calc((100cqw - var(--chat-content-max-width)) / 2 - 1.5rem),
-      10.875rem
-    );
-  }
-  .chat-content-lane,
-  .chat-lane {
-    translate: calc(-1 * var(--chat-lane-shift, 0px)) 0;
-    transition: translate var(--motion-duration-slow) var(--motion-ease-standard, ease);
-
-    @media (prefers-reduced-motion: reduce) {
-      transition: none;
-    }
-  }
-  /* A lane nested in another (the composer surface) moves with its parent. */
-  :is(.chat-content-lane, .chat-lane) :is(.chat-content-lane, .chat-lane) {
-    translate: none;
-  }
-
   .messages-timeline-row-frame {
     padding-inline: 0;
   }

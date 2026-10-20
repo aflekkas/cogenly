@@ -232,7 +232,6 @@ import {
 } from "../proposedPlan";
 import {
   DEFAULT_INTERACTION_MODE,
-  DEFAULT_RUNTIME_MODE,
   type ChatMessage,
   type SessionPhase,
   type Thread,
@@ -1251,6 +1250,9 @@ export default function ChatView(props: ChatViewProps) {
   const composerInteractionMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.interactionMode ?? null,
   );
+  const composerRuntimeMode = useComposerDraftStore(
+    (store) => store.getComposerDraft(composerDraftTarget)?.runtimeMode ?? null,
+  );
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
   );
@@ -1284,6 +1286,7 @@ export default function ChatView(props: ChatViewProps) {
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
   );
+  const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
@@ -1606,9 +1609,6 @@ export default function ChatView(props: ChatViewProps) {
   // session.lastError. Bump a tick so the banner hides immediately. Mirrors
   // the branch mismatch banner.
   const [, setThreadErrorBannerDismissTick] = useState(0);
-  // Cogenly runs every agent with full access. Sending moves older threads
-  // stored with another mode onto it (persistThreadSettingsForNextTurn).
-  const runtimeMode = DEFAULT_RUNTIME_MODE;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = canWriteSourceControl && isLocalDraftThread;
   const activeThreadId = activeThread?.id ?? null;
@@ -1865,6 +1865,12 @@ export default function ChatView(props: ChatViewProps) {
     () => resolveProjectSettings(settings, activeProject?.id ?? null, activeProject ?? undefined),
     [activeProject, settings],
   );
+  // The composer's pick, else the thread's stored mode, else the new-thread
+  // default. Sending applies a pick to the thread (persistThreadSettingsForNextTurn).
+  const runtimeMode =
+    composerRuntimeMode ??
+    activeThread?.runtimeMode ??
+    activeProjectSettings.settings.defaultRuntimeMode;
   const activeProjectScripts = useMemo(
     () => (activeProject ? resolveProjectScripts(settings, activeProject) : []),
     [activeProject, settings],
@@ -2249,7 +2255,7 @@ export default function ChatView(props: ChatViewProps) {
     setLogicalProjectDraftThreadId(logicalProjectKey, activeProjectRef, nextDraftId, {
       threadId: nextThreadId,
       createdAt: new Date().toISOString(),
-      runtimeMode: DEFAULT_RUNTIME_MODE,
+      runtimeMode: activeProjectSettings.settings.defaultRuntimeMode,
       interactionMode: DEFAULT_INTERACTION_MODE,
       ...input,
     });
@@ -4280,6 +4286,15 @@ export default function ChatView(props: ChatViewProps) {
     scheduleComposerFocus();
   };
   const handleInteractionModeChangeStable = useStableCallback(handleInteractionModeChange);
+  const handleRuntimeModeChange = (mode: RuntimeMode) => {
+    if (mode === runtimeMode) return;
+    setComposerDraftRuntimeMode(composerDraftTarget, mode);
+    if (isLocalDraftThread) {
+      setDraftThreadContext(composerDraftTarget, { runtimeMode: mode });
+    }
+    scheduleComposerFocus();
+  };
+  const handleRuntimeModeChangeStable = useStableCallback(handleRuntimeModeChange);
   const toggleInteractionMode = () => {
     if (!interactionModeEnabled) return;
     handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
@@ -9581,14 +9596,7 @@ export default function ChatView(props: ChatViewProps) {
 
         {/* Main content area with optional plan sidebar. Its centered lane
             glides to its new center when a panel opens or closes (panelFlip). */}
-        <div
-          className="@container/chat-main relative flex min-h-0 min-w-0 flex-1"
-          data-panel-flip="center"
-          // The floating details card claims the right edge; the lane steps left to clear it.
-          data-chat-lane-reserve={
-            threadPanelOpen && threadPanelPresentation === "inline" ? "" : undefined
-          }
-        >
+        <div className="relative flex min-h-0 min-w-0 flex-1" data-panel-flip="center">
           {/* Chat column */}
           <ThreadFindCanvas
             findOptions={{
@@ -10036,6 +10044,8 @@ export default function ChatView(props: ChatViewProps) {
                               getModelDisabledReason={getModelDisabledReason}
                               toggleInteractionMode={toggleInteractionModeStable}
                               handleInteractionModeChange={handleInteractionModeChangeStable}
+                              runtimeMode={runtimeMode}
+                              handleRuntimeModeChange={handleRuntimeModeChangeStable}
                               focusComposer={focusComposerStable}
                               scheduleComposerFocus={scheduleComposerFocusStable}
                               setThreadError={setThreadError}
