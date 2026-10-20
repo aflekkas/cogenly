@@ -118,7 +118,7 @@ interface RightPanelTabsProps {
    * accept the MouseEvent as a profile id.
    */
   onAddBrowserInProfile: (profileId: string) => void;
-  /** Shows the thread's agent terminals; it never starts a shell. */
+  /** Shows the Terminal surface (agent runs and shells); it never starts a shell by itself. */
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;

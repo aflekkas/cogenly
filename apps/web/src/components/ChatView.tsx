@@ -4563,7 +4563,7 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
   const togglePreviewPanelStable = useStableCallback(togglePreviewPanel);
-  // Shows the agent's terminals; the panel never starts a shell of its own.
+  // Shows the thread's terminals; opening the surface never starts a shell by itself.
   const openTerminalSurface = () => {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().openTerminal(activeThreadRef);
@@ -9297,6 +9297,8 @@ export default function ChatView(props: ChatViewProps) {
         visible={rightPanelOpen}
         threadRef={activeThreadRef}
         activeTerminalId={renderedRightPanelSurface.activeTerminalId}
+        shellCwd={gitCwd}
+        shellWorktreePath={activeThread.worktreePath ?? null}
         focusRequestId={terminalFocusRequestId}
         keybindings={keybindings}
         onSelectTerminal={selectPanelTerminalStable}

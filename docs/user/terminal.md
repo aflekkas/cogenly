@@ -1,4 +1,22 @@
-# Terminal history
+# Terminal
+
+Open **Terminal** from the right panel's **+** menu. It has two sections:
+
+- **Agent runs** lists every command the agent ran in the thread. Running
+  commands stay at the top; select one to see its full command, working
+  directory, output, and how it ended. A dev server that prints a local address
+  gets an **Open** button, which follows your **Open links in** setting
+  (Cmd/Ctrl-click opens the system browser). **Stop** ends a running command;
+  it stays listed with its exit status.
+- **Shells** are terminals you open yourself with **+** in the Terminal header.
+  They start in the thread's workspace. Double-click a shell's tab, or press F2
+  on it, to rename it on this device. Project scripts also open here.
+
+In the run list, Up and Down move between runs, Enter moves focus into the
+output, and Esc returns to the list. When the agent starts a command while you
+are in a shell, the shell stays selected; the new run appears under Agent runs.
+
+## Terminal history
 
 Each terminal keeps up to 5,000 lines and 8 MiB of scrollback on its environment
 server. Cogenly removes the oldest output when either limit is reached. A long
