@@ -30,11 +30,11 @@ export function CogenlyMark({ className }: { className?: string }) {
       <rect width="128" height="128" rx="26" fill={`url(#${gradientId})`} />
       <path
         d="M76.71 44.08A26 26 0 1 0 76.71 83.92"
-        stroke="var(--color-brand-ink)"
+        stroke="var(--color-brand-glyph)"
         strokeWidth="20"
         strokeLinecap="round"
       />
-      <circle cx="94" cy="64" r="10" fill="var(--color-brand-ink)" />
+      <circle cx="94" cy="64" r="10" fill="var(--color-brand-glyph)" />
     </svg>
   );
 }

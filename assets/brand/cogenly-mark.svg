@@ -1,8 +1,8 @@
 <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="cogenly-ember" x1="64" y1="0" x2="64" y2="128" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FF8A4C"/>
-      <stop offset="1" stop-color="#F0472D"/>
+      <stop stop-color="#FF7B3A"/>
+      <stop offset="1" stop-color="#E63E22"/>
     </linearGradient>
     <linearGradient id="cogenly-rim" x1="64" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
       <stop stop-color="#FFFFFF" stop-opacity="0.3"/>
@@ -11,6 +11,6 @@
   </defs>
   <rect width="128" height="128" rx="28" fill="url(#cogenly-ember)"/>
   <rect x="1.75" y="1.75" width="124.5" height="124.5" rx="26.25" stroke="url(#cogenly-rim)" stroke-width="1.5"/>
-  <path d="M79.85 41.64A28 28 0 1 0 79.85 86.36" stroke="#0D0D0F" stroke-width="16" stroke-linecap="round"/>
-  <circle cx="91" cy="64" r="9" fill="#0D0D0F"/>
+  <path d="M79.85 41.64A28 28 0 1 0 79.85 86.36" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="91" cy="64" r="9" fill="#FFFFFF"/>
 </svg>
