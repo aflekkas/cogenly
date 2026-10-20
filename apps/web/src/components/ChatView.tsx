@@ -285,7 +285,6 @@ import {
   CheckCircle2Icon,
   MessageCircleIcon,
   PaperclipIcon,
-  ChevronDownIcon,
   DownloadIcon,
   GitBranchIcon,
   ShieldQuestionIcon,
@@ -411,6 +410,7 @@ import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
+import { ScrollToEndButton } from "./chat/ScrollToEndButton";
 import {
   PanelLayoutControls,
   type PanelLayoutControlsProps,
@@ -3173,6 +3173,22 @@ export default function ChatView(props: ChatViewProps) {
     rememberedForActive: peekRememberedThreadTimeline<typeof timelineEntries>(activeThreadKey),
   });
   const displayedTimelineKey = displayedTimeline.displayThreadKey ?? routeThreadKey;
+  // The scroll-to-end button marks rows that arrived after the reader left
+  // the live edge. It remembers the last row there was when it appeared.
+  const latestDisplayedEntryId = displayedTimeline.entries.at(-1)?.id ?? null;
+  const [scrollAwayEntry, setScrollAwayEntry] = useState<{
+    readonly threadKey: string;
+    readonly entryId: string | null;
+  } | null>(null);
+  if (!showScrollToBottom) {
+    if (scrollAwayEntry !== null) setScrollAwayEntry(null);
+  } else if (scrollAwayEntry === null || scrollAwayEntry.threadKey !== displayedTimelineKey) {
+    setScrollAwayEntry({ threadKey: displayedTimelineKey, entryId: latestDisplayedEntryId });
+  }
+  const scrollToEndHasUnseen =
+    scrollAwayEntry !== null &&
+    scrollAwayEntry.threadKey === displayedTimelineKey &&
+    scrollAwayEntry.entryId !== latestDisplayedEntryId;
   const paintOnlyDisplayedTimeline = isPaintOnlyThreadTimeline(
     displayedTimeline.displayThreadKey,
     activeThreadKey,
@@ -5148,6 +5164,19 @@ export default function ChatView(props: ChatViewProps) {
     const mainSurface = composerOverlayElement?.querySelector<HTMLElement>(
       '[data-chat-composer-main-surface="true"]',
     );
+    // The backdrop starts at the composer's top edge and runs to the window
+    // edge, so the timeline never shows below or beside the composer.
+    if (composerOverlayElement && mainSurface) {
+      const backdropTop = Math.max(
+        0,
+        mainSurface.getBoundingClientRect().top -
+          composerOverlayElement.getBoundingClientRect().top,
+      );
+      composerOverlayElement.style.setProperty(
+        "--chat-composer-backdrop-top",
+        `${Math.round(backdropTop)}px`,
+      );
+    }
     const button = composerOverlayElement?.parentElement?.querySelector<HTMLElement>(
       'button[aria-label="Scroll to end"]',
     );
@@ -9371,27 +9400,17 @@ export default function ChatView(props: ChatViewProps) {
                   : { historyControls: threadHistoryControls })}
               />
 
-              {/* scroll to end pill — shown when user has scrolled away from the live edge */}
-              {showScrollToBottom && !isThreadFindActive && (
-                <div
-                  className="chat-scroll-to-bottom pointer-events-none absolute z-30 flex justify-center py-1.5"
-                  style={{ bottom: scrollToEndClearance + 4 }}
-                >
-                  <Button
-                    aria-label="Scroll to end"
-                    onPointerDown={(event) => event.preventDefault()}
-                    onClick={() => {
-                      scrollToEnd(true);
-                    }}
-                    className="pointer-events-auto"
-                    size="xs"
-                    variant="glass"
-                  >
-                    <ChevronDownIcon className="size-3.5" />
-                    Scroll to end
-                  </Button>
-                </div>
-              )}
+              {/* Scroll-to-end button: shown once the reader leaves the live edge. */}
+              <div
+                className="chat-scroll-to-bottom pointer-events-none absolute z-30 flex justify-center py-2"
+                style={{ bottom: scrollToEndClearance + 4 }}
+              >
+                <ScrollToEndButton
+                  visible={showScrollToBottom && !isThreadFindActive}
+                  hasUnseen={scrollToEndHasUnseen}
+                  onScrollToEnd={() => scrollToEnd(true)}
+                />
+              </div>
             </div>
 
             {/* Input bar — centered for an empty draft, docked after sending. */}
@@ -9405,6 +9424,13 @@ export default function ChatView(props: ChatViewProps) {
                   : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
               }
             >
+              {isDraftHeroState ? null : (
+                <div
+                  aria-hidden
+                  data-chat-composer-backdrop="true"
+                  className="pointer-events-auto absolute inset-x-0 bottom-0 top-(--chat-composer-backdrop-top,100%) bg-background"
+                />
+              )}
               <div
                 ref={draftHeroTransition.transitionGroupRef}
                 className="chat-composer-lane w-full"

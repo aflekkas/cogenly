@@ -609,6 +609,12 @@ type MessagesTimelineRowContent =
       showAssistantMeta: boolean;
       showAssistantCopyButton: boolean;
       assistantCopyStreaming: boolean;
+      /**
+       * The live activity indicator sits in this message's metadata slot. The
+       * slot keeps the metadata row's height, so the turn settling swaps its
+       * content without moving anything.
+       */
+      showLiveActivity?: true;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
     }
@@ -1490,6 +1496,14 @@ export function deriveMessagesTimelineRows(input: {
   const activeTurnHeaderIndex = input.isWorking
     ? lastResponseBoundaryIndex(timelineEntries) + 1
     : timelineEntries.length;
+  // A turn that so far is only reply text has no work for the elapsed-time
+  // header to summarize, and settling would drop it from above the reply.
+  // The reply takes the header's place as soon as it arrives instead.
+  const activeTurnIsReplyOnly =
+    activeTurnHeaderIndex < timelineEntries.length &&
+    timelineEntries
+      .slice(activeTurnHeaderIndex)
+      .every((entry) => entry.kind === "message" && entry.message.role === "assistant");
 
   // Contiguous trailing work entries of the active run collapse into one live
   // row that survives between actions: while a tool runs it shows that tool,
@@ -1597,7 +1611,7 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
-    if (input.isWorking && index === activeTurnHeaderIndex) {
+    if (input.isWorking && index === activeTurnHeaderIndex && !activeTurnIsReplyOnly) {
       appendWorkingRow();
     }
 
@@ -2004,11 +2018,22 @@ export function deriveMessagesTimelineRows(input: {
         );
       }
     } else {
-      nextRows.push({
-        kind: "thinking",
-        id: LIVE_ACTIVITY_ROW_ID,
-        createdAt: input.activeTurnStartedAt ?? null,
-      });
+      const lastRow = nextRows.at(-1);
+      if (
+        lastRow?.kind === "message" &&
+        lastRow.message.role === "assistant" &&
+        runIdIsActiveResponse(lastRow.message.runId)
+      ) {
+        // Under the reply it is working on, the activity holds the slot its
+        // metadata row takes once the turn settles.
+        nextRows[nextRows.length - 1] = { ...lastRow, showLiveActivity: true };
+      } else {
+        nextRows.push({
+          kind: "thinking",
+          id: LIVE_ACTIVITY_ROW_ID,
+          createdAt: input.activeTurnStartedAt ?? null,
+        });
+      }
     }
   }
 
@@ -2355,6 +2380,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.showAssistantMeta === bm.showAssistantMeta &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
+        a.showLiveActivity === bm.showLiveActivity &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
         a.revertTurnCount === bm.revertTurnCount
       );

@@ -267,7 +267,6 @@ import { createContextPresentationRegistry } from "../contextPresentationRegistr
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { useClientSettings } from "~/hooks/useSettings";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
-import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import {
@@ -427,13 +426,6 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END = {
 } as const satisfies MaintainScrollAtEndOptions;
 const EMPTY_TIMELINE_RUNS: ReadonlyArray<HandoffTimelineRun> = [];
 const EMPTY_RUN_IDS: ReadonlySet<RunId> = new Set();
-// Streamed text lands a paragraph at a time. A smooth scroll to the end
-// turns each landing into a short glide instead of a jump. Thread switches
-// and layout settles keep the instant variant so nothing visibly travels.
-const TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH = {
-  ...TIMELINE_MAINTAIN_SCROLL_AT_END,
-  animated: true,
-} as const satisfies MaintainScrollAtEndOptions;
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -649,12 +641,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     rememberedPosition?.atEnd === false ? null : listIdentityKey,
   );
   const restoringThreadPosition = positionedThreadKey !== listIdentityKey;
-  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const listIdentityRef = useRef(listIdentityKey);
   const previousLatestRunRef = useRef(latestRun);
-  // The list stays mounted across thread switches. Its first end pins on the
-  // new thread must snap, not glide, even if that thread is mid-turn.
-  const [settlingListIdentity, setSettlingListIdentity] = useState<string | null>(listIdentityKey);
   let paintedExpandedRunIds = expandedRunIds;
   let paintedExpandedWorkGroupIds = expandedWorkGroupIds;
   let paintedExpandedAttemptIds = expandedAttemptIds;
@@ -662,7 +650,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
     listIdentityRef.current = listIdentityKey;
     setPositionedThreadKey(null);
     previousLatestRunRef.current = latestRun;
-    setSettlingListIdentity(listIdentityKey);
     paintedExpandedRunIds = rememberedPosition?.disclosures?.runs ?? new Set();
     paintedExpandedWorkGroupIds = rememberedPosition?.disclosures?.workGroups ?? new Set();
     paintedExpandedAttemptIds = rememberedPosition?.disclosures?.attempts ?? new Set();
@@ -703,21 +690,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (settlingListIdentity === null) return;
-    // Two frames covers the fresh-data layout pass and the initial end pin.
-    let second: number | null = null;
-    const first = requestAnimationFrame(() => {
-      second = requestAnimationFrame(() => {
-        setSettlingListIdentity((current) => (current === settlingListIdentity ? null : current));
-      });
-    });
-    return () => {
-      cancelAnimationFrame(first);
-      if (second !== null) cancelAnimationFrame(second);
-    };
-  }, [settlingListIdentity]);
 
   // A toggle made at the end keeps the end in view while rows re-measure.
   // Anywhere else, the toggled row holds its place.
@@ -1660,9 +1632,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 fullscreenAppRowId !== null ||
                 disclosureToggleSettling
                   ? false
-                  : isWorking && !prefersReducedMotion && settlingListIdentity === null
-                    ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
-                    : TIMELINE_MAINTAIN_SCROLL_AT_END
+                  : TIMELINE_MAINTAIN_SCROLL_AT_END
               }
               maintainVisibleContentPosition={
                 findActive ||
@@ -2134,7 +2104,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
             ? "pb-1.5"
             : (row.kind === "message" &&
                   row.message.role === "assistant" &&
-                  !row.showAssistantMeta) ||
+                  !row.showAssistantMeta &&
+                  !row.showLiveActivity) ||
                 row.kind === "worktree-setup" ||
                 row.kind === "event" ||
                 row.kind === "attempt-fold" ||
@@ -2891,7 +2862,12 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             />
           </AssistantCitationSource>
         </div>
-        {row.showAssistantMeta ? (
+        {row.showLiveActivity ? (
+          // Same box as the metadata row (xs buttons), which replaces it in place.
+          <div className="mt-1.5 flex h-7 items-center sm:h-6">
+            <LiveActivityRow label="Thinking" iconName="brain" active shimmer />
+          </div>
+        ) : row.showAssistantMeta ? (
           <AssistantMessageMeta
             className="mt-1.5"
             projectedItem={row.projectedItem}
