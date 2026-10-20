@@ -10,7 +10,7 @@ const WIDTH_CLASS: Record<WorkspacePageWidth, string> = {
   expanded: "max-w-6xl",
 };
 
-/** Shared content frame for workspace pages. */
+/** Shared content frame for workspace pages. Glides to its new center when a panel toggles. */
 export function WorkspacePageContainer({
   width = "readable",
   className,
@@ -23,6 +23,7 @@ export function WorkspacePageContainer({
         WIDTH_CLASS[width],
         className,
       )}
+      data-panel-flip="center"
       {...props}
     />
   );

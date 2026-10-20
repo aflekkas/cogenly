@@ -83,7 +83,9 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron} className="border-b border-border">
-          <h1 className="min-w-0 flex-1 truncate text-sm font-medium">Projects</h1>
+          <h1 className="min-w-0 flex-1 truncate text-sm font-medium" data-panel-flip="start">
+            Projects
+          </h1>
           <Button
             size="xs"
             variant="ghost-muted"

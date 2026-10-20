@@ -3,8 +3,11 @@ import { type PanelAnimationDurationMs } from "@t3tools/contracts/settings";
 
 import { useMediaQuery } from "./hooks/useMediaQuery";
 
-/** Panels, including the sidebar, always animate open and close at this duration. */
-const PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 200;
+/**
+ * Panels, including the sidebar, always animate open and close at this
+ * duration: --motion-duration-slow, the token for panels and larger surfaces.
+ */
+const PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 250;
 
 const PanelAnimationSuppressionContext = createContext(false);
 

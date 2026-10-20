@@ -38,6 +38,20 @@ Build new UI the same way. Compose or extend a component instead of copying its 
 When a call site repeats a treatment another one already uses, make it a variant or a slot on the
 shared component. A new composer banner or notice uses the `ComposerBanner` slots.
 
+## Panel motion
+
+The sidebar and the inline right panel open and close without per-frame layout: the page lays
+out once at its final size, the panel slides on `translate`, and content marked `data-panel-flip`
+glides from where it was drawn on the same curve. See
+[`lib/panelFlip.ts`](../../apps/web/src/lib/panelFlip.ts).
+
+- Never transform the main pane or the chat column. A transform makes it the containing block of
+  its `position: fixed` titlebar controls, so they jump with it. Mark the content instead.
+- A new page marks its centered frame (`WorkspacePageContainer` already does) and a leading title
+  that isn't a `WorkspaceBreadcrumb` with `data-panel-flip="start"`. Unmarked content snaps.
+- Don't animate panel widths or header padding. Every frame would rerun the chat's
+  `observeResize` callbacks, each a synchronous React render.
+
 ## Handlers in large components
 
 V8 gives every closure created in one render a single shared scope. A memoized handler keeps
