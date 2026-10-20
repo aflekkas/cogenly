@@ -16,7 +16,8 @@ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv
 ];
 export type BuiltInUsageReadersEnv =
   | ProviderUsageReaderEnv<typeof ClaudeDriver>
-  | ProviderUsageReaderEnv<typeof CodexDriver>;
+  | ProviderUsageReaderEnv<typeof CodexDriver>
+  | ProviderUsageReaderEnv<typeof MuseDriver>;
 export const BUILT_IN_USAGE_DRIVERS: ReadonlyArray<
   AnyProviderDriver<BuiltInDriversEnv, BuiltInUsageReadersEnv>
-> = [ClaudeDriver, CodexDriver];
+> = [ClaudeDriver, CodexDriver, MuseDriver];

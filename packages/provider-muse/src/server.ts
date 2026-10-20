@@ -6,3 +6,10 @@
  */
 export { MuseDriver, type MuseDriverEnv } from "./server/driver.ts";
 export { makeMuseAdapterV2, type MuseAdapterV2Options } from "./server/adapter.ts";
+export {
+  museUsageFormat,
+  museUsageReader,
+  parseMuseLine,
+  parseMuseRecord,
+  type MuseUsageReaderEnv,
+} from "./server/usage.ts";

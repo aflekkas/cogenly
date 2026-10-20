@@ -18,6 +18,7 @@ import { makeMuseAdapterV2 } from "./adapter.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import { checkMuseProviderStatus, makePendingMuseProvider } from "./status.ts";
+import { museUsageReader, type MuseUsageReaderEnv } from "./usage.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import { enrichMuseSnapshot, latestMuseVersion, museMaintenance } from "./maintenance.ts";
@@ -53,11 +54,12 @@ export type MuseDriverEnv =
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers;
 
-export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv> = {
+export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv, MuseUsageReaderEnv> = {
   driverKind: DRIVER_KIND,
   metadata: { displayName: "Muse Code", supportsMultipleInstances: true },
   configSchema: MuseSettings,
   defaultConfig: () => decodeMuseSettings({}),
+  usage: museUsageReader,
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
