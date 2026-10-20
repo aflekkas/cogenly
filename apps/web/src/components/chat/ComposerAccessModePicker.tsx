@@ -33,31 +33,30 @@ export function ComposerAccessModeMenuContent(props: {
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
   return (
-    <>
+    // Base UI requires the label inside the group it names.
+    <MenuRadioGroup
+      value={props.runtimeMode}
+      onValueChange={(value: RuntimeMode) => {
+        if (value !== props.runtimeMode) props.onRuntimeModeChange(value);
+      }}
+    >
       <MenuGroupLabel>Access</MenuGroupLabel>
-      <MenuRadioGroup
-        value={props.runtimeMode}
-        onValueChange={(value: RuntimeMode) => {
-          if (value !== props.runtimeMode) props.onRuntimeModeChange(value);
-        }}
-      >
-        {props.runtimeModes.map((mode) => {
-          const config = runtimeModeConfig[mode];
-          return (
-            <MenuRadioItem key={mode} value={mode}>
-              <span className="flex items-start gap-2">
-                <config.icon aria-hidden="true" className="mt-0.5" />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span>{config.label}</span>
-                  <span className="text-muted-foreground text-xs">{config.description}</span>
-                </span>
-                <MenuRadioItemIndicator className="mt-0.5" />
+      {props.runtimeModes.map((mode) => {
+        const config = runtimeModeConfig[mode];
+        return (
+          <MenuRadioItem key={mode} value={mode}>
+            <span className="flex items-start gap-2">
+              <config.icon aria-hidden="true" className="mt-0.5" />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span>{config.label}</span>
+                <span className="text-muted-foreground text-xs">{config.description}</span>
               </span>
-            </MenuRadioItem>
-          );
-        })}
-      </MenuRadioGroup>
-    </>
+              <MenuRadioItemIndicator className="mt-0.5" />
+            </span>
+          </MenuRadioItem>
+        );
+      })}
+    </MenuRadioGroup>
   );
 }
 
