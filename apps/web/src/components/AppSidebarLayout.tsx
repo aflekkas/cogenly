@@ -36,6 +36,7 @@ import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarCh
 import { SidebarNavRail } from "./sidebar/SidebarNavRail";
 import { resolveWorkspaceTitlebarLayout } from "../workspaceTitlebar";
 import { useIsMobile } from "../hooks/useMediaQuery";
+import { routeHidesListColumn } from "./sidebar/listColumnRoutes";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
 import { useProjects } from "../state/entities";
 import {
@@ -218,9 +219,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // mobile sheet keeps those, and the legacy sidebar keeps its own layout.
   const isMobile = useIsMobile();
   const navRailVisible = !isMobile && !legacySidebarEnabled;
-  // Usage is a full-width page: with the rail there to navigate away, it has no
-  // list column. The mobile sheet stays, since it is the only way back.
-  const listSidebarHidden = navRailVisible && pathname === "/usage";
+  // Usage and Projects are full-width pages: with the rail there to navigate
+  // away, they have no list column. The mobile sheet stays, since it is the only way back.
+  const listSidebarHidden = navRailVisible && routeHidesListColumn(pathname);
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(() => {
     const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState;
     return isMacosDesktop && typeof getWindowFullscreenState === "function"

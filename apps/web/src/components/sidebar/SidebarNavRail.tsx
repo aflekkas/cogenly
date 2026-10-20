@@ -23,6 +23,7 @@ import { useUiStateStore } from "../../uiStateStore";
 import { useSidebar, useSidebarVisibility } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { isSidebarUtilityPage } from "./mainAppLocation";
+import { routeHidesListColumn } from "./listColumnRoutes";
 import { SIDEBAR_MODE_ICONS } from "./modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./modes/sidebarModes.logic";
 import { useSelectSidebarMode } from "./modes/useSelectSidebarMode";
@@ -67,6 +68,8 @@ export function SidebarNavRail({
   const onUtilityPage = isSidebarUtilityPage(pathname);
   const onSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const onUsage = pathname === "/usage";
+  // Usage and Projects have no list column, so nothing to toggle there.
+  const listColumnHidden = routeHidesListColumn(pathname);
   const toggleShortcut = shortcutLabelForCommand(keybindings, "sidebar.toggle", {
     context: { usagePageOpen: onUsage },
   });
@@ -123,10 +126,9 @@ export function SidebarNavRail({
           isElectron && "drag-region",
         )}
       >
-        {sidebarToggleBelowTitlebar || onUsage ? null : sidebarToggle}
+        {sidebarToggleBelowTitlebar || listColumnHidden ? null : sidebarToggle}
       </div>
-      {/* Usage has no list column, so nothing to toggle there. */}
-      {sidebarToggleBelowTitlebar && !onUsage ? sidebarToggle : null}
+      {sidebarToggleBelowTitlebar && !listColumnHidden ? sidebarToggle : null}
       <div
         role="tablist"
         aria-label="Sidebar view"
