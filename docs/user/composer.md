@@ -90,6 +90,9 @@ returns to the remembered selection.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
 
+The model picker opens on **Recent**, the top of its provider rail: the models you have picked
+or sent with most, and most recently, across providers. Each device keeps its own list.
+
 ## Quote an assistant response
 
 On web and desktop, select text within one assistant response and choose

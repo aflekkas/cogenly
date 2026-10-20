@@ -21,7 +21,12 @@ import {
 } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
-import { ModelPickerSidebar } from "./ModelPickerSidebar";
+import {
+  MODEL_PICKER_RECENT,
+  ModelPickerSidebar,
+  type ModelPickerRailSelection,
+} from "./ModelPickerSidebar";
+import { rankModelUsage, readModelUsage, recordModelUsage, useModelUsage } from "~/lib/modelUsage";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
   modelPickerLegacySectionKey,
@@ -97,12 +102,14 @@ export function shouldOfferModelPickerSetup(
 
 export function adjacentModelPickerProvider(input: {
   entries: ReadonlyArray<ProviderInstanceEntry>;
-  selectedInstanceId: ProviderInstanceId;
+  selectedInstanceId: ModelPickerRailSelection;
+  /** Recent leads the cycle when the rail shows it. */
+  includeRecent?: boolean;
   direction: 1 | -1;
   disabledInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
   selectableUnavailableInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
 }) {
-  const providers = input.entries
+  const providers: ModelPickerRailSelection[] = input.entries
     .filter(
       (entry) =>
         !input.disabledInstanceIds?.has(entry.instanceId) &&
@@ -110,6 +117,7 @@ export function adjacentModelPickerProvider(input: {
           input.selectableUnavailableInstanceIds?.has(entry.instanceId)),
     )
     .map((entry) => entry.instanceId);
+  if (input.includeRecent) providers.unshift(MODEL_PICKER_RECENT);
   if (providers.length === 0) {
     return input.selectedInstanceId;
   }
@@ -169,6 +177,7 @@ function measureLegacyResize(input: {
 }
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
+const RECENT_MODEL_COUNT = 5;
 const MODEL_LIST_ESTIMATED_ITEM_SIZE = 52;
 
 function ModelListSeparator() {
@@ -263,8 +272,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       }),
     ) &&
     !isProviderInstancePickerReady(activeEntry);
-  // The picker always opens on the current model's provider.
-  const [selectedInstanceId, setSelectedInstanceId] = useState(props.activeInstanceId);
+  // The rail entry the user chose; until then the picker opens on Recent when
+  // this device has used models, else on the current model's provider.
+  const [chosenInstanceId, setChosenInstanceId] = useState<ModelPickerRailSelection | null>(null);
+  const [openedWithUsage] = useState(() => readModelUsage().length > 0);
+  // Ranked as of opening, so the list holds still while the picker is open.
+  const [openedAt] = useState(() => Date.now());
+  const modelUsage = useModelUsage();
   const [expandedLegacyInstances, setExpandedLegacyInstances] = useState(
     () =>
       new Set<ProviderInstanceId>(
@@ -292,29 +306,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     const timeout = window.setTimeout(() => setLegacyResize(null), 400);
     return () => window.clearTimeout(timeout);
   }, [legacyResize]);
-
-  const handleSelectInstance = useCallback(
-    (instanceId: ProviderInstanceId) => {
-      // Another provider's list has another length: ease the frame (and the
-      // popover with it) to the new height instead of snapping.
-      const frame = modelListFrameRef.current;
-      const resize =
-        frame && instanceId !== selectedInstanceId && !prefersReducedMotion()
-          ? measureLegacyResize({
-              frame,
-              listState: undefined,
-              legacyKey: "",
-              collapsing: false,
-            })
-          : null;
-      setSelectedInstanceId(instanceId);
-      setLegacyResize(resize);
-      window.requestAnimationFrame(() => {
-        focusModelList();
-      });
-    },
-    [focusModelList, selectedInstanceId],
-  );
 
   useLayoutEffect(() => {
     focusModelList();
@@ -445,15 +436,67 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, [instanceEntries, isLocked, matchesLockedProvider]);
   const showSidebar = sidebarInstanceEntries.length > 0;
 
+  // Recent: the models this device used most and most recently, across
+  // providers, that this picker can still offer.
+  const recentModels = useMemo(() => {
+    const modelByKey = new Map(
+      flatModels
+        .filter(matchesLockedProvider)
+        .map((model) => [modelPickerModelKey(model.instanceId, model.slug), model] as const),
+    );
+    const recent: ModelPickerItem[] = [];
+    for (const entry of rankModelUsage(modelUsage, openedAt)) {
+      const model = modelByKey.get(
+        modelPickerModelKey(entry.instanceId as ProviderInstanceId, entry.model),
+      );
+      if (model) recent.push(model);
+      if (recent.length === RECENT_MODEL_COUNT) break;
+    }
+    return recent;
+  }, [flatModels, matchesLockedProvider, modelUsage, openedAt]);
+  const showRecent = recentModels.length > 0;
+  const selectedInstanceId: ModelPickerRailSelection =
+    chosenInstanceId === MODEL_PICKER_RECENT && !showRecent
+      ? props.activeInstanceId
+      : (chosenInstanceId ??
+        (openedWithUsage && showRecent ? MODEL_PICKER_RECENT : props.activeInstanceId));
+
+  const handleSelectInstance = useCallback(
+    (instanceId: ModelPickerRailSelection) => {
+      // Another provider's list has another length: ease the frame (and the
+      // popover with it) to the new height instead of snapping.
+      const frame = modelListFrameRef.current;
+      const resize =
+        frame && instanceId !== selectedInstanceId && !prefersReducedMotion()
+          ? measureLegacyResize({
+              frame,
+              listState: undefined,
+              legacyKey: "",
+              collapsing: false,
+            })
+          : null;
+      setChosenInstanceId(instanceId);
+      setLegacyResize(resize);
+      window.requestAnimationFrame(() => {
+        focusModelList();
+      });
+    },
+    [focusModelList, selectedInstanceId],
+  );
+
   const filteredModels = useMemo(
     () =>
-      flatModels.filter(
-        (model) => model.instanceId === selectedInstanceId && matchesLockedProvider(model),
-      ),
-    [flatModels, matchesLockedProvider, selectedInstanceId],
+      selectedInstanceId === MODEL_PICKER_RECENT
+        ? recentModels
+        : flatModels.filter(
+            (model) => model.instanceId === selectedInstanceId && matchesLockedProvider(model),
+          ),
+    [flatModels, matchesLockedProvider, recentModels, selectedInstanceId],
   );
 
   const legacySection = useMemo(() => {
+    // Recent lists what was used, legacy or not.
+    if (selectedInstanceId === MODEL_PICKER_RECENT) return null;
     const currentModels = filteredModels.filter((model) => !model.isLegacy);
     const legacyModels = filteredModels.filter((model) => model.isLegacy);
     if (legacyModels.length === 0) {
@@ -481,7 +524,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     ];
   }, [filteredModels, legacySection]);
 
-  const selectedEntry = entryByInstanceId.get(selectedInstanceId);
+  const selectedEntry =
+    selectedInstanceId === MODEL_PICKER_RECENT
+      ? undefined
+      : entryByInstanceId.get(selectedInstanceId);
   const providerSetupEntries =
     props.onOpenProviderSetup &&
     selectedEntry &&
@@ -545,6 +591,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       // normalization rules, so pass the driver kind here.
       const resolvedModel = resolveSelectableModel(entry.driverKind, modelSlug, options);
       if (resolvedModel) {
+        recordModelUsage(instanceId, resolvedModel);
         if (additive && onToggleModel) {
           onToggleModel(instanceId, resolvedModel);
         } else {
@@ -723,6 +770,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         const next = adjacentModelPickerProvider({
           entries: sidebarInstanceEntries,
           selectedInstanceId,
+          includeRecent: showRecent,
           direction: command === "modelPicker.nextProvider" ? 1 : -1,
           disabledInstanceIds: lockedDisabledInstanceIds,
           selectableUnavailableInstanceIds,
@@ -762,6 +810,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     modelJumpShortcutContext,
     selectableUnavailableInstanceIds,
     selectedInstanceId,
+    showRecent,
     sidebarInstanceEntries,
   ]);
 
@@ -778,6 +827,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             selectedInstanceId={selectedInstanceId}
             onSelectInstance={handleSelectInstance}
             onFocusList={focusModelList}
+            showRecent={showRecent}
             instanceEntries={sidebarInstanceEntries}
             {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
             {...(lockedDisabledInstanceIds

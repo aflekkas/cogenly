@@ -26,6 +26,7 @@ import {
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useDelayedStatus } from "../hooks/useDelayedStatus";
+import { recordModelUsage } from "../lib/modelUsage";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
@@ -6735,6 +6736,8 @@ export default function ChatView(props: ChatViewProps) {
       interactionMode: sendInteractionMode,
       interactionModeEnabled: sendInteractionModeEnabled,
     } = sendCtx;
+    // The model picker's Recent list ranks what is actually sent with.
+    recordModelUsage(ctxSelectedModelSelection.instanceId, ctxSelectedModelSelection.model);
     const annotationImageAlreadyAttached =
       directAnnotation?.image !== undefined &&
       sendContextImages.some((image) => image.id === directAnnotation.image?.id);
