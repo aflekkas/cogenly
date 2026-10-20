@@ -31,9 +31,9 @@ function Shell({
       data-context-collapsed={contextStripCollapsed || undefined}
       className={cn(
         "@container/composer-surface group/composer-surface relative isolate mx-auto w-full max-w-(--chat-content-max-width)",
-        "[--chat-composer-drawer-inset:1.375rem] [--chat-composer-glass-surface:var(--card)] [--chat-composer-outline:rgb(0_0_0/8%)]",
-        "dark:[--chat-composer-glass-surface:var(--composer-surface,var(--surface-raised))] dark:[--corner-glow:2.5%] dark:[--surface-raised-sheen-top:transparent] dark:[--surface-raised-sheen-bottom:transparent] dark:[--chat-composer-highlight:transparent] dark:[--surface-raised-edge-top:rgb(255_255_255/1.2%)] dark:[--surface-raised-edge-side:rgb(255_255_255/1.2%)] dark:[--surface-raised-edge-bottom:rgb(255_255_255/1.2%)] dark:[--chat-composer-outline:var(--surface-edge,rgb(255_255_255/5%))]",
-        "[html[data-theme-id]_&]:[--chat-composer-glass-surface:var(--app-theme-surface-raised)] [html[data-theme-id]_&]:[--chat-composer-outline:var(--app-theme-toolbar-border)]",
+        "[--chat-composer-drawer-inset:1.375rem] [--chat-composer-glass-surface:var(--message-surface)] [--chat-composer-outline:rgb(0_0_0/8%)]",
+        "dark:[--chat-composer-glass-surface:var(--message-surface)] dark:[--corner-glow:4%] dark:[--corner-glow-top:2.8%] dark:[--surface-raised-sheen-top:transparent] dark:[--surface-raised-sheen-bottom:transparent] dark:[--chat-composer-highlight:transparent] dark:[--surface-raised-edge-top:var(--surface-edge,rgb(255_255_255/4%))] dark:[--surface-raised-edge-side:var(--surface-edge,rgb(255_255_255/4%))] dark:[--surface-raised-edge-bottom:var(--surface-edge,rgb(255_255_255/4%))] dark:[--chat-composer-outline:var(--surface-edge,rgb(255_255_255/4%))]",
+        "[html[data-theme-id]_&]:[--chat-composer-glass-surface:var(--message-surface)] [html[data-theme-id]_&]:[--chat-composer-outline:var(--app-theme-toolbar-border)]",
         "dark:[html[data-theme-id]:not([data-theme-id=t3-chat])_&]:[--chat-composer-highlight:color-mix(in_srgb,var(--app-theme-input)_12%,transparent)] dark:[html[data-theme-id]:not([data-theme-id=t3-chat])_&]:[--chat-composer-outline:color-mix(in_srgb,var(--app-theme-input)_30%,var(--background))]",
         "dark:[html[data-theme-id=t3-chat]_&]:[--chat-composer-highlight:color-mix(in_srgb,#432d48_12%,transparent)] dark:[html[data-theme-id=t3-chat]_&]:[--chat-composer-outline:#241e28]",
         "before:pointer-events-none before:absolute before:inset-0 before:z-0 before:rounded-3xl before:bg-linear-to-b before:from-(--surface-raised-sheen-top) before:to-(--surface-raised-sheen-bottom) before:bg-(--chat-composer-glass-surface)",
@@ -68,7 +68,7 @@ function Host({ className, ...props }: ComponentProps<"div">) {
       className={cn(
         // Measured on the reference composer: a few levels of rim on the top
         // and left, a one-pixel shade on the right and below, no bright ring.
-        "relative z-10 w-full rounded-3xl shadow-(--surface-raised-shadow) after:z-1 dark:[--surface-raised-shadow:0_1px_1px_rgb(0_0_0/30%),0_10px_28px_-14px_rgb(0_0_0/50%)]",
+        "relative z-10 w-full rounded-3xl shadow-(--surface-raised-shadow) after:z-1 dark:[--surface-raised-shadow:var(--surface-halo,0_1px_2px_rgb(0_0_0/30%))]",
         outlineClasses,
         contextSeamClasses,
         "group-has-data-[composer-banner-surface=attached]/composer-surface:shadow-none group-has-data-[composer-banner-surface=attached]/composer-surface:after:hidden",
