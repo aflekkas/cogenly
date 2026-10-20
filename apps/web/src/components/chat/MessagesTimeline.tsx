@@ -2617,7 +2617,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             {typeof revertTurnCount === "number" && (
               <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
             )}
-            {!row.message.streaming && <StartWorkFromMessageButton id={row.message.id} />}
             {resolvedContext.text && (
               <MessageCopyButton
                 // Structured paste needs the canonical links to retain their positions.
@@ -2638,6 +2637,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 variant="ghost"
               />
             )}
+            <BranchActions>
+              {!row.message.streaming && <StartWorkFromMessageButton id={row.message.id} />}
+            </BranchActions>
           </div>
         </div>
       </div>
@@ -2925,6 +2927,22 @@ function AssistantForkButton({
 }
 
 /**
+ * The actions that branch off a message (fork the chat, start Work), kept
+ * together and set off from copy by a hairline. Hidden when none apply.
+ */
+function BranchActions({ children }: { readonly children: ReactNode }) {
+  return (
+    <span
+      role="group"
+      aria-label="Branch from this message"
+      className="flex items-center gap-0.5 empty:hidden before:me-1.5 before:h-3.5 before:w-px before:bg-border"
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
  * "Start Work from here": picks a repository and hands the chat, through this
  * message, to a new Work session. Distinct from forking, which continues the
  * conversation as a chat.
@@ -3035,10 +3053,12 @@ function AssistantMessageMetaActions({
         showCopyButton={showCopyButton}
         streaming={copyStreaming}
       />
-      {projectedItem?.item.type === "assistant_message" ? (
-        <AssistantForkButton projectedItem={projectedItem} />
-      ) : null}
-      {!message.streaming ? <StartWorkFromMessageButton id={message.id} /> : null}
+      <BranchActions>
+        {projectedItem?.item.type === "assistant_message" ? (
+          <AssistantForkButton projectedItem={projectedItem} />
+        ) : null}
+        {!message.streaming ? <StartWorkFromMessageButton id={message.id} /> : null}
+      </BranchActions>
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
