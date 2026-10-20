@@ -25,6 +25,7 @@ import {
 } from "./ChatView.logic";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { useScratchProject } from "../hooks/useScratchProject";
+import { useDelayedStatus } from "../hooks/useDelayedStatus";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
@@ -2288,10 +2289,29 @@ export default function ChatView(props: ChatViewProps) {
   const serverUpdateFailureDismissed =
     serverUpdateState === dismissedServerUpdateState ||
     isServerUpdateFailureDismissed(serverUpdateState);
+  // The machine notice for the open thread, before debouncing. While an update
+  // runs, transient connect blips are expected (the server restarts) and the
+  // update banner already shows progress. Hard failure phases still surface so
+  // the Reconnect action stays reachable.
+  const environmentNoticePhase = ((): "reconnecting" | "offline" | "error" | null => {
+    const connection = activeEnvironmentUnavailableState?.connection ?? null;
+    if (connection === null) return null;
+    const reconnecting = connection.phase === "connecting" || connection.phase === "reconnecting";
+    if (reconnecting && (serverUpdateState.status === "running" || !reconnectWarningGraceElapsed)) {
+      return null;
+    }
+    return reconnecting ? "reconnecting" : connection.phase === "error" ? "error" : "offline";
+  })();
+  // A flappy connection never flashes the notice: it shows once the state has
+  // lasted a moment and then stays up for a minimum time.
+  const activeEnvironmentNoticeEnvironmentId = activeEnvironment?.environmentId ?? null;
+  const activeEnvironmentNoticeLabel = activeEnvironment?.label ?? null;
+  const shownEnvironmentNoticePhase = useDelayedStatus(
+    activeEnvironment?.environmentId ?? "",
+    environmentNoticePhase,
+  );
   const systemComposerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const items: ComposerBannerStackItem[] = [];
-    const updateRunning = serverUpdateState.status === "running";
-    const unavailableConnection = activeEnvironmentUnavailableState?.connection ?? null;
     const disconnectAction =
       canDisconnectActiveEnvironment && activeEnvironmentUnavailableState ? (
         <Button
@@ -2308,22 +2328,16 @@ export default function ChatView(props: ChatViewProps) {
           Disconnect server
         </Button>
       ) : undefined;
-    const environmentReconnecting =
-      unavailableConnection !== null &&
-      (unavailableConnection.phase === "connecting" ||
-        unavailableConnection.phase === "reconnecting");
-    // While an update runs, transient connect blips are expected (the server
-    // restarts) and the update banner already shows progress. Hard failure
-    // phases still surface so the Reconnect action stays reachable.
-    const suppressUnavailableBanner =
-      environmentReconnecting && (updateRunning || !reconnectWarningGraceElapsed);
-    if (activeEnvironmentUnavailableState && unavailableConnection && !suppressUnavailableBanner) {
+    const environmentReconnecting = shownEnvironmentNoticePhase === "reconnecting";
+    if (shownEnvironmentNoticePhase !== null && activeEnvironmentNoticeLabel !== null) {
       items.push({
-        id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
-        variant: unavailableConnection.phase === "error" ? "error" : "warning",
+        // Keyed by phase too, so reconnecting and offline cross-fade.
+        id: `environment-unavailable:${activeEnvironmentNoticeEnvironmentId}:${shownEnvironmentNoticePhase}`,
+        variant: shownEnvironmentNoticePhase === "error" ? "error" : "warning",
         icon: <WifiOffIcon />,
-        title: `${activeEnvironmentUnavailableState.label} is ${environmentReconnecting ? "reconnecting" : "offline"}`,
-        actions: (
+        title: `${activeEnvironmentNoticeLabel} is ${environmentReconnecting ? "reconnecting" : "offline"}`,
+        // Held for its minimum time after the machine is back: no actions then.
+        actions: activeEnvironmentUnavailableState ? (
           <>
             {!environmentReconnecting ? (
               <Button
@@ -2340,7 +2354,7 @@ export default function ChatView(props: ChatViewProps) {
             ) : null}
             {disconnectAction}
           </>
-        ),
+        ) : undefined,
       });
     }
     if (
@@ -2435,7 +2449,9 @@ export default function ChatView(props: ChatViewProps) {
     handleDisconnectActiveEnvironmentStable,
     setDismissedVersionMismatchKey,
     showVersionMismatchBanner,
-    reconnectWarningGraceElapsed,
+    shownEnvironmentNoticePhase,
+    activeEnvironmentNoticeEnvironmentId,
+    activeEnvironmentNoticeLabel,
     serverUpdateFailureDismissed,
     serverUpdateState,
     versionMismatch,

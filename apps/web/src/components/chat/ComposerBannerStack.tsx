@@ -1,14 +1,31 @@
 import { InfoIcon } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { ComposerBanner, type ComposerBannerVariant } from "./ComposerBanner";
 import { observeResize } from "~/lib/observeResize";
+import { PANEL_MOTION_EASING } from "~/lib/panelFlip";
 
 // Match the duration-220 exit transition before removing a dismissed notice.
 const DISMISS_TRANSITION_MS = 220;
+// The attached notice opens, closes and swaps on this timing.
+const NOTICE_PRESENCE_MS = 200;
+const NOTICE_PRESENCE_EASING = PANEL_MOTION_EASING;
+const NOTICE_PRESENCE_RISE = "0 4px";
+
+function prefersReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 export interface ComposerBannerStackItem {
   readonly id: string;
@@ -90,7 +107,26 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
   // Activity stays attached. Urgency and severity only order the notices behind it.
   const orderedItems = items.toSorted((a, b) => bannerPriority(a) - bannerPriority(b));
   const frontItem = orderedItems[0];
-  if (!frontItem) {
+
+  // The front notice that just went away, kept while it fades: under the next
+  // one (a cross-fade) or in the collapsing frame when none follows.
+  const [leavingFront, setLeavingFront] = useState<ComposerBannerStackEntry | null>(null);
+  const lastFrontRef = useRef(frontItem);
+  useLayoutEffect(() => {
+    const lastFront = lastFrontRef.current;
+    lastFrontRef.current = frontItem;
+    if (lastFront && lastFront.id !== frontItem?.id) setLeavingFront(lastFront);
+  });
+  const clearLeavingFront = useCallback(() => setLeavingFront(null), []);
+  // A notice already up when the composer mounts (a thread switch) is just there.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+  }, []);
+  // A dismissed notice has already slid out; it must not reappear while the frame closes.
+  const leavingFrontDismissed = leavingFront !== null && requestedExitingItemId === leavingFront.id;
+
+  if (!frontItem && !leavingFront) {
     return (
       <>
         {null}
@@ -101,7 +137,7 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
   }
   const stackedItems = orderedItems.slice(1);
   const hasStack = stackedItems.length > 0;
-  const showCollapsedStackCap = hasStack && exitingItemId !== frontItem.id;
+  const showCollapsedStackCap = hasStack && exitingItemId !== frontItem?.id;
   const firstStackedItem = stackedItems[0];
 
   const requestDismiss = (item: ComposerBannerStackEntry) => {
@@ -218,34 +254,222 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
         data-composer-banner-drawer="true"
         data-chat-composer-collapsed-controls="true"
       >
-        <div
-          key={frontItem.id}
-          className={cn(
-            "relative z-10 transition-[opacity,translate] duration-220 ease-in",
-            exitingItemId === frontItem.id
-              ? "pointer-events-none translate-y-16 opacity-0"
-              : "opacity-100",
-          )}
-          onPointerDownCapture={() => {
-            setStackExpanded(false);
-            const activeElement = document.activeElement;
-            if (
-              activeElement instanceof HTMLElement &&
-              noticesRef.current?.contains(activeElement)
-            ) {
-              activeElement.blur();
-            }
-          }}
+        <NoticePresenceFrame
+          open={frontItem !== undefined}
+          swapKey={frontItem?.id ?? null}
+          animateMountRef={mountedRef}
+          onClosed={clearLeavingFront}
         >
-          <ComposerBannerStackAlert
-            item={frontItem}
-            attached
-            exiting={exitingItemId === frontItem.id}
-            onDismissRequest={() => requestDismiss(frontItem)}
-          />
-        </div>
+          {frontItem ? (
+            <>
+              {leavingFront ? (
+                <LeavingNotice key={leavingFront.id} onDone={clearLeavingFront}>
+                  <div className={cn(leavingFrontDismissed && "opacity-0")}>
+                    <ComposerBannerStackAlert
+                      item={leavingFront}
+                      attached
+                      exiting
+                      onDismissRequest={() => {}}
+                    />
+                  </div>
+                </LeavingNotice>
+              ) : null}
+              {renderFrontItem(frontItem)}
+            </>
+          ) : leavingFront ? (
+            <div aria-hidden inert className={cn(leavingFrontDismissed && "opacity-0")}>
+              <ComposerBannerStackAlert
+                item={leavingFront}
+                attached
+                exiting
+                onDismissRequest={() => {}}
+              />
+            </div>
+          ) : null}
+        </NoticePresenceFrame>
       </ComposerBanner.Attachment>
     </>
+  );
+
+  function renderFrontItem(frontItem: ComposerBannerStackEntry) {
+    return (
+      <div
+        key={frontItem.id}
+        data-notice-current=""
+        className={cn(
+          "relative z-10 transition-[opacity,translate] duration-220 ease-in",
+          exitingItemId === frontItem.id
+            ? "pointer-events-none translate-y-16 opacity-0"
+            : "opacity-100",
+        )}
+        onPointerDownCapture={() => {
+          setStackExpanded(false);
+          const activeElement = document.activeElement;
+          if (activeElement instanceof HTMLElement && noticesRef.current?.contains(activeElement)) {
+            activeElement.blur();
+          }
+        }}
+      >
+        <ComposerBannerStackAlert
+          item={frontItem}
+          attached
+          exiting={exitingItemId === frontItem.id}
+          onDismissRequest={() => requestDismiss(frontItem)}
+        />
+      </div>
+    );
+  }
+}
+
+/**
+ * The attached notice's frame. It grows from no height while the notice fades
+ * and rises in, collapses the same way when the last notice goes, and eases
+ * between two notices' heights on a swap (the new one fading in over the old,
+ * see LeavingNotice). Web Animations, so an interrupted change starts from
+ * where the frame is. Reduced motion fades only.
+ */
+function NoticePresenceFrame({
+  open,
+  swapKey,
+  animateMountRef,
+  onClosed,
+  children,
+}: {
+  readonly open: boolean;
+  /** False while the stack is mounting, so a notice already up is just there. */
+  readonly animateMountRef: { readonly current: boolean };
+  readonly swapKey: string | null;
+  readonly onClosed: () => void;
+  readonly children: ReactNode;
+}) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const motionRef = useRef<Animation | null>(null);
+  const settledHeightRef = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) return;
+    const mounting = settledHeightRef.current === null;
+    const running = motionRef.current;
+    const current = getComputedStyle(frame);
+    const fromHeight = running
+      ? frame.getBoundingClientRect().height
+      : mounting
+        ? 0
+        : settledHeightRef.current!;
+    const fromOpacity = running ? Number(current.opacity) : mounting ? 0 : 1;
+    const fromTranslate = running
+      ? current.translate === "none"
+        ? "0 0"
+        : current.translate
+      : mounting
+        ? NOTICE_PRESENCE_RISE
+        : "0 0";
+    running?.cancel();
+    motionRef.current = null;
+    frame.style.overflow = "";
+    const naturalHeight = frame.getBoundingClientRect().height;
+    settledHeightRef.current = naturalHeight;
+
+    const timing: KeyframeAnimationOptions = {
+      duration: NOTICE_PRESENCE_MS,
+      easing: NOTICE_PRESENCE_EASING,
+      fill: open ? "none" : "forwards",
+    };
+    const reducedMotion = prefersReducedMotion();
+    if (!open) {
+      const motion = frame.animate(
+        reducedMotion
+          ? [{ opacity: fromOpacity }, { opacity: 0 }]
+          : [
+              { height: `${fromHeight}px`, opacity: fromOpacity, translate: fromTranslate },
+              { height: "0px", opacity: 0, translate: NOTICE_PRESENCE_RISE },
+            ],
+        timing,
+      );
+      if (!reducedMotion) frame.style.overflow = "clip";
+      motionRef.current = motion;
+      motion.finished.then(
+        () => {
+          motionRef.current = null;
+          settledHeightRef.current = null;
+          onClosed();
+        },
+        () => {},
+      );
+      return;
+    }
+    const swapping = !mounting && !running && fromHeight !== naturalHeight;
+    if ((mounting && !animateMountRef.current) || (!mounting && !running && !swapping)) return;
+    if (swapping) {
+      frame
+        .querySelector<HTMLElement>("[data-notice-current]")
+        ?.animate([{ opacity: 0 }, { opacity: 1 }], {
+          duration: NOTICE_PRESENCE_MS,
+          easing: NOTICE_PRESENCE_EASING,
+        });
+    }
+    const motion = frame.animate(
+      reducedMotion
+        ? [{ opacity: fromOpacity }, { opacity: 1 }]
+        : [
+            { height: `${fromHeight}px`, opacity: fromOpacity, translate: fromTranslate },
+            { height: `${naturalHeight}px`, opacity: 1, translate: "0 0" },
+          ],
+      timing,
+    );
+    if (!reducedMotion) frame.style.overflow = "clip";
+    motionRef.current = motion;
+    motion.finished.then(
+      () => {
+        motionRef.current = null;
+        frame.style.overflow = "";
+      },
+      () => {},
+    );
+  }, [animateMountRef, onClosed, open, swapKey]);
+
+  useEffect(() => () => motionRef.current?.cancel(), []);
+
+  return (
+    <div ref={frameRef} className="relative">
+      {children}
+    </div>
+  );
+}
+
+/** The previous front notice, fading out under the next one. */
+function LeavingNotice({
+  onDone,
+  children,
+}: {
+  readonly onDone: () => void;
+  readonly children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const motion = element.animate([{ opacity: 1 }, { opacity: 0 }], {
+      duration: NOTICE_PRESENCE_MS,
+      easing: NOTICE_PRESENCE_EASING,
+      fill: "forwards",
+    });
+    motion.finished.then(
+      () => onDone(),
+      () => {},
+    );
+    return () => motion.cancel();
+  }, [onDone]);
+  return (
+    <div
+      ref={ref}
+      aria-hidden
+      inert
+      className="pointer-events-none absolute inset-x-0 bottom-0 z-20"
+    >
+      {children}
+    </div>
   );
 }
 
