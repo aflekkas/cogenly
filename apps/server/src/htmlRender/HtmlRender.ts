@@ -1,4 +1,4 @@
-import type { ThreadId } from "@t3tools/contracts";
+import type { ThreadId, VisualStateError } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   clampHtmlRenderHeight,
@@ -31,6 +31,7 @@ import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
 import { createAttachmentId } from "../attachmentStore.ts";
 import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as ServerConfig from "../config.ts";
+import * as VisualState from "./VisualState.ts";
 import * as HeadlessChrome from "./headlessChrome.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
@@ -108,7 +109,12 @@ export class HtmlRender extends Context.Service<
       readonly html: string;
       readonly title: string;
       readonly height: number;
-    }) => Effect.Effect<HtmlRenderReference, HtmlRenderPrepareError | HtmlRenderStoreError>;
+      /** Stored as the visual's first state document (version 1) when defined. */
+      readonly initialState?: unknown;
+    }) => Effect.Effect<
+      HtmlRenderReference,
+      HtmlRenderPrepareError | HtmlRenderStoreError | VisualStateError
+    >;
     /** Screenshots a page in headless Chrome, tolerating unreadable local images. */
     readonly preview: (input: {
       readonly html: string;
@@ -335,6 +341,7 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const config = yield* ServerConfig.ServerConfig;
   const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
+  const visualStates = yield* VisualState.VisualStateService;
   const services = yield* Effect.context<
     FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
   >();
@@ -418,6 +425,7 @@ const make = Effect.gen(function* () {
     readonly html: string;
     readonly title: string;
     readonly height: number;
+    readonly initialState?: unknown;
   }) {
     const html = yield* prepare(input.html);
     // The `-html` id suffix makes the asset route serve it as a sandboxed text/html document.
@@ -439,9 +447,19 @@ const make = Effect.gen(function* () {
       // publish that fails or is interrupted before returning removes it.
       Effect.onError(() => fileSystem.remove(filePath, { force: true }).pipe(Effect.ignore)),
     );
+    const title = input.title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH) || "HTML";
+    if (input.initialState !== undefined) {
+      yield* visualStates.set({
+        threadId: input.threadId,
+        renderId: attachmentId,
+        title,
+        state: input.initialState,
+        expectedVersion: 0,
+      });
+    }
     return {
       attachmentId,
-      title: input.title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH) || "HTML",
+      title,
       height: clampHtmlRenderHeight(input.height),
       ...(measured === undefined ? {} : { heights: measured.heights }),
       ...(measured?.outline === undefined ? {} : { outline: measured.outline }),

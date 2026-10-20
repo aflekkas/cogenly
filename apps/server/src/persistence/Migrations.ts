@@ -82,6 +82,7 @@ import Migration0069 from "./Migrations/069_ContextFacts.ts";
 import Migration0071 from "./Migrations/071_FactSearch.ts";
 import Migration0072 from "./Migrations/072_AgentsAlwaysEnabled.ts";
 import Migration0074 from "./Migrations/074_ProjectFolders.ts";
+import Migration0075 from "./Migrations/075_VisualStates.ts";
 import Migration0073 from "./Migrations/073_AgentsFullAccess.ts";
 import Migration0070 from "./Migrations/070_AgentEventTriggers.ts";
 import Migration0067 from "./Migrations/067_AgentScope.ts";
@@ -176,6 +177,7 @@ export const migrationEntries = [
   [72, "AgentsAlwaysEnabled", Migration0072],
   [73, "AgentsFullAccess", Migration0073],
   [74, "ProjectFolders", Migration0074],
+  [75, "VisualStates", Migration0075],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

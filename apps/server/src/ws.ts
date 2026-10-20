@@ -6,6 +6,7 @@ import type * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import type * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
+import * as VisualStates from "./htmlRender/VisualState.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
@@ -1057,6 +1058,7 @@ const makeWsRpcHandlers = (
     const agentWorkspace = yield* AgentWorkspace.AgentWorkspaceService;
     const agentStore = yield* AgentStore.AgentStore;
     const facts = yield* Facts.FactService;
+    const visualStates = yield* VisualStates.VisualStateService;
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
     const secretRequests = yield* SecretRequests.SecretRequests;
@@ -1597,6 +1599,10 @@ const makeWsRpcHandlers = (
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
+      [WS_METHODS.visualStateGet]: (input) =>
+        visualStates.get(input).pipe(Effect.map((state) => ({ state }))),
+      [WS_METHODS.visualStateSet]: (input) => visualStates.set(input),
+      [WS_METHODS.visualStateSubmit]: (input) => visualStates.submit(input),
       [WS_METHODS.factsUpdate]: (input) => facts.update(input),
       [WS_METHODS.factsSupersede]: (input) => facts.supersede(input),
       [WS_METHODS.factsRetract]: (input) => facts.retract(input.id),
@@ -2689,6 +2695,7 @@ type WsRequestServices =
   | VcsProcess.VcsProcess
   | VcsProvisioningService.VcsProvisioningService
   | VcsStatusBroadcaster.VcsStatusBroadcaster
+  | VisualStates.VisualStateService
   | WorkHandoff.WorkHandoffService
   | WorkspaceEntries.WorkspaceEntries
   | WorkspaceFileSystem.WorkspaceFileSystem

@@ -26,6 +26,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
+import * as VisualState from "../htmlRender/VisualState.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
@@ -67,7 +68,12 @@ import {
   DeviceStandardToolkit,
 } from "./toolkits/device/tools.ts";
 import * as HtmlHandlers from "./toolkits/html/handlers.ts";
-import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
+import {
+  HtmlPreviewTool,
+  HtmlPreviewToolkit,
+  HtmlRenderToolkit,
+  HtmlStateToolkit,
+} from "./toolkits/html/tools.ts";
 
 /** Where an MCP client discovers how to sign in (RFC 9728), at this request's own origin. */
 const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
@@ -867,10 +873,20 @@ const imageToolRegistration = <Tools extends Record<string, Tool.Any>, A, E, R, 
   handlers: McpToolAccess.HandlersLayer<Tools, EX, RX>,
 ) => Layer.effectDiscard(register).pipe(Layer.provide(McpToolAccess.HandlersLayer.layer(handlers)));
 
+// The render service stores a page's first state through the visual state
+// service, so it is built with it; both draw thread access from the server.
+const layerHtmlRenderProvided = HtmlRender.layer.pipe(Layer.provide(VisualState.layer));
+
 export const layerHtmlToolkit = Layer.mergeAll(
   toolkitRegistration(HtmlRenderToolkit, HtmlHandlers.layerRender),
+  toolkitRegistration(HtmlStateToolkit, HtmlHandlers.layerState),
   imageToolRegistration(registerHtmlPreview(), HtmlHandlers.layerPreview),
-).pipe(Layer.provide(HtmlRender.layer));
+).pipe(
+  // The state tools and the render service both draw on visual states; the
+  // render service carries its own copy for its first-state write.
+  Layer.provide(VisualState.layer),
+  Layer.provide(layerHtmlRenderProvided),
+);
 
 const layerPreviewStandardToolkitRegistration = toolkitRegistration(
   PreviewStandardToolkit,

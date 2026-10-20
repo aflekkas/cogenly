@@ -50,6 +50,8 @@ import {
   type OrchestrationV2Subagent,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
+  VISUAL_STATE_MAX_BYTES,
+  type VisualState,
   latestProviderTurnForAttempt,
   orchestrationV2RunWorkStartedAt,
   ProviderInstanceId,
@@ -63,6 +65,11 @@ import {
   type TurnItemId,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
+import {
+  formatVisualSubmitMessage,
+  visualPayloadJson,
+  visualStateJsonBytes,
+} from "@t3tools/shared/htmlRender";
 import {
   derivePendingBackgroundWork,
   pendingBackgroundTurnItems,
@@ -475,6 +482,8 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.runtime-mode.set":
     case "thread.interaction-mode.set":
     case "thread.model-selection.set":
+    case "visual-state.set":
+    case "visual-state.submit":
     case "provider-session.detach":
     case "message.dispatch":
     case "notification.delivery.accept":
@@ -974,6 +983,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           checkpoints: [],
           plans: [],
           contextHandoffs: [],
+          visualStates: [],
           visibleTurnItems: [],
           updatedAt: records.thread.updatedAt,
         })),
@@ -8143,6 +8153,138 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
     });
 
+  const dispatchVisualStateSet = (
+    command: Extract<OrchestrationV2Command, { readonly type: "visual-state.set" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) =>
+    Effect.gen(function* () {
+      const size = visualStateJsonBytes(command.state);
+      if (size === null) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Visual ${command.renderId} state cannot be encoded as JSON.`,
+        });
+      }
+      if (size > VISUAL_STATE_MAX_BYTES) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Visual ${command.renderId} state is larger than ${VISUAL_STATE_MAX_BYTES} bytes.`,
+        });
+      }
+      const projection = yield* loadProjectionForCommand(command, ["visualStates"]);
+      const current =
+        projection.visualStates.find((candidate) => candidate.renderId === command.renderId) ??
+        null;
+      if (current?.locked === true) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Visual ${command.renderId} already submitted and is locked.`,
+        });
+      }
+      if ((current?.version ?? 0) !== command.expectedVersion) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause:
+            `Visual ${command.renderId} changed since version ${command.expectedVersion} ` +
+            `(now ${current?.version ?? 0}); read it again and retry.`,
+        });
+      }
+      const now = yield* DateTime.now;
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "visual-state.updated",
+        threadId: command.threadId,
+        occurredAt: now,
+        payload: {
+          threadId: command.threadId,
+          renderId: command.renderId,
+          title: command.title ?? current?.title ?? "",
+          state: command.state,
+          version: command.expectedVersion + 1,
+          locked: current?.locked ?? false,
+          submittedAt: current?.submittedAt ?? null,
+          updatedAt: now,
+        } satisfies VisualState,
+      });
+    });
+
+  const dispatchVisualStateSubmit = (
+    command: Extract<OrchestrationV2Command, { readonly type: "visual-state.submit" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) =>
+    Effect.gen(function* () {
+      const payloadJson = visualPayloadJson(command.payload);
+      if (payloadJson === null) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Visual ${command.renderId} payload cannot be encoded as JSON.`,
+        });
+      }
+      if (Buffer.byteLength(payloadJson, "utf8") > VISUAL_STATE_MAX_BYTES) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Visual ${command.renderId} payload is larger than ${VISUAL_STATE_MAX_BYTES} bytes.`,
+        });
+      }
+      const projection = yield* loadProjectionForCommand(command, ["visualStates"]);
+      const current =
+        projection.visualStates.find((candidate) => candidate.renderId === command.renderId) ??
+        null;
+      if (current?.locked === true) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Visual ${command.renderId} already submitted and is locked.`,
+        });
+      }
+      const now = yield* DateTime.now;
+      const title = command.title ?? current?.title ?? "";
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "visual-state.updated",
+        threadId: command.threadId,
+        occurredAt: now,
+        payload: {
+          threadId: command.threadId,
+          renderId: command.renderId,
+          title,
+          state: current?.state ?? null,
+          version: (current?.version ?? 0) + 1,
+          locked: command.lock ?? current?.locked ?? false,
+          submittedAt: now,
+          updatedAt: now,
+        } satisfies VisualState,
+      });
+      // A submit lands as a user turn behind any running turn, the way normal
+      // follow-ups queue, so the agent reads the result next.
+      yield* dispatchMessage(
+        {
+          type: "message.dispatch",
+          commandId: command.commandId,
+          threadId: command.threadId,
+          messageId: command.messageId,
+          text: formatVisualSubmitMessage(title, payloadJson),
+          attachments: [],
+          dispatchMode: { type: "queue_after_active" },
+          createdBy: "user",
+          creationSource: "server",
+        },
+        events,
+        effects,
+      );
+    });
+
   const loadProjectionForCommand = <K extends ProjectionRecordField>(
     command: OrchestrationV2Command,
     fields: ReadonlyArray<K>,
@@ -11151,6 +11293,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "queued-run.edit":
         yield* dispatchQueuedRunEdit(command, events);
+        break;
+      case "visual-state.set":
+        yield* dispatchVisualStateSet(command, events);
+        break;
+      case "visual-state.submit":
+        yield* dispatchVisualStateSubmit(command, events, effects);
         break;
       case "checkpoint.rollback":
         yield* dispatchCheckpointRollback(command, events, effects);

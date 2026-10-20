@@ -19,7 +19,10 @@ import {
   ProviderInstanceId,
   ThreadId,
   OrchestratorMcpFailure,
+  type OrchestrationV2ServerCommand,
+  type VisualState,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -53,6 +56,27 @@ import * as PreviewBrowser from "../../preview/PreviewBrowser.ts";
 const threadId = ThreadId.make("thread-scratch");
 const shell = liveThreadShell(threadId);
 const projection = idleThreadProjection(shell);
+
+// The html_state smoke cases below share one visual: the write lands first so
+// the read sees it, both through the real handler stack.
+let visualStateRows: Array<VisualState> = [];
+const recordVisualStateSet = (command: OrchestrationV2ServerCommand) => {
+  if (command.type !== "visual-state.set") {
+    return Effect.die(new Error(`Unexpected dispatch in MCP smoke: ${command.type}`));
+  }
+  const row = {
+    threadId: command.threadId,
+    renderId: command.renderId,
+    title: command.title ?? "",
+    state: command.state,
+    version: command.expectedVersion + 1,
+    locked: false,
+    submittedAt: null,
+    updatedAt: DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"),
+  } satisfies VisualState;
+  visualStateRows = [row];
+  return Effect.succeed({ sequence: 1, storedEvents: [] });
+};
 const project = {
   id: shell.projectId,
   title: "MCP smoke project",
@@ -117,8 +141,9 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(ThreadManagementService.ThreadManagementService)({
     getThreadShell: () => Effect.succeed(shell),
-    getThreadRecords: () => Effect.succeed(projection),
+    getThreadRecords: () => Effect.succeed({ ...projection, visualStates: visualStateRows }),
     getProjectThreadRecords: () => Effect.succeed(projection),
+    dispatch: (command) => recordVisualStateSet(command),
   }),
   Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
   Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({ list: () => Effect.succeed([]) }),
@@ -282,6 +307,44 @@ const smokeCases = [
       htmlRender: {
         title: "MCP smoke",
         height: 120,
+      },
+    },
+  },
+  {
+    // The html_state tools run through the real handler stack against the
+    // stubbed thread below; the write lands first so the read sees it.
+    toolkit: "htmlState",
+    names: ["html_state_read", "html_state_write"],
+    tool: "html_state_write",
+    args: {
+      renderId: "html-render-1",
+      title: "MCP smoke",
+      state: { answers: [1] },
+      expectedVersion: 0,
+    },
+    expected: {
+      state: {
+        renderId: "html-render-1",
+        title: "MCP smoke",
+        state: { answers: [1] },
+        version: 1,
+        locked: false,
+      },
+    },
+  },
+  {
+    // Names are pinned once in the write case above; the read reuses its row.
+    toolkit: "htmlState",
+    names: [],
+    tool: "html_state_read",
+    args: { renderId: "html-render-1" },
+    expected: {
+      state: {
+        renderId: "html-render-1",
+        title: "MCP smoke",
+        state: { answers: [1] },
+        version: 1,
+        locked: false,
       },
     },
   },

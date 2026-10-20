@@ -109,6 +109,7 @@ export const idleThreadProjection = (
     checkpoints: [],
     contextHandoffs: [],
     contextTransfers: [],
+    visualStates: [],
     visibleTurnItems: [],
     updatedAt: shell.updatedAt,
   };

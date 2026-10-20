@@ -57,6 +57,7 @@ import {
   OrchestrationV2RuntimeRequestJson as OrchestrationV2RuntimeRequestJsonSchema,
   OrchestrationV2SubagentJson as OrchestrationV2SubagentJsonSchema,
   OrchestrationV2TurnItemJson as OrchestrationV2TurnItemJsonSchema,
+  VisualStateJson as VisualStateJsonSchema,
   orchestrationV2RunWorkStartedAt,
   RunId,
   MessageId,
@@ -586,7 +587,7 @@ export class ProjectionStoreV2 extends Context.Service<ProjectionStoreV2, Projec
   "t3/orchestration-v2/ProjectionStore/ProjectionStoreV2",
 ) {}
 
-export const ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION = 2;
+export const ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION = 3;
 
 function needsRecovery(
   projection: OrchestrationV2ThreadProjection,
@@ -737,6 +738,7 @@ export function emptyProjection(
     checkpoints: [],
     contextHandoffs: [],
     contextTransfers: [],
+    visualStates: [],
     visibleTurnItems: [],
     updatedAt: event.occurredAt,
   };
@@ -922,6 +924,20 @@ export function applyToProjection(
         ...base,
         contextTransfers: upsertById(base.contextTransfers, event.payload),
       };
+    case "visual-state.updated": {
+      const known = base.visualStates.findIndex(
+        (candidate) => candidate.renderId === event.payload.renderId,
+      );
+      return {
+        ...base,
+        visualStates:
+          known === -1
+            ? [...base.visualStates, event.payload]
+            : base.visualStates.map((candidate, index) =>
+                index === known ? event.payload : candidate,
+              ),
+      };
+    }
   }
 }
 
@@ -1134,6 +1150,7 @@ const encodeContextHandoffPayload = Schema.encodeEffect(
 const encodeContextTransferPayload = Schema.encodeEffect(
   Schema.fromJsonString(OrchestrationV2ContextTransferJsonSchema),
 );
+const encodeVisualStatePayload = Schema.encodeEffect(Schema.fromJsonString(VisualStateJsonSchema));
 
 const decodeThreadPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2AppThreadJsonSchema),
@@ -1181,6 +1198,9 @@ const decodeContextHandoffPayload = Schema.decodeUnknownEffect(
 );
 const decodeContextTransferPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2ContextTransferJsonSchema),
+);
+const decodeVisualStatePayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(VisualStateJsonSchema),
 );
 
 const isProjectionStoreThreadNotFoundError = Schema.is(ProjectionStoreThreadNotFoundError);
@@ -2739,6 +2759,29 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             `;
             break;
           }
+          case "visual-state.updated": {
+            const payloadJson = yield* encodeVisualStatePayload(event.payload);
+            const payload = parseEncodedPayload(payloadJson);
+            yield* sql`
+              INSERT INTO orchestration_v2_projection_visual_states (
+                thread_id,
+                render_id,
+                updated_at,
+                payload_json
+              )
+              VALUES (
+                ${event.threadId},
+                ${event.payload.renderId},
+                ${stringField(payload, "updatedAt")},
+                ${payloadJson}
+              )
+              ON CONFLICT(thread_id, render_id)
+              DO UPDATE SET
+                updated_at = excluded.updated_at,
+                payload_json = excluded.payload_json
+            `;
+            break;
+          }
         }
 
         if (
@@ -3087,6 +3130,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           checkpointRows,
           contextHandoffRows,
           contextTransferRows,
+          visualStateRows,
         ] = yield* Effect.all([
           decodeThreadPayload(threadRow.payload_json),
           fields !== undefined && !fields.includes("runs")
@@ -3374,6 +3418,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   (SELECT value FROM json_each(${cohortHandoffIds})))
             ORDER BY rowid ASC
           `,
+          fields !== undefined && !fields.includes("visualStates")
+            ? Effect.succeed([])
+            : sql<PayloadRow>`
+                SELECT payload_json FROM orchestration_v2_projection_visual_states
+                WHERE thread_id = ${threadId} ORDER BY render_id ASC
+              `,
         ]);
 
         const [
@@ -3391,6 +3441,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           checkpoints,
           contextHandoffs,
           contextTransfers,
+          visualStates,
         ] = yield* Effect.all([
           decodeRows(decodeRunPayload, threadId)(runRows),
           decodeRows(decodeRunAttemptPayload, threadId)(attemptRows),
@@ -3406,6 +3457,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           decodeRows(decodeCheckpointPayload, threadId)(checkpointRows),
           decodeRows(decodeContextHandoffPayload, threadId)(contextHandoffRows),
           decodeRows(decodeContextTransferPayload, threadId)(contextTransferRows),
+          decodeRows(decodeVisualStatePayload, threadId)(visualStateRows),
         ]);
         // A metadata read must preserve message ordering without decoding tool output.
         const messageOrdinals = new Map<string, number>();
@@ -3436,6 +3488,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           checkpoints,
           contextHandoffs,
           contextTransfers,
+          visualStates,
           visibleTurnItems: [],
           updatedAt: thread.updatedAt,
         } satisfies OrchestrationV2ThreadProjection;

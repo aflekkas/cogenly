@@ -1,3 +1,4 @@
+import * as VisualStates from "../htmlRender/VisualState.ts";
 import * as GlobalSearch from "../search/GlobalSearch.ts";
 import * as Facts from "../context/FactService.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
@@ -422,7 +423,7 @@ export const layer = Layer.mergeAll(
   layerLegacyV1ThreadImporterProvided,
 );
 
-export const layerProduction = Layer.mergeAll(
+const layerProductionBase = Layer.mergeAll(
   Facts.layer,
   Retrieval.layer,
   layer.pipe(Layer.provide(layerProjectService)),
@@ -447,4 +448,10 @@ export const layerProduction = Layer.mergeAll(
   layerProviderContinuationWorkerProvided,
   layerAgentSessionImporterProvided,
   EffectOutbox.layerPruneWorker.pipe(Layer.provide(EffectOutbox.layer)),
-).pipe(Layer.provide(Scheduler.layer), Layer.provideMerge(layerEventInfrastructure));
+)
+  .pipe(Layer.provide(Scheduler.layer), Layer.provideMerge(layerEventInfrastructure))
+  // Visual states read the thread projection and dispatch through thread
+  // management, so it joins after the merge that provides them.
+  .pipe(Layer.provideMerge(VisualStates.layer));
+
+export const layerProduction = layerProductionBase;
