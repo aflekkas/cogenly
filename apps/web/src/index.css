@@ -258,6 +258,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --color-update-surface: var(--update-surface);
   --color-success-foreground: var(--success-foreground);
   --color-success: var(--success);
+  /* The send button: a plain standard blue in every theme and channel. */
+  --color-send: #2563eb;
+  --color-send-hover: #3b82f6;
   --color-diff-addition: var(--diff-addition);
   --color-diff-deletion: var(--diff-deletion);
   --color-diff-addition-foreground: var(--diff-addition-foreground);
@@ -1442,11 +1445,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --surface-raised-edge-top: rgb(255 255 255 / 4%);
     --surface-raised-edge-side: rgb(255 255 255 / 8%);
     --surface-raised-edge-bottom: rgb(255 255 255 / 5%);
-    /* In-page surfaces (bubbles, composer, search dock) rest on a faint edge a
-       few levels over their fill, with a fainter ring outside it: a soft glow
-       rather than a drawn line. */
-    --surface-edge: rgb(255 255 255 / 1.5%);
-    --surface-halo: 0 0 0 1px rgb(255 255 255 / 1%);
+    /* Inputs and in-page surfaces (search box, composer, bubbles, cards) glow
+       like the reference: a faint ring just outside, then a two-pixel rim about
+       four levels over the fill (the border plus a one-pixel inset), then the
+       fill. --surface-halo carries the outer ring and the inner rim pixel. */
+    --surface-edge: rgb(255 255 255 / 2.2%);
+    --surface-halo: 0 0 0 1px rgb(255 255 255 / 2%), inset 0 0 0 1px rgb(255 255 255 / 3%);
     --surface-raised-highlight: rgb(255 255 255 / 3%);
     --surface-raised-shadow:
       0 -1px 4px rgb(255 255 255 / 2.5%), 0 1px 2px rgb(0 0 0 / 35%),
@@ -1527,6 +1531,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* The icon rail sits a step below the list so the two read as separate columns. */
   --nav-rail: var(--color-zinc-100);
   --nav-rail-muted: var(--sidebar-muted-foreground);
+  --sidebar-input-surface: var(--sidebar-card);
   --sidebar-shelf-bar: var(--color-zinc-100);
   --sidebar-shelf-selected: var(--color-white);
   --nav-rail-selected: var(--sidebar-row-active);
@@ -1564,6 +1569,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --sidebar-muted-foreground: var(--muted-foreground);
     --sidebar-control-surface: rgb(255 255 255 / 3.5%);
     --sidebar-card: #0e0e0e;
+    /* The search box sits a step above the cards, as in the reference. */
+    --sidebar-input-surface: #111111;
     --sidebar-row-hover: #131313;
     --sidebar-row-active: #181818;
     --sidebar-row-selected: var(--sidebar-row-active);
@@ -1572,10 +1579,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
        glow just above the card and a short dark shadow under it, with no
        bright line along the bottom. */
     --state-selected-edge: transparent;
-    --state-selected-highlight: rgb(255 255 255 / 1.5%);
+    --state-selected-highlight: transparent;
+    /* The same glow as the inputs: a two-pixel rim, a faint outer ring, and a
+       short dark shadow under the card. */
     --state-selected-shadow:
-      inset 1px 0 0 rgb(255 255 255 / 1.2%), inset -1px 0 0 rgb(255 255 255 / 1.2%),
-      0 -1px 6px rgb(255 255 255 / 2%), 0 2px 3px rgb(0 0 0 / 45%);
+      inset 0 0 0 2px rgb(255 255 255 / 1.8%), 0 0 0 1px rgb(255 255 255 / 2%),
+      0 2px 3px rgb(0 0 0 / 45%);
   }
 }
 

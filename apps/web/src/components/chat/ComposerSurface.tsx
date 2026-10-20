@@ -15,7 +15,7 @@ function Shell({
       className={cn(
         "@container/composer-surface group/composer-surface relative isolate mx-auto w-full max-w-(--chat-content-max-width)",
         "[--chat-composer-drawer-inset:1.375rem] [--chat-composer-glass-surface:var(--card)] [--chat-composer-outline:rgb(0_0_0/8%)]",
-        "dark:[--chat-composer-glass-surface:var(--composer-surface,var(--surface-raised))] dark:[--surface-raised-sheen-top:transparent] dark:[--surface-raised-sheen-bottom:transparent] dark:[--chat-composer-highlight:transparent] dark:[--surface-raised-edge-top:var(--surface-edge)] dark:[--surface-raised-edge-side:var(--surface-edge)] dark:[--surface-raised-edge-bottom:var(--surface-edge)] dark:[--chat-composer-outline:var(--surface-edge,rgb(255_255_255/5%))]",
+        "dark:[--chat-composer-glass-surface:var(--composer-surface,var(--surface-raised))] dark:[--surface-raised-sheen-top:transparent] dark:[--surface-raised-sheen-bottom:transparent] dark:[--chat-composer-highlight:transparent] dark:[--surface-raised-edge-top:rgb(255_255_255/1.2%)] dark:[--surface-raised-edge-side:rgb(255_255_255/1.2%)] dark:[--surface-raised-edge-bottom:rgb(255_255_255/1.2%)] dark:[--chat-composer-outline:var(--surface-edge,rgb(255_255_255/5%))]",
         "[html[data-theme-id]_&]:[--chat-composer-glass-surface:var(--app-theme-surface-raised)] [html[data-theme-id]_&]:[--chat-composer-outline:var(--app-theme-toolbar-border)]",
         "dark:[html[data-theme-id]:not([data-theme-id=t3-chat])_&]:[--chat-composer-highlight:color-mix(in_srgb,var(--app-theme-input)_12%,transparent)] dark:[html[data-theme-id]:not([data-theme-id=t3-chat])_&]:[--chat-composer-outline:color-mix(in_srgb,var(--app-theme-input)_30%,var(--background))]",
         "dark:[html[data-theme-id=t3-chat]_&]:[--chat-composer-highlight:color-mix(in_srgb,#432d48_12%,transparent)] dark:[html[data-theme-id=t3-chat]_&]:[--chat-composer-outline:#241e28]",
@@ -37,7 +37,7 @@ function Shell({
 }
 
 const outlineClasses =
-  "after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:surface-raised-edge";
+  "after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:surface-raised-edge dark:after:p-0.5!";
 
 // The bottom strip continues the outline, so leave the seam between its corners open.
 const contextSeamClasses =
@@ -48,7 +48,7 @@ function Host({ className, ...props }: ComponentProps<"div">) {
     <div
       data-slot="composer-host"
       className={cn(
-        "relative z-10 w-full rounded-2xl shadow-(--surface-raised-shadow) after:z-1",
+        "relative z-10 w-full rounded-2xl shadow-(--surface-raised-shadow) after:z-1 dark:[--surface-raised-shadow:0_0_0_1px_rgb(255_255_255/3%),0_1px_2px_rgb(0_0_0/35%),0_10px_28px_-14px_rgb(0_0_0/70%)]",
         outlineClasses,
         contextSeamClasses,
         "group-has-data-[composer-banner-surface=attached]/composer-surface:shadow-none group-has-data-[composer-banner-surface=attached]/composer-surface:after:hidden",

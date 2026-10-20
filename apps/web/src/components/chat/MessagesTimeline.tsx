@@ -2524,7 +2524,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       {row.message.inputIntent && row.message.inputIntent !== "turn_start" ? (
         <UserMessageIntentMarker intent={row.message.inputIntent} />
       ) : null}
-      <div className="relative max-w-[80%] rounded-2xl border border-(--surface-edge,rgb(255_255_255/4%)) bg-message shadow-(--surface-halo,none) px-[18px] py-3.5 text-message-foreground">
+      <div className="relative max-w-[80%] rounded-2xl border border-(--surface-edge,rgb(255_255_255/4%)) bg-message shadow-(--surface-halo,none) px-4.5 py-3.5 text-message-foreground">
         <MessageAuthorHeading>You</MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
