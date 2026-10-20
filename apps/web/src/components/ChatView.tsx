@@ -5165,16 +5165,21 @@ export default function ChatView(props: ChatViewProps) {
       '[data-chat-composer-main-surface="true"]',
     );
     // The backdrop starts at the composer's top edge and runs to the window
-    // edge, so the timeline never shows below or beside the composer.
+    // edge, so the timeline never shows below or beside the composer. The
+    // timeline's bottom edge fade ends at that same edge (--chat-composer-cover)
+    // instead of hiding behind the backdrop.
     if (composerOverlayElement && mainSurface) {
-      const backdropTop = Math.max(
-        0,
-        mainSurface.getBoundingClientRect().top -
-          composerOverlayElement.getBoundingClientRect().top,
-      );
+      const overlayRect = composerOverlayElement.getBoundingClientRect();
+      const backdropTop = Math.max(0, mainSurface.getBoundingClientRect().top - overlayRect.top);
       composerOverlayElement.style.setProperty(
         "--chat-composer-backdrop-top",
         `${Math.round(backdropTop)}px`,
+      );
+      const hasBackdrop =
+        composerOverlayElement.querySelector('[data-chat-composer-backdrop="true"]') !== null;
+      composerOverlayElement.parentElement?.style.setProperty(
+        "--chat-composer-cover",
+        `${hasBackdrop ? Math.max(0, Math.round(overlayRect.height - backdropTop)) : 0}px`,
       );
     }
     const button = composerOverlayElement?.parentElement?.querySelector<HTMLElement>(

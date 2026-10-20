@@ -748,6 +748,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   inherits: false;
   initial-value: 0px;
 }
+/* Space at the bottom of a scroller that an overlay covers; the end fade
+   finishes above it. Not inherited, so nested scrollers start from 0px. */
+@property --scroll-fade-end-inset {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
 @property --scroll-fade-start-x {
   syntax: "<length>";
   inherits: false;
@@ -807,8 +814,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
         to bottom,
         transparent,
         black var(--scroll-fade-start-y),
-        black calc(100% - var(--scroll-fade-end-y)),
-        transparent
+        black calc(100% - var(--scroll-fade-end-inset) - var(--scroll-fade-end-y)),
+        transparent calc(100% - var(--scroll-fade-end-inset))
       ),
       linear-gradient(black, black);
     mask-image:
@@ -816,8 +823,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
         to bottom,
         transparent,
         black var(--scroll-fade-start-y),
-        black calc(100% - var(--scroll-fade-end-y)),
-        transparent
+        black calc(100% - var(--scroll-fade-end-inset) - var(--scroll-fade-end-y)),
+        transparent calc(100% - var(--scroll-fade-end-inset))
       ),
       linear-gradient(black, black);
     -webkit-mask-position: left, right;
@@ -880,8 +887,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
         to bottom,
         transparent,
         black var(--scroll-fade-start-y),
-        black calc(100% - var(--scroll-fade-end-y)),
-        transparent
+        black calc(100% - var(--scroll-fade-end-inset) - var(--scroll-fade-end-y)),
+        transparent calc(100% - var(--scroll-fade-end-inset))
       ),
       linear-gradient(
         to right,
@@ -895,8 +902,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
         to bottom,
         transparent,
         black var(--scroll-fade-start-y),
-        black calc(100% - var(--scroll-fade-end-y)),
-        transparent
+        black calc(100% - var(--scroll-fade-end-inset) - var(--scroll-fade-end-y)),
+        transparent calc(100% - var(--scroll-fade-end-inset))
       ),
       linear-gradient(
         to right,
@@ -2896,6 +2903,9 @@ code {
     padding-inline-end: calc(
       env(safe-area-inset-right) + 0.75rem + var(--chat-lane-inset-end, 0px)
     );
+  }
+  .messages-timeline-scroll {
+    --scroll-fade-end-inset: var(--chat-composer-cover, 0px);
   }
   [data-chat-canvas] .messages-timeline-scroll {
     padding-inline-start: calc(
