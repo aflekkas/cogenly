@@ -10,6 +10,9 @@ import {
   htmlRenderTheme,
   htmlRenderThemeFragment,
   injectHtmlRenderBootstrap,
+  htmlRenderKitOptedOut,
+  HTML_RENDER_KIT_GUIDE,
+  HTML_RENDER_KIT_STYLE_ID,
   htmlRenderThemeMessage,
   readHtmlRenderContentHeight,
   readHtmlRenderImageRequest,
@@ -66,6 +69,39 @@ describe("injectHtmlRenderBootstrap", () => {
     expect(injected.indexOf('<style id="t3-theme">')).toBeLessThan(injected.indexOf("<template>"));
     expect(injected).toContain('<meta name="viewport" content="width=device-width');
     expect(injected.endsWith(fragment)).toBe(true);
+  });
+
+  it("injects the Cogenly kit after the bridge and before the page's own styles", () => {
+    const html =
+      "<!doctype html><html><head><style>.cg-card{padding:0}</style></head><body><div class=cg-card>x</div></body></html>";
+    const injected = injectHtmlRenderBootstrap(html);
+    const kitAt = injected.indexOf(`<style id="${HTML_RENDER_KIT_STYLE_ID}">`);
+    expect(kitAt).toBeGreaterThan(injected.indexOf("window.cogenly="));
+    expect(kitAt).toBeLessThan(injected.indexOf("<style>.cg-card{padding:0}"));
+    expect(injected).toContain('customElements.define("cg-tabs"');
+    expect(injected).toContain('customElements.define("cg-choice"');
+    // The kit styles against the injected theme, never its own colors.
+    const kitCss = injected.slice(kitAt, injected.indexOf("</style>", kitAt));
+    expect(kitCss).not.toMatch(/#[0-9a-f]{3,8}\b(?![^"]*")/i);
+    expect(kitCss).toContain("--cg-chart-6:var(--chart-6)");
+  });
+
+  it("leaves only the theme when the page or the caller declines the kit", () => {
+    const page = '<!doctype html><html lang="en" data-cg="off"><head></head><body>x</body></html>';
+    for (const injected of [
+      injectHtmlRenderBootstrap(page),
+      injectHtmlRenderBootstrap("<!doctype html><html><body>x</body></html>", { kit: false }),
+    ]) {
+      expect(injected).toContain('<style id="t3-theme">');
+      expect(injected).toContain("window.cogenly=");
+      expect(injected).not.toContain(HTML_RENDER_KIT_STYLE_ID);
+      expect(injected).not.toContain("cg-tabs");
+    }
+    expect(htmlRenderKitOptedOut(page)).toBe(true);
+    expect(htmlRenderKitOptedOut("<html data-cg=off>")).toBe(true);
+    expect(htmlRenderKitOptedOut('<html data-cg="on">')).toBe(false);
+    expect(htmlRenderKitOptedOut('<!-- <html data-cg="off"> --><html>')).toBe(false);
+    expect(htmlRenderKitOptedOut("<p>no html tag</p>")).toBe(false);
   });
 
   it("ignores tags written inside comments and scripts", () => {
@@ -235,6 +271,40 @@ describe("htmlRenderTheme", () => {
     expect(htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark").variables["--background"]).toBe(
       T3_CODE_DARK_THEME_COLORS.canvas,
     );
+  });
+});
+
+describe("HTML_RENDER_KIT_GUIDE", () => {
+  it("names the opt-out, the classes, the components and shows an example", () => {
+    expect(HTML_RENDER_KIT_GUIDE).toContain('data-cg="off"');
+    expect(HTML_RENDER_KIT_GUIDE).toContain("kit:false");
+    for (const name of [
+      ".cg-card",
+      ".cg-grid",
+      ".cg-stack",
+      ".cg-button",
+      ".cg-badge",
+      ".cg-table",
+      ".cg-stat",
+      ".cg-list",
+      ".cg-row",
+      ".cg-input",
+      ".cg-select",
+      ".cg-checkbox",
+      ".cg-radio",
+      ".cg-divider",
+      ".cg-link",
+      ".cg-image",
+      "--cg-chart-1",
+      "<cg-tabs",
+      "<cg-choice",
+      "data-cg-submit",
+    ]) {
+      expect(HTML_RENDER_KIT_GUIDE).toContain(name);
+    }
+    expect(HTML_RENDER_KIT_GUIDE).toContain('<div class="cg-card');
+    // It rides along on every html_render call, so it stays short.
+    expect(HTML_RENDER_KIT_GUIDE.length).toBeLessThan(3200);
   });
 });
 

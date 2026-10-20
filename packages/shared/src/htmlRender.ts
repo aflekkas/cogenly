@@ -4,6 +4,9 @@ import {
   type ThemeAppearance,
   type ThemeColors,
 } from "./themePalettes.ts";
+import { HTML_RENDER_KIT_CSS, HTML_RENDER_KIT_SCRIPT } from "./htmlRenderKit.ts";
+
+export { HTML_RENDER_KIT_GUIDE } from "./htmlRenderKit.ts";
 import { EVENT_CODE_SHORTCUT_KEYS } from "./keybindings.ts";
 
 /**
@@ -273,6 +276,20 @@ const FIXED_COLORS = {
   },
 } as const;
 
+// The in-page surface treatment index.css gives dark mode (search
+// "surface-edge" there): one faint hairline, a lit top-left corner and a soft
+// halo. Light mode has none and cards fall back to --border. The web client
+// reads these live from its stylesheet; these stand in for the headless preview.
+const SURFACE_TOKENS = {
+  light: {},
+  dark: {
+    "--surface-edge": "rgb(255 255 255 / 2.2%)",
+    "--corner-glow": "7%",
+    "--corner-glow-top": "2.8%",
+    "--surface-halo": "0 1px 2px rgb(0 0 0 / 30%)",
+  },
+} as const;
+
 /**
  * Maps a theme palette to the variables HTML renders style against. Names
  * follow the app's own tokens, except `--accent`, which is the theme's brand
@@ -320,7 +337,9 @@ export function htmlRenderTheme(
       "--code-foreground": colors.codeForeground,
       "--chart-1": colors.accent,
       ...Object.fromEntries(fixed.chart.map((color, index) => [`--chart-${index + 2}`, color])),
-      "--radius": "0.625rem",
+      ...SURFACE_TOKENS[appearance],
+      // The app's own corner radius (index.css --radius), so kit surfaces match it.
+      "--radius": "0.5rem",
       "--font-sans": fonts.sans,
       "--font-mono": fonts.mono,
     },
@@ -690,7 +709,9 @@ export const HTML_RENDER_STATE_GUIDE = [
   'Quiz example: `const { state } = await window.cogenly.state.get();` render from `state`; on each answer `await window.cogenly.state.set({ answers })`; on Finish `await window.cogenly.submit({ kind: "quiz-result", score, answers }, { lock: true })` and show a submitted note.',
 ].join(" ");
 
-function bootstrapMarkup(markup: string): string {
+export const HTML_RENDER_KIT_STYLE_ID = "t3-kit";
+
+function bootstrapMarkup(markup: string, kit: boolean): string {
   const dark = htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark");
   const light = htmlRenderTheme(T3_CODE_LIGHT_THEME_COLORS, "light");
   // Without a client-provided theme (a direct download, the headless preview
@@ -704,7 +725,21 @@ function bootstrapMarkup(markup: string): string {
     `<style id="t3-theme">${defaultCss}</style>`,
     `<script>${BOOTSTRAP_SCRIPT}</script>`,
     `<script>${VISUAL_BRIDGE_SCRIPT}</script>`,
+    // The kit follows the bridge (its components write window.cogenly.state)
+    // and precedes the page's own head, so the page's styles override it.
+    ...(kit
+      ? [
+          `<style id="${HTML_RENDER_KIT_STYLE_ID}">${HTML_RENDER_KIT_CSS}</style>`,
+          `<script>${HTML_RENDER_KIT_SCRIPT}</script>`,
+        ]
+      : []),
   ].join("");
+}
+
+/** A page declines the kit with `<html data-cg="off">`. */
+export function htmlRenderKitOptedOut(html: string): boolean {
+  const htmlOpen = /<html(?:\s[^>]*)?>/i.exec(blankNonMarkup(html));
+  return htmlOpen !== null && /\sdata-cg\s*=\s*["']?off(?:["'\s/>]|$)/i.test(htmlOpen[0]);
 }
 
 // Comments, raw text, and template contents are blanked to the same length,
@@ -736,12 +771,17 @@ const blankNonMarkup = (html: string) => {
 };
 
 /**
- * Inserts the theme bootstrap at the start of the document head, so a page's
- * own styles and scripts come after it.
+ * Inserts the theme bootstrap, and by default the Cogenly kit, at the start
+ * of the document head, so a page's own styles and scripts come after them.
+ * `kit: false` or `<html data-cg="off">` leaves the page with the theme alone.
  */
-export function injectHtmlRenderBootstrap(html: string): string {
+export function injectHtmlRenderBootstrap(
+  html: string,
+  options: { readonly kit?: boolean | undefined } = {},
+): string {
   const scan = blankNonMarkup(html);
-  const markup = bootstrapMarkup(scan);
+  const kit = options.kit !== false && !htmlRenderKitOptedOut(scan);
+  const markup = bootstrapMarkup(scan, kit);
   const headOpen = /<head(?:\s[^>]*)?>/i.exec(scan);
   if (headOpen) {
     const at = headOpen.index + headOpen[0].length;

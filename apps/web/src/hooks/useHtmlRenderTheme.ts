@@ -26,6 +26,13 @@ const LIVE_TOKENS = [
   "--popover-foreground",
   "--border",
   "--input",
+  "--ring",
+  "--radius",
+  // The kit's card treatment (index.css "surface-edge"); unset in light mode.
+  "--surface-edge",
+  "--corner-glow",
+  "--corner-glow-top",
+  "--surface-halo",
 ] as const;
 
 function readLiveTokens(): Readonly<Record<string, string>> {

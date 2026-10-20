@@ -97,8 +97,14 @@ export interface HtmlPreview {
 export class HtmlRender extends Context.Service<
   HtmlRender,
   {
-    /** The self-contained page that gets stored: local images inlined, theme bootstrap injected. */
-    readonly prepare: (html: string) => Effect.Effect<string, HtmlRenderPrepareError>;
+    /**
+     * The self-contained page that gets stored: local images inlined, theme
+     * bootstrap and (unless `kit` is false or the page opts out) the Cogenly kit injected.
+     */
+    readonly prepare: (
+      html: string,
+      kit?: boolean,
+    ) => Effect.Effect<string, HtmlRenderPrepareError>;
     /**
      * Stores a prepared page as a thread attachment for clients to show inline,
      * measuring its height at each client width when the preview browser is
@@ -111,6 +117,7 @@ export class HtmlRender extends Context.Service<
       readonly height: number;
       /** Stored as the visual's first state document (version 1) when defined. */
       readonly initialState?: unknown;
+      readonly kit?: boolean | undefined;
     }) => Effect.Effect<
       HtmlRenderReference,
       HtmlRenderPrepareError | HtmlRenderStoreError | VisualStateError
@@ -120,6 +127,7 @@ export class HtmlRender extends Context.Service<
       readonly html: string;
       readonly width?: number | undefined;
       readonly appearance?: ThemeAppearance | undefined;
+      readonly kit?: boolean | undefined;
     }) => Effect.Effect<
       HtmlPreview,
       | Exclude<HtmlRenderPrepareError, HtmlRenderImagesNotFoundError>
@@ -409,11 +417,13 @@ const make = Effect.gen(function* () {
     );
 
   // The bootstrap goes in first so its head scan never runs over inlined image data.
-  const inline = (html: string) =>
-    inlineLocalImages(injectHtmlRenderBootstrap(html)).pipe(Effect.provideContext(services));
+  const inline = (html: string, kit?: boolean) =>
+    inlineLocalImages(injectHtmlRenderBootstrap(html, { kit })).pipe(
+      Effect.provideContext(services),
+    );
 
-  const prepare = Effect.fn("HtmlRender.prepare")(function* (html: string) {
-    const inlined = yield* inline(html);
+  const prepare = Effect.fn("HtmlRender.prepare")(function* (html: string, kit?: boolean) {
+    const inlined = yield* inline(html, kit);
     if (inlined.missing.length > 0) {
       return yield* new HtmlRenderImagesNotFoundError({ paths: inlined.missing });
     }
@@ -426,8 +436,9 @@ const make = Effect.gen(function* () {
     readonly title: string;
     readonly height: number;
     readonly initialState?: unknown;
+    readonly kit?: boolean | undefined;
   }) {
-    const html = yield* prepare(input.html);
+    const html = yield* prepare(input.html, input.kit);
     // The `-html` id suffix makes the asset route serve it as a sandboxed text/html document.
     const attachmentId = createAttachmentId(input.threadId, "html");
     const filePath =
@@ -470,13 +481,14 @@ const make = Effect.gen(function* () {
     readonly html: string;
     readonly width?: number | undefined;
     readonly appearance?: ThemeAppearance | undefined;
+    readonly kit?: boolean | undefined;
   }) {
     const width = Math.min(
       MAX_PREVIEW_WIDTH,
       Math.max(MIN_PREVIEW_WIDTH, Math.round(input.width ?? HTML_RENDER_COLUMN_WIDTH)),
     );
     const appearance = input.appearance ?? "dark";
-    const inlined = yield* inline(input.html);
+    const inlined = yield* inline(input.html, input.kit);
     const executable = yield* previewBrowser.executable;
     const theme = htmlRenderTheme(
       appearance === "light" ? T3_CODE_LIGHT_THEME_COLORS : T3_CODE_DARK_THEME_COLORS,
