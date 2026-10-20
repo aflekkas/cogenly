@@ -377,6 +377,18 @@ export class TerminalResizeError extends Schema.TaggedError<TerminalResizeError>
   }
 }
 
+export class TerminalUserShellsDisabledError extends Schema.TaggedError<TerminalUserShellsDisabledError>()(
+  "TerminalUserShellsDisabledError",
+  {
+    threadId: Schema.String,
+    terminalId: Schema.String,
+  },
+) {
+  override get message() {
+    return "User shells are disabled; terminals show agent runs only.";
+  }
+}
+
 export const TerminalError = Schema.Union([
   TerminalCwdError,
   TerminalHistoryError,
@@ -386,5 +398,6 @@ export const TerminalError = Schema.Union([
   TerminalNotRunningError,
   TerminalWriteError,
   TerminalResizeError,
+  TerminalUserShellsDisabledError,
 ]);
 export type TerminalError = typeof TerminalError.Type;

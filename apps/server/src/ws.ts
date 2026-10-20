@@ -177,6 +177,7 @@ import * as ServerSettings from "./serverSettings.ts";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
+import * as ClientTerminals from "./terminal/ClientTerminals.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
@@ -2348,18 +2349,22 @@ const makeWsRpcHandlers = (
         vcsProvisioning.initRepository(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
       [WS_METHODS.reviewGetDiffPreview]: (input) => review.getDiffPreview(input),
       [WS_METHODS.reviewGetDiffFileContents]: (input) => review.getDiffFileContents(input),
-      [WS_METHODS.terminalOpen]: (input) => terminalManager.open(input),
+      [WS_METHODS.terminalOpen]: (input) =>
+        ClientTerminals.openTerminalForClient(terminalManager.open, input),
       [WS_METHODS.terminalAttach]: (input) =>
         Stream.callback<TerminalAttachStreamEvent, TerminalError>((queue) =>
           Effect.acquireRelease(
-            terminalManager.attachStream(input, (event) => Queue.offer(queue, event)),
+            ClientTerminals.attachTerminalForClient(terminalManager.attachStream, input, (event) =>
+              Queue.offer(queue, event),
+            ),
             (unsubscribe) => Effect.sync(unsubscribe),
           ).pipe(Effect.catchCause((cause) => Queue.failCause(queue, cause))),
         ),
-      [WS_METHODS.terminalWrite]: (input) => terminalManager.write(input),
+      [WS_METHODS.terminalWrite]: (input) =>
+        ClientTerminals.writeTerminalForClient(terminalManager.write, input),
       [WS_METHODS.terminalResize]: (input) => terminalManager.resize(input),
       [WS_METHODS.terminalClear]: (input) => terminalManager.clear(input),
-      [WS_METHODS.terminalRestart]: (input) => terminalManager.restart(input),
+      [WS_METHODS.terminalRestart]: (input) => ClientTerminals.restartTerminalForClient(input),
       [WS_METHODS.terminalKill]: (input) => terminalManager.killAgent(input),
       [WS_METHODS.terminalClose]: (input) => terminalManager.close(input),
       [WS_METHODS.terminalObserve]: (input) =>
