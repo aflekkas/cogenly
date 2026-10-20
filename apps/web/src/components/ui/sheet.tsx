@@ -4,9 +4,26 @@ import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
 import type { CSSProperties } from "react";
 import { cn } from "~/lib/utils";
+import { OverlayPresenceBoundary, useOverlayPresenceRoot } from "~/components/ui/overlay-presence";
 import { Button } from "~/components/ui/button";
 
-const Sheet = SheetPrimitive.Root;
+/** Closes with its exit motion when an OverlayPresence around it empties. */
+function Sheet<Payload>({
+  open,
+  onOpenChangeComplete,
+  ...props
+}: SheetPrimitive.Root.Props<Payload>) {
+  const presence = useOverlayPresenceRoot(open, onOpenChangeComplete);
+  return (
+    <OverlayPresenceBoundary>
+      <SheetPrimitive.Root
+        {...props}
+        open={presence.open}
+        onOpenChangeComplete={presence.onOpenChangeComplete}
+      />
+    </OverlayPresenceBoundary>
+  );
+}
 
 const SheetPortal = SheetPrimitive.Portal;
 
@@ -16,7 +33,7 @@ function SheetBackdrop({ className, ...props }: SheetPrimitive.Backdrop.Props) {
   return (
     <SheetPrimitive.Backdrop
       className={cn(
-        "fixed inset-0 z-(--z-sheet) bg-background/60 backdrop-blur-xs transition-all duration-200 ease-out data-ending-style:duration-150 data-ending-style:ease-popup-exit motion-reduce:transition-none data-ending-style:opacity-0 data-starting-style:opacity-0",
+        "fixed inset-0 z-(--z-sheet) bg-background/60 backdrop-blur-xs transition-all duration-200 ease-out data-ending-style:duration-150 data-ending-style:ease-popup-exit motion-reduce:transition-none data-ending-style:opacity-0 data-starting-style:opacity-0 starting:opacity-0",
         className,
       )}
       data-slot="sheet-backdrop"
@@ -79,7 +96,7 @@ function SheetPopup({
       <SheetBackdrop
         className={
           instant
-            ? "transition-none! data-ending-style:opacity-100! data-starting-style:opacity-100!"
+            ? "transition-none! data-ending-style:opacity-100! data-starting-style:opacity-100! starting:opacity-100!"
             : undefined
         }
         style={transitionStyle}
@@ -87,19 +104,19 @@ function SheetPopup({
       <SheetViewport side={side} variant={variant}>
         <SheetPrimitive.Popup
           className={cn(
-            "surface-raised surface-raised-floating relative flex max-h-full min-h-0 w-full min-w-0 flex-col bg-popover text-popover-foreground transition-[opacity,translate] duration-200 ease-drawer data-ending-style:duration-150 data-ending-style:ease-popup-exit motion-reduce:transition-none will-change-transform data-ending-style:opacity-0 data-starting-style:opacity-0",
+            "surface-raised surface-raised-floating relative flex max-h-full min-h-0 w-full min-w-0 flex-col bg-popover text-popover-foreground transition-[opacity,translate] duration-200 ease-drawer data-ending-style:duration-150 data-ending-style:ease-popup-exit motion-reduce:transition-none will-change-transform data-ending-style:opacity-0 data-starting-style:opacity-0 starting:opacity-0",
             side === "bottom" &&
-              "row-start-2 border-t data-ending-style:translate-y-8 data-starting-style:translate-y-8",
+              "row-start-2 border-t data-ending-style:translate-y-8 data-starting-style:translate-y-8 starting:translate-y-8",
             side === "top" &&
-              "data-ending-style:-translate-y-8 data-starting-style:-translate-y-8 border-b",
+              "data-ending-style:-translate-y-8 data-starting-style:-translate-y-8 starting:-translate-y-8 border-b",
             side === "left" &&
-              "data-ending-style:-translate-x-8 data-starting-style:-translate-x-8 w-[calc(100%-(--spacing(12)))] max-w-md border-e",
+              "data-ending-style:-translate-x-8 data-starting-style:-translate-x-8 starting:-translate-x-8 w-[calc(100%-(--spacing(12)))] max-w-md border-e",
             side === "right" &&
-              "col-start-2 w-[calc(100%-(--spacing(12)))] max-w-md border-s data-ending-style:translate-x-8 data-starting-style:translate-x-8",
+              "col-start-2 w-[calc(100%-(--spacing(12)))] max-w-md border-s data-ending-style:translate-x-8 data-starting-style:translate-x-8 starting:translate-x-8",
             variant === "inset" &&
               "before:hidden sm:rounded-2xl sm:border sm:before:rounded-[calc(var(--radius-2xl)-1px)] sm:**:data-[slot=sheet-footer]:rounded-b-[calc(var(--radius-2xl)-1px)]",
             instant &&
-              "transition-none! will-change-auto! data-ending-style:translate-x-0! data-starting-style:translate-x-0! data-ending-style:translate-y-0! data-starting-style:translate-y-0! data-ending-style:opacity-100! data-starting-style:opacity-100!",
+              "transition-none! will-change-auto! data-ending-style:translate-x-0! data-starting-style:translate-x-0! data-ending-style:translate-y-0! data-starting-style:translate-y-0! starting:translate-0! data-ending-style:opacity-100! data-starting-style:opacity-100! starting:opacity-100!",
             className,
           )}
           data-slot="sheet-popup"

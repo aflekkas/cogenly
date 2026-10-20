@@ -4,6 +4,7 @@ import { Dialog as CommandDialogPrimitive } from "@base-ui/react/dialog";
 import { SearchIcon } from "lucide-react";
 import type * as React from "react";
 import { cn } from "~/lib/utils";
+import { OverlayPresenceBoundary, useOverlayPresenceRoot } from "~/components/ui/overlay-presence";
 import {
   Autocomplete,
   AutocompleteCollection,
@@ -18,7 +19,23 @@ import {
 import { DIALOG_BACKDROP_CLASS, DIALOG_POPUP_CLASS } from "~/components/ui/dialog-styles";
 import { Button } from "~/components/ui/button";
 
-const CommandDialog = CommandDialogPrimitive.Root;
+/** Closes with its exit motion when an OverlayPresence around it empties. */
+function CommandDialog<Payload>({
+  open,
+  onOpenChangeComplete,
+  ...props
+}: CommandDialogPrimitive.Root.Props<Payload>) {
+  const presence = useOverlayPresenceRoot(open, onOpenChangeComplete);
+  return (
+    <OverlayPresenceBoundary>
+      <CommandDialogPrimitive.Root
+        {...props}
+        open={presence.open}
+        onOpenChangeComplete={presence.onOpenChangeComplete}
+      />
+    </OverlayPresenceBoundary>
+  );
+}
 
 const CommandDialogPortal = CommandDialogPrimitive.Portal;
 
