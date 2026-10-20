@@ -13,37 +13,6 @@ import {
 
 import { shortcutKeyFromEvent } from "../../keybindings";
 import { isMacPlatform } from "../../lib/utils";
-import { METRIC_OPTIONS, WINDOW_OPTIONS } from "../usage/usageShortcuts";
-
-// Every usage.* command needs a rank. An unranked one falls back to the
-// alphabetical compare, which makes the comparator inconsistent and the order
-// depend on the input order.
-const usageCommandOrder = new Map<KeybindingCommand, number>(
-  [
-    "usage.open" as const,
-    ...[...METRIC_OPTIONS, ...WINDOW_OPTIONS].map((option) => option.command),
-  ].map((command, index) => [command, index]),
-);
-
-const firstUsageCommand = METRIC_OPTIONS[0].command;
-
-/**
- * Orders commands by `key`, except Usage page commands, which sort as one
- * block in page order where the first of them would sort. A total order, so
- * adding a binding elsewhere cannot reshuffle the Usage rows.
- */
-function compareCommands(
-  left: KeybindingCommand,
-  right: KeybindingCommand,
-  key: (command: KeybindingCommand) => string,
-): number {
-  const leftRank = usageCommandOrder.get(left);
-  const rightRank = usageCommandOrder.get(right);
-  if (leftRank !== undefined && rightRank !== undefined) return leftRank - rightRank;
-  return key(leftRank === undefined ? left : firstUsageCommand).localeCompare(
-    key(rightRank === undefined ? right : firstUsageCommand),
-  );
-}
 
 export type KeybindingSource = "Default" | "Custom" | "Repository";
 
@@ -283,7 +252,7 @@ export function buildKeybindingRows(
   });
 
   rowsWithConflicts.sort((left, right) => {
-    const commandCompare = compareCommands(left.command, right.command, (command) => command);
+    const commandCompare = left.command.localeCompare(right.command);
     if (commandCompare !== 0) return commandCompare;
     return left.key.localeCompare(right.key);
   });
@@ -369,7 +338,9 @@ export function buildKeybindingCommandOptions(
     commands.add(binding.command);
   }
   for (const command of RETIRED_KEYBINDING_COMMANDS) commands.delete(command);
-  return [...commands].toSorted((left, right) => compareCommands(left, right, commandLabel));
+  return [...commands].toSorted((left, right) =>
+    commandLabel(left).localeCompare(commandLabel(right)),
+  );
 }
 
 export function commandLabel(command: KeybindingCommand): string {
@@ -379,10 +350,6 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "thread.steerQueuedMessage") return "Queue: Send First Queued Message as Steer";
   if (command === "thread.editQueuedMessage") return "Queue: Edit Last Queued Message";
   if (command === "thread.copyReference") return "Pull Request: Copy Link or Thread ID";
-  const usageMetric = METRIC_OPTIONS.find((option) => option.command === command);
-  if (usageMetric) return `Usage: ${usageMetric.label}`;
-  const usagePeriod = WINDOW_OPTIONS.find((option) => option.command === command);
-  if (usagePeriod) return `Usage: Period: ${usagePeriod.label}`;
   // The mode id stays `tasks`; users know it as Work.
   if (command === "sidebar.mode.tasks") return "Sidebar: Mode: Work";
   if (command === "view.reopenClosed") return "Reopen Closed Tab";

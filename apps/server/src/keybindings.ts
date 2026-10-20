@@ -132,7 +132,17 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
 // Commands the client no longer has. Earlier startups wrote their defaults into
 // existing configs, so entries for them are dropped quietly instead of being
 // reported as invalid (which would also block the startup default sync).
-const RETIRED_KEYBINDING_COMMANDS: ReadonlySet<string> = new Set(["composer.stash"]);
+const RETIRED_KEYBINDING_COMMANDS: ReadonlySet<string> = new Set([
+  "composer.stash",
+  // Usage view and period shortcuts, retired when Usage became limits-only.
+  "usage.cost",
+  "usage.tokens",
+  "usage.limits",
+  "usage.period.day",
+  "usage.period.week",
+  "usage.period.month",
+  "usage.period.quarter",
+]);
 
 const isRetiredKeybindingEntry = (entry: unknown) =>
   Predicate.isObject(entry) &&
