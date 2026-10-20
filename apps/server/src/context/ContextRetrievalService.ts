@@ -67,10 +67,10 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const access = yield* Access.AgentAccessScope;
   const facts = yield* Facts.FactService;
-  const tags = (threadId: ThreadId) =>
+  const folders = (threadId: ThreadId) =>
     sql<{
       label_id: string;
-    }>`SELECT l.label_id FROM thread_project_labels t JOIN project_labels l ON l.label_id=t.label_id WHERE t.thread_id=${threadId} AND t.confirmed_by_user=1`.pipe(
+    }>`SELECT folder_id AS label_id FROM effective_thread_project_folders WHERE thread_id=${threadId} AND folder_id IS NOT NULL`.pipe(
       Effect.map((rows) => rows.map((r) => ProjectLabelId.make(r.label_id))),
     );
   const settings = (threadId: ThreadId) =>
@@ -78,7 +78,7 @@ const make = Effect.gen(function* () {
       const rows = yield* sql<{
         enabled: number;
       }>`SELECT enabled FROM thread_context_settings WHERE thread_id=${threadId}`;
-      return { enabled: rows[0] ? rows[0].enabled === 1 : (yield* tags(threadId)).length > 0 };
+      return { enabled: rows[0] ? rows[0].enabled === 1 : (yield* folders(threadId)).length > 0 };
     }).pipe(Effect.mapError(wrap));
   const retrieve = (input: RetrieveInput) =>
     Effect.gen(function* () {
@@ -89,10 +89,10 @@ const make = Effect.gen(function* () {
       const agentId =
         input.principal === "user" ? undefined : AgentId.make(input.principal.slice(6));
       const scope = agentId === undefined ? undefined : yield* access.resolve(agentId);
-      // Tags select user relevance. An agent's grant ceiling is always resolved separately.
+      // Folders select user relevance. An agent's grant ceiling is always resolved separately.
       let labels =
         input.principal === "user" && input.threadId !== undefined
-          ? yield* tags(input.threadId)
+          ? yield* folders(input.threadId)
           : (scope?.readableLabelIds ?? (yield* facts.readableLabels(input.principal)));
       if (input.labelIds !== undefined)
         labels = labels.filter((id) => input.labelIds!.includes(id));
@@ -144,11 +144,11 @@ const make = Effect.gen(function* () {
           labels: string;
           runId: string;
         }>`SELECT t.thread_id AS id,t.title,t.updated_at AS updatedAt,r.status,r.run_id AS runId,
-        (SELECT json_group_array(lr.label_id) FROM label_repositories lr WHERE lr.repository_id=t.project_id AND lr.label_id IN ${sql.in(labels)}) AS labels,
+        (SELECT json_group_array(f.folder_id) FROM effective_thread_project_folders f WHERE f.thread_id=t.thread_id AND f.folder_id IN ${sql.in(labels)}) AS labels,
         COALESCE((SELECT json_group_array(json_object('kind','pr','id',json_extract(p.value,'$.url'))) FROM json_each(t.payload_json,'$.pullRequests') p WHERE json_extract(p.value,'$.url') IS NOT NULL AND json_extract(p.value,'$.source') <> 'stack-dismissed'),'[]') AS refs
         FROM orchestration_v2_projection_threads t JOIN orchestration_v2_projection_runs r ON r.run_id=(SELECT rr.run_id FROM orchestration_v2_projection_runs rr WHERE rr.thread_id=t.thread_id ORDER BY rr.ordinal DESC LIMIT 1)
-        WHERE t.deleted_at IS NULL AND json_extract(t.payload_json,'$.workOrigin') IS NOT NULL AND r.completed_at IS NOT NULL
-        AND ${scope === undefined || input.labelIds !== undefined ? sql`EXISTS (SELECT 1 FROM label_repositories lr WHERE lr.repository_id=t.project_id AND lr.label_id IN ${sql.in(labels)})` : sql`t.project_id IN ${sql.in(scope.readableRepositoryIds)}`} ORDER BY t.updated_at DESC,t.thread_id LIMIT 30`;
+        WHERE t.deleted_at IS NULL AND COALESCE(json_extract(t.payload_json,'$.surface'),'work') = 'work' AND json_extract(t.payload_json,'$.workOrigin') IS NOT NULL AND r.completed_at IS NOT NULL
+        AND ${scope === undefined || input.labelIds !== undefined ? sql`EXISTS (SELECT 1 FROM effective_thread_project_folders f WHERE f.thread_id=t.thread_id AND f.folder_id IN ${sql.in(labels)})` : sql`t.project_id IN ${sql.in(scope.readableRepositoryIds)}`} ORDER BY t.updated_at DESC,t.thread_id LIMIT 30`;
         for (const row of work) {
           const refs = yield* decodeRefs(row.refs);
           const matchedLabels = yield* decodeLabels(row.labels);
@@ -249,11 +249,11 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.mapError(wrap)),
     forTurn: (input) =>
       Effect.gen(function* () {
-        const threadTags = yield* tags(input.threadId);
-        // Untagged ordinary chats never send retrieved context to a provider, even with a stale opt-in.
+        const threadFolders = yield* folders(input.threadId);
+        // Unfiled ordinary chats never send retrieved context to a provider, even with a stale opt-in.
         const enabled =
           input.principal !== "user" ||
-          (threadTags.length > 0 && (yield* settings(input.threadId)).enabled);
+          (threadFolders.length > 0 && (yield* settings(input.threadId)).enabled);
         const result = enabled ? yield* retrieve(input) : { items: [], text: "" };
         if (input.runId !== undefined) {
           const runId = input.runId;

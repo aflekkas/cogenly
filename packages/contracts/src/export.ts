@@ -269,9 +269,6 @@ export const ExportRecord = Schema.Union([
     data: Schema.Struct({
       thread_id: Schema.String,
       label_id: Schema.String,
-      confidence: Schema.NullOr(Schema.Number),
-      confirmed_by_user: Schema.Number,
-      source: Schema.String,
     }),
   }),
 ]);

@@ -101,12 +101,7 @@ const definitions = [
     "project_id",
   ],
   ["repositoryLabels", "label_repositories", "label_id, repository_id", "label_id"],
-  [
-    "threadLabels",
-    "thread_project_labels",
-    "thread_id, label_id, confidence, confirmed_by_user, source",
-    "thread_id",
-  ],
+  ["threadLabels", "thread_project_labels", "thread_id, label_id", "thread_id"],
 ] as const;
 function columnParts(columns: string) {
   let depth = 0;
@@ -295,14 +290,14 @@ const make = Effect.gen(function* () {
         const labelPredicate =
           label === undefined
             ? sql`1`
-            : sql`EXISTS (SELECT 1 FROM thread_project_labels x WHERE x.thread_id = t.thread_id AND x.label_id = ${label})`;
+            : sql`EXISTS (SELECT 1 FROM effective_thread_project_folders x WHERE x.thread_id = t.thread_id AND x.folder_id = ${label})`;
         // Both modes retain ordinary conversation history; Work-only exports select bounded Work metadata/conversations.
         const threads = sql`SELECT t.rowid AS rowid, t.* FROM orchestration_v2_projection_threads t WHERE t.deleted_at IS NULL AND ${labelPredicate} AND (${input.include.includes("chats") ? sql`1` : input.include.includes("work") ? sql`json_extract(t.payload_json, '$.agent.role') = 'work' OR (NOT EXISTS (SELECT 1 FROM agents a WHERE a.conversation_thread_id = t.thread_id) AND t.project_id IN (SELECT project_id FROM projection_projects WHERE workspace_root <> ${path.join(config.baseDir, "scratch")}))` : sql`0`})`;
         const agents =
           label === undefined
             ? sql`SELECT agent_id FROM agents`
             : // Agents reach every project; a project export carries those that worked in it.
-              sql`SELECT agent_id FROM agents a WHERE EXISTS (SELECT 1 FROM thread_project_labels x WHERE x.label_id = ${label} AND (x.thread_id = a.conversation_thread_id OR x.thread_id IN (SELECT work_thread_id FROM agent_work_runs r WHERE r.agent_id = a.agent_id) OR x.thread_id IN (SELECT thread_id FROM agent_run_threads t WHERE t.agent_id = a.agent_id)))`;
+              sql`SELECT agent_id FROM agents a WHERE EXISTS (SELECT 1 FROM effective_thread_project_folders x WHERE x.folder_id = ${label} AND (x.thread_id = a.conversation_thread_id OR x.thread_id IN (SELECT work_thread_id FROM agent_work_runs r WHERE r.agent_id = a.agent_id) OR x.thread_id IN (SELECT thread_id FROM agent_run_threads t WHERE t.agent_id = a.agent_id)))`;
         const commitments =
           label === undefined
             ? sql`SELECT id FROM commitments`
@@ -349,7 +344,7 @@ const make = Effect.gen(function* () {
           if (kind === "runs" || kind === "contextRefs")
             predicate = sql`(${predicate}) AND thread_id IN (SELECT thread_id FROM orchestration_v2_projection_threads WHERE deleted_at IS NULL)`;
           if ((kind === "runs" || kind === "contextRefs") && label !== undefined)
-            predicate = sql`(${predicate}) AND thread_id IN (SELECT thread_id FROM thread_project_labels WHERE label_id = ${label})`;
+            predicate = sql`(${predicate}) AND thread_id IN (SELECT thread_id FROM effective_thread_project_folders WHERE folder_id = ${label})`;
           if (agentKinds.has(kind)) predicate = sql`agent_id IN (${agents})`;
           if (
             label !== undefined &&
@@ -358,7 +353,7 @@ const make = Effect.gen(function* () {
             const key = sql.unsafe(
               kind === "agentRuns" || kind === "eventDeliveries" ? "work_thread_id" : "thread_id",
             );
-            predicate = sql`${predicate} AND ${key} IN (SELECT thread_id FROM thread_project_labels WHERE label_id = ${label})`;
+            predicate = sql`${predicate} AND ${key} IN (SELECT thread_id FROM effective_thread_project_folders WHERE folder_id = ${label})`;
           }
           if (kind === "threadLabels" && input.include.includes("projects"))
             predicate = sql`thread_id IN (SELECT thread_id FROM orchestration_v2_projection_threads WHERE deleted_at IS NULL)`;
@@ -377,13 +372,20 @@ const make = Effect.gen(function* () {
               label === undefined
                 ? sql`deleted_at IS NULL`
                 : sql`deleted_at IS NULL AND project_id IN (SELECT repository_id FROM label_repositories WHERE label_id = ${label})`;
-          const source = kind === "threads" ? sql`(${threads})` : sql.unsafe(table);
+          const source =
+            kind === "threads"
+              ? sql`(${threads})`
+              : kind === "threadLabels"
+                ? sql`(SELECT t.rowid AS rowid, f.thread_id, f.folder_id AS label_id
+              FROM effective_thread_project_folders f JOIN orchestration_v2_projection_threads t ON t.thread_id = f.thread_id
+              WHERE f.folder_id IS NOT NULL)`
+                : sql.unsafe(table);
           const fields = columnParts(columns).map((expression, index) => {
             const name = columnNames(columns)[index]!;
             const value = expression.includes(" AS ")
               ? expression.slice(0, expression.lastIndexOf(" AS "))
               : expression;
-            return `'${name}', ${["enabled", "confidence", "confirmed_by_user"].includes(name) ? value : `(${value}) || ''`}`;
+            return `'${name}', ${name === "enabled" ? value : `(${value}) || ''`}`;
           });
           const json = sql.unsafe(`json_object(${fields.join(", ")})`);
           // Enforce the size limit in SQLite before materializing text in JavaScript.

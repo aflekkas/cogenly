@@ -8,6 +8,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as DateTime from "effect/DateTime";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import {
+  ExportRecord,
   EventId,
   ThreadId,
   ProjectId,
@@ -20,6 +21,7 @@ import * as Sqlite from "../persistence/Sqlite.ts";
 import { agentFixture } from "../agents/agent.testkit.ts";
 
 const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const decodeExportRecord = Schema.decodeUnknownEffect(Schema.fromJsonString(ExportRecord));
 const parse = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const layer = Exports.layer.pipe(
   Layer.provideMerge(Projections.layer),
@@ -33,9 +35,11 @@ const seed = Effect.gen(function* () {
   yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES ('repo', 'Repo', '/repos/repo', '[]', ${at}, ${at})`;
   for (const id of ["a", "b"]) {
     yield* sql`INSERT INTO project_labels(label_id, name, created_at, updated_at) VALUES (${id}, ${id}, ${at}, ${at})`;
-    yield* sql`INSERT INTO label_repositories(label_id, repository_id) VALUES (${id}, 'repo')`;
+    if (id === "a")
+      yield* sql`INSERT INTO label_repositories(label_id, repository_id) VALUES (${id}, 'repo')`;
     yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${id}, 'repo', ${id}, 'codex', 'full-access', 'default', ${at}, ${at}, ${encode({ workOrigin: "agent", sourceThreadId: "origin-thread", sourceAgentId: "origin-agent", sourceAgentRunId: "origin-run", branch: "main", pullRequests: [{ url: "https://github.com/org/repo/pull/1" }] })})`;
-    yield* sql`INSERT INTO thread_project_labels(thread_id, label_id, confidence, confirmed_by_user, source) VALUES (${id}, ${id}, NULL, 1, 'user')`;
+    if (id === "b")
+      yield* sql`INSERT INTO thread_project_labels(thread_id, label_id) VALUES (${id}, ${id})`;
     yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id, thread_id, role, streaming, created_at, updated_at, payload_json) VALUES (${id}, ${id}, 'user', 0, ${at}, ${at}, ${encode({ text: `Message ${id}` })})`;
     yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES (${id}, ${id}, 1, 'codex', 'completed', ${at}, ${encode({ modelSelection: { instanceId: "codex", model: "gpt-5" } })})`;
     const agent = agentFixture(id);
@@ -103,7 +107,14 @@ describe("portable exports", () => {
       expect(content).toContain('"source_agent_id":"origin-agent"');
       expect(content).toContain('"source_agent_run_id":"origin-run"');
       expect(content).toContain('"work_origin":"agent"');
-      expect(content).toContain('"kind":"threadLabels"');
+      const records = yield* Effect.forEach(content.trim().split("\n"), (line) =>
+        decodeExportRecord(line),
+      );
+      const folderMemberships = records.filter((record) => record.kind === "threadLabels");
+      expect(folderMemberships).toEqual([
+        { kind: "threadLabels", data: { thread_id: "a", label_id: "a" } },
+        { kind: "threadLabels", data: { thread_id: "b", label_id: "b" } },
+      ]);
       expect(content).toContain('"trigger_context_json"');
       expect(content).toContain('"kind":"contextRefs"');
       expect(parse(yield* fs.readFileString(result.path + "/manifest.json"))).toMatchObject({
@@ -181,56 +192,58 @@ describe("portable exports", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  it.effect("filters each kind by label and honors section selection", () =>
-    Effect.gen(function* () {
-      yield* seed;
-      const service = yield* Exports.ExportService;
-      const fs = yield* FileSystem.FileSystem;
-      const result = yield* service.export({
-        include: ["chats", "agents", "memory", "commitments", "projects"],
-        labelId: ProjectLabelId.make("a"),
-      });
-      expect(result.counts).toMatchObject({
-        threads: 1,
-        messages: 1,
-        agents: 1,
-        memory: 1,
-        commitments: 1,
-        commitmentHistory: 1,
-        triggers: 1,
-        labels: 1,
-        threadLabels: 1,
-        contextRefs: 1,
-        eventDeliveries: 1,
-      });
-      const content = yield* fs.readFileString(result.path + "/records.jsonl");
-      expect(content).toContain("Message a");
-      expect(content).not.toContain("Message b");
-      expect(content).not.toContain("Memory b");
-      expect(content).not.toContain("Item b");
-      expect(yield* service.validate({ path: result.path })).toEqual({
-        counts: result.counts,
-        errors: [],
-      });
-      const onlyMemory = yield* service.export({ include: ["memory"] });
-      expect(onlyMemory.counts).toEqual({ memory: 2, factHistory: 2 });
-      const projectsOnly = yield* service.export({ include: ["projects"] });
-      expect(projectsOnly.counts.threadLabels).toBe(2);
-      const sql = yield* SqlClient.SqlClient;
-      yield* sql`UPDATE agent_work_runs SET agent_id = 'agent:a' WHERE work_thread_id = 'b'`;
-      yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind) VALUES ('b', 'agent:a', 'owner')`;
-      const scoped = yield* service.export({
-        include: ["agents"],
-        labelId: ProjectLabelId.make("a"),
-      });
-      expect(scoped.counts.agentRuns).toBe(1);
-      expect(scoped.counts.agentRunThreads).toBeUndefined();
-      expect(scoped.counts.runs).toBe(1);
-      expect(yield* service.validate({ path: scoped.path })).toEqual({
-        counts: scoped.counts,
-        errors: [],
-      });
-    }).pipe(Effect.provide(layer)),
+  it.effect(
+    "filters each kind by effective folder, honors explicit overrides and section selection",
+    () =>
+      Effect.gen(function* () {
+        yield* seed;
+        const service = yield* Exports.ExportService;
+        const fs = yield* FileSystem.FileSystem;
+        const result = yield* service.export({
+          include: ["chats", "agents", "memory", "commitments", "projects"],
+          labelId: ProjectLabelId.make("a"),
+        });
+        expect(result.counts).toMatchObject({
+          threads: 1,
+          messages: 1,
+          agents: 1,
+          memory: 1,
+          commitments: 1,
+          commitmentHistory: 1,
+          triggers: 1,
+          labels: 1,
+          threadLabels: 1,
+          contextRefs: 1,
+          eventDeliveries: 1,
+        });
+        const content = yield* fs.readFileString(result.path + "/records.jsonl");
+        expect(content).toContain("Message a");
+        expect(content).not.toContain("Message b");
+        expect(content).not.toContain("Memory b");
+        expect(content).not.toContain("Item b");
+        expect(yield* service.validate({ path: result.path })).toEqual({
+          counts: result.counts,
+          errors: [],
+        });
+        const onlyMemory = yield* service.export({ include: ["memory"] });
+        expect(onlyMemory.counts).toEqual({ memory: 2, factHistory: 2 });
+        const projectsOnly = yield* service.export({ include: ["projects"] });
+        expect(projectsOnly.counts.threadLabels).toBe(2);
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE agent_work_runs SET agent_id = 'agent:a' WHERE work_thread_id = 'b'`;
+        yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind) VALUES ('b', 'agent:a', 'owner')`;
+        const scoped = yield* service.export({
+          include: ["agents"],
+          labelId: ProjectLabelId.make("a"),
+        });
+        expect(scoped.counts.agentRuns).toBe(1);
+        expect(scoped.counts.agentRunThreads).toBeUndefined();
+        expect(scoped.counts.runs).toBe(1);
+        expect(yield* service.validate({ path: scoped.path })).toEqual({
+          counts: scoped.counts,
+          errors: [],
+        });
+      }).pipe(Effect.provide(layer)),
   );
 
   it.effect(
@@ -265,6 +278,7 @@ describe("portable exports", () => {
         yield* seed;
         const sql = yield* SqlClient.SqlClient;
         const threadId = ThreadId.make("a");
+        yield* sql`INSERT INTO thread_project_labels(thread_id, label_id) VALUES ('a', 'a')`;
         yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind) VALUES ('a', 'agent:a', 'owner')`;
         const now = DateTime.makeUnsafe(at);
         const projection = yield* Projections.ProjectionStoreV2;

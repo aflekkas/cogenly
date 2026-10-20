@@ -102,7 +102,7 @@ describe("shared facts and scoped context", () => {
         });
         yield* store.remember({ agentId: agent.id, text: "own private" });
         const sql = yield* SqlClient.SqlClient;
-        yield* sql`INSERT INTO thread_project_labels(thread_id,label_id,confirmed_by_user,source) VALUES (${threadId},${b},1,'user')`;
+        yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES (${threadId},${b})`;
         yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,role,streaming,created_at,updated_at,payload_json) VALUES ('secret',${threadId},'user',0,${at},${at},'{"text":"foreign transcript"}')`;
         const principal = `agent:${agent.id}` as const;
         const visible = (yield* facts.list({}, principal)).facts.map((f) => f.text);
@@ -253,7 +253,7 @@ describe("shared facts and scoped context", () => {
         const agent = yield* (yield* Store.AgentStore).save(agentFixture());
         yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES ('repo','Repo','/repo','[]',${at},${at})`;
         yield* sql`INSERT INTO label_repositories(label_id,repository_id) VALUES (${a},'repo')`;
-        yield* sql`INSERT INTO thread_project_labels(thread_id,label_id,confirmed_by_user,source) VALUES (${threadId},${a},1,'user')`;
+        yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES (${threadId},${a})`;
         yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,role,streaming,created_at,updated_at,payload_json) VALUES ('recent',${threadId},'assistant',0,${at},${at},'{"text":"A recent message"}')`;
         for (const [id, status, label] of [
           ["open", "open", a],
@@ -335,6 +335,59 @@ describe("shared facts and scoped context", () => {
   );
 
   it.effect(
+    "uses repository defaults for Work context and explicit folder filing for chats and Work outcomes",
+    () =>
+      Effect.gen(function* () {
+        yield* seed;
+        const sql = yield* SqlClient.SqlClient;
+        const facts = yield* Facts.FactService;
+        const retrieval = yield* Retrieval.ContextRetrievalService;
+        yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES ('repo','Repo','/repo','[]',${at},${at})`;
+        yield* sql`INSERT INTO label_repositories(label_id,repository_id) VALUES (${a},'repo')`;
+        yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json='{"surface":"work","workOrigin":"direct"}' WHERE thread_id=${threadId}`;
+        yield* facts.create(input("Repository context"));
+        yield* facts.create(input("Explicit context", [b]));
+        expect(yield* retrieval.settings(threadId)).toEqual({ enabled: true });
+        expect(
+          (yield* retrieval.forTurn({ threadId, principal: "user", budgetChars: 4000 })).text,
+        ).toContain("Repository context");
+        yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES (${threadId},${b})`;
+        expect(
+          (yield* retrieval.forTurn({ threadId, principal: "user", budgetChars: 4000 })).text,
+        ).toContain("Explicit context");
+        expect(
+          (yield* retrieval.forTurn({ threadId, principal: "user", budgetChars: 4000 })).text,
+        ).not.toContain("Repository context");
+        yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES ('outcome','repo','Outcome','codex','full-access','default',${at},${at},'{"surface":"work","workOrigin":"direct"}')`;
+        yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,completed_at,payload_json) VALUES ('outcome-run','outcome',1,'codex','completed',${at},${at},'{}')`;
+        expect(
+          (yield* retrieval.retrieve({
+            principal: "user",
+            threadId,
+            budgetChars: 4000,
+          })).items.some((i) => i.id === "outcome"),
+        ).toBe(false);
+        yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES ('outcome',${b})`;
+        expect(
+          (yield* retrieval.retrieve({
+            principal: "user",
+            threadId,
+            budgetChars: 4000,
+          })).items.find((i) => i.id === "outcome")?.labelIds,
+        ).toEqual([b]);
+        yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json='{"surface":"chat"}' WHERE thread_id=${threadId}`;
+        expect(
+          (yield* retrieval.forTurn({ threadId, principal: "user", budgetChars: 4000 })).text,
+        ).toContain("Explicit context");
+        yield* sql`DELETE FROM thread_project_labels WHERE thread_id=${threadId}`;
+        expect(yield* retrieval.settings(threadId)).toEqual({ enabled: false });
+        expect(
+          (yield* retrieval.forTurn({ threadId, principal: "user", budgetChars: 4000 })).text,
+        ).toBe("");
+      }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect(
     "enforces the complete rendered budget, records exact selected refs, and respects opt-out and untagged chats",
     () =>
       Effect.gen(function* () {
@@ -348,11 +401,7 @@ describe("shared facts and scoped context", () => {
         const runId = RunId.make("run-context");
         expect(yield* store.context(threadId, runId)).toBe("");
         expect((yield* retrieval.forRun(runId)).refs).toEqual([]);
-        yield* sql`INSERT INTO thread_project_labels(thread_id,label_id,confirmed_by_user,source) VALUES (${threadId},${a},0,'suggested')`;
-        expect(
-          (yield* retrieval.forTurn({ threadId, runId, principal: "user", budgetChars: 300 })).text,
-        ).toBe("");
-        yield* sql`UPDATE thread_project_labels SET confirmed_by_user=1 WHERE thread_id=${threadId}`;
+        yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES (${threadId},${a})`;
         const selected = yield* retrieval.forTurn({
           threadId,
           runId,

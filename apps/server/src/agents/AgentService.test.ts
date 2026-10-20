@@ -1351,6 +1351,44 @@ describe("event-driven agent triggers", () => {
         }).pipe(Effect.provide(h.layer));
       }),
   );
+  it.effect.each(["repository default", "explicit override excludes", "explicit override matches"])(
+    "matches event folder filters using %s",
+    (membership) =>
+      Effect.gen(function* () {
+        const h = yield* setup;
+        yield* Effect.gen(function* () {
+          const { task } = yield* prepare(h);
+          const folders = yield* Labels.ProjectLabelService;
+          const a = (yield* folders.create({ name: "Repository folder" })).label.id;
+          const b = (yield* folders.create({ name: "Explicit folder" })).label.id;
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${h.fixture.projectId!},'Repo','/repo','[]',${h.fixture.createdAt},${h.fixture.createdAt})`;
+          yield* folders.linkRepository({ labelId: a, repositoryId: h.fixture.projectId! });
+          const source = completedEvent(h, "folder");
+          yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES (${source.event.threadId},${h.fixture.projectId!},'Work','codex','full-access','default',${h.fixture.createdAt},${h.fixture.createdAt},'{"surface":"work"}')`;
+          if (membership !== "repository default")
+            yield* folders.moveThread({ threadId: source.event.threadId, folderId: b });
+          const expectedFolder = membership === "explicit override matches" ? b : a;
+          yield* (yield* Schedules.ScheduledTaskService).upsert({
+            ...h.triggerInput,
+            id: task.id,
+            schedule: {
+              type: "event",
+              event: "work.completed",
+              filter: { labelIds: [expectedFolder] },
+            },
+          });
+          yield* (yield* EventReactor.AgentEventReactor).observe(source);
+          yield* (yield* AgentEvents.AgentEventBus).drain;
+          expect(h.launches).toHaveLength(membership === "explicit override excludes" ? 0 : 1);
+          if (membership !== "explicit override excludes")
+            expect(
+              (yield* (yield* Store.AgentStore).runs(h.fixture.id))[0]?.triggerContext?.labelIds,
+            ).toEqual([expectedFolder]);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
   it.effect.each(["missing repository", "tagged missing repository", "home with unrelated tag"])(
     "uses repository liveness for %s",
     (reason) =>
@@ -1370,7 +1408,7 @@ describe("event-driven agent triggers", () => {
             const label = (yield* (yield* Labels.ProjectLabelService).create({ name: "Private" }))
               .label;
             const sql = yield* SqlClient.SqlClient;
-            yield* sql`INSERT INTO thread_project_labels(thread_id, label_id, confirmed_by_user, source) VALUES (${source.event.threadId}, ${label.id}, 1, 'user')`;
+            yield* sql`INSERT INTO thread_project_labels(thread_id, label_id) VALUES (${source.event.threadId}, ${label.id})`;
           }
           yield* (yield* EventReactor.AgentEventReactor).observe(source);
           yield* (yield* AgentEvents.AgentEventBus).drain;

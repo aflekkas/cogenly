@@ -55,7 +55,7 @@ const make = Effect.gen(function* () {
       }
       const labels = yield* sql<{
         label_id: string;
-      }>`SELECT label_id FROM thread_project_labels WHERE thread_id = ${threadId}`;
+      }>`SELECT folder_id AS label_id FROM effective_thread_project_folders WHERE thread_id = ${threadId} AND folder_id IS NOT NULL`;
       return {
         projectId: thread.projectId,
         labelIds: labels.map((r) => ProjectLabelId.make(r.label_id)),

@@ -101,7 +101,7 @@ const make = Effect.gen(function* () {
               (SELECT label_id FROM commitment_labels WHERE commitment_id = m.id ORDER BY label_id))
             WHEN a.agent_id IS NOT NULL THEN json_array()
             ELSE (SELECT json_group_array(label_id) FROM
-              (SELECT label_id FROM thread_project_labels WHERE thread_id = m.thread_id ORDER BY label_id)) END AS labels
+              (SELECT folder_id AS label_id FROM effective_thread_project_folders WHERE thread_id = m.thread_id AND folder_id IS NOT NULL)) END AS labels
         FROM matches m
         LEFT JOIN orchestration_v2_projection_threads t ON t.thread_id = m.thread_id
         LEFT JOIN projection_projects p ON p.project_id = t.project_id

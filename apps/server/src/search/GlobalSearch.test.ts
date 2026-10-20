@@ -85,6 +85,37 @@ const commitment = Effect.fnUntraced(function* (
 
 describe("global search", () => {
   it.effect(
+    "filters threads by their effective folder with explicit filing overriding repository defaults",
+    () =>
+      Effect.gen(function* () {
+        yield* seed;
+        const folders = yield* Labels.ProjectLabelService;
+        const search = yield* Search.GlobalSearch;
+        const a = (yield* folders.create({ name: "A" })).label.id;
+        const b = (yield* folders.create({ name: "B" })).label.id;
+        yield* folders.linkRepository({ labelId: a, repositoryId: repo });
+        yield* thread("derived", repo, "Quartz derived", { surface: "work" });
+        yield* thread("explicit", repo, "Quartz explicit", { surface: "work" });
+        yield* thread("chat", repo, "Quartz chat", { surface: "chat" });
+        yield* folders.moveThread({ threadId: ThreadId.make("explicit"), folderId: b });
+        expect(
+          (yield* search.query({ query: "quartz", labelId: a })).results.map((r) => r.id),
+        ).toEqual(["derived"]);
+        expect(
+          (yield* search.query({ query: "quartz", labelId: b })).results.map((r) => r.id),
+        ).toEqual(["explicit"]);
+        yield* folders.moveThread({ threadId: ThreadId.make("explicit"), folderId: null });
+        expect(
+          (yield* search.query({ query: "quartz", labelId: a })).results.map((r) => r.id).sort(),
+        ).toEqual(["derived", "explicit"]);
+        yield* folders.moveThread({ threadId: ThreadId.make("chat"), folderId: b });
+        expect(
+          (yield* search.query({ query: "quartz", labelId: b })).results.map((r) => r.id),
+        ).toEqual(["chat"]);
+      }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect(
     "indexes only confirmed facts, enforces owner/label visibility, and cleans up retractions and cascades",
     () =>
       Effect.gen(function* () {
