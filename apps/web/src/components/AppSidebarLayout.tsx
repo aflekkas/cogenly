@@ -302,9 +302,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
         <ProjectProjectionRetention />
         {navRailVisible ? (
-          <SidebarNavRail
-            showSidebarToggle={titlebarLayout.sidebarToggle === "rail-titlebar"}
-          />
+          <SidebarNavRail showSidebarToggle={titlebarLayout.sidebarToggle === "rail-titlebar"} />
         ) : null}
         {listSidebarHidden ? null : (
           <Sidebar
