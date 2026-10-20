@@ -20,7 +20,6 @@ import {
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
-import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { observeResize } from "~/lib/observeResize";
@@ -241,7 +240,6 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter({
 }) {
   return (
     <SidebarFooter className={cn(!utilityMenu && "empty:hidden")}>
-      <SidebarThreadUndoNotice />
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       {utilityMenu ? (

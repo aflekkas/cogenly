@@ -58,6 +58,32 @@ describe("discardComposerDraft", () => {
     expect(releaseDraftAttachments).not.toHaveBeenCalled();
   });
 
+  it("offers the discard as one undo toast whose count follows the group", async () => {
+    const add = vi.spyOn(toastManager, "add").mockReturnValue("undo-toast");
+    const close = vi.spyOn(toastManager, "close").mockReturnValue(undefined);
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId);
+    store.setPrompt(draftId, "first");
+
+    discardComposerDraft(draftId);
+    expect(add).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: "Discarded 1 draft", timeout: 5_000 }),
+    );
+
+    useComposerDraftStore.getState().setPrompt(threadRef, "second");
+    discardComposerDraft(threadRef);
+    expect(close).toHaveBeenCalledWith("undo-toast");
+    expect(add).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Discarded 2 drafts" }));
+
+    // The toast's Undo button restores the whole group.
+    const action = add.mock.lastCall?.[0].actionProps;
+    expect(action?.children).toBe("Undo");
+    action?.onClick?.({} as never);
+    await vi.waitFor(() =>
+      expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe("first"),
+    );
+  });
+
   it("clears a thread draft for good and releases its uploads once undo expires", async () => {
     useComposerDraftStore.getState().setPrompt(threadRef, "reply in progress");
 
