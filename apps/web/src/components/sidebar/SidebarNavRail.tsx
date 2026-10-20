@@ -118,9 +118,10 @@ export function SidebarNavRail({
           isElectron && "drag-region",
         )}
       >
-        {sidebarToggleBelowTitlebar ? null : sidebarToggle}
+        {sidebarToggleBelowTitlebar || onUsage ? null : sidebarToggle}
       </div>
-      {sidebarToggleBelowTitlebar ? sidebarToggle : null}
+      {/* Usage has no list column, so nothing to toggle there. */}
+      {sidebarToggleBelowTitlebar && !onUsage ? sidebarToggle : null}
       <div
         role="tablist"
         aria-label="Sidebar view"

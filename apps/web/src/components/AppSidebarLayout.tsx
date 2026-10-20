@@ -218,6 +218,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // mobile sheet keeps those, and the legacy sidebar keeps its own layout.
   const isMobile = useIsMobile();
   const navRailVisible = !isMobile && !legacySidebarEnabled;
+  // Usage is a full-width page: with the rail there to navigate away, it has no
+  // list column. The mobile sheet stays, since it is the only way back.
+  const listSidebarHidden = navRailVisible && pathname === "/usage";
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(() => {
     const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState;
     return isMacosDesktop && typeof getWindowFullscreenState === "function"
@@ -295,37 +298,39 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
             sidebarToggleBelowTitlebar={titlebarLayout.sidebarToggle === "rail-below-titlebar"}
           />
         ) : null}
-        <Sidebar
-          side="left"
-          collapsible="offcanvas"
-          data-app-sidebar=""
-          role="navigation"
-          aria-label={isOnSettings ? "Settings" : "Threads"}
-          // The list column starts after the rail and slides under it when collapsed.
-          className={navRailVisible ? "left-(--nav-rail-width)" : undefined}
-          // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
-          style={windowControlsInsetStyle}
-        >
-          <div
-            key={isOnSettings ? "settings" : "threads"}
-            className={cn(
-              "flex min-h-0 w-full flex-1 flex-col",
-              sidebarView.swapped &&
-                "motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-standard motion-safe:starting:opacity-0",
-            )}
+        {listSidebarHidden ? null : (
+          <Sidebar
+            side="left"
+            collapsible="offcanvas"
+            data-app-sidebar=""
+            role="navigation"
+            aria-label={isOnSettings ? "Settings" : "Threads"}
+            // The list column starts after the rail and slides under it when collapsed.
+            className={navRailVisible ? "left-(--nav-rail-width)" : undefined}
+            // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
+            style={windowControlsInsetStyle}
           >
-            {isOnSettings ? (
-              <>
-                <SidebarChromeHeader isElectron={isElectron} />
-                <SettingsSidebarNav pathname={pathname} />
-              </>
-            ) : legacySidebarEnabled ? (
-              <LegacyThreadSidebar />
-            ) : (
-              <ThreadSidebar />
-            )}
-          </div>
-        </Sidebar>
+            <div
+              key={isOnSettings ? "settings" : "threads"}
+              className={cn(
+                "flex min-h-0 w-full flex-1 flex-col",
+                sidebarView.swapped &&
+                  "motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-standard motion-safe:starting:opacity-0",
+              )}
+            >
+              {isOnSettings ? (
+                <>
+                  <SidebarChromeHeader isElectron={isElectron} />
+                  <SettingsSidebarNav pathname={pathname} />
+                </>
+              ) : legacySidebarEnabled ? (
+                <LegacyThreadSidebar />
+              ) : (
+                <ThreadSidebar />
+              )}
+            </div>
+          </Sidebar>
+        )}
         {children}
         <SidebarControl showButton={titlebarLayout.sidebarToggle === "fixed"} />
         <NavigationHistoryShortcuts />
