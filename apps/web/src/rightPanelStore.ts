@@ -988,7 +988,16 @@ export function selectActiveRightPanel(
 ): RightPanelKind | null {
   const state = selectThreadRightPanelState(byThreadKey, ref);
   if (!state.isOpen) return null;
-  return state.surfaces.find((surface) => surface.id === state.activeSurfaceId)?.kind ?? null;
+  return selectedSurface(state)?.kind ?? null;
+}
+
+/** An open tab strip always shows one of its tabs, the first when the selection is missing. */
+function selectedSurface(state: ThreadRightPanelState): RightPanelSurface | null {
+  return (
+    state.surfaces.find((surface) => surface.id === state.activeSurfaceId) ??
+    state.surfaces[0] ??
+    null
+  );
 }
 
 export function selectActiveRightPanelSurface(
@@ -1005,6 +1014,5 @@ export function selectSelectedRightPanelSurface(
   byThreadKey: Record<string, ThreadRightPanelState>,
   ref: ScopedThreadRef | null | undefined,
 ): RightPanelSurface | null {
-  const state = selectThreadRightPanelState(byThreadKey, ref);
-  return state.surfaces.find((surface) => surface.id === state.activeSurfaceId) ?? null;
+  return selectedSurface(selectThreadRightPanelState(byThreadKey, ref));
 }

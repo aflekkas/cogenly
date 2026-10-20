@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   migratePersistedRightPanelState,
+  selectActiveRightPanelSurface,
   selectThreadRightPanelState,
   useRightPanelStore,
 } from "./rightPanelStore";
@@ -88,5 +89,21 @@ describe("terminal surface actions", () => {
       kind: "terminal",
       activeTerminalId: "term-1",
     });
+  });
+});
+
+describe("selectActiveRightPanelSurface", () => {
+  it("shows the first tab when the stored selection no longer matches one", () => {
+    const byThreadKey = {
+      "env-1:thread-1": {
+        isOpen: true,
+        activeSurfaceId: "browser:gone",
+        surfaces: [
+          { id: "terminal" as const, kind: "terminal" as const },
+          { id: "device" as const, kind: "device" as const },
+        ],
+      },
+    };
+    expect(selectActiveRightPanelSurface(byThreadKey, threadRef)?.id).toBe("terminal");
   });
 });

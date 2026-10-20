@@ -36,6 +36,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -184,6 +185,14 @@ type TabContextMenuAction =
   | "close-all";
 
 const TAB_SCROLL_EDGE_TOLERANCE = 1;
+
+/**
+ * The narrowest the strip may get before it scrolls: every tab at its minimum
+ * width (`min-w-24`) plus its gap (`gap-1`), then the new-tab button.
+ */
+export function tabStripMinWidth(tabCount: number): string {
+  return `calc(${tabCount} * 6.25rem + 1.75rem)`;
+}
 const TAB_DRAG_MODIFIERS = [restrictToHorizontalAxis, restrictToFirstScrollableAncestor];
 
 function tabScrollViewport(root: HTMLDivElement | null): HTMLDivElement | null {
@@ -708,6 +717,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const browserProfiles = useBrowserDefaults().profiles;
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
+  const tabIdPrefix = useId();
   const addSurfaceTriggerRef = useRef<HTMLButtonElement>(null);
   const [renamingDevice, setRenamingDevice] = useState<string | null>(null);
   const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
@@ -830,11 +840,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     action.onClick();
   };
 
-  const handleTabContextMenu = useCallback(
-    async (event: ReactMouseEvent, surface: RightPanelSurface) => {
-      event.preventDefault();
-      event.stopPropagation();
-
+  const openTabContextMenu = useCallback(
+    async (position: { x: number; y: number }, surface: RightPanelSurface) => {
       const api = readLocalApi();
       if (!api) return;
 
@@ -885,7 +892,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         },
       );
 
-      const action = await api.contextMenu.show(items, { x: event.clientX, y: event.clientY });
+      const action = await api.contextMenu.show(items, position);
       switch (action) {
         case "rename":
           setRenamingDevice(surface.id);
@@ -925,6 +932,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
     [props],
   );
+  const handleTabContextMenu = useCallback(
+    (event: ReactMouseEvent, surface: RightPanelSurface) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void openTabContextMenu({ x: event.clientX, y: event.clientY }, surface);
+    },
+    [openTabContextMenu],
+  );
   const handleTabMouseDown = useCallback((event: ReactMouseEvent) => {
     if (event.button !== 1) return;
     event.preventDefault();
@@ -938,6 +953,71 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     },
     [props],
   );
+
+  const tabElements = () =>
+    Array.from(tabListRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []);
+  // Set when the keyboard closed a tab, so focus lands on the tab that takes its
+  // place once the close renders (a browser tab may first ask for confirmation).
+  const focusActiveTabAfterCloseRef = useRef<string | null>(null);
+  useEffect(() => {
+    const closedId = focusActiveTabAfterCloseRef.current;
+    if (closedId === null || props.surfaces.some((surface) => surface.id === closedId)) return;
+    focusActiveTabAfterCloseRef.current = null;
+    tabListRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+  });
+
+  // Manual activation: arrows only move focus, so walking past a terminal or
+  // browser tab never hands keyboard focus to the surface it would mount.
+  const handleTabListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+    const tab = event.target;
+    if (!(tab instanceof HTMLElement) || tab.getAttribute("role") !== "tab") return;
+    const tabs = tabElements();
+    const index = tabs.indexOf(tab);
+    const surface = props.surfaces.find((entry) => entry.id === tab.dataset.surfaceId);
+    if (index < 0 || !surface) return;
+    const focusTab = (next: number) => {
+      event.preventDefault();
+      tabs[(next + tabs.length) % tabs.length]?.focus();
+    };
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    switch (event.key) {
+      case "ArrowRight":
+        focusTab(index + 1);
+        return;
+      case "ArrowLeft":
+        focusTab(index - 1);
+        return;
+      case "Home":
+        focusTab(0);
+        return;
+      case "End":
+        focusTab(tabs.length - 1);
+        return;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        props.onActivate(surface);
+        return;
+      case "Delete":
+      case "Backspace":
+        event.preventDefault();
+        focusActiveTabAfterCloseRef.current = surface.id;
+        props.onCloseSurface(surface);
+        return;
+      case "F2":
+        if (surface.kind !== "device" || !props.onRenameDevice) return;
+        event.preventDefault();
+        setRenamingDevice(surface.id);
+        return;
+      case "ContextMenu": {
+        event.preventDefault();
+        const rect = tab.getBoundingClientRect();
+        void openTabContextMenu({ x: rect.left, y: rect.bottom }, surface);
+        return;
+      }
+    }
+  };
 
   useEffect(() => {
     if (!props.activeSurfaceId || !tabScrollState.hasOverflow) return;
@@ -1018,136 +1098,158 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           // edge when the sidebar toggles.
           data-panel-flip={props.maximized ? "start" : undefined}
         >
-          <div className="flex h-full w-max min-w-full items-center gap-1">
+          <div
+            className="flex h-full w-full items-center gap-1"
+            // Tabs shrink to their minimum width before the strip scrolls.
+            style={{ minWidth: tabStripMinWidth(props.surfaces.length) }}
+          >
             <SortableTabList surfaces={props.surfaces} onMove={props.onMoveSurface}>
-              {props.surfaces.map((surface) => {
-                const active = surface.id === props.activeSurfaceId;
-                const pending = props.pendingSurfaceIds.has(surface.id);
-                const title = surfaceTitle(surface, props.previewSessions);
-                const previewTabId = previewTabIdOf(surface, props.previewSessions);
-                // Desktop state is keyed by the session id, but desktop actions
-                // must be addressed with the runtime id.
-                const audio = tabAudioState(
-                  previewTabId ? (props.desktopByTabId[previewTabId] ?? null) : null,
-                );
-                const audioRuntimeTabId = previewTabId
-                  ? (props.previewRuntimeTabId?.(previewTabId) ?? null)
-                  : null;
-                return (
-                  <SortableTab
-                    key={surface.id}
-                    surfaceId={surface.id}
-                    disabled={!props.onMoveSurface || renamingDevice === surface.id}
-                    data-active-tab={active}
-                    onMouseDown={handleTabMouseDown}
-                    onAuxClick={(event) => handleTabAuxClick(event, surface)}
-                    onContextMenu={(event) => void handleTabContextMenu(event, surface)}
-                    className={cn(
-                      "cursor-pointer group/tab flex h-6 max-w-36 shrink-0 items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
-                      ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
-                      active ? "state-selected" : "state-hover text-muted-foreground",
-                    )}
-                  >
-                    <PanelTabCloseButton
-                      label={`Close ${title}`}
-                      onClick={() => props.onCloseSurface(surface)}
+              <div
+                role="tablist"
+                aria-label="Panel tabs"
+                aria-orientation="horizontal"
+                className="flex min-w-0 items-center gap-1"
+                onKeyDown={handleTabListKeyDown}
+              >
+                {props.surfaces.map((surface, index) => {
+                  const active = surface.id === props.activeSurfaceId;
+                  const pending = props.pendingSurfaceIds.has(surface.id);
+                  const title = surfaceTitle(surface, props.previewSessions);
+                  const previewTabId = previewTabIdOf(surface, props.previewSessions);
+                  // Desktop state is keyed by the session id, but desktop actions
+                  // must be addressed with the runtime id.
+                  const audio = tabAudioState(
+                    previewTabId ? (props.desktopByTabId[previewTabId] ?? null) : null,
+                  );
+                  const audioRuntimeTabId = previewTabId
+                    ? (props.previewRuntimeTabId?.(previewTabId) ?? null)
+                    : null;
+                  // One tab stop for the whole strip: the selected tab, or the
+                  // first one while nothing is selected.
+                  const tabStop = active || (props.activeSurfaceId === null && index === 0);
+                  return (
+                    <SortableTab
+                      key={surface.id}
+                      surfaceId={surface.id}
+                      disabled={!props.onMoveSurface || renamingDevice === surface.id}
+                      role="tab"
+                      id={`${tabIdPrefix}-tab-${index}`}
+                      aria-selected={active}
+                      aria-controls={active ? `${tabIdPrefix}-panel` : undefined}
+                      tabIndex={tabStop ? 0 : -1}
+                      data-surface-id={surface.id}
+                      data-active-tab={active}
+                      onClick={(event) => {
+                        // The close and mute buttons inside the tab act on their own.
+                        if (event.target instanceof Element && event.target.closest("button"))
+                          return;
+                        props.onActivate(surface);
+                      }}
+                      onDoubleClick={() => {
+                        if (surface.kind === "device" && props.onRenameDevice)
+                          setRenamingDevice(surface.id);
+                      }}
+                      onMouseDown={handleTabMouseDown}
+                      onAuxClick={(event) => handleTabAuxClick(event, surface)}
+                      onContextMenu={(event) => handleTabContextMenu(event, surface)}
+                      className={cn(
+                        "group/tab flex h-6 w-40 min-w-24 cursor-pointer items-center gap-1 rounded-md pr-2 pl-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                        ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
+                        active ? "state-selected" : "state-hover text-muted-foreground",
+                      )}
                     >
-                      <SurfaceIcon
-                        surface={surface}
-                        sessions={props.previewSessions}
-                        desktopByTabId={props.desktopByTabId}
-                        theme={resolvedTheme}
-                        environmentId={props.environmentId}
-                      />
-                      {pending ? (
-                        <span
-                          className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
-                          aria-hidden
+                      <PanelTabCloseButton
+                        label={`Close ${title}`}
+                        focusable={false}
+                        onClick={() => props.onCloseSurface(surface)}
+                      >
+                        <SurfaceIcon
+                          surface={surface}
+                          sessions={props.previewSessions}
+                          desktopByTabId={props.desktopByTabId}
+                          theme={resolvedTheme}
+                          environmentId={props.environmentId}
                         />
-                      ) : null}
-                    </PanelTabCloseButton>
-                    {audio === "none" || !audioRuntimeTabId ? null : (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              className="cursor-pointer flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
-                              aria-label={audio === "muted" ? `Unmute ${title}` : `Mute ${title}`}
-                              onClick={(event) => {
-                                // Sibling of the close button, inside a tab that
-                                // activates on click: keep this to the toggle.
-                                event.stopPropagation();
-                                void previewBridge
-                                  ?.setAudioMuted(audioRuntimeTabId, audio !== "muted")
-                                  .catch(() => undefined);
-                              }}
-                            >
-                              <MorphIcon
-                                className="size-3"
-                                icon={audio === "muted" ? VolumeOff : Volume2}
+                        {pending ? (
+                          <span
+                            className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
+                            aria-hidden
+                          />
+                        ) : null}
+                      </PanelTabCloseButton>
+                      {renamingDevice === surface.id ? (
+                        <input
+                          aria-label="Device tab name"
+                          className="w-24 min-w-0 flex-1 rounded-sm bg-background px-1 outline-none ring-1 ring-inset ring-ring"
+                          defaultValue={title}
+                          ref={(element) => {
+                            element?.focus();
+                            element?.select();
+                          }}
+                          onBlur={(event) => {
+                            props.onRenameDevice?.(surface.id, event.currentTarget.value);
+                            setRenamingDevice(null);
+                          }}
+                          onKeyDown={(event) => {
+                            event.stopPropagation();
+                            if (event.key === "Enter") event.currentTarget.blur();
+                            if (event.key === "Escape") {
+                              event.currentTarget.value = title;
+                              event.currentTarget.blur();
+                            }
+                          }}
+                        />
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={<span className="min-w-0 flex-1 truncate text-left" />}
+                          >
+                            {title}
+                          </TooltipTrigger>
+                          <TooltipPopup>
+                            {surface.kind === "device" ? (
+                              <DeviceTabTooltip
+                                surface={surface}
+                                environmentId={props.environmentId}
+                                title={title}
                               />
-                            </button>
-                          }
-                        />
-                        <TooltipPopup>{audio === "muted" ? "Unmute tab" : "Mute tab"}</TooltipPopup>
-                      </Tooltip>
-                    )}
-                    {renamingDevice === surface.id ? (
-                      <input
-                        aria-label="Device tab name"
-                        className="w-24 min-w-0 rounded-sm bg-background px-1 outline-none ring-1 ring-inset ring-ring"
-                        defaultValue={title}
-                        ref={(element) => {
-                          element?.focus();
-                          element?.select();
-                        }}
-                        onBlur={(event) => {
-                          props.onRenameDevice?.(surface.id, event.currentTarget.value);
-                          setRenamingDevice(null);
-                        }}
-                        onKeyDown={(event) => {
-                          event.stopPropagation();
-                          if (event.key === "Enter") event.currentTarget.blur();
-                          if (event.key === "Escape") {
-                            event.currentTarget.value = title;
-                            event.currentTarget.blur();
-                          }
-                        }}
-                      />
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              onDoubleClick={() => {
-                                if (surface.kind === "device" && props.onRenameDevice)
-                                  setRenamingDevice(surface.id);
-                              }}
-                              className="cursor-pointer flex min-w-0 items-center"
-                              onClick={() => props.onActivate(surface)}
-                            >
-                              <span className="truncate">{title}</span>
-                            </button>
-                          }
-                        />
-                        <TooltipPopup>
-                          {surface.kind === "device" ? (
-                            <DeviceTabTooltip
-                              surface={surface}
-                              environmentId={props.environmentId}
-                              title={title}
-                            />
-                          ) : (
-                            title
-                          )}
-                        </TooltipPopup>
-                      </Tooltip>
-                    )}
-                  </SortableTab>
-                );
-              })}
+                            ) : (
+                              title
+                            )}
+                          </TooltipPopup>
+                        </Tooltip>
+                      )}
+                      {audio === "none" || !audioRuntimeTabId ? null : (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <button
+                                type="button"
+                                tabIndex={-1}
+                                className="cursor-pointer flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
+                                aria-label={audio === "muted" ? `Unmute ${title}` : `Mute ${title}`}
+                                onClick={() => {
+                                  void previewBridge
+                                    ?.setAudioMuted(audioRuntimeTabId, audio !== "muted")
+                                    .catch(() => undefined);
+                                }}
+                              >
+                                <MorphIcon
+                                  className="size-3"
+                                  icon={audio === "muted" ? VolumeOff : Volume2}
+                                />
+                              </button>
+                            }
+                          />
+                          <TooltipPopup>
+                            {audio === "muted" ? "Unmute tab" : "Mute tab"}
+                          </TooltipPopup>
+                        </Tooltip>
+                      )}
+                    </SortableTab>
+                  );
+                })}
+              </div>
             </SortableTabList>
             {props.open !== false ? (
               <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
@@ -1155,7 +1257,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   ref={addSurfaceTriggerRef}
                   render={
                     <Button
-                      aria-label="Add panel surface"
+                      aria-label="New tab"
                       className="shrink-0"
                       size="icon-xs"
                       variant="ghost-muted"
@@ -1295,8 +1397,19 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           />
         ) : null}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
-        {props.activeSurfaceId === null ? (
+      <div
+        className="flex min-h-0 flex-1 flex-col"
+        data-right-panel-surface-content
+        {...(props.surfaces.length > 0
+          ? {
+              role: "tabpanel",
+              id: `${tabIdPrefix}-panel`,
+              "aria-labelledby": activeTabDomId(tabIdPrefix, props),
+            }
+          : {})}
+      >
+        {/* The chooser is only for an empty strip; open tabs always show one of themselves. */}
+        {props.surfaces.length === 0 ? (
           <RightPanelEmptyState
             onAddBrowser={props.onAddBrowser}
             onAddBrowserInProfile={props.onAddBrowserInProfile}
@@ -1318,6 +1431,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       </div>
     </PreviewPanelShell>
   );
+}
+
+function activeTabDomId(
+  prefix: string,
+  props: Pick<RightPanelTabsProps, "surfaces" | "activeSurfaceId">,
+): string | undefined {
+  const index = props.surfaces.findIndex((surface) => surface.id === props.activeSurfaceId);
+  return index < 0 ? undefined : `${prefix}-tab-${index}`;
 }
 
 function DeviceTabTooltip(props: {
