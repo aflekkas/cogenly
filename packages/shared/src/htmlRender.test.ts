@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 
+// @effect-diagnostics nodeBuiltinImport:off - executes the shipped bootstrap validators.
+import * as NodeVM from "node:vm";
 import {
   encodeHtmlRenderOutline,
   formatVisualSubmitMessage,
+  HTML_RENDER_APP_FONT_FAMILY,
+  HTML_RENDER_APP_FONT_FILES,
   HTML_RENDER_MAX_HEIGHT,
+  htmlRenderFontFaceCss,
   htmlRenderFrameHeight,
   htmlRenderOutlineBoxes,
   htmlRenderReferencesEqual,
@@ -20,6 +25,7 @@ import {
   readHtmlRenderLinkRequest,
   readHtmlRenderReference,
   readVisualSubmitMessage,
+  type HtmlRenderFontFace,
 } from "./htmlRender.ts";
 import { T3_CODE_DARK_THEME_COLORS, T3_CODE_LIGHT_THEME_COLORS } from "./themePalettes.ts";
 import { htmlRenderFromToolItem } from "./toolOutput.ts";
@@ -271,6 +277,108 @@ describe("htmlRenderTheme", () => {
     expect(htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark").variables["--background"]).toBe(
       T3_CODE_DARK_THEME_COLORS.canvas,
     );
+  });
+
+  it("sets the app family first once its faces arrive, and never twice", () => {
+    const faces: ReadonlyArray<HtmlRenderFontFace> = [
+      { url: "https://app.example/assets/inter-latin.woff2", unicodeRange: "U+0000-00FF" },
+    ];
+    const themed = htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark", undefined, faces);
+    expect(themed.fontFaces).toEqual(faces);
+    expect(themed.variables["--font-sans"]).toMatch(
+      new RegExp(`^"${HTML_RENDER_APP_FONT_FAMILY}", `),
+    );
+    const fragment = htmlRenderThemeFragment(themed);
+    expect(JSON.parse(decodeURIComponent(fragment.slice("#t3-theme=".length)))).toEqual(themed);
+    expect(htmlRenderThemeMessage(themed).params).toMatchObject({ fontFaces: faces });
+    // A stack already starting with the app family is left alone.
+    const already = htmlRenderTheme(
+      T3_CODE_DARK_THEME_COLORS,
+      "dark",
+      { sans: `"${HTML_RENDER_APP_FONT_FAMILY}", sans-serif`, mono: "monospace" },
+      faces,
+    );
+    expect(already.variables["--font-sans"]).toBe(`"${HTML_RENDER_APP_FONT_FAMILY}", sans-serif`);
+    // Without faces the stack stays as passed and the message stays lean.
+    const plain = htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark");
+    expect(plain.fontFaces).toBeUndefined();
+    expect(plain.variables["--font-sans"]).not.toContain(HTML_RENDER_APP_FONT_FAMILY);
+    expect("fontFaces" in htmlRenderThemeMessage(plain).params).toBe(false);
+  });
+});
+
+describe("htmlRenderFontFaceCss", () => {
+  const faces: ReadonlyArray<HtmlRenderFontFace> = HTML_RENDER_APP_FONT_FILES.map((file) => ({
+    url: `https://app.example/assets/${file.file}`,
+    unicodeRange: file.unicodeRange,
+  }));
+
+  it("declares one subset face per entry, latin first", () => {
+    const css = htmlRenderFontFaceCss(faces);
+    expect(css).toContain(`font-family:"${HTML_RENDER_APP_FONT_FAMILY}"`);
+    expect(css).toContain("font-weight:100 900");
+    expect(css).toContain('src:url("https://app.example/assets/inter-latin-wght-normal.woff2")');
+    expect(css).toContain("unicode-range:U+0000-00FF");
+    expect(css.indexOf("inter-latin-wght-normal")).toBeLessThan(
+      css.indexOf("inter-latin-ext-wght-normal"),
+    );
+  });
+
+  it("drops faces that could break out of the stylesheet", () => {
+    expect(htmlRenderFontFaceCss([])).toBe("");
+    for (const face of [
+      { url: "javascript:alert(1)", unicodeRange: "U+0000-00FF" },
+      { url: "/relative/path.woff2", unicodeRange: "U+0000-00FF" },
+      { url: 'https://app.example/a".woff2', unicodeRange: "U+0000-00FF" },
+      { url: "https://app.example/a.woff2", unicodeRange: "U+0000-00FF;}</style><script>alert(1)" },
+      { url: "https://app.example/a.woff2", unicodeRange: "latin" },
+    ]) {
+      expect(htmlRenderFontFaceCss([face])).toBe("");
+    }
+  });
+
+  it("ships the face handler in the bootstrap but no faces without a host", () => {
+    const injected = injectHtmlRenderBootstrap("<!doctype html><html><body>x</body></html>");
+    // The updater that themes arriving over postMessage run through.
+    expect(injected).toContain(`font-family:"${HTML_RENDER_APP_FONT_FAMILY}"`);
+    expect(injected).toContain("fontFaces");
+    // Stored pages carry no faces: a download has no parent origin to load them from.
+    const style = /<style id="t3-theme">(.*?)<\/style>/s.exec(injected)?.[1] ?? "";
+    expect(style).not.toContain("@font-face");
+  });
+
+  it("ships validators that parse and agree with htmlRenderFontFaceCss", () => {
+    const injected = injectHtmlRenderBootstrap("<!doctype html><html><body>x</body></html>");
+    const script = /<script>([\s\S]*?)<\/script>/.exec(injected)?.[1] ?? "";
+    // A syntax slip in the embedded script breaks every render's theme,
+    // bridge and kit at once: it must at least parse.
+    expect(() => new NodeVM.Script(script)).not.toThrow();
+    const start = script.indexOf("function v(u)");
+    const end = script.indexOf("function a(t)");
+    const validators = new NodeVM.Script(
+      `${script.slice(start, end)}; ({ v, r, o });`,
+    ).runInNewContext({}) as unknown as {
+      readonly v: (url: unknown) => boolean;
+      readonly r: (range: unknown) => boolean;
+      readonly o: (faces: ReadonlyArray<HtmlRenderFontFace>) => string | null;
+    };
+    expect(validators.v("https://app.example/assets/inter-latin.woff2")).toBe(true);
+    expect(validators.v("http://localhost:9733/assets/inter-latin.woff2")).toBe(true);
+    expect(validators.v("javascript:alert(1)")).toBe(false);
+    expect(validators.v("/relative/inter.woff2")).toBe(false);
+    expect(validators.v('https://app.example/a".woff2')).toBe(false);
+    expect(validators.r("U+0000-00FF")).toBe(true);
+    expect(validators.r("U+0100-02BA,U+02BD-02C5")).toBe(true);
+    expect(validators.r("latin")).toBe(false);
+    expect(validators.r("U+0000-00FF;}</style>")).toBe(false);
+    // The embedded copy emits what the server-side helper emits, and rejects
+    // a bad entry wholesale rather than a bad page's faces.
+    const faces: ReadonlyArray<HtmlRenderFontFace> = HTML_RENDER_APP_FONT_FILES.map((file) => ({
+      url: `https://app.example/assets/${file.file}`,
+      unicodeRange: file.unicodeRange,
+    }));
+    expect(validators.o(faces)).toBe(htmlRenderFontFaceCss(faces));
+    expect(validators.o([{ url: "javascript:alert(1)", unicodeRange: "U+0000-00FF" }])).toBe(null);
   });
 });
 

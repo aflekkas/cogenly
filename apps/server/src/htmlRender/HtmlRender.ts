@@ -2,15 +2,19 @@ import type { ThreadId, VisualStateError } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   clampHtmlRenderHeight,
+  HTML_RENDER_APP_FONT_FILES,
   HTML_RENDER_COLUMN_WIDTH,
+  HTML_RENDER_HEADLESS_FONT_PATH,
   HTML_RENDER_MAX_TITLE_LENGTH,
   HTML_RENDER_MEASURE_FONTS,
   HTML_RENDER_MEASURE_WIDTHS,
   htmlRenderTheme,
   htmlRenderThemeFragment,
   injectHtmlRenderBootstrap,
+  type HtmlRenderFontFace,
   type HtmlRenderReference,
 } from "@t3tools/shared/htmlRender";
+import * as NodeModule from "node:module";
 import {
   T3_CODE_DARK_THEME_COLORS,
   T3_CODE_LIGHT_THEME_COLORS,
@@ -21,7 +25,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import type * as Path from "effect/Path";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -340,9 +344,22 @@ const MAX_CONCURRENT_BROWSERS = 2;
 // Publishing waits this long at most for heights before returning without them.
 const MEASURE_TIMEOUT = "6 seconds";
 
-// Measured in the dark theme with Arial-metric fonts, so text wraps close to how clients show it.
+/** The app font faces as the headless browser loads them, from its own page origin. */
+const headlessFontFaces = (): ReadonlyArray<HtmlRenderFontFace> =>
+  HTML_RENDER_APP_FONT_FILES.map((file) => ({
+    url: `${HeadlessChrome.PAGE_ORIGIN}${HTML_RENDER_HEADLESS_FONT_PATH}/${file.file}`,
+    unicodeRange: file.unicodeRange,
+  }));
+
+// Measured in the dark theme with the app font (Arial-metric stacks behind
+// it), so text wraps the way clients set it.
 const MEASURE_FRAGMENT = htmlRenderThemeFragment(
-  htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark", HTML_RENDER_MEASURE_FONTS),
+  htmlRenderTheme(
+    T3_CODE_DARK_THEME_COLORS,
+    "dark",
+    HTML_RENDER_MEASURE_FONTS,
+    headlessFontFaces(),
+  ),
 );
 
 const make = Effect.gen(function* () {
@@ -358,6 +375,70 @@ const make = Effect.gen(function* () {
   // Chrome also refuses it as root, where that opt-out is the only way to run.
   const noSandbox = PreviewBrowserHost.sandboxDisabled(yield* HostProcess.Environment);
   const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
+  const path = yield* Path.Path;
+  const requireShared = NodeModule.createRequire(import.meta.url);
+
+  /**
+   * The app font woff2 bytes the headless browser serves its pages. Source
+   * checkouts read the shared package's files; the bundled server reads the
+   * built client's hashed assets from its static dir. Without either, pages
+   * keep today's metric-fallback stacks.
+   */
+  let cachedFonts: ReadonlyArray<HeadlessChrome.HeadlessFont> | undefined;
+  const readDistFont = (file: string) =>
+    Effect.gen(function* () {
+      const staticDir =
+        config.staticDir ?? (config.devUrl ? yield* ServerConfig.resolveStaticDir() : undefined);
+      if (staticDir === undefined) return Option.none();
+      const manifest = yield* fileSystem
+        .readFileString(path.join(staticDir, ".vite", "manifest.json"))
+        .pipe(
+          Effect.map((raw) => decodeFontManifest(raw)),
+          Effect.orElseSucceed(() => Option.none()),
+        );
+      if (Option.isNone(manifest)) return Option.none();
+      const base = file.replace(/\.woff2$/, "");
+      const hashed = Object.values(manifest.value).find(
+        (entry) => entry.file.startsWith(`assets/${base}-`) && entry.file.endsWith(".woff2"),
+      )?.file;
+      if (hashed === undefined) return Option.none();
+      return yield* fileSystem.readFile(path.join(staticDir, hashed)).pipe(Effect.option);
+    });
+  const appFonts = Effect.fn("HtmlRender.appFonts")(function* () {
+    if (cachedFonts !== undefined) return cachedFonts;
+    const fonts = yield* Effect.forEach(HTML_RENDER_APP_FONT_FILES, (font) =>
+      Effect.gen(function* () {
+        const packaged = yield* Effect.try(() =>
+          requireShared.resolve(`@t3tools/shared/fonts/${font.file}`),
+        ).pipe(Effect.option);
+        const bytes = Option.isSome(packaged)
+          ? yield* fileSystem.readFile(packaged.value).pipe(Effect.option)
+          : yield* readDistFont(font.file);
+        if (Option.isNone(bytes)) return Option.none();
+        return Option.some({
+          url: `${HeadlessChrome.PAGE_ORIGIN}${HTML_RENDER_HEADLESS_FONT_PATH}/${font.file}`,
+          bytes: bytes.value,
+        } satisfies HeadlessChrome.HeadlessFont);
+      }),
+    );
+    const found = fonts.flatMap((font) => (Option.isSome(font) ? [font.value] : []));
+    if (found.length < HTML_RENDER_APP_FONT_FILES.length) {
+      yield* Effect.logWarning("The app font is unavailable; measuring HTML renders without it.", {
+        expected: HTML_RENDER_APP_FONT_FILES.length,
+        found: found.length,
+      });
+    }
+    cachedFonts = found;
+    return found;
+  });
+
+  /**
+   * The client build's manifest, whatever entries the bundle grew. Unknown
+   * shapes decode to nothing: the headless font falls back to metric stacks.
+   */
+  const decodeFontManifest = Schema.decodeUnknownOption(
+    Schema.fromJsonString(Schema.Record(Schema.String, Schema.Struct({ file: Schema.String }))),
+  );
 
   /** Runs one browser launch; a host that cannot start it gets setup steps instead. */
   const launching = <A>(
@@ -387,6 +468,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const executable = yield* previewBrowser.installed;
       if (Option.isNone(executable)) return undefined;
+      const fonts = yield* appFonts().pipe(Effect.provideContext(services));
       const { heights, outline } = yield* launching(executable.value, (noSandbox) =>
         HeadlessChrome.measureHtmlHeights({
           executable: executable.value,
@@ -394,6 +476,7 @@ const make = Effect.gen(function* () {
           html,
           widths: HTML_RENDER_MEASURE_WIDTHS,
           urlFragment: MEASURE_FRAGMENT,
+          fonts,
         }).pipe(Effect.provideContext(services)),
       ).pipe(
         Effect.timeoutOrElse({
@@ -490,10 +573,12 @@ const make = Effect.gen(function* () {
     const appearance = input.appearance ?? "dark";
     const inlined = yield* inline(input.html, input.kit);
     const executable = yield* previewBrowser.executable;
+    const fonts = yield* appFonts().pipe(Effect.provideContext(services));
     const theme = htmlRenderTheme(
       appearance === "light" ? T3_CODE_LIGHT_THEME_COLORS : T3_CODE_DARK_THEME_COLORS,
       appearance,
       HTML_RENDER_MEASURE_FONTS,
+      headlessFontFaces(),
     );
     const screenshot = yield* launching(executable, (noSandbox) =>
       HeadlessChrome.captureHtmlScreenshot({
@@ -502,6 +587,7 @@ const make = Effect.gen(function* () {
         html: inlined.html,
         width,
         urlFragment: htmlRenderThemeFragment(theme),
+        fonts,
       }).pipe(Effect.provideContext(services)),
     );
     return {

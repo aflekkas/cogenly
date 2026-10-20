@@ -251,10 +251,75 @@ export const HTML_RENDER_MEASURE_FONTS: HtmlRenderFonts = {
   mono: '"Liberation Mono", Cousine, Menlo, Consolas, monospace',
 };
 
+/**
+ * One subset of the app's self-hosted Inter (`@fontsource-variable/inter`,
+ * committed under `fonts/`), as a frame loads it: an absolute URL on the
+ * parent origin for clients, the headless browser's own page origin for
+ * screenshots and measurements. A sandboxed frame has an opaque origin, so
+ * the URL needs `Access-Control-Allow-Origin: *`, not same-origin access.
+ */
+export interface HtmlRenderFontFace {
+  readonly url: string;
+  readonly unicodeRange: string;
+}
+
+/** The family frames set once their font faces arrive. */
+export const HTML_RENDER_APP_FONT_FAMILY = "Inter Variable";
+
+/**
+ * The Inter subsets frames load, with the unicode ranges from the font's own
+ * CSS. Latin first, so a page using only it never downloads the extended file.
+ * `file` names a woff2 under the shared package's `fonts/` export.
+ */
+export const HTML_RENDER_APP_FONT_FILES = [
+  {
+    file: "inter-latin-wght-normal.woff2",
+    unicodeRange:
+      "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD",
+  },
+  {
+    file: "inter-latin-ext-wght-normal.woff2",
+    unicodeRange:
+      "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+  },
+] as const;
+
+/** Where the headless browser serves the app font from on its page origin. */
+export const HTML_RENDER_HEADLESS_FONT_PATH = "/t3-app-font";
+
+/** An http(s) URL with no characters that could break out of a quoted `url()`. */
+const FONT_URL_PATTERN = /^https?:\/\/[A-Za-z0-9_.~:/?#@!$&'*+,;=%-]+$/;
+const UNICODE_RANGE_PATTERN =
+  /^U\+[0-9A-Fa-f?]+(-[0-9A-Fa-f?]+)?(,U\+[0-9A-Fa-f?]+(-[0-9A-Fa-f?]+)?)*$/;
+
+/**
+ * The `@font-face` rules declaring `faces`, dropping entries with an
+ * unexpected URL or range. The bootstrap runs the same check on themes that
+ * arrive later over postMessage.
+ */
+export function htmlRenderFontFaceCss(faces: ReadonlyArray<HtmlRenderFontFace>): string {
+  return faces
+    .flatMap((face) =>
+      FONT_URL_PATTERN.test(face.url) && UNICODE_RANGE_PATTERN.test(face.unicodeRange)
+        ? [
+            `@font-face{font-family:"${HTML_RENDER_APP_FONT_FAMILY}";font-style:normal;font-weight:100 900;font-display:swap;` +
+              `src:url("${face.url}") format("woff2-variations");unicode-range:${face.unicodeRange}}`,
+          ]
+        : [],
+    )
+    .join("");
+}
+
 /** The resolved theme a client hands an HTML render. */
 export interface HtmlRenderTheme {
   readonly appearance: ThemeAppearance;
   readonly variables: Readonly<Record<string, string>>;
+  /**
+   * The app font faces the frame loads. Absent where no host serves them (a
+   * downloaded page, a theme read back from storage), where `--font-sans`
+   * falls back to the system stack.
+   */
+  readonly fontFaces?: ReadonlyArray<HtmlRenderFontFace>;
 }
 
 // Roles themes cannot change (index.css keeps info/success fixed), plus a
@@ -299,10 +364,20 @@ export function htmlRenderTheme(
   colors: ThemeColors,
   appearance: ThemeAppearance,
   fonts: HtmlRenderFonts = HTML_RENDER_DEFAULT_FONTS,
+  fontFaces?: ReadonlyArray<HtmlRenderFontFace>,
 ): HtmlRenderTheme {
   const fixed = FIXED_COLORS[appearance];
+  // The frame sets the app family once its faces arrive; pass a stack without
+  // it and it is prepended here.
+  const sans =
+    fontFaces !== undefined &&
+    fontFaces.length > 0 &&
+    !fonts.sans.includes(HTML_RENDER_APP_FONT_FAMILY)
+      ? `"${HTML_RENDER_APP_FONT_FAMILY}", ${fonts.sans}`
+      : fonts.sans;
   return {
     appearance,
+    ...(fontFaces !== undefined ? { fontFaces } : {}),
     variables: {
       "--background": colors.canvas,
       "--foreground": colors.text,
@@ -340,7 +415,7 @@ export function htmlRenderTheme(
       ...SURFACE_TOKENS[appearance],
       // The app's own corner radius (index.css --radius), so kit surfaces match it.
       "--radius": "0.5rem",
-      "--font-sans": fonts.sans,
+      "--font-sans": sans,
       "--font-mono": fonts.mono,
     },
   };
@@ -356,6 +431,7 @@ export const HTML_RENDER_THEME_GUIDE = [
   "--success, --success-foreground, --info, --info-foreground, --code-background, --code-foreground,",
   "--chart-1 … --chart-6 (categorical series for charts), --radius, --font-sans, --font-mono.",
   "The base stylesheet sets html background/color/font from these, body margin to 0, and hides the page's scrollbar; your own CSS overrides it.",
+  "The app's Inter travels with the theme from the parent origin, so --font-sans already sets it: never load your own copy.",
   "Take every color from these variables (color-mix() them for tints) rather than hardcoding hex values, and never set your own page background: a hardcoded dark page shows as a box in light mode and against other themes.",
 ].join(" ");
 
@@ -654,7 +730,11 @@ export function htmlRenderThemeMessage(theme: HtmlRenderTheme) {
   return {
     jsonrpc: "2.0",
     method: HOST_CONTEXT_CHANGED_METHOD,
-    params: { theme: theme.appearance, styles: { variables: theme.variables } },
+    params: {
+      theme: theme.appearance,
+      styles: { variables: theme.variables },
+      ...(theme.fontFaces !== undefined ? { fontFaces: theme.fontFaces } : {}),
+    },
   } as const;
 }
 
@@ -672,7 +752,8 @@ function rootRule(theme: HtmlRenderTheme): string {
   const declarations = Object.entries(theme.variables)
     .map(([name, value]) => `${name}:${value};`)
     .join("");
-  return `:root{color-scheme:${theme.appearance};${declarations}}`;
+  const faces = theme.fontFaces === undefined ? "" : htmlRenderFontFaceCss(theme.fontFaces);
+  return `${faces}:root{color-scheme:${theme.appearance};${declarations}}`;
 }
 
 // Runs synchronously in <head>, before the page's own styles and body, so the
@@ -690,7 +771,7 @@ function rootRule(theme: HtmlRenderTheme): string {
 // field has focus or the page handled it: the deciding listener is added while
 // the key dispatches, so it runs after every listener the page has. Keys
 // match as resolveEventKeys reads them, so the client accepts what it claims.
-const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("t3-theme"),n=0;if(!s)return;var b=${JSON.stringify(BASE_CSS)};function a(t){if(!t||typeof t!=="object"||!t.variables||typeof t.variables!=="object")return;var c=":root{color-scheme:"+(t.appearance==="light"?"light":"dark")+";";for(var k in t.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.variables[k]).replace(/[;{}<>]/g,"")+";";}s.textContent=c+"}"+b;}try{var m=/[#&]${THEME_FRAGMENT_KEY}=([^&]*)/.exec(location.hash);if(m){a(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,"",location.pathname+location.search);}}catch(e){}window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(d&&d.jsonrpc==="2.0"&&d.method===${JSON.stringify(HOST_CONTEXT_CHANGED_METHOD)}&&p&&p.styles)a({appearance:p.theme,variables:p.styles.variables});});document.addEventListener("click",function(e){var l=e.isTrusted?e.composedPath().find(function(t){return t&&t.matches&&t.matches("a[href]");}):null,u;if(!l)return;try{u=new URL(l.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol)||u.href.split("#")[0]===location.href.split("#")[0])return;if(window.parent!==window){e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",id:"t3-link-"+(++n),method:${JSON.stringify(OPEN_LINK_METHOD)},params:{url:u.href,metaKey:e.metaKey,ctrlKey:e.ctrlKey}},"*");}else{l.setAttribute("target","_blank");l.setAttribute("rel","noopener");}},true);if(window.parent!==window){var h,o,z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h)return;h=v;window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(SIZE_CHANGED_METHOD)},params:{height:v}},"*");};if(window.ResizeObserver){o=new ResizeObserver(z);o.observe(document.documentElement);}document.addEventListener("DOMContentLoaded",function(){if(o&&document.body)o.observe(document.body);z();});window.addEventListener("load",z);window.addEventListener("click",function(e){var t=e.composedPath()[0],u;if(!e.isTrusted||e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||!t||t.tagName!=="IMG"||t.closest("a[href],button"))return;u=t.currentSrc||t.src;if(u)setTimeout(function(){if(!e.defaultPrevented)window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(OPEN_IMAGE_METHOD)},params:{src:u,name:t.alt||t.title||""}},"*");});});var K=[],B=[],C=${JSON.stringify(EVENT_CODE_SHORTCUT_KEYS)};window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(e.source===window.parent&&d&&d.jsonrpc==="2.0"&&d.method===${JSON.stringify(SHORTCUTS_METHOD)}&&p&&Array.isArray(p.shortcuts)&&Array.isArray(p.blocked)){K=p.shortcuts;B=p.blocked;}});window.addEventListener("keydown",function(e){var t=e.composedPath()[0],c=e.code||"",l=e.key.toLowerCase(),x=/^[a-z]$/.test(l)?[l]:[l,/^Key[A-Z]$/.test(c)?c.slice(3).toLowerCase():"",C.hasOwnProperty(c)?C[c]:""],f,m=function(s){return s&&s.metaKey===e.metaKey&&s.ctrlKey===e.ctrlKey&&s.shiftKey===e.shiftKey&&s.altKey===e.altKey&&x.indexOf(s.key)>-1;};if(!e.isTrusted||e.isComposing||e.getModifierState("AltGraph")&&!/^[a-z0-9]$/i.test(e.key)||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName))||!K.some(m)||B.some(m))return;f=function(v){window.removeEventListener("keydown",f);if(v!==e||e.defaultPrevented)return;e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(KEY_DOWN_METHOD)},params:{key:e.key,code:e.code,metaKey:e.metaKey,ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,repeat:e.repeat}},"*");};window.addEventListener("keydown",f);setTimeout(function(){window.removeEventListener("keydown",f);});},true);}})();`;
+const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("t3-theme"),n=0;if(!s)return;var b=${JSON.stringify(BASE_CSS)};var f="";function v(u){return typeof u==="string"&&/^https?:[/][/][A-Za-z0-9_.~:/?#@!$&'*+,;=%-]+$/.test(u);}function r(g){return typeof g==="string"&&/^U[+][0-9A-Fa-f?]+(-[0-9A-Fa-f?]+)?(,U[+][0-9A-Fa-f?]+(-[0-9A-Fa-f?]+)?)*$/.test(g);}function o(q){if(!Array.isArray(q))return null;var e="";for(var i=0;i<q.length;i++){var d=q[i];if(!d||typeof d!=="object"||!v(d.url)||!r(d.unicodeRange))return null;e+='@font-face{font-family:"Inter Variable";font-style:normal;font-weight:100 900;font-display:swap;src:url("'+d.url+'") format("woff2-variations");unicode-range:'+d.unicodeRange+'}';}return e;}function a(t){if(!t||typeof t!=="object"||!t.variables||typeof t.variables!=="object")return;var c=":root{color-scheme:"+(t.appearance==="light"?"light":"dark")+";";for(var k in t.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.variables[k]).replace(/[;{}<>]/g,"")+";";}var q=o(t.fontFaces);if(q!==null)f=q;s.textContent=f+c+"}"+b;}try{var m=/[#&]${THEME_FRAGMENT_KEY}=([^&]*)/.exec(location.hash);if(m){a(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,"",location.pathname+location.search);}}catch(e){}window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(d&&d.jsonrpc==="2.0"&&d.method===${JSON.stringify(HOST_CONTEXT_CHANGED_METHOD)}&&p&&p.styles)a({appearance:p.theme,variables:p.styles.variables,fontFaces:p.fontFaces});});document.addEventListener("click",function(e){var l=e.isTrusted?e.composedPath().find(function(t){return t&&t.matches&&t.matches("a[href]");}):null,u;if(!l)return;try{u=new URL(l.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol)||u.href.split("#")[0]===location.href.split("#")[0])return;if(window.parent!==window){e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",id:"t3-link-"+(++n),method:${JSON.stringify(OPEN_LINK_METHOD)},params:{url:u.href,metaKey:e.metaKey,ctrlKey:e.ctrlKey}},"*");}else{l.setAttribute("target","_blank");l.setAttribute("rel","noopener");}},true);if(window.parent!==window){var h,o,z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h)return;h=v;window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(SIZE_CHANGED_METHOD)},params:{height:v}},"*");};if(window.ResizeObserver){o=new ResizeObserver(z);o.observe(document.documentElement);}document.addEventListener("DOMContentLoaded",function(){if(o&&document.body)o.observe(document.body);z();});window.addEventListener("load",z);window.addEventListener("click",function(e){var t=e.composedPath()[0],u;if(!e.isTrusted||e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||!t||t.tagName!=="IMG"||t.closest("a[href],button"))return;u=t.currentSrc||t.src;if(u)setTimeout(function(){if(!e.defaultPrevented)window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(OPEN_IMAGE_METHOD)},params:{src:u,name:t.alt||t.title||""}},"*");});});var K=[],B=[],C=${JSON.stringify(EVENT_CODE_SHORTCUT_KEYS)};window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(e.source===window.parent&&d&&d.jsonrpc==="2.0"&&d.method===${JSON.stringify(SHORTCUTS_METHOD)}&&p&&Array.isArray(p.shortcuts)&&Array.isArray(p.blocked)){K=p.shortcuts;B=p.blocked;}});window.addEventListener("keydown",function(e){var t=e.composedPath()[0],c=e.code||"",l=e.key.toLowerCase(),x=/^[a-z]$/.test(l)?[l]:[l,/^Key[A-Z]$/.test(c)?c.slice(3).toLowerCase():"",C.hasOwnProperty(c)?C[c]:""],f,m=function(s){return s&&s.metaKey===e.metaKey&&s.ctrlKey===e.ctrlKey&&s.shiftKey===e.shiftKey&&s.altKey===e.altKey&&x.indexOf(s.key)>-1;};if(!e.isTrusted||e.isComposing||e.getModifierState("AltGraph")&&!/^[a-z0-9]$/i.test(e.key)||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName))||!K.some(m)||B.some(m))return;f=function(v){window.removeEventListener("keydown",f);if(v!==e||e.defaultPrevented)return;e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(KEY_DOWN_METHOD)},params:{key:e.key,code:e.code,metaKey:e.metaKey,ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,repeat:e.repeat}},"*");};window.addEventListener("keydown",f);setTimeout(function(){window.removeEventListener("keydown",f);});},true);}})();`;
 
 // The page side of the interactive bridge. It exposes `window.cogenly` with
 // the state document the thread stores for this render: `state.get()` reads

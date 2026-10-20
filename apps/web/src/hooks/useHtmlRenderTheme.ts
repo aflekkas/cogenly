@@ -1,14 +1,39 @@
 import {
   htmlRenderTheme,
+  HTML_RENDER_APP_FONT_FILES,
   HTML_RENDER_DEFAULT_FONTS,
+  type HtmlRenderFontFace,
   type HtmlRenderTheme,
 } from "@t3tools/shared/htmlRender";
+import interLatinExtUrl from "@t3tools/shared/fonts/inter-latin-ext-wght-normal.woff2?url";
+import interLatinUrl from "@t3tools/shared/fonts/inter-latin-wght-normal.woff2?url";
 import {
   T3_CODE_LIGHT_THEME_COLORS,
   T3_CODE_DARK_THEME_COLORS,
 } from "@t3tools/shared/themePalettes";
 import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "./useTheme";
+
+const FONT_FILE_URLS: Record<string, string> = {
+  "inter-latin-wght-normal.woff2": interLatinUrl,
+  "inter-latin-ext-wght-normal.woff2": interLatinExtUrl,
+};
+
+/**
+ * The app's Inter as this page serves it: absolute URLs on this origin, so a
+ * sandboxed frame (opaque origin, CORS fetch) sets the same type the app
+ * wears. Hashed asset URLs never change within a page load.
+ */
+function appFontFaces(): ReadonlyArray<HtmlRenderFontFace> {
+  if (typeof window === "undefined") return [];
+  const origin = window.location.origin;
+  return HTML_RENDER_APP_FONT_FILES.flatMap((file) => {
+    const path = FONT_FILE_URLS[file.file];
+    return path === undefined ? [] : [{ url: `${origin}${path}`, unicodeRange: file.unicodeRange }];
+  });
+}
+
+const APP_FONT_FACES = appFontFaces();
 
 /**
  * Tokens a page reads with the same meaning the app gives them. They come from
@@ -63,6 +88,7 @@ export function useHtmlRenderTheme(): HtmlRenderTheme {
       resolvedTheme === "dark" ? T3_CODE_DARK_THEME_COLORS : T3_CODE_LIGHT_THEME_COLORS,
       resolvedTheme,
       HTML_RENDER_DEFAULT_FONTS,
+      APP_FONT_FACES,
     );
     // Until the stylesheet catches up with a switch, the stock palette stands in.
     if (live.appearance !== resolvedTheme) return theme;

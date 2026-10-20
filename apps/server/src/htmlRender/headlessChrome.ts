@@ -52,7 +52,8 @@ const CAPTURE_TIMEOUT = "20 seconds";
 // public addresses, so a page cannot reach this machine's local network. The
 // main frame also stays on the page and the browser opens no popups, so a
 // capture always shows the page itself.
-const PAGE_ORIGIN = "http://t3-page.localhost";
+/** The made-up origin headless pages load from; also serves the app font faces the theme names. */
+export const PAGE_ORIGIN = "http://t3-page.localhost";
 const PAGE_URL = `${PAGE_ORIGIN}/page.html`;
 // Stack traces and load errors name the page this way instead of its URL.
 const PAGE_NAME = "page.html";
@@ -67,6 +68,15 @@ const textEncoder = new TextEncoder();
  */
 const pageBody = (html: string) =>
   Buffer.from(Buffer.from(html, "utf8").toString("base64"), "latin1");
+
+/** One app font face the page may load, as raw woff2 bytes served from `url`. */
+export interface HeadlessFont {
+  readonly url: string;
+  readonly bytes: Uint8Array;
+}
+
+const fontBody = (bytes: Uint8Array) =>
+  Buffer.from(Buffer.from(bytes).toString("base64"), "latin1");
 
 const CdpMessage = Schema.fromJsonString(
   Schema.Struct({
@@ -255,6 +265,8 @@ interface PageEvents {
   readonly mainFrameId: string;
   /** The page served for `PAGE_URL`, from `pageBody`. */
   body: Uint8Array | undefined;
+  /** App font faces by URL, from `fontBody`, served while the page loads. */
+  fonts?: Map<string, Uint8Array> | undefined;
   loaded: Deferred.Deferred<void, BrowserFailure> | undefined;
   readonly consoleMessages: Array<ConsoleMessage>;
   omittedConsoleMessages: number;
@@ -348,13 +360,18 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
       ),
     ).pipe(Effect.asVoid);
 
-  // Serves the page. Its body is shared bytes between two small JSON halves,
-  // queued together, so loading a page of up to 25 MiB at several widths never
-  // copies it on this side.
-  const fulfillPage = (sessionId: string, requestId: string, body: Uint8Array) =>
+  // Serves the page and its font faces. Each body is shared bytes between two
+  // small JSON halves, queued together, so loading a page of up to 25 MiB at
+  // several widths never copies it on this side.
+  const fulfillBody = (
+    sessionId: string,
+    requestId: string,
+    contentType: string,
+    body: Uint8Array,
+  ) =>
     Queue.offerAll(outgoing, [
       textEncoder.encode(
-        `{"id":${++nextId},"sessionId":${JSON.stringify(sessionId)},"method":"Fetch.fulfillRequest","params":{"requestId":${JSON.stringify(requestId)},"responseCode":200,"responseHeaders":[{"name":"Content-Type","value":"text/html; charset=utf-8"}],"body":"`,
+        `{"id":${++nextId},"sessionId":${JSON.stringify(sessionId)},"method":"Fetch.fulfillRequest","params":{"requestId":${JSON.stringify(requestId)},"responseCode":200,"responseHeaders":[{"name":"Content-Type","value":${JSON.stringify(contentType)}},{"name":"Access-Control-Allow-Origin","value":"*"}],"body":"`,
       ),
       body,
       textEncoder.encode('"}}\0'),
@@ -388,7 +405,12 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
       const body = page.body;
       const url = paused.request.url.split("#", 1)[0]!;
       if (url === PAGE_URL && body !== undefined) {
-        return fulfillPage(sessionId, paused.requestId, body);
+        return fulfillBody(sessionId, paused.requestId, "text/html; charset=utf-8", body);
+      }
+      // The app font faces the theme names, served from the caller's bytes.
+      const font = page.fonts?.get(url);
+      if (font !== undefined) {
+        return fulfillBody(sessionId, paused.requestId, "font/woff2", font);
       }
       // A frame inside the page may show another site; Local Network Access
       // still covers it. The main frame and T3's own origin serve nothing else.
@@ -542,9 +564,17 @@ const launchBrowser = Effect.fnUntraced(function* (input: {
     );
 
     /** Loads a page from `pageBody`, so callers loading it often encode it once. */
-    const load = Effect.fnUntraced(function* (body: Uint8Array, urlFragment: string) {
+    const load = Effect.fnUntraced(function* (
+      body: Uint8Array,
+      urlFragment: string,
+      fonts?: ReadonlyArray<HeadlessFont>,
+    ) {
       const loaded = yield* Deferred.make<void, BrowserFailure>();
       events.body = body;
+      events.fonts =
+        fonts === undefined || fonts.length === 0
+          ? undefined
+          : new Map(fonts.map((font) => [font.url, fontBody(font.bytes)] as const));
       events.loaded = loaded;
       const navigation = yield* send(
         "Page.navigate",
@@ -649,6 +679,7 @@ export const captureHtmlScreenshot = Effect.fn("headlessChrome.captureHtmlScreen
     readonly html: string;
     readonly width: number;
     readonly urlFragment: string;
+    readonly fonts?: ReadonlyArray<HeadlessFont>;
   }) {
     const path = yield* Path.Path;
     const directory = yield* scratchDirectory;
@@ -658,7 +689,7 @@ export const captureHtmlScreenshot = Effect.fn("headlessChrome.captureHtmlScreen
       profileDirectory: path.join(directory, "profile"),
     });
     const page = yield* browser.openPage(input.width);
-    const contentHeight = yield* page.load(pageBody(input.html), input.urlFragment);
+    const contentHeight = yield* page.load(pageBody(input.html), input.urlFragment, input.fonts);
     const capturedHeight = Math.max(1, Math.min(contentHeight, MAX_CAPTURE_HEIGHT));
     const png = yield* page.screenshot(capturedHeight);
     return { png, contentHeight, capturedHeight, consoleMessages: page.consoleMessages() };
@@ -687,6 +718,7 @@ export const measureHtmlHeights = Effect.fn("headlessChrome.measureHtmlHeights")
   readonly html: string;
   readonly widths: ReadonlyArray<number>;
   readonly urlFragment: string;
+  readonly fonts?: ReadonlyArray<HeadlessFont>;
 }) {
   const path = yield* Path.Path;
   const directory = yield* scratchDirectory;
@@ -702,7 +734,7 @@ export const measureHtmlHeights = Effect.fn("headlessChrome.measureHtmlHeights")
     (width) =>
       browser.openPage(width).pipe(
         Effect.flatMap((page) =>
-          page.load(body, input.urlFragment).pipe(
+          page.load(body, input.urlFragment, input.fonts).pipe(
             Effect.tap(() =>
               width === HTML_RENDER_COLUMN_WIDTH
                 ? page.outline.pipe(

@@ -73,6 +73,24 @@ const buildSourcemap: boolean | "hidden" =
       ? "hidden"
       : true;
 
+// Sandboxed html-render frames load the app font from this origin with an
+// opaque origin, so font responses need CORS even in dev.
+function fontCorsPlugin(): Plugin {
+  return {
+    name: "cogenly:font-cors",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use(((req, res, next) => {
+        const pathname = req.url?.split("?", 1)[0];
+        if (pathname !== undefined && pathname.endsWith(".woff2")) {
+          res.setHeader("Access-Control-Allow-Origin", "*");
+        }
+        next();
+      }) as Connect.NextHandleFunction);
+    },
+  };
+}
+
 const unitTestProject = {
   extends: true,
   test: {
@@ -157,6 +175,7 @@ export default defineConfig(() => {
     assetsInclude: ["**/*.wasm"],
     plugins: [
       devCompressionPlugin(),
+      fontCorsPlugin(),
       thirdPartyLicensesPlugin({
         bundleName: "web",
         configFile: new URL("../../third-party-licenses.config.json", import.meta.url),

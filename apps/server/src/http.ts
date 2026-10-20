@@ -652,6 +652,12 @@ const handleStaticAndDevRequest = Effect.fn("handleStaticAndDevRequest")(
     const headers: Record<string, string> = {
       "Cache-Control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
     };
+    // Sandboxed html-render frames fetch the app font from this origin with an
+    // opaque origin, so font files are readable cross-origin. Fonts carry no
+    // credentials or user data.
+    if (/\.(?:woff2?|ttf|otf)$/i.test(filePath)) {
+      headers["Access-Control-Allow-Origin"] = "*";
+    }
     // Deployments can preserve HTML size and mtime while changing its bundle URLs.
     const modifiedAt = isHtml ? undefined : Option.getOrUndefined(fileInfo.mtime);
     const etag = modifiedAt
