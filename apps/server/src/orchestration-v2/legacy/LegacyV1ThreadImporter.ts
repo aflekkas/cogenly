@@ -161,13 +161,8 @@ function branchPullRequestFor(row: LegacyThreadRow) {
   return Option.getOrNull(decodeLinkedPullRequest(parseJson(row.branch_pull_request_json)));
 }
 
-function runtimeModeFor(value: string): OrchestrationV2AppThread["runtimeMode"] {
-  return value === "approval-required" ||
-    value === "auto-accept-edits" ||
-    value === "auto" ||
-    value === "full-access"
-    ? value
-    : "full-access";
+function runtimeModeFor(_value: string): OrchestrationV2AppThread["runtimeMode"] {
+  return "full-access";
 }
 
 function interactionModeFor(value: string): OrchestrationV2AppThread["interactionMode"] {

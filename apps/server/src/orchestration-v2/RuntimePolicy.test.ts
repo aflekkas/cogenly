@@ -4,7 +4,7 @@ import {
   type OrchestrationV2AppThread,
   ProjectId,
   ProviderInstanceId,
-  type RuntimeMode,
+  RuntimeMode,
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
@@ -12,6 +12,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
@@ -29,7 +30,7 @@ const modelSelection = {
 function makeThread(input: {
   readonly now: DateTime.Utc;
   readonly worktreePath: string | null;
-  readonly runtimeMode?: RuntimeMode;
+  readonly runtimeMode?: typeof RuntimeMode.Encoded;
   readonly surface?: "chat" | "work";
 }): OrchestrationV2AppThread {
   const threadId = ThreadId.make("thread:runtime-policy");
@@ -42,7 +43,7 @@ function makeThread(input: {
     title: "Runtime policy",
     providerInstanceId,
     modelSelection,
-    runtimeMode: input.runtimeMode ?? "full-access",
+    runtimeMode: Schema.decodeUnknownSync(RuntimeMode)(input.runtimeMode ?? "full-access"),
     interactionMode: "default",
     branch: null,
     worktreePath: input.worktreePath,
@@ -63,13 +64,12 @@ function makeThread(input: {
   };
 }
 
-// Grok's instance offers no Auto-accept edits; the Codex instance advertises no
-// restriction; the supervised-only instance offers no Full access at all.
+// Stale or empty provider capability snapshots cannot restore runtime gating.
 const grokInstanceId = ProviderInstanceId.make("grok");
 const supervisedOnlyInstanceId = ProviderInstanceId.make("supervised-only");
 const supportedRuntimeModesByInstance = new Map<ProviderInstanceId, ReadonlyArray<RuntimeMode>>([
-  [grokInstanceId, ["approval-required", "auto", "full-access"]],
-  [supervisedOnlyInstanceId, ["approval-required"]],
+  [grokInstanceId, ["full-access"]],
+  [supervisedOnlyInstanceId, []],
 ]);
 const providerInstanceFor = (instanceId: ProviderInstanceId) =>
   ({
@@ -138,11 +138,11 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
     }),
   );
 
-  it.effect("runs each thread in the access mode it stored", () =>
+  it.effect("normalizes every legacy thread mode to full access", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicy.RuntimePolicyV2;
       const now = yield* DateTime.now;
-      const modeFor = (instanceId: ProviderInstanceId, runtimeMode: RuntimeMode) =>
+      const modeFor = (instanceId: ProviderInstanceId, runtimeMode: typeof RuntimeMode.Encoded) =>
         policy
           .resolve({
             thread: makeThread({ now, worktreePath: null, runtimeMode }),
@@ -156,17 +156,17 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
         "auto",
         "full-access",
       ] as const) {
-        assert.equal(yield* modeFor(providerInstanceId, runtimeMode), runtimeMode);
+        assert.equal(yield* modeFor(providerInstanceId, runtimeMode), "full-access");
       }
-      // A mode the provider does not offer runs Supervised.
-      assert.equal(yield* modeFor(grokInstanceId, "auto-accept-edits"), "approval-required");
+      // Legacy input normalizes independently of provider capability snapshots.
+      assert.equal(yield* modeFor(grokInstanceId, "auto-accept-edits"), "full-access");
       assert.equal(yield* modeFor(grokInstanceId, "full-access"), "full-access");
-      // A provider without Full access still runs Supervised rather than T3 imitating it.
-      assert.equal(yield* modeFor(supervisedOnlyInstanceId, "full-access"), "approval-required");
+      // Empty capability snapshots do not reduce access.
+      assert.equal(yield* modeFor(supervisedOnlyInstanceId, "full-access"), "full-access");
     }),
   );
 
-  it.effect("runs a chat supervised whatever access mode it stored", () =>
+  it.effect("runs chat and work with full access", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicy.RuntimePolicyV2;
       const now = yield* DateTime.now;
@@ -178,7 +178,7 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
           })
           .pipe(Effect.map((resolved) => resolved.runtimeMode));
 
-      assert.equal(yield* modeFor("chat"), "approval-required");
+      assert.equal(yield* modeFor("chat"), "full-access");
       assert.equal(yield* modeFor("work"), "full-access");
     }),
   );

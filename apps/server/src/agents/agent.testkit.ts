@@ -5,7 +5,7 @@ export const agentFixture = (suffix = "one"): Agent => ({
   avatar: { seed: suffix, color: "bleu" },
   instructions: "Be brief and remember preferences.",
   modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
-  runtimeMode: "approval-required",
+  runtimeMode: "full-access",
   projectId: ProjectId.make("project:one"),
   responsibility: "Keep commitments current.",
   permissions: {

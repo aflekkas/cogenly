@@ -311,9 +311,9 @@ export const ClaudeProviderCapabilitiesV2 = {
     supportsDynamicToolCallbacks: true,
   },
   approvals: {
-    supportsCommandApproval: true,
-    supportsFileReadApproval: true,
-    supportsFileChangeApproval: true,
+    supportsCommandApproval: false,
+    supportsFileReadApproval: false,
+    supportsFileChangeApproval: false,
     supportsApplyPatchApproval: false,
     approvalsHaveNativeRequestIds: true,
     approvalCallbacksAreLiveOnly: true,
@@ -1110,8 +1110,8 @@ export function makeClaudeQueryOptions(input: {
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const {
-    "permission-mode": launchArgPermissionMode,
-    "dangerously-skip-permissions": launchArgSkipPermissions,
+    "permission-mode": _launchArgPermissionMode,
+    "dangerously-skip-permissions": _launchArgSkipPermissions,
     ...extraArgs
   } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
   const requestThinkingSummaries =
@@ -1144,11 +1144,7 @@ export function makeClaudeQueryOptions(input: {
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
-    permissionMode:
-      (launchArgPermissionMode as PermissionMode | null | undefined) ??
-      (launchArgSkipPermissions === null || launchArgSkipPermissions === "true"
-        ? "bypassPermissions"
-        : (input.permissionMode ?? "default")),
+    permissionMode: "bypassPermissions",
     includePartialMessages: true,
     ...(compiledSelection.effort === undefined
       ? {}
@@ -1160,9 +1156,7 @@ export function makeClaudeQueryOptions(input: {
     ...(input.allowedTools === undefined ? {} : { allowedTools: [...input.allowedTools] }),
     ...(input.disallowedTools === undefined ? {} : { disallowedTools: [...input.disallowedTools] }),
     ...(input.canUseTool === undefined ? {} : { canUseTool: input.canUseTool }),
-    ...(input.allowDangerouslySkipPermissions === true
-      ? { allowDangerouslySkipPermissions: true }
-      : {}),
+    allowDangerouslySkipPermissions: true,
     ...(requestThinkingSummaries
       ? {
           thinking: { type: "adaptive" as const, display: "summarized" as const },
@@ -1771,90 +1765,6 @@ function assertNever(value: never): never {
   throw new Error(`Unhandled Claude SDK variant: ${jsonStringifyForTool(value)}`);
 }
 
-const ClaudeRuntimeSandboxPolicyKind = Schema.Struct({
-  type: Schema.Literals(["dangerFullAccess", "externalSandbox", "readOnly", "workspaceWrite"]),
-});
-type ClaudeRuntimeSandboxPolicy = typeof ClaudeRuntimeSandboxPolicyKind.Type;
-type ClaudeRuntimeSandboxPolicyKindName = ClaudeRuntimeSandboxPolicy["type"];
-const isClaudeRuntimeSandboxPolicyKind = Schema.is(ClaudeRuntimeSandboxPolicyKind);
-
-const ClaudeRuntimeReadOnlyFullAccessSandboxPolicy = Schema.Struct({
-  type: Schema.Literal("readOnly"),
-  access: Schema.Struct({
-    type: Schema.Literal("fullAccess"),
-  }),
-});
-const isClaudeRuntimeReadOnlyFullAccessSandboxPolicy = Schema.is(
-  ClaudeRuntimeReadOnlyFullAccessSandboxPolicy,
-);
-
-function sandboxPolicyKindForClaudeRuntimePolicy(
-  runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
-): ClaudeRuntimeSandboxPolicyKindName | undefined {
-  return runtimePolicy.sandboxPolicy !== undefined &&
-    isClaudeRuntimeSandboxPolicyKind(runtimePolicy.sandboxPolicy)
-    ? runtimePolicy.sandboxPolicy.type
-    : undefined;
-}
-
-function readOnlyPolicyAllowsGlobalReads(
-  runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
-): boolean {
-  return (
-    runtimePolicy.sandboxPolicy !== undefined &&
-    isClaudeRuntimeReadOnlyFullAccessSandboxPolicy(runtimePolicy.sandboxPolicy)
-  );
-}
-
-function permissionModeForClaudeRuntimePolicy(
-  runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
-): PermissionMode {
-  if (runtimePolicy.interactionMode === "plan") {
-    return "plan";
-  }
-  if (runtimePolicy.approvalPolicy === "never") {
-    switch (sandboxPolicyKindForClaudeRuntimePolicy(runtimePolicy)) {
-      case "readOnly":
-        return "dontAsk";
-      case "dangerFullAccess":
-      case "externalSandbox":
-        return "bypassPermissions";
-      case "workspaceWrite":
-      case undefined:
-        return runtimePolicy.runtimeMode === "approval-required"
-          ? "dontAsk"
-          : runtimePolicy.runtimeMode === "auto-accept-edits"
-            ? "acceptEdits"
-            : "bypassPermissions";
-    }
-  }
-  if (runtimePolicy.approvalPolicy !== undefined && runtimePolicy.approvalPolicy !== "never") {
-    return "default";
-  }
-
-  switch (sandboxPolicyKindForClaudeRuntimePolicy(runtimePolicy)) {
-    case "readOnly":
-      return "dontAsk";
-    case "dangerFullAccess":
-      return runtimePolicy.runtimeMode === "approval-required" ? "default" : "bypassPermissions";
-    case "externalSandbox":
-    case "workspaceWrite":
-    case undefined:
-      break;
-  }
-
-  switch (runtimePolicy.runtimeMode) {
-    case "approval-required":
-      return "default";
-    case "auto-accept-edits":
-      return "acceptEdits";
-    case "auto":
-      return "auto";
-    case "full-access":
-      return "bypassPermissions";
-  }
-}
-
 export interface ClaudeRuntimeQueryPolicy {
   readonly permissionMode: PermissionMode;
   readonly tools?: ClaudeAgentSdkQueryTools;
@@ -1864,52 +1774,13 @@ export interface ClaudeRuntimeQueryPolicy {
 }
 
 export function claudeRuntimeQueryPolicyForRuntimePolicy(
-  runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+  _runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
 ): ClaudeRuntimeQueryPolicy {
-  const permissionMode = permissionModeForClaudeRuntimePolicy(runtimePolicy);
-  const readOnlyTools =
-    sandboxPolicyKindForClaudeRuntimePolicy(runtimePolicy) === "readOnly"
-      ? CLAUDE_READ_ONLY_ALLOWED_TOOLS
-      : undefined;
-  const allowedTools =
-    readOnlyTools !== undefined && readOnlyPolicyAllowsGlobalReads(runtimePolicy)
-      ? readOnlyTools
-      : undefined;
-  // acceptEdits approves edits before the callback runs; everything else it
-  // leaves to the callback, which must ask rather than allow.
-  const installPermissionCallback =
-    runtimePolicy.approvalPolicy === undefined
-      ? runtimePolicy.runtimeMode === "approval-required" ||
-        runtimePolicy.runtimeMode === "auto-accept-edits"
-      : runtimePolicy.approvalPolicy !== "never";
-
-  if (permissionMode === "plan") {
-    return {
-      permissionMode,
-      ...(readOnlyTools === undefined ? {} : { tools: readOnlyTools }),
-      ...(allowedTools === undefined ? {} : { allowedTools }),
-      installPermissionCallback,
-    };
-  }
-
   return {
-    permissionMode,
-    ...(readOnlyTools === undefined ? {} : { tools: readOnlyTools }),
-    ...(allowedTools === undefined ? {} : { allowedTools }),
-    ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
-    installPermissionCallback,
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
+    installPermissionCallback: false,
   };
-}
-
-function shouldInstallClaudePermissionCallback(policy: ClaudeRuntimeQueryPolicy): boolean {
-  return policy.installPermissionCallback;
-}
-
-// Whether a tool's permission callback must ask the user before answering.
-function requiresClaudeApproval(context: ActiveClaudeTurnContext): boolean {
-  return shouldInstallClaudePermissionCallback(
-    claudeRuntimeQueryPolicyForRuntimePolicy(context.input.runtimePolicy),
-  );
 }
 
 function claudeRuntimeQueryPolicyKey(policy: ClaudeRuntimeQueryPolicy): string {
@@ -2003,10 +1874,6 @@ export function classifyClaudeNativeTool(toolName: string): ClaudeToolClassifica
         normalizedName,
         ...known,
       };
-}
-
-function providerRequestKindFromClaudeTool(toolName: string): ProviderRequestKind {
-  return classifyClaudeNativeTool(toolName).requestKind;
 }
 
 function isClaudeWebSearchOutput(output: unknown): output is WebSearchOutput {
@@ -2329,21 +2196,6 @@ function webSearchResultsFromClaudeOutput(
       url: content.url,
     }));
   });
-}
-
-function summarizeClaudeToolRequest(toolName: string, input: ClaudeNativeToolInput): string {
-  const command = firstStringInputField(input, ["command", "cmd", "script"]);
-  if (command !== undefined) {
-    return `${toolName}: ${command.slice(0, 400)}`;
-  }
-  const path = firstStringInputField(input, ["file_path", "path", "filename", "fileName"]);
-  if (path !== undefined) {
-    return `${toolName}: ${path.slice(0, 400)}`;
-  }
-  const serialized = jsonStringifyForTool(claudeNativeToolInputValue(input));
-  return serialized.length <= 400
-    ? `${toolName}: ${serialized}`
-    : `${toolName}: ${serialized.slice(0, 397)}...`;
 }
 
 function outputFromClaudeToolResult(
@@ -8240,26 +8092,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             });
           }
 
-          if (
-            heldForEcho &&
-            toolName !== "ExitPlanMode" &&
-            (toolName === "AskUserQuestion" || requiresClaudeApproval(context))
-          ) {
+          if (heldForEcho && toolName !== "ExitPlanMode" && toolName === "AskUserQuestion") {
             // The SDK blocks on the answer, and the prompt echo cannot arrive
             // until the held turn goes on, so the request is raised now and
             // the held output goes with it to the pending prompt turn, as it
             // did before this turn was held. ExitPlanMode is answered at once
             // below, so its frames stay held.
             yield* releaseHeldRootFrames(context);
-            if (toolName !== "Agent") {
-              yield* ensureToolCallStarted({
-                context,
-                nativeItemId: nativeRequestId,
-                toolName,
-                toolInput: nativeToolInput,
-                parentToolUseId: null,
-              });
-            }
+            yield* ensureToolCallStarted({
+              context,
+              nativeItemId: nativeRequestId,
+              toolName,
+              toolInput: nativeToolInput,
+              parentToolUseId: null,
+            });
           }
 
           if (toolName === "AskUserQuestion") {
@@ -8351,81 +8197,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             } satisfies PermissionResult;
           }
 
-          if (!requiresClaudeApproval(context)) {
-            return {
-              behavior: "allow",
-              updatedInput: toolInput,
-              toolUseID: callbackOptions.toolUseID,
-            } satisfies PermissionResult;
-          }
-
-          const requestKind = providerRequestKindFromClaudeTool(toolName);
-          const prompt =
-            callbackOptions.title ??
-            callbackOptions.description ??
-            callbackOptions.decisionReason ??
-            summarizeClaudeToolRequest(toolName, nativeToolInput);
-          const artifacts = yield* buildApprovalRequestArtifacts({
-            context,
-            nativeItemId: nativeRequestId,
-            nativeRequestId,
-            requestKind,
-            prompt,
-          });
-          const decision = yield* Deferred.make<ProviderApprovalDecision, never>();
-          yield* Ref.update(pendingRuntimeRequests, (current) => {
-            const updated = new Map(current);
-            updated.set(String(artifacts.request.id), {
-              type: "approval",
-              requestId: artifacts.request.id,
-              requestKind,
-              decision,
-            });
-            return updated;
-          });
-          yield* Effect.all(
-            [
-              emitProviderEvent({
-                type: "node.updated",
-                driver: CLAUDE_PROVIDER,
-                node: artifacts.node,
-              }),
-              emitProviderEvent({
-                type: "runtime_request.updated",
-                driver: CLAUDE_PROVIDER,
-                runtimeRequest: artifacts.request,
-              }),
-              emitProviderEvent({
-                type: "turn_item.updated",
-                driver: CLAUDE_PROVIDER,
-                turnItem: artifacts.turnItem,
-              }),
-            ],
-            { concurrency: 1 },
-          );
-
-          const resolvedDecision = yield* awaitClaudeApprovalDecision(
-            decision,
-            callbackOptions.signal,
-          ).pipe(
-            Effect.ensuring(
-              Ref.update(pendingRuntimeRequests, (current) => {
-                const updated = new Map(current);
-                updated.delete(String(artifacts.request.id));
-                return updated;
-              }),
-            ),
-          );
-
-          return permissionResultFromDecision({
-            toolName,
-            decision: resolvedDecision,
-            toolInput,
+          return {
+            behavior: "allow",
+            updatedInput: toolInput,
             toolUseID: callbackOptions.toolUseID,
-            ...(callbackOptions.suggestions === undefined
-              ? {}
-              : { suggestions: callbackOptions.suggestions }),
-          });
+          } satisfies PermissionResult;
         });
 
         const canUseTool: CanUseTool = (toolName, toolInput, callbackOptions) =>
@@ -8544,8 +8320,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const queryPolicy = claudeRuntimeQueryPolicyForRuntimePolicy(turnInput.runtimePolicy);
           const mcpOverrides = claudeMcpQueryOverrides({
             mcpSession: yield* mcpSessions.read(turnInput.threadId),
-            readOnlySandbox:
-              sandboxPolicyKindForClaudeRuntimePolicy(turnInput.runtimePolicy) === "readOnly",
+            readOnlySandbox: false,
             ...(queryPolicy.allowedTools === undefined
               ? {}
               : { allowedTools: queryPolicy.allowedTools }),

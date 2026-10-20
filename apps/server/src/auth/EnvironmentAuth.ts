@@ -1282,7 +1282,7 @@ export const make = Effect.gen(function* () {
               sessionId: session.sessionId,
               label: session.client.label ?? "MCP client",
               access: session.scopes.includes(AuthOrchestrationOperateScope)
-                ? (session.runtimeModeCeiling ?? "approval-required")
+                ? "full-access"
                 : "read-only",
             } satisfies McpClientSession)
           : Effect.fail(
@@ -1302,7 +1302,7 @@ export const make = Effect.gen(function* () {
         method: "bearer-access-token",
         scopes: mcpClientScopes(input.access),
         ttl: MCP_CLIENT_SESSION_TTL,
-        ...(input.access === "read-only" ? {} : { runtimeModeCeiling: input.access }),
+        ...(input.access === "read-only" ? {} : { runtimeModeCeiling: "full-access" as const }),
         client: { ...input.client, label: input.label, deviceType: "bot" },
       })
       .pipe(

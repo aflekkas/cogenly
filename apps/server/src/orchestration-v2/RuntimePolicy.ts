@@ -3,7 +3,6 @@ import {
   OrchestrationV2AppThread,
   ProjectId,
   ProviderInstanceId,
-  type RuntimeMode,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -62,36 +61,11 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
 export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
   resolve: (input) =>
     Effect.succeed({
-      runtimeMode: chatRuntimeMode(input.thread) ?? input.thread.runtimeMode,
+      runtimeMode: "full-access",
       interactionMode: input.thread.interactionMode,
       cwd: input.thread.worktreePath,
     }),
 });
-
-/**
- * A chat is a quick conversation with no repository to act on, so it always
- * runs supervised, the most restrictive mode both Claude and Codex offer,
- * whatever mode a client or stale draft recorded.
- */
-function chatRuntimeMode(thread: { readonly surface?: "chat" | "work" | undefined }) {
-  return thread.surface === "chat" ? ("approval-required" as const) : undefined;
-}
-
-/**
- * The mode a provider runs a thread in. A mode the provider does not offer
- * (a thread set before it stopped offering it, or a stale client) runs in
- * Supervised rather than having T3 imitate it.
- */
-function providerRuntimeMode(
-  runtimeMode: RuntimeMode,
-  supportedRuntimeModes: ReadonlyArray<RuntimeMode> | undefined,
-): RuntimeMode {
-  return supportedRuntimeModes === undefined ||
-    supportedRuntimeModes.length === 0 ||
-    supportedRuntimeModes.includes(runtimeMode)
-    ? runtimeMode
-    : "approval-required";
-}
 
 export const layerFromProjectStore: Layer.Layer<
   RuntimePolicyV2,
@@ -101,14 +75,8 @@ export const layerFromProjectStore: Layer.Layer<
   RuntimePolicyV2,
   Effect.gen(function* () {
     const projects = yield* ProjectStore.ProjectStoreV2;
-    const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
-        const instance = yield* providerInstances.getInstance(input.modelSelection.instanceId);
-        const supportedRuntimeModes =
-          instance === undefined
-            ? undefined
-            : (yield* instance.snapshot.getSnapshot).supportedRuntimeModes;
         const cwd =
           input.thread.worktreePath ??
           (yield* projects.get(input.thread.projectId).pipe(
@@ -135,9 +103,7 @@ export const layerFromProjectStore: Layer.Layer<
             ),
           ));
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-          runtimeMode:
-            chatRuntimeMode(input.thread) ??
-            providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
+          runtimeMode: "full-access",
           interactionMode: input.thread.interactionMode,
           cwd,
         });

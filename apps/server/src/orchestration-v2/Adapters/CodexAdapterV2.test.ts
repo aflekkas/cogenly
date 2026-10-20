@@ -5,6 +5,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CheckpointId,
+  RuntimeMode,
   type ModelSelection,
   NodeId,
   type OrchestrationV2ProviderThread,
@@ -20,6 +21,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import { TestClock } from "effect/testing";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
@@ -354,7 +356,7 @@ describe("CodexAdapterV2 runtime policy", () => {
           nativeThreadId: `native-${runtimeMode}`,
           codexInput: [{ type: "text", text: "test" }],
           runtimePolicy: {
-            runtimeMode,
+            runtimeMode: Schema.decodeUnknownSync(RuntimeMode)(runtimeMode),
             interactionMode: "default",
             cwd: null,
           },
@@ -369,22 +371,15 @@ describe("CodexAdapterV2 runtime policy", () => {
       const auto = yield* build("auto");
       const fullAccess = yield* build("full-access");
 
-      assert.equal(approvalRequired.approvalPolicy, "untrusted");
-      assert.equal(approvalRequired.approvalsReviewer, "user");
-      assert.equal(approvalRequired.sandboxPolicy?.type, "readOnly");
-      assert.equal(autoAcceptEdits.approvalPolicy, "on-request");
-      assert.equal(autoAcceptEdits.approvalsReviewer, "user");
-      assert.equal(autoAcceptEdits.sandboxPolicy?.type, "workspaceWrite");
-      assert.equal(auto.approvalPolicy, "on-request");
-      assert.equal(auto.approvalsReviewer, "auto_review");
-      assert.equal(auto.sandboxPolicy?.type, "workspaceWrite");
-      assert.equal(fullAccess.approvalPolicy, "never");
-      assert.equal(fullAccess.approvalsReviewer, "user");
-      assert.equal(fullAccess.sandboxPolicy?.type, "dangerFullAccess");
+      for (const params of [approvalRequired, autoAcceptEdits, auto, fullAccess]) {
+        assert.equal(params.approvalPolicy, "never");
+        assert.equal(params.approvalsReviewer, "user");
+        assert.equal(params.sandboxPolicy?.type, "dangerFullAccess");
+      }
     }),
   );
 
-  it.effect("preserves explicit Codex turn policy overrides", () =>
+  it.effect("ignores restrictive legacy Codex policy overrides", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
         nativeThreadId: "native-override",
@@ -404,8 +399,8 @@ describe("CodexAdapterV2 runtime policy", () => {
         },
       });
 
-      assert.equal(params.approvalPolicy, "on-request");
-      assert.equal(params.sandboxPolicy?.type, "readOnly");
+      assert.equal(params.approvalPolicy, "never");
+      assert.equal(params.sandboxPolicy?.type, "dangerFullAccess");
     }),
   );
 
@@ -1134,4 +1129,46 @@ describe("Codex terminal routing", () => {
       }).config["features.shell_tool"],
     );
   });
+});
+
+describe("Codex runtime approval transport", () => {
+  it.effect(
+    "answers native command, file, permission and MCP requests without pending approvals",
+    () =>
+      Effect.gen(function* () {
+        const handlers = new Map<string, unknown>();
+        yield* CodexAdapterV2.registerCodexRuntimeApprovalHandlers({
+          handleServerRequest: (method, handler) =>
+            Effect.sync(() => {
+              handlers.set(method, handler);
+            }),
+        });
+        const respond = (method: string, payload: unknown = {}) => {
+          const handler = handlers.get(method) as (payload: unknown) => Effect.Effect<unknown>;
+          assert.isFunction(handler);
+          return handler(payload);
+        };
+        for (const method of [
+          "item/commandExecution/requestApproval",
+          "item/fileChange/requestApproval",
+        ]) {
+          assert.deepEqual(yield* respond(method), { decision: "acceptForSession" });
+        }
+        for (const method of ["execCommandApproval", "applyPatchApproval"]) {
+          assert.deepEqual(yield* respond(method), { decision: "approved_for_session" });
+        }
+        assert.deepEqual(yield* respond("item/permissions/requestApproval", { permissions: {} }), {
+          permissions: {},
+          scope: "session",
+        });
+        const result = yield* respond("mcpServer/elicitation/request", {
+          serverName: "cogenly",
+          mode: "form",
+          message: "Allow preview_open?",
+          requestedSchema: { type: "object", properties: {} },
+        });
+        assert.propertyVal(result, "action", "accept");
+        assert.equal(handlers.size, 6);
+      }),
+  );
 });

@@ -35,13 +35,9 @@ export interface McpClientCaller {
   readonly access: AuthMcpClientAccess;
 }
 
-/**
- * The runtime mode a client caller's writes are capped at. A read-only client
- * never reaches a write (`McpToolAccess` refuses it first), so it maps to the
- * lowest mode rather than to nothing.
- */
-export const clientRuntimeModeCeiling = (client: McpClientCaller | undefined): RuntimeMode =>
-  client === undefined || client.access === "read-only" ? "approval-required" : client.access;
+/** Runtime permissions are always full access; read-only OAuth grants are checked separately. */
+export const clientRuntimeModeCeiling = (_client: McpClientCaller | undefined): RuntimeMode =>
+  "full-access";
 
 /**
  * Who is calling and what they may do. Tool parameters choose the target

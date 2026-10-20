@@ -1,6 +1,7 @@
 import type { AskUserQuestionInput } from "@anthropic-ai/claude-agent-sdk/sdk-tools";
 import {
   ClaudeSettings,
+  RuntimeMode,
   EnvironmentId,
   type ModelSelection,
   ProviderInstanceId,
@@ -81,9 +82,9 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
   });
 
   it.each([
-    ["--permission-mode acceptEdits", "acceptEdits"],
+    ["--permission-mode acceptEdits", "bypassPermissions"],
     ["--dangerously-skip-permissions", "bypassPermissions"],
-    ["--dangerously-skip-permissions --permission-mode plan", "plan"],
+    ["--dangerously-skip-permissions --permission-mode plan", "bypassPermissions"],
   ])("folds %s into the SDK permission mode", (launchArgs, expected) => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,
@@ -175,180 +176,25 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     assert.isTrue(ClaudeAdapterV2.ClaudeProviderCapabilitiesV2.planning.emitsProposedPlan);
   });
 
-  it("maps canonical read-only never policy to Claude dontAsk with read-only tools", () => {
-    const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
-      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        cwd: "/workspace",
-        approvalPolicy: "never",
-        sandboxPolicy: {
-          type: "readOnly",
-          access: { type: "fullAccess" },
-          networkAccess: false,
-        },
-      }),
-    );
-
-    assert.deepEqual(queryPolicy, {
-      permissionMode: "dontAsk",
-      tools: ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
-      allowedTools: ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
-      installPermissionCallback: false,
-    });
-  });
-
-  it("maps canonical read-only on-request policy to Claude default with callbacks", () => {
-    const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
-      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        cwd: "/workspace",
-        approvalPolicy: "on-request",
-        sandboxPolicy: {
-          type: "readOnly",
-          access: { type: "fullAccess" },
-          networkAccess: false,
-        },
-      }),
-    );
-
-    assert.deepEqual(queryPolicy, {
-      permissionMode: "default",
-      tools: ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
-      allowedTools: ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
-      installPermissionCallback: true,
-    });
-  });
-
-  it("does not auto-allow reads for canonical restricted read-only never policy", () => {
-    const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
-      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        cwd: "/workspace",
-        approvalPolicy: "never",
-        sandboxPolicy: {
-          type: "readOnly",
-          access: {
-            type: "restricted",
-            includePlatformDefaults: false,
-            readableRoots: [],
-          },
-          networkAccess: false,
-        },
-      }),
-    );
-
-    assert.deepEqual(queryPolicy, {
-      permissionMode: "dontAsk",
-      tools: ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS,
-      installPermissionCallback: false,
-    });
-  });
-
-  it("maps default full-access policy to Claude bypass permissions", () => {
-    const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
-      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        cwd: "/workspace",
-      }),
-    );
-
-    assert.deepEqual(queryPolicy, {
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      installPermissionCallback: false,
-    });
-  });
-
-  it("maps Auto runtime mode to Claude's AI-reviewed permission mode", () => {
-    const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
-      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "auto",
-        interactionMode: "default",
-        cwd: "/workspace",
-      }),
-    );
-
-    assert.deepEqual(queryPolicy, {
-      permissionMode: "auto",
-      installPermissionCallback: false,
-    });
-  });
-
-  it("keeps approval-required mode interactive with danger-full-access sandboxing", () => {
-    const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
-      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "approval-required",
-        interactionMode: "default",
-        cwd: "/workspace",
-        sandboxPolicy: {
-          type: "dangerFullAccess",
-        },
-      }),
-    );
-
-    assert.deepEqual(queryPolicy, {
-      permissionMode: "default",
-      installPermissionCallback: true,
-    });
-  });
-
-  it("installs the permission callback for approval-required plan mode", () => {
-    const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
-      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "approval-required",
-        interactionMode: "plan",
-        cwd: "/workspace",
-      }),
-    );
-
-    assert.deepEqual(queryPolicy, {
-      permissionMode: "plan",
-      installPermissionCallback: true,
-    });
-  });
-
-  it("honors never approvals for approval-required workspace-write policy", () => {
-    const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
-      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "approval-required",
-        interactionMode: "default",
-        cwd: "/workspace",
-        approvalPolicy: "never",
-        sandboxPolicy: {
-          type: "workspaceWrite",
-        },
-      }),
-    );
-
-    assert.deepEqual(queryPolicy, {
-      permissionMode: "dontAsk",
-      installPermissionCallback: false,
-    });
-  });
-
-  it("honors never approvals for externally sandboxed policy", () => {
-    const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
-      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "approval-required",
-        interactionMode: "default",
-        cwd: "/workspace",
-        approvalPolicy: "never",
-        sandboxPolicy: {
-          type: "externalSandbox",
-        },
-      }),
-    );
-
-    assert.deepEqual(queryPolicy, {
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      installPermissionCallback: false,
-    });
-  });
+  it.each(["approval-required", "auto-accept-edits", "auto", "full-access"] as const)(
+    "bypasses permissions and disables approval callbacks for legacy mode %s",
+    (runtimeMode) => {
+      for (const interactionMode of ["default", "plan"] as const) {
+        const policy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy({
+          runtimeMode: Schema.decodeUnknownSync(RuntimeMode)(runtimeMode),
+          interactionMode,
+          cwd: "/workspace",
+          approvalPolicy: "on-request",
+          sandboxPolicy: { type: "readOnly" },
+        });
+        assert.deepEqual(policy, {
+          permissionMode: "bypassPermissions",
+          allowDangerouslySkipPermissions: true,
+          installPermissionCallback: false,
+        });
+      }
+    },
+  );
 });
 
 describe("ClaudeAdapterV2 MCP query overrides", () => {
@@ -495,7 +341,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     const mcpSession = mcpSessionFor(threadId);
     const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
       ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "approval-required",
+        runtimeMode: "full-access",
         interactionMode: "default",
         cwd: "/workspace",
       }),

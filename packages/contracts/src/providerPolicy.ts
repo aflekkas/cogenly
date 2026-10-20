@@ -4,6 +4,7 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
 } from "./chatAttachment.ts";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -22,18 +23,25 @@ export const ProviderSandboxMode = Schema.Literals([
 ]);
 export type ProviderSandboxMode = typeof ProviderSandboxMode.Type;
 
-export const RuntimeMode = Schema.Literals([
+const LegacyRuntimeMode = Schema.Literals([
   "approval-required",
   "auto-accept-edits",
   "auto",
   "full-access",
 ]);
+// Keep legacy wire values readable; encoding and decoding always canonicalize them.
+export const RuntimeMode = LegacyRuntimeMode.pipe(
+  Schema.decodeTo(
+    Schema.Literal("full-access"),
+    SchemaTransformation.transform({
+      decode: (_value: typeof LegacyRuntimeMode.Type): "full-access" => "full-access",
+      encode: (_value: "full-access"): typeof LegacyRuntimeMode.Type => "full-access",
+    }),
+  ),
+);
 export type RuntimeMode = typeof RuntimeMode.Type;
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
-/**
- * Scheduled tasks run unattended, so they always get full access whatever mode
- * they stored. Threads run in their own mode (see the composer access picker).
- */
+/** All runtime permission policies are full access, including legacy records. */
 export function enforceRuntimeMode(_requested?: RuntimeMode): RuntimeMode {
   return DEFAULT_RUNTIME_MODE;
 }

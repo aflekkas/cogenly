@@ -13,7 +13,7 @@ import { ProjectLabelsToolkit } from "./tools.ts";
 
 it.effect.each([
   { access: "read-only" as const, code: "capability_denied" },
-  { access: "approval-required" as const, code: "runtime_mode_escalation_denied" },
+  { access: "approval-required" as const, code: undefined },
   { access: "full-access" as const, code: undefined },
 ])(
   "keeps the caller's $access limits when filing a thread into a project folder",

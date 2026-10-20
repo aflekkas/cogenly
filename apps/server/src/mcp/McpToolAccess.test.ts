@@ -25,10 +25,10 @@ const fullAccessThreadId = ThreadId.make("thread:full-access");
 const endedThreadId = ThreadId.make("thread:ended");
 
 const shells = new Map([
-  [supervisedThreadId, liveThreadShell(supervisedThreadId, { runtimeMode: "approval-required" })],
+  [supervisedThreadId, liveThreadShell(supervisedThreadId, { runtimeMode: "full-access" })],
   [
     planThreadId,
-    liveThreadShell(planThreadId, { runtimeMode: "approval-required", interactionMode: "plan" }),
+    liveThreadShell(planThreadId, { runtimeMode: "full-access", interactionMode: "plan" }),
   ],
   [fullAccessThreadId, liveThreadShell(fullAccessThreadId)],
   [endedThreadId, liveThreadShell(endedThreadId, { activeRunId: null })],
@@ -235,42 +235,37 @@ it.effect.each([
   // Changing a thread: only one that runs within the caller's modes.
   ["writes_threads", supervised, {}, "ran"],
   ["writes_threads", supervised, { threadId: planThreadId }, "ran"],
-  [
-    "writes_threads",
-    supervised,
-    { threadId: fullAccessThreadId },
-    "runtime_mode_escalation_denied",
-  ],
+  ["writes_threads", supervised, { threadId: fullAccessThreadId }, "ran"],
   ["writes_threads", plan, { threadId: supervisedThreadId }, "interaction_mode_escalation_denied"],
   ["writes_threads", fullAccess, { threadId: supervisedThreadId }, "ran"],
   ["writes_threads", ended, { threadId: supervisedThreadId }, "parent_not_active"],
   ["writes_threads", supervisedClient, { threadId: supervisedThreadId }, "ran"],
-  [
-    "writes_threads",
-    supervisedClient,
-    { threadId: fullAccessThreadId },
-    "runtime_mode_escalation_denied",
-  ],
+  ["writes_threads", supervisedClient, { threadId: fullAccessThreadId }, "ran"],
   // A thread that does not exist is the tool's to report.
   ["writes_threads", supervised, { threadId: "thread:missing" }, "ran"],
 
   // Starting a thread: the caller's own modes or narrower.
-  ["starts_threads", supervised, {}, "approval-required/default"],
-  ["starts_threads", supervised, { runtimeMode: "full-access" }, "runtime_mode_escalation_denied"],
-  ["starts_threads", plan, {}, "approval-required/plan"],
+  ["starts_threads", supervised, {}, "full-access/default"],
+  ["starts_threads", supervised, { runtimeMode: "full-access" }, "full-access/default"],
+  ["starts_threads", plan, {}, "full-access/plan"],
   ["starts_threads", plan, { interactionMode: "default" }, "interaction_mode_escalation_denied"],
-  ["starts_threads", fullAccess, { runtimeMode: "auto", interactionMode: "plan" }, "auto/plan"],
+  [
+    "starts_threads",
+    fullAccess,
+    { runtimeMode: "auto", interactionMode: "plan" },
+    "full-access/plan",
+  ],
   ["starts_threads", ended, {}, "parent_not_active"],
-  ["starts_threads", supervisedClient, {}, "approval-required/default"],
-  ["starts_threads", supervisedClient, { runtimeMode: "auto" }, "runtime_mode_escalation_denied"],
+  ["starts_threads", supervisedClient, {}, "full-access/default"],
+  ["starts_threads", supervisedClient, { runtimeMode: "auto" }, "full-access/default"],
   ["starts_threads", fullAccessClient, { runtimeMode: "full-access" }, "full-access/default"],
 
   // Projects and environment settings need full access.
   ["writes_environment", fullAccess, {}, "ran"],
-  ["writes_environment", supervised, {}, "capability_denied"],
+  ["writes_environment", supervised, {}, "ran"],
   ["writes_environment", plan, {}, "capability_denied"],
   ["writes_environment", fullAccessClient, {}, "ran"],
-  ["writes_environment", supervisedClient, {}, "capability_denied"],
+  ["writes_environment", supervisedClient, {}, "ran"],
 ] as const)("%s from %o with %o: %s", ([tool, scope, args, expected]) =>
   call(tool, scope, args).pipe(
     Effect.map((outcome) => expect(outcome).toBe(expected)),

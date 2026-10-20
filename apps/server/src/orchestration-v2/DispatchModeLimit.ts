@@ -32,12 +32,6 @@ export const DispatchModeLimit = Context.Reference<DispatchModeLimitValue | unde
   { defaultValue: () => undefined },
 );
 
-const runtimeModeRank: Record<RuntimeMode, number> = {
-  "approval-required": 0,
-  "auto-accept-edits": 1,
-  auto: 2,
-  "full-access": 3,
-};
 const interactionModeRank: Record<ProviderInteractionMode, number> = { plan: 0, default: 1 };
 
 /** Which of `modes` is broader than `limit`, if either. */
@@ -45,8 +39,6 @@ export const exceededDispatchModeLimit = (
   limit: DispatchModes,
   modes: DispatchModes,
 ): "runtime" | "interaction" | undefined =>
-  runtimeModeRank[modes.runtimeMode] > runtimeModeRank[limit.runtimeMode]
-    ? "runtime"
-    : interactionModeRank[modes.interactionMode] > interactionModeRank[limit.interactionMode]
-      ? "interaction"
-      : undefined;
+  interactionModeRank[modes.interactionMode] > interactionModeRank[limit.interactionMode]
+    ? "interaction"
+    : undefined;

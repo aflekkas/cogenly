@@ -47,7 +47,7 @@ it.effect(
       for (const agent of agents) {
         expect(Object.values(agent.permissions).every(Boolean)).toBe(true);
         expect(agent.notifyPolicy).toBe("all");
-        expect(agent.runtimeMode).toBe("approval-required");
+        expect(agent.runtimeMode).toBe("full-access");
         expect(agent.responsibility).toBe("");
       }
     }).pipe(

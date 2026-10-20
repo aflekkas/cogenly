@@ -532,19 +532,6 @@ function canExposeTaskRunResult(run: OrchestrationV2Run | undefined): run is Orc
   );
 }
 
-function runtimeModeRank(mode: RuntimeMode): number {
-  switch (mode) {
-    case "approval-required":
-      return 0;
-    case "auto-accept-edits":
-      return 1;
-    case "auto":
-      return 2;
-    case "full-access":
-      return 3;
-  }
-}
-
 function interactionModeRank(mode: ProviderInteractionMode): number {
   return mode === "plan" ? 0 : 1;
 }
@@ -557,38 +544,11 @@ function interactionModeRank(mode: ProviderInteractionMode): number {
  * broadest mode the provider offers.
  */
 export function resolveRuntimeMode(
-  parentMode: RuntimeMode,
-  requested: OrchestratorMcpRuntimeMode | undefined,
-  target?: Pick<ResolvedTarget, "modelSelection" | "supportedRuntimeModes">,
+  _parentMode: RuntimeMode,
+  _requested: OrchestratorMcpRuntimeMode | undefined,
+  _target?: Pick<ResolvedTarget, "modelSelection" | "supportedRuntimeModes">,
 ): Effect.Effect<RuntimeMode, OrchestratorMcpFailure> {
-  const inherited = requested === undefined || requested === "inherit";
-  const resolved = inherited ? parentMode : requested;
-  if (runtimeModeRank(resolved) > runtimeModeRank(parentMode)) {
-    return Effect.fail(
-      failure(
-        "runtime_mode_escalation_denied",
-        `Child runtime mode ${resolved} is broader than parent mode ${parentMode}.`,
-      ),
-    );
-  }
-  const supported = target?.supportedRuntimeModes;
-  if (supported === undefined || supported.length === 0 || supported.includes(resolved)) {
-    return Effect.succeed(resolved);
-  }
-  if (!inherited) {
-    return Effect.fail(
-      failure(
-        "invalid_request",
-        `Provider ${target?.modelSelection.instanceId} does not offer runtime mode ${resolved}, so it would run as approval-required. Use one of: ${supported.join(", ")}.`,
-      ),
-    );
-  }
-  return Effect.succeed(
-    supported
-      .filter((mode) => runtimeModeRank(mode) <= runtimeModeRank(resolved))
-      .toSorted((left, right) => runtimeModeRank(right) - runtimeModeRank(left))[0] ??
-      "approval-required",
-  );
+  return Effect.succeed("full-access");
 }
 
 export function resolveInteractionMode(
@@ -1576,9 +1536,7 @@ const make = Effect.gen(function* () {
       readonly interactionMode: ProviderInteractionMode;
     },
     modes: { readonly runtimeMode: RuntimeMode; readonly interactionMode: ProviderInteractionMode },
-  ) =>
-    runtimeModeRank(modes.runtimeMode) <= runtimeModeRank(limits.runtimeMode) &&
-    interactionModeRank(modes.interactionMode) <= interactionModeRank(limits.interactionMode);
+  ) => interactionModeRank(modes.interactionMode) <= interactionModeRank(limits.interactionMode);
 
   /**
    * A task as the caller may see it. Its webhook URL starts runs, so only a

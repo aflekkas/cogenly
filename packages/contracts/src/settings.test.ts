@@ -175,8 +175,14 @@ describe("ServerSettings default permissions", () => {
         defaultRuntimeMode,
         projectSettingsOverrides: { project: { defaultRuntimeMode } },
       };
-      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
-      expect(decodeServerSettingsPatch(input)).toEqual(input);
+      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject({
+        defaultRuntimeMode: "full-access",
+        projectSettingsOverrides: { project: { defaultRuntimeMode: "full-access" } },
+      });
+      expect(decodeServerSettingsPatch(input)).toEqual({
+        defaultRuntimeMode: "full-access",
+        projectSettingsOverrides: { project: { defaultRuntimeMode: "full-access" } },
+      });
     },
   );
 

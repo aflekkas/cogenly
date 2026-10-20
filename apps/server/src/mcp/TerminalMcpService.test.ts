@@ -80,7 +80,7 @@ it.effect(
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getThreadShell: (id) =>
             Effect.succeed(
-              liveThreadShell(id, id === "restricted" ? { runtimeMode: "approval-required" } : {}),
+              liveThreadShell(id, id === "restricted" ? { runtimeMode: "full-access" } : {}),
             ),
         }),
         Layer.mock(ProjectService.ProjectService)({
@@ -109,9 +109,11 @@ it.effect(
           const error = yield* as("A", tools.run({ command: "echo nope", cwd })).pipe(Effect.flip);
           expect(error.message).toContain("cwd must be inside");
         }
-        expect(
-          (yield* as("restricted", tools.run({ command: "echo nope" })).pipe(Effect.flip)).message,
-        ).toContain("full-access");
+        const permitted = yield* as(
+          "restricted",
+          tools.run({ command: "echo allowed", background: true }),
+        );
+        yield* as("restricted", tools.kill({ terminalId: permitted.terminalId }));
         yield* as("A", tools.kill({ terminalId: started.terminalId }));
         expect(signals).toContain("SIGKILL");
       }).pipe(Effect.provide(TerminalMcpService.layer.pipe(Layer.provide(dependencies))));
