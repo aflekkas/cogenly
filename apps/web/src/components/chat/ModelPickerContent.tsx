@@ -135,9 +135,10 @@ function prefersReducedMotion() {
 }
 
 /**
- * Measure the list frame before Legacy models opens or closes. The frame's
- * height then transitions between the two content heights, and the popover
- * follows it, so the popover resizes in one transition instead of jumping.
+ * Measure the list frame before Legacy models opens or closes, or before the
+ * rail switches provider. The frame's height then transitions between the two
+ * content heights, and the popover follows it, so the popover resizes in one
+ * transition instead of jumping.
  */
 function measureLegacyResize(input: {
   frame: HTMLElement;
@@ -284,15 +285,35 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     modelListElementRef.current?.focus({ preventScroll: true });
   }, []);
 
+  // A provider switch to a list of the same height fires no transitionend, so
+  // its resize also clears once the transition would have ended.
+  useEffect(() => {
+    if (!legacyResize || legacyResize.collapsedHeight !== undefined) return;
+    const timeout = window.setTimeout(() => setLegacyResize(null), 400);
+    return () => window.clearTimeout(timeout);
+  }, [legacyResize]);
+
   const handleSelectInstance = useCallback(
     (instanceId: ProviderInstanceId) => {
+      // Another provider's list has another length: ease the frame (and the
+      // popover with it) to the new height instead of snapping.
+      const frame = modelListFrameRef.current;
+      const resize =
+        frame && instanceId !== selectedInstanceId && !prefersReducedMotion()
+          ? measureLegacyResize({
+              frame,
+              listState: undefined,
+              legacyKey: "",
+              collapsing: false,
+            })
+          : null;
       setSelectedInstanceId(instanceId);
-      setLegacyResize(null);
+      setLegacyResize(resize);
       window.requestAnimationFrame(() => {
         focusModelList();
       });
     },
-    [focusModelList],
+    [focusModelList, selectedInstanceId],
   );
 
   useLayoutEffect(() => {
