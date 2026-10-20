@@ -8,6 +8,7 @@ import {
   ClientSettingsPatch,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
+  isUnconfiguredDefaultInstanceEnabled,
   requiredScopesForProjectMutation,
   resolveProjectProviderInstanceEnabled,
   resolveProviderInstanceEnabled,
@@ -704,13 +705,22 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
 });
 
 describe("provider enabled defaults", () => {
-  it("keeps Muse disabled until a configured instance opts in", () => {
+  it("keeps Muse enabled like Codex and Claude until a configured instance opts out", () => {
     const muse = ProviderDriverKind.make("muse");
-    expect(resolveProviderInstanceEnabled({ driver: muse, config: {} })).toBe(false);
-    expect(resolveProviderInstanceEnabled({ driver: muse, enabled: true, config: {} })).toBe(true);
+    expect(resolveProviderInstanceEnabled({ driver: muse, config: {} })).toBe(true);
+    expect(resolveProviderInstanceEnabled({ driver: muse, enabled: false, config: {} })).toBe(
+      false,
+    );
     expect(
       resolveProviderInstanceEnabled({ driver: muse, enabled: true, config: { enabled: false } }),
     ).toBe(false);
+  });
+
+  it("starts the unconfigured Muse default instance alongside Codex and Claude", () => {
+    for (const instanceId of ["codex", "claudeAgent", "muse"]) {
+      expect(isUnconfiguredDefaultInstanceEnabled(ProviderInstanceId.make(instanceId))).toBe(true);
+    }
+    expect(isUnconfiguredDefaultInstanceEnabled(ProviderInstanceId.make("grok"))).toBe(false);
   });
 
   it("enables only the stable bindings by default", () => {
@@ -718,7 +728,8 @@ describe("provider enabled defaults", () => {
       resolveProviderInstanceEnabled({ driver: ProviderDriverKind.make(driver), config: {} });
     expect(enabledByDefault("codex")).toBe(true);
     expect(enabledByDefault("claudeAgent")).toBe(true);
-    for (const driver of ["cursor", "grok", "muse", "pi", "opencode", "antigravity"]) {
+    expect(enabledByDefault("muse")).toBe(true);
+    for (const driver of ["cursor", "grok", "pi", "opencode", "antigravity"]) {
       expect(enabledByDefault(driver)).toBe(false);
     }
   });

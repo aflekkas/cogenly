@@ -58,7 +58,12 @@ it.layer(NodeServices.layer)("Muse status", (it) => {
   it.effect("does not start a host when disabled", () =>
     Effect.gen(function* () {
       const createHost = vi.fn(async () => makeHost(metaCatalog));
-      const snapshot = yield* checkMuseProviderStatus(settings({}), {}, undefined, createHost);
+      const snapshot = yield* checkMuseProviderStatus(
+        settings({ enabled: false }),
+        {},
+        undefined,
+        createHost,
+      );
       expect(snapshot.status).toBe("disabled");
       expect(createHost).not.toHaveBeenCalled();
     }),
