@@ -96,7 +96,7 @@
       }
 
       /* Loading loop for the mark (assets/brand/cogenly-mark.svg), 2.4s: the dot steps well
-         out of the "c" (orbit radius 70 of 128, clear of its outer edge at 36), circles it
+         out of the "c" (orbit radius 58 of 128, 13 clear of its outer edge at 36), circles it
          once, then glides back into the opening on a plain ease-out and rests. The dot and its
          arm are HTML boxes, not SVG, so these transform animations run on the compositor and
          keep moving while the bundle evaluates. Positions are the SVG's 128 box as percents:
@@ -129,16 +129,16 @@
         }
       }
 
-      /* 42 of 128 out from the docked radius; the dot is 18 wide, so 233.33% of itself. */
+      /* 30 of 128 out from the docked radius; the dot is 18 wide, so 166.67% of itself. */
       @keyframes boot-mark-reach {
         0% {
           transform: translateX(0);
         }
         14% {
-          transform: translateX(233.33%);
+          transform: translateX(166.67%);
         }
         52% {
-          transform: translateX(233.33%);
+          transform: translateX(166.67%);
           animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
         }
         88%,
