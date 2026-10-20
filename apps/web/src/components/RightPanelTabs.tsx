@@ -128,7 +128,15 @@ interface RightPanelTabsProps {
   diffAvailable: boolean;
   filesAvailable: boolean;
   deviceAvailable: boolean;
+  /** Surfaces the thread's kind offers at all; the rest are left out, not disabled. */
+  supportedSurfaces: SupportedRightPanelSurfaces;
   children: ReactNode;
+}
+
+export interface SupportedRightPanelSurfaces {
+  readonly terminal: boolean;
+  readonly files: boolean;
+  readonly diff: boolean;
 }
 
 export function shouldOpenDefaultBrowserProfileFromMenuClick(
@@ -307,17 +315,19 @@ function RightPanelEmptyState(props: {
   diffAvailable: boolean;
   filesAvailable: boolean;
   deviceAvailable: boolean;
+  supportedSurfaces: SupportedRightPanelSurfaces;
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
 
-  const actions = [
+  const launcherActions = [
     {
       label: "Browser",
       icon: Globe2,
       shortcut: "B",
       available: props.browserAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.browser,
+      supported: true,
       onClick: props.onAddBrowser,
     },
     {
@@ -326,6 +336,7 @@ function RightPanelEmptyState(props: {
       shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
+      supported: props.supportedSurfaces.terminal,
       onClick: props.onAddTerminal,
     },
     {
@@ -334,6 +345,7 @@ function RightPanelEmptyState(props: {
       shortcut: "F",
       available: props.filesAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
+      supported: props.supportedSurfaces.files,
       onClick: props.onAddFiles,
     },
     {
@@ -342,6 +354,7 @@ function RightPanelEmptyState(props: {
       shortcut: "D",
       available: props.diffAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
+      supported: props.supportedSurfaces.diff,
       onClick: props.onAddDiff,
     },
     {
@@ -351,9 +364,11 @@ function RightPanelEmptyState(props: {
       shortcut: "M",
       available: props.deviceAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
+      supported: true,
       onClick: props.onAddDevice,
     },
   ] as const;
+  const actions = launcherActions.filter((action) => action.supported);
 
   type SurfaceAction = (typeof actions)[number];
 
@@ -757,13 +772,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     });
   }, []);
 
-  const addSurfaceActions = [
+  const allSurfaceActions = [
     {
       label: "Browser",
       icon: Globe2,
       shortcut: "B",
       available: props.browserAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.browser,
+      supported: true,
       onClick: props.onAddBrowser,
     },
     {
@@ -772,6 +788,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.terminal,
+      supported: props.supportedSurfaces.terminal,
       onClick: props.onAddTerminal,
     },
     {
@@ -780,6 +797,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       shortcut: "F",
       available: props.filesAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.files,
+      supported: props.supportedSurfaces.files,
       onClick: props.onAddFiles,
     },
     {
@@ -788,6 +806,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       shortcut: "D",
       available: props.diffAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.diff,
+      supported: props.supportedSurfaces.diff,
       onClick: props.onAddDiff,
     },
     {
@@ -796,9 +815,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       shortcut: "M",
       available: props.deviceAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.device,
+      supported: true,
       onClick: props.onAddDevice,
     },
   ] as const;
+  const addSurfaceActions = allSurfaceActions.filter((action) => action.supported);
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const action = surfaceShortcutActionForKey(addSurfaceActions, event.nativeEvent);
@@ -1286,6 +1307,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
             deviceAvailable={props.deviceAvailable}
+            supportedSurfaces={props.supportedSurfaces}
           />
         ) : (
           props.children
