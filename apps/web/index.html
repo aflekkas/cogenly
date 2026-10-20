@@ -52,40 +52,57 @@
         color: #262626;
       }
 
+      /* The boot splash sits outside #root as a full-window ember overlay. The app removes it
+         after morphing it into the sidebar mark (src/bootSplash.ts). Fixed brand colors in
+         both themes, like the app icon. */
       #boot-shell {
-        position: relative;
-        overflow: hidden;
-        display: flex;
-        min-height: 100%;
-        align-items: center;
-        justify-content: center;
-        background: inherit;
-        color: inherit;
-      }
-
-      html[data-theme-selected="true"] #boot-shell {
-        background: var(--boot-background);
-        color: var(--boot-foreground);
-      }
-
-      #boot-shell-card {
-        position: relative;
-        z-index: 1;
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 96px;
-        height: 96px;
+        background: linear-gradient(180deg, #ff7b3a, #e63e22);
+        color: #ffffff;
+      }
+
+      /* Once the inline script has drawn the pixel grid, cleared cells show the app beneath. */
+      #boot-shell[data-pixels="ready"] {
+        background: transparent;
+      }
+
+      #boot-shell-pixels {
+        position: absolute;
+        top: 0;
+        left: 0;
+        image-rendering: pixelated;
+      }
+
+      #boot-shell-mark {
+        position: relative;
+        width: 104px;
+        height: 104px;
+      }
+
+      /* The mark's tile (rx 28 of 128), hidden on the splash; it fades in as the glyph lands. */
+      #boot-shell-tile {
+        position: absolute;
+        inset: 0;
+        border-radius: 21.875%;
+        background: linear-gradient(180deg, #ff7b3a, #e63e22);
+        opacity: 0;
       }
 
       #boot-shell-logo {
-        width: 64px;
-        height: 64px;
+        position: relative;
+        display: block;
+        width: 104px;
+        height: 104px;
       }
 
       /* Loading loop for the mark (assets/brand/cogenly-mark.svg): the dot steps out of the
-         "c", circles it once and docks; the "c" gives a small catch. Transform-only, and it
-         ends when React's first commit replaces #root's contents. */
+         "c", circles it once and docks; the "c" gives a small catch. Transform-only; it ends
+         when src/bootSplash.ts settles it and removes the splash. */
       #boot-shell-logo * {
         transform-box: view-box;
       }
@@ -178,66 +195,161 @@
     <title>Cogenly (Beta)</title>
   </head>
   <body>
-    <div id="root">
-      <div id="boot-shell">
-        <div id="boot-shell-card" aria-label="Cogenly splash screen">
-          <!-- Inline copy of assets/brand/cogenly-mark.svg so it paints and animates before any fetch. -->
-          <svg
-            id="boot-shell-logo"
-            role="img"
-            aria-label="Cogenly"
-            viewBox="0 0 128 128"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <defs>
-              <linearGradient
-                id="boot-mark-ember"
-                x1="64"
-                y1="0"
-                x2="64"
-                y2="128"
-                gradientUnits="userSpaceOnUse"
-              >
-                <stop stop-color="#FF7B3A" />
-                <stop offset="1" stop-color="#E63E22" />
-              </linearGradient>
-              <linearGradient
-                id="boot-mark-rim"
-                x1="64"
-                y1="0"
-                x2="64"
-                y2="64"
-                gradientUnits="userSpaceOnUse"
-              >
-                <stop stop-color="#FFFFFF" stop-opacity="0.3" />
-                <stop offset="1" stop-color="#FFFFFF" stop-opacity="0" />
-              </linearGradient>
-            </defs>
-            <rect width="128" height="128" rx="28" fill="url(#boot-mark-ember)" />
-            <rect
-              x="1.75"
-              y="1.75"
-              width="124.5"
-              height="124.5"
-              rx="26.25"
-              stroke="url(#boot-mark-rim)"
-              stroke-width="1.5"
-            />
-            <path
-              class="boot-mark-c"
-              d="M79.85 41.64A28 28 0 1 0 79.85 86.36"
-              stroke="#FFFFFF"
-              stroke-width="16"
-              stroke-linecap="round"
-            />
-            <g class="boot-mark-arm">
-              <circle class="boot-mark-dot" cx="91" cy="64" r="9" fill="#FFFFFF" />
-            </g>
-          </svg>
-        </div>
+    <div id="boot-shell" role="status" aria-label="Cogenly is loading">
+      <canvas id="boot-shell-pixels" aria-hidden="true"></canvas>
+      <div id="boot-shell-mark">
+        <div id="boot-shell-tile"></div>
+        <!-- The white glyph of assets/brand/cogenly-mark.svg, inline so it animates before any fetch.
+           Its 128 box matches the mark's tile, so scaling it onto the sidebar mark lines up. -->
+        <svg
+          id="boot-shell-logo"
+          aria-hidden="true"
+          viewBox="0 0 128 128"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            class="boot-mark-c"
+            d="M79.85 41.64A28 28 0 1 0 79.85 86.36"
+            stroke="#FFFFFF"
+            stroke-width="16"
+            stroke-linecap="round"
+          />
+          <g class="boot-mark-arm">
+            <circle class="boot-mark-dot" cx="91" cy="64" r="9" fill="#FFFFFF" />
+          </g>
+        </svg>
       </div>
     </div>
+    <script>
+      // Pixel ember for the boot splash: an abstract mosaic of big blocks (1x1 and some 2x2
+      // cells, about 20 columns) in five quantized ember tones, drawn on one canvas at cell
+      // resolution and upscaled with image-rendering: pixelated. While loading, a few blocks at
+      // a time step to a neighboring tone (redrawn at 15fps). src/bootSplash.ts calls
+      // dissipate() to drop the blocks out bottom-up during the morph; the loop stops when the
+      // canvas is removed. Reduced motion draws one static frame.
+      (() => {
+        const shell = document.getElementById("boot-shell");
+        const canvas = document.getElementById("boot-shell-pixels");
+        const context = canvas && canvas.getContext("2d");
+        if (!shell || !context) return;
+        const FRAME_MS = 66;
+        const TONES = [
+          [255, 128, 64],
+          [250, 108, 52],
+          [243, 89, 42],
+          [235, 72, 36],
+          [222, 58, 30],
+        ];
+        const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+        let cell = 64;
+        let cols = 0;
+        let rows = 0;
+        let image = null;
+        let blocks = [];
+        let dissipation = null;
+        let lastFrame = -Infinity;
+
+        function resize() {
+          // About 20 columns, never finer than 48px or coarser than 96px blocks.
+          cell = Math.max(48, Math.min(96, Math.round(innerWidth / 20)));
+          cols = Math.ceil(innerWidth / cell);
+          rows = Math.ceil(innerHeight / cell);
+          canvas.width = cols;
+          canvas.height = rows;
+          canvas.style.width = cols * cell + "px";
+          canvas.style.height = rows * cell + "px";
+          image = context.createImageData(cols, rows);
+          const taken = new Uint8Array(cols * rows);
+          blocks = [];
+          for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+              if (taken[y * cols + x]) continue;
+              const merge =
+                x + 1 < cols && y + 1 < rows && !taken[y * cols + x + 1] && Math.random() < 0.22;
+              const cells = merge
+                ? [y * cols + x, y * cols + x + 1, (y + 1) * cols + x, (y + 1) * cols + x + 1]
+                : [y * cols + x];
+              for (const index of cells) taken[index] = 1;
+              const t = rows > 1 ? (y + (merge ? 0.5 : 0)) / (rows - 1) : 0;
+              blocks.push({
+                cells,
+                t,
+                // A jittered quantization gives the tone bands ragged, mosaic edges.
+                tone: Math.round(t * (TONES.length - 1) + (Math.random() - 0.5) * 1.1),
+                phase: Math.random() * 6.2832,
+                speed: 0.0005 + Math.random() * 0.0007,
+                step: Math.random() < 0.5 ? -1 : 1,
+                jitter: Math.random(),
+              });
+            }
+          }
+        }
+
+        function draw(time) {
+          const data = image.data;
+          const elapsed = dissipation ? time - dissipation.start : 0;
+          for (const block of blocks) {
+            // Each block spends a short slice of its slow cycle one tone off.
+            const shifted = !reduceMotion && Math.sin(time * block.speed + block.phase) > 0.94;
+            const tone = Math.min(
+              TONES.length - 1,
+              Math.max(0, block.tone + (shifted ? block.step : 0)),
+            );
+            let alpha = 255;
+            if (dissipation) {
+              // Bottom rows drop out first, with per-block jitter, all gone by the end.
+              const delay = ((1 - block.t) * 0.62 + block.jitter * 0.26) * dissipation.duration;
+              const progress = (elapsed - delay) / (0.12 * dissipation.duration);
+              alpha = progress <= 0 ? 255 : progress >= 1 ? 0 : progress < 0.5 ? 150 : 60;
+            }
+            const color = TONES[tone];
+            for (const index of block.cells) {
+              const offset = index * 4;
+              data[offset] = color[0];
+              data[offset + 1] = color[1];
+              data[offset + 2] = color[2];
+              data[offset + 3] = alpha;
+            }
+          }
+          context.putImageData(image, 0, 0);
+        }
+
+        function tick(time) {
+          if (!canvas.isConnected) {
+            // The splash was removed, or the boot error replaced it: stop and restore the fallback.
+            removeEventListener("resize", onResize);
+            delete shell.dataset.pixels;
+            return;
+          }
+          if (dissipation || time - lastFrame >= FRAME_MS) {
+            lastFrame = time;
+            draw(time);
+          }
+          if (!reduceMotion || dissipation) requestAnimationFrame(tick);
+        }
+
+        function onResize() {
+          if (dissipation) return;
+          resize();
+          draw(performance.now());
+        }
+
+        resize();
+        draw(performance.now());
+        shell.dataset.pixels = "ready";
+        addEventListener("resize", onResize);
+        if (!reduceMotion) requestAnimationFrame(tick);
+
+        window.cogenlyBootSplash = {
+          dissipate(duration) {
+            dissipation = { start: performance.now(), duration };
+            if (reduceMotion) requestAnimationFrame(tick);
+          },
+        };
+      })();
+    </script>
+    <div id="root"></div>
     <script type="module" src="/src/bootstrap.ts"></script>
   </body>
 </html>

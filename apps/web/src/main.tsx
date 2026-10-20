@@ -14,6 +14,7 @@ import {
   syncDocumentWindowControlsOverlayClass,
 } from "./lib/windowControlsOverlay";
 import { AppRoot } from "./AppRoot";
+import { BootSplashHandoff } from "./components/BootSplashHandoff";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 
 prepareProviderAuthDelivery();
@@ -55,11 +56,11 @@ const managedAuthShellModule =
       : import("./components/clerk/BrowserManagedAuthShell")
     : null;
 
-// The index.html boot splash lives inside #root, and React's first commit
-// clears it. Resolve everything that first commit needs, the selected
-// managed-auth runtime and the initial route's split chunks, before
-// rendering, so the splash holds until real UI paints instead of dropping to
-// a blank window while chunks download.
+// The index.html boot splash is an overlay beside #root that BootSplashHandoff
+// morphs away after React's first commit. Resolve everything that first commit
+// needs, the selected managed-auth runtime and the initial route's split
+// chunks, before rendering, so the splash holds until real UI paints instead
+// of dropping to a blank window while chunks download.
 export const startup = Promise.all([
   managedAuthShellModule?.then((module) => module.default) ?? null,
   router.load(),
@@ -78,6 +79,7 @@ export const startup = Promise.all([
         ) : (
           app
         )}
+        <BootSplashHandoff />
       </React.StrictMode>,
     );
   })
