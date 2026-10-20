@@ -129,6 +129,12 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 - Our users drive agents all day and notice a dropped frame, a lying spinner, and a stale label. No continuously repainting animations; they peg the GPU on high-refresh displays.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
 
+## Motion
+
+- Every UI state change animates: short and purposeful, about 150 to 220ms ease-out. No snaps, no layout jumps, and nothing re-pops when the pointer moves between targets. Under `prefers-reduced-motion`, keep opacity fades only.
+- Reuse the shared primitives instead of inventing timings: the `--motion-duration-*` and `--ease-*` tokens in `apps/web/src/index.css`, `WorkLogCollapse` / `WorkLogChevron` / `WorkLogDisclosure` in `apps/web/src/components/chat/WorkLog.tsx` for height-plus-fade disclosures, the clamped message "Show more" in `MessagesTimeline.tsx`, and `modeSwitchMotion` (`apps/web/src/components/sidebar/modes/`) for screen switches.
+- Animate only the change a user made (a toggle, a send, an arrival), never history on load or virtualized remounts. Disclosures in the timeline go through its disclosure hold so the scroll position stays put and a timeline pinned to the end stays pinned.
+
 ## Additional tips
 
 - Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
