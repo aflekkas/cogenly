@@ -141,7 +141,11 @@ import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import { truncate } from "@t3tools/shared/String";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
 import { AgentTerminalsPanel } from "./AgentTerminalsPanel";
-import { agentTerminalEntries, isAgentTerminalId } from "./AgentTerminalsPanel.logic";
+import {
+  agentTerminalEntries,
+  isAgentTerminalId,
+  terminalSections,
+} from "./AgentTerminalsPanel.logic";
 import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
@@ -1574,6 +1578,11 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThreadId, activeThreadKnownSessionsRaw]);
   const activeServerOrderedTerminalIds = useMemo(
     () => activeThreadKnownSessions.map((session) => session.target.terminalId),
+    [activeThreadKnownSessions],
+  );
+  // For the Terminal tab's title; the surface itself derives the same count.
+  const terminalLiveRunCount = useMemo(
+    () => terminalSections(agentTerminalEntries(activeThreadKnownSessions)).liveRunCount,
     [activeThreadKnownSessions],
   );
   const activeThreadRef = useActiveThreadRef(activeThread);
@@ -9752,6 +9761,7 @@ export default function ChatView(props: ChatViewProps) {
           onMoveSurface={moveRightPanelSurfaceStable}
           onCopyFilePath={copyRightPanelFilePathStable}
           addOptions={rightPanelAddOptions}
+          terminalLiveRunCount={terminalLiveRunCount}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -9796,6 +9806,7 @@ export default function ChatView(props: ChatViewProps) {
             onMoveSurface={moveRightPanelSurfaceStable}
             onCopyFilePath={copyRightPanelFilePathStable}
             addOptions={rightPanelAddOptions}
+            terminalLiveRunCount={terminalLiveRunCount}
           >
             {rightPanelContent}
           </RightPanelTabs>

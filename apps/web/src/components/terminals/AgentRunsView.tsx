@@ -307,7 +307,6 @@ export interface AgentRunsViewProps {
   readonly runs: ReadonlyArray<AgentTerminalEntry>;
   readonly liveRunCount: number;
   readonly selected: AgentTerminalEntry | null;
-  readonly listCollapsed: boolean;
   readonly canOperate: boolean;
   readonly visible: boolean;
   readonly focusToken: number;
@@ -399,7 +398,7 @@ export function AgentRunsView(props: AgentRunsViewProps) {
           "min-h-0 shrink-0 overflow-y-auto overscroll-contain pb-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           "max-h-[38%] border-b border-border/60",
           "@min-[40rem]/terminals:flex! @min-[40rem]/terminals:max-h-none @min-[40rem]/terminals:w-60 @min-[40rem]/terminals:border-e @min-[40rem]/terminals:border-b-0",
-          props.listCollapsed ? "hidden" : "flex flex-col",
+          "flex flex-col",
         )}
       >
         {live.length > 0 ? <GroupLabel>Running</GroupLabel> : null}
