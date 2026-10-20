@@ -8,6 +8,7 @@ import { cn } from "~/lib/utils";
 import { HtmlRenderDocument } from "../files/BrowserDocumentFrame";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
+import { HtmlRenderSubmittedBadge } from "./HtmlRenderSubmittedBadge";
 
 /** Breathing room between the page and the canvas edge, in screen pixels. */
 const PAD = 40;
@@ -41,6 +42,10 @@ export function HtmlRenderDialog(props: {
   readonly src: string;
   readonly title: string;
   readonly threadRef?: ScopedThreadRef | undefined;
+  /** The render's attachment id, so the page keeps its interactive state. */
+  readonly renderId?: string | undefined;
+  /** The visual was submitted and takes no more answers. */
+  readonly submitted?: boolean;
   readonly onClose: () => void;
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -297,6 +302,7 @@ export function HtmlRenderDialog(props: {
                     src={props.src}
                     title={props.title}
                     threadRef={props.threadRef}
+                    renderId={props.renderId}
                     className="block size-full"
                     onContentHeight={setContentHeight}
                   />
@@ -314,6 +320,7 @@ export function HtmlRenderDialog(props: {
           </div>
           <div className="mt-2 flex min-w-0 items-center justify-center gap-3 text-xs text-white/80">
             <span className="truncate">{props.title}</span>
+            {props.submitted ? <HtmlRenderSubmittedBadge /> : null}
             <div className="flex shrink-0 items-center gap-1">
               <Button
                 aria-label="Zoom out"

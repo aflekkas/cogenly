@@ -17,6 +17,8 @@ import {
 } from "./threadRequests.ts";
 import { arrayElementsEqual, parseThreadKey, threadKey } from "./entities.ts";
 
+const EMPTY_VISUAL_STATES: OrchestrationV2ThreadProjection["visualStates"] = Object.freeze([]);
+
 const EMPTY_VISIBLE_TURN_ITEMS: OrchestrationV2ThreadProjection["visibleTurnItems"] = Object.freeze(
   [],
 );
@@ -164,6 +166,25 @@ export function createEnvironmentThreadDetailAtoms<E>(
     }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-pending-requests:${key}`));
   });
 
+  // Interactive render documents. The reducer replaces only the entry that
+  // changed, so a render's frame re-renders on its own updates alone.
+  const visualStatesAtomFamily = Atom.family((key: string) =>
+    Atom.make(
+      (get) =>
+        Option.getOrNull(get(threadStateValueAtomFamily(key)).data)?.visualStates ??
+        EMPTY_VISUAL_STATES,
+    ).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-visual-states:${key}`)),
+  );
+  const visualStateAtomFamily = Atom.family((key: string) => {
+    const separator = key.lastIndexOf("\u0000");
+    const thread = key.slice(0, separator);
+    const renderId = key.slice(separator + 1);
+    return Atom.make(
+      (get) =>
+        get(visualStatesAtomFamily(thread)).find((entry) => entry.renderId === renderId) ?? null,
+    ).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-visual-state:${key}`));
+  });
+
   const statusAtomFamily = Atom.family((key: string) =>
     Atom.make((get) => get(threadStateValueAtomFamily(key)).status).pipe(
       Atom.setIdleTTL(0),
@@ -193,6 +214,11 @@ export function createEnvironmentThreadDetailAtoms<E>(
     threadAtom: (ref: ScopedThreadRef) => threadAtomFamily(threadKey(ref)),
     visibleTurnItemsAtom: (ref: ScopedThreadRef) => visibleTurnItemsAtomFamily(threadKey(ref)),
     statusAtom: (ref: ScopedThreadRef) => statusAtomFamily(threadKey(ref)),
+    /** Every interactive render's stored document in the thread. */
+    visualStatesAtom: (ref: ScopedThreadRef) => visualStatesAtomFamily(threadKey(ref)),
+    /** One interactive render's stored document, or null before its first write. */
+    visualStateAtom: (ref: ScopedThreadRef, renderId: string) =>
+      visualStateAtomFamily(`${threadKey(ref)}\u0000${renderId}`),
     errorAtom: (ref: ScopedThreadRef) => errorAtomFamily(threadKey(ref)),
     historyAtom: (ref: ScopedThreadRef) => historyAtomFamily(threadKey(ref)),
   };

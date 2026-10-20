@@ -28,6 +28,7 @@ import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState }
 import { useOpenLink } from "~/browser/useOpenLink";
 import { ExpandedImageDialog } from "~/components/chat/ExpandedImageDialog";
 import type { ExpandedImagePreview } from "~/components/chat/ExpandedImagePreview";
+import { useHtmlRenderVisualBridge } from "~/components/chat/useHtmlRenderVisualBridge";
 import { useHtmlRenderTheme } from "~/hooks/useHtmlRenderTheme";
 import { shortcutConflictKey } from "~/keybindings";
 import { readLocalApi } from "~/localApi";
@@ -83,6 +84,8 @@ export function BrowserDocumentFrame(props: {
   readonly htmlRender?: boolean;
   /** The thread an HTML render's links open beside. */
   readonly threadRef?: ScopedThreadRef | undefined;
+  /** An HTML render's attachment id, which keys its interactive state in the thread. */
+  readonly renderId?: string | undefined;
 }) {
   const className = "min-h-0 flex-1 border-0 bg-white";
   return props.pdf ? (
@@ -99,6 +102,7 @@ export function BrowserDocumentFrame(props: {
       src={props.src}
       title={props.title}
       threadRef={props.threadRef}
+      renderId={props.renderId}
       className="min-h-0 flex-1"
     />
   ) : (
@@ -124,6 +128,11 @@ export function HtmlRenderDocument(props: {
   readonly className?: string;
   /** The thread the page's links open beside, as a chat link would. */
   readonly threadRef?: ScopedThreadRef | undefined;
+  /**
+   * The render's attachment id. With `threadRef`, the page's `window.cogenly`
+   * reads and writes the thread's stored document for it.
+   */
+  readonly renderId?: string | undefined;
   /** Receives the page's content height whenever it changes, so an inline frame can fit it. */
   readonly onContentHeight?: (height: number) => void;
   /** Reports the image viewer opening and closing, so a virtualized row can stay mounted. */
@@ -136,6 +145,11 @@ export function HtmlRenderDocument(props: {
   const [src] = useState(() => `${props.src.split("#", 1)[0]}${htmlRenderThemeFragment(theme)}`);
   const [loaded, setLoaded] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
+  useHtmlRenderVisualBridge(frameRef, {
+    threadRef: props.threadRef,
+    renderId: props.renderId,
+    title: props.title,
+  });
   const postTheme = () => {
     frameRef.current?.contentWindow?.postMessage(htmlRenderThemeMessage(theme), "*");
   };

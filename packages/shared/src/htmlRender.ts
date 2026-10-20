@@ -573,6 +573,29 @@ export function formatVisualSubmitMessage(title: string, payloadJson: string): s
   return `[${label} submitted]\n\`\`\`json\n${payloadJson}\n\`\`\``;
 }
 
+const VISUAL_SUBMIT_MESSAGE_PATTERN =
+  /^\[Visual(?: "(.*)")? submitted\][ \t]*\r?\n```json[ \t]*\r?\n([\s\S]*?)\r?\n?```\s*$/;
+
+/**
+ * The parts of a `formatVisualSubmitMessage` text: the visual's title (null
+ * for an untitled one), the fence's JSON as written, and its parsed payload
+ * (undefined when the fence is not valid JSON). Undefined for any other text.
+ */
+export function readVisualSubmitMessage(
+  text: string,
+): { readonly title: string | null; readonly json: string; readonly payload: unknown } | undefined {
+  const match = VISUAL_SUBMIT_MESSAGE_PATTERN.exec(text);
+  if (match === null) return undefined;
+  const json = match[2]!.trim();
+  let payload: unknown;
+  try {
+    payload = JSON.parse(json);
+  } catch {
+    payload = undefined;
+  }
+  return { title: match[1]?.trim() || null, json, payload };
+}
+
 /** UTF-8 bytes of a JSON value's encoding, or null when it cannot be encoded. */
 export function visualStateJsonBytes(value: unknown): number | null {
   try {

@@ -177,6 +177,8 @@ import {
 } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
+import { VisualSubmitChip } from "./VisualSubmitChip";
+import { readVisualSubmitMessage } from "@t3tools/shared/htmlRender";
 import { McpAppFrame } from "./McpAppFrame";
 import { useThreadShell } from "../../state/entities";
 import { StartWorkPicker, useCanStartWork } from "../work/StartWork";
@@ -2548,6 +2550,21 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       ctx.activeThreadEnvironmentId,
     ],
   );
+
+  // A visual's submitted result reads as a chip, not the JSON the agent parses.
+  const visualSubmit = readVisualSubmitMessage(row.message.text);
+  if (visualSubmit !== undefined) {
+    return (
+      <div className="flex flex-col items-end pe-(--chat-content-inset)">
+        <VisualSubmitChip
+          submit={visualSubmit}
+          createdAt={row.message.createdAt}
+          threadRef={ctx.threadRef}
+          listRef={ctx.listRef}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="group flex flex-col items-end gap-1 pe-(--chat-content-inset)">

@@ -20,6 +20,8 @@ import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { HtmlRenderDialog } from "./HtmlRenderDialog";
+import { HtmlRenderSubmittedBadge } from "./HtmlRenderSubmittedBadge";
+import { useHtmlRenderVisualState } from "./useHtmlRenderVisualBridge";
 import { observeResize } from "~/lib/observeResize";
 
 // A frame may load its URL a little after mounting.
@@ -38,6 +40,7 @@ export function HtmlRenderFrame(props: {
   readonly onFullscreenChange?: (fullscreen: boolean) => void;
 }) {
   const { attachmentId, title } = props.htmlRender;
+  const submitted = useHtmlRenderVisualState(props.threadRef, attachmentId)?.locked === true;
   // The frame takes the page's measured height at its own width, read before
   // first paint so the reserved box is already the right size.
   const boxRef = useRef<HTMLDivElement>(null);
@@ -130,6 +133,7 @@ export function HtmlRenderFrame(props: {
             src={src}
             title={title}
             threadRef={props.threadRef}
+            renderId={attachmentId}
             className={cn(
               "block size-full motion-safe:transition-opacity motion-safe:duration-200",
               !ready && "opacity-0",
@@ -138,6 +142,11 @@ export function HtmlRenderFrame(props: {
             onLoad={showPage}
             onFullscreenChange={onFullscreenChange}
           />
+          {submitted ? (
+            <div className="pointer-events-none absolute end-2 top-2 transition-opacity duration-150 group-hover/html-render:opacity-0">
+              <HtmlRenderSubmittedBadge />
+            </div>
+          ) : null}
           <div className="absolute end-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100">
             <Tooltip>
               <TooltipTrigger
@@ -173,6 +182,8 @@ export function HtmlRenderFrame(props: {
                 src={expandedSrc}
                 title={title}
                 threadRef={props.threadRef}
+                renderId={attachmentId}
+                submitted={submitted}
                 onClose={() => setExpandedSrc(null)}
               />
             )}

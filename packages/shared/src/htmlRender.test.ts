@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   encodeHtmlRenderOutline,
+  formatVisualSubmitMessage,
   HTML_RENDER_MAX_HEIGHT,
   htmlRenderFrameHeight,
   htmlRenderOutlineBoxes,
@@ -15,6 +16,7 @@ import {
   readHtmlRenderKeyDown,
   readHtmlRenderLinkRequest,
   readHtmlRenderReference,
+  readVisualSubmitMessage,
 } from "./htmlRender.ts";
 import { T3_CODE_DARK_THEME_COLORS, T3_CODE_LIGHT_THEME_COLORS } from "./themePalettes.ts";
 import { htmlRenderFromToolItem } from "./toolOutput.ts";
@@ -152,6 +154,44 @@ describe("readHtmlRenderKeyDown", () => {
     expect(readHtmlRenderKeyDown(notification({ key: 1, code: "KeyK" }))).toBeUndefined();
     expect(
       readHtmlRenderKeyDown({ jsonrpc: "2.0", method: "ui/open-link", params: { key: "k" } }),
+    ).toBeUndefined();
+  });
+});
+
+describe("readVisualSubmitMessage", () => {
+  it("reads back what formatVisualSubmitMessage writes", () => {
+    const payload = { kind: "quiz-result", score: 2, answers: ["a", 'say "hi"'] };
+    expect(
+      readVisualSubmitMessage(
+        formatVisualSubmitMessage('Capitals "quiz"', JSON.stringify(payload, null, 2)),
+      ),
+    ).toEqual({
+      title: 'Capitals "quiz"',
+      json: JSON.stringify(payload, null, 2),
+      payload,
+    });
+    expect(readVisualSubmitMessage(formatVisualSubmitMessage("  ", "null"))).toEqual({
+      title: null,
+      json: "null",
+      payload: null,
+    });
+  });
+
+  it("keeps a fence that is not valid JSON as text", () => {
+    expect(readVisualSubmitMessage('[Visual "Plan" submitted]\n```json\n{oops\n```')).toEqual({
+      title: "Plan",
+      json: "{oops",
+      payload: undefined,
+    });
+  });
+
+  it("ignores ordinary messages that only mention a submit", () => {
+    expect(readVisualSubmitMessage('[Visual "Plan" submitted]')).toBeUndefined();
+    expect(
+      readVisualSubmitMessage('I wrote [Visual "Plan" submitted]\n```json\n{}\n```'),
+    ).toBeUndefined();
+    expect(
+      readVisualSubmitMessage('[Visual "Plan" submitted]\n```json\n{}\n```\nAnd one more thing'),
     ).toBeUndefined();
   });
 });
