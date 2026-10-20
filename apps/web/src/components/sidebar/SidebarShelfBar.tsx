@@ -57,7 +57,7 @@ export function SidebarShelfBar({
       {/* One highlight slides between the equal-width segments. */}
       <span
         aria-hidden
-        className="absolute inset-y-0.5 left-0.5 -z-10 rounded-lg border border-(--surface-edge,transparent) bg-(--sidebar-shelf-selected) shadow-(--surface-halo,none) transition-transform duration-(--motion-duration-slow) ease-standard motion-reduce:transition-none"
+        className="corner-glow absolute inset-y-0.5 left-0.5 -z-10 rounded-lg border border-(--surface-edge,transparent) bg-(--sidebar-shelf-selected) shadow-(--surface-halo,none) transition-transform duration-(--motion-duration-slow) ease-standard motion-reduce:transition-none"
         style={{
           width: `calc((100% - 0.25rem) / ${segments.length})`,
           transform: `translateX(${selectedIndex * 100}%)`,
