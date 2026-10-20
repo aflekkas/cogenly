@@ -267,11 +267,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* The send button: the accent, run as the logo's ember gradient from the
      top-left to the bottom-right. While nothing can be sent it is a flat
      grey (89,92,93) with a dark arrow, as in the reference. */
-  --color-send-top: var(--accent-fill);
-  --color-send-bottom: var(--accent-fill-deep);
-  --color-send-top-hover: var(--accent-fill-hover);
-  --color-send-bottom-hover: var(--accent-fill);
-  --color-send-foreground: var(--accent-fill-foreground);
+  --color-send-top: var(--brand-accent-fill);
+  --color-send-bottom: var(--brand-accent-fill-deep);
+  --color-send-top-hover: var(--brand-accent-fill-hover);
+  --color-send-bottom-hover: var(--brand-accent-fill);
+  --color-send-foreground: var(--brand-accent-fill-foreground);
+  /* The brand orange as a colour utility, for the few deliberate uses. */
+  --color-brand-accent: var(--brand-accent-fill);
+  --color-brand-accent-tint: var(--brand-accent-tint);
+  --color-primary-hover: var(--primary-hover);
   --color-send-idle: #595c5d;
   --color-send-idle-foreground: #121516;
   --color-diff-addition: var(--diff-addition);
@@ -1423,20 +1427,22 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --card-foreground: var(--color-zinc-800);
   --popover: var(--color-white);
   --popover-foreground: var(--color-zinc-800);
-  /* The accent is the Cogenly orange from the logo (--color-brand-ember-*).
-     Every accent use (primary, ring, message action, update, send button,
-     text selection) derives from these five, so it changes in one place.
-     Light: a burnt orange that keeps white text at 4.7:1 and reads at 4.7:1
-     as link text on white; the reds stay at hue 0, this sits at 18. */
-  --accent-fill: #c94a14;
-  --accent-fill-hover: #b8420f;
-  --accent-fill-deep: #b03d10;
-  --accent-fill-foreground: var(--color-white);
-  --accent-tint: color-mix(in srgb, var(--accent-fill) 12%, transparent);
-  --accent-ring: var(--accent-fill);
-  --accent-selection: color-mix(in srgb, var(--accent-fill) 28%, transparent);
-  --primary: var(--accent-fill);
-  --primary-foreground: var(--accent-fill-foreground);
+  /* The brand orange from the logo (--color-brand-ember-*) is used sparingly:
+     the enabled send button, the boot splash and the "needs you" signal.
+     Light: a burnt orange that keeps white text at 4.7:1; the reds stay at
+     hue 0, this sits at 18. */
+  --brand-accent-fill: #c94a14;
+  --brand-accent-fill-hover: #b8420f;
+  --brand-accent-fill-deep: #b03d10;
+  --brand-accent-fill-foreground: var(--color-white);
+  --brand-accent-tint: color-mix(in srgb, var(--brand-accent-fill) 12%, transparent);
+  /* Everything else that used to be the accent (primary buttons, focus rings,
+     checks, switches, sliders, progress, badges, links, text selection) is
+     neutral: near-black on white here, near-white on dark below. */
+  --primary: #141416;
+  --primary-hover: #2b2b2f;
+  --primary-foreground: var(--color-white);
+  --selection-surface: color-mix(in srgb, var(--foreground) 18%, transparent);
   --secondary: var(--color-zinc-50);
   --secondary-foreground: var(--color-zinc-800);
   --muted: var(--color-zinc-50);
@@ -1458,7 +1464,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --destructive: var(--error);
   --border: var(--color-zinc-200);
   --input: var(--color-zinc-300);
-  --ring: var(--accent-ring);
+  /* Focus rings are the foreground at moderate alpha, visible on any surface:
+     55% of zinc-800 reads at 4.3:1 on white; dark uses 45% of its near-white
+     foreground, 4.2:1 on the canvas. */
+  --ring: color-mix(in srgb, var(--foreground) 55%, transparent);
   --destructive-foreground: var(--error-foreground);
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-700);
@@ -1469,7 +1478,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --warning-surface: color-mix(in srgb, var(--warning) 8%, transparent);
   --update: var(--primary);
   --update-foreground: var(--primary);
-  --update-surface: var(--accent-tint);
+  --update-surface: color-mix(in srgb, var(--primary) 12%, transparent);
   /* Keep every sidebar primitive on the same light surface hierarchy, including
      portaled mobile sheets and settings navigation outside the app sidebar. */
   --sidebar: var(--color-zinc-50);
@@ -1555,15 +1564,20 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --card-foreground: #f2f4f7;
     --popover: #16181b;
     --popover-foreground: #f2f4f7;
-    /* Dark: the brand orange itself (hue 20). It reads at 7.5:1 as text on
-       the canvas. Text and icons on an orange fill are white, matching the
-       glyph on the app icon. */
-    --accent-fill: #ff7b3a;
-    --accent-fill-hover: #ff8a4c;
-    --accent-fill-deep: #e63e22;
-    --accent-fill-foreground: var(--color-white);
-    --accent-tint: color-mix(in srgb, var(--accent-fill) 14%, transparent);
-    --accent-selection: color-mix(in srgb, var(--accent-fill) 32%, transparent);
+    /* Dark: the brand orange itself (hue 20), white on it like the glyph on
+       the app icon. */
+    --brand-accent-fill: #ff7b3a;
+    --brand-accent-fill-hover: #ff8a4c;
+    --brand-accent-fill-deep: #e63e22;
+    --brand-accent-fill-foreground: var(--color-white);
+    --brand-accent-tint: color-mix(in srgb, var(--brand-accent-fill) 14%, transparent);
+    /* Neutral primary: the foreground white with the canvas as its text
+       (17:1), a step dimmer on hover. */
+    --primary: #f2f4f7;
+    --primary-hover: #d9dbe0;
+    --primary-foreground: #0d0d0f;
+    --ring: color-mix(in srgb, var(--foreground) 45%, transparent);
+    --selection-surface: color-mix(in srgb, var(--foreground) 24%, transparent);
     --secondary: --alpha(var(--color-white) / 3%);
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 3%);
@@ -1586,7 +1600,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --warning-foreground: var(--color-amber-400);
     --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
     --update-foreground: var(--primary);
-    --update-surface: var(--accent-tint);
+    --update-surface: color-mix(in srgb, var(--primary) 12%, transparent);
     --sidebar: var(--card);
     --sidebar-control-surface: var(--muted);
     --sidebar-row-hover: var(--accent);
@@ -2191,9 +2205,9 @@ code {
   .drag-region > * {
     -webkit-app-region: initial;
   }
-  /* Text selection carries the accent, not the browser's blue. */
+  /* Text selection is a neutral wash of the foreground, not the browser's blue. */
   ::selection {
-    background-color: var(--accent-selection);
+    background-color: var(--selection-surface);
   }
 }
 
@@ -2343,9 +2357,13 @@ code {
   text-decoration: none;
 }
 
-/* File links are Chips and own their color and focus ring. */
+/* File links are Chips and own their color and focus ring. Links are
+   neutral: foreground text with a quiet underline marks them. */
 .chat-markdown a:not(.chat-markdown-file-link) {
-  color: var(--primary);
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentcolor 40%, transparent);
+  text-underline-offset: 0.15em;
 }
 
 .chat-markdown a:not(.chat-markdown-file-link, [data-markdown-image-link]):hover,
