@@ -332,7 +332,13 @@ function ToggleIcon({ expanded }: { expanded: boolean }) {
       tabIndex={-1}
       className="pointer-events-none"
     >
-      <ChevronDownIcon className={cn("size-3.5", !expanded && "rotate-180")} />
+      {/* Turns in place, in step with the disclosure it toggles. */}
+      <ChevronDownIcon
+        className={cn(
+          "size-3.5 transition-[rotate] duration-200 ease-standard motion-reduce:transition-none",
+          !expanded && "rotate-180",
+        )}
+      />
     </Button>
   );
 }

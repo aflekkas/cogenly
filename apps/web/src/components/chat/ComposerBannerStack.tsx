@@ -326,9 +326,10 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
  * and rises in, collapses the same way when the last notice goes, and eases
  * between two notices' heights on a swap (the new one fading in over the old,
  * see LeavingNotice). Web Animations, so an interrupted change starts from
- * where the frame is. Reduced motion fades only.
+ * where the frame is. Reduced motion fades only. The queue tray and its rows
+ * open and close on it too.
  */
-function NoticePresenceFrame({
+export function NoticePresenceFrame({
   open,
   swapKey,
   animateMountRef,
@@ -352,11 +353,14 @@ function NoticePresenceFrame({
     const mounting = settledHeightRef.current === null;
     const running = motionRef.current;
     const current = getComputedStyle(frame);
-    const fromHeight = running
-      ? frame.getBoundingClientRect().height
-      : mounting
-        ? 0
-        : settledHeightRef.current!;
+    // A close starts from the height it is drawn at now: held content may have
+    // resized since it settled (a disclosure inside it opened or closed).
+    const fromHeight =
+      running || (!open && !mounting)
+        ? frame.getBoundingClientRect().height
+        : mounting
+          ? 0
+          : settledHeightRef.current!;
     const fromOpacity = running ? Number(current.opacity) : mounting ? 0 : 1;
     const fromTranslate = running
       ? current.translate === "none"
