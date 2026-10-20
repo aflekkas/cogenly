@@ -1609,8 +1609,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // a useful hierarchy nor a reliable hover cue. Status now lives in the row
   // content; surface is reserved for interaction (hover, multi-select, route).
   const rowSurfaceClassName = cn(
-    // The corner glow shows only on the selected card.
-    "group/sidebar-row corner-glow relative w-full cursor-pointer overflow-hidden rounded-[10px] text-left outline-none select-none not-[.state-selected]:[--corner-glow:0%] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+    // Only the selected card is lit: a hairline rim plus a soft wash from the
+    // top-left corner that fades out about halfway across, as in the reference.
+    "group/sidebar-row corner-glow relative w-full cursor-pointer overflow-hidden rounded-rail text-left outline-none select-none [--corner-glow-border:0px] not-[.state-selected]:[--corner-glow:0%] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     props.isActive || isSelected || props.sweepAction !== null
       ? "state-selected"
@@ -1662,7 +1663,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         aria-hidden
         className={cn(
           "min-w-0 flex-1 transition-[color,opacity] duration-(--motion-duration-base) motion-reduce:transition-none",
-          variant === "card" ? "text-[15px]" : "text-sm",
+          variant === "card" ? "text-card" : "text-sm",
           shouldRecede ? "font-normal" : "font-medium",
           variant === "card"
             ? cn(

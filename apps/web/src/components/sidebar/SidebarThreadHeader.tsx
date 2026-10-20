@@ -75,7 +75,7 @@ export function SidebarThreadHeader({
     : newItemLabel;
 
   return (
-    <div className="corner-glow relative flex h-12 items-center gap-1 rounded-rail border border-(--surface-edge,rgb(255_255_255/6%)) bg-(--sidebar-input-surface) shadow-(--surface-halo,none) pr-1 pl-2.5">
+    <div className="corner-glow relative flex h-12 items-center [--corner-glow:2%] gap-1 rounded-rail border border-(--surface-edge,rgb(255_255_255/6%)) bg-(--sidebar-input-surface) shadow-(--surface-halo,none) pr-1 pl-2.5">
       <div className="flex h-8 min-w-0 flex-1 items-center gap-2 text-sm font-medium text-sidebar-muted-foreground">
         <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
         <SidebarInput
