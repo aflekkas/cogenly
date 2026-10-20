@@ -1,14 +1,17 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { MuseSettings } from "../settings.ts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
+import * as TestClock from "effect/testing/TestClock";
 import { vi } from "vite-plus/test";
 
 import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import type { MuseSdkHost, MuseSdkHostOptions } from "./sdk.ts";
 import { COMPACT_SLASH_COMMAND } from "@t3tools/provider-core/server/snapshotProbe";
+import { makeMuseLimitsBumpController } from "./limitsBump.ts";
 import { checkMuseProviderStatus } from "./status.ts";
 import { parseMuseUsageLimits } from "./usageLimits.ts";
 import { writeCachedMuseUsageLimits } from "./usageLimitsCache.ts";
@@ -21,7 +24,9 @@ const makeHost = (catalog: Record<string, unknown>) => {
       serverInfo: { name: "muse", version: "1.4.11" },
     },
     connection: {
-      request: vi.fn(async (method: string) => (method === "usage/read" ? {} : catalog)),
+      request: vi.fn(async (method: string, _params?: Record<string, unknown>) =>
+        method === "usage/read" ? {} : catalog,
+      ),
       command: vi.fn(async () => ({})),
       mintCommandId: () => "test-command",
       onNotification: () => {},
@@ -179,11 +184,12 @@ it.layer(NodeServices.layer)("Muse status", (it) => {
         const fs = yield* FileSystem.FileSystem;
         const binaryPath = yield* fakeCli();
         const host = makeHost(metaCatalog);
+        const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
         const cached = parseMuseUsageLimits({
-          observedAtMs: 1_792_166_400_000,
+          observedAtMs: nowMs,
           tier: "pro",
-          window: { usedPercent: 12, resetsAtMs: 1_792_184_400_000, windowDurationMins: 300 },
-          weekly: { usedPercent: 34, resetsAtMs: 1_792_771_200_000 },
+          window: { usedPercent: 12, resetsAtMs: nowMs + 3_600_000, windowDurationMins: 300 },
+          weekly: { usedPercent: 34, resetsAtMs: nowMs + 86_400_000 },
         })!;
         const directory = yield* fs.makeTempDirectoryScoped({ prefix: "muse-status-cache-" });
         const cachePath = `${directory}/muse.json`;
@@ -198,6 +204,41 @@ it.layer(NodeServices.layer)("Muse status", (it) => {
         expect(snapshot.status).toBe("ready");
         expect(snapshot.usageLimits).toEqual(cached);
         expect(snapshot.usageLimits?.checkedAt).toBe(cached.checkedAt);
+      }),
+    ),
+  );
+
+  it.effect("reads reset windows as reset instead of stale numbers", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // The test clock starts at the epoch, ahead of nothing; move it past the fixture resets.
+        yield* TestClock.adjust(1_792_200_000_000);
+        const fs = yield* FileSystem.FileSystem;
+        const binaryPath = yield* fakeCli();
+        const host = makeHost(metaCatalog);
+        // Both resets passed long ago; the bump turn this fixture cannot run
+        // would replace these, so the probe shows reset bars instead.
+        const cached = parseMuseUsageLimits({
+          observedAtMs: 1_700_000_000_000,
+          tier: "pro",
+          window: { usedPercent: 87, resetsAtMs: 1_700_001_000_000, windowDurationMins: 300 },
+          weekly: { usedPercent: 64, resetsAtMs: 1_700_002_000_000 },
+        })!;
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "muse-status-cache-" });
+        const cachePath = `${directory}/muse.json`;
+        yield* writeCachedMuseUsageLimits(cachePath, cached);
+        const snapshot = yield* checkMuseProviderStatus(
+          settings({ enabled: true, binaryPath, limitsAutoRefresh: false }),
+          undefined,
+          undefined,
+          async () => host,
+          cachePath,
+        );
+        expect(snapshot.usageLimits?.windows.map((window) => window.usedPercent)).toEqual([0, 0]);
+        expect(snapshot.usageLimits?.checkedAt).toBe(cached.checkedAt);
+        expect(snapshot.usageLimits?.windows.map((window) => window.resetsAt)).toEqual(
+          cached.windows.map((window) => window.resetsAt),
+        );
       }),
     ),
   );
@@ -235,6 +276,73 @@ it.layer(NodeServices.layer)("Muse status", (it) => {
         );
         expect(snapshot.usageLimits?.windows.map((window) => window.usedPercent)).toEqual([56, 78]);
         expect(snapshot.usageLimits?.checkedAt).not.toBe(stale.checkedAt);
+      }),
+    ),
+  );
+
+  it.effect("spends one bump turn on the cheapest model when nothing was ever observed", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const binaryPath = yield* fakeCli();
+        const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+        const catalog = {
+          providerId: "meta",
+          models: [
+            {
+              modelId: "muse-wonder-1.0",
+              displayLabel: "Wonder",
+              providerId: "meta",
+              isDefault: true,
+            },
+            {
+              modelId: "muse-spark-1.2",
+              displayLabel: "Spark",
+              providerId: "meta",
+              isDefault: false,
+            },
+          ],
+        };
+        const fresh = {
+          observedAtMs: nowMs,
+          tier: "pro",
+          window: { usedPercent: 7, resetsAtMs: nowMs + 3_600_000, windowDurationMins: 300 },
+          weekly: { usedPercent: 16, resetsAtMs: nowMs + 86_400_000 },
+        };
+        let notify: (notification: { method: string; params: unknown }) => void = () => {};
+        let usageReads = 0;
+        const seen: Array<{ readonly method: string; readonly params: unknown }> = [];
+        const host = makeHost(catalog);
+        vi.mocked(host.connection.request).mockImplementation(async (method, params) => {
+          seen.push({ method, params });
+          if (method === "model/list") return catalog;
+          // The probe read finds nothing; the bump's final read finds the turn's headers.
+          if (method === "usage/read") return usageReads++ === 0 ? {} : { usage: fresh };
+          if (method === "session/start") return { session: { sessionId: "bump-session" } };
+          if (method === "turn/start") {
+            notify({ method: "usage/changed", params: fresh });
+            notify({ method: "turn/completed", params: { terminal: "completed" } });
+            return { turnId: "bump-turn" };
+          }
+          return {};
+        });
+        host.connection.onNotification = ((handler: typeof notify) => {
+          notify = handler;
+        }) as MuseSdkHost["connection"]["onNotification"];
+        const bump = yield* makeMuseLimitsBumpController();
+        const snapshot = yield* checkMuseProviderStatus(
+          settings({ enabled: true, binaryPath }),
+          undefined,
+          undefined,
+          async () => host,
+          undefined,
+          bump,
+        );
+        expect(snapshot.status).toBe("ready");
+        expect(snapshot.usageLimits?.unavailable).toBeUndefined();
+        expect(snapshot.usageLimits?.windows.map((window) => window.usedPercent)).toEqual([7, 16]);
+        expect(seen.find((call) => call.method === "session/start")?.params).toMatchObject({
+          modelId: "muse-spark-1.2",
+        });
       }),
     ),
   );

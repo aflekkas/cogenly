@@ -462,12 +462,28 @@ describe("MuseAdapterV2", () => {
         },
       );
       assert.isTrue(seen.some((options) => options.readOnly === true));
+      // The read-only host is ephemeral and refuses profile selection.
+      const started = yield* fake.takeCall("session/start");
+      assert.notProperty(started.params, "permissionProfile");
       yield* harness.runtime.startTurn(yield* turnInput(harness.providerThread, 1, policy));
       const call = yield* fake.takeCall("turn/start");
       const text = JSON.stringify(call.params.input);
       assert.include(text, "<conversation_mode>");
       assert.include(text, "Start Work");
       yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
+  it.effect("omits the permission profile when a conversation host resumes", () =>
+    Effect.gen(function* () {
+      const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        ...runtimePolicy,
+        conversationMode: true,
+      });
+      const fake = yield* makeFakeMuse();
+      yield* makeHarness(fake, INSTANCE_ID, "saved-session", undefined, undefined, policy);
+      const resumed = yield* fake.takeCall("session/resume");
+      assert.notProperty(resumed.params, "permissionProfile");
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 

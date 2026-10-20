@@ -23,6 +23,7 @@ import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEve
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import { enrichMuseSnapshot, latestMuseVersion, museMaintenance } from "./maintenance.ts";
 import { createMuseSdkHost, makeMuseEnvironment } from "./sdk.ts";
+import { makeMuseLimitsBumpController } from "./limitsBump.ts";
 import { resolveMuseUsageLimitsCachePath, writeCachedMuseUsageLimits } from "./usageLimitsCache.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -100,6 +101,7 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv, MuseUsageRe
         cacheDir: host.paths.providerStatusCacheDir,
         instanceId,
       }).pipe(Effect.provideService(Path.Path, path));
+      const limitsBump = yield* makeMuseLimitsBumpController();
       const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
       const resolveInstallation = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(museMaintenance, {
@@ -140,6 +142,7 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv, MuseUsageRe
           cwd,
           createMuseSdkHost,
           usageLimitsCachePath,
+          limitsBump,
         ).pipe(
           Effect.map(stampIdentity),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),

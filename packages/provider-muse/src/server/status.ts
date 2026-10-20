@@ -1,4 +1,5 @@
 import { readMuseUsageLimits } from "./usageLimits.ts";
+import type { MuseLimitsBumpController } from "./limitsBump.ts";
 import { ServerProviderModel } from "@t3tools/contracts";
 import { MuseSettings } from "../settings.ts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -57,6 +58,7 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
   cwd?: string,
   createHost: typeof createMuseSdkHost = createMuseSdkHost,
   usageLimitsCachePath?: string,
+  bump?: MuseLimitsBumpController,
 ) {
   if (!settings.enabled) return yield* makePendingMuseProvider(settings);
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
@@ -142,6 +144,8 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
     cwd,
     createHost,
     usageLimitsCachePath,
+    models,
+    bump,
   );
   return {
     ...snapshot(

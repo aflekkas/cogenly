@@ -1830,19 +1830,29 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           const startModel = yield* resolveModel(args.modelSelection);
           // Resume selects it too, since the thread may predate it or its mode changed.
           // `session/setPermissionProfile` would need Muse's experimental API.
-          const permissionProfile = musePermissionProfile(args.runtimePolicy.runtimeMode);
+          // Read-only hosts are ephemeral: they fix their own permission
+          // surface and refuse any profile selection, so only Work
+          // sessions name one.
+          const permissionProfile =
+            input.runtimePolicy.conversationMode === true
+              ? undefined
+              : musePermissionProfile(args.runtimePolicy.runtimeMode);
           const result = yield* request(
             requestedId ? "session/resume" : "session/start",
             requestedId
               ? // Cogenly already has the transcript; skip Muse's history payload.
-                { excludeItems: true, ...(config ? { config } : {}), permissionProfile }
+                {
+                  excludeItems: true,
+                  ...(config ? { config } : {}),
+                  ...(permissionProfile ? { permissionProfile } : {}),
+                }
               : {
                   workspaceRoot: cwd,
                   ...(config ? { config } : {}),
                   ...(startModel ? { modelId: startModel } : {}),
                   providerId: "meta",
                   approvalMode: museApprovalMode(args.runtimePolicy.runtimeMode),
-                  permissionProfile,
+                  ...(permissionProfile ? { permissionProfile } : {}),
                 },
           ).pipe(
             Effect.catch((error) => {
