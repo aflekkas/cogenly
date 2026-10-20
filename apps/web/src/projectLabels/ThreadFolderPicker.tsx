@@ -17,11 +17,10 @@ import {
   ComboboxTrigger,
 } from "../components/ui/combobox";
 import { ProjectContextToggle } from "../context/ThreadContext";
-import { useThreadKindResolver } from "../hooks/useThreadKind";
 import { useThreadShell } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
-import { PROJECT_LABEL_COLORS, threadFolderState } from "./projectLabels.logic";
+import { PROJECT_LABEL_COLORS, priorFiling, threadFolderState } from "./projectLabels.logic";
 import { ProjectColorDot } from "./ProjectTag";
 import { reportProjectFolderFailure, useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
@@ -57,7 +56,6 @@ export function ThreadFolderPicker(props: {
   const thread = useThreadShell(
     useMemo(() => scopeThreadRef(environmentId, threadId), [environmentId, threadId]),
   );
-  const kindOf = useThreadKindResolver();
   const canMove = useAtomValue(
     serverEnvironment.moveThreadProjectFolder.permissionAtom(environmentId),
   );
@@ -73,7 +71,7 @@ export function ThreadFolderPicker(props: {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const state = thread ? threadFolderState(thread, kindOf(thread) === "work", directory) : null;
+  const state = thread ? threadFolderState(thread, directory) : null;
   const current = state?.current ?? null;
 
   const options = useMemo((): FolderOption[] => {
@@ -87,7 +85,7 @@ export function ThreadFolderPicker(props: {
         id: entry.label.id,
         name: entry.label.name,
       }));
-    if (needle === "" && state.current !== null && !state.viaRepository) {
+    if (needle === "" && state.current !== null && state.removable) {
       result.push({ kind: "remove", key: "remove" });
     }
     if (
@@ -104,7 +102,7 @@ export function ThreadFolderPicker(props: {
   // Nothing to show and nothing the viewer could do.
   if (!canMove && current === null) return null;
 
-  const previous = current && { id: current.label.id, name: current.label.name };
+  const previous = priorFiling(state);
   const choose = async (option: FolderOption) => {
     if (busy || !canMove) return;
     setBusy(true);

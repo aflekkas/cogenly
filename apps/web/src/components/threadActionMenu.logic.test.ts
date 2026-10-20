@@ -25,7 +25,7 @@ function stateFor(kind: ThreadKind, overrides: Partial<ThreadActionMenuState> = 
     snoozePresets: [],
     folder: {
       current: { key: "env:spawn", id: "spawn", name: "Spawn" },
-      viaRepository: false,
+      removable: true,
       options: [
         { id: "bartr", name: "Bartr" },
         { id: "spawn", name: "Spawn" },
@@ -187,7 +187,7 @@ describe("Move to folder in the thread action menu", () => {
   });
 
   it("does not offer removal for Work that sits in its repository's folder", () => {
-    const items = folderItems(stateFor("work", { folder: { ...base, viaRepository: true } }));
+    const items = folderItems(stateFor("work", { folder: { ...base, removable: false } }));
     expect(ids(items)).not.toContain("remove-folder");
     expect(ids(items)).toContain("move-folder:bartr");
   });

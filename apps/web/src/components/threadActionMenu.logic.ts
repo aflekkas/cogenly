@@ -106,8 +106,8 @@ export interface ThreadActionMenuState {
 export interface ThreadActionMenuFolder {
   /** `key` opens the folder's view; `id` is what a move sends. */
   readonly current: { readonly key: string; readonly id: string; readonly name: string } | null;
-  /** Work in its repository's folder: removing would leave it there, so it is not offered. */
-  readonly viaRepository: boolean;
+  /** Only an explicit filing offers "Remove from folder"; Work in its repository's folder does not. */
+  readonly removable: boolean;
   readonly options: ReadonlyArray<{ readonly id: string; readonly name: string }>;
   /** The move command's permission on the thread's environment. */
   readonly canMove: boolean;
@@ -146,7 +146,7 @@ function folderMenuItems(
     checked: option.id === current?.id,
     disabled: disabled || option.id === current?.id,
   }));
-  if (current !== null && !folder.viaRepository) {
+  if (current !== null && folder.removable) {
     children.push({
       id: "remove-folder",
       label: "Remove from folder",

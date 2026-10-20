@@ -79,7 +79,7 @@ import {
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
 import { ProjectColorDot } from "../projectLabels/ProjectTag";
-import { threadFolderState } from "../projectLabels/projectLabels.logic";
+import { priorFiling, threadFolderState } from "../projectLabels/projectLabels.logic";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
 import { requestAgentCreation } from "../agents/AgentsCreateHost";
@@ -1915,16 +1915,9 @@ function OpenCommandPaletteDialog(props: {
     },
   });
   if (activeThread && (activeCapabilities?.projectFolder ?? true)) {
-    const folderState = threadFolderState(
-      activeThread,
-      activeThreadKind === "work",
-      activeFolderDirectory,
-    );
+    const folderState = threadFolderState(activeThread, activeFolderDirectory);
     const thread = activeThread;
-    const previous = folderState.current && {
-      id: folderState.current.label.id,
-      name: folderState.current.label.name,
-    };
+    const previous = priorFiling(folderState);
     if (folderState.options.length > 0) {
       actionItems.push({
         kind: "submenu",
@@ -1965,7 +1958,7 @@ function OpenCommandPaletteDialog(props: {
         ],
       });
     }
-    if (folderState.current !== null && !folderState.viaRepository) {
+    if (folderState.current !== null && folderState.removable) {
       actionItems.push({
         kind: "action",
         value: "action:remove-thread-from-folder",

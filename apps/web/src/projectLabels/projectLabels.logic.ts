@@ -78,30 +78,35 @@ export function repositoryFolderMove(
   return { from: current, needsConfirm: current.key !== targetKey };
 }
 
+export type ProjectFolderSource = "explicit" | "repository";
+
+interface FolderedThread {
+  readonly environmentId: EnvironmentId;
+  readonly source: {
+    readonly projectFolderId?: ProjectLabelId | null | undefined;
+    readonly projectFolderSource?: ProjectFolderSource | null | undefined;
+  };
+}
+
 export interface ThreadFolderState {
   /** The folder the thread is in now; null when unfiled or the folder is unknown here. */
   readonly current: EnvironmentProjectLabel | null;
-  /**
-   * True when Work sits in its repository's folder, so "Remove from folder"
-   * would leave it where it is. Moving it elsewhere still works.
-   */
+  /** How it got there: moved by hand, or Work following its repository. */
+  readonly source: ProjectFolderSource | null;
+  /** Work in its repository's folder. It can move elsewhere, but not be removed. */
   readonly viaRepository: boolean;
+  /** Only an explicit filing can be removed; removing restores the repository default. */
+  readonly removable: boolean;
   /** Folders on the thread's environment it can move to, alphabetical. */
   readonly options: ReadonlyArray<EnvironmentProjectLabel>;
 }
 
-/** Where a thread is filed and where it could go, for move menus. */
+/** Where a thread is filed, how, and where it could go, for move menus. */
 export function threadFolderState(
-  thread: {
-    readonly environmentId: EnvironmentId;
-    readonly projectId: ProjectId;
-    readonly source: { readonly projectFolderId?: ProjectLabelId | null | undefined };
-  },
-  isWork: boolean,
+  thread: FolderedThread,
   directory: {
     readonly labels: ReadonlyArray<EnvironmentProjectLabel>;
     readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
-    readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
   },
 ): ThreadFolderState {
   const folderId = threadProjectFolderId(thread);
@@ -109,12 +114,35 @@ export function threadFolderState(
     folderId === null
       ? null
       : (directory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
-  const repositoryFolder = isWork
-    ? directory.folderByRepository.get(scopedRepositoryKey(thread.environmentId, thread.projectId))
-    : undefined;
+  const source = current === null ? null : (thread.source.projectFolderSource ?? null);
   return {
     current,
-    viaRepository: current !== null && repositoryFolder?.key === current.key,
+    source,
+    viaRepository: source === "repository",
+    removable: source === "explicit",
     options: directory.labels.filter((entry) => entry.environmentId === thread.environmentId),
   };
+}
+
+/** A filing to put back: the folder and how the thread was in it. */
+export interface PriorFiling {
+  readonly id: ProjectLabelId;
+  readonly name: string;
+  readonly source: ProjectFolderSource | null;
+}
+
+/**
+ * The folder id an Undo sends to restore `prior` exactly. A repository-derived
+ * or unfiled thread gets null (no explicit filing), so it keeps following its
+ * repository; an explicit filing gets its folder back.
+ */
+export function undoFolderId(prior: PriorFiling | null): ProjectLabelId | null {
+  return prior?.source === "explicit" ? prior.id : null;
+}
+
+/** The prior filing to remember before a move, from the thread's folder state. */
+export function priorFiling(state: ThreadFolderState): PriorFiling | null {
+  return state.current
+    ? { id: state.current.label.id, name: state.current.label.name, source: state.source }
+    : null;
 }

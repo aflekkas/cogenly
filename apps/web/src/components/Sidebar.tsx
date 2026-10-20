@@ -220,6 +220,7 @@ import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { RepositoryGroupHeading } from "./sidebar/modes/RepositoryGroupHeading";
 import {
   projectLabelKey,
+  priorFiling,
   threadFolderState,
   threadProjectFolderId,
   type ProjectLabelKey,
@@ -4008,7 +4009,7 @@ export default function Sidebar() {
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
-        const folderState = threadFolderState(thread, threadKind === "work", projectLabelDirectory);
+        const folderState = threadFolderState(thread, projectLabelDirectory);
         const threadProjectGroup =
           projectGroupsRef.current.find((project) =>
             project.memberProjectRefs.some(
@@ -4052,7 +4053,7 @@ export default function Sidebar() {
                   id: folderState.current.label.id,
                   name: folderState.current.label.name,
                 },
-                viaRepository: folderState.viaRepository,
+                removable: folderState.removable,
                 options: folderState.options.map((entry) => ({
                   id: entry.label.id,
                   name: entry.label.name,
@@ -4086,12 +4087,11 @@ export default function Sidebar() {
                   (entry) => entry.label.id === clickedId.slice("move-folder:".length),
                 ) ?? null);
           if (clickedId !== "remove-folder" && target === null) return;
-          const previous = folderState.current;
           await moveThreadToFolder({
             environmentId: thread.environmentId,
             threadId: thread.id,
             folder: target && { id: target.label.id, name: target.label.name },
-            previous: previous && { id: previous.label.id, name: previous.label.name },
+            previous: priorFiling(folderState),
           });
           return;
         }

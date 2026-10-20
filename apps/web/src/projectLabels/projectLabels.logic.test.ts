@@ -7,10 +7,12 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  priorFiling,
   projectLabelKey,
   repositoryFolderMove,
   scopedRepositoryKey,
   threadFolderState,
+  undoFolderId,
   type EnvironmentProjectLabel,
 } from "./projectLabels.logic";
 
@@ -42,38 +44,57 @@ const directory = {
   byKey: new Map([bartr, remote, spawn].map((entry) => [entry.key, entry] as const)),
   folderByRepository: new Map([[scopedRepositoryKey(env, "server"), spawn]]),
 };
-const thread = (projectId: string, projectFolderId: string | null) => ({
+const thread = (
+  projectFolderId: string | null,
+  projectFolderSource: "explicit" | "repository" | null = null,
+) => ({
   environmentId: env,
-  projectId: ProjectId.make(projectId),
   source: {
     projectFolderId: projectFolderId === null ? null : ProjectLabelId.make(projectFolderId),
+    projectFolderSource,
   },
 });
 
 describe("threadFolderState", () => {
   it("offers only folders on the thread's own environment", () => {
-    const state = threadFolderState(thread("scratch", null), false, directory);
+    const state = threadFolderState(thread(null), directory);
     expect(state.current).toBeNull();
     expect(state.options.map((entry) => entry.label.name)).toEqual(["Bartr", "Spawn Partners"]);
   });
 
-  it("marks Work in its repository's folder, so removing it is not offered", () => {
-    expect(threadFolderState(thread("server", "spawn"), true, directory)).toMatchObject({
+  it("lets only an explicit filing be removed; Work in its repository's folder cannot", () => {
+    expect(threadFolderState(thread("spawn", "repository"), directory)).toMatchObject({
       current: spawn,
+      source: "repository",
       viaRepository: true,
+      removable: false,
     });
-    // Work filed elsewhere, and chats, can always come back out.
-    expect(threadFolderState(thread("server", "bartr"), true, directory).viaRepository).toBe(false);
-    expect(threadFolderState(thread("server", "spawn"), false, directory).viaRepository).toBe(
-      false,
-    );
+    expect(threadFolderState(thread("spawn", "explicit"), directory)).toMatchObject({
+      viaRepository: false,
+      removable: true,
+    });
+    // An older server sends no source: show the folder, offer no removal.
+    expect(threadFolderState(thread("spawn"), directory).removable).toBe(false);
   });
 
   it("treats a folder this client does not know as unfiled", () => {
-    expect(threadFolderState(thread("scratch", "gone"), false, directory).current).toBeNull();
+    const state = threadFolderState(thread("gone", "explicit"), directory);
+    expect(state.current).toBeNull();
+    expect(state.source).toBeNull();
   });
 });
 
+describe("undo of a move", () => {
+  it("restores the exact prior filing", () => {
+    const explicit = priorFiling(threadFolderState(thread("bartr", "explicit"), directory));
+    expect(undoFolderId(explicit)).toBe("bartr");
+    // Repository-derived Work goes back to having no explicit filing, so it keeps following its repo.
+    const derived = priorFiling(threadFolderState(thread("spawn", "repository"), directory));
+    expect(derived).toMatchObject({ id: "spawn", source: "repository" });
+    expect(undoFolderId(derived)).toBeNull();
+    expect(undoFolderId(priorFiling(threadFolderState(thread(null), directory)))).toBeNull();
+  });
+});
 describe("repositoryFolderMove", () => {
   it("asks before taking a repository out of another folder", () => {
     expect(repositoryFolderMove(bartr.key, undefined)).toEqual({ from: null, needsConfirm: false });

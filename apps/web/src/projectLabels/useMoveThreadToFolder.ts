@@ -7,6 +7,7 @@ import type * as Cause from "effect/Cause";
 import { useCallback } from "react";
 
 import { toastManager } from "../components/ui/toast";
+import { undoFolderId, type PriorFiling } from "./projectLabels.logic";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 
@@ -42,8 +43,8 @@ export function useMoveThreadToFolder() {
       readonly environmentId: EnvironmentId;
       readonly threadId: ThreadId;
       readonly folder: FolderRef | null;
-      /** Where the thread was, for the toast and its Undo. */
-      readonly previous: FolderRef | null;
+      /** Where the thread was and how, so Undo restores that exact filing. */
+      readonly previous: PriorFiling | null;
       readonly undoable?: boolean;
     }): Promise<boolean> => {
       const { environmentId, threadId, folder, previous } = input;
@@ -80,7 +81,7 @@ export function useMoveThreadToFolder() {
                   toastManager.close(id);
                   void move({
                     environmentId,
-                    input: { threadId, folderId: previous?.id ?? null },
+                    input: { threadId, folderId: undoFolderId(previous) },
                   }).then((undo) => {
                     if (undo._tag === "Failure" && !isAtomCommandInterrupted(undo)) {
                       reportProjectFolderFailure("Could not undo the move", undo);

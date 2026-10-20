@@ -117,23 +117,17 @@ function SidebarBrand() {
       className="relative z-10 ml-[max(var(--sidebar-content-inset),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md text-foreground outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex"
       to="/"
     >
-      <SidebarBrandMark bootSplashTarget label={title} />
+      <SidebarBrandMark label={title} />
     </Link>
   );
 }
 
-function SidebarBrandMark({
-  bootSplashTarget = false,
-  label,
-}: {
-  bootSplashTarget?: boolean;
-  label: string;
-}) {
+function SidebarBrandMark({ label }: { label: string }) {
   return (
     // Center the visible capitals on the mark, without the font's ascender/descender space.
     // Padding keeps ascenders and round-letter overshoot inside the truncation clip.
     <span className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold tracking-brand">
-      <CogenlyMark bootSplashTarget={bootSplashTarget} />
+      <CogenlyMark />
       <span className="truncate [text-box:trim-both_cap_alphabetic] supports-[text-box:trim-both_cap_alphabetic]:py-1">
         {label}
       </span>

@@ -1,16 +1,14 @@
 import { FolderPlusIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
-import {
-  projectContentsCount,
-  projectFolderSummary,
-} from "../../../projectLabels/projectContents.logic";
+import { projectFolderSummary } from "../../../projectLabels/projectContents.logic";
 import type {
   EnvironmentProjectLabel,
   ProjectLabelKey,
 } from "../../../projectLabels/projectLabels.logic";
 import { ProjectColorDot } from "../../../projectLabels/ProjectTag";
-import { useProjectContents } from "../../../projectLabels/useProjectContents";
+import { useProjectLabelDirectory } from "../../../projectLabels/useProjectLabels";
+import { useConnectedEnvironmentIds } from "../../../state/environments";
 
 /**
  * The Projects mode list: every project folder across connected machines,
@@ -23,7 +21,7 @@ export function SidebarProjectsList(props: {
   onOpenProject: (entry: EnvironmentProjectLabel) => void;
   onCreateProject: () => void;
 }) {
-  const { directory, byProject } = useProjectContents();
+  const directory = useProjectLabelDirectory(useConnectedEnvironmentIds());
   if (directory.labels.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground">
@@ -43,7 +41,7 @@ export function SidebarProjectsList(props: {
     <ul aria-label="Projects" className="flex flex-col gap-1">
       {directory.labels.map((entry) => {
         const repositoryCount = entry.label.repositoryIds.length;
-        const threadCount = projectContentsCount(byProject.get(entry.key));
+        const threadCount = entry.label.threadCount;
         const active = entry.key === props.activeProjectKey;
         const environment = props.environmentLabel(entry);
         return (

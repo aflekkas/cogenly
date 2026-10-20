@@ -7,13 +7,14 @@ import { useEffect, useRef, useState } from "react";
 import { isElectron } from "../../env";
 import type { ProjectLabelId } from "@t3tools/contracts";
 import { ProjectLabelEditorDialog } from "../../projectLabels/ProjectLabelEditorDialog";
-import {
-  projectContentsCount,
-  projectFolderSummary,
-} from "../../projectLabels/projectContents.logic";
+import { projectFolderSummary } from "../../projectLabels/projectContents.logic";
 import { ProjectColorDot } from "../../projectLabels/ProjectTag";
-import { useProjectContents } from "../../projectLabels/useProjectContents";
-import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { useProjectLabelDirectory } from "../../projectLabels/useProjectLabels";
+import {
+  useConnectedEnvironmentIds,
+  useEnvironments,
+  usePrimaryEnvironmentId,
+} from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
@@ -72,7 +73,7 @@ function NewProjectDialog(props: {
  */
 export function ProjectsOverview(props: ProjectsOverviewSearch) {
   const navigate = useNavigate();
-  const { directory, byProject } = useProjectContents();
+  const directory = useProjectLabelDirectory(useConnectedEnvironmentIds());
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
   const createEnvironmentId = props.environmentId ?? primaryEnvironmentId;
@@ -136,7 +137,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               {directory.labels.map((entry) => {
                 const summary = projectFolderSummary(
                   entry.label.repositoryIds.length,
-                  projectContentsCount(byProject.get(entry.key)),
+                  entry.label.threadCount,
                 );
                 return (
                   <SettingsRow

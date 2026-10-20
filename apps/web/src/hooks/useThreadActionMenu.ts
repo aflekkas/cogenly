@@ -50,7 +50,7 @@ import {
 } from "../logicalProject";
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
-import { threadFolderState } from "../projectLabels/projectLabels.logic";
+import { priorFiling, threadFolderState } from "../projectLabels/projectLabels.logic";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -172,7 +172,7 @@ export function useThreadActionMenu(input: {
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
         const threadKind = resolveThreadKind(thread);
         const capabilities = threadCapabilities(threadKind);
-        const folderState = threadFolderState(thread, threadKind === "work", folderDirectory);
+        const folderState = threadFolderState(thread, folderDirectory);
         const isUnread = hasUnseenCompletion({
           ...thread,
           lastVisitedAt: resolveThreadLastVisitedAt(
@@ -199,7 +199,7 @@ export function useThreadActionMenu(input: {
               id: folderState.current.label.id,
               name: folderState.current.label.name,
             },
-            viaRepository: folderState.viaRepository,
+            removable: folderState.removable,
             options: folderState.options.map((entry) => ({
               id: entry.label.id,
               name: entry.label.name,
@@ -247,12 +247,11 @@ export function useThreadActionMenu(input: {
                   (entry) => entry.label.id === action.slice("move-folder:".length),
                 );
           if (target === undefined) return;
-          const previous = folderState.current;
           await moveThreadToFolder({
             environmentId: threadRef.environmentId,
             threadId: threadRef.threadId,
             folder: target && { id: target.label.id, name: target.label.name },
-            previous: previous && { id: previous.label.id, name: previous.label.name },
+            previous: priorFiling(folderState),
           });
           return;
         }
