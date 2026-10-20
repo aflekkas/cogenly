@@ -327,7 +327,7 @@ describe("describeApproval", () => {
             projectId: ProjectId.make("repo-1"),
             threadId: null,
             modelSelection: { instanceId: ProviderInstanceId.make("claude"), model: "opus" },
-            runtimeMode: "approval-required",
+            runtimeMode: "full-access",
             interactionMode: "default",
             workspaceStrategy: { type: "root" },
           },

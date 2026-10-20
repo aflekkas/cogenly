@@ -601,7 +601,7 @@ export function CreateAgent({
                   instructions: "",
                   avatar: { seed: randomUUID() },
                   modelSelection: model,
-                  runtimeMode: "approval-required",
+                  runtimeMode: "full-access",
                   projectId,
                   dailyRunCap: 24,
                 }}

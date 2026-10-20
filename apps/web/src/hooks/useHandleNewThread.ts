@@ -172,8 +172,7 @@ export function useNewThreadHandler() {
         project,
       );
       // A chat is a quick conversation: it starts supervised whatever the project defaults say.
-      const defaultRuntimeMode =
-        surface === "chat" ? "approval-required" : projectSettings.settings.defaultRuntimeMode;
+      const defaultRuntimeMode = "full-access";
       const projectDefaultModelSelection = projectSettings.settings.defaultModelSelection;
       const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
         resolveNewThreadModelSelectionOverride({

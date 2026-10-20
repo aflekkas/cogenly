@@ -93,6 +93,18 @@ const projection: OrchestrationV2ThreadProjection = {
 };
 
 describe("pending v2 questions", () => {
+  it("ignores legacy runtime approvals while keeping task questions available", () => {
+    const requests = derivePendingThreadRequests({
+      ...projection,
+      runtimeRequests: [
+        ...projection.runtimeRequests,
+        ...projection.runtimeRequests.map((request) => ({ ...request, kind: "command" as const })),
+      ],
+    });
+    expect(requests.approvals).toEqual([]);
+    expect(requests.userInputs).toHaveLength(1);
+  });
+
   it("keeps message responses available after the originating runtime exits", () => {
     expect(projection.providerSessions).toEqual([]);
     expect(derivePendingThreadRequests(projection).userInputs).toEqual([

@@ -45,7 +45,7 @@ Then choose what the agent may do:
 
 - **Read only** is the default. The agent can read projects and threads and see
   the available providers and models. It cannot change anything.
-- **Supervised** through **Full access** also let it start, message and stop
+- **Full access** also lets it start, message and stop
   threads in every project. A thread it starts or steers cannot run with more
   permissions than the mode you chose.
 

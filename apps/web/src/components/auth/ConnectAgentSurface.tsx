@@ -7,7 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { isLoopbackHost } from "@t3tools/shared/preview";
-import { EyeIcon, type LucideIcon } from "lucide-react";
+import { EyeIcon, LockOpenIcon, type LucideIcon } from "lucide-react";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -16,13 +16,18 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { PrimaryEnvironmentHttpClient } from "~/environments/primary/httpClient";
 import { runPrimaryHttp } from "~/lib/runtime";
 import { cn } from "~/lib/utils";
-import { runtimeModeConfig } from "../chat/runtimeModeConfig";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { RadioGroup } from "../ui/radio-group";
 import { Spinner } from "../ui/spinner";
 import { AuthSurfaceShell } from "./AuthSurfaceShell";
+
+const fullAccessConfig = {
+  label: "Full access",
+  description: "Run tools without runtime approval prompts.",
+  icon: LockOpenIcon,
+};
 
 const accessConfig: Record<
   AuthMcpClientAccess,
@@ -33,7 +38,10 @@ const accessConfig: Record<
     description: "Read repositories and threads. Cannot start, message or change anything.",
     icon: EyeIcon,
   },
-  ...runtimeModeConfig,
+  "approval-required": fullAccessConfig,
+  "auto-accept-edits": fullAccessConfig,
+  auto: fullAccessConfig,
+  "full-access": fullAccessConfig,
 };
 
 /** A CLI agent's callback is a loopback address; a hosted agent's is its own server. */
@@ -224,7 +232,7 @@ export function ConnectAgentSurface() {
             value={access}
             onValueChange={(value) => setAccess(value as AuthMcpClientAccess)}
           >
-            {AuthMcpClientAccess.literals.map((option) => (
+            {(["read-only", "full-access"] as const).map((option) => (
               <AccessOption key={option} access={option} selected={option === access} />
             ))}
           </RadioGroup>

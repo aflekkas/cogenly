@@ -85,13 +85,6 @@ If you do not want to answer, dismiss the question from its panel. Dismissing
 closes it without sending anything to Codex. This requires a Codex version that
 supports async questions.
 
-## Approve app access
-
-Codex tools can request access to another app. Respond to the named app's request
-in the thread on web or desktop. Some tools offer access for one request,
-the current session, or permanently. See [Permission modes](./permission-modes.md)
-for command and file approvals.
-
 ## Codex says I hit a usage limit
 
 When Codex stops on a usage limit, the thread names the window that ran out and

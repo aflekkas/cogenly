@@ -130,7 +130,7 @@ type DelegateTaskInput = {
   mode?: "async" | "wait";
   timeoutMs?: number;
   clientRequestId?: string;
-  runtimeMode?: "inherit" | "approval-required" | "auto-accept-edits" | "full-access";
+  runtimeMode?: "inherit" | "full-access";
   interactionMode?: "inherit" | "plan" | "default";
 };
 ```
@@ -142,12 +142,8 @@ that driver; an explicit `providerInstanceId` is honored exactly and fails
 when unavailable. Selecting a different provider without a model uses that
 provider's first advertised model.
 
-A provider runs a runtime mode it does not offer as `approval-required`, so a
-child would ask for approval on every command. `orchestrator_capabilities`
-lists `runtimeModes` only for a provider that offers some of the modes, and
-omits it for a provider that offers all of them. When the target lists
-`runtimeModes`, an explicit `runtimeMode` outside that list is refused, and an
-inherited mode steps down to the broadest mode the target offers.
+All threads and delegated tasks run with full access. Legacy runtime mode inputs
+are accepted for compatibility and normalized to full access.
 
 Each delegated review round uses a new `delegate_task` call with the original brief,
 prior findings, responses, and unresolved objections. Track each round by its own `taskId` and use
@@ -228,7 +224,7 @@ type CreateThreadsInput = {
       driverKind?: string;
       model?: string;
     };
-    runtimeMode?: "inherit" | "approval-required" | "auto-accept-edits" | "full-access";
+    runtimeMode?: "inherit" | "full-access";
     interactionMode?: "inherit" | "plan" | "default";
   }>;
   clientRequestId?: string;

@@ -94,21 +94,7 @@ export function derivePendingThreadRequests(
       continue;
     }
 
-    if (request.kind === "auth_refresh" || request.kind === "dynamic_tool_call") continue;
-    const item = projection.turnItems.findLast(
-      (candidate) => candidate.type === "approval_request" && candidate.requestId === request.id,
-    );
-    approvals.push({
-      requestId: request.id,
-      requestKind: request.kind,
-      createdAt: DateTime.formatIso(request.createdAt),
-      ...(item?.type === "approval_request" && item.prompt ? { detail: item.prompt } : {}),
-      ...(item?.type === "approval_request" && item.appName ? { appName: item.appName } : {}),
-      ...(item?.type === "approval_request" && item.options !== undefined
-        ? { options: item.options }
-        : {}),
-      responseCapability: responseCapability === "live" ? "live" : "not_resumable",
-    });
+    // Legacy runtime approvals are historical records, never composer blockers.
   }
 
   return { approvals, userInputs };
