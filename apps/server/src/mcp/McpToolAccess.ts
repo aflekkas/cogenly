@@ -174,6 +174,40 @@ export const actsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A,
     ),
   );
 
+/**
+ * Chat-surface threads stay conversational: they cannot change files, run
+ * commands, or start work sessions. Handlers for those tools check this
+ * after establishing the live caller, so a missing or ended caller still
+ * reports itself first. Callers without a thread are unaffected. Reads,
+ * proposals, and the handoff draft stay on the plain declarations.
+ */
+export const assertWorkCaller = (
+  thread: Caller["caller"],
+): Effect.Effect<void, OrchestratorMcpFailure> =>
+  thread?.surface === "chat"
+    ? Effect.fail(
+        new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message:
+            "This thread runs in conversation mode: chat threads cannot change files, run commands, or start work sessions. Suggest Start Work, or draft the handoff with work_propose_handoff.",
+        }),
+      )
+    : Effect.void;
+
+/**
+ * Like `actsAsCaller`, but refuses chat-surface callers. Terminals, worktree
+ * moves, delegation, and thread creation use this; everything a conversation
+ * may still touch stays on `actsAsCaller`.
+ */
+export const actsAsWorkCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
+  declare((params: P) =>
+    requireThreadCaller.pipe(
+      Effect.flatMap(() => writingCaller),
+      Effect.tap((caller) => assertWorkCaller(caller.caller)),
+      Effect.flatMap(() => handle(params)),
+    ),
+  );
+
 /** Changes something that belongs to no thread, such as a pending upload or a scheduled task. */
 export const writes = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
   declare((params: P) => orchestratingCaller.pipe(Effect.flatMap(() => handle(params))));

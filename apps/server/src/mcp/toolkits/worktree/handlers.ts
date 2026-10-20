@@ -36,7 +36,7 @@ const handlers = {
         .pipe(Effect.mapError(unavailable));
     }),
   ),
-  t3_worktree_handoff: McpToolAccess.actsAsCaller((input) =>
+  t3_worktree_handoff: McpToolAccess.actsAsWorkCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const service = yield* WorktreeMcpService.WorktreeMcpService;

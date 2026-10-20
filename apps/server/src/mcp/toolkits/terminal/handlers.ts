@@ -4,16 +4,16 @@ import * as TerminalMcpService from "../../TerminalMcpService.ts";
 import { TerminalToolkit } from "./tools.ts";
 
 export const layer = McpToolAccess.toLayer(TerminalToolkit, {
-  terminal_run: McpToolAccess.actsAsCaller((input) =>
+  terminal_run: McpToolAccess.actsAsWorkCaller((input) =>
     Effect.flatMap(TerminalMcpService.TerminalMcpService, (service) => service.run(input)),
   ),
   terminal_read: McpToolAccess.readsAsCaller((input) =>
     Effect.flatMap(TerminalMcpService.TerminalMcpService, (service) => service.read(input)),
   ),
-  terminal_write: McpToolAccess.actsAsCaller((input) =>
+  terminal_write: McpToolAccess.actsAsWorkCaller((input) =>
     Effect.flatMap(TerminalMcpService.TerminalMcpService, (service) => service.write(input)),
   ),
-  terminal_kill: McpToolAccess.actsAsCaller((input) =>
+  terminal_kill: McpToolAccess.actsAsWorkCaller((input) =>
     Effect.flatMap(TerminalMcpService.TerminalMcpService, (service) => service.kill(input)),
   ),
   terminal_list: McpToolAccess.readsAsCaller(() =>

@@ -70,6 +70,7 @@ export const handlers = Access.toLayer(toolkit, {
       Effect.gen(function* () {
         const scope = yield* source;
         const { caller } = yield* readCaller();
+        yield* Access.assertWorkCaller(caller);
         const sourceAgentRunId = caller?.sourceAgentRunId ?? caller?.activeRunId ?? undefined;
         const work = yield* Work.WorkHandoffService;
         return yield* work

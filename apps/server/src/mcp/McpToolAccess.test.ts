@@ -23,6 +23,8 @@ const supervisedThreadId = ThreadId.make("thread:supervised");
 const planThreadId = ThreadId.make("thread:plan");
 const fullAccessThreadId = ThreadId.make("thread:full-access");
 const endedThreadId = ThreadId.make("thread:ended");
+const chatThreadId = ThreadId.make("thread:chat");
+const endedChatThreadId = ThreadId.make("thread:ended-chat");
 
 const shells = new Map([
   [supervisedThreadId, liveThreadShell(supervisedThreadId, { runtimeMode: "full-access" })],
@@ -32,6 +34,11 @@ const shells = new Map([
   ],
   [fullAccessThreadId, liveThreadShell(fullAccessThreadId)],
   [endedThreadId, liveThreadShell(endedThreadId, { activeRunId: null })],
+  [chatThreadId, { ...liveThreadShell(chatThreadId), surface: "chat" as const }],
+  [
+    endedChatThreadId,
+    { ...liveThreadShell(endedChatThreadId, { activeRunId: null }), surface: "chat" as const },
+  ],
 ]);
 
 const threadCaller = (threadId: ThreadId): McpInvocationContext.McpInvocationScope => ({
@@ -86,6 +93,7 @@ const ProbeToolkit = Toolkit.make(
   Tool.make("reads", probe),
   Tool.make("reads_as_caller", probe),
   Tool.make("acts_as_caller", probe),
+  Tool.make("acts_as_work_caller", probe),
   Tool.make("writes", probe),
   Tool.make("writes_with_capability", probe),
   Tool.make("writes_threads", {
@@ -106,6 +114,7 @@ const probeHandlers: McpToolAccess.Handlers<typeof ProbeToolkit.tools> = {
   reads: McpToolAccess.reads(() => ran),
   reads_as_caller: McpToolAccess.readsAsCaller(() => ran),
   acts_as_caller: McpToolAccess.actsAsCaller(() => ran),
+  acts_as_work_caller: McpToolAccess.actsAsWorkCaller(() => ran),
   writes: McpToolAccess.writes(() => ran),
   writes_with_capability: McpToolAccess.writesWithCapability(() => ran),
   writes_threads: McpToolAccess.writesThreads(
@@ -153,6 +162,7 @@ export const refusedAtCompileTime = () => {
       reads: unchecked,
       reads_as_caller: unchecked,
       acts_as_caller: unchecked,
+      acts_as_work_caller: unchecked,
       writes: unchecked,
       writes_with_capability: unchecked,
       writes_threads: unchecked,
@@ -194,6 +204,8 @@ const supervised = threadCaller(supervisedThreadId);
 const plan = threadCaller(planThreadId);
 const fullAccess = threadCaller(fullAccessThreadId);
 const ended = threadCaller(endedThreadId);
+const chat = threadCaller(chatThreadId);
+const endedChat = threadCaller(endedChatThreadId);
 const supervisedClient = clientCaller("approval-required");
 const fullAccessClient = clientCaller("full-access");
 const readOnlyClient = clientCaller("read-only");
@@ -218,6 +230,15 @@ it.effect.each([
   ["acts_as_caller", supervised, {}, "ran"],
   ["acts_as_caller", ended, {}, "parent_not_active"],
   ["acts_as_caller", fullAccessClient, {}, "thread_credential_required"],
+  // Conversation tools stay on the plain declaration, even for chat threads.
+  ["acts_as_caller", chat, {}, "ran"],
+
+  // Workspace-mutating tools refuse chat-surface callers but keep work threads.
+  ["acts_as_work_caller", chat, {}, "capability_denied"],
+  ["acts_as_work_caller", fullAccess, {}, "ran"],
+  ["acts_as_work_caller", supervised, {}, "ran"],
+  ["acts_as_work_caller", endedChat, {}, "parent_not_active"],
+  ["acts_as_work_caller", fullAccessClient, {}, "thread_credential_required"],
 
   // Any change needs a thread caller's live turn; a client has none to lose.
   ["writes", supervised, {}, "ran"],

@@ -59,6 +59,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
       Effect.gen(function* () {
         const context = yield* readCaller();
         const { caller } = context;
+        yield* McpToolAccess.assertWorkCaller(caller);
         const commandId = yield* newCommandId();
         const threadId = ThreadId.make(commandId);
         const messageId = MessageId.make(commandId);
