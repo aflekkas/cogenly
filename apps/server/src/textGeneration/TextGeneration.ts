@@ -77,6 +77,21 @@ export const make = Effect.gen(function* () {
               );
         }),
       ),
+    generateHandoffBrief: (input) =>
+      resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => {
+          const generator: ProviderTextGeneration & Partial<WorkScopeSummaryGeneration> =
+            textGeneration;
+          return generator.generateHandoffBrief
+            ? generator.generateHandoffBrief(input)
+            : Effect.fail(
+                new TextGenerationError({
+                  operation: "generateThreadTitle",
+                  detail: "This provider does not support handoff briefs.",
+                }),
+              );
+        }),
+      ),
     generateCommitMessage: (input) =>
       resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateCommitMessage(input)),

@@ -263,6 +263,8 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
   const textGeneration: ProviderInstance["textGeneration"] & WorkScopeSummaryGeneration = {
     generateWorkScopeSummary: (value) =>
       protect("generateThreadTitle", nativeGeneration.generateWorkScopeSummary(value)),
+    generateHandoffBrief: (value) =>
+      protect("generateThreadTitle", nativeGeneration.generateHandoffBrief(value)),
     generateCommitMessage: (value) =>
       protect("generateCommitMessage", nativeGeneration.generateCommitMessage(value)),
     generatePrContent: (value) =>

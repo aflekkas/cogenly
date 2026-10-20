@@ -3,6 +3,7 @@ import {
   WorkHandoffError,
   type AgentId,
   type MessageId,
+  type ModelSelection,
   type ProviderInteractionMode,
   type RuntimeMode,
   type ThreadId,
@@ -26,6 +27,7 @@ import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import * as HandoffContext from "./WorkHandoffContext.ts";
 
 /** Transport-owned provenance: RPC clients cannot impersonate an agent or choose its run. */
 export interface WorkHandoffActor {
@@ -42,31 +44,18 @@ type ChatMessages = OrchestrationV2ThreadProjection["messages"];
 const settledText = (messages: ChatMessages) =>
   messages.filter((message) => !message.streaming && message.text.trim());
 
-/**
- * The scope a handoff carries when the caller wrote none: the chat's own words,
- * so Work can start at once. The user's latest requests, oldest first, and the
- * assistant's reply when the handoff stops at one (often the plan to build).
- */
-export function chatHandoffScope(messages: ChatMessages): string {
-  const settled = settledText(messages);
-  const requests = settled
-    .filter((message) => message.role === "user")
-    .slice(-6)
-    .map((message, index) => `${index + 1}. ${message.text.trim().slice(0, 1500)}`);
-  const last = settled.at(-1);
-  const sections = [
-    ...(requests.length > 0
-      ? [`Requests from the chat, oldest first:\n\n${requests.join("\n\n")}`]
-      : []),
-    ...(last?.role === "assistant"
-      ? [`The chat's reply this handoff starts from:\n\n${last.text.trim().slice(0, 6000)}`]
-      : []),
-  ];
-  return (sections.join("\n\n") || "Continue the work discussed in the source conversation.").slice(
-    0,
-    16000,
-  );
-}
+/** Turn items that can summarize what the chat looked at, ran, or delegated. */
+const handoffArtifactItemTypes = [
+  "user_message",
+  "assistant_message",
+  "command_execution",
+  "file_search",
+  "web_search",
+  "subagent",
+  "dynamic_tool",
+  "file_change",
+  "proposed_plan",
+] as const;
 
 export class WorkHandoffService extends Context.Service<
   WorkHandoffService,
@@ -152,19 +141,23 @@ const make = Effect.gen(function* () {
         (!useWorktree || targetIsScratch
           ? { type: "root" as const }
           : { type: "worktree" as const, baseRef: "HEAD", startFromOrigin: false });
-      // No scope or title from the caller: carry the chat's own words over and
-      // let the Work thread title itself from them, as a new thread does.
-      const scopeSummary =
-        input.scopeSummary ??
-        chatHandoffScope(
-          (yield* chatThrough(input.sourceThreadId, input.throughMessageId)).messages,
-        );
+      const cwd = Option.isNone(target) ? undefined : target.value.workspaceRoot;
+      // Every handoff carries the source transcript as first-turn context; without
+      // a caller scope the visible message is a short generated brief of it, and
+      // the Work thread titles itself from that, as a new thread does.
+      const { carried, handoffContext } = yield* handoffContextFor(
+        input.sourceThreadId,
+        input.throughMessageId,
+        source.thread,
+        cwd,
+      );
+      const scopeSummary = input.scopeSummary ?? (yield* generateBrief(carried, cwd));
       const cutOff =
         input.throughMessageId === undefined
           ? ""
           : `\nThe handoff covers the source conversation through message ${input.throughMessageId}; ignore anything after it.`;
       // The existing launch service owns repository validation, provisioning, setup,
-      // deferred execution, receipts and retries. No transcript is copied into Work.
+      // deferred execution, receipts and retries.
       const result = yield* launches
         .launch({
           commandId: input.commandId,
@@ -188,7 +181,7 @@ const make = Effect.gen(function* () {
           createdBy: origin === "agent" ? "agent" : "user",
           creationSource: origin === "agent" ? "mcp" : "web",
           initialMessage: {
-            text: `${scopeSummary}\n\nSource conversation: [${source.thread.title}](cogenly-thread://v1/${input.sourceThreadId})\nSource thread ID: ${input.sourceThreadId}${cutOff}\n${input.scopeSummary === undefined ? "These are the chat's own words; read the source conversation for the rest of its context before making changes." : "Use this approved scope; follow the source reference if more context is needed."}`,
+            text: `${scopeSummary}\n\nSource conversation: [${source.thread.title}](cogenly-thread://v1/${input.sourceThreadId})\nSource thread ID: ${input.sourceThreadId}${cutOff}\n${input.scopeSummary === undefined ? "The chat's transcript was carried as handoff context; consult it before asking about anything already discussed." : "Use this approved scope; follow the source reference if more context is needed."}`,
             senderThreadId: input.sourceThreadId,
             attachments: [],
           },
@@ -215,6 +208,7 @@ const make = Effect.gen(function* () {
           ...(input.throughMessageId === undefined
             ? {}
             : { throughMessageId: input.throughMessageId }),
+          handoffContext,
         })
         .pipe(
           Effect.mapError(
@@ -257,6 +251,157 @@ const make = Effect.gen(function* () {
           .filter((message) => DateTime.isLessThanOrEqualTo(message.createdAt, cutOff.createdAt))
           .concat(cutOff);
   });
+  /**
+   * The chat's whole user/assistant transcript up to and including
+   * `throughMessageId`, in chat order. A message that is not in the chat fails.
+   */
+  const carriedThrough = Effect.fn("WorkHandoffService.carriedThrough")(function* (
+    sourceThreadId: ThreadId,
+    throughMessageId: MessageId | undefined,
+  ) {
+    const records = yield* threads
+      .getThreadRecords(sourceThreadId, ["messages"], { messageRoles: ["user", "assistant"] })
+      .pipe(
+        Effect.mapError(
+          (cause) => new WorkHandoffError({ sourceThreadId, stage: "read-source", cause }),
+        ),
+      );
+    if (throughMessageId === undefined) return records.messages;
+    const index = records.messages.findIndex((message) => message.id === throughMessageId);
+    if (index === -1)
+      return yield* new WorkHandoffError({
+        sourceThreadId,
+        stage: "read-source",
+        cause: "Cut-off message is not in this chat.",
+      });
+    return records.messages.slice(0, index + 1);
+  });
+  /**
+   * The visible first message when the caller wrote no scope: a one-line goal
+   * plus short bullets, generated from the transcript, with a deterministic
+   * fallback that skips greetings and filler.
+   */
+  const generateBrief = Effect.fn("WorkHandoffService.generateBrief")(function* (
+    carried: ChatMessages,
+    cwd: string | undefined,
+  ) {
+    const fallback = HandoffContext.fallbackHandoffBrief(carried);
+    const fallbackText = HandoffContext.formatHandoffBrief(fallback.goal, fallback.bullets);
+    const lines = HandoffContext.handoffTranscriptLines(
+      carried,
+      HandoffContext.HANDOFF_BRIEF_MODEL_MESSAGES,
+      HandoffContext.HANDOFF_BRIEF_MODEL_CHARS,
+    );
+    if (cwd === undefined || lines.length === 0) return fallbackText;
+    const brief = yield* settings.getSettings.pipe(
+      Effect.flatMap((config) =>
+        text.generateHandoffBrief({
+          cwd,
+          transcript: JSON.stringify(lines),
+          modelSelection: config.textGenerationModelSelection,
+        }),
+      ),
+      Effect.map((result) => {
+        const goal = result.goal.trim().slice(0, HandoffContext.HANDOFF_BRIEF_GOAL_CHARS);
+        if (goal.length === 0) return "";
+        const bullets = HandoffContext.cleanHandoffSummaryLines(
+          result.bullets.join("\n"),
+          HandoffContext.HANDOFF_BRIEF_BULLETS,
+        );
+        return HandoffContext.formatHandoffBrief(goal, bullets);
+      }),
+      Effect.orElseSucceed(() => ""),
+    );
+    return brief || fallbackText;
+  });
+  /** Older turns as coverage lines: a cheap summary, or one line per turn. */
+  const summarizeOlder = Effect.fn("WorkHandoffService.summarizeOlder")(function* (
+    older: ChatMessages,
+    cwd: string | undefined,
+  ) {
+    const fallback = HandoffContext.compactOlderTurns(older);
+    const lines = HandoffContext.handoffTranscriptLines(
+      older,
+      HandoffContext.HANDOFF_OLDER_MODEL_TURNS,
+      HandoffContext.HANDOFF_OLDER_MODEL_CHARS,
+    );
+    if (cwd === undefined || lines.length === 0) return fallback;
+    const summary = yield* settings.getSettings.pipe(
+      Effect.flatMap((config) =>
+        text.generateWorkScopeSummary({
+          cwd,
+          requirements: JSON.stringify(lines),
+          modelSelection: config.textGenerationModelSelection,
+        }),
+      ),
+      Effect.map((result) => HandoffContext.cleanHandoffSummaryLines(result.summary)),
+      Effect.orElseSucceed((): ReadonlyArray<string> => []),
+    );
+    if (summary.length === 0) return fallback;
+    const covered = summary.map((line) => `- ${line.replace(/^\s*[-*•]\s*/, "")}`);
+    if (older.length > lines.length)
+      covered.push(
+        `- …plus ${older.length - lines.length} earlier messages (see the source chat).`,
+      );
+    return covered;
+  });
+  /**
+   * The carried transcript and its prepared handoff context: recent turns in
+   * full, older ones summarized, artifacts, and the chat's model. Delivery
+   * injects it into the Work thread's first turn within its own budget.
+   */
+  const handoffContextFor = Effect.fn("WorkHandoffService.handoffContext")(function* (
+    sourceThreadId: ThreadId,
+    throughMessageId: MessageId | undefined,
+    source: { readonly title: string; readonly modelSelection: ModelSelection },
+    cwd: string | undefined,
+  ) {
+    const allThrough = yield* carriedThrough(sourceThreadId, throughMessageId);
+    const carried = allThrough.filter(HandoffContext.isHandoffTranscriptMessage);
+    const { older, recent } = HandoffContext.splitTranscriptTail(carried);
+    const items = yield* threads
+      .getThreadRecords(sourceThreadId, ["turnItems"], {
+        turnItemTypes: [...handoffArtifactItemTypes],
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) => new WorkHandoffError({ sourceThreadId, stage: "read-source", cause }),
+        ),
+      );
+    const scoped = HandoffContext.filterHandoffItemsThroughCutoff(
+      items.turnItems,
+      new Set(allThrough.map((message) => message.id)),
+      throughMessageId,
+    );
+    const olderSummaryLines = yield* summarizeOlder(older, cwd);
+    const coverage = HandoffContext.buildHandoffCoverage({
+      sourceThreadId,
+      sourceThreadTitle: source.title,
+      modelSelection: source.modelSelection,
+      messagesCarried: carried.length,
+      recentCount: recent.length,
+      olderCount: older.length,
+      olderSummaryLines,
+      links: HandoffContext.extractHandoffLinks(carried),
+      attachments: HandoffContext.summarizeHandoffAttachments(carried),
+      toolLines: HandoffContext.summarizeHandoffToolItems(scoped),
+    });
+    const history = HandoffContext.selectHandoffHistory(recent, sourceThreadId, coverage);
+    return {
+      carried,
+      handoffContext: {
+        history: {
+          messages: [...history.messages],
+          coverage,
+          omittedItems: history.omittedItems,
+          omittedItemIds: [...history.omittedItemIds],
+        },
+        sourceThreadTitle: source.title,
+        messagesCarried: carried.length,
+        summaryUsed: older.length > 0,
+      },
+    };
+  });
   /** The chat's recent window, and its messages through `throughMessageId`. */
   const chatThrough = Effect.fn("WorkHandoffService.chatThrough")(function* (
     sourceThreadId: ThreadId,
@@ -281,6 +426,7 @@ const make = Effect.gen(function* () {
     // confirmations and other meta-chatter out of both generation and fallback.
     const requirements = settledText(messages)
       .filter((message) => message.role === "user")
+      .filter((message) => !HandoffContext.isFillerMessage(message.text))
       .slice(-6)
       .map((message) => message.text.trim().slice(0, 2000));
     const fallback =
@@ -290,6 +436,7 @@ const make = Effect.gen(function* () {
           sentence.replace(/^\s*(?:[-*•]\s*|\d+[.)]\s*)?(?:user:\s*|assistant:\s*)?/iu, "").trim(),
         )
         .filter(Boolean)
+        .filter((sentence) => !HandoffContext.isFillerMessage(sentence))
         .slice(0, 8)
         .map((sentence) => `- ${sentence.slice(0, 240)}`)
         .join("\n") || "- Confirm the implementation scope before making changes.";
@@ -339,15 +486,7 @@ const make = Effect.gen(function* () {
             modelSelection: config.textGenerationModelSelection,
           }),
         ),
-        Effect.map((result) =>
-          result.summary
-            .split("\n")
-            .map((line) => line.replace(/^\s*(?:[-*•]\s*)?(?:user|assistant):\s*/iu, "").trim())
-            .filter((line) => line.length > 0 && !line.startsWith("```"))
-            .slice(0, 8)
-            .map((line) => line.slice(0, 240))
-            .join("\n"),
-        ),
+        Effect.map((result) => HandoffContext.cleanHandoffSummaryLines(result.summary).join("\n")),
         Effect.orElseSucceed(() => ""),
       );
       scopeSummary = summary || fallback;

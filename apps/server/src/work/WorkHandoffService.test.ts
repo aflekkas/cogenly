@@ -147,7 +147,10 @@ const runtime = Layer.mergeAll(
 const makeHarness = (
   options: {
     summary?: Text.TextGeneration["Service"]["generateWorkScopeSummary"];
+    brief?: Text.TextGeneration["Service"]["generateHandoffBrief"];
     messages?: OrchestrationV2ThreadProjection["messages"];
+    /** Overrides the source chat's stored messages, the transcript `start` carries. */
+    recordsMessages?: OrchestrationV2ThreadProjection["messages"];
     /** Makes `scratch` the scratch project, so Work can target "No repository". */
     scratch?: boolean;
     /** Whether the target repository is under git; defaults to true. */
@@ -162,7 +165,20 @@ const makeHarness = (
       Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
       Layer.mock(Threads.ThreadManagementService)({
         dispatch: (command) => orchestrator.dispatch(command),
-        getThreadRecords: orchestrator.getThreadRecords,
+        getThreadRecords: ((threadId, fields, filter) => {
+          if (
+            options.recordsMessages === undefined ||
+            !(fields as ReadonlyArray<string>).includes("messages")
+          )
+            return orchestrator.getThreadRecords(threadId, fields, filter);
+          const messages = options.recordsMessages.filter(
+            (message) =>
+              filter?.messageRoles === undefined || filter.messageRoles.includes(message.role),
+          );
+          return orchestrator
+            .getThreadRecords(threadId, fields, filter)
+            .pipe(Effect.map((records) => ({ ...records, messages })));
+        }) as typeof orchestrator.getThreadRecords,
         getThreadProjection: orchestrator.getThreadProjection,
         getThreadSnapshotWindow: (id, window) =>
           orchestrator.getThreadSnapshotWindow(id, window).pipe(
@@ -247,6 +263,13 @@ const makeHarness = (
             }),
           ),
         generateThreadTitle: () => Effect.succeed({ title: "Implement audit validation" }),
+        generateHandoffBrief:
+          options.brief ??
+          (() =>
+            Effect.succeed({
+              goal: "Implement booking-audit validation",
+              bullets: ["Preserve existing URL handling.", "Verify with focused tests."],
+            })),
         generateWorkScopeSummary:
           options.summary ??
           (() =>
@@ -703,6 +726,31 @@ it.effect("drafts only from the chat up to and including the chosen message", ()
   }).pipe(Effect.provide(runtime)),
 );
 
+it.effect("skips greetings and filler when drafting from the chat", () =>
+  Effect.gen(function* () {
+    const requests: string[] = [];
+    const h = yield* makeHarness({
+      messages: [
+        message("user", "hi", 0),
+        message("user", "Fix booking-audit validation.", 1),
+        message("user", "thanks!", 2),
+      ],
+      summary: (request) =>
+        Effect.sync(() => {
+          requests.push(request.requirements);
+          return { summary: "- Fix booking-audit validation." };
+        }),
+    });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      const draft = yield* service.proposeHandoff(sourceId);
+      expect(JSON.parse(requests[0]!)).toEqual(["Fix booking-audit validation."]);
+      expect(draft.scopeSummary).toBe("- Fix booking-audit validation.");
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
 it.effect("reads an older cut-off from the chat's own user messages", () =>
   Effect.gen(function* () {
     const requests: string[] = [];
@@ -744,7 +792,10 @@ it.effect("reads an older cut-off from the chat's own user messages", () =>
 
 it.effect("starts Work without a repository at the scratch root and names the cut-off", () =>
   Effect.gen(function* () {
-    const h = yield* makeHarness({ scratch: true });
+    const h = yield* makeHarness({
+      scratch: true,
+      recordsMessages: [message("user", "Fix booking-audit validation.", 1)],
+    });
     yield* h.orchestrator.dispatch(create(sourceId));
     yield* Effect.gen(function* () {
       const service = yield* Work.WorkHandoffService;
@@ -770,10 +821,10 @@ it.effect("starts Work without a repository at the scratch root and names the cu
   }).pipe(Effect.provide(runtime)),
 );
 
-it.effect("hands the chat over as is when no title or scope is given, and titles itself", () =>
+it.effect("hands a brief over with the transcript as context, and titles itself", () =>
   Effect.gen(function* () {
     const h = yield* makeHarness({
-      messages: [
+      recordsMessages: [
         message("user", "Add booking-audit validation.", 0),
         message("assistant", "Plan: validate dates first, then totals.", 1),
         message("user", "Unrelated: rename the marketing page.", 2),
@@ -790,19 +841,159 @@ it.effect("hands the chat over as is when no title or scope is given, and titles
       });
       yield* Deferred.await(h.finished);
       const projection = yield* h.orchestrator.getThreadProjection(result.threadId);
+      // The visible message is a short brief, not the transcript.
       const text = projection.messages[0]?.text ?? "";
-      // The chat's words through the cut-off, including the reply it stops at.
-      expect(text).toContain("1. Add booking-audit validation.");
-      expect(text).toContain("Plan: validate dates first, then totals.");
+      expect(text).toContain("Implement booking-audit validation");
+      expect(text).toContain("- Preserve existing URL handling.");
+      expect(text).not.toContain("Plan: validate dates first, then totals.");
       expect(text).not.toContain("marketing page");
       expect(text).toContain(`cogenly-thread://v1/${sourceId}`);
-      expect(projection.contextHandoffs[0]?.summaryText).toContain("Add booking-audit validation.");
+      expect(text).toContain("through message scope:1");
+      expect(projection.contextHandoffs[0]?.summaryText).toContain(
+        "Implement booking-audit validation",
+      );
+      // The transcript through the cut-off travels as first-turn handoff context.
+      const handoff = projection.contextHandoffs[0];
+      expect(handoff?.status).toBe("ready");
+      expect(handoff?.sourceThreadId).toBe(sourceId);
+      expect(handoff?.sourceThreadTitle).toBe("Audit design");
+      expect(handoff?.messagesCarried).toBe(2);
+      expect(handoff?.summaryUsed).toBe(false);
+      expect(handoff?.history?.messages.map((candidate) => candidate.role)).toEqual([
+        "user",
+        "assistant",
+      ]);
+      expect(handoff?.history?.messages[1]?.text).toContain("Plan: validate dates first");
+      expect(handoff?.history?.coverage).toContain("Source chat model: gpt-5 (provider codex)");
+      expect(handoff?.history?.coverage).toContain(`t3_thread_read({threadId:"${sourceId}"`);
       // A git repository with no workspace choice gets its own worktree.
       expect(projection.runs[0]?.workspacePreparation?.type).toBe("worktree");
       // Titled like a new thread: the chat's title holds until the generated one lands.
       expect(projection.thread.title).toBe("Audit design");
       expect(projection.thread.titleRegeneration).not.toBeNull();
       yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("falls back to a goal-plus-bullets brief that skips filler", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness({
+      recordsMessages: [
+        message("user", "hi", 0),
+        message("user", "i want to make a custom t shirt, get it before halloween", 1),
+        message("assistant", "What color?", 2),
+        message("user", "Make it red.", 3),
+      ],
+      brief: () =>
+        Effect.fail(
+          new TextGenerationError({
+            operation: "generateThreadTitle",
+            detail: "Unavailable in test",
+          }),
+        ),
+    });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      const result = yield* service.start({
+        commandId: CommandId.make("handoff:fallback"),
+        sourceThreadId: sourceId,
+        targetProjectId: targetId,
+      });
+      yield* Deferred.await(h.finished);
+      const projection = yield* h.orchestrator.getThreadProjection(result.threadId);
+      const text = projection.messages[0]?.text ?? "";
+      expect(text).toContain("i want to make a custom t shirt, get it before halloween");
+      expect(text).toContain("- Make it red.");
+      expect(text).not.toMatch(/^1\. hi$/gmu);
+      // The filler stays out of the brief but is still carried in context.
+      expect(projection.contextHandoffs[0]?.messagesCarried).toBe(4);
+      expect(
+        projection.contextHandoffs[0]?.history?.messages.map((candidate) => candidate.text),
+      ).toEqual([
+        "hi",
+        "i want to make a custom t shirt, get it before halloween",
+        "What color?",
+        "Make it red.",
+      ]);
+      yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("summarizes older turns into coverage once past the full tail", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness({
+      recordsMessages: Array.from({ length: 26 }, (_, index) =>
+        message(
+          index % 2 === 0 ? "user" : "assistant",
+          `booking-audit requirement ${index}.`,
+          index,
+        ),
+      ),
+    });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      const result = yield* service.start({
+        commandId: CommandId.make("handoff:long"),
+        sourceThreadId: sourceId,
+        targetProjectId: targetId,
+      });
+      yield* Deferred.await(h.finished);
+      const projection = yield* h.orchestrator.getThreadProjection(result.threadId);
+      const handoff = projection.contextHandoffs[0];
+      expect(handoff?.messagesCarried).toBe(26);
+      expect(handoff?.summaryUsed).toBe(true);
+      expect(handoff?.history?.messages).toHaveLength(20);
+      expect(handoff?.history?.messages[0]?.text).toContain("requirement 6.");
+      expect(handoff?.history?.messages.at(-1)?.text).toContain("requirement 25.");
+      expect(handoff?.history?.coverage).toContain("Carried 26 chat messages");
+      expect(handoff?.history?.coverage).toContain("- Fix booking-audit validation.");
+      yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("carries the transcript even with an explicit scope", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness({
+      recordsMessages: [
+        message("user", "Add booking-audit validation.", 0),
+        message("assistant", "Plan: validate dates first, then totals.", 1),
+      ],
+    });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      const result = yield* service.start(input);
+      yield* Deferred.await(h.finished);
+      const projection = yield* h.orchestrator.getThreadProjection(result.threadId);
+      expect(projection.messages[0]?.text).toContain(input.scopeSummary);
+      const handoff = projection.contextHandoffs[0];
+      expect(handoff?.status).toBe("ready");
+      expect(handoff?.summaryText).toBe(input.scopeSummary);
+      expect(handoff?.messagesCarried).toBe(2);
+      expect(handoff?.history?.messages.map((candidate) => candidate.role)).toEqual([
+        "user",
+        "assistant",
+      ]);
+      yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("rejects a cut-off that is not in the chat when starting", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      const failure = yield* service
+        .start({ ...input, throughMessageId: MessageId.make("elsewhere") })
+        .pipe(Effect.flip);
+      expect(failure.stage).toBe("read-source");
     }).pipe(Effect.provide(h.work));
   }).pipe(Effect.provide(runtime)),
 );

@@ -7239,8 +7239,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ],
         },
       });
-      // Already delivered as the initial user message. Keep the portable summary in
-      // the existing handoff projection for provenance, without injecting it twice.
+      // The carried transcript is delivered into the Work thread's first turn by
+      // the usual handoff pipeline, within that turn's own budget and exactly
+      // once per native thread. The summary stays for provenance.
+      const handoffContext = command.handoffContext;
       yield* emitEvent({
         type: "context-handoff.updated",
         threadId: target.thread.id,
@@ -7250,15 +7252,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           id: ContextHandoffId.make(`work-handoff:${command.commandId}`),
           threadId: target.thread.id,
           sourceThreadId: source.id,
+          ...(handoffContext === undefined
+            ? {}
+            : {
+                sourceThreadTitle: handoffContext.sourceThreadTitle,
+                messagesCarried: handoffContext.messagesCarried,
+                summaryUsed: handoffContext.summaryUsed,
+              }),
           targetRunId: run.id,
           fromProviderThreadIds:
             source.activeProviderThreadId === null ? [] : [source.activeProviderThreadId],
           toProviderThreadId: run.providerThreadId,
           coveredRunOrdinals: { from: run.ordinal, to: run.ordinal },
           strategy: "manual_context",
-          status: "superseded",
+          status: handoffContext === undefined ? "superseded" : "ready",
           summaryMessageId: run.userMessageId,
           summaryText: command.scopeSummary,
+          ...(handoffContext === undefined ? {} : { history: handoffContext.history }),
           createdByProviderInstanceId: null,
           createdAt: now,
           updatedAt: now,

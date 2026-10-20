@@ -446,6 +446,7 @@ import { classifyThreadKind, hasRightPanel, threadCapabilities } from "../thread
 import {
   UnanchoredWorkHandoffMarkers,
   WorkHandoffMarkersProvider,
+  formatWorkHandoffSourceDetail,
 } from "./work/WorkHandoffMarkers";
 import { anchorWorkHandoffs } from "./work/work.logic";
 import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
@@ -5740,6 +5741,12 @@ export default function ChatView(props: ChatViewProps) {
     [activeThreadShell, workSourceChatThreadId],
   );
   const workSourceChat = useThreadShell(workSourceChatRef);
+  const workHandoffMessagesCarried =
+    workSourceChatRef === null
+      ? null
+      : (serverProjection?.contextHandoffs.find(
+          (handoff) => handoff.sourceThreadId === workSourceChatRef.threadId,
+        )?.messagesCarried ?? null);
   const timelineParentLink = useMemo(
     () =>
       parentThreadLink ??
@@ -5747,12 +5754,15 @@ export default function ChatView(props: ChatViewProps) {
         ? null
         : {
             threadId: workSourceChatRef.threadId,
-            title: workSourceChat?.title ?? "Chat",
+            title: formatWorkHandoffSourceDetail(
+              workSourceChat?.title ?? "Chat",
+              workHandoffMessagesCarried,
+            ),
             label: "From chat",
             icon: MessageSquareIcon,
             actionLabel: "Open the chat this Work came from",
           }),
-    [parentThreadLink, workSourceChat?.title, workSourceChatRef],
+    [parentThreadLink, workHandoffMessagesCarried, workSourceChat?.title, workSourceChatRef],
   );
   const activeThreadHasCompactableConversation = serverVisibleTurnItems.some(
     ({ item }) =>

@@ -90,6 +90,18 @@ function WorkHandoffMarkerList(props: {
   );
 }
 
+/**
+ * The Work thread's "From chat" detail: the source chat's title, plus how many
+ * of its messages the handoff carried when the server recorded it.
+ */
+export function formatWorkHandoffSourceDetail(
+  title: string,
+  messagesCarried: number | null | undefined,
+): string {
+  if (messagesCarried === null || messagesCarried === undefined) return title;
+  return `${title} · ${messagesCarried} ${messagesCarried === 1 ? "message" : "messages"}`;
+}
+
 const STATUS_LABEL: Record<WorkHandoffStatus, string> = {
   running: "Running",
   attention: "Needs attention",

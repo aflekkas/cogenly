@@ -1047,11 +1047,36 @@ export const OrchestrationV2HistoricalMessage = Schema.Struct({
 });
 export type OrchestrationV2HistoricalMessage = typeof OrchestrationV2HistoricalMessage.Type;
 
+export const OrchestrationV2ContextHandoffHistory = Schema.Struct({
+  messages: Schema.Array(OrchestrationV2HistoricalMessage),
+  coverage: Schema.String,
+  omittedItems: NonNegativeInt,
+  // IDs omitted during preparation, before the target's delivery budget is known.
+  omittedItemIds: Schema.optional(Schema.Array(TurnItemId)),
+});
+export type OrchestrationV2ContextHandoffHistory = typeof OrchestrationV2ContextHandoffHistory.Type;
+
+/**
+ * The source chat a Work handoff carries: prepared transcript history plus
+ * the metadata the Work thread shows beside its "From chat" link.
+ */
+export const OrchestrationV2WorkHandoffContext = Schema.Struct({
+  history: OrchestrationV2ContextHandoffHistory,
+  sourceThreadTitle: Schema.String,
+  messagesCarried: NonNegativeInt,
+  summaryUsed: Schema.Boolean,
+});
+export type OrchestrationV2WorkHandoffContext = typeof OrchestrationV2WorkHandoffContext.Type;
+
 export const OrchestrationV2ContextHandoff = Schema.Struct({
   id: ContextHandoffId,
   transferId: Schema.optional(Schema.NullOr(ContextTransferId)),
-  /** Chat/agent source of a Work handoff, delivered in the first user message. */
+  /** Chat/agent source of a Work handoff, delivered into its first turn. */
   sourceThreadId: Schema.optional(ThreadId),
+  /** Work handoff metadata, shown beside the Work thread's "From chat" link. */
+  sourceThreadTitle: Schema.optional(Schema.String),
+  messagesCarried: Schema.optional(NonNegativeInt),
+  summaryUsed: Schema.optional(Schema.Boolean),
   threadId: ThreadId,
   targetRunId: RunId,
   fromProviderThreadIds: Schema.Array(ProviderThreadId),
@@ -1071,15 +1096,7 @@ export const OrchestrationV2ContextHandoff = Schema.Struct({
   summaryMessageId: Schema.NullOr(MessageId),
   summaryText: Schema.String,
   // Optional fields keep existing preview events and projections readable without a migration.
-  history: Schema.optional(
-    Schema.Struct({
-      messages: Schema.Array(OrchestrationV2HistoricalMessage),
-      coverage: Schema.String,
-      omittedItems: NonNegativeInt,
-      // IDs omitted during preparation, before the target's delivery budget is known.
-      omittedItemIds: Schema.optional(Schema.Array(TurnItemId)),
-    }),
-  ),
+  history: Schema.optional(OrchestrationV2ContextHandoffHistory),
   delivery: Schema.optional(
     Schema.Struct({
       nativeThreadId: Schema.String,
@@ -3270,6 +3287,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     targetThreadId: ThreadId,
     scopeSummary: TrimmedNonEmptyString,
     throughMessageId: Schema.optional(MessageId),
+    handoffContext: Schema.optional(OrchestrationV2WorkHandoffContext),
   }),
   /**
    * Records what a pull request watch saw, and wakes the agent in the same transaction when
