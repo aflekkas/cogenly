@@ -85,7 +85,7 @@ export async function handleDesktopAppActivationRequest(
       return failure(
         request.requestId,
         "project-create-failed",
-        errorMessage(error, "Cogenly could not add the project."),
+        errorMessage(error, "Cogenly could not add the repository."),
       );
     }
   }
@@ -99,7 +99,7 @@ export async function handleDesktopAppActivationRequest(
       return failure(
         request.requestId,
         "thread-open-failed",
-        "Cogenly could not open a new thread for the project.",
+        "Cogenly could not open a new thread for the repository.",
       );
     }
     return {
@@ -113,7 +113,7 @@ export async function handleDesktopAppActivationRequest(
     return failure(
       request.requestId,
       "thread-open-failed",
-      errorMessage(error, "Cogenly could not open a new thread for the project."),
+      errorMessage(error, "Cogenly could not open a new thread for the repository."),
     );
   }
 }

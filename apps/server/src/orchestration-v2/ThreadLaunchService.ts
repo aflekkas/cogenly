@@ -74,6 +74,10 @@ export interface ThreadLaunchInitialMessage {
 }
 
 export interface ThreadLaunchInput {
+  readonly workOrigin?: import("@t3tools/contracts").WorkOrigin;
+  readonly sourceThreadId?: ThreadId;
+  readonly sourceAgentId?: import("@t3tools/contracts").AgentId;
+  readonly sourceAgentRunId?: string;
   readonly agent?: {
     readonly id: import("@t3tools/contracts").AgentId;
     readonly role: "conversation" | "work";
@@ -935,6 +939,16 @@ const make = Effect.gen(function* () {
               })
             : threads.dispatch({
                 type: "thread.create",
+                ...(input.workOrigin === undefined ? {} : { workOrigin: input.workOrigin }),
+                ...(input.sourceThreadId === undefined
+                  ? {}
+                  : { sourceThreadId: input.sourceThreadId }),
+                ...(input.sourceAgentId === undefined
+                  ? {}
+                  : { sourceAgentId: input.sourceAgentId }),
+                ...(input.sourceAgentRunId === undefined
+                  ? {}
+                  : { sourceAgentRunId: input.sourceAgentRunId }),
                 ...(input.agent === undefined ? {} : { agent: input.agent }),
                 commandId: input.commandId,
                 threadId: candidateThreadId,

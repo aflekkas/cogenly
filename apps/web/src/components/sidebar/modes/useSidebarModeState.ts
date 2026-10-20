@@ -1,4 +1,5 @@
 import { useAgents } from "../../../agents/agentsClient";
+import { decisionsWaitingCount } from "../../../agents/agentWorkspace.logic";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -8,6 +9,7 @@ import type { EnvironmentId, ResolvedKeybindingsConfig, ScopedThreadRef } from "
 import { useEffect, useMemo } from "react";
 
 import { resolveShortcutCommand } from "../../../keybindings";
+import { useSelectSidebarMode } from "./useSelectSidebarMode";
 import { useUiStateStore } from "../../../uiStateStore";
 import {
   filterThreadsForSidebarMode,
@@ -21,40 +23,20 @@ const MODE_BY_COMMAND: Record<string, SidebarMode> = {
   "sidebar.mode.chats": "chats",
   "sidebar.mode.tasks": "tasks",
   "sidebar.mode.agents": "agents",
+  "sidebar.mode.projects": "projects",
 };
 
-export interface SidebarModeState {
-  readonly mode: SidebarMode;
-  readonly setMode: (mode: SidebarMode) => void;
-  /** The threads the current mode lists; feed these to the sidebar's partition. */
-  readonly modeThreads: ReadonlyArray<EnvironmentThreadShell>;
-  /** Project keys whose new-thread drafts belong in the current mode; null for all. */
-  readonly draftProjectKeys: ReadonlySet<string> | null;
-  readonly agentsNeedingYou: number;
-}
-
 /**
- * Everything the sidebar needs to list one mode at a time. Owns the persisted
- * mode, the mode shortcuts, and following the open thread into its mode.
+ * Which mode lists each thread: agent conversations, scratch chats, or Work.
+ * Shared by the sidebar and the project view so both sort threads alike.
  */
-export function useSidebarModeState(input: {
+export function useSidebarModeClassifier(input: {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly serverConfigs: ReadonlyMap<EnvironmentId, { readonly scratchWorkspaceRoot?: string }>;
-  /** The sidebar's project scope, or null for all projects. */
-  readonly scopedProjectKeys: ReadonlySet<string> | null;
-  readonly routeThreadRef: ScopedThreadRef | null;
-  readonly keybindings: ResolvedKeybindingsConfig;
-  /** Group label per `environmentId:projectId`. */
-  readonly projectDisplayNameByKey: ReadonlyMap<string, string>;
-}): SidebarModeState {
-  const { threads, projects, serverConfigs, scopedProjectKeys, routeThreadRef, keybindings } =
-    input;
-  const mode = useUiStateStore((store) => store.sidebarMode);
-  const setMode = useUiStateStore((store) => store.setSidebarMode);
-
+}) {
+  const { threads, projects, serverConfigs } = input;
   const { agents } = useAgents();
-
   const scratchProjectKeys = useMemo(
     () =>
       new Set(
@@ -81,6 +63,54 @@ export function useSidebarModeState(input: {
     }
     return { agentThreadKeys, scratchProjectKeys };
   }, [agents, scratchProjectKeys, threads]);
+  return { classifier, scratchProjectKeys };
+}
+
+export interface SidebarModeState {
+  readonly mode: SidebarMode;
+  /** Sets the mode and keeps the main panel, for following a thread into its mode. */
+  readonly setMode: (mode: SidebarMode) => void;
+  /** Picks a mode by hand, replacing a main panel of another kind. */
+  readonly selectMode: (mode: SidebarMode) => void;
+  /** The threads the current mode lists; feed these to the sidebar's partition. */
+  readonly modeThreads: ReadonlyArray<EnvironmentThreadShell>;
+  /** Project keys whose new-thread drafts belong in the current mode; null for all. */
+  readonly draftProjectKeys: ReadonlySet<string> | null;
+  /** Approvals and run questions waiting on you across agents; never unread messages. */
+  readonly decisionsWaiting: number;
+  /** Agent names by `environmentId:agentId`, for marking the Work an agent started. */
+  readonly agentNameByKey: ReadonlyMap<string, string>;
+  /** Which mode lists each thread, and so its kind. */
+  readonly classifier: SidebarModeThreadClassifier;
+}
+
+/**
+ * Everything the sidebar needs to list one mode at a time. Owns the persisted
+ * mode, the mode shortcuts, and following the open thread into its mode.
+ */
+export function useSidebarModeState(input: {
+  readonly threads: ReadonlyArray<EnvironmentThreadShell>;
+  readonly projects: ReadonlyArray<EnvironmentProject>;
+  readonly serverConfigs: ReadonlyMap<EnvironmentId, { readonly scratchWorkspaceRoot?: string }>;
+  /** The sidebar's project scope, or null for all projects. */
+  readonly scopedProjectKeys: ReadonlySet<string> | null;
+  readonly routeThreadRef: ScopedThreadRef | null;
+  readonly keybindings: ResolvedKeybindingsConfig;
+  /** Group label per `environmentId:projectId`. */
+  readonly projectDisplayNameByKey: ReadonlyMap<string, string>;
+}): SidebarModeState {
+  const { threads, projects, serverConfigs, scopedProjectKeys, routeThreadRef, keybindings } =
+    input;
+  const mode = useUiStateStore((store) => store.sidebarMode);
+  const setMode = useUiStateStore((store) => store.setSidebarMode);
+  const selectMode = useSelectSidebarMode();
+
+  const { agents } = useAgents();
+  const { classifier, scratchProjectKeys } = useSidebarModeClassifier({
+    threads,
+    projects,
+    serverConfigs,
+  });
 
   const modeThreads = useMemo(
     () => filterThreadsForSidebarMode(threads, mode, classifier),
@@ -88,7 +118,7 @@ export function useSidebarModeState(input: {
   );
 
   const draftProjectKeys = useMemo((): ReadonlySet<string> | null => {
-    if (mode === "agents") return new Set();
+    if (mode === "agents" || mode === "projects") return new Set();
     const keys = projects
       .map((project) => `${project.environmentId}:${project.id}`)
       .filter((key) => (mode === "chats") === scratchProjectKeys.has(key))
@@ -98,10 +128,12 @@ export function useSidebarModeState(input: {
     return new Set(keys);
   }, [mode, projects, scopedProjectKeys, scratchProjectKeys]);
 
-  const agentsNeedingYou = useMemo(
-    () => agents.filter((agent) => agent.state === "blocked" || agent.state === "needsYou").length,
+  const agentNameByKey = useMemo(
+    () => new Map(agents.map((agent) => [`${agent.environmentId}:${agent.id}`, agent.name])),
     [agents],
   );
+
+  const decisionsWaiting = useMemo(() => decisionsWaitingCount(agents), [agents]);
 
   // Opening a thread that another mode lists (search, notification, link)
   // switches to that mode. Keyed on the thread's own mode, so picking a
@@ -116,11 +148,7 @@ export function useSidebarModeState(input: {
       ) ?? null
     );
   }, [routeThreadRef, threads]);
-  const routeThreadMode = routeThread?.source.agent
-    ? "agents"
-    : routeThread
-      ? sidebarModeForThread(routeThread, classifier)
-      : null;
+  const routeThreadMode = routeThread ? sidebarModeForThread(routeThread, classifier) : null;
   const routeThreadKey = routeThread
     ? sidebarModeThreadKey(routeThread.environmentId, routeThread.id)
     : null;
@@ -136,11 +164,20 @@ export function useSidebarModeState(input: {
       if (!next) return;
       event.preventDefault();
       event.stopPropagation();
-      setMode(next);
+      selectMode(next);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, setMode]);
+  }, [keybindings, selectMode]);
 
-  return { mode, setMode, modeThreads, draftProjectKeys, agentsNeedingYou };
+  return {
+    mode,
+    setMode,
+    selectMode,
+    modeThreads,
+    draftProjectKeys,
+    decisionsWaiting,
+    agentNameByKey,
+    classifier,
+  };
 }

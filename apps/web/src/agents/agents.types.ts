@@ -1,7 +1,14 @@
 import type {
+  AgentActivityResult,
+  AgentApproval,
   AgentListItem,
+  Commitment,
+  CommitmentHistory,
   EnvironmentId,
+  ProjectId,
+  ProjectLabelWithRepositories,
   ModelSelection,
+  RunId,
   ScheduledTaskSchedule,
   ThreadId,
 } from "@t3tools/contracts";
@@ -32,6 +39,8 @@ export interface AgentMessage {
   source?: { name: string; threadId: ThreadId };
   /** The model an owner text went to; drives the "Switched to …" lines. */
   model?: AgentModelRef;
+  /** The run that wrote an assistant reply; what retrieval added to it is shown per run. */
+  runId?: RunId;
 }
 export type AgentModelRef = Pick<ModelSelection, "instanceId" | "model">;
 export interface AgentRequest {
@@ -68,6 +77,27 @@ export interface AgentContact extends AgentListItem {
   memory: ReadonlyArray<AgentMemoryNote>;
   activity: ReadonlyArray<AgentWorkRun>;
   requests: ReadonlyArray<AgentRequest>;
+  /** Pending owner decisions the agent asked for: Work, a trigger, or a permission change. */
+  approvals: ReadonlyArray<AgentApproval>;
+  /** A run in its conversation or Work waits on an approval or answer, known before `requests` load. */
+  waitingInRun?: boolean;
+}
+/** What the agent's Activity, Open items and Responsibilities tabs read. */
+export interface AgentWorkspaceView {
+  commitments: ReadonlyArray<Commitment>;
+  activity: typeof AgentActivityResult.Type | null;
+  /** The environment's projects (labels) with their linked repositories. */
+  labels: ReadonlyArray<ProjectLabelWithRepositories>;
+  /** The environment's repositories (Cogenly projects). */
+  repositories: ReadonlyArray<{ id: ProjectId; title: string }>;
+  loading: boolean;
+  error: string | null;
+  refresh: () => void;
+}
+/** An open item's status history, loaded when someone expands it. */
+export interface CommitmentHistoryView {
+  history: ReadonlyArray<CommitmentHistory> | null;
+  error: string | null;
 }
 export interface AgentModelOption {
   environmentId?: EnvironmentId;

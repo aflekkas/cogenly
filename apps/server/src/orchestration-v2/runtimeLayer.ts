@@ -1,3 +1,13 @@
+import * as GlobalSearch from "../search/GlobalSearch.ts";
+import * as Facts from "../context/FactService.ts";
+import * as Retrieval from "../context/ContextRetrievalService.ts";
+import * as Exports from "../export/ExportService.ts";
+import * as AgentEvents from "../agents/AgentEventBus.ts";
+import * as AgentEventReactor from "../agents/AgentEventReactor.ts";
+import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
+import * as WorkHandoff from "../work/WorkHandoffService.ts";
+import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
+import * as AgentMcpPolicy from "../agents/AgentMcpPolicy.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
@@ -278,6 +288,16 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
     ),
   ),
 );
+const layerWorkHandoffProvided = WorkHandoff.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerThreadLaunchProvided,
+      layerThreadManagementProvided,
+      layerProjectService,
+      AgentStore.layer,
+    ),
+  ),
+);
 const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
@@ -304,6 +324,34 @@ const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
       layerAgentsProvided,
       AgentStore.layer,
     ),
+  ),
+);
+const layerAgentEventsProvided = AgentEvents.layer.pipe(
+  Layer.provide(Layer.mergeAll(layerAgentsProvided, layerScheduledTaskProvided, AgentStore.layer)),
+);
+const layerAgentEventReactorProvided = AgentEventReactor.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerAgentEventsProvided,
+      ProjectionStore.layer,
+      layerEventStoreProvided,
+      layerManagedProjectFoldersProvided,
+    ),
+  ),
+);
+const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      AgentStore.layer,
+      layerAgentsProvided,
+      layerWorkHandoffProvided,
+      layerScheduledTaskProvided,
+    ),
+  ),
+);
+const layerAgentMcpPolicyProvided = AgentMcpPolicy.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(AgentStore.layer, layerAgentWorkspaceProvided, layerThreadManagementProvided),
   ),
 );
 const layerProviderContinuationWorkerProvided = ProviderContinuationService.layer.pipe(
@@ -374,12 +422,21 @@ export const layer = Layer.mergeAll(
 );
 
 export const layerProduction = Layer.mergeAll(
+  Facts.layer,
+  Retrieval.layer,
   layer.pipe(Layer.provide(layerProjectService)),
   layerProjectService,
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
+  layerWorkHandoffProvided,
   layerThreadLifecycleProvided,
   layerAgentsProvided,
+  GlobalSearch.layer.pipe(Layer.provide(AgentStore.layer)),
+  Exports.layer,
+  ProjectLabels.layer,
+  layerAgentWorkspaceProvided,
+  layerAgentEventReactorProvided,
+  layerAgentMcpPolicyProvided,
   AgentStore.layer,
   layerScheduledTaskProvided,
   layerSecretRequestsProvided,

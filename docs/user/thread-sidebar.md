@@ -5,24 +5,113 @@ need a separate branch and working directory.
 
 ## Message an agent
 
-The sidebar's **Agents** tab lists your persistent agents by recent activity. Open
-one to message it, or choose **New agent** to give one a name, instructions and a
-Claude or Codex model. You can add a first trigger during creation or add one later.
+An agent is a persistent specialist, such as "Spawn Ops", with its own conversation,
+responsibility and permissions. The sidebar's **Agents** tab lists them. Each row shows its status
+(**Needs approval**, **Needs you**, **Running** or **Idle**) and a
+count only when decisions are waiting on you.
 
-Open the agent's name or face to edit its instructions, pause background work,
-manage triggers and memory, or inspect recent runs. Trigger results arrive in the
-same conversation; their source links open the background work. Messages sent
-while an agent is busy use its normal queue or steering behavior.
+Choose **New agent** in the sidebar or command palette to create one. Give it a
+name, a responsibility and the workspace its conversation runs in. Nothing creates an
+agent for you.
+
+Opening an agent shows its chat. Ask it what is outstanding, give it direction, or
+ask it to start Work. The tabs above the chat hold the rest:
+
+- **Activity**: each run with what woke it (your message, a trigger, an event, an
+  approved action, or Work), its recorded status, model and summary, and what it
+  did, such as items it proposed or Work it started. Work links open the session;
+  event runs also link the Work, pull request or open item the event was about.
+- **Open items**: things to follow up on, owned by you, the agent or someone else,
+  with due dates, projects, and links to where they came from. Items the agent
+  finds stay **Proposed** until you confirm or dismiss them. **Mark done** asks
+  what finished it, optionally with a link as evidence; done and dismissed items
+  can be reopened. **Delete** removes an item and its history for good; dismiss it
+  instead to keep a record. **History** on an item lists every status change: who
+  made it, when, why, and any evidence. Pending approvals sit at the top, and also appear
+  in the chat.
+- **Responsibilities**: the agent's mission, instructions, permissions, notifications, daily run cap, triggers, memory (facts it
+  proposed wait there for you to confirm; see [Memory](./memory-and-export.md#memory)),
+  and **Delete**.
+
+Agents work on their own across all of your projects and repositories, and can add
+new projects. What they may do is set by permission switches: read, draft and start
+Work are on for a new agent; the high-impact send, create PRs, merge, deploy and
+delete stay off until you turn them on. An agent cannot grant itself anything.
+When it wants to start Work, add a trigger, or change its permissions, it
+asks, and you **Approve** or **Reject**. Approvals expire after seven days.
+
+**Start Work** in the agent's header starts a coding session in any repository, its
+home repository first. Without the start Work permission the agent would ask you
+first; starting it yourself approves that one session. The session runs in a new worktree and appears in **Work** under its
+repository, marked with the agent's name.
+The command palette also has **Start Work with …** and **Open items for …** for
+each agent.
+
+The badge on **Agents** counts decisions waiting for you across all agents:
+approvals they asked for, and approvals or questions inside their runs. Unread
+replies show as a dot on the agent instead.
+
+Triggers wake an agent for one recorded run: on an interval, at a time, on a
+webhook, or **When something happens**, such as PR checks failing, a PR merging,
+Work finishing or becoming ready for review, or an open item coming due. An event
+trigger can be limited to some projects, repositories, or Work you, a chat or an
+agent started. Filters only narrow what wakes it, and a repeated event wakes it
+once. Event triggers have no **Run now**; they run when the event happens. Add triggers under
+**Responsibilities → Triggers**, when creating the agent, or in **Settings →
+Scheduled tasks**. An agent can suggest one, but it is added only if you approve.
+
+An agent uses the model picked in its chat, for its replies and its background runs.
+A new agent starts on the model a new chat in its workspace would get. Agents are
+always on: their triggers keep running, up to the daily run cap, and a run that fails
+waits a little longer before the next one. To stop a trigger, turn it off under
+**Triggers**. Messages sent while an agent is busy use its normal queue or steering
+behavior.
+
+Coding work an agent starts appears in **Work** with your own threads, under its
+repository and marked with the agent's name.
+
+## Start Work from a chat
+
+When a chat turns into a coding task, choose **Start Work…** from the thread's title
+menu or right-click menu, run **Start Work from this thread** in the command palette,
+or press `mod+alt+s`. Cogenly drafts a title and scope from the conversation and
+suggests a repository. Edit any of them, then choose a new worktree or the local
+checkout and, optionally, a different model. The session starts from the scope you
+approved, with a link back to the chat rather than the whole transcript.
+
+The chat keeps a **Work started** line for each session it handed off. The session's
+header shows the chat or agent it came from and its status, such as **Running**,
+**Needs input**, or **Ready for review**. You don't need to return to the chat.
 
 ## Start a thread
 
 On web and desktop, a new thread keeps the current project and carries your model
 and mode selections, unless the destination project has its own model default.
-Its branch and workspace mode come from your configured defaults. To continue in
-an existing worktree, use **New thread in this worktree** from the branch toolbar.
+Its branch and workspace mode come from your configured defaults. In **Work**,
+**New work** starts in a new worktree unless the project, its `t3.json`, or
+Settings choose a workspace mode. To continue in an existing worktree, use
+**New thread in this worktree** from the branch toolbar.
 
 When you change a new thread's project, Cogenly stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
+
+### Chats
+
+The **Chats** tab lists threads without a project, newest first under **Today**,
+**Yesterday**, **Previous 7 days** and **Older**. **New chat** beside search, `mod+n`
+while Chats is open, and **New chat** in the command palette all start one without a
+project; they never open a repository. Opening **Chats** shows your most recent chat,
+or a new one when you have none. A small dot marks a chat that is still running
+or waiting on you. Older chats load as you scroll, and search covers all of them. Add
+repositories from **Work** or the command palette.
+
+A chat is a conversation; Work is a coding session in a repository. So a chat's
+menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
+which always asks first, while settling, snoozing, archiving, repository settings
+and the branch, worktree, diff, terminal and files controls belong to Work. When a
+chat turns into code, **Start Work…** hands it to a new Work session. An agent's
+conversation belongs to the agent: rename it or remove it from the agent's
+**Responsibilities**.
 
 ### Start without a project
 
@@ -194,11 +283,45 @@ On web and desktop, right-click a pull request link in a thread and choose
 same link to return to the branch PR, if one exists.
 The linked pull request participates in automatic settlement.
 
+## Tag threads with projects
+
+A project, such as a client or a course, is a tag for related chats and Work. It is
+separate from the repository a thread runs in: one project can link several
+repositories, and a chat can carry several projects or none. Tags organize and
+suggest context only; they never change what an agent can access, since agents reach
+every project.
+
+Projects have their own sidebar view: pick **Projects** in the navigation rail (or the
+mobile switcher), or press `mod+alt+4`. Open a project to see its Work, chats and
+agents, and to rename, recolor, describe, or delete it and link its repositories with
+**Edit project**. Start one with **New project** at the top of the list or in the
+command palette. Deleting a project removes its tag from threads but keeps the threads.
+
+To tag a thread, click the tag button beside its title, or run **Edit this thread's
+projects** from the command palette. Pick projects to add or remove them, type a new
+name to create one, or choose **No project** to clear them. After a thread's first
+reply, Cogenly may suggest projects from its repository and wording. Suggestions
+show outlined and do nothing until you accept them; a dismissed suggestion is not
+offered again for that thread. Confirmed projects also give the chat
+[project context](./memory-and-export.md#project-context-in-chats).
+
+**Chats** stays one list of titles by date, and the filter button beside search
+narrows it to one project. **Work** is one list, newest activity first. Each row
+names its repository beside the branch and shows its projects: the ones you tagged
+and the ones linking its repository. Right-click a row for **Repository settings** or
+to open one of its projects.
+
 ## Find and reference work
 
-On web and desktop, open the command palette with `Cmd/Ctrl+K` to search threads
-across connected environments. Message search starts after two characters and
+On web and desktop, open the command palette with `Cmd/Ctrl+K` or the rail's
+**Search** button to search threads in every mode across connected environments,
+and to open an agent by name. Message search starts after two characters and
 includes your messages and final agent responses.
+
+After two characters the palette also lists **Search everything** results: chats,
+Work, agents, open items, projects, and pull requests, with the matching words in
+bold. An open item opens in its agent's **Open items**, or in the thread it came
+from; a project opens its project view; a pull request opens in your browser.
 
 Use **Settings → Keybindings** to find or customize shortcuts for searching files
 and copying a thread reference. A copied reference uses the thread's pull request

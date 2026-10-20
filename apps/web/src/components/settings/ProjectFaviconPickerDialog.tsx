@@ -20,7 +20,7 @@ import { toastManager } from "../ui/toast";
 
 function emptyMessage(query: string, error: string | null, isPending: boolean): string {
   if (error) return error;
-  if (isPending) return query.trim() ? "Searching project files…" : "Indexing project files…";
+  if (isPending) return query.trim() ? "Searching repository files…" : "Indexing repository files…";
   return query.trim() ? "No matching image files." : "No image files found.";
 }
 export function canPickExternalProjectFavicon(cwd: string, platform: string): boolean {
@@ -68,76 +68,73 @@ export function ProjectFaviconPickerDialog(props: {
 
   return (
     <CommandDialog open={props.open} onOpenChange={props.onOpenChange}>
-      {props.open ? (
-        <CommandDialogPopup
-          aria-label="Choose project icon"
-          className="overflow-hidden"
-          onBackdropPointerDown={() => props.onOpenChange(false)}
+      <CommandDialogPopup
+        aria-label="Choose repository icon"
+        className="overflow-hidden"
+        onBackdropPointerDown={() => props.onOpenChange(false)}
+      >
+        <CommandPaletteContent
+          aria-label="Choose repository icon"
+          autoHighlight="always"
+          escapeLabel="Close"
+          footerActionLabel="Select icon"
+          footerTrailing={
+            pickExternal ? (
+              <CommandFooterAction
+                disabled={isPickingExternal}
+                onClick={() => {
+                  setIsPickingExternal(true);
+                  void pickExternal()
+                    .then((path) => {
+                      if (!path) return;
+                      props.onOpenChange(false);
+                      props.onSelect(path);
+                    })
+                    .catch((error: unknown) => {
+                      toastManager.add({
+                        type: "error",
+                        title: "Could not open image picker",
+                        description: error instanceof Error ? error.message : "An error occurred.",
+                      });
+                    })
+                    .finally(() => setIsPickingExternal(false));
+                }}
+              >
+                {`Open in ${fileManagerName}`}
+              </CommandFooterAction>
+            ) : null
+          }
+          inputProps={{ placeholder: "Search image files…" }}
+          mode="none"
+          onItemHighlighted={(value) => {
+            setHighlightedItemValue(typeof value === "string" ? value : null);
+          }}
+          onValueChange={(value) => {
+            setHighlightedItemValue(null);
+            setQuery(value);
+          }}
+          panelSize="tall-list"
+          testId="project-favicon-picker"
+          value={query}
         >
-          <CommandPaletteContent
-            aria-label="Choose project icon"
-            autoHighlight="always"
-            escapeLabel="Close"
-            footerActionLabel="Select icon"
-            footerTrailing={
-              pickExternal ? (
-                <CommandFooterAction
-                  disabled={isPickingExternal}
-                  onClick={() => {
-                    setIsPickingExternal(true);
-                    void pickExternal()
-                      .then((path) => {
-                        if (!path) return;
-                        props.onOpenChange(false);
-                        props.onSelect(path);
-                      })
-                      .catch((error: unknown) => {
-                        toastManager.add({
-                          type: "error",
-                          title: "Could not open image picker",
-                          description:
-                            error instanceof Error ? error.message : "An error occurred.",
-                        });
-                      })
-                      .finally(() => setIsPickingExternal(false));
-                  }}
-                >
-                  {`Open in ${fileManagerName}`}
-                </CommandFooterAction>
-              ) : null
+          <CommandPaletteResults
+            groups={
+              items.length > 0
+                ? [{ value: "project-favicon-files", label: props.projectName, items }]
+                : []
             }
-            inputProps={{ placeholder: "Search image files…" }}
-            mode="none"
-            onItemHighlighted={(value) => {
-              setHighlightedItemValue(typeof value === "string" ? value : null);
+            highlightedItemValue={highlightedItemValue}
+            isActionsOnly={false}
+            keybindings={keybindings}
+            onExecuteItem={(item) => {
+              if (item.kind !== "action") return;
+              props.onOpenChange(false);
+              void item.run();
             }}
-            onValueChange={(value) => {
-              setHighlightedItemValue(null);
-              setQuery(value);
-            }}
-            panelSize="tall-list"
-            testId="project-favicon-picker"
-            value={query}
-          >
-            <CommandPaletteResults
-              groups={
-                items.length > 0
-                  ? [{ value: "project-favicon-files", label: props.projectName, items }]
-                  : []
-              }
-              highlightedItemValue={highlightedItemValue}
-              isActionsOnly={false}
-              keybindings={keybindings}
-              onExecuteItem={(item) => {
-                if (item.kind !== "action") return;
-                props.onOpenChange(false);
-                void item.run();
-              }}
-              emptyStateMessage={emptyMessage(query, result.error, result.isPending)}
-            />
-          </CommandPaletteContent>
-        </CommandDialogPopup>
-      ) : null}
+            emptyStateMessage={emptyMessage(query, result.error, result.isPending)}
+          />
+        </CommandPaletteContent>
+      </CommandDialogPopup>
     </CommandDialog>
   );
 }

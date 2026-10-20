@@ -32,8 +32,59 @@ import {
 import * as RpcAuthorization from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
+  it("requires orchestration read access for global search", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.searchQuery)).toBe(AuthOrchestrationReadScope);
+  });
+  it.each([WS_METHODS.exportCreate, WS_METHODS.exportValidate, WS_METHODS.exportList])(
+    "requires the owner Settings grant for %s",
+    (method) => {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthSettingsWriteScope);
+    },
+  );
+  it("protects permanent commitment deletion", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.commitmentsDelete)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
+  });
+
+  it("requires operate access to start Work or generate a handoff draft", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.workStart)).toBe(AuthOrchestrationOperateScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.workProposeHandoff)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
+  it("requires owner operate authority for agent decisions and commitment mutations", () => {
+    for (const method of [
+      WS_METHODS.agentsRequestApproval,
+      WS_METHODS.agentsApprove,
+      WS_METHODS.agentsReject,
+      WS_METHODS.agentsStartWork,
+      WS_METHODS.factsCreate,
+      WS_METHODS.factsUpdate,
+      WS_METHODS.factsSupersede,
+      WS_METHODS.factsRetract,
+      WS_METHODS.contextSetEnabled,
+      WS_METHODS.commitmentsCreate,
+      WS_METHODS.commitmentsUpdateStatus,
+      WS_METHODS.commitmentsConfirm,
+      WS_METHODS.commitmentsDismiss,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    for (const method of [
+      WS_METHODS.agentsApprovalsList,
+      WS_METHODS.agentsActivity,
+      WS_METHODS.factsList,
+      WS_METHODS.factsHistory,
+      WS_METHODS.contextForRun,
+      WS_METHODS.contextSettings,
+      WS_METHODS.commitmentsList,
+      WS_METHODS.commitmentsHistory,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
   });
 
   it("requires operate access to stop a workflow", () => {
@@ -426,5 +477,64 @@ it.effect("denies manual cleanup before the handler without settings permission"
       requiredPermission: AuthSettingsWriteScope,
     });
     expect(handled).toBe(false);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("context labels do not let read-only clients change tags or launch classification", () =>
+  Effect.gen(function* () {
+    const tested = [
+      WS_METHODS.projectLabelsList,
+      WS_METHODS.projectLabelsSetThreadLabels,
+      WS_METHODS.projectLabelsSuggestLabels,
+    ] as const;
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof tested)[number]> =>
+          !(tested as ReadonlyArray<string>).includes(tag),
+      ),
+    );
+    let writes = 0;
+    const client = yield* RpcTest.makeClient(group).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          group.toLayerHandler(WS_METHODS.projectLabelsList, () => Effect.succeed({ labels: [] })),
+          group.toLayerHandler(WS_METHODS.projectLabelsSetThreadLabels, () =>
+            Effect.sync(() => {
+              writes++;
+              return { labels: [] };
+            }),
+          ),
+          group.toLayerHandler(WS_METHODS.projectLabelsSuggestLabels, () =>
+            Effect.sync(() => {
+              writes++;
+              return { labels: [] };
+            }),
+          ),
+          RpcAuthorization.layer([AuthOrchestrationReadScope]),
+        ),
+      ),
+    );
+    expect(yield* client[WS_METHODS.projectLabelsList]({})).toEqual({ labels: [] });
+    expect(
+      yield* client[WS_METHODS.projectLabelsSetThreadLabels]({
+        threadId: ThreadId.make("tagged"),
+        labelIds: [],
+      }).pipe(Effect.flip),
+    ).toMatchObject({
+      _tag: "EnvironmentAuthorizationError",
+      requiredPermission: AuthOrchestrationOperateScope,
+    });
+    expect(
+      yield* client[WS_METHODS.projectLabelsSuggestLabels]({
+        threadId: ThreadId.make("tagged"),
+      }).pipe(Effect.flip),
+    ).toMatchObject({
+      _tag: "EnvironmentAuthorizationError",
+      requiredPermission: AuthOrchestrationOperateScope,
+    });
+    expect(writes).toBe(0);
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.getThreadProjection)).toBe(
+      AuthOrchestrationReadScope,
+    );
   }).pipe(Effect.scoped),
 );

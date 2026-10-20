@@ -66,3 +66,12 @@ export * from "./secretRequest.ts";
 export * from "./clientRpcPermissions.ts";
 
 export * from "./agent.ts";
+
+export * from "./projectLabel.ts";
+export * from "./work.ts";
+export * from "./agentWorkspace.ts";
+
+export * from "./search.ts";
+export * from "./fact.ts";
+export * from "./export.ts";
+export * from "./agentEvent.ts";

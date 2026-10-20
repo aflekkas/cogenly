@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -25,6 +26,7 @@ import {
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useStableCallback } from "../hooks/useStableCallback";
+import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import {
   latestExecutedRun,
@@ -332,6 +334,7 @@ import {
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
+import { useRightPanelFlip } from "./chat/useRightPanelFlip";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
@@ -467,6 +470,9 @@ import {
 } from "./chat/QueuedRunsControl";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
+import { requestStartWork } from "./work/StartWorkDialog";
+import { classifyThreadKind, threadCapabilities } from "../threadCapabilities";
+import { WorkHandoffLines } from "./work/WorkHandoffLines";
 import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
@@ -1766,6 +1772,12 @@ export default function ChatView(props: ChatViewProps) {
     panelAnimationDurationMs,
   );
   const rightPanelPresent = rightPanelPresence.present;
+  useRightPanelFlip(
+    workspaceLayoutElement,
+    activeThreadRef,
+    !shouldUsePlanSidebarSheet,
+    rightPanelOpen,
+  );
   const rightPanelControlsInPanel =
     shouldUsePlanSidebarSheet && rightPanelPresent && rightPanelOpen;
   const rightPanelControlsAtRoot = rightPanelPresent && !shouldUsePlanSidebarSheet;
@@ -1939,7 +1951,7 @@ export default function ChatView(props: ChatViewProps) {
             variant="ghost"
             onClick={() => void removeClonedProject({ environmentId, projectId })}
           >
-            Remove project
+            Remove repository
           </Button>
           <Button
             size="xs"
@@ -2117,6 +2129,14 @@ export default function ChatView(props: ChatViewProps) {
       activeProject,
       environmentById.get(activeProject.environmentId)?.serverConfig?.scratchWorkspaceRoot ?? null,
     );
+  // What this thread's kind offers: a chat has no repository controls, an
+  // agent's conversation leaves its lifecycle to the agent.
+  const activeThreadCapabilities = threadCapabilities(
+    classifyThreadKind({
+      agentRole: activeThreadShell?.source.agent?.role ?? null,
+      isScratch: activeProjectIsScratch,
+    }),
+  );
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const envs: EnvironmentOption[] = [];
@@ -2197,7 +2217,7 @@ export default function ChatView(props: ChatViewProps) {
     envMode: DraftThreadEnvMode;
   }) => {
     if (!activeProject) {
-      throw new Error("No active project is available for this pull request.");
+      throw new Error("No active repository is available for this pull request.");
     }
     const activeProjectRef = scopeProjectRef(activeProject.environmentId, activeProject.id);
     const logicalProjectKey = deriveLogicalProjectKeyFromSettings(
@@ -3495,7 +3515,10 @@ export default function ChatView(props: ChatViewProps) {
       rememberCheckoutIsRepo(environmentId, gitStatusCwd, liveIsGitRepo);
     }
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
-  const isGitRepo = liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true;
+  // A chat never offers branch, worktree or diff controls, whatever its folder holds.
+  const isGitRepo =
+    activeThreadCapabilities.git &&
+    (liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true);
   // When context is enabled, keep a hidden, off-flow strip mounted so the composer
   // can measure whether its relocated controls fit. The visible chrome remains
   // content-driven: Git/environment context or controls that actually fit.
@@ -4559,7 +4582,7 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
   const togglePreviewPanelStable = useStableCallback(togglePreviewPanel);
-  // Shows the agent's terminals; the panel never starts a shell of its own.
+  // Shows the thread's terminals; opening the surface never starts a shell by itself.
   const openTerminalSurface = () => {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().openTerminal(activeThreadRef);
@@ -4599,6 +4622,18 @@ export default function ChatView(props: ChatViewProps) {
     useRightPanelStore.getState().toggleThreadPanel(activeThreadRef, threadPanelPresentation);
   };
   const toggleThreadPanelStable = useStableCallback(toggleThreadPanel);
+  // An agent's conversation has no thread details of its own: the header opens the
+  // agent's settings (its Responsibilities view) instead.
+  const agentConversationViewKey =
+    activeThreadRef && activeThreadShell?.source.agent?.role === "conversation"
+      ? agentViewKey({
+          environmentId: activeThreadRef.environmentId,
+          conversationThreadId: activeThreadRef.threadId,
+        })
+      : null;
+  const openAgentSettingsStable = useStableCallback(() => {
+    if (agentConversationViewKey) requestAgentView(agentConversationViewKey, "responsibilities");
+  });
   // A thread started for a link the OS opened shows its browser maximized, like a browser window.
   useEffect(() => {
     if (!canMaximizeRightPanel) return;
@@ -6136,6 +6171,23 @@ export default function ChatView(props: ChatViewProps) {
     isUnsnoozing,
     nowMinute,
   ]);
+  // Work this chat started, one line each ahead of the thread's own state line.
+  const activeThreadWorkHandoffs = activeThreadShell?.source.workHandoffs;
+  const threadFooterLines = useMemo(
+    () =>
+      activeThreadWorkHandoffs?.length ? (
+        <>
+          <WorkHandoffLines
+            links={activeThreadWorkHandoffs}
+            onOpenThread={onOpenRelatedThreadStable}
+          />
+          {threadStatusLine}
+        </>
+      ) : (
+        threadStatusLine
+      ),
+    [activeThreadWorkHandoffs, onOpenRelatedThreadStable, threadStatusLine],
+  );
   const activeThreadHasCompactableConversation = serverVisibleTurnItems.some(
     ({ item }) =>
       item.type === "user_message" &&
@@ -6176,7 +6228,7 @@ export default function ChatView(props: ChatViewProps) {
     ? !canOperateThread
       ? "This connection cannot change threads."
       : !activeProject
-        ? "Choose a project before compacting"
+        ? "Choose a repository before compacting"
         : !manualCompactionProviderAvailable
           ? "Compaction is unavailable for this provider"
           : "Compacting is unavailable right now"
@@ -6422,6 +6474,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "thread.settle") {
+        if (!activeThreadCapabilities.settle) return;
         if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
         event.preventDefault();
         event.stopPropagation();
@@ -6444,6 +6497,17 @@ export default function ChatView(props: ChatViewProps) {
             }),
           );
         });
+        return;
+      }
+
+      if (command === "thread.startWork") {
+        // Only a chat hands off to Work; agent conversations start Work through the agent.
+        if (!activeThreadCapabilities.startWork) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat && isServerThread && activeThreadRef) {
+          requestStartWork(activeThreadRef);
+        }
         return;
       }
 
@@ -6472,7 +6536,8 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "threadPanel.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        toggleThreadPanelStable();
+        if (activeThreadCapabilities.agentSettings) openAgentSettingsStable();
+        else if (activeThreadCapabilities.threadDetails) toggleThreadPanelStable();
         return;
       }
 
@@ -6487,6 +6552,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "diff.toggle") {
+        if (!activeThreadCapabilities.diff) return;
         event.preventDefault();
         event.stopPropagation();
         onToggleDiffStable();
@@ -6506,6 +6572,7 @@ export default function ChatView(props: ChatViewProps) {
         command === "composer.mode" ||
         command === "composer.workspace"
       ) {
+        if (command === "composer.workspace" && !activeThreadCapabilities.git) return;
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) composerRef.current?.openControl(command);
@@ -6528,6 +6595,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "composer.branch") {
+        if (!activeThreadCapabilities.git) return;
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) branchToolbarRef.current?.openBranchPicker();
@@ -6535,6 +6603,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "composer.previousWorktree") {
+        if (!activeThreadCapabilities.git) return;
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) branchToolbarRef.current?.usePreviousWorktree();
@@ -6571,7 +6640,8 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       const scriptId = projectScriptIdFromCommand(command);
-      if (!scriptId || !activeProject || !canOperateTerminal) return;
+      if (!scriptId || !activeProject || !canOperateTerminal || !activeThreadCapabilities.terminal)
+        return;
       const script = activeProjectScripts.find((entry) => entry.id === scriptId);
       if (!script) return;
       event.preventDefault();
@@ -6604,6 +6674,7 @@ export default function ChatView(props: ChatViewProps) {
     activeProject,
     activeRightPanelSurface,
     activeProjectScripts,
+    agentConversationViewKey,
     canOperateTerminal,
     activeThreadRef,
     activeThreadSettled,
@@ -7115,7 +7186,7 @@ export default function ChatView(props: ChatViewProps) {
           type: "warning",
           title: "Choose models and a base branch",
           description:
-            "Multiple models need a new thread in a Git project. Each gets its own worktree.",
+            "Multiple models need a new thread in a Git repository. Each gets its own worktree.",
         }),
       );
       return;
@@ -7481,8 +7552,8 @@ export default function ChatView(props: ChatViewProps) {
       toastManager.add(
         stackedThreadToast({
           type: "warning",
-          title: "Choose a project first",
-          description: "This draft no longer points to an available project.",
+          title: "Choose a repository first",
+          description: "This draft no longer points to an available repository.",
         }),
       );
       return;
@@ -9247,6 +9318,8 @@ export default function ChatView(props: ChatViewProps) {
         visible={rightPanelOpen}
         threadRef={activeThreadRef}
         activeTerminalId={renderedRightPanelSurface.activeTerminalId}
+        shellCwd={gitCwd}
+        shellWorktreePath={activeThread.worktreePath ?? null}
         focusRequestId={terminalFocusRequestId}
         keybindings={keybindings}
         onSelectTerminal={selectPanelTerminalStable}
@@ -9342,12 +9415,14 @@ export default function ChatView(props: ChatViewProps) {
     threadId: activeThread.id,
     ...(draftId ? { draftId } : {}),
     activeProjectName: activeProject?.title,
-    activeProjectScripts: activeProject ? activeProjectScripts : undefined,
+    // Scripts run in a terminal, and the card's git sections follow the kind's git controls.
+    activeProjectScripts:
+      activeProject && activeThreadCapabilities.terminal ? activeProjectScripts : undefined,
     preferredScriptId: activeProject
       ? (lastInvokedScriptByProjectId[activeProject.id] ?? null)
       : null,
     keybindings,
-    gitCwd,
+    gitCwd: activeThreadCapabilities.git ? gitCwd : null,
     isGitRepo,
     envLocked,
     availableEnvironments: logicalProjectEnvironments,
@@ -9387,6 +9462,7 @@ export default function ChatView(props: ChatViewProps) {
     rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
     onToggleThreadPanel: toggleThreadPanelStable,
     onToggleRightPanel: toggleRightPanelStable,
+    onOpenAgentSettings: agentConversationViewKey ? openAgentSettingsStable : undefined,
   } satisfies PanelLayoutControlsProps;
   const panelToggleControls = (
     <PanelLayoutControls
@@ -9447,7 +9523,10 @@ export default function ChatView(props: ChatViewProps) {
   const content = (
     <div
       ref={setWorkspaceLayoutElement}
-      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      // Clips vertically only: content gliding in from where it was drawn
+      // (panelFlip) may cross the pane's new left edge while the sidebar opens.
+      // The sidebar wrapper clips at the window's edges.
+      className="relative flex min-h-0 min-w-0 flex-1 overflow-y-clip bg-background"
     >
       <Dialog
         open={
@@ -9475,8 +9554,10 @@ export default function ChatView(props: ChatViewProps) {
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
       <div
         className={cn(
-          "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
-          rightPanelMaximized ? "w-0 flex-none" : "flex-1",
+          // isolate keeps the chat's raised overlays under the right panel, so
+          // content gliding beside a sliding panel passes beneath it unclipped.
+          "isolate flex min-h-0 min-w-0 flex-col",
+          rightPanelMaximized ? "w-0 flex-none overflow-x-hidden" : "flex-1",
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
@@ -9485,7 +9566,7 @@ export default function ChatView(props: ChatViewProps) {
           ref={threadPanelPopoverAnchorRef}
           data-chat-header
           className={cn(
-            "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
+            "relative bg-background",
             isElectron
               ? cn(
                   "drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 sm:px-5",
@@ -9515,14 +9596,16 @@ export default function ChatView(props: ChatViewProps) {
             onOpenThread={onOpenRelatedThreadStable}
             rightPanelOpen={inlineRightPanelOwnsTitleBar}
             onNewThreadInProject={handleNewThreadInActiveProjectStable}
-            {...(activeDraftLogicalProjectKey
+            capabilities={activeThreadCapabilities}
+            {...(activeDraftLogicalProjectKey && activeThreadCapabilities.repositorySettings
               ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
               : {})}
           />
         </header>
 
-        {/* Main content area with optional plan sidebar */}
-        <div className="relative flex min-h-0 min-w-0 flex-1">
+        {/* Main content area with optional plan sidebar. Its centered lane
+            glides to its new center when a panel opens or closes (panelFlip). */}
+        <div className="relative flex min-h-0 min-w-0 flex-1" data-panel-flip="center">
           {/* Chat column */}
           <ThreadFindCanvas
             findOptions={{
@@ -9620,7 +9703,7 @@ export default function ChatView(props: ChatViewProps) {
                 isPreparingWorktree={!paintOnlyDisplayedTimeline && isPreparingWorktree}
                 footer={
                   paintOnlyDisplayedTimeline ? null : pendingHandoff === null ? (
-                    threadStatusLine
+                    threadFooterLines
                   ) : (
                     <>
                       <div className="chat-content-lane">
@@ -9630,7 +9713,7 @@ export default function ChatView(props: ChatViewProps) {
                           pending
                         />
                       </div>
-                      {threadStatusLine}
+                      {threadFooterLines}
                     </>
                   )
                 }
@@ -9751,7 +9834,7 @@ export default function ChatView(props: ChatViewProps) {
               >
                 <div
                   data-chat-composer-stack="true"
-                  className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-(--chat-content-max-width)"
+                  className="group/composer-stack chat-content-lane pointer-events-auto relative z-10 px-(--chat-content-inset)"
                 >
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full">
@@ -10139,6 +10222,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddDevice={addDeviceSurfaceStable}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && (canReadTerminal || canOperateTerminal)}
+          supportedSurfaces={activeThreadCapabilities}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
           deviceAvailable={activeThreadRef !== null}
@@ -10193,6 +10277,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddDevice={addDeviceSurfaceStable}
             browserAvailable={canOperatePreview && browserAvailable}
             terminalAvailable={activeProject !== null && (canReadTerminal || canOperateTerminal)}
+            supportedSurfaces={activeThreadCapabilities}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
             deviceAvailable={activeThreadRef !== null}
@@ -10240,13 +10325,15 @@ export default function ChatView(props: ChatViewProps) {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-      {expandedImage && (
-        <ExpandedImageDialog
-          key={expandedImageKey(expandedImage)}
-          preview={expandedImage}
-          onClose={closeExpandedImageStable}
-        />
-      )}
+      <OverlayPresence when={expandedImage}>
+        {(expandedImage) => (
+          <ExpandedImageDialog
+            key={expandedImageKey(expandedImage)}
+            preview={expandedImage}
+            onClose={closeExpandedImageStable}
+          />
+        )}
+      </OverlayPresence>
     </div>
   );
   return (

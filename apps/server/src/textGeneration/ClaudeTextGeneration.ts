@@ -18,6 +18,7 @@ import { type ClaudeSettings, TextGenerationError } from "@t3tools/contracts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
+import * as WorkScopeSummaryGeneration from "./WorkScopeSummaryGeneration.ts";
 import {
   normalizeCliError,
   toJsonSchemaObject,
@@ -341,5 +342,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     );
   });
 
-  return TextGenerationOperations.fromRunner("ClaudeTextGeneration", runClaudeJson);
+  return {
+    ...TextGenerationOperations.fromRunner("ClaudeTextGeneration", runClaudeJson),
+    ...WorkScopeSummaryGeneration.fromRunner(runClaudeJson),
+  };
 });

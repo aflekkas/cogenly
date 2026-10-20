@@ -27,6 +27,8 @@ import { undoLatestThreadAction } from "../hooks/showThreadUndoNotice";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
+import { useUiStateStore } from "../uiStateStore";
+import { newThreadShortcutTarget } from "../components/sidebar/modes/sidebarModes.logic";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 
@@ -44,7 +46,8 @@ function ChatRouteGlobalShortcuts() {
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const { scratchEnvironmentId, startScratchThread } = useScratchProject();
+  const { scratchEnvironmentId, startScratchThread, startNewChat } = useScratchProject();
+  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
   const projectGroupCount = useMemo(
     () =>
       buildSidebarProjectSnapshots({
@@ -121,10 +124,22 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        // The default sidebar routes creation through the command palette
-        // whenever there is a real choice to make; the legacy sidebar (and
-        // single-project setups) keep the immediate contextual create.
-        if (!legacySidebarEnabled && projectGroupCount > 1) {
+        // Chats makes a plain chat. Otherwise the default sidebar routes
+        // creation through the command palette whenever there is a real
+        // choice to make; the legacy sidebar (and single-project setups) keep
+        // the immediate contextual create.
+        const target = newThreadShortcutTarget({
+          mode: sidebarMode,
+          legacySidebar: legacySidebarEnabled,
+          repositoryCount: projectGroupCount,
+        });
+        if (target === "chat") {
+          startNewChat(
+            activeThread?.environmentId ?? activeDraftThread?.environmentId ?? primaryEnvironmentId,
+          );
+          return;
+        }
+        if (target === "repository-picker") {
           openCommandPalette({ open: "new-thread-in" });
           return;
         }
@@ -200,6 +215,8 @@ function ChatRouteGlobalShortcuts() {
     routeThreadRef,
     scratchEnvironmentId,
     selectedThreadKeysSize,
+    sidebarMode,
+    startNewChat,
     startScratchThread,
     legacySidebarEnabled,
   ]);

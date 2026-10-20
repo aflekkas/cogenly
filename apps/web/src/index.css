@@ -131,7 +131,19 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --workspace-titlebar-control-size: 1.75rem;
   --workspace-titlebar-control-gap: 0.75rem;
   --workspace-titlebar-scroll-fade-height: 1.5rem;
+  /* Motion durations. fast: hover, press and color feedback. base: selection,
+     status swaps and toasts. slow: panels and larger surfaces. Pair them with
+     ease-standard; reduced motion zeroes the transitions that use them. */
+  --motion-duration-fast: 150ms;
+  --motion-duration-base: 200ms;
+  --motion-duration-slow: 250ms;
+  /* ease-standard for inline transitions and scripts (the theme token is
+     inlined into utilities, so it has no runtime variable). */
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --chat-content-max-width: 46rem;
+  /* Transcript text sits this far inside the lane; the composer and user
+     bubbles share the inset so the column has one left and right edge. */
+  --chat-content-inset: 0.25rem;
   --thread-details-panel-width: 17.5rem;
   /* The prompt on phones: iOS zooms into any input under 16px on focus. */
   --font-size-prompt-touch: max(var(--font-size-prompt, 1rem), 16px);
@@ -187,11 +199,21 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --text-4xs--line-height: 1;
   --text-5xs: 0.4375rem;
   --text-5xs--line-height: 1;
-  /* Motion. drawer is the decelerating curve for surfaces that slide or pop in
-     (composer context, pills). */
+  /* Motion. standard is the app's default curve: a gentle start and a long
+     settle, so small state changes (hover, selection, status swaps) glide
+     rather than snap. ease-out and every bare transition-* utility use it too;
+     durations live in --motion-duration-* (:root). drawer is the decelerating
+     curve for surfaces that slide or pop in (composer context, pills). */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-duration: 150ms;
   --inset-shadow-control-highlight: 0 1px rgb(255 255 255 / 16%);
   --inset-shadow-control-pressed: 0 1px rgb(0 0 0 / 8%);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  /* Overlays (popup-motion, dialogs, sheets) enter on drawer and leave on
+     popup-exit, a quicker accelerating curve. */
+  --ease-popup-exit: cubic-bezier(0.4, 0, 1, 1);
   /* The composer's elevation: a soft drop pulled in under the surface, shared
      by the composer, its context strip and attached banners. */
   --shadow-composer: 0 12px 28px -18px rgb(0 0 0 / 40%);
@@ -512,7 +534,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    state-selected: a darker-than-slab fill where the top highlight and faint
    edge do the work. Apply it conditionally (or behind data-*: variants). It is
    deliberately more specific, so it wins over state-hover and plain bg-* or
-   hover:bg-* utilities when both apply. */
+   hover:bg-* utilities when both apply. Selection is the fill alone, with no
+   leading line. Everything is background layers and shadows: static, no
+   pseudo-elements, no layout. */
 @utility state-hover {
   &[data-highlighted] {
     background-color: var(--state-hover-fill);
@@ -562,6 +586,107 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     box-shadow:
       var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000),
       var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  }
+}
+
+/* Sidebar rows and rail buttons cross-fade between rest, hover and selected:
+   the old highlight fades out as the new one fades in. state-fade opts other
+   surfaces (tinted rows) into the same cross-fade. Layered under utilities,
+   so a control that declares its own transition keeps it. */
+@layer components {
+  [data-app-sidebar] :is(.state-hover, .state-selected),
+  .state-fade {
+    transition-property: color, background-color, border-color, box-shadow, opacity, scale;
+    transition-duration: var(--motion-duration-base);
+    transition-timing-function: --theme(--ease-standard);
+
+    @media (prefers-reduced-motion: reduce) {
+      transition-duration: 0s;
+    }
+  }
+}
+
+/* Open/close motion for anchored popups: menus, selects, comboboxes,
+   autocompletes, popovers and tooltips. Put it on the Base UI Popup element
+   itself, with transition-[opacity,scale,translate] (plus anything else the
+   popup animates), because Base UI waits for that element's own transitions
+   before unmounting. Keep the glass fill on the same element: an opacity
+   fade on an ancestor would cut a child's backdrop-filter off from the page.
+   The popup fades in from 97% scale (origin --transform-origin) and slides a
+   few pixels out of the trigger along data-side; exits are quicker.
+   Compositor-only properties, a single transition per open or close. */
+@utility popup-motion {
+  --popup-motion-offset: 4px;
+  --tw-duration: 160ms;
+  --tw-ease: --theme(--ease-drawer);
+
+  &:is([data-starting-style], [data-ending-style]) {
+    opacity: 0;
+    scale: 0.97;
+  }
+  &[data-side="bottom"]:is([data-starting-style], [data-ending-style]) {
+    translate: 0 calc(-1 * var(--popup-motion-offset));
+  }
+  &[data-side="top"]:is([data-starting-style], [data-ending-style]) {
+    translate: 0 var(--popup-motion-offset);
+  }
+  &:is([data-side="left"], [data-side="inline-start"]):is(
+      [data-starting-style],
+      [data-ending-style]
+    ) {
+    translate: var(--popup-motion-offset) 0;
+  }
+  &:is([data-side="right"], [data-side="inline-end"]):is(
+      [data-starting-style],
+      [data-ending-style]
+    ) {
+    translate: calc(-1 * var(--popup-motion-offset)) 0;
+  }
+  &[data-ending-style] {
+    --tw-duration: 110ms;
+    --tw-ease: --theme(--ease-popup-exit);
+  }
+
+  /* Reduced motion opens and closes instantly; a zero-length transition never
+     starts, so Base UI unmounts at once too. */
+  @media (prefers-reduced-motion: reduce) {
+    &&,
+    &&[data-ending-style] {
+      --tw-duration: 0s;
+    }
+  }
+}
+
+/* Enter motion for disclosure content that mounts when opened (inline
+   "show more" panels that aren't a Collapsible): a short fade and drop in.
+   Closing unmounts at once. Uses @starting-style, so it runs once per mount
+   and never on later renders. */
+@utility reveal-motion {
+  @media (prefers-reduced-motion: no-preference) {
+    transition-property: opacity, translate;
+    transition-duration: 160ms;
+    transition-timing-function: --theme(--ease-drawer);
+
+    @starting-style {
+      opacity: 0;
+      translate: 0 -4px;
+    }
+  }
+}
+
+/* Status icons and labels that swap with state (sidebar row chips, pending
+   markers): key the element by its state so the new one mounts and rises a
+   couple of pixels into place while fading in. Enter only, once per mount. */
+@utility swap-motion {
+  @media (prefers-reduced-motion: no-preference) {
+    transition-property: opacity, translate;
+    transition-duration: var(--motion-duration-base);
+    transition-timing-function: --theme(--ease-standard);
+
+    @starting-style {
+      opacity: 0;
+      translate: 0 2px;
+    }
   }
 }
 
@@ -673,6 +798,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   to {
     transform: translateX(-100%);
   }
+}
+
+/* Single-line text that fades out at its end instead of an ellipsis. The mask
+   only covers the last 1.5rem of the box, so text that fits never fades. */
+@utility fade-truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent);
+  mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent);
 }
 
 @utility live-activity-focus {
@@ -1299,17 +1433,18 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --surface-raised-shadow-floating:
       0 1px 2px rgb(0 0 0 / 40%), 0 18px 44px -18px rgb(0 0 0 / 80%);
     /* Dark states are barely-there white fills; the lit top edge and faint
-       hairline carry the selection, never a gray slab. */
+       hairline carry the selection, never a gray slab. Selection borrows the
+       raised-card light: a sheen, a lit top edge, a hairline and a soft drop. */
     --state-hover-fill: rgb(255 255 255 / 3.5%);
     --state-hover-sheen-top: transparent;
     --state-hover-sheen-bottom: transparent;
     --state-hover-highlight: transparent;
     --state-selected-fill: rgb(255 255 255 / 6%);
-    --state-selected-sheen-top: transparent;
+    --state-selected-sheen-top: rgb(255 255 255 / 2.5%);
     --state-selected-sheen-bottom: transparent;
-    --state-selected-highlight: transparent;
-    --state-selected-edge: transparent;
-    --state-selected-shadow: 0 0 #0000;
+    --state-selected-highlight: rgb(255 255 255 / 8%);
+    --state-selected-edge: rgb(255 255 255 / 3.5%);
+    --state-selected-shadow: 0 1px 2px rgb(0 0 0 / 35%);
     --foreground: var(--color-neutral-100);
     --card: color-mix(in srgb, var(--background) 97%, var(--color-white));
     --card-foreground: var(--color-neutral-100);
@@ -1319,7 +1454,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --secondary: --alpha(var(--color-white) / 3%);
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 3%);
-    --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
+    --muted-foreground: #a3a3a3;
     --accent: --alpha(var(--color-white) / 4%);
     --accent-foreground: var(--color-neutral-100);
     --error: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
@@ -1394,13 +1529,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --sidebar-foreground: var(--foreground);
     --sidebar-muted-foreground: var(--muted-foreground);
     --sidebar-control-surface: var(--muted);
-    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 2.5%, transparent);
-    --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 4%, transparent);
+    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 6%, transparent);
+    --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 9%, transparent);
     --sidebar-row-selected: var(--sidebar-row-active);
     --sidebar-border: var(--border);
-    --state-selected-highlight: transparent;
-    --state-selected-edge: transparent;
-    --state-selected-shadow: 0 0 #0000;
+    --state-selected-highlight: rgb(255 255 255 / 8%);
+    --state-selected-edge: rgb(255 255 255 / 3.5%);
+    --state-selected-shadow: 0 1px 2px rgb(0 0 0 / 50%);
   }
 }
 
@@ -2033,11 +2168,6 @@ code {
 /* GitHub-style task lists: the checkbox replaces the list marker. */
 .chat-markdown li.task-list-item {
   list-style-type: none;
-}
-
-.chat-markdown li.task-list-item input[type="checkbox"] {
-  margin: 0 0.35em 0.15em calc(-1 * var(--list-gutter, 1.25rem));
-  vertical-align: middle;
 }
 
 /* Markdown assumes inline images — GitHub comments lay button images out in a row — and the

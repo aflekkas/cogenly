@@ -102,20 +102,19 @@ function AutocompletePopup({
         side={side}
         sideOffset={sideOffset}
       >
-        <span
+        {/* The Popup is the glass surface so its own transition drives open and close. */}
+        <AutocompletePrimitive.Popup
           className={cn(
-            "dropdown-glass surface-raised surface-raised-floating relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg transition-[scale,opacity]",
+            "dropdown-glass surface-raised surface-raised-floating popup-motion relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg transition-[opacity,scale,translate]",
             className,
           )}
+          data-slot="autocomplete-popup"
+          {...props}
         >
-          <AutocompletePrimitive.Popup
-            className="flex max-h-[min(var(--available-height),23rem)] flex-1 flex-col text-foreground"
-            data-slot="autocomplete-popup"
-            {...props}
-          >
+          <div className="flex max-h-[min(var(--available-height),23rem)] flex-1 flex-col text-foreground">
             {children}
-          </AutocompletePrimitive.Popup>
-        </span>
+          </div>
+        </AutocompletePrimitive.Popup>
       </AutocompletePrimitive.Positioner>
     </AutocompletePrimitive.Portal>
   );

@@ -1,9 +1,10 @@
-import { PanelRightIcon, SquareMenuIcon } from "lucide-react";
+import { PanelRightIcon, SettingsIcon, SquareMenuIcon } from "lucide-react";
 import { Maximize2, Minimize2 } from "lucide";
 import { MorphIcon } from "~/components/MorphIcon";
 import { memo, type ReactElement } from "react";
 
 import type { ThreadPanelPresentation } from "../../rightPanelLayout";
+import { Button } from "../ui/button";
 import { PopoverCreateHandle, PopoverTrigger } from "../ui/popover";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -21,6 +22,8 @@ export interface PanelLayoutControlsProps {
   rightPanelUnavailableLabel?: string;
   onToggleThreadPanel: () => void;
   onToggleRightPanel: () => void;
+  /** Set on an agent's conversation: its settings replace the thread details toggle. */
+  onOpenAgentSettings?: (() => void) | undefined;
 }
 
 export const PanelLayoutControls = memo(function PanelLayoutControls({
@@ -36,6 +39,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
   rightPanelUnavailableLabel = "Right panel is unavailable",
   onToggleThreadPanel,
   onToggleRightPanel,
+  onOpenAgentSettings,
 }: PanelLayoutControlsProps) {
   const threadPanelToggle = (
     <Toggle
@@ -66,13 +70,35 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
       className="flex h-full shrink-0 items-center gap-1 [-webkit-app-region:no-drag]"
       data-panel-layout-controls
     >
-      {showThreadPanelControl
-        ? threadPanelPresentation === "popover"
-          ? threadPanelTooltip(
-              <PopoverTrigger handle={threadPanelPopoverHandle} render={threadPanelToggle} />,
-            )
-          : threadPanelTooltip(threadPanelToggle)
-        : null}
+      {showThreadPanelControl && onOpenAgentSettings ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                className="shrink-0 [-webkit-app-region:no-drag]"
+                aria-label="Agent settings"
+                variant="ghost"
+                size="icon-sm"
+                onClick={onOpenAgentSettings}
+              />
+            }
+          >
+            <SettingsIcon className="size-4" />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">
+            Agent settings
+            {threadPanelShortcutLabel ? ` (${threadPanelShortcutLabel})` : ""}
+          </TooltipPopup>
+        </Tooltip>
+      ) : showThreadPanelControl ? (
+        threadPanelPresentation === "popover" ? (
+          threadPanelTooltip(
+            <PopoverTrigger handle={threadPanelPopoverHandle} render={threadPanelToggle} />,
+          )
+        ) : (
+          threadPanelTooltip(threadPanelToggle)
+        )
+      ) : null}
       {showRightPanelControl ? (
         <Tooltip>
           <TooltipTrigger render={<span className="flex shrink-0" />}>

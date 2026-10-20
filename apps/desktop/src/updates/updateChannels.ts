@@ -1,18 +1,31 @@
 import type { DesktopUpdateChannel } from "@t3tools/contracts";
 
-const NIGHTLY_VERSION_PATTERN = /^[^-+]+-nightly\.\d{8}\.\d+$/;
-// Preview builds are the maintainers' test train, cut by hand from unreleased
-// branches to exercise the release flow. They share nightly's branding but
-// are packaged without an update feed (see
-// isDesktopPreviewVersion in scripts/build-desktop-artifact.ts), so the
-// channel a preview install reports is cosmetic: it never checks for updates
-// and no updater feed ever lists a preview release.
-const PRERELEASE_VERSION_PATTERN = /^[^-+]+-(?:nightly|preview)\.\d{8}\.\d+$/;
+const STAGING_VERSION_PATTERN = /^[^-+]+-staging\.\d{8}\.\d+$/;
 
-export function isNightlyDesktopVersion(version: string): boolean {
-  return PRERELEASE_VERSION_PATTERN.test(version);
+export function isStagingDesktopVersion(version: string): boolean {
+  return STAGING_VERSION_PATTERN.test(version);
 }
 
-export function resolveDefaultDesktopUpdateChannel(appVersion: string): DesktopUpdateChannel {
-  return NIGHTLY_VERSION_PATTERN.test(appVersion) ? "nightly" : "latest";
+// `latest` is the persisted prod ID and electron-updater's manifest name.
+export function resolveDefaultDesktopUpdateChannel(version: string): DesktopUpdateChannel {
+  return isStagingDesktopVersion(version) ? "staging" : "latest";
+}
+
+export function resolveDesktopUpdateFeed(channel: DesktopUpdateChannel) {
+  return {
+    channel,
+    allowPrerelease: channel === "staging",
+    manifest: `${channel}-mac.yml`,
+  };
+}
+
+export function requiresManualMacUpdate(platform: NodeJS.Platform, signed: boolean): boolean {
+  return platform === "darwin" && !signed;
+}
+
+export function desktopUpdateDownloadUrl(version: string, genericFeedUrl?: string): string {
+  const baseUrl =
+    genericFeedUrl?.replace(/\/+$/, "") ??
+    `https://github.com/aflekkas/cogenly/releases/download/v${encodeURIComponent(version)}`;
+  return `${baseUrl}/Cogenly-${encodeURIComponent(version)}-arm64.dmg`;
 }

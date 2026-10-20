@@ -1,5 +1,6 @@
 "use client";
 
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
@@ -239,200 +240,205 @@ export function AddProviderInstanceDialog({
     onOpenChange(false);
   };
 
-  if (addingChatGptAccount) {
-    return (
-      <AddManagedCodexAccountDialog
-        environmentId={environmentId}
-        onClose={() => onOpenChange(false)}
-      />
-    );
-  }
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <WizardPopup size="wide">
-        <WizardHeader
-          title="Add provider"
-          description={<>Add an account or configure a provider on {environmentLabel}.</>}
-        >
-          <AddProviderInstanceWizardSteps
-            currentStep={wizardStep}
-            summaries={wizardStepSummaries}
-            instanceIdError={instanceIdError}
-            disabled={isSaving}
-            onNavigation={applyWizardNavigation}
-          />
-        </WizardHeader>
+    <>
+      <Dialog open={open && !addingChatGptAccount} onOpenChange={onOpenChange}>
+        <WizardPopup size="wide">
+          <WizardHeader
+            title="Add provider"
+            description={<>Add an account or configure a provider on {environmentLabel}.</>}
+          >
+            <AddProviderInstanceWizardSteps
+              currentStep={wizardStep}
+              summaries={wizardStepSummaries}
+              instanceIdError={instanceIdError}
+              disabled={isSaving}
+              onNavigation={applyWizardNavigation}
+            />
+          </WizardHeader>
 
-        <WizardPanel>
-          <div className={cn("grid gap-2", wizardStep !== 0 && "hidden")}>
-            <div id="add-instance-driver-label" className="text-sm font-medium text-foreground">
-              Provider
-            </div>
-            <RadioGroup
-              value={driver}
-              onValueChange={(value) => {
-                setDriver(ProviderDriverKind.make(value));
-                setHasAttemptedSubmit(false);
-              }}
-              aria-labelledby="add-instance-driver-label"
-              className="grid grid-cols-1 sm:grid-cols-2"
-            >
-              {providerClients.definitions.map((option) => {
-                return (
-                  <RadioPrimitive.Root
-                    key={option.driverKind}
-                    value={option.driverKind}
-                    className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-inset data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
-                  >
-                    <ProviderInstanceIcon
-                      driverKind={option.driverKind}
-                      displayName={option.label}
-                      iconClassName="size-4"
-                    />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                      {option.label}
-                    </span>
-                    <RadioPrimitive.Indicator
-                      className="grid size-5 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground"
-                      aria-hidden
+          <WizardPanel>
+            <div className={cn("grid gap-2", wizardStep !== 0 && "hidden")}>
+              <div id="add-instance-driver-label" className="text-sm font-medium text-foreground">
+                Provider
+              </div>
+              <RadioGroup
+                value={driver}
+                onValueChange={(value) => {
+                  setDriver(ProviderDriverKind.make(value));
+                  setHasAttemptedSubmit(false);
+                }}
+                aria-labelledby="add-instance-driver-label"
+                className="grid grid-cols-1 sm:grid-cols-2"
+              >
+                {providerClients.definitions.map((option) => {
+                  return (
+                    <RadioPrimitive.Root
+                      key={option.driverKind}
+                      value={option.driverKind}
+                      className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-inset data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
                     >
-                      <CheckIcon className="size-3.5 shrink-0" />
-                    </RadioPrimitive.Indicator>
-                    {option.badgeLabel ? (
-                      <Badge variant="warning" size="sm">
-                        {option.badgeLabel}
-                      </Badge>
-                    ) : null}
-                  </RadioPrimitive.Root>
-                );
-              })}
-            </RadioGroup>
-          </div>
+                      <ProviderInstanceIcon
+                        driverKind={option.driverKind}
+                        displayName={option.label}
+                        iconClassName="size-4"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                        {option.label}
+                      </span>
+                      <RadioPrimitive.Indicator
+                        className="grid size-5 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground"
+                        aria-hidden
+                      >
+                        <CheckIcon className="size-3.5 shrink-0" />
+                      </RadioPrimitive.Indicator>
+                      {option.badgeLabel ? (
+                        <Badge variant="warning" size="sm">
+                          {option.badgeLabel}
+                        </Badge>
+                      ) : null}
+                    </RadioPrimitive.Root>
+                  );
+                })}
+              </RadioGroup>
+            </div>
 
-          <SettingsGroup variant="plain" className={cn(wizardStep !== identityStep && "hidden")}>
-            <SettingsRow
-              title={<label htmlFor="add-provider-label">Label</label>}
-              description={
-                <span id="add-provider-label-description">Shown in the provider list.</span>
-              }
-              control={
-                <Input
-                  id="add-provider-label"
-                  aria-describedby="add-provider-label-description"
-                  size="sm"
-                  className="w-full @min-[32rem]/settings-row:w-56"
-                  placeholder="e.g. Work"
-                  value={label}
-                  onChange={(event) => setIdentityDraft({ label: event.target.value })}
-                />
-              }
-            />
-            <SettingsRow
-              title={<label htmlFor="add-provider-instance-id">Instance ID</label>}
-              description={
-                <span id="add-provider-instance-id-description">Letters, digits, '-', or '_'.</span>
-              }
-              status={
-                showInstanceIdError ? (
-                  <span
-                    id="add-provider-instance-id-error"
-                    role="alert"
-                    className="text-destructive"
-                  >
-                    {instanceIdError}
+            <SettingsGroup variant="plain" className={cn(wizardStep !== identityStep && "hidden")}>
+              <SettingsRow
+                title={<label htmlFor="add-provider-label">Label</label>}
+                description={
+                  <span id="add-provider-label-description">Shown in the provider list.</span>
+                }
+                control={
+                  <Input
+                    id="add-provider-label"
+                    aria-describedby="add-provider-label-description"
+                    size="sm"
+                    className="w-full @min-[32rem]/settings-row:w-56"
+                    placeholder="e.g. Work"
+                    value={label}
+                    onChange={(event) => setIdentityDraft({ label: event.target.value })}
+                  />
+                }
+              />
+              <SettingsRow
+                title={<label htmlFor="add-provider-instance-id">Instance ID</label>}
+                description={
+                  <span id="add-provider-instance-id-description">
+                    Letters, digits, '-', or '_'.
                   </span>
-                ) : undefined
-              }
-              control={
-                <Input
-                  id="add-provider-instance-id"
-                  aria-describedby={
-                    showInstanceIdError
-                      ? "add-provider-instance-id-description add-provider-instance-id-error"
-                      : "add-provider-instance-id-description"
-                  }
-                  size="sm"
-                  className="w-full @min-[32rem]/settings-row:w-56"
-                  placeholder={`${driver}_work`}
-                  value={instanceId}
-                  onChange={(event) => {
-                    setIdentityDraft({ instanceIdOverride: event.target.value });
-                  }}
-                  aria-invalid={showInstanceIdError}
-                />
-              }
-            />
-            <SettingsRow
-              title="Accent color"
-              description="Optional marker shown in the picker."
-              control={
-                <ProviderAccentColorPicker
-                  displayName={label || driverOption.label}
-                  value={accentColor || undefined}
-                  onCommit={(value) => setIdentityDraft({ accentColor: value })}
-                  layout="inline"
-                />
-              }
-            />
-          </SettingsGroup>
-
-          {driverSettingsFields.length > 0 ? (
-            <SettingsGroup variant="plain" className={cn(wizardStep !== 2 && "hidden")}>
-              <ProviderSettingsForm
-                definition={driverOption}
-                value={configDraft}
-                idPrefix={`add-provider-${driver}`}
-                variant="settings"
-                onChange={setConfigDraft}
+                }
+                status={
+                  showInstanceIdError ? (
+                    <span
+                      id="add-provider-instance-id-error"
+                      role="alert"
+                      className="text-destructive"
+                    >
+                      {instanceIdError}
+                    </span>
+                  ) : undefined
+                }
+                control={
+                  <Input
+                    id="add-provider-instance-id"
+                    aria-describedby={
+                      showInstanceIdError
+                        ? "add-provider-instance-id-description add-provider-instance-id-error"
+                        : "add-provider-instance-id-description"
+                    }
+                    size="sm"
+                    className="w-full @min-[32rem]/settings-row:w-56"
+                    placeholder={`${driver}_work`}
+                    value={instanceId}
+                    onChange={(event) => {
+                      setIdentityDraft({ instanceIdOverride: event.target.value });
+                    }}
+                    aria-invalid={showInstanceIdError}
+                  />
+                }
+              />
+              <SettingsRow
+                title="Accent color"
+                description="Optional marker shown in the picker."
+                control={
+                  <ProviderAccentColorPicker
+                    displayName={label || driverOption.label}
+                    value={accentColor || undefined}
+                    onCommit={(value) => setIdentityDraft({ accentColor: value })}
+                    layout="inline"
+                  />
+                }
               />
             </SettingsGroup>
-          ) : wizardStep === 2 ? (
-            <div className="grid gap-2">
-              <p className="text-sm text-muted-foreground">
-                This driver has no required configuration. You can add the instance now.
-              </p>
-            </div>
-          ) : null}
-        </WizardPanel>
 
-        <WizardFooter>
-          <Button
-            variant={wizardStep === 0 ? "ghost-muted" : "outline"}
-            size="sm"
-            disabled={isSaving}
-            onClick={() => {
-              if (wizardStep === 0) {
-                onOpenChange(false);
-                return;
-              }
-              setWizardStep((step) => Math.max(0, step - 1));
-            }}
-          >
-            {wizardStep === 0 ? "Cancel" : "Back"}
-          </Button>
-          {wizardStep === 0 && driver === "codex" ? (
-            <>
-              <Button variant="outline" size="sm" onClick={() => navigateToStep(1)}>
-                Configure manually
-              </Button>
-              <ChatGptConnectionButton size="sm" onClick={() => setAddingChatGptAccount(true)} />
-            </>
-          ) : wizardStep < 2 ? (
-            <Button size="sm" onClick={() => navigateToStep(wizardStep + 1)}>
-              Next
-            </Button>
-          ) : (
+            {driverSettingsFields.length > 0 ? (
+              <SettingsGroup variant="plain" className={cn(wizardStep !== 2 && "hidden")}>
+                <ProviderSettingsForm
+                  definition={driverOption}
+                  value={configDraft}
+                  idPrefix={`add-provider-${driver}`}
+                  variant="settings"
+                  onChange={setConfigDraft}
+                />
+              </SettingsGroup>
+            ) : wizardStep === 2 ? (
+              <div className="grid gap-2">
+                <p className="text-sm text-muted-foreground">
+                  This driver has no required configuration. You can add the instance now.
+                </p>
+              </div>
+            ) : null}
+          </WizardPanel>
+
+          <WizardFooter>
             <Button
+              variant={wizardStep === 0 ? "ghost-muted" : "outline"}
               size="sm"
-              disabled={isSaving || !canManageProviders}
-              onClick={() => void handleSave()}
+              disabled={isSaving}
+              onClick={() => {
+                if (wizardStep === 0) {
+                  onOpenChange(false);
+                  return;
+                }
+                setWizardStep((step) => Math.max(0, step - 1));
+              }}
             >
-              {isSaving ? "Adding..." : "Add instance"}
+              {wizardStep === 0 ? "Cancel" : "Back"}
             </Button>
-          )}
-        </WizardFooter>
-      </WizardPopup>
-    </Dialog>
+            {wizardStep === 0 && driver === "codex" ? (
+              <>
+                <Button variant="outline" size="sm" onClick={() => navigateToStep(1)}>
+                  Configure manually
+                </Button>
+                <ChatGptConnectionButton size="sm" onClick={() => setAddingChatGptAccount(true)} />
+              </>
+            ) : wizardStep < 2 ? (
+              <Button size="sm" onClick={() => navigateToStep(wizardStep + 1)}>
+                Next
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                disabled={isSaving || !canManageProviders}
+                onClick={() => void handleSave()}
+              >
+                {isSaving ? "Adding..." : "Add instance"}
+              </Button>
+            )}
+          </WizardFooter>
+        </WizardPopup>
+      </Dialog>
+      {/* Adding a ChatGPT account hands over to its own dialog: this one
+          closes as that one opens. */}
+      <OverlayPresence when={addingChatGptAccount}>
+        {() => (
+          <AddManagedCodexAccountDialog
+            environmentId={environmentId}
+            onClose={() => onOpenChange(false)}
+          />
+        )}
+      </OverlayPresence>
+    </>
   );
 }

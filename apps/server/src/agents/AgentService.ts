@@ -1,4 +1,7 @@
+import * as Access from "./AgentAccessScope.ts";
+import { canReceiveAgentEvent } from "./agentEventPolicy.ts";
 import {
+  defaultAgentPermissions,
   AgentError,
   AgentId,
   CommandId,
@@ -6,6 +9,8 @@ import {
   MessageId,
   ThreadId,
   TurnItemId,
+  AgentEventContext,
+  ScheduledTaskSchedule,
   type Agent,
   type AgentListItem,
   type AgentMarkReadInput,
@@ -31,6 +36,8 @@ import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { conversationCarryOver } from "./context.ts";
 
+const encodeEventContext = Schema.encodeEffect(Schema.fromJsonString(AgentEventContext));
+const encodeEventSchedule = Schema.encodeEffect(Schema.fromJsonString(ScheduledTaskSchedule));
 const isAgentError = Schema.is(AgentError);
 const failure = (cause: unknown) =>
   isAgentError(cause)
@@ -58,6 +65,7 @@ export class AgentService extends Context.Service<
       task: ScheduledTask,
       fireKey: string,
       prompt: string,
+      context?: AgentEventContext,
     ) => Effect.Effect<boolean, AgentError>;
     /** Also called on startup; terminal runs with undelivered postbacks survive restarts. */
     readonly reconcile: () => Effect.Effect<void, AgentError>;
@@ -73,6 +81,7 @@ const make = Effect.gen(function* () {
   const events = yield* EventSink.EventSinkV2;
   const scheduler = yield* Scheduler.Scheduler;
   const sql = yield* SqlClient.SqlClient;
+  const access = yield* Access.AgentAccessScope;
   const changes = yield* PubSub.sliding<void>(1);
   const changed = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
   const list = () => store.list().pipe(Effect.map((agents) => ({ agents })));
@@ -82,6 +91,14 @@ const make = Effect.gen(function* () {
   // A stable command receipt makes replay after a crash exactly-once in the conversation.
   const post = (agent: Agent, run: AgentWorkRun) =>
     Effect.gen(function* () {
+      if (agent.notifyPolicy !== "all" && run.status === "completed") {
+        const changes =
+          yield* sql`SELECT 1 FROM agent_run_actions a JOIN orchestration_v2_projection_runs r ON r.run_id = a.run_id WHERE r.thread_id = ${run.workThreadId} LIMIT 1`;
+        if (agent.notifyPolicy === "action_required" || changes.length === 0) {
+          yield* store.markPosted(run.id);
+          return;
+        }
+      }
       const at = yield* DateTime.now;
       const commandId = CommandId.make(`agent-post:${run.id}`);
       const messageId = MessageId.make(`agent-post:${run.id}`);
@@ -165,13 +182,11 @@ const make = Effect.gen(function* () {
               DateTime.toEpochMillis(yield* DateTime.now) - Date.parse(record.createdAt) >
               300000
             ) {
-              const next = yield* store.outcome(agent.id, false);
+              yield* store.outcome(agent.id, false);
               yield* store.finishRun(
                 record.id,
                 "failed",
-                ["This job was interrupted before it could start.", next.pauseReason]
-                  .filter(Boolean)
-                  .join("\n\n"),
+                "This job was interrupted before it could start.",
               );
             }
             return;
@@ -181,13 +196,11 @@ const make = Effect.gen(function* () {
             run === undefined &&
             DateTime.toEpochMillis(yield* DateTime.now) - Date.parse(record.createdAt) > 300000
           ) {
-            const next = yield* store.outcome(agent.id, false);
+            yield* store.outcome(agent.id, false);
             yield* store.finishRun(
               record.id,
               "failed",
-              ["This job was interrupted before its first turn started.", next.pauseReason]
-                .filter(Boolean)
-                .join("\n\n"),
+              "This job was interrupted before its first turn started.",
             );
             return;
           }
@@ -211,16 +224,12 @@ const make = Effect.gen(function* () {
             .trim();
           const updated = yield* sql.withTransaction(
             Effect.gen(function* () {
-              const next = yield* store.outcome(agent.id, succeeded);
-              const summary = [
+              yield* store.outcome(agent.id, succeeded);
+              const summary =
                 response.slice(0, 1200) ||
-                  (succeeded
-                    ? "Work finished."
-                    : "This run failed. Open the work details to inspect it."),
-                next.pauseReason,
-              ]
-                .filter(Boolean)
-                .join("\n\n");
+                (succeeded
+                  ? "Work finished."
+                  : "This run failed. Open the work details to inspect it.");
               yield* store.finishRun(record.id, succeeded ? "completed" : "failed", summary);
               return {
                 ...record,
@@ -307,13 +316,15 @@ const make = Effect.gen(function* () {
         }
         const agent = yield* store.save({
           ...input,
+          responsibility: input.responsibility ?? existing?.responsibility ?? "",
+          permissions: input.permissions ?? existing?.permissions ?? defaultAgentPermissions,
+          notifyPolicy: input.notifyPolicy ?? existing?.notifyPolicy ?? "meaningful_changes",
           id,
           conversationThreadId,
           createdAt: existing?.createdAt ?? at,
           updatedAt: at,
           consecutiveFailures: existing?.consecutiveFailures ?? 0,
           backoffUntil: existing?.backoffUntil ?? null,
-          pauseReason: existing?.pauseReason ?? null,
         });
         if (existing !== null) {
           yield* threads.dispatch({
@@ -336,8 +347,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const agent = (yield* store.list()).find((candidate) => candidate.id === id);
         if (agent === undefined) return { deleted: false };
-        // Disable before stopping work so a due trigger cannot launch while deletion waits.
-        yield* store.save({ ...agent, enabled: false });
+        // Retire before stopping work so a due trigger cannot launch while deletion waits.
+        yield* store.retire(id);
         const runs = yield* store.runs(id);
         const threadIds = [
           agent.conversationThreadId,
@@ -362,8 +373,8 @@ const make = Effect.gen(function* () {
     send: (input) =>
       Effect.gen(function* () {
         const agent = yield* store.get(input.id);
-        // Pausing, backoff and daily caps govern background reservations only.
-        // An owner text always reaches the provider, including after auto-pause.
+        // Backoff and daily caps govern background reservations only.
+        // An owner text always reaches the provider.
         const result = yield* threads.sendToThread({
           projectId: yield* workspace(agent),
           commandId: input.commandId,
@@ -382,19 +393,47 @@ const make = Effect.gen(function* () {
           delivery: result.delivery,
         };
       }).pipe(Effect.mapError(failure)),
-    trigger: (task, fireKey, prompt) =>
+    trigger: (task, fireKey, prompt, context) =>
       Effect.gen(function* () {
         if (task.agentId == null) return false;
-        const agent = yield* store.get(task.agentId);
+        if (task.schedule.type === "event" && context === undefined)
+          return yield* new AgentError({
+            message: "Event triggers require a source event and cannot be run manually.",
+          });
+        let agent = yield* store.get(task.agentId);
         const id = `agent-work:${fireKey}`;
         const workThreadId = ThreadId.make(id);
         const accepted = yield* sql.withTransaction(
           Effect.gen(function* () {
+            if (context !== undefined) {
+              agent = yield* store.get(task.agentId!);
+              const scheduleJson = yield* encodeEventSchedule(task.schedule);
+              const current =
+                yield* sql`SELECT 1 FROM scheduled_tasks WHERE task_id = ${task.id} AND enabled = 1 AND agent_id = ${agent.id} AND project_id = ${task.projectId} AND created_at = ${task.createdAt} AND schedule_json = ${scheduleJson}`;
+              if (current.length === 0) return false;
+              if (!canReceiveAgentEvent(yield* access.resolve(agent.id), task, context))
+                return false;
+              const prior =
+                yield* sql`SELECT 1 FROM agent_event_deliveries WHERE agent_id = ${agent.id} AND event_key = ${context.dedupKey}`;
+              if (prior.length) return false;
+            }
             if (!(yield* store.reserve(agent.id))) return false;
+            if (context !== undefined) {
+              const inherited = {
+                ...context,
+                chainDepth: context.chainDepth + 1,
+                chainAgentIds: [...new Set([...context.chainAgentIds, agent.id])],
+              };
+              const contextJson = yield* encodeEventContext(inherited);
+              yield* sql`INSERT INTO agent_event_deliveries(agent_id, event_key, work_thread_id, context_json) VALUES (${agent.id}, ${context.dedupKey}, ${workThreadId}, ${contextJson})`;
+              yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind, source_run_id) VALUES (${workThreadId}, ${agent.id}, 'event', ${context.refs.runId ?? null})`;
+            }
             yield* store.createRun({
               id,
               agentId: agent.id,
               triggerId: task.id,
+              triggerKind: context === undefined ? "trigger" : "event",
+              ...(context === undefined ? {} : { triggerContext: context }),
               workThreadId,
               status: "starting",
               createdAt: DateTime.formatIso(yield* DateTime.now),
@@ -413,6 +452,9 @@ const make = Effect.gen(function* () {
         const result = yield* Effect.result(
           launch.launch({
             agent: { id: agent.id, role: "work" },
+            workOrigin: "agent",
+            sourceAgentId: agent.id,
+            sourceAgentRunId: id,
             commandId: CommandId.make(id),
             threadId: workThreadId,
             projectId: agent.projectId ?? task.projectId,
@@ -426,20 +468,18 @@ const make = Effect.gen(function* () {
             initialMessage: {
               messageId: MessageId.make(id),
               scheduledTaskId: task.id,
-              text: `Background job for ${agent.name}. Finish with a short owner-facing result, question, or approval request. Details stay in this work thread.\n\nConversation summary:\n${carry.summary}\nRecent conversation:\n${carry.recent}\n\nTrigger:\n${prompt}`,
+              text: `Background job for ${agent.name}. Finish with a short owner-facing result, question, or approval request. Details stay in this work thread.\n\nConversation summary:\n${carry.summary}\nRecent conversation:\n${carry.recent}\n\nTrigger:\n${prompt}${context === undefined ? "" : `\n\nEvent context:\n${yield* encodeEventContext(context)}`}`,
               attachments: [],
             },
           }),
         );
         if (result._tag === "Success") yield* store.markRunning(id);
         if (result._tag === "Failure") {
-          const next = yield* store.outcome(agent.id, false);
+          yield* store.outcome(agent.id, false);
           yield* store.finishRun(
             id,
             "failed",
-            ["I could not start this job. Open its work details to inspect it.", next.pauseReason]
-              .filter(Boolean)
-              .join("\n\n"),
+            "I could not start this job. Open its work details to inspect it.",
           );
         }
         yield* changed;
@@ -448,4 +488,4 @@ const make = Effect.gen(function* () {
     reconcile,
   });
 });
-export const layer = Layer.effect(AgentService, make);
+export const layer = Layer.effect(AgentService, make).pipe(Layer.provide(Access.layer));

@@ -1,3 +1,4 @@
+import { withWorkMetadata } from "@t3tools/shared/workMetadata";
 import { applyThreadPullRequestLinkUpdate } from "@t3tools/shared/threadPullRequests";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
@@ -720,7 +721,7 @@ export function emptyProjection(
   event: Extract<OrchestrationV2DomainEvent, { readonly type: "thread.created" }>,
 ): OrchestrationV2ThreadProjection {
   return {
-    thread: event.payload,
+    thread: withWorkMetadata(event.payload),
     runs: [],
     attempts: [],
     nodes: [],
@@ -791,7 +792,7 @@ export function applyToProjection(
     case "thread.provider-switched":
       return {
         ...base,
-        thread: event.payload,
+        thread: withWorkMetadata(event.payload),
       };
     // Visited tracking is read state, not activity: skip the updatedAt bump so
     // viewing a thread does not surface it as recently active.
@@ -799,7 +800,7 @@ export function applyToProjection(
     case "thread.marked-unread":
       return {
         ...projection,
-        thread: event.payload,
+        thread: withWorkMetadata(event.payload),
       };
     case "run.created":
     case "run.updated":
@@ -1517,6 +1518,11 @@ export function threadShellFromProjection(
   return {
     createdBy: projection.thread.createdBy,
     agent: projection.thread.agent,
+    workOrigin: withWorkMetadata(projection.thread).workOrigin,
+    sourceThreadId: projection.thread.sourceThreadId,
+    sourceAgentId: withWorkMetadata(projection.thread).sourceAgentId,
+    sourceAgentRunId: projection.thread.sourceAgentRunId,
+    workHandoffs: projection.thread.workHandoffs,
     creationSource: projection.thread.creationSource,
     id: projection.thread.id,
     projectId: projection.thread.projectId,
@@ -1786,6 +1792,11 @@ function shellFromState(input: {
   return {
     createdBy: input.state.thread.createdBy,
     agent: input.state.thread.agent,
+    workOrigin: withWorkMetadata(input.state.thread).workOrigin,
+    sourceThreadId: input.state.thread.sourceThreadId,
+    sourceAgentId: withWorkMetadata(input.state.thread).sourceAgentId,
+    sourceAgentRunId: input.state.thread.sourceAgentRunId,
+    workHandoffs: input.state.thread.workHandoffs,
     creationSource: input.state.thread.creationSource,
     id: input.state.thread.id,
     projectId: input.state.thread.projectId,
@@ -1911,7 +1922,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           case "thread.interaction-mode-updated":
           case "thread.model-selection-updated":
           case "thread.provider-switched": {
-            const payloadJson = yield* encodeThreadPayload(event.payload);
+            const payloadJson = yield* encodeThreadPayload(withWorkMetadata(event.payload));
             const payload = parseEncodedPayload(payloadJson);
             yield* sql`
               INSERT INTO orchestration_v2_projection_threads (
@@ -1959,6 +1970,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 deleted_at = excluded.deleted_at,
                 payload_json = excluded.payload_json
             `;
+            if (event.type === "thread.deleted") {
+              yield* sql`DELETE FROM agent_run_threads WHERE thread_id = ${event.threadId}`;
+            }
             break;
           }
           case "run.created":

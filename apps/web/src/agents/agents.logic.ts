@@ -27,11 +27,18 @@ export function formatMessageTime(at: string, now = new Date(), locale?: string)
   return `${day} ${date.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" })}`;
 }
 
+/**
+ * Each message with its time separator and grouping. `endsRun` marks the last assistant
+ * reply of a finished run, where that run's "Context used" belongs.
+ */
 export function conversationRows(
   messages: ReadonlyArray<AgentMessage>,
   now = new Date(),
   locale?: string,
 ) {
+  const lastOfRun = new Map<string, string>();
+  for (const message of messages)
+    if (message.role === "assistant" && message.runId) lastOfRun.set(message.runId, message.id);
   return messages.map((message, index) => {
     const previous = messages[index - 1];
     const date = validDate(message.createdAt);
@@ -53,6 +60,10 @@ export function conversationRows(
         gap <= GROUP_GAP_MS &&
         !message.source &&
         !previous.source,
+      endsRun:
+        !message.streaming &&
+        message.runId !== undefined &&
+        lastOfRun.get(message.runId) === message.id,
     };
   });
 }
@@ -69,6 +80,26 @@ export function sortAgentContacts(agents: ReadonlyArray<AgentContact>) {
 export const agentContactKey = (agent: Pick<AgentContact, "environmentId" | "id">) =>
   `${agent.environmentId}:${agent.id}`;
 
+export type AgentStatusLabel = "Needs approval" | "Needs you" | "Running" | "Idle";
+
+/**
+ * What an agent is doing, from its requests and runs. It claims activity only
+ * while a run is live: an agent with nothing running is "Idle", never "online"
+ * or "thinking".
+ */
+export function agentStatusLabel(
+  agent: Pick<AgentContact, "state" | "requests"> & {
+    approvals?: AgentContact["approvals"];
+  },
+): AgentStatusLabel {
+  if (agent.approvals?.length || agent.requests.some((request) => request.kind === "approval"))
+    return "Needs approval";
+  if (agent.requests.length > 0 || agent.state === "blocked" || agent.state === "needsYou")
+    return "Needs you";
+  if (agent.state === "thinking" || agent.state === "working") return "Running";
+  return "Idle";
+}
+
 /** Preserve viewed history while the shell receives a message in a closed conversation. */
 export function mergeLatestMessage(
   messages: ReadonlyArray<AgentMessage>,
@@ -84,30 +115,6 @@ export function mergeLatestMessage(
         );
   return [...messages, latest].sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
-  );
-}
-
-/** No-project contacts come first without a heading; each project keeps activity order. */
-export function groupAgentContacts(
-  agents: ReadonlyArray<AgentContact>,
-  projectOf: (agent: AgentContact) => { key: string; label: string } | null,
-) {
-  const groups = new Map<string, { key: string; label: string | null; agents: AgentContact[] }>();
-  for (const agent of sortAgentContacts(agents)) {
-    const project = projectOf(agent);
-    const key = project?.key ?? "no-project";
-    let group = groups.get(key);
-    if (!group) {
-      group = { key, label: project?.label ?? null, agents: [] };
-      groups.set(key, group);
-    }
-    group.agents.push(agent);
-  }
-  return [...groups.values()].toSorted(
-    (a, b) =>
-      Number(b.label === null) - Number(a.label === null) ||
-      (a.label ?? "").localeCompare(b.label ?? "") ||
-      a.key.localeCompare(b.key),
   );
 }
 
@@ -139,13 +146,12 @@ export function agentDraft(agent: AgentContact): AgentDraft {
     modelSelection: agent.modelSelection,
     runtimeMode: agent.runtimeMode,
     projectId: agent.projectId,
-    enabled: agent.enabled,
     dailyRunCap: agent.dailyRunCap,
   };
 }
 
 type ModelRef = Pick<ModelSelection, "instanceId" | "model">;
-export const sameModel = (a: ModelRef, b: ModelRef) =>
+const sameModel = (a: ModelRef, b: ModelRef) =>
   a.instanceId === b.instanceId && a.model === b.model;
 
 /**

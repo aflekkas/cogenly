@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { DeviceToolVersions } from "../device/DeviceToolVersions";
 import { DeviceHostAvailability } from "../device/DeviceHostAvailability";
 import { useAtomValue } from "@effect/atom-react";
@@ -201,17 +202,19 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
                 {...listActions}
               />
             )}
-            {editing ? (
-              <DeviceHostEditor
-                key={editing.id}
-                host={editing}
-                isNew={originalHost === null}
-                targets={targets}
-                busy={busy}
-                onSave={(host) => void save(host, false, originalHost ?? host)}
-                onClose={() => setEditing(null)}
-              />
-            ) : null}
+            <OverlayPresence when={editing}>
+              {(editing) => (
+                <DeviceHostEditor
+                  key={editing.id}
+                  host={editing}
+                  isNew={originalHost === null}
+                  targets={targets}
+                  busy={busy}
+                  onSave={(host) => void save(host, false, originalHost ?? host)}
+                  onClose={() => setEditing(null)}
+                />
+              )}
+            </OverlayPresence>
           </>
         )}
       </div>

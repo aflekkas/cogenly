@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useAuth } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
 import type {
@@ -108,8 +109,8 @@ type WizardStep = "connection" | "agents" | "import";
 const NO_ENVIRONMENTS: readonly EnvironmentId[] = [];
 
 const AGENT_ONBOARDING_THREAD_ID = ThreadId.make("onboarding-agent-setup");
-const ONBOARDING_STAGES = ["Connect", "Agents", "Projects"] as const;
-const SCAN_LIMIT_MESSAGE = "Scan limit reached. Some projects or conversations may be missing.";
+const ONBOARDING_STAGES = ["Connect", "Agents", "Repositories"] as const;
+const SCAN_LIMIT_MESSAGE = "Scan limit reached. Some repositories or conversations may be missing.";
 
 export function WelcomeWizard({
   localAvailable,
@@ -329,7 +330,7 @@ function ConnectionStep({
         Connect your computers
       </h1>
       <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-        Choose one or more computers. We’ll set up agents and projects on each.
+        Choose one or more computers. We’ll set up agents and repositories on each.
       </p>
       {directEnvironments.length > 0 ? (
         <fieldset className="mt-5 space-y-2">
@@ -826,15 +827,17 @@ function ConnectedAgentsStep({
           </Button>
         </div>
       ) : null}
-      {addingAccount ? (
-        <AddManagedCodexAccountDialog
-          environmentId={environmentId}
-          onClose={() => setAddingAccount(false)}
-          onAccountCreated={(instanceId, displayName) =>
-            setCreatedAccount({ instanceId, displayName, autoStart: true })
-          }
-        />
-      ) : null}
+      <OverlayPresence when={addingAccount}>
+        {() => (
+          <AddManagedCodexAccountDialog
+            environmentId={environmentId}
+            onClose={() => setAddingAccount(false)}
+            onAccountCreated={(instanceId, displayName) =>
+              setCreatedAccount({ instanceId, displayName, autoStart: true })
+            }
+          />
+        )}
+      </OverlayPresence>
       {terminalSession !== null ? (
         <AgentInstallTerminal
           key={`${terminalSession.environmentId}:${terminalSession.providerInstanceId}:${terminalSession.driver}`}
@@ -1163,7 +1166,7 @@ function AgentInstallTerminal({
 
 // ── Step 4: import ───────────────────────────────────────────
 
-const IMPORT_PERMISSION_MESSAGE = "This connection cannot import projects or thread history.";
+const IMPORT_PERMISSION_MESSAGE = "This connection cannot import repositories or thread history.";
 
 function ImportStep({
   scans,
@@ -1409,16 +1412,16 @@ function ImportStep({
   if (scans.every((scan) => scan.data === null) && scans.some((scan) => scan.isPending)) {
     return (
       <div className="flex h-full min-h-40 flex-col">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Your projects</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Your repositories</h1>
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-6">
           <Spinner size="lg" tone="muted" />
           <p className="text-center text-sm text-muted-foreground">
-            Looking for projects from Claude Code and Codex…
+            Looking for repositories from Claude Code and Codex…
           </p>
         </div>
         <div className="flex justify-end">
           <Button variant="ghost-muted" onClick={() => void onDone()}>
-            Do not import projects
+            Do not import repositories
           </Button>
         </div>
       </div>
@@ -1427,8 +1430,8 @@ function ImportStep({
 
   return (
     <StepShell
-      title="Import your projects"
-      description="Import projects and conversations from Claude Code and Codex on your selected computers."
+      title="Import your repositories"
+      description="Import repositories and conversations from Claude Code and Codex on your selected computers."
     >
       {candidates.length > 0 ? (
         <div className="mt-5 flex items-center justify-between gap-3 text-xs text-muted-foreground">
@@ -1476,21 +1479,21 @@ function ImportStep({
                 {scan.isPending && scan.data === null ? (
                   <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
                     <Spinner size="md" />
-                    Looking for projects…
+                    Looking for repositories…
                   </div>
                 ) : scan.error !== null ? (
                   <div
                     role="alert"
                     className="flex items-center justify-between gap-3 text-sm text-muted-foreground"
                   >
-                    <span>Could not check projects. {scan.error}</span>
+                    <span>Could not check repositories. {scan.error}</span>
                     <Button variant="ghost" size="sm" onClick={scan.refresh}>
                       Retry
                     </Button>
                   </div>
                 ) : scanCandidates.length === 0 ? (
                   <p className="py-2 text-sm text-muted-foreground">
-                    No existing Claude Code or Codex projects found.
+                    No existing Claude Code or Codex repositories found.
                   </p>
                 ) : null}
                 {scan.data?.truncated ? (
@@ -1513,7 +1516,7 @@ function ImportStep({
       ) : null}
       <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
         <Button variant="ghost-muted" disabled={isImporting} onClick={finishAfterImport}>
-          Do not import projects
+          Do not import repositories
         </Button>
         <Button
           autoFocus
@@ -1522,7 +1525,7 @@ function ImportStep({
         >
           {isImporting
             ? "Importing…"
-            : `Import ${selected.length} ${selected.length === 1 ? "project" : "projects"}`}
+            : `Import ${selected.length} ${selected.length === 1 ? "repository" : "repositories"}`}
         </Button>
       </div>
     </StepShell>

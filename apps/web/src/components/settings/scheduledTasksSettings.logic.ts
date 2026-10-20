@@ -1,4 +1,6 @@
 import {
+  type AgentEventFilter,
+  type AgentEventKind,
   EnvironmentId,
   type ProjectId,
   ScheduledTaskId,
@@ -47,7 +49,7 @@ export function validateScheduledTasksSearch(raw: Record<string, unknown>) {
   };
 }
 
-export type ScheduleMode = "fixed" | "interval" | "webhook";
+export type ScheduleMode = "fixed" | "interval" | "webhook" | "event";
 export type WorkspaceMode = "root" | "worktree" | "existing_worktree";
 
 export interface DraftState {
@@ -83,7 +85,15 @@ export interface DraftState {
   readonly signatureSecret: string;
   /** Minutes as typed; empty runs every held request regardless of age. */
   readonly maxDeliveryAgeMinutes: string;
+  /** The agent an event trigger wakes; event triggers always belong to one. */
+  readonly agentId: string | null;
+  readonly event: {
+    readonly event: AgentEventKind;
+    readonly filter?: typeof AgentEventFilter.Type | undefined;
+  };
 }
+
+export const DEFAULT_DRAFT_EVENT: DraftState["event"] = { event: "pr.checks_failed" };
 
 /** GitHub's signature settings, the most common sender. */
 export const WEBHOOK_SIGNATURE_DEFAULTS = {
@@ -94,6 +104,12 @@ export const WEBHOOK_SIGNATURE_DEFAULTS = {
 
 /** Null when the draft's webhook age limit is invalid; the caller reports it and does not save. */
 export function scheduleFromDraft(draft: DraftState): ScheduledTaskUpsertSchedule | null {
+  if (draft.scheduleMode === "event")
+    return {
+      type: "event",
+      event: draft.event.event,
+      ...(draft.event.filter ? { filter: draft.event.filter } : {}),
+    };
   if (draft.scheduleMode === "webhook") {
     const maxDeliveryAgeMinutes = parseMaxDeliveryAge(draft.maxDeliveryAgeMinutes);
     if (maxDeliveryAgeMinutes === undefined) return null;
@@ -135,7 +151,13 @@ export function taskToDraft(task: ScheduledTask): DraftState {
     prompt: task.prompt,
     enabled: task.enabled,
     scheduleMode:
-      schedule.type === "interval" ? "interval" : schedule.type === "webhook" ? "webhook" : "fixed",
+      schedule.type === "interval"
+        ? "interval"
+        : schedule.type === "webhook"
+          ? "webhook"
+          : schedule.type === "event"
+            ? "event"
+            : "fixed",
     intervalMinutes:
       schedule.type === "interval" ? String(Math.max(1, schedule.everyMs / 60_000)) : "15",
     timeOfDay: schedule.type === "fixed_time" ? schedule.timeOfDay : "09:00",
@@ -169,6 +191,11 @@ export function taskToDraft(task: ScheduledTask): DraftState {
       schedule.type === "webhook" && schedule.maxDeliveryAgeMinutes != null
         ? String(schedule.maxDeliveryAgeMinutes)
         : "",
+    agentId: task.agentId ?? null,
+    event:
+      schedule.type === "event"
+        ? { event: schedule.event, ...(schedule.filter ? { filter: schedule.filter } : {}) }
+        : DEFAULT_DRAFT_EVENT,
   };
 }
 

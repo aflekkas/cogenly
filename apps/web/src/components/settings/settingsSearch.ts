@@ -16,6 +16,7 @@ import {
 export type SettingsPath =
   | "/settings/projects"
   | "/settings/general"
+  | "/settings/memory"
   | "/settings/diagnostics"
   | "/settings/appearance"
   | "/settings/keybindings"
@@ -25,6 +26,7 @@ export type SettingsPath =
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
   | "/settings/storage"
+  | "/settings/data"
   | "/settings/connections"
   | "/settings/archived";
 
@@ -94,8 +96,9 @@ export interface SettingsSearchAvailability {
  */
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/diagnostics": "Diagnostics",
-  "/settings/projects": "Project",
+  "/settings/projects": "Repository",
   "/settings/general": "General",
+  "/settings/memory": "Memory",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",
@@ -104,6 +107,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/scheduled-tasks": "Scheduled Tasks",
   "/settings/source-control": "Source Control",
   "/settings/storage": "Storage",
+  "/settings/data": "Data",
   "/settings/connections": "Connections",
   "/settings/archived": "Archive",
 };
@@ -208,16 +212,28 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-defaults",
-    title: "Project defaults and overrides",
+    title: "Repository defaults and overrides",
     to: "/settings/general",
     scope: "project-defaults",
-    searchTerms: ["model workspace environments projects inheritance checkout"],
+    searchTerms: ["model workspace environments projects repositories inheritance checkout"],
+  },
+  {
+    id: "memory",
+    title: "Memory",
+    to: "/settings/memory",
+    searchTerms: ["facts remember forget correct context proposed confirm agents knowledge"],
+  },
+  {
+    id: "data-export",
+    title: "Export",
+    to: "/settings/data",
+    searchTerms: ["export backup download portable data jsonl validate bundle"],
   },
   {
     id: "project-overview",
-    title: "Project overview",
+    title: "Repository overview",
     to: "/settings/projects",
-    searchTerms: ["name icon image checkout remove delete"],
+    searchTerms: ["project repository repo overview name icon image checkout remove delete"],
   },
   {
     id: "default-model",
@@ -236,15 +252,15 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-grouping",
-    title: "Project grouping",
+    title: "Repository grouping",
     to: "/settings/general",
-    searchTerms: ["combine matching repositories environments sidebar"],
+    searchTerms: ["project grouping combine matching repositories environments sidebar"],
   },
   {
     id: "project-order",
-    title: "Project order",
+    title: "Repository order",
     to: "/settings/general",
-    searchTerms: ["sort projects sidebar manual created recent"],
+    searchTerms: ["project order sort projects repositories sidebar manual created recent"],
   },
   {
     id: "snooze-limited-threads",
@@ -416,10 +432,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "add-project-starts-in",
-    title: "Add project starts in",
+    title: "Add repository starts in",
     to: "/settings/general",
     scope: "environment-defaults",
-    searchTerms: ["base directory folder browser path home"],
+    searchTerms: ["add project base directory folder browser path home"],
   },
   {
     id: "archive-confirmation",
@@ -457,7 +473,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "update-track",
     title: "Update track",
     to: "/settings/general",
-    searchTerms: ["release channel stable latest nightly prerelease"],
+    searchTerms: ["release channel prod latest staging prerelease"],
     releaseChannelOnly: true,
   },
   {
@@ -875,6 +891,8 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/diagnostics": "environment",
   "/settings/projects": "project",
   "/settings/general": null,
+  "/settings/memory": null,
+  "/settings/data": null,
   "/settings/appearance": null,
   "/settings/snap-shot": null,
   // Keybindings fan out to the selection; Providers shows the representative

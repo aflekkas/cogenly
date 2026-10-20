@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type { DesktopSshPasswordPromptRequest } from "@t3tools/contracts";
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -43,20 +44,20 @@ export function SshPasswordPromptDialog() {
     });
   }, []);
 
-  if (!currentRequest) {
-    return null;
-  }
-
   return (
-    <ActiveSshPasswordPrompt
-      key={currentRequest.requestId}
-      request={currentRequest}
-      onRemove={(requestId) => {
-        setQueue((currentQueue) =>
-          currentQueue[0]?.requestId === requestId ? currentQueue.slice(1) : currentQueue,
-        );
-      }}
-    />
+    <OverlayPresence when={currentRequest}>
+      {(currentRequest) => (
+        <ActiveSshPasswordPrompt
+          key={currentRequest.requestId}
+          request={currentRequest}
+          onRemove={(requestId) => {
+            setQueue((currentQueue) =>
+              currentQueue[0]?.requestId === requestId ? currentQueue.slice(1) : currentQueue,
+            );
+          }}
+        />
+      )}
+    </OverlayPresence>
   );
 }
 

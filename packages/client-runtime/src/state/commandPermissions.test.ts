@@ -1,3 +1,4 @@
+import { createExportAtoms } from "./exports.ts";
 import { requestGuarded, runStreamGuarded } from "../rpc/client.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -8,6 +9,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
   AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   ThreadId,
@@ -23,8 +25,12 @@ import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import { EnvironmentRegistry } from "../connection/registry.ts";
+import { createAgentWorkspaceAtoms } from "./agents.ts";
 import { createCommandPermissions } from "./commandPermissions.ts";
-import { createEnvironmentRpcCommand } from "./runtime.ts";
+import {
+  createEnvironmentGuardedRpcQueryAtomFamily,
+  createEnvironmentRpcCommand,
+} from "./runtime.ts";
 
 vi.mock("./session.ts", () => ({
   createEnvironmentSessionAtoms: () => ({ sessionStateAtom: sessions }),
@@ -59,7 +65,135 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("executes guarded read queries only with the destination read grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        let calls = 0;
+        const supervisor = {
+          target: { environmentId: env, label: "test" },
+          state: yield* SubscriptionRef.make({ phase: "connected" }),
+          session: yield* SubscriptionRef.make(
+            Option.some({
+              client: {
+                [WS_METHODS.searchQuery]: () =>
+                  Effect.sync(() => {
+                    calls++;
+                    return { results: [] };
+                  }),
+              },
+            }),
+          ),
+        } as unknown as EnvironmentSupervisor["Service"];
+        const queryRuntime = Atom.runtime(
+          Layer.succeed(EnvironmentRegistry, {
+            run: (_id, effect) =>
+              effect.pipe(Effect.provideService(EnvironmentSupervisor, supervisor)),
+            followStream: (_id, stream) =>
+              stream.pipe(Stream.provideService(EnvironmentSupervisor, supervisor)),
+          } as EnvironmentRegistry["Service"]),
+        );
+        const query = createEnvironmentGuardedRpcQueryAtomFamily(queryRuntime, {
+          label: "test.search",
+          tag: WS_METHODS.searchQuery,
+        });
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        const denied = yield* AtomRegistry.getResult(
+          registry,
+          query({ environmentId: env, input: { query: "denied" } }),
+        ).pipe(Effect.flip);
+        expect(denied).toMatchObject({
+          _tag: "EnvironmentAuthorizationError",
+          requiredScope: AuthOrchestrationReadScope,
+        });
+        expect(calls).toBe(0);
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthOrchestrationReadScope],
+            permissions: [AuthOrchestrationReadScope],
+          }),
+        );
+        const allowed = yield* AtomRegistry.getResult(
+          registry,
+          query({ environmentId: env, input: { query: "allowed" } }),
+        );
+        expect(allowed).toEqual({ results: [] });
+        expect(calls).toBe(1);
+      }),
+    ),
+  );
+
+  it.effect("guards search with the destination read grant without requiring operate access", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const permission = createCommandPermissions(runtime, WS_METHODS.searchQuery);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(permission.permissionAtom(env))).toBe(false);
+        expect((yield* permission.authorize(registry, env).pipe(Effect.flip)).requiredScope).toBe(
+          AuthOrchestrationReadScope,
+        );
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthOrchestrationReadScope],
+            permissions: [AuthOrchestrationReadScope],
+          }),
+        );
+        expect(registry.get(permission.permissionAtom(env))).toBe(true);
+        yield* permission.authorize(registry, env);
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect(registry.get(permission.permissionAtom(other))).toBe(false);
+      }),
+    ),
+  );
+  it.effect("the agent approval command refuses execution without an owner grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        const commands = createAgentWorkspaceAtoms(runtime);
+        const result = yield* Effect.promise(() =>
+          commands.agentsApprove.run(registry, {
+            environmentId: env,
+            input: { id: "approval:test" },
+          }),
+        );
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure")
+          expect(Cause.pretty(result.cause)).toContain("EnvironmentAuthorizationError");
+      }),
+    ),
+  );
+
   it.effect.each([
+    WS_METHODS.projectLabelsCreate,
+    WS_METHODS.projectLabelsUpdate,
+    WS_METHODS.projectLabelsDelete,
+    WS_METHODS.projectLabelsLinkRepository,
+    WS_METHODS.projectLabelsUnlinkRepository,
+    WS_METHODS.projectLabelsSetThreadLabels,
+    WS_METHODS.projectLabelsReviewSuggestion,
+    WS_METHODS.projectLabelsSuggestLabels,
+    WS_METHODS.workStart,
+    WS_METHODS.workProposeHandoff,
+    WS_METHODS.agentsRequestApproval,
+    WS_METHODS.agentsApprove,
+    WS_METHODS.agentsReject,
+    WS_METHODS.agentsStartWork,
+    WS_METHODS.factsCreate,
+    WS_METHODS.factsUpdate,
+    WS_METHODS.factsSupersede,
+    WS_METHODS.factsRetract,
+    WS_METHODS.contextSetEnabled,
+    WS_METHODS.commitmentsCreate,
+    WS_METHODS.commitmentsUpdateStatus,
+    WS_METHODS.commitmentsConfirm,
+    WS_METHODS.commitmentsDismiss,
+    WS_METHODS.commitmentsDelete,
     WS_METHODS.agentsUpsert,
     WS_METHODS.agentsDelete,
     WS_METHODS.agentsSend,
@@ -230,6 +364,33 @@ describe("command permissions", () => {
       registry.dispose();
     }
   });
+  it.effect("exports refuse execution without the Settings grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        const commands = createExportAtoms(runtime);
+        const results = [
+          yield* Effect.promise(() =>
+            commands.exportCreate.run(registry, {
+              environmentId: env,
+              input: { include: ["chats"] },
+            }),
+          ),
+          yield* Effect.promise(() =>
+            commands.exportValidate.run(registry, {
+              environmentId: env,
+              input: { path: "/ignored" },
+            }),
+          ),
+          yield* Effect.promise(() =>
+            commands.exportList.run(registry, { environmentId: env, input: {} }),
+          ),
+        ];
+        expect(results.every((result) => result._tag === "Failure")).toBe(true);
+      }),
+    ),
+  );
 });
 
 it.effect(

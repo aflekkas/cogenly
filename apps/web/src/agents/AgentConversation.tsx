@@ -1,10 +1,18 @@
-import { ChevronLeftIcon, EllipsisIcon, LoaderCircleIcon, ArrowUpRightIcon } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { OverlayPresence } from "~/components/ui/overlay-presence";
+import {
+  ChevronLeftIcon,
+  LoaderCircleIcon,
+  ArrowUpRightIcon,
+  PlayIcon,
+  SettingsIcon,
+} from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
 import { useMessageMotion } from "./useMessageMotion";
 import {
+  agentStatusLabel,
   conversationRows,
   modelDisplayName,
   modelSwitches,
@@ -12,16 +20,211 @@ import {
 } from "./agents.logic";
 import { useAgents, useAgentsClient } from "./agentsClient";
 import { AgentComposer } from "./AgentComposer";
-import { AgentDetails } from "./AgentDetails";
-import type { AgentContact, AgentModelRef, AgentRequest } from "./agents.types";
+import { Button } from "~/components/ui/button";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import { Toggle, ToggleGroup } from "~/components/ui/toggle-group";
+import { AgentActivity } from "./AgentActivity";
+import { AgentOpenItems, ApprovalDecision } from "./AgentOpenItems";
+import { AgentResponsibilities } from "./AgentResponsibilities";
+import { AgentStartWork } from "./AgentStartWork";
+import { agentViewKey, takeAgentView, watchAgentView, type AgentTab } from "./agentViewIntent";
+import { countOpenCommitments } from "./agentWorkspace.logic";
+import type { AgentContact, AgentModelRef, AgentRequest, AgentWorkspaceView } from "./agents.types";
 
-export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBack?: () => void }) {
+const TABS: ReadonlyArray<{ value: AgentTab; label: string }> = [
+  { value: "chat", label: "Chat" },
+  { value: "activity", label: "Activity" },
+  { value: "items", label: "Open items" },
+  { value: "responsibilities", label: "Responsibilities" },
+];
+
+/**
+ * An agent opens on its conversation. Activity, Open items and Responsibilities are
+ * secondary tabs in the same view; there is no separate dashboard.
+ */
+export function AgentConversation(props: {
+  agent: AgentContact;
+  onBack?: () => void;
+  onDeleted?: (() => void) | undefined;
+}) {
+  const { Workspace } = useAgentsClient();
+  return (
+    <Workspace agent={props.agent}>
+      {(workspace) => <AgentView {...props} workspace={workspace} />}
+    </Workspace>
+  );
+}
+
+function AgentView({
+  agent,
+  workspace,
+  onBack,
+  onDeleted,
+}: {
+  agent: AgentContact;
+  workspace: AgentWorkspaceView;
+  onBack?: (() => void) | undefined;
+  onDeleted?: (() => void) | undefined;
+}) {
   const client = useAgentsClient();
-  const [details, setDetails] = useState<"about" | "activity" | null>(null);
+  const canWrite = client.canWrite?.(agent.environmentId) ?? true;
+  const viewKey = agentViewKey(agent);
+  // The command palette and search can ask for a tab or Start Work before or after this mounts.
+  const [initialView] = useState(() => takeAgentView(viewKey));
+  const [tab, setTab] = useState<AgentTab>(
+    initialView && initialView !== "start-work" ? initialView : "chat",
+  );
+  const [startingWork, setStartingWork] = useState(initialView === "start-work" && canWrite);
+  const [focusMessage, setFocusMessage] = useState<string | null>(null);
+  const openChat = (messageId?: string) => {
+    setTab("chat");
+    setFocusMessage(messageId ?? null);
+  };
+  const itemsCount = agent.approvals.length + countOpenCommitments(workspace.commitments);
+  useEffect(
+    () =>
+      watchAgentView(viewKey, (view) => {
+        if (view === "start-work") {
+          if (canWrite) setStartingWork(true);
+          return;
+        }
+        setTab(view);
+        setFocusMessage(null);
+      }),
+    [viewKey, canWrite],
+  );
+  return (
+    <section className="agent-conversation" aria-label={`Conversation with ${agent.name}`}>
+      <header className="agent-contact-header">
+        {onBack && (
+          <button
+            type="button"
+            className="agent-icon-button agent-back"
+            aria-label="Back to agents"
+            onClick={onBack}
+          >
+            <ChevronLeftIcon size={20} />
+          </button>
+        )}
+        <button
+          type="button"
+          className="agent-header-person"
+          aria-label={`${agent.name}'s responsibilities`}
+          onClick={() => setTab("responsibilities")}
+        >
+          <AgentFace
+            seed={agent.avatar.seed}
+            {...(agent.avatar.color ? { color: agent.avatar.color } : {})}
+            state={agent.requests.length ? "blocked" : agent.state}
+            size={56}
+          />
+          <span>{agent.name}</span>
+          <small>{agentStatusLabel(agent)}</small>
+        </button>
+        <div className="agent-header-more">
+          <Button
+            size="xs"
+            variant="ghost-muted"
+            disabled={!canWrite}
+            onClick={() => setStartingWork(true)}
+          >
+            <PlayIcon />
+            Start Work
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost-muted"
+            aria-label="Agent settings"
+            title="Agent settings"
+            aria-pressed={tab === "responsibilities"}
+            onClick={() => {
+              setTab("responsibilities");
+              setFocusMessage(null);
+            }}
+          >
+            <SettingsIcon />
+          </Button>
+        </div>
+        <ToggleGroup
+          aria-label={`${agent.name} views`}
+          className="max-w-full overflow-x-auto"
+          value={[tab]}
+          onValueChange={(value) => {
+            const next = TABS.find((candidate) => candidate.value === value[0]);
+            if (!next) return;
+            setTab(next.value);
+            setFocusMessage(null);
+          }}
+        >
+          {TABS.map((option) => (
+            <Toggle key={option.value} value={option.value}>
+              {option.label}
+              {option.value === "items" && itemsCount > 0 && (
+                <span className="tabular-nums text-muted-foreground">{itemsCount}</span>
+              )}
+            </Toggle>
+          ))}
+        </ToggleGroup>
+      </header>
+      {tab !== "chat" && (
+        <div className="agent-message-scroll">
+          {tab === "activity" ? (
+            <AgentActivity
+              agent={agent}
+              workspace={workspace}
+              onOpenChat={() => openChat()}
+              onOpenItems={() => setTab("items")}
+            />
+          ) : tab === "items" ? (
+            <AgentOpenItems agent={agent} workspace={workspace} onOpenChat={openChat} />
+          ) : (
+            <AgentResponsibilities agent={agent} workspace={workspace} onDeleted={onDeleted} />
+          )}
+        </div>
+      )}
+      {tab === "chat" && (
+        <ChatPane
+          agent={agent}
+          workspace={workspace}
+          focusMessage={focusMessage}
+          onShowActivity={() => setTab("activity")}
+        />
+      )}
+      <OverlayPresence when={startingWork}>
+        {() => (
+          <AgentStartWork
+            agent={agent}
+            workspace={workspace}
+            onClose={() => setStartingWork(false)}
+            onOpenItems={() => setTab("items")}
+          />
+        )}
+      </OverlayPresence>
+    </section>
+  );
+}
+
+function ChatPane({
+  agent,
+  workspace,
+  focusMessage,
+  onShowActivity,
+}: {
+  agent: AgentContact;
+  workspace: AgentWorkspaceView;
+  focusMessage: string | null;
+  onShowActivity: () => void;
+}) {
+  const client = useAgentsClient();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { models } = useAgents();
-  const detailsAnchor = useRef<HTMLElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const modelStatus = (model: AgentModelRef) =>
     client.modelStatus?.(agent, model) ?? { status: "unknown" as const, providerName: "" };
@@ -35,6 +238,14 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
     busy,
     switches.trailing && `${switches.trailing.instanceId}:${switches.trailing.model}`,
   );
+  // An open item's source message opens here; bring it into view once.
+  useEffect(() => {
+    if (!focusMessage) return;
+    stopFollowing();
+    scroll.current
+      ?.querySelector(`[data-message-id="${CSS.escape(focusMessage)}"]`)
+      ?.scrollIntoView({ block: "center" });
+  }, [focusMessage, scroll, stopFollowing]);
   useEffect(() => {
     const mark = () => {
       if (
@@ -89,50 +300,7 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
     }
   }
   return (
-    <section className="agent-conversation" aria-label={`Conversation with ${agent.name}`}>
-      <header ref={detailsAnchor} className="agent-contact-header">
-        {onBack && (
-          <button
-            type="button"
-            className="agent-icon-button agent-back"
-            aria-label="Back to agents"
-            onClick={onBack}
-          >
-            <ChevronLeftIcon size={20} />
-          </button>
-        )}
-        <button
-          type="button"
-          className="agent-header-person"
-          aria-label={`About ${agent.name}`}
-          onClick={() => setDetails("about")}
-        >
-          <AgentFace
-            seed={agent.avatar.seed}
-            {...(agent.avatar.color ? { color: agent.avatar.color } : {})}
-            state={agent.requests.length ? "blocked" : agent.state}
-            size={74}
-          />
-          <span>{agent.name}</span>
-          <small>
-            {agent.requests.length
-              ? "Needs you"
-              : busy
-                ? "Thinking…"
-                : !agent.enabled
-                  ? "Background work paused"
-                  : "Your always-on agent"}
-          </small>
-        </button>
-        <button
-          type="button"
-          className="agent-icon-button agent-header-more"
-          aria-label="Agent details"
-          onClick={() => setDetails("about")}
-        >
-          <EllipsisIcon size={21} />
-        </button>
-      </header>
+    <>
       <div
         className="agent-message-scroll"
         ref={scroll}
@@ -187,7 +355,7 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
               This is the start of something good.<span>Say hello to {agent.name}.</span>
             </div>
           )}
-          {conversationRows(agent.messages).map(({ message, separator, grouped }) => (
+          {conversationRows(agent.messages).map(({ message, separator, grouped, endsRun }) => (
             <Fragment key={message.id}>
               {switches.before.has(message.id) && (
                 <ModelSwitchLine
@@ -224,6 +392,9 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
                     message.text
                   )}
                 </div>
+                {endsRun && message.runId && client.MessageContext && (
+                  <client.MessageContext agent={agent} runId={message.runId} />
+                )}
                 {message.role === "user" &&
                   (message.id === lastOwner?.id ||
                     message.delivery === "failed" ||
@@ -266,8 +437,15 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
           {agent.requests.map((request) => (
             <Request key={request.id} agent={agent} request={request} />
           ))}
+          {agent.approvals.map((approval) => (
+            <div key={approval.id} className="agent-message-row" data-message-id={approval.id}>
+              <div className="agent-bubble agent-request">
+                <ApprovalDecision agent={agent} approval={approval} workspace={workspace} />
+              </div>
+            </div>
+          ))}
           {(busy || agent.activity.length > 0) && (
-            <button className="agent-working" type="button" onClick={() => setDetails("activity")}>
+            <button className="agent-working" type="button" onClick={onShowActivity}>
               {busy ? (
                 <LoaderCircleIcon size={13} className="agent-spinner" />
               ) : (
@@ -297,15 +475,7 @@ export function AgentConversation({ agent, onBack }: { agent: AgentContact; onBa
         />
         {busy && <p className="agent-composer-hint">You can keep messaging while I work.</p>}
       </footer>
-      {details && (
-        <AgentDetails
-          agent={agent}
-          anchor={detailsAnchor}
-          initialTab={details}
-          onClose={() => setDetails(null)}
-        />
-      )}
-    </section>
+    </>
   );
 }
 function DeliveryFailure({
@@ -351,6 +521,53 @@ function ModelSwitchLine({ name }: { name: string }) {
     <p className="agent-system-line" role="status">
       Switched to {name}
     </p>
+  );
+}
+type RequestQuestion = NonNullable<AgentRequest["questions"]>[number];
+/** A question's fixed answers; multi-select questions keep every chosen value. */
+function QuestionOptions({
+  question,
+  answer,
+  onChange,
+}: {
+  question: RequestQuestion;
+  answer: string | string[] | undefined;
+  onChange: (answer: string | string[]) => void;
+}) {
+  const options = (question.options ?? []).map((option) => ({
+    label: option.label,
+    value: option.value ?? option.label,
+  }));
+  const labelFor = (value: string) =>
+    options.find((option) => option.value === value)?.label ?? value;
+  const items = options.map((option) => (
+    <SelectItem key={option.value} value={option.value} label={option.label}>
+      {option.label}
+    </SelectItem>
+  ));
+  if (question.multiSelect) {
+    const selected = Array.isArray(answer) ? answer : [];
+    return (
+      <Select multiple value={selected} onValueChange={(next) => onChange(next)}>
+        <SelectTrigger size="sm" aria-label={question.text}>
+          <SelectValue placeholder="Choose answers">
+            {selected.length ? selected.map(labelFor).join(", ") : "Choose answers"}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectPopup>{items}</SelectPopup>
+      </Select>
+    );
+  }
+  const selected = typeof answer === "string" && answer ? answer : null;
+  return (
+    <Select value={selected} onValueChange={(next) => next !== null && onChange(next)}>
+      <SelectTrigger size="sm" aria-label={question.text}>
+        <SelectValue placeholder="Choose an answer">
+          {selected === null ? "Choose an answer" : labelFor(selected)}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectPopup>{items}</SelectPopup>
+    </Select>
   );
 }
 function Request({ agent, request }: { agent: AgentContact; request: AgentRequest }) {
@@ -405,42 +622,18 @@ function Request({ agent, request }: { agent: AgentContact; request: AgentReques
             }}
           >
             {request.questions?.map((question) => (
-              <label className="agent-question" key={question.id}>
+              <div className="agent-question" key={question.id}>
                 {question.text}
                 {question.options && (
-                  <select
-                    aria-label={question.text}
-                    multiple={question.multiSelect}
-                    value={
-                      question.multiSelect
-                        ? Array.isArray(answers[question.id])
-                          ? answers[question.id]
-                          : []
-                        : typeof answers[question.id] === "string"
-                          ? answers[question.id]
-                          : ""
-                    }
-                    onChange={(event) =>
-                      setAnswers({
-                        ...answers,
-                        [question.id]: question.multiSelect
-                          ? Array.from(event.target.selectedOptions, (option) => option.value)
-                          : event.target.value,
-                      })
-                    }
-                  >
-                    <option value="" disabled>
-                      Choose an answer
-                    </option>
-                    {question.options.map((option) => (
-                      <option key={option.label} value={option.value ?? option.label}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <QuestionOptions
+                    question={question}
+                    answer={answers[question.id]}
+                    onChange={(answer) => setAnswers({ ...answers, [question.id]: answer })}
+                  />
                 )}
                 {question.allowCustomAnswer !== false && (
                   <input
+                    aria-label={question.text}
                     required={question.required !== false && !question.options?.length}
                     value={typeof answers[question.id] === "string" ? answers[question.id] : ""}
                     placeholder="Your reply…"
@@ -449,7 +642,7 @@ function Request({ agent, request }: { agent: AgentContact; request: AgentReques
                     }
                   />
                 )}
-              </label>
+              </div>
             ))}
             <button
               className="agent-small-button"

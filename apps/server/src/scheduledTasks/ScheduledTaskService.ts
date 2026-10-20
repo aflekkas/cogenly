@@ -1,6 +1,9 @@
+import * as Access from "../agents/AgentAccessScope.ts";
+import { matchesAgentEvent } from "../agents/agentEventPolicy.ts";
 import * as Agents from "../agents/AgentService.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import {
+  type AgentEventContext,
   CommandId,
   enforceRuntimeMode,
   MessageId,
@@ -247,6 +250,10 @@ export class ScheduledTaskService extends Context.Service<
     readonly delete: (
       input: ScheduledTaskDeleteInput,
     ) => Effect.Effect<ScheduledTaskDeleteResult, ScheduledTaskError>;
+    readonly triggerEvent: (
+      id: ScheduledTaskId,
+      event: AgentEventContext,
+    ) => Effect.Effect<boolean, ScheduledTaskError>;
     readonly runNow: (
       input: ScheduledTaskRunNowInput,
     ) => Effect.Effect<ScheduledTaskRunNowResult, ScheduledTaskError>;
@@ -408,6 +415,7 @@ export const layer = Layer.effect(
   ScheduledTaskService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const access = yield* Access.AgentAccessScope;
     const crypto = yield* Crypto.Crypto;
     const agents = yield* Agents.AgentService;
     const agentStore = yield* AgentStore.AgentStore;
@@ -798,6 +806,12 @@ export const layer = Layer.effect(
           if (reason !== null) return yield* new WebhookDeliverySkipped({ reason });
         }
 
+        if (active.schedule.type === "event")
+          return yield* new ScheduledTaskError({
+            taskId: active.id,
+            code: "event_run_now_unsupported",
+            message: "Event triggers require a source event and cannot be run manually.",
+          });
         yield* markRunning(active.id, startedAtIso);
         yield* notifyChanged;
 
@@ -1141,10 +1155,32 @@ export const layer = Layer.effect(
           lastRunError: existingTask?.lastRunError ?? null,
           runCount: existingTask?.runCount ?? 0,
         };
+        if (task.schedule.type === "event" && task.agentId == null) {
+          return yield* taskError("Event triggers require an agent.", { taskId: id });
+        }
         if (task.agentId != null) {
           yield* agentStore
             .get(task.agentId)
             .pipe(Effect.mapError((cause) => taskError("Agent not found.", { cause })));
+        }
+        if (task.schedule.type === "event" && task.agentId != null) {
+          const scope = yield* access
+            .resolve(task.agentId)
+            .pipe(
+              Effect.mapError((cause) =>
+                taskError("Could not resolve trigger scope.", { taskId: id, cause }),
+              ),
+            );
+          const filter = task.schedule.filter;
+          if (
+            filter?.projectIds?.some((repo) => !scope.readableRepositoryIds.includes(repo)) ||
+            filter?.labelIds?.some((label) => !scope.readableLabelIds.includes(label))
+          )
+            return yield* new ScheduledTaskError({
+              taskId: id,
+              code: "event_filter_out_of_scope",
+              message: "Event filters must stay within the agent's readable scope.",
+            });
         }
         yield* saveTask(task, input.requireExisting === true, webhook);
         yield* notifyChanged;
@@ -1207,6 +1243,12 @@ export const layer = Layer.effect(
     const runNow: ScheduledTaskService["Service"]["runNow"] = (input: ScheduledTaskRunNowInput) =>
       Effect.gen(function* () {
         const task = yield* loadTask(input.id);
+        if (task.schedule.type === "event")
+          return yield* new ScheduledTaskError({
+            taskId: input.id,
+            code: "event_run_now_unsupported",
+            message: "Event triggers require a source event and cannot be run manually.",
+          });
         if (task.schedule.type === "webhook") {
           // There is no request to render the prompt from.
           return yield* taskError("Webhook tasks run when their URL receives a request.", {
@@ -1220,6 +1262,28 @@ export const layer = Layer.effect(
         );
         return { task: next };
       });
+
+    const triggerEvent: ScheduledTaskService["Service"]["triggerEvent"] = (id, event) =>
+      Effect.gen(function* () {
+        const task = yield* findTask(id);
+        if (task === null || !matchesAgentEvent(task, event)) return false;
+        const accepted = yield* agents.trigger(
+          task,
+          `event:${task.agentId}:${event.dedupKey}`,
+          task.prompt,
+          event,
+        );
+        if (accepted) {
+          const at = iso(yield* localNow);
+          yield* sql`UPDATE scheduled_tasks SET last_run_at = ${at}, last_run_status = 'succeeded', last_run_error = NULL, run_count = run_count + 1 WHERE task_id = ${id} AND created_at = ${task.createdAt}`;
+          yield* notifyChanged;
+        }
+        return accepted;
+      }).pipe(
+        Effect.mapError((cause) =>
+          taskError("Could not dispatch event trigger.", { taskId: id, cause }),
+        ),
+      );
 
     const rotateWebhookToken: ScheduledTaskService["Service"]["rotateWebhookToken"] = (input) =>
       Effect.gen(function* () {
@@ -1712,6 +1776,7 @@ export const layer = Layer.effect(
       });
 
     return ScheduledTaskService.of({
+      triggerEvent,
       list,
       subscribeList,
       upsert,
@@ -1724,4 +1789,4 @@ export const layer = Layer.effect(
       triggerWebhook,
     });
   }),
-);
+).pipe(Layer.provide(Access.layer));

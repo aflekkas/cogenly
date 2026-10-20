@@ -159,6 +159,29 @@ function useMarkThreadUnread() {
 }
 
 /**
+ * Marks a thread read, the reverse of mark unread: records a visit now, on
+ * the server when it tracks visits and in this browser otherwise.
+ */
+function useMarkThreadRead() {
+  const visitThreadMutation = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
+  const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
+  return useCallback(
+    (target: ScopedThreadRef) => {
+      const visitedAt = new Date().toISOString();
+      if (readEnvironmentSupportsVisitedTracking(target.environmentId)) {
+        void visitThreadMutation({
+          environmentId: target.environmentId,
+          input: { threadId: target.threadId, visitedAt },
+        });
+        return;
+      }
+      markThreadVisited(scopedThreadKey(target), visitedAt);
+    },
+    [markThreadVisited, visitThreadMutation],
+  );
+}
+
+/**
  * Clears a thread's Woke marker by recording a visit at the wake time.
  * Servers with visited tracking own the watermark (thread.visit keeps the
  * later of the stored and supplied values, so this syncs to every device);
@@ -221,6 +244,7 @@ export function useThreadActions() {
     reportFailure: false,
   });
   const markThreadUnread = useMarkThreadUnread();
+  const markThreadRead = useMarkThreadRead();
   const stopThreadSession = useOrchestrationCommand(threadEnvironment.stopSession);
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
     reportFailure: false,
@@ -784,12 +808,14 @@ export function useThreadActions() {
       snoozeThread,
       unsnoozeThread,
       markThreadUnread,
+      markThreadRead,
       setThreadAutoSettle,
     }),
     [
       archiveThread,
       confirmAndDeleteThread,
       deleteThread,
+      markThreadRead,
       markThreadUnread,
       setThreadAutoSettle,
       settleThread,

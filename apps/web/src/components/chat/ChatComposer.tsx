@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
@@ -347,6 +348,7 @@ import {
 } from "./composerScrollGesture";
 import { prepareVideoFirstFrame } from "../../lib/videoFirstFrame";
 import { observeResize } from "~/lib/observeResize";
+import { subscribePanelMotion } from "~/lib/panelFlip";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
@@ -473,7 +475,7 @@ function SnapShotAttachmentFrame({
       className={cn(
         animateArrival &&
           !animationId &&
-          "origin-center transition-[opacity,scale] duration-300 ease-drawer starting:scale-95 starting:opacity-0 motion-reduce:transition-none motion-reduce:starting:scale-100 motion-reduce:starting:opacity-100",
+          "origin-center transition-[opacity,scale] duration-(--motion-duration-slow) ease-drawer starting:scale-95 starting:opacity-0 motion-reduce:transition-none motion-reduce:starting:scale-100 motion-reduce:starting:opacity-100",
         className,
       )}
       {...props}
@@ -1114,16 +1116,18 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
 
     // The composer is centered and capped at a max width, so opening a side
     // panel slides it sideways without ever resizing it. Watching the anchor
-    // alone would leave the menu behind; the ancestors are what shrink, and
-    // they resize on every frame of the panel animation.
+    // alone would leave the menu behind; the ancestors are what shrink.
     const observed: Element[] = [anchor];
     for (let element = anchor.parentElement; element; element = element.parentElement) {
       observed.push(element);
     }
     const stopObserving = observeResize(observed, updatePosition);
+    // The composer glides on a transform when a panel toggles.
+    const stopFollowingPanels = subscribePanelMotion(updatePosition);
 
     return () => {
       stopObserving();
+      stopFollowingPanels();
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
@@ -2872,13 +2876,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (composerTriggerKind === "pull-request") {
       if (pullRequestProjectId === null || pullRequestRepository === null) {
-        return "Pull requests are not available for this project.";
+        return "Pull requests are not available for this repository.";
       }
       if (
         pullRequestLookup.error !== null ||
         pullRequestLookup.data?.errors.some((error) => error.projectId === pullRequestProjectId)
       ) {
-        return "Pull requests could not be read for this project.";
+        return "Pull requests could not be read for this repository.";
       }
       return composerTrigger?.query
         ? `No pull request matches ${composerTrigger.query}.`
@@ -7263,43 +7267,45 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : undefined
                 }
               >
-                {previewFile ? (
-                  <Dialog
-                    open
-                    onOpenChange={(open) => {
-                      if (!open) setPreviewFileId(null);
-                    }}
-                  >
-                    <DialogPopup
-                      {...composerFloatingLayerProps}
-                      className="h-[min(85vh,52rem)] max-w-4xl overflow-hidden"
-                      showCloseButton={false}
+                <OverlayPresence when={previewFile}>
+                  {(previewFile) => (
+                    <Dialog
+                      open
+                      onOpenChange={(open) => {
+                        if (!open) setPreviewFileId(null);
+                      }}
                     >
-                      <DialogTitle className="sr-only">{previewFile.name}</DialogTitle>
-                      <AttachmentFilePreview
-                        key={previewFile.id}
-                        name={previewFile.name}
-                        mimeType={previewFile.mimeType}
-                        sizeBytes={previewFile.sizeBytes}
-                        file={previewFile.file}
-                        origin="Draft"
-                        {...(previewFile.uploadedAttachmentId && previewFile.uploadEnvironmentId
-                          ? {
-                              asset: {
-                                environmentId: previewFile.uploadEnvironmentId,
-                                attachmentId: previewFile.uploadedAttachmentId,
-                              },
-                            }
-                          : {})}
-                        onRemove={() => {
-                          removeComposerFileFromDraft(previewFile.id);
-                          setPreviewFileId(null);
-                        }}
-                        onClose={() => setPreviewFileId(null)}
-                      />
-                    </DialogPopup>
-                  </Dialog>
-                ) : null}
+                      <DialogPopup
+                        {...composerFloatingLayerProps}
+                        className="h-[min(85vh,52rem)] max-w-4xl overflow-hidden"
+                        showCloseButton={false}
+                      >
+                        <DialogTitle className="sr-only">{previewFile.name}</DialogTitle>
+                        <AttachmentFilePreview
+                          key={previewFile.id}
+                          name={previewFile.name}
+                          mimeType={previewFile.mimeType}
+                          sizeBytes={previewFile.sizeBytes}
+                          file={previewFile.file}
+                          origin="Draft"
+                          {...(previewFile.uploadedAttachmentId && previewFile.uploadEnvironmentId
+                            ? {
+                                asset: {
+                                  environmentId: previewFile.uploadEnvironmentId,
+                                  attachmentId: previewFile.uploadedAttachmentId,
+                                },
+                              }
+                            : {})}
+                          onRemove={() => {
+                            removeComposerFileFromDraft(previewFile.id);
+                            setPreviewFileId(null);
+                          }}
+                          onClose={() => setPreviewFileId(null)}
+                        />
+                      </DialogPopup>
+                    </Dialog>
+                  )}
+                </OverlayPresence>
                 <ComposerContextActionsContext value={composerContextActions}>
                   <ComposerPromptEditor
                     ariaLabel="Message"
@@ -7360,7 +7366,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           : showPlanFollowUpPrompt && activeProposedPlan
                             ? "Add feedback to refine the plan, or leave this blank to implement it"
                             : projectSelectionRequired
-                              ? "Choose a project above to start a thread"
+                              ? "Choose a repository above to start a thread"
                               : showProviderUnavailable
                                 ? "Enable a provider in Settings to send a message"
                                 : phase === "disconnected"

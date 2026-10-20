@@ -133,7 +133,7 @@ function SelectPopup({
         sideOffset={sideOffset}
       >
         <SelectPrimitive.Popup
-          className="origin-(--transform-origin) rounded-lg text-foreground outline-none"
+          className="dropdown-glass surface-raised surface-raised-floating popup-motion origin-(--transform-origin) rounded-lg text-foreground outline-none transition-[opacity,scale,translate]"
           data-slot="select-popup"
           {...props}
         >
@@ -143,12 +143,7 @@ function SelectPopup({
           >
             <ChevronUpIcon className="relative size-4.5 sm:size-4" />
           </SelectPrimitive.ScrollUpArrow>
-          <div
-            className={cn(
-              "dropdown-glass surface-raised surface-raised-floating relative h-full rounded-lg",
-              matchTriggerWidth && "min-w-(--anchor-width)",
-            )}
-          >
+          <div className={cn("relative h-full", matchTriggerWidth && "min-w-(--anchor-width)")}>
             <SelectPrimitive.List
               className={cn("max-h-(--available-height) overflow-y-auto p-1", className)}
               data-slot="select-list"

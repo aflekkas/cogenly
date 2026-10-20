@@ -65,7 +65,7 @@ export function useScratchProject() {
   const openScratchProject = useCallback(
     async (
       environmentId: EnvironmentId,
-      failureTitle = "Could not start without a project",
+      failureTitle = "Could not start without a repository",
     ): Promise<EnvironmentProject | null> => {
       const result = await openScratch({ environmentId, input: {} });
       if (result._tag === "Success") return result.value;
@@ -77,17 +77,48 @@ export function useScratchProject() {
     [openScratch],
   );
 
+  /** `replace` swaps the current history entry, for landings that pick the chat themselves. */
   const startScratchThread = useCallback(
-    async (environmentId: EnvironmentId) => {
+    async (environmentId: EnvironmentId, options?: { readonly replace?: boolean }) => {
       const project = await openScratchProject(environmentId);
       if (project) {
-        await handleNewThread(scopeProjectRef(project.environmentId, project.id)).catch(
-          (error: unknown) => reportScratchFailure("Could not start without a project", error),
+        await handleNewThread(scopeProjectRef(project.environmentId, project.id), {
+          replace: options?.replace ?? false,
+        }).catch((error: unknown) =>
+          reportScratchFailure("Could not start without a repository", error),
         );
       }
     },
     [handleNewThread, openScratchProject],
   );
 
-  return { scratchWorkspaceRootFor, scratchEnvironmentId, openScratchProject, startScratchThread };
+  /**
+   * New chat from Chats mode: always a plain chat on the current machine,
+   * never a repository draft. Says so when that machine offers none.
+   */
+  const startNewChat = useCallback(
+    (current: EnvironmentId | null) => {
+      const environmentId = scratchEnvironmentId(current);
+      if (environmentId === null) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "info",
+            title: "Chats aren't available here",
+            description: "This machine can't start a chat without a repository right now.",
+          }),
+        );
+        return;
+      }
+      void startScratchThread(environmentId);
+    },
+    [scratchEnvironmentId, startScratchThread],
+  );
+
+  return {
+    scratchWorkspaceRootFor,
+    scratchEnvironmentId,
+    openScratchProject,
+    startScratchThread,
+    startNewChat,
+  };
 }

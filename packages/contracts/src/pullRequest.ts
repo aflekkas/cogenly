@@ -758,6 +758,7 @@ export type PullRequestPreview = typeof PullRequestPreview.Type;
  * status check never loads permissions, repository settings, checks, or base comparison data.
  */
 export const PullRequestSummary = Schema.Struct({
+  headSha: Schema.optional(TrimmedNonEmptyString),
   provider: SourceControlProviderKind,
   projectId: ProjectId,
   repository: TrimmedNonEmptyString,

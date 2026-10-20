@@ -1,44 +1,57 @@
 import {
   AuthTerminalOperateScope,
+  AuthTerminalReadScope,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { CircleCheck, CircleX, Square, TerminalSquare, X } from "lucide-react";
+import { nextTerminalId } from "@t3tools/shared/terminalLabels";
+import { ListCollapse, ListTree, Plus, TerminalSquare } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { confirmTerminalClose } from "~/lib/terminalCloseConfirm";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
-import { cn } from "~/lib/utils";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { terminalEnvironment } from "../state/terminal";
 import { useKnownTerminalSessions } from "../state/terminalSessions";
 import { useAtomCommand } from "../state/use-atom-command";
+import { useTerminalShellNamesStore } from "../terminalShellNamesStore";
 import {
   agentTerminalEntries,
-  agentTerminalExitLabel,
-  isAgentTerminalRunning,
+  isAgentTerminalId,
+  resolveSelected,
+  terminalSections,
   type AgentTerminalEntry,
 } from "./AgentTerminalsPanel.logic";
-import { TerminalViewport } from "./TerminalViewport";
+import { AgentRunsView } from "./terminals/AgentRunsView";
+import { shellTabs, TerminalShellsView, type ShellTab } from "./terminals/TerminalShellsView";
 import { Button } from "./ui/button";
-import { Spinner } from "./ui/spinner";
+import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
-function EntryStatusIcon({ entry }: { entry: AgentTerminalEntry }) {
-  if (isAgentTerminalRunning(entry)) {
-    return (
-      <span className="inline-flex shrink-0 text-success">
-        <Spinner size="xs" aria-label="Running" />
-      </span>
-    );
-  }
-  if (entry.status === "exited" && entry.exitCode === 0) {
-    return <CircleCheck className="size-3 shrink-0 text-muted-foreground" aria-label="Finished" />;
-  }
-  return <CircleX className="size-3 shrink-0 text-destructive-foreground" aria-label="Failed" />;
+type TerminalSection = "runs" | "shells";
+
+const sectionOf = (terminalId: string): TerminalSection =>
+  isAgentTerminalId(terminalId) ? "runs" : "shells";
+
+function PanelMessage({ title, detail }: { title: string; detail?: string }) {
+  return (
+    <div
+      data-agent-terminals
+      className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-1 px-6 text-center"
+    >
+      <TerminalSquare className="size-5 text-muted-foreground/70" />
+      <p className="text-sm text-foreground">{title}</p>
+      {detail ? <p className="text-xs text-muted-foreground">{detail}</p> : null}
+    </div>
+  );
 }
 
-function RowAction(props: { label: string; onClick: () => void; children: React.ReactNode }) {
+function HeaderAction(props: {
+  label: string;
+  onClick: () => void;
+  pressed?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger
@@ -47,19 +60,20 @@ function RowAction(props: { label: string; onClick: () => void; children: React.
             size="icon-xs"
             variant="ghost"
             aria-label={props.label}
-            className="shrink-0"
-            onClick={(event) => {
-              event.stopPropagation();
-              props.onClick();
-            }}
+            aria-pressed={props.pressed}
+            onClick={props.onClick}
           />
         }
       >
         {props.children}
       </TooltipTrigger>
-      <TooltipPopup side="left">{props.label}</TooltipPopup>
+      <TooltipPopup side="bottom">{props.label}</TooltipPopup>
     </Tooltip>
   );
+}
+
+function SectionCount({ count }: { count: number }) {
+  return count > 0 ? <span className="text-muted-foreground/70 tabular-nums">{count}</span> : null;
 }
 
 export interface AgentTerminalsPanelProps {
@@ -68,177 +82,246 @@ export interface AgentTerminalsPanelProps {
   /** Bumped when the user asks for the terminal, so keyboard focus may move into it. */
   readonly focusRequestId: number;
   readonly activeTerminalId: string | undefined;
+  /** Where a new shell starts; null when the thread has no workspace. */
+  readonly shellCwd: string | null;
+  readonly shellWorktreePath: string | null;
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly onSelectTerminal: (terminalId: string) => void;
   readonly onAddTerminalContext: (selection: TerminalContextSelection) => void;
 }
 
 /**
- * The right panel's Terminal surface: every shell command the agent ran in this
- * thread, newest first, with the selected one's live output below. It never
- * starts a shell of its own.
+ * The right panel's Terminal surface, in two sections: **Agent runs**, the
+ * commands the agent ran in this thread, and **Shells**, terminals the user
+ * opened. Each section remembers its own selection; an agent starting a
+ * command never moves keyboard focus or pulls the user out of a shell.
  */
 export function AgentTerminalsPanel({
   threadRef,
   visible,
   focusRequestId,
   activeTerminalId,
+  shellCwd,
+  shellWorktreePath,
   keybindings,
   onSelectTerminal,
   onAddTerminalContext,
 }: AgentTerminalsPanelProps) {
   const environmentId = threadRef.environmentId;
   const canOperate = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
+  const canRead = useEnvironmentScope(environmentId, AuthTerminalReadScope);
   const sessions = useKnownTerminalSessions({ environmentId, threadId: threadRef.threadId });
   const entries = useMemo(() => agentTerminalEntries(sessions ?? []), [sessions]);
-  const active =
-    entries.find((entry) => entry.terminalId === activeTerminalId) ?? entries[0] ?? null;
+  const { runs, liveRunCount, shells } = useMemo(() => terminalSections(entries), [entries]);
+  const shellNames = useTerminalShellNamesStore((state) => state.names);
+  const forgetShellName = useTerminalShellNamesStore((state) => state.forget);
   const killTerminal = useAtomCommand(terminalEnvironment.kill, "terminal kill");
   const closeTerminal = useAtomCommand(terminalEnvironment.close, "terminal close");
+
+  // A shell this panel asked for, shown as a tab until the server lists it.
+  const [pendingShellId, setPendingShellId] = useState<string | null>(null);
+  if (pendingShellId !== null && shells.some((entry) => entry.terminalId === pendingShellId)) {
+    setPendingShellId(null);
+  }
+  const tabs = shellTabs(threadRef, shells, pendingShellId, shellNames);
+
+  const [section, setSection] = useState<TerminalSection>(() =>
+    activeTerminalId !== undefined
+      ? sectionOf(activeTerminalId)
+      : runs.length === 0 && shells.length > 0
+        ? "shells"
+        : "runs",
+  );
+  const [lastRunId, setLastRunId] = useState<string | null>(null);
+  const [lastShellId, setLastShellId] = useState<string | null>(null);
+  const [listCollapsed, setListCollapsed] = useState(false);
+  const [seenActiveTerminalId, setSeenActiveTerminalId] = useState(activeTerminalId);
+  if (activeTerminalId !== seenActiveTerminalId) {
+    setSeenActiveTerminalId(activeTerminalId);
+    if (activeTerminalId !== undefined) {
+      const owner = sectionOf(activeTerminalId);
+      setSection(owner);
+      if (owner === "runs") setLastRunId(activeTerminalId);
+      else setLastShellId(activeTerminalId);
+    }
+  }
+
+  const activeIsRun = activeTerminalId !== undefined && isAgentTerminalId(activeTerminalId);
+  const selectedRun = resolveSelected(runs, activeIsRun ? activeTerminalId : lastRunId);
+  const selectedShell = resolveSelected(
+    tabs,
+    activeTerminalId !== undefined && !activeIsRun ? activeTerminalId : lastShellId,
+  );
+  const selectedTerminalId =
+    section === "runs" ? (selectedRun?.terminalId ?? null) : (selectedShell?.terminalId ?? null);
 
   // Only a user request may move keyboard focus; an agent starting a command
   // must not pull it out of the composer.
   const [focusTarget, setFocusTarget] = useState<{ terminalId: string; token: number } | null>(
     null,
   );
+  const focusTerminal = (terminalId: string) =>
+    setFocusTarget((current) => ({ terminalId, token: (current?.token ?? 0) + 1 }));
   const [seenFocusRequestId, setSeenFocusRequestId] = useState(focusRequestId);
   if (focusRequestId !== seenFocusRequestId) {
     setSeenFocusRequestId(focusRequestId);
-    if (active) {
-      setFocusTarget({ terminalId: active.terminalId, token: (focusTarget?.token ?? 0) + 1 });
+    if (selectedTerminalId !== null) {
+      setFocusTarget({ terminalId: selectedTerminalId, token: (focusTarget?.token ?? 0) + 1 });
     }
   }
 
-  const selectEntry = (entry: AgentTerminalEntry) => {
-    onSelectTerminal(entry.terminalId);
-    setFocusTarget((current) => ({
-      terminalId: entry.terminalId,
-      token: (current?.token ?? 0) + 1,
-    }));
+  const switchSection = (next: TerminalSection) => {
+    setSection(next);
+    const target = next === "runs" ? selectedRun : selectedShell;
+    if (target) onSelectTerminal(target.terminalId);
   };
-  const stopEntry = (entry: AgentTerminalEntry) => {
+  const createShell = () => {
+    if (shellCwd === null || !readEnvironmentScope(environmentId, AuthTerminalOperateScope)) return;
+    const terminalId = nextTerminalId([
+      ...entries.map((entry) => entry.terminalId),
+      ...(pendingShellId ? [pendingShellId] : []),
+    ]);
+    setPendingShellId(terminalId);
+    setSection("shells");
+    onSelectTerminal(terminalId);
+    focusTerminal(terminalId);
+  };
+  const stopRun = (entry: AgentTerminalEntry) => {
     if (!readEnvironmentScope(environmentId, AuthTerminalOperateScope)) return;
     void killTerminal({
       environmentId,
       input: { threadId: threadRef.threadId, terminalId: entry.terminalId },
     });
   };
-  const closeEntry = (entry: AgentTerminalEntry) => {
-    void confirmTerminalClose([entry.label]).then((confirmed) => {
+  const closeShell = (tab: ShellTab) => {
+    const index = tabs.findIndex((candidate) => candidate.terminalId === tab.terminalId);
+    const neighbour = tabs[index + 1] ?? tabs[index - 1] ?? null;
+    const afterClose = () => {
+      forgetShellName(threadRef, tab.terminalId);
+      if (pendingShellId === tab.terminalId) setPendingShellId(null);
+      if (selectedShell?.terminalId === tab.terminalId && neighbour) {
+        onSelectTerminal(neighbour.terminalId);
+      }
+    };
+    if (!tab.entry) {
+      afterClose();
+      return;
+    }
+    void confirmTerminalClose([tab.name]).then((confirmed) => {
       if (!confirmed || !readEnvironmentScope(environmentId, AuthTerminalOperateScope)) return;
+      afterClose();
       void closeTerminal({
         environmentId,
-        input: { threadId: threadRef.threadId, terminalId: entry.terminalId, deleteHistory: true },
+        input: { threadId: threadRef.threadId, terminalId: tab.terminalId, deleteHistory: true },
       });
     });
   };
 
-  if (!active) {
+  if (!canRead) {
     return (
-      <div
-        data-agent-terminals
-        className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-1 px-6 text-center"
-      >
-        <TerminalSquare className="size-5 text-muted-foreground/70" />
-        <p className="text-sm text-foreground">No agent commands yet</p>
-        <p className="text-xs text-muted-foreground">
-          Shell commands the agent runs in this thread show up here live.
-        </p>
-      </div>
+      <PanelMessage
+        title="Terminals unavailable"
+        detail="This connection is not allowed to view terminals in this environment."
+      />
     );
   }
+
+  if (sessions === null) {
+    return <PanelMessage title="Connecting to terminals…" />;
+  }
+
+  const canCreateShell = canOperate && shellCwd !== null;
 
   return (
     <div
       data-agent-terminals
       data-terminal-owner="right-panel"
-      className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"
+      className="@container/terminals flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background"
     >
-      <ul
-        aria-label="Agent commands"
-        className="max-h-[38%] shrink-0 overflow-y-auto border-b border-border/70 py-1"
-      >
-        {entries.map((entry) => {
-          const selected = entry.terminalId === active.terminalId;
-          const running = isAgentTerminalRunning(entry);
-          return (
-            <li key={entry.terminalId}>
-              <div
-                role="button"
-                tabIndex={0}
-                aria-current={selected ? "true" : undefined}
-                data-agent-terminal-id={entry.terminalId}
-                data-agent-terminal-status={running ? "running" : "finished"}
-                onClick={() => selectEntry(entry)}
-                onKeyDown={(event) => {
-                  if (event.target !== event.currentTarget) return;
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    selectEntry(entry);
-                  }
-                }}
-                className={cn(
-                  "group mx-1 flex h-7 cursor-pointer items-center gap-2 rounded-md px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                  selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
-                )}
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 px-2">
+        <ToggleGroup
+          aria-label="Terminal sections"
+          value={[section]}
+          onValueChange={(value) => {
+            const next = value[0];
+            if (next === "runs" || next === "shells") switchSection(next);
+          }}
+        >
+          <Toggle value="runs">
+            Agent runs
+            {liveRunCount > 0 ? (
+              <span
+                role="img"
+                aria-label={`${liveRunCount} running`}
+                className="size-1.5 rounded-full bg-success"
+              />
+            ) : null}
+            <SectionCount count={runs.length} />
+          </Toggle>
+          <Toggle value="shells">
+            Shells
+            <SectionCount count={shells.length} />
+          </Toggle>
+        </ToggleGroup>
+        <div className="ms-auto flex items-center gap-0.5">
+          {section === "runs" && runs.length > 0 ? (
+            <span className="@min-[40rem]/terminals:hidden">
+              <HeaderAction
+                label={listCollapsed ? "Show run list" : "Hide run list"}
+                pressed={!listCollapsed}
+                onClick={() => setListCollapsed((value) => !value)}
               >
-                <EntryStatusIcon entry={entry} />
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate font-mono",
-                    !running && !selected && "text-muted-foreground",
-                  )}
-                >
-                  {entry.label}
-                </span>
-                {running ? (
-                  <span className="shrink-0 text-success text-3xs uppercase tracking-wide">
-                    live
-                  </span>
-                ) : (
-                  <span
-                    className={cn(
-                      "shrink-0 tabular-nums text-3xs",
-                      entry.status === "exited" && entry.exitCode === 0
-                        ? "text-muted-foreground"
-                        : "text-destructive-foreground",
-                    )}
-                  >
-                    {agentTerminalExitLabel(entry)}
-                  </span>
-                )}
-                {canOperate && entry.isAgent && running ? (
-                  <RowAction label="Stop command" onClick={() => stopEntry(entry)}>
-                    <Square className="size-3 fill-current" />
-                  </RowAction>
-                ) : null}
-                {canOperate && !entry.isAgent ? (
-                  <RowAction label="Close terminal" onClick={() => closeEntry(entry)}>
-                    <X className="size-3" />
-                  </RowAction>
-                ) : null}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-      <div className="min-h-0 flex-1 bg-(--terminal-background)">
-        <TerminalViewport
-          key={active.terminalId}
-          threadRef={threadRef}
-          threadId={threadRef.threadId}
-          terminalId={active.terminalId}
-          terminalLabel={active.label}
-          cwd={active.cwd}
-          worktreePath={active.worktreePath}
-          onAddTerminalContext={onAddTerminalContext}
-          focusRequestId={focusTarget?.token ?? 0}
-          autoFocus={focusTarget?.terminalId === active.terminalId}
-          visible={visible}
-          resizeEpoch={0}
-          keybindings={keybindings}
-        />
+                {listCollapsed ? <ListTree /> : <ListCollapse />}
+              </HeaderAction>
+            </span>
+          ) : null}
+          {canCreateShell ? (
+            <HeaderAction label="New shell" onClick={createShell}>
+              <Plus />
+            </HeaderAction>
+          ) : null}
+        </div>
       </div>
+      {section === "runs" ? (
+        <AgentRunsView
+          threadRef={threadRef}
+          runs={runs}
+          liveRunCount={liveRunCount}
+          selected={selectedRun}
+          listCollapsed={listCollapsed}
+          canOperate={canOperate}
+          visible={visible}
+          keybindings={keybindings}
+          focusToken={focusTarget?.token ?? 0}
+          autoFocus={focusTarget?.terminalId === selectedRun?.terminalId}
+          onSelect={onSelectTerminal}
+          onFocusOutput={() => {
+            if (selectedRun) focusTerminal(selectedRun.terminalId);
+          }}
+          onStop={stopRun}
+          onAddTerminalContext={onAddTerminalContext}
+        />
+      ) : (
+        <TerminalShellsView
+          threadRef={threadRef}
+          tabs={tabs}
+          selected={selectedShell}
+          canOperate={canOperate}
+          shellCwd={shellCwd}
+          shellWorktreePath={shellWorktreePath}
+          visible={visible}
+          keybindings={keybindings}
+          focusToken={focusTarget?.token ?? 0}
+          autoFocus={focusTarget?.terminalId === selectedShell?.terminalId}
+          onSelect={(terminalId) => {
+            onSelectTerminal(terminalId);
+            focusTerminal(terminalId);
+          }}
+          onCreate={createShell}
+          onClose={closeShell}
+          onAddTerminalContext={onAddTerminalContext}
+        />
+      )}
     </div>
   );
 }

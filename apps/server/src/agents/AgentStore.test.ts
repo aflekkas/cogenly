@@ -9,7 +9,6 @@ import * as Sqlite from "../persistence/Sqlite.ts";
 import {
   agentSessionSeedItems,
   conversationCarryOver,
-  memoryContext,
   shouldRotateAgentSession,
 } from "./context.ts";
 import { callingAgent } from "./MemoryMcp.ts";
@@ -35,7 +34,15 @@ describe("persistent agents", () => {
       expect(yield* store.context(agent.conversationThreadId)).toContain(agent.instructions);
       yield* store.forget(agent.id, note.id);
       expect(yield* store.memory(agent.id)).toEqual([]);
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at) VALUES ('approval:delete', ${agent.id}, '{}', 'pending', ${agent.createdAt})`;
+      yield* sql`INSERT INTO agent_run_actions(id, agent_id, kind, at) VALUES ('action:delete', ${agent.id}, 'read', ${agent.createdAt})`;
+      yield* sql`INSERT INTO agent_run_threads(thread_id, agent_id, trigger_kind) VALUES ('run:delete', ${agent.id}, 'owner')`;
       expect(yield* store.delete(agent.id)).toBe(true);
+      expect(yield* sql`SELECT * FROM agent_approvals`).toEqual([]);
+      expect(yield* sql`SELECT * FROM agent_run_actions`).toEqual([]);
+      expect(yield* sql`SELECT * FROM agent_run_threads`).toEqual([]);
+      expect(yield* sql`SELECT * FROM agent_memory`).toEqual([]);
       expect(yield* store.list()).toEqual([]);
     }).pipe(Effect.provide(layer)),
   );
@@ -141,7 +148,7 @@ describe("persistent agents", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  it.effect("enforces a daily cap, exponential backoff, auto-pause, and explicit resume", () =>
+  it.effect("enforces a daily cap and exponential backoff, and never pauses after failures", () =>
     Effect.gen(function* () {
       const store = yield* Store.AgentStore;
       const sql = yield* SqlClient.SqlClient;
@@ -156,12 +163,12 @@ describe("persistent agents", () => {
       yield* store.outcome(agent.id, false);
       yield* store.outcome(agent.id, false);
       yield* store.outcome(agent.id, false);
-      const paused = yield* store.outcome(agent.id, false);
-      expect(paused.enabled).toBe(false);
-      expect(paused.pauseReason).toContain("five");
-      const resumed = yield* store.save({ ...paused, enabled: true });
-      expect(resumed.consecutiveFailures).toBe(0);
-      expect(resumed.backoffUntil).toBeNull();
+      const failing = yield* store.outcome(agent.id, false);
+      expect(failing.consecutiveFailures).toBe(5);
+      expect(yield* store.reserve(agent.id)).toBe(false);
+      // Once the backoff elapses the agent runs again; nothing waits on the owner.
+      yield* sql`UPDATE agents SET backoff_until = NULL, run_day = '2000-01-01' WHERE agent_id = ${agent.id}`;
+      expect(yield* store.reserve(agent.id)).toBe(true);
       yield* store.outcome(agent.id, true);
       expect((yield* store.get(agent.id)).consecutiveFailures).toBe(0);
     }).pipe(Effect.provide(layer)),
@@ -242,18 +249,4 @@ describe("persistent agents", () => {
         expect(seed).not.toContain("item:current");
       }).pipe(Effect.provide(layer)),
   );
-
-  it("injects all small memory and bounds large memory with recent facts and older summaries", () => {
-    const notes = Array.from({ length: 30 }, (_, i) => ({
-      id: `note:${i}`,
-      text: `fact ${i} ${"x".repeat(100)}`,
-      source: "owner",
-      updatedAt: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`,
-    }));
-    expect(memoryContext(notes.slice(0, 2))).toContain("fact 0");
-    const context = memoryContext(notes, 1500);
-    expect(context.length).toBeLessThanOrEqual(1500);
-    expect(context).toContain("fact 29");
-    expect(context).toContain("Older memory summary");
-  });
 });

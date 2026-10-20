@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
   AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   type AuthEnvironmentScope,
@@ -11,6 +12,11 @@ import { WS_METHODS } from "./rpc.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
+  [WS_METHODS.searchQuery]: AuthOrchestrationReadScope,
+  [WS_METHODS.exportCreate]: AuthSettingsWriteScope,
+  [WS_METHODS.exportValidate]: AuthSettingsWriteScope,
+  [WS_METHODS.exportList]: AuthSettingsWriteScope,
+  [WS_METHODS.commitmentsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverRunStorageCleanup]: AuthSettingsWriteScope,
   // Endpoint checks exist to configure exports, so they need the same grant as saving them.
   [WS_METHODS.serverCheckOtlpEndpoint]: AuthSettingsWriteScope,
@@ -41,6 +47,29 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.vcsSwitchRef]: AuthSourceControlWriteScope,
   [WS_METHODS.vcsInit]: AuthSourceControlWriteScope,
 
+  [WS_METHODS.projectLabelsCreate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsUpdate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsDelete]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsLinkRepository]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsUnlinkRepository]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsSetThreadLabels]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsReviewSuggestion]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsSuggestLabels]: AuthOrchestrationOperateScope,
+  [WS_METHODS.workStart]: AuthOrchestrationOperateScope,
+  [WS_METHODS.workProposeHandoff]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentsRequestApproval]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentsApprove]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentsReject]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentsStartWork]: AuthOrchestrationOperateScope,
+  [WS_METHODS.factsCreate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.factsUpdate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.factsSupersede]: AuthOrchestrationOperateScope,
+  [WS_METHODS.factsRetract]: AuthOrchestrationOperateScope,
+  [WS_METHODS.contextSetEnabled]: AuthOrchestrationOperateScope,
+  [WS_METHODS.commitmentsCreate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.commitmentsUpdateStatus]: AuthOrchestrationOperateScope,
+  [WS_METHODS.commitmentsConfirm]: AuthOrchestrationOperateScope,
+  [WS_METHODS.commitmentsDismiss]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsUpsert]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsSend]: AuthOrchestrationOperateScope,
@@ -55,6 +84,11 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
+export type ClientGuardedReadRpcTag = {
+  [Tag in ClientGuardedRpcTag]: (typeof CLIENT_GUARDED_RPC_SCOPES)[Tag] extends `${string}:read`
+    ? Tag
+    : never;
+}[ClientGuardedRpcTag];
 
 const decodePrepareThread = Schema.decodeUnknownSync(GitPreparePullRequestThreadInput);
 

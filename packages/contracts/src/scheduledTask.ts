@@ -1,3 +1,4 @@
+import { ScheduledTaskEventSchedule } from "./agentEvent.ts";
 import { AgentId } from "./agent.ts";
 import * as Schema from "effect/Schema";
 
@@ -128,17 +129,19 @@ const ScheduledTaskUpsertWebhookSchedule = Schema.Struct({
  * users can list, disable, edit, or delete them after the write minimum changes.
  */
 export const ScheduledTaskSchedule = Schema.Union([
+  ScheduledTaskEventSchedule,
   ScheduledTaskIntervalSchedule,
   ScheduledTaskFixedTimeSchedule,
   ScheduledTaskWebhookSchedule,
 ]).annotate({
   description:
-    "Structured trigger. Pass an object with type 'interval', 'fixed_time' or 'webhook'.",
+    "Structured trigger. Pass an object with type 'interval', 'fixed_time', 'webhook' or 'event'.",
 });
 export type ScheduledTaskSchedule = typeof ScheduledTaskSchedule.Type;
 
 /** Mutation model: newly created or updated interval schedules run at most once per minute. */
 export const ScheduledTaskUpsertSchedule = Schema.Union([
+  ScheduledTaskEventSchedule,
   Schema.Struct({
     type: Schema.Literal("interval").annotate({
       description: "Select interval scheduling.",
@@ -154,7 +157,8 @@ export const ScheduledTaskUpsertSchedule = Schema.Union([
   ScheduledTaskFixedTimeSchedule,
   ScheduledTaskUpsertWebhookSchedule,
 ]).annotate({
-  description: "Writable trigger. Pass an object with type 'interval', 'fixed_time' or 'webhook'.",
+  description:
+    "Writable trigger. Pass an object with type 'interval', 'fixed_time', 'webhook' or 'event'.",
 });
 export type ScheduledTaskUpsertSchedule = typeof ScheduledTaskUpsertSchedule.Type;
 
@@ -337,6 +341,9 @@ export class ScheduledTaskError extends Schema.TaggedError<ScheduledTaskError>()
   {
     message: Schema.String,
     taskId: Schema.optional(ScheduledTaskId),
+    code: Schema.optional(
+      Schema.Literals(["event_filter_out_of_scope", "event_run_now_unsupported"]),
+    ),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}

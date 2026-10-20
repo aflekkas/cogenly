@@ -59,7 +59,7 @@ find only searches the files loaded so far.
 
 With a hardware keyboard, use `Cmd+1` through `Cmd+9` to open the first nine
 displayed threads. The shortcuts follow the current list filters and order.
-`Cmd+K` opens the command palette to search commands, projects, and threads.
+`Cmd+K` opens the command palette to search commands, projects, threads, and agents.
 Use the arrow keys and Return to choose a result, or `Cmd+1` through `Cmd+9` to
 choose directly. Escape or `Cmd+K` closes the palette. Start a search with `>`
 to show only actions.
@@ -154,10 +154,13 @@ terminals so native undo keeps working there.
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
 through the pages you have visited, like a browser's back and forward buttons.
 
-`chat.new` may ask you to choose a project when there is more than one.
+`chat.new` may ask you to choose a project when there is more than one; while the
+sidebar shows **Chats**, it starts a chat without a project instead.
 `chat.newLocal` skips that chooser. Both use your
 [new-thread defaults](./thread-sidebar.md#start-a-thread). `chat.newWithoutProject`
 (`mod+alt+n`) starts a thread [without a project](./thread-sidebar.md#start-without-a-project).
+`thread.startWork` (`mod+alt+s`) hands the open chat to a new
+[Work session](./thread-sidebar.md#start-work-from-a-chat).
 
 ## Reserved shortcuts
 

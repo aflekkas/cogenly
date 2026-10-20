@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type { EnvironmentId, UnifiedSettings } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
@@ -74,14 +75,16 @@ export function UsageProviderSettings({
           })
         )}
       </SettingsSection>
-      {adding && !readOnly ? (
-        <AddUsageLimitSourceDialog
-          open
-          onOpenChange={setAdding}
-          environmentId={environmentId}
-          environmentLabel={environmentLabel}
-        />
-      ) : null}
+      <OverlayPresence when={adding && !readOnly}>
+        {() => (
+          <AddUsageLimitSourceDialog
+            open
+            onOpenChange={setAdding}
+            environmentId={environmentId}
+            environmentLabel={environmentLabel}
+          />
+        )}
+      </OverlayPresence>
     </>
   );
 }

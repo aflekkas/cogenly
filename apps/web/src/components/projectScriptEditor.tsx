@@ -1,3 +1,4 @@
+import { useLastPresent } from "~/components/ui/overlay-presence";
 import {
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
@@ -188,7 +189,8 @@ export function ProjectScriptEditorDialog({
   const pendingSubmissionRef = useRef<{ request: ProjectScriptEditorRequest } | null>(null);
 
   const isOpen = request !== null;
-  const isEditing = request?.scriptId != null;
+  // Copy follows the last request, so it holds while the dialog closes.
+  const isEditing = useLastPresent(request)?.scriptId != null;
   const isSaving = request !== null && savingRequest === request;
 
   // A save completion must not affect a replacement request or an unmounted editor.
@@ -243,7 +245,7 @@ export function ProjectScriptEditorDialog({
     event.preventDefault();
     if (!request || pendingSubmissionRef.current !== null) return;
     if (!readEnvironmentScope(environmentId, editScope)) {
-      setValidationError("This connection cannot change project actions.");
+      setValidationError("This connection cannot change repository actions.");
       return;
     }
     const changesKeybinding =
@@ -337,7 +339,7 @@ export function ProjectScriptEditorDialog({
           <DialogHeader>
             <DialogTitle>{isEditing ? "Edit Action" : "Add Action"}</DialogTitle>
             <DialogDescription>
-              Actions are project-scoped commands you can run from the top bar or keybindings.
+              Actions are repository-scoped commands you can run from the top bar or keybindings.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
@@ -508,7 +510,7 @@ export function ProjectScriptEditorDialog({
               onClick={() => {
                 if (!request?.scriptId) return;
                 if (!readEnvironmentScope(environmentId, editScope)) {
-                  setValidationError("This connection cannot change project actions.");
+                  setValidationError("This connection cannot change repository actions.");
                   return;
                 }
                 setDeleteConfirmOpen(false);

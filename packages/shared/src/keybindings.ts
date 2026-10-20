@@ -126,6 +126,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+1", command: "sidebar.mode.chats" },
   { key: "mod+alt+2", command: "sidebar.mode.tasks" },
   { key: "mod+alt+3", command: "sidebar.mode.agents" },
+  { key: "mod+alt+4", command: "sidebar.mode.projects" },
   { key: "mod+[", command: "navigation.back", when: "!terminalFocus" },
   { key: "mod+]", command: "navigation.forward", when: "!terminalFocus" },
   { key: "mod+alt+b", command: "rightPanel.toggle" },
@@ -184,6 +185,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+]", command: "thread.next" },
   { key: "mod+shift+c", command: "thread.copyReference", when: "!terminalFocus" },
   { key: "mod+shift+s", command: "thread.settle", when: "!terminalFocus" },
+  { key: "mod+alt+s", command: "thread.startWork", when: "!terminalFocus" },
   { key: "mod+z", command: "thread.undo", when: "!terminalFocus && !editableFocus" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,

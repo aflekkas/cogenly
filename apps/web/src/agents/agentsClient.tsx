@@ -1,12 +1,16 @@
-import {
-  createContext,
-  useContext,
-  useSyncExternalStore,
-  useCallback,
-  useRef,
-  type ComponentType,
-} from "react";
-import type { EnvironmentId, ProviderApprovalDecision, ThreadId } from "@t3tools/contracts";
+import { useContext, useSyncExternalStore, useCallback, useRef, type ComponentType } from "react";
+import type {
+  AgentApproval,
+  Commitment,
+  CommitmentCreateInput,
+  CommitmentStatusInput,
+  EnvironmentId,
+  ModelSelection,
+  ProjectId,
+  ProviderApprovalDecision,
+  RunId,
+  ThreadId,
+} from "@t3tools/contracts";
 import type {
   AgentContact,
   AgentMessage,
@@ -16,6 +20,8 @@ import type {
   AgentModelOption,
   AgentModelRef,
   AgentTrigger,
+  AgentWorkspaceView,
+  CommitmentHistoryView,
 } from "./agents.types";
 import {
   agentContactKey,
@@ -26,6 +32,8 @@ import {
   resolveAgentModelStatus,
   type AgentModelStatus,
 } from "./agents.logic";
+import { triggerErrorMessage } from "./agentWorkspace.logic";
+import { AgentHydrationContext, AgentsClientContext } from "./agentsContext";
 
 export class AgentCreatedWithoutTriggerError extends Error {
   constructor(
@@ -33,7 +41,7 @@ export class AgentCreatedWithoutTriggerError extends Error {
     cause: unknown,
   ) {
     super(
-      `Agent created, but the first trigger was not saved. ${cause instanceof Error ? cause.message : "Try saving the trigger again."}`,
+      `Agent created, but the first trigger was not saved. ${triggerErrorMessage(cause, "Try saving the trigger again.")}`,
     );
   }
 }
@@ -70,25 +78,73 @@ export interface AgentsClient {
     trigger: Omit<AgentTrigger, "id"> & { id?: string },
   ) => Promise<void>;
   runTrigger: (agent: AgentContact, id: string) => Promise<void>;
+  setTriggerEnabled: (agent: AgentContact, id: string, enabled: boolean) => Promise<void>;
   deleteTrigger: (agent: AgentContact, id: string) => Promise<void>;
   loadEarlier?: (agent: AgentContact) => Promise<void>;
   canWrite?: (environmentId: EnvironmentId) => boolean;
   openWork: (agent: AgentContact, threadId: ThreadId) => void;
+  /** Settings → Projects, where projects are created and linked to repositories. */
+  openProjectSettings?: () => void;
+  /** Opens an http(s) link from an open item's evidence outside the app. */
+  openExternal: (url: string) => void;
+  /** Renders its children with the agent's open items, audited activity, and projects. */
+  Workspace: ComponentType<{
+    agent: AgentContact;
+    children: (view: AgentWorkspaceView) => ReactNode;
+  }>;
+  /** Renders its children with one open item's history; mount it only when shown. */
+  CommitmentHistory: ComponentType<{
+    agent: AgentContact;
+    commitment: Pick<Commitment, "id" | "updatedAt">;
+    children: (view: CommitmentHistoryView) => ReactNode;
+  }>;
+  decideApproval: (
+    agent: AgentContact,
+    id: string,
+    decision: "approve" | "reject",
+  ) => Promise<AgentApproval>;
+  /** Owner-started Work as this agent. The server may still return an approval instead. */
+  startWork: (
+    agent: AgentContact,
+    input: { projectId: ProjectId; title: string; prompt: string; commandId: string },
+  ) => Promise<{ threadId: ThreadId | null; approval: AgentApproval | null }>;
+  createCommitment: (agent: AgentContact, input: CommitmentCreateInput) => Promise<void>;
+  setCommitmentStatus: (agent: AgentContact, input: CommitmentStatusInput) => Promise<void>;
+  confirmCommitment: (agent: AgentContact, id: string, why: string) => Promise<void>;
+  dismissCommitment: (agent: AgentContact, id: string, why: string) => Promise<void>;
+  /** Removes an open item and its history for good; dismissing keeps both. */
+  deleteCommitment: (agent: AgentContact, id: string) => Promise<void>;
   /** Whether a model can run on the agent's environment; absent where there is no catalog. */
   modelStatus?: (agent: AgentContact, model: AgentModelRef) => AgentModelStatus;
   /** Model and effort pickers from the live provider catalog; absent where there is none. */
   ModelControls?: ComponentType<AgentModelControlsProps>;
+  /** "Context used (N)" under the reply that closes a run; absent where there is no retrieval. */
+  MessageContext?: ComponentType<{ agent: AgentContact; runId: RunId }>;
+  /** The agent's facts in Responsibilities; absent where there is no facts service. */
+  MemorySection?: ComponentType<{
+    agent: AgentContact;
+    labels: AgentWorkspaceView["labels"];
+  }>;
 }
-const ClientContext = createContext<AgentsClient | null>(null);
-export const AgentsClientProvider = ClientContext.Provider;
+export const AgentsClientProvider = AgentsClientContext.Provider;
 export function useAgentsClient() {
-  const client = useContext(ClientContext);
+  const client = useContext(AgentsClientContext);
   if (!client) throw new Error("AgentsClientProvider is required");
   return client;
 }
+const NO_AGENTS: AgentsSnapshot = { agents: [], models: [], loading: false, error: null };
+const subscribeToNothing = () => () => {};
+const readNoAgents = () => NO_AGENTS;
+/**
+ * The agents list, empty outside the provider: global surfaces (sidebar, palette,
+ * thread route) also render where it is absent, such as the welcome wizard.
+ */
 export function useAgents() {
-  const client = useAgentsClient();
-  const snapshot = useSyncExternalStore(client.subscribe, client.getSnapshot);
+  const client = useContext(AgentsClientContext);
+  const snapshot = useSyncExternalStore(
+    client?.subscribe ?? subscribeToNothing,
+    client?.getSnapshot ?? readNoAgents,
+  );
   const agents = useMemo(() => sortAgentContacts(snapshot.agents), [snapshot.agents]);
   return { ...snapshot, agents };
 }
@@ -107,7 +163,7 @@ export function useAgentUnread(agent: AgentContact) {
 }
 
 // All environment, thread, and RPC access for the feature stays at this boundary.
-import { useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -122,9 +178,18 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { agentsRpc } from "~/rpc/agents";
+import { agentWorkspaceRpc, agentsRpc } from "~/rpc/agents";
+import { readLocalApi } from "~/localApi";
+import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { usePrimaryEnvironmentId, useConnectedEnvironmentIds } from "~/state/environments";
-import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
+import {
+  useProjects,
+  useServerConfigs,
+  useThreadShells,
+  waitForThreadShell,
+} from "~/state/entities";
+import { openWorkWhenArrived } from "~/components/work/work.logic";
 import { useEnvironmentThread, threadEnvironment } from "~/state/threads";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "~/state/server";
 import { useEnvironmentSettings } from "~/hooks/useSettings";
@@ -133,8 +198,10 @@ import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
   isProviderInstancePickerVisible,
+  resolveDefaultProviderModelSelection,
   sortProviderInstanceEntries,
 } from "~/providerInstances";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
 import { ComposerControlSeparator } from "~/components/chat/ComposerControl";
 import { TraitsPicker } from "~/components/chat/TraitsPicker";
@@ -144,6 +211,9 @@ import { readEnvironmentScope } from "~/state/session";
 import { useEnvironmentQuery } from "~/state/query";
 import { randomUUID, newMessageId } from "~/lib/utils";
 import { useAgentScheduledTasks } from "~/components/sidebar/modes/useAgentScheduledTasks";
+import { AgentFactsSection } from "~/memory/AgentFacts";
+import { ContextUsed } from "~/context/ThreadContext";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { AgentRequest } from "./agents.types";
 
 function commandValue<A>(
@@ -176,7 +246,16 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           .filter(Boolean)
           .map((id) => {
             const environmentId = id as EnvironmentId;
-            return { environmentId, result: get(agentsRpc.list({ environmentId, input: {} })) };
+            return {
+              environmentId,
+              result: get(agentsRpc.list({ environmentId, input: {} })),
+              approvals: get(
+                agentWorkspaceRpc.agentsApprovalsList({
+                  environmentId,
+                  input: { status: "pending" },
+                }),
+              ),
+            };
           }),
       ),
     [idsKey],
@@ -217,6 +296,32 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
     reportFailure: false,
   });
   const runTask = useAtomCommand(serverEnvironment.runScheduledTaskNow, { reportFailure: false });
+  const setTaskEnabled = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
+    reportFailure: false,
+  });
+  const registry = useContext(RegistryContext);
+  const approve = useOrchestrationCommand(agentWorkspaceRpc.agentsApprove, {
+    reportFailure: false,
+  });
+  const reject = useOrchestrationCommand(agentWorkspaceRpc.agentsReject, { reportFailure: false });
+  const startWork = useOrchestrationCommand(agentWorkspaceRpc.agentsStartWork, {
+    reportFailure: false,
+  });
+  const createCommitment = useOrchestrationCommand(agentWorkspaceRpc.commitmentsCreate, {
+    reportFailure: false,
+  });
+  const updateCommitment = useOrchestrationCommand(agentWorkspaceRpc.commitmentsUpdateStatus, {
+    reportFailure: false,
+  });
+  const confirmCommitment = useOrchestrationCommand(agentWorkspaceRpc.commitmentsConfirm, {
+    reportFailure: false,
+  });
+  const dismissCommitment = useOrchestrationCommand(agentWorkspaceRpc.commitmentsDismiss, {
+    reportFailure: false,
+  });
+  const deleteCommitment = useOrchestrationCommand(agentWorkspaceRpc.commitmentsDelete, {
+    reportFailure: false,
+  });
   const deleteTask = useAtomCommand(serverEnvironment.deleteScheduledTask, {
     reportFailure: false,
   });
@@ -245,8 +350,10 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   );
   const agents = useMemo(
     () =>
-      results.flatMap(({ environmentId, result }) => {
+      results.flatMap(({ environmentId, result, approvals: approvalsResult }) => {
         const records = Option.getOrNull(AsyncResult.value(result))?.agents ?? [];
+        const pendingApprovals =
+          Option.getOrNull(AsyncResult.value(approvalsResult))?.approvals ?? [];
         return records.map((record): AgentContact => {
           const shell = threads.find(
             (thread) =>
@@ -274,18 +381,21 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
               ownership.role === "work"
             );
           });
-          const state =
+          const approvals = pendingApprovals.filter(
+            (approval) => approval.agentId === record.id && approval.status === "pending",
+          );
+          const waitingInRun = Boolean(
             shell?.hasPendingApprovals ||
             shell?.hasPendingUserInput ||
-            cached?.requests.length ||
-            workThreads.some((thread) => thread.hasPendingApprovals || thread.hasPendingUserInput)
+            workThreads.some((thread) => thread.hasPendingApprovals || thread.hasPendingUserInput),
+          );
+          const state =
+            approvals.length || waitingInRun || cached?.requests.length
               ? "blocked"
               : shell?.runtime?.activeRunId ||
                   workThreads.some((thread) => thread.runtime?.activeRunId)
                 ? "thinking"
-                : record.enabled
-                  ? "idle"
-                  : "asleep";
+                : "idle";
           return {
             ...record,
             environmentId,
@@ -311,6 +421,8 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
             memory: cached?.memory ?? [],
             activity: cached?.activity ?? [],
             requests: cached?.requests ?? [],
+            approvals,
+            waitingInRun,
           };
         });
       }),
@@ -341,10 +453,11 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   );
   const persistTrigger = useCallback(
     async (agent: AgentContact, trigger: Omit<AgentTrigger, "id"> & { id?: string }) => {
+      // Policy changes only through the owner; a trigger saved here is the owner's decision.
       const projectId =
         agent.projectId ??
         projects.find((project) => project.environmentId === agent.environmentId)?.id;
-      if (!projectId) throw new Error("Choose a project before adding a trigger.");
+      if (!projectId) throw new Error("Choose a repository before adding a trigger.");
       if (!readEnvironmentScope(agent.environmentId, AuthOrchestrationOperateScope))
         throw new Error("This connection cannot change agents.");
       const { id: _triggerId, ...triggerFields } = trigger;
@@ -377,13 +490,14 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           environmentId,
           unreadCount: 0,
           latestMessage: null,
-          state: record.enabled ? "idle" : "asleep",
+          state: "idle",
           preview: "Say hello",
           messages: [],
           triggers: [],
           memory: [],
           activity: [],
           requests: [],
+          approvals: [],
         };
         if (firstTrigger) {
           // Creation and the optional trigger are separate writes. Keep the profile's
@@ -489,6 +603,16 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           }),
         );
       },
+      setTriggerEnabled: async (agent, id, enabled) => {
+        if (!readEnvironmentScope(agent.environmentId, AuthOrchestrationOperateScope))
+          throw new Error("This connection cannot change agents.");
+        commandValue(
+          await setTaskEnabled({
+            environmentId: agent.environmentId,
+            input: { id: ScheduledTaskId.make(id), enabled },
+          }),
+        );
+      },
       deleteTrigger: async (agent, id) => {
         if (!readEnvironmentScope(agent.environmentId, AuthOrchestrationOperateScope))
           throw new Error("This connection cannot change agents.");
@@ -510,14 +634,70 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       canWrite: (environmentId) =>
         readEnvironmentScope(environmentId, AuthOrchestrationOperateScope),
       openWork: (agent, threadId) => {
-        void navigate({
-          to: "/$environmentId/$threadId",
-          params: { environmentId: agent.environmentId, threadId },
+        void openWorkWhenArrived({
+          waitForThread: () => waitForThreadShell(scopeThreadRef(agent.environmentId, threadId)),
+          open: () =>
+            navigate({
+              to: "/$environmentId/$threadId",
+              params: { environmentId: agent.environmentId, threadId },
+            }),
         });
+      },
+      openProjectSettings: () => {
+        void navigate({ to: "/project" });
+      },
+      openExternal: (url) => {
+        void readLocalApi()?.shell.openExternal(url);
+      },
+      Workspace: LiveAgentWorkspace,
+      CommitmentHistory: LiveCommitmentHistory,
+      decideApproval: async (agent, id, decision) => {
+        const command = decision === "approve" ? approve : reject;
+        const { approval } = commandValue(
+          await command({ environmentId: agent.environmentId, input: { id } }),
+        );
+        refreshWorkspace(registry, agent);
+        return approval;
+      },
+      startWork: async (agent, input) => {
+        const result = commandValue(
+          await startWork({
+            environmentId: agent.environmentId,
+            input: { ...input, agentId: agent.id, commandId: CommandId.make(input.commandId) },
+          }),
+        );
+        refreshWorkspace(registry, agent);
+        return result;
+      },
+      createCommitment: async (agent, input) => {
+        commandValue(await createCommitment({ environmentId: agent.environmentId, input }));
+        refreshWorkspace(registry, agent);
+      },
+      setCommitmentStatus: async (agent, input) => {
+        commandValue(await updateCommitment({ environmentId: agent.environmentId, input }));
+        refreshWorkspace(registry, agent);
+      },
+      confirmCommitment: async (agent, id, why) => {
+        commandValue(
+          await confirmCommitment({ environmentId: agent.environmentId, input: { id, why } }),
+        );
+        refreshWorkspace(registry, agent);
+      },
+      dismissCommitment: async (agent, id, why) => {
+        commandValue(
+          await dismissCommitment({ environmentId: agent.environmentId, input: { id, why } }),
+        );
+        refreshWorkspace(registry, agent);
+      },
+      deleteCommitment: async (agent, id) => {
+        commandValue(await deleteCommitment({ environmentId: agent.environmentId, input: { id } }));
+        refreshWorkspace(registry, agent);
       },
       modelStatus: (agent, model) =>
         resolveAgentModelStatus(configs.get(agent.environmentId)?.providers, model),
       ModelControls: LiveAgentModelControls,
+      MemorySection: AgentFactsSection,
+      MessageContext: AgentMessageContext,
     }),
     [
       snapshot,
@@ -532,9 +712,19 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       persistTrigger,
       deleteTask,
       runTask,
+      setTaskEnabled,
       navigate,
       loadEarlier,
       configs,
+      registry,
+      approve,
+      reject,
+      startWork,
+      createCommitment,
+      updateCommitment,
+      confirmCommitment,
+      dismissCommitment,
+      deleteCommitment,
     ],
   );
   return (
@@ -543,10 +733,104 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
     </AgentsClientProvider>
   );
 }
-type AgentConversationData = Pick<AgentContact, "messages" | "requests" | "memory" | "activity">;
-const AgentHydrationContext = createContext<
-  ((key: string, content: AgentConversationData) => void) | null
->(null);
+/** Re-read what an owner decision can change, without waiting for the agents stream. */
+function refreshWorkspace(
+  registry: import("effect/reactivity").AtomRegistry.AtomRegistry,
+  agent: AgentContact,
+) {
+  const environmentId = agent.environmentId;
+  registry.refresh(
+    agentWorkspaceRpc.agentsApprovalsList({ environmentId, input: { status: "pending" } }),
+  );
+  registry.refresh(
+    agentWorkspaceRpc.commitmentsList({ environmentId, input: { agentId: agent.id } }),
+  );
+  registry.refresh(
+    agentWorkspaceRpc.agentsActivity({ environmentId, input: { agentId: agent.id } }),
+  );
+}
+
+const EMPTY_COMMITMENTS: AgentWorkspaceView["commitments"] = [];
+function LiveAgentWorkspace({
+  agent,
+  children,
+}: {
+  agent: AgentContact;
+  children: (view: AgentWorkspaceView) => ReactNode;
+}) {
+  return children(useLiveAgentWorkspace(agent));
+}
+function useLiveAgentWorkspace(agent: AgentContact): AgentWorkspaceView {
+  const environmentId = agent.environmentId;
+  const commitments = useEnvironmentQuery(
+    agentWorkspaceRpc.commitmentsList({ environmentId, input: { agentId: agent.id } }),
+  );
+  const activity = useEnvironmentQuery(
+    agentWorkspaceRpc.agentsActivity({ environmentId, input: { agentId: agent.id } }),
+  );
+  const { labels, error: labelsError } = useEnvironmentProjectLabels(environmentId);
+  const projects = useProjects();
+  const configs = useServerConfigs();
+  const scratchRoot = configs.get(environmentId)?.scratchWorkspaceRoot;
+  const repositories = useMemo(
+    () =>
+      projects
+        .filter(
+          (project) =>
+            project.environmentId === environmentId &&
+            !project.isScratch &&
+            !isScratchProject(project, scratchRoot),
+        )
+        .map(({ id, title }) => ({ id, title })),
+    [projects, environmentId, scratchRoot],
+  );
+  const refreshCommitments = commitments.refresh;
+  const refreshActivity = activity.refresh;
+  const refresh = useCallback(() => {
+    refreshCommitments();
+    refreshActivity();
+  }, [refreshCommitments, refreshActivity]);
+  return {
+    commitments: commitments.data?.commitments ?? EMPTY_COMMITMENTS,
+    activity: activity.data,
+    labels,
+    repositories,
+    loading: commitments.data === null && commitments.error === null,
+    error: commitments.error ?? activity.error ?? labelsError,
+    refresh,
+  };
+}
+
+function LiveCommitmentHistory({
+  agent,
+  commitment,
+  children,
+}: {
+  agent: AgentContact;
+  commitment: Pick<Commitment, "id" | "updatedAt">;
+  children: (view: CommitmentHistoryView) => ReactNode;
+}) {
+  const query = useEnvironmentQuery(
+    agentWorkspaceRpc.commitmentsHistory({
+      environmentId: agent.environmentId,
+      input: { id: commitment.id },
+    }),
+  );
+  // Any status change, by you or the agent, moves updatedAt; read the new entry.
+  const { refresh } = query;
+  const seenUpdatedAt = useRef(commitment.updatedAt);
+  useEffect(() => {
+    if (seenUpdatedAt.current === commitment.updatedAt) return;
+    seenUpdatedAt.current = commitment.updatedAt;
+    refresh();
+  }, [commitment.updatedAt, refresh]);
+  return children({ history: query.data?.history ?? null, error: query.error });
+}
+
+export type AgentConversationData = Pick<
+  AgentContact,
+  "messages" | "requests" | "memory" | "activity"
+>;
 export function useAgentConversation(agent: AgentContact | null): AgentContact | null {
   const state = useEnvironmentThread(
     agent?.environmentId ?? null,
@@ -630,6 +914,7 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
           streaming: message.streaming,
           delivery: messageDelivery(run),
           ...(message.role === "user" && run ? { model: run.modelSelection } : {}),
+          ...(message.role === "assistant" && message.runId ? { runId: message.runId } : {}),
           ...(message.scheduledTaskId && message.senderThreadId
             ? {
                 source: {
@@ -753,6 +1038,25 @@ function LiveAgentModelControls({
   );
 }
 
+/** The same "Context used (N)" disclosure chat turns show, for one agent run. */
+function AgentMessageContext({ agent, runId }: { agent: AgentContact; runId: RunId }) {
+  return (
+    <ContextUsed
+      threadRef={scopeThreadRef(agent.environmentId, agent.conversationThreadId)}
+      runId={runId}
+    >
+      {({ trigger, panel }) =>
+        trigger ? (
+          <div className="flex flex-col items-start pt-1">
+            {trigger}
+            {panel}
+          </div>
+        ) : null
+      }
+    </ContextUsed>
+  );
+}
+
 /** The default workspace stays on the environment where creation was invoked. */
 export function useAgentCreationContext(target: EnvironmentId | null) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -764,4 +1068,25 @@ export function useAgentCreationContext(target: EnvironmentId | null) {
       .filter((project) => project.environmentId === target)
       .map(({ id, title }) => ({ id, title })),
   };
+}
+
+/**
+ * The model a new chat in this workspace starts with: the project or environment
+ * default, else the first ready provider's default. Agents start on it and then
+ * follow whatever their chat composer picks.
+ */
+export function useDefaultAgentModel(
+  environmentId: EnvironmentId,
+  projectId: ProjectId | null,
+): ModelSelection | null {
+  const config = useServerConfigs().get(environmentId);
+  const projects = useProjects();
+  if (!config) return null;
+  const project = projects.find(
+    (candidate) => candidate.environmentId === environmentId && candidate.id === projectId,
+  );
+  return resolveDefaultProviderModelSelection(
+    config.providers,
+    resolveProjectSettings(config.settings, projectId, project).settings.defaultModelSelection,
+  );
 }

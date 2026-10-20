@@ -63,7 +63,7 @@ export function DesktopAppActivationCoordinator() {
         });
         if (result._tag === "Failure") {
           const error = squashAtomCommandFailure(result);
-          throw error instanceof Error ? error : new Error("Cogenly could not add the project.");
+          throw error instanceof Error ? error : new Error("Cogenly could not add the repository.");
         }
         return projectId;
       },

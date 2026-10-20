@@ -228,3 +228,23 @@ it.effect("preserves the GITHUB_OUTPUT append path and exact cause", () => {
     assert.notInclude(appendError.message, appendCause.message);
   });
 });
+
+it.effect("isolates staging and prod notes from other release channels", () =>
+  Effect.gen(function* () {
+    const tags = [
+      "v1.1.9",
+      "v1.2.0-staging.20261019.1",
+      "v1.2.0-preview.20261019.2",
+      "v1.2.0-nightly.20261019.3",
+    ];
+    assert.equal(yield* resolvePreviousReleaseTag("prod", "v1.2.0", tags), "v1.1.9");
+    assert.equal(
+      yield* resolvePreviousReleaseTag("staging", "v1.2.0-staging.20261019.4", tags),
+      "v1.2.0-staging.20261019.1",
+    );
+    assert.equal(
+      yield* resolvePreviousReleaseTag("staging", "v1.2.0-staging.20261019.1", ["v1.1.9"]),
+      undefined,
+    );
+  }),
+);

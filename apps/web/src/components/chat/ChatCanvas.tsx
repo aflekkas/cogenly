@@ -11,6 +11,40 @@ import { ChatCanvasContext } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout, type ChatCanvasPreview } from "./chatCanvasLayout";
 import type { PreviewMiniPlayerObstacles } from "../preview/previewMiniPlayerLayout";
 import { observeResize } from "../../lib/observeResize";
+import { notifyPanelMotion } from "../../lib/panelFlip";
+import { usePanelAnimationSettings } from "../../panelAnimations";
+
+// Everything that reads the lane insets (index.css).
+const CHAT_LANE_SELECTOR =
+  ".messages-timeline-scroll, .chat-composer-lane, .chat-banner-lane, .chat-scroll-to-bottom";
+const CHAT_LANE_GLIDE_ID = "chat-lane-glide";
+// The details card's own open: 160ms on ease-drawer (ThreadDetailsCard).
+const CHAT_LANE_GLIDE_MS = 160;
+const CHAT_LANE_GLIDE_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
+
+/**
+ * Glides the lanes by offset from where they were drawn to the committed
+ * insets. Call from a layout effect, so the frame that paints the new insets
+ * already draws the lanes where they were. An interrupted glide continues
+ * from where it has drawn them.
+ */
+function glideChatLanes(canvas: HTMLElement, offset: number) {
+  for (const lane of canvas.querySelectorAll<HTMLElement>(CHAT_LANE_SELECTOR)) {
+    let from = offset;
+    for (const animation of lane.getAnimations()) {
+      if (animation.id !== CHAT_LANE_GLIDE_ID) continue;
+      from += new DOMMatrixReadOnly(getComputedStyle(lane).transform).m41;
+      animation.cancel();
+    }
+    if (Math.abs(from) < 0.5) continue;
+    const animation = lane.animate(
+      [{ transform: `translateX(${from}px)` }, { transform: "translateX(0)" }],
+      { duration: CHAT_LANE_GLIDE_MS, easing: CHAT_LANE_GLIDE_EASING },
+    );
+    animation.id = CHAT_LANE_GLIDE_ID;
+  }
+  notifyPanelMotion(CHAT_LANE_GLIDE_MS);
+}
 
 /**
  * Owns the available conversation space. Cards only report where they sit; the
@@ -144,6 +178,20 @@ export function ChatCanvas({
     detailsCardTopInset,
   ]);
   const { layout } = context;
+  // A details card that opens or closes where it does not fit beside the
+  // centered chat moves the lanes over; they glide instead of jumping. A
+  // resize, the first measure, or reduced motion snaps.
+  const { active: laneMotion } = usePanelAnimationSettings();
+  const drawnLaneRef = useRef<{ left: number; card: boolean; width: number } | null>(null);
+  useLayoutEffect(() => {
+    const drawn = drawnLaneRef.current;
+    const next = { left: layout.chat.left, card: detailsCard !== null, width: measurements.width };
+    drawnLaneRef.current = next;
+    const element = elementRef.current;
+    if (!element || !drawn || !laneMotion) return;
+    if (drawn.card === next.card || drawn.width !== next.width) return;
+    if (Math.abs(drawn.left - next.left) >= 0.5) glideChatLanes(element, drawn.left - next.left);
+  }, [layout.chat.left, detailsCard, measurements.width, laneMotion]);
   return (
     <ChatCanvasContext value={context}>
       <div

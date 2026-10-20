@@ -3,6 +3,7 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
+import { OverlayPresenceBoundary, useOverlayPresenceRoot } from "~/components/ui/overlay-presence";
 import { Button } from "~/components/ui/button";
 import {
   DIALOG_BACKDROP_CLASS,
@@ -13,7 +14,23 @@ import {
 } from "~/components/ui/dialog-styles";
 import { ScrollArea } from "~/components/ui/scroll-area";
 
-const Dialog = DialogPrimitive.Root;
+/** Closes with its exit motion when an OverlayPresence around it empties. */
+function Dialog<Payload>({
+  open,
+  onOpenChangeComplete,
+  ...props
+}: DialogPrimitive.Root.Props<Payload>) {
+  const presence = useOverlayPresenceRoot(open, onOpenChangeComplete);
+  return (
+    <OverlayPresenceBoundary>
+      <DialogPrimitive.Root
+        {...props}
+        open={presence.open}
+        onOpenChangeComplete={presence.onOpenChangeComplete}
+      />
+    </OverlayPresenceBoundary>
+  );
+}
 
 const DialogPortal = DialogPrimitive.Portal;
 

@@ -31,6 +31,7 @@ import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { ThreadProjectTags } from "~/projectLabels/ThreadProjectTags";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -38,7 +39,9 @@ import {
   WorkspaceBreadcrumbText,
 } from "../WorkspaceBreadcrumb";
 import { observeResize } from "~/lib/observeResize";
+import { WorkThreadHeaderMeta } from "../work/WorkThreadHeaderMeta";
 import { cn } from "~/lib/utils";
+import type { ThreadCapabilities } from "~/threadCapabilities";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -51,6 +54,8 @@ interface ChatHeaderProps {
   onOpenThread: (threadId: ThreadId) => void;
   rightPanelOpen: boolean;
   onNewThreadInProject: () => void;
+  /** What the thread's kind offers; rename and project tags follow it. */
+  capabilities: ThreadCapabilities;
   onOpenProjectSettings?: (() => void) | undefined;
 }
 
@@ -85,6 +90,7 @@ export const ChatHeader = memo(function ChatHeader({
   onOpenThread,
   rightPanelOpen,
   onNewThreadInProject,
+  capabilities,
   onOpenProjectSettings,
 }: ChatHeaderProps) {
   const activeProjectName = activeProject?.title;
@@ -172,9 +178,11 @@ export const ChatHeader = memo(function ChatHeader({
     };
   }, [activeProjectName, activeThreadTitle, parentThreadLink, isRenamingTitle]);
   const renameCommittedRef = useRef(false);
+  const canRename = capabilities.rename;
   const startRename = useCallback(() => {
     if (
       !isServerThread ||
+      !canRename ||
       !readEnvironmentScope(activeThreadEnvironmentId, AuthOrchestrationOperateScope)
     )
       return;
@@ -184,7 +192,7 @@ export const ChatHeader = memo(function ChatHeader({
       threadId: activeThreadId,
       title: activeThreadTitle,
     });
-  }, [activeThreadEnvironmentId, activeThreadId, activeThreadTitle, isServerThread]);
+  }, [activeThreadEnvironmentId, activeThreadId, activeThreadTitle, canRename, isServerThread]);
   const commitRename = useCallback(
     (title: string) => {
       setRenaming(null);
@@ -280,7 +288,7 @@ export const ChatHeader = memo(function ChatHeader({
         const api = readLocalApi();
         if (!api) return;
         void api.contextMenu
-          .show([{ id: "project-settings", label: "Project settings", icon: "settings" }], {
+          .show([{ id: "project-settings", label: "Repository settings", icon: "settings" }], {
             x: event.clientX,
             y: event.clientY,
           })
@@ -416,7 +424,9 @@ export const ChatHeader = memo(function ChatHeader({
                     aria-label={`Thread actions for ${activeThreadTitle}`}
                     aria-haspopup="menu"
                     onClick={openMenuFromTitle}
-                    onDoubleClick={canOperateThread ? handleTitleDoubleClick : undefined}
+                    onDoubleClick={
+                      canOperateThread && canRename ? handleTitleDoubleClick : undefined
+                    }
                     onBlur={cancelPendingTitleMenu}
                     className="group/thread-title inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                   />
@@ -443,8 +453,20 @@ export const ChatHeader = memo(function ChatHeader({
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
             </Tooltip>
           )}
+          {/* Drafts have no thread to tag until the first send creates it. */}
+          {isServerThread && capabilities.projectTags && renamingTitle === null ? (
+            <span className="ml-2 flex shrink-0 items-center">
+              <ThreadProjectTags
+                environmentId={activeThreadEnvironmentId}
+                threadId={activeThreadId}
+              />
+            </span>
+          ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      {isServerThread ? (
+        <WorkThreadHeaderMeta threadRef={activeThreadRef} onOpenThread={onOpenThread} />
+      ) : null}
     </div>
   );
 });

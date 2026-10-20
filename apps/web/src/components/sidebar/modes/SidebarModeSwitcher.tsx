@@ -1,33 +1,35 @@
 /**
- * Chats | Tasks | Agents as a segmented control: the mobile sheet's mode row;
+ * Chats | Work | Agents | Projects as a segmented control: the mobile sheet's mode row;
  * wider windows switch modes from the navigation rail instead.
  * One pill slides between equal-width segments, so the control never reflows
  * when a badge appears. Arrow keys move between segments, as in any tablist.
  */
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { BotIcon, ListChecksIcon, type LucideIcon, MessageCircleIcon } from "lucide-react";
+import { BotIcon, HammerIcon, type LucideIcon, MessageCircleIcon, TagIcon } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, useRef } from "react";
 
 import { cn } from "~/lib/utils";
 import { shortcutLabelForCommand } from "../../../keybindings";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
+import { decisionsWaitingLabel } from "../../../agents/agentWorkspace.logic";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./sidebarModes.logic";
 
 export const SIDEBAR_MODE_ICONS: Record<SidebarMode, LucideIcon> = {
   chats: MessageCircleIcon,
-  tasks: ListChecksIcon,
+  tasks: HammerIcon,
   agents: BotIcon,
+  projects: TagIcon,
 };
 
 export function SidebarModeSwitcher(props: {
   mode: SidebarMode;
   onModeChange: (mode: SidebarMode) => void;
   /** Agents waiting on the user; shows an amber count on the Agents segment. */
-  agentsNeedingYou: number;
+  decisionsWaiting: number;
   keybindings: ResolvedKeybindingsConfig;
   className?: string;
 }) {
-  const { mode, onModeChange, agentsNeedingYou, keybindings } = props;
+  const { mode, onModeChange, decisionsWaiting, keybindings } = props;
   const index = SIDEBAR_MODES.indexOf(mode);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -55,14 +57,14 @@ export function SidebarModeSwitcher(props: {
       aria-label="Sidebar view"
       onKeyDown={handleKeyDown}
       className={cn(
-        "@container/sidebar-modes relative grid h-8 grid-cols-3 rounded-lg bg-sidebar-foreground/[0.045] p-0.5",
+        "@container/sidebar-modes relative grid h-8 grid-cols-4 rounded-lg bg-sidebar-foreground/[0.045] p-0.5",
         props.className,
       )}
     >
       <span
         aria-hidden
         data-testid="sidebar-mode-indicator"
-        className="pointer-events-none absolute inset-y-0.5 left-0.5 w-[calc((100%-0.25rem)/3)] rounded-md state-selected transition-transform duration-250 ease-out motion-reduce:transition-none"
+        className="pointer-events-none absolute inset-y-0.5 left-0.5 w-[calc((100%-0.25rem)/4)] rounded-md state-selected transition-transform duration-(--motion-duration-slow) ease-standard motion-reduce:transition-none"
         style={{ transform: `translateX(${index * 100}%)` }}
       />
       {SIDEBAR_MODES.map((segment, segmentIndex) => {
@@ -70,7 +72,7 @@ export function SidebarModeSwitcher(props: {
         const label = SIDEBAR_MODE_LABELS[segment];
         const Icon = SIDEBAR_MODE_ICONS[segment];
         const shortcut = shortcutLabelForCommand(keybindings, `sidebar.mode.${segment}`);
-        const badge = segment === "agents" && agentsNeedingYou > 0 ? agentsNeedingYou : null;
+        const badge = segment === "agents" && decisionsWaiting > 0 ? decisionsWaiting : null;
         return (
           <Tooltip key={segment}>
             <TooltipTrigger
@@ -108,15 +110,21 @@ export function SidebarModeSwitcher(props: {
               />
               <span className="truncate">{label}</span>
               {badge !== null ? (
-                <span
-                  aria-label={`${badge} ${badge === 1 ? "agent needs" : "agents need"} you`}
-                  className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-warning px-1 text-3xs font-semibold leading-none text-background tabular-nums"
-                >
-                  {badge > 9 ? "9+" : badge}
-                </span>
+                <>
+                  <span
+                    aria-hidden
+                    className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-warning px-1 text-3xs font-semibold leading-none text-background tabular-nums"
+                  >
+                    {badge > 9 ? "9+" : badge}
+                  </span>
+                  <span className="sr-only">, {decisionsWaitingLabel(badge)}</span>
+                </>
               ) : null}
             </TooltipTrigger>
-            <TooltipPopup side="bottom">{shortcut ? `${label} (${shortcut})` : label}</TooltipPopup>
+            <TooltipPopup side="bottom">
+              {shortcut ? `${label} (${shortcut})` : label}
+              {badge !== null ? ` · ${decisionsWaitingLabel(badge)}` : null}
+            </TooltipPopup>
           </Tooltip>
         );
       })}

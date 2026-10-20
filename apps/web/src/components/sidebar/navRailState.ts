@@ -6,10 +6,10 @@ import { create } from "zustand";
  * Settings, where the last reported count stays.
  */
 export const useNavRailBadgeStore = create<{
-  agentsNeedingYou: number;
-  setAgentsNeedingYou: (count: number) => void;
+  decisionsWaiting: number;
+  setDecisionsWaiting: (count: number) => void;
 }>((set) => ({
-  agentsNeedingYou: 0,
-  setAgentsNeedingYou: (count) =>
-    set((state) => (state.agentsNeedingYou === count ? state : { agentsNeedingYou: count })),
+  decisionsWaiting: 0,
+  setDecisionsWaiting: (count) =>
+    set((state) => (state.decisionsWaiting === count ? state : { decisionsWaiting: count })),
 }));

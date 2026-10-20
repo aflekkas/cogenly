@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isModifierPairShortcut,
@@ -575,26 +576,28 @@ export function SnapShotSettings() {
           ) : null}
         </SettingsUnavailableGroup>
       </SettingsSection>
-      {wizard && state ? (
-        <SnapShotSetupDialog
-          state={state}
-          initialStep={wizard.initialStep}
-          wasEnabled={wizard.wasEnabled}
-          includeAccessibility={settings.snapShotIncludeAccessibility}
-          busy={setupBusy}
-          error={setupError?.message ?? null}
-          shortcutInput={shortcutInput}
-          shortcutStatus={shortcutStatus}
-          shortcutChanged={shortcutChanged}
-          canSaveShortcut={canSaveShortcut}
-          onSaveShortcut={saveShortcut}
-          onEnable={enableForSetup}
-          onAction={setup}
-          onRefresh={refreshState}
-          onClose={closeSetup}
-          onLeaveStep={stopRecording}
-        />
-      ) : null}
+      <OverlayPresence when={wizard && state ? { wizard, state } : null}>
+        {({ wizard, state }) => (
+          <SnapShotSetupDialog
+            state={state}
+            initialStep={wizard.initialStep}
+            wasEnabled={wizard.wasEnabled}
+            includeAccessibility={settings.snapShotIncludeAccessibility}
+            busy={setupBusy}
+            error={setupError?.message ?? null}
+            shortcutInput={shortcutInput}
+            shortcutStatus={shortcutStatus}
+            shortcutChanged={shortcutChanged}
+            canSaveShortcut={canSaveShortcut}
+            onSaveShortcut={saveShortcut}
+            onEnable={enableForSetup}
+            onAction={setup}
+            onRefresh={refreshState}
+            onClose={closeSetup}
+            onLeaveStep={stopRecording}
+          />
+        )}
+      </OverlayPresence>
     </SettingsPageContainer>
   );
 }

@@ -310,9 +310,9 @@ export function planScopedSettingsPatch(
       : scope.kind === "unavailable"
         ? scope.message
         : unscopableKeys.length > 0
-          ? "This setting is environment-wide and cannot be overridden by a project."
+          ? "This setting is environment-wide and cannot be overridden by a repository."
           : isProjectScope
-            ? "Connect the selected checkouts, or update their environments, to save a project override."
+            ? "Connect the selected checkouts, or update their environments, to save a repository override."
             : `Connect ${scope.kind === "environment" ? scope.label : "an environment"} to save this setting.`;
   return { clientPatch, hasClientWrite, serverWrites, unavailableReason };
 }

@@ -52,7 +52,7 @@ export function shouldUseSidebarUpdateReleaseNotesPopover(
   showUpdateDetails: boolean,
   state: DesktopUpdateState | null,
 ): boolean {
-  return showUpdateDetails && state?.channel === "nightly" && state.releaseNotes.length > 0;
+  return showUpdateDetails && state?.channel === "staging" && state.releaseNotes.length > 0;
 }
 
 export function handleSidebarUpdateReleaseNotesPopoverOpenChange(
@@ -118,7 +118,6 @@ export function SidebarUpdateArchitectureWarning() {
 
 function SidebarUpdateArchitectureWarningContent() {
   const state = useDesktopUpdateState();
-  // Its advice is to install an update, which Cogenly's disabled updater never offers.
   const visible =
     shouldShowLocalDesktopUpdateControl(state) && shouldShowArm64IntelBuildWarning(state);
   const description = state && visible ? getArm64IntelBuildWarningDescription(state) : null;
@@ -156,7 +155,7 @@ async function downloadLocalUpdate(
       ? getDesktopUpdateActionError(result)
       : null;
     if (actionError) reportError("Could not download update", actionError);
-    return result.completed;
+    return result.completed && !result.state.manualDownloadUrl;
   } catch (error) {
     reportError(
       "Could not start update download",
@@ -391,8 +390,7 @@ function SidebarUpdateControl() {
     );
   }, [prefersReducedMotion, state?.status]);
 
-  // Without a local update to check (web, or Cogenly's always-disabled desktop
-  // updater), the button shows only for provider or remote-server work.
+  // Without a local update feed, show provider or remote-server work only.
   const showsLocalUpdate = isElectron && shouldShowLocalDesktopUpdateControl(state);
   if (!showsLocalUpdate && !runsEverything && !isRunningEverything) return null;
 
@@ -541,7 +539,7 @@ function SidebarUpdateControl() {
         {showReleaseNotesPopover && state ? (
           <PopoverPopup
             align="center"
-            aria-label="Nightly update release notes"
+            aria-label="Staging update release notes"
             initialFocus={false}
             onKeyDownCapture={(event) => {
               if (

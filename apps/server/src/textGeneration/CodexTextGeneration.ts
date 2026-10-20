@@ -20,6 +20,7 @@ import * as ServerConfig from "../config.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { codexExecLaunchArgs, resolveCodexLaunchArgs } from "../provider/codexLaunchArgs.ts";
 import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
+import * as WorkScopeSummaryGeneration from "./WorkScopeSummaryGeneration.ts";
 import {
   normalizeCliError,
   toJsonSchemaObject,
@@ -412,5 +413,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     }).pipe(Effect.ensuring(cleanup));
   });
 
-  return TextGenerationOperations.fromRunner("CodexTextGeneration", runCodexJson);
+  return {
+    ...TextGenerationOperations.fromRunner("CodexTextGeneration", runCodexJson),
+    ...WorkScopeSummaryGeneration.fromRunner(runCodexJson),
+  };
 });

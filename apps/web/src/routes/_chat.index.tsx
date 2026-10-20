@@ -1,8 +1,9 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { useAtomValue } from "@effect/atom-react";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { isElectron } from "../env";
@@ -13,38 +14,66 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useScratchProject } from "../hooks/useScratchProject";
+import { useAgents } from "../agents/agentsClient";
+import { requestAgentCreation } from "../agents/AgentsCreateHost";
+import {
+  resolveModeLanding,
+  type ModeLanding,
+} from "../components/sidebar/modes/modeLanding.logic";
+import {
+  sidebarModeForThread,
+  sortChatsByActivity,
+  type SidebarMode,
+} from "../components/sidebar/modes/sidebarModes.logic";
+import { useSidebarModeClassifier } from "../components/sidebar/modes/useSidebarModeState";
+import { environmentServerConfigsAtom } from "../state/server";
+import { buildThreadRouteParams } from "../threadRoutes";
+import { useUiStateStore } from "../uiStateStore";
 import {
   readProject,
   useAllEnvironmentShellsBootstrapped,
   useProjects,
   useThreadShells,
 } from "../state/entities";
-import { useEnvironments } from "../state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 
 function ChatIndexRouteView() {
   const { authGateState } = Route.useRouteContext();
   const { environments, isReady } = useEnvironments();
+  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
 
   if (authGateState.status === "hosted-static") {
     if (!isReady) return null;
     if (environments.length === 0) return <HostedStaticOnboardingState />;
   }
 
-  return <IndexDraftLanding />;
+  return <ModeIndexLanding key={sidebarMode} mode={sidebarMode} />;
 }
 
 /**
- * Landing on the index route drops straight into a draft thread for the most
- * recently active project, so the first screen is a prompt instead of a dead
- * end. Falls back to an add-project hero when no project exists yet.
+ * Landing on the index route opens what the sidebar's mode lists, so the
+ * first screen is never a thread of another kind: Chats opens a chat, Work a
+ * draft in the most recently active repository, Agents an agent, Projects
+ * the overview. Keyed by mode, so a mode switch on the index lands again.
  */
-function IndexDraftLanding() {
+function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
   const projects = useProjects();
   const threads = useThreadShells();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
+  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
+  const { agents, loading: agentsLoading } = useAgents();
+  const { classifier, scratchProjectKeys } = useSidebarModeClassifier({
+    threads,
+    projects,
+    serverConfigs,
+  });
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const { scratchEnvironmentId, startScratchThread } = useScratchProject();
   const handleNewThread = useNewThreadHandler();
+  const navigate = useNavigate();
   const router = useRouter();
   // Read at effect time: this page stays mounted while a navigation away from
   // "/" is still loading, but the router already points at the new location.
@@ -52,58 +81,154 @@ function IndexDraftLanding() {
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
 
-  const mostRecentProject = useMemo(
-    () =>
-      bootstrapped
-        ? (sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null)
+  const landing = useMemo(() => {
+    const recentChat =
+      sortChatsByActivity(
+        threads.filter(
+          (thread) =>
+            thread.archivedAt === null && sidebarModeForThread(thread, classifier) === "chats",
+        ),
+      )[0] ?? null;
+    const recentRepository =
+      sortScopedProjectsForSidebar(
+        projects.filter(
+          (project) => !scratchProjectKeys.has(`${project.environmentId}:${project.id}`),
+        ),
+        threads,
+        "updated_at",
+      )[0] ?? null;
+    const recentAgent = agents[0] ?? null;
+    return resolveModeLanding({
+      mode,
+      bootstrapped,
+      recentChat: recentChat ? scopeThreadRef(recentChat.environmentId, recentChat.id) : null,
+      chatEnvironmentId: scratchEnvironmentId(primaryEnvironmentId),
+      recentRepository: recentRepository
+        ? scopeProjectRef(recentRepository.environmentId, recentRepository.id)
         : null,
-    [bootstrapped, projects, threads],
-  );
+      recentAgentConversation: recentAgent
+        ? scopeThreadRef(recentAgent.environmentId, recentAgent.conversationThreadId)
+        : null,
+      agentsLoaded: !agentsLoading,
+    });
+  }, [
+    agents,
+    agentsLoading,
+    bootstrapped,
+    classifier,
+    mode,
+    primaryEnvironmentId,
+    projects,
+    scratchEnvironmentId,
+    scratchProjectKeys,
+    threads,
+  ]);
 
+  // `attempt` changes on a retry, so the same landing runs again.
+  const land = useEffectEvent((landing: ModeLanding, _attempt: number) => {
+    // Opening something after the user has left would replace the page they picked.
+    if (startingRef.current || !isStillOnIndex()) return;
+    switch (landing.kind) {
+      case "open-thread":
+        startingRef.current = true;
+        void navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(landing.threadRef),
+          replace: true,
+        });
+        return;
+      case "projects-overview":
+        startingRef.current = true;
+        void navigate({ to: "/project", replace: true });
+        return;
+      case "new-chat":
+        startingRef.current = true;
+        void startScratchThread(landing.environmentId, { replace: true });
+        return;
+      case "repository-draft": {
+        // A repository removed since this render is gone from the store; the
+        // next render picks another one.
+        if (readProject(landing.projectRef) === null) return;
+        startingRef.current = true;
+        void handleNewThread(landing.projectRef, { replace: true })
+          .then((opened) => {
+            // The repository was removed while its draft started; land on the next one.
+            if (opened === null) {
+              startingRef.current = false;
+              setStartState((state) => ({ ...state, retryRequest: state.retryRequest + 1 }));
+            }
+          })
+          .catch(() => {
+            startingRef.current = false;
+            setStartState((state) => ({ ...state, failed: true }));
+          });
+        return;
+      }
+      default:
+        return;
+    }
+  });
   useEffect(() => {
-    // Starting a draft after the user has left would replace the page they picked.
-    if (mostRecentProject === null || startingRef.current || !isStillOnIndex()) {
-      return;
-    }
-    const projectRef = scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id);
-    // A project removed since this render is gone from the store; the next
-    // render picks another one.
-    if (readProject(projectRef) === null) {
-      return;
-    }
-    startingRef.current = true;
-    void handleNewThread(projectRef, { replace: true })
-      .then((opened) => {
-        // The project was removed while its draft started; land on the next one.
-        if (opened === null) {
-          startingRef.current = false;
-          setStartState((state) => ({ ...state, retryRequest: state.retryRequest + 1 }));
-        }
-      })
-      .catch(() => {
-        startingRef.current = false;
-        setStartState((state) => ({ ...state, failed: true }));
-      });
-  }, [handleNewThread, mostRecentProject, startState.retryRequest]);
+    land(landing, startState.retryRequest);
+  }, [landing, startState.retryRequest]);
 
-  if (!bootstrapped) {
-    return null;
+  switch (landing.kind) {
+    case "repository-draft":
+      return startState.failed ? (
+        <DraftStartError
+          onRetry={() => {
+            setStartState((state) => ({
+              failed: false,
+              retryRequest: state.retryRequest + 1,
+            }));
+          }}
+        />
+      ) : null;
+    // First-run routing to the welcome wizard happens in FirstRunGate at the
+    // root, before this route ever renders.
+    case "no-repositories":
+      return <NoProjectsHero />;
+    case "chats-unavailable":
+      return (
+        <IndexEmptyState
+          title="Chats aren’t available here"
+          description="This machine can’t start a chat without a repository right now."
+        />
+      );
+    case "agents-empty":
+      return (
+        <IndexEmptyState
+          title="No agents yet"
+          description="An agent is a persistent specialist with its own conversation and responsibility."
+        >
+          <Button size="sm" onClick={() => requestAgentCreation(primaryEnvironmentId)}>
+            <PlusIcon className="size-4" />
+            New agent
+          </Button>
+        </IndexEmptyState>
+      );
+    default:
+      return null;
   }
-  if (mostRecentProject !== null) {
-    return startState.failed ? (
-      <DraftStartError
-        onRetry={() => {
-          setStartState((state) => ({
-            failed: false,
-            retryRequest: state.retryRequest + 1,
-          }));
-        }}
-      />
-    ) : null;
-  }
-  // First-run routing to the welcome wizard happens in FirstRunGate at the
-  // root, before this route ever renders.
-  return <NoProjectsHero />;
+}
+
+function IndexEmptyState(props: {
+  readonly title: string;
+  readonly description: string;
+  readonly children?: ReactNode;
+}) {
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
+      {isElectron ? <WorkspacePageHeader electron /> : null}
+      <Empty className="flex-1">
+        <EmptyHeader className="max-w-md">
+          <EmptyTitle>{props.title}</EmptyTitle>
+          <EmptyDescription>{props.description}</EmptyDescription>
+          {props.children ? <div className="mt-5 flex justify-center">{props.children}</div> : null}
+        </EmptyHeader>
+      </Empty>
+    </SidebarInset>
+  );
 }
 
 function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
@@ -114,7 +239,7 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
         <EmptyHeader className="max-w-md">
           <EmptyTitle>Couldn’t start a new thread</EmptyTitle>
           <EmptyDescription>
-            The project is still available. Try opening the draft again.
+            The repository is still available. Try opening the draft again.
           </EmptyDescription>
           <div className="mt-5 flex justify-center">
             <Button size="sm" onClick={onRetry}>

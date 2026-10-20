@@ -1,3 +1,9 @@
+import * as GlobalSearch from "../../search/GlobalSearch.ts";
+import * as FactService from "../../context/FactService.ts";
+import * as ProjectLabels from "../../projectLabels/ProjectLabelService.ts";
+import * as WorkHandoff from "../../work/WorkHandoffService.ts";
+import * as AgentWorkspace from "../../agents/AgentWorkspaceService.ts";
+import * as AgentMcpPolicy from "../../agents/AgentMcpPolicy.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import { agentFixture } from "../../agents/agent.testkit.ts";
 import * as AgentStore from "../../agents/AgentStore.ts";
@@ -8,7 +14,12 @@ import * as ServerConfig from "../../config.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProviderInstanceId,
+  ThreadId,
+  OrchestratorMcpFailure,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -58,12 +69,38 @@ const project = {
   deletedAt: null,
 };
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(GlobalSearch.GlobalSearch)({ query: () => Effect.succeed({ results: [] }) }),
+  Layer.mock(ProjectLabels.ProjectLabelService)({ list: () => Effect.succeed({ labels: [] }) }),
+  Layer.mock(WorkHandoff.WorkHandoffService)({
+    proposeHandoff: () =>
+      Effect.succeed({
+        title: "Audit",
+        scopeSummary: "Implement audit validation.",
+        suggestedProjectId: null,
+      }),
+  }),
+  Layer.mock(AgentWorkspace.AgentWorkspaceService)({
+    listOpenItems: () => Effect.succeed({ commitments: [] }),
+  }),
+  Layer.mock(AgentMcpPolicy.AgentMcpPolicy)({
+    beforeTool: (_scope, name) =>
+      ["t3_thread_launch", "work_start"].includes(name)
+        ? Effect.fail(
+            new OrchestratorMcpFailure({
+              code: "agent_approval_required",
+              message: "Owner approval required: approval:http-test",
+            }),
+          )
+        : Effect.succeed({ handled: false }),
+    afterTool: () => Effect.void,
+  }),
   Layer.mock(TerminalManager.TerminalManager)({ listAgents: () => Effect.succeed([]) }),
   Layer.mock(AgentStore.AgentStore)({
     forThread: () => Effect.succeed(agentFixture()),
     memory: () => Effect.succeed([]),
   }),
   Layer.mock(Orchestrator.OrchestratorV2)({ getThreadShell: () => Effect.succeed(shell) }),
+  Layer.mock(FactService.FactService)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
     list: Effect.succeed({
@@ -138,10 +175,63 @@ const CallPayload = Schema.fromJsonString(
 const decodeCallPayload = Schema.decodeUnknownEffect(CallPayload);
 const decodeToolsListPayload = Schema.decodeUnknownEffect(ToolsListPayload);
 
+const encodeCall = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
+const decodeDeniedCall = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      result: Schema.Struct({
+        isError: Schema.Boolean,
+        content: Schema.Array(Schema.Struct({ text: Schema.String })),
+      }),
+    }),
+  ),
+);
+
 const smokeCases = [
   {
+    toolkit: "search",
+    names: ["search"],
+    tool: "search",
+    args: { query: "quartz" },
+    expected: { results: [] },
+  },
+  {
+    toolkit: "work",
+    names: ["work_start", "work_propose_handoff"],
+    tool: "work_propose_handoff",
+    args: {},
+    expected: {
+      title: "Audit",
+      scopeSummary: "Implement audit validation.",
+      suggestedProjectId: null,
+    },
+  },
+  {
+    toolkit: "agentWorkspace",
+    names: [
+      "list_open_items",
+      "propose_commitment",
+      "propose_event_trigger",
+      "update_commitment_status",
+      "request_agent_approval",
+      "start_agent_work",
+    ],
+    tool: "list_open_items",
+    args: {},
+    expected: { commitments: [] },
+  },
+  {
     toolkit: "agentMemory",
-    names: ["memory_read", "memory_write", "memory_remember", "memory_forget"],
+    names: [
+      "memory_read",
+      "memory_write",
+      "memory_remember",
+      "memory_forget",
+      "fact_search",
+      "fact_propose",
+      "fact_supersede",
+    ],
     tool: "memory_read",
     args: {},
     expected: { notes: [] },
@@ -194,6 +284,13 @@ const smokeCases = [
         height: 120,
       },
     },
+  },
+  {
+    toolkit: "projectLabels",
+    names: ["t3_project_label_list", "t3_project_label_read", "t3_thread_set_project_labels"],
+    tool: "t3_project_label_list",
+    args: {},
+    expected: { labels: [] },
   },
   {
     toolkit: "project",
@@ -461,6 +558,30 @@ it.effect.each(smokeCases)(
         const result = yield* decodeCallPayload(callText.match(/\{.*\}/s)![0]);
         expect(result.result.isError).toBe(false);
         expect(result.result.structuredContent).toMatchObject(testCase.expected);
+        if (testCase.toolkit === "agentWorkspace") {
+          // An authenticated call cannot reach the launch handler after policy refuses it.
+          for (const name of ["t3_thread_launch", "work_start"]) {
+            const refused = yield* httpClient.post("/mcp", {
+              headers: {
+                accept: "application/json, text/event-stream",
+                authorization: auth,
+                ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+              },
+              body: HttpBody.text(
+                encodeCall({
+                  jsonrpc: "2.0",
+                  id: 4,
+                  method: "tools/call",
+                  params: { name, arguments: { title: "Unapproved work" } },
+                }),
+                "application/json",
+              ),
+            });
+            const denied = yield* decodeDeniedCall(yield* refused.text);
+            expect(denied.result.isError).toBe(true);
+            expect(denied.result.content[0]!.text).toContain("agent_approval_required");
+          }
+        }
         // Descriptions, including imported guidance, must use the product name.
         expect(
           bodyText.match(/T3 Code|T3-owned|T3 thread|T3 injects|T3's|t3\.chat|Cogenly Connect/g),

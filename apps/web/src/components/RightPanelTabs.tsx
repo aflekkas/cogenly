@@ -118,7 +118,7 @@ interface RightPanelTabsProps {
    * accept the MouseEvent as a profile id.
    */
   onAddBrowserInProfile: (profileId: string) => void;
-  /** Shows the thread's agent terminals; it never starts a shell. */
+  /** Shows the Terminal surface (agent runs and shells); it never starts a shell by itself. */
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
@@ -128,7 +128,15 @@ interface RightPanelTabsProps {
   diffAvailable: boolean;
   filesAvailable: boolean;
   deviceAvailable: boolean;
+  /** Surfaces the thread's kind offers at all; the rest are left out, not disabled. */
+  supportedSurfaces: SupportedRightPanelSurfaces;
   children: ReactNode;
+}
+
+export interface SupportedRightPanelSurfaces {
+  readonly terminal: boolean;
+  readonly files: boolean;
+  readonly diff: boolean;
 }
 
 export function shouldOpenDefaultBrowserProfileFromMenuClick(
@@ -139,8 +147,8 @@ export function shouldOpenDefaultBrowserProfileFromMenuClick(
 
 const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the Cogenly desktop app.",
-  terminal: "Agent terminals are only available from a project thread.",
-  files: "Files are only available when a project is open.",
+  terminal: "Agent terminals are only available from a repository thread.",
+  files: "Files are only available when a repository is open.",
   diff: "Diff is only available for server threads in Git repositories.",
   device: "Devices are only available from a thread.",
 } as const;
@@ -160,8 +168,8 @@ const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
 /** One-line unavailability hints for the empty-state rows. */
 const SURFACE_UNAVAILABLE_HINTS = {
   browser: "Only available in the desktop app.",
-  terminal: "Available when a project is open.",
-  files: "Available when a project is open.",
+  terminal: "Available when a repository is open.",
+  files: "Available when a repository is open.",
   diff: "Available for Git repositories.",
   device: "Available from a thread.",
 } as const;
@@ -307,17 +315,19 @@ function RightPanelEmptyState(props: {
   diffAvailable: boolean;
   filesAvailable: boolean;
   deviceAvailable: boolean;
+  supportedSurfaces: SupportedRightPanelSurfaces;
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
 
-  const actions = [
+  const launcherActions = [
     {
       label: "Browser",
       icon: Globe2,
       shortcut: "B",
       available: props.browserAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.browser,
+      supported: true,
       onClick: props.onAddBrowser,
     },
     {
@@ -326,6 +336,7 @@ function RightPanelEmptyState(props: {
       shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
+      supported: props.supportedSurfaces.terminal,
       onClick: props.onAddTerminal,
     },
     {
@@ -334,6 +345,7 @@ function RightPanelEmptyState(props: {
       shortcut: "F",
       available: props.filesAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
+      supported: props.supportedSurfaces.files,
       onClick: props.onAddFiles,
     },
     {
@@ -342,6 +354,7 @@ function RightPanelEmptyState(props: {
       shortcut: "D",
       available: props.diffAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
+      supported: props.supportedSurfaces.diff,
       onClick: props.onAddDiff,
     },
     {
@@ -351,9 +364,11 @@ function RightPanelEmptyState(props: {
       shortcut: "M",
       available: props.deviceAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
+      supported: true,
       onClick: props.onAddDevice,
     },
   ] as const;
+  const actions = launcherActions.filter((action) => action.supported);
 
   type SurfaceAction = (typeof actions)[number];
 
@@ -757,13 +772,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     });
   }, []);
 
-  const addSurfaceActions = [
+  const allSurfaceActions = [
     {
       label: "Browser",
       icon: Globe2,
       shortcut: "B",
       available: props.browserAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.browser,
+      supported: true,
       onClick: props.onAddBrowser,
     },
     {
@@ -772,6 +788,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.terminal,
+      supported: props.supportedSurfaces.terminal,
       onClick: props.onAddTerminal,
     },
     {
@@ -780,6 +797,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       shortcut: "F",
       available: props.filesAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.files,
+      supported: props.supportedSurfaces.files,
       onClick: props.onAddFiles,
     },
     {
@@ -788,6 +806,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       shortcut: "D",
       available: props.diffAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.diff,
+      supported: props.supportedSurfaces.diff,
       onClick: props.onAddDiff,
     },
     {
@@ -796,9 +815,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       shortcut: "M",
       available: props.deviceAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.device,
+      supported: true,
       onClick: props.onAddDevice,
     },
   ] as const;
+  const addSurfaceActions = allSurfaceActions.filter((action) => action.supported);
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const action = surfaceShortcutActionForKey(addSurfaceActions, event.nativeEvent);
@@ -993,6 +1014,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           scrollFade
           className="min-w-0 flex-1"
           data-right-panel-tab-list
+          // Maximized, the tabs lead the pane like a chat title and ride its
+          // edge when the sidebar toggles.
+          data-panel-flip={props.maximized ? "start" : undefined}
         >
           <div className="flex h-full w-max min-w-full items-center gap-1">
             <SortableTabList surfaces={props.surfaces} onMove={props.onMoveSurface}>
@@ -1286,6 +1310,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
             deviceAvailable={props.deviceAvailable}
+            supportedSurfaces={props.supportedSurfaces}
           />
         ) : (
           props.children

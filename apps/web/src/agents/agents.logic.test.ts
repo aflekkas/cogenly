@@ -6,10 +6,10 @@ import {
   mergeLatestMessage,
   formatMessageTime,
   sortAgentContacts,
-  groupAgentContacts,
   modelSwitches,
   modelDisplayName,
   resolveAgentModelStatus,
+  agentStatusLabel,
 } from "./agents.logic";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -63,6 +63,26 @@ describe("texting timeline", () => {
     expect(rows[1]?.separator).toBe("Today 7:40 AM");
     expect(rows[2]?.grouped).toBe(false);
   });
+  it("marks the last finished reply of each run for its context", () => {
+    const run = (id: string, runId: string, streaming = false) => ({
+      ...message(id, "assistant", at(16, 7, 10)),
+      runId: runId as NonNullable<AgentMessage["runId"]>,
+      streaming,
+    });
+    const rows = conversationRows(
+      [
+        run("a", "r1"),
+        message("q", "user", at(16, 7, 11)),
+        run("b", "r1"),
+        run("c", "r2"),
+        message("d", "assistant", at(16, 7, 12)),
+        run("e", "r3", true),
+      ],
+      now,
+      "en-US",
+    );
+    expect(rows.map((row) => row.endsRun)).toEqual([false, false, true, true, false, false]);
+  });
   it("formats local today, yesterday, older dates, and invalid dates", () => {
     expect(formatMessageTime(at(16, 7, 13), now, "en-US")).toBe("Today 7:13 AM");
     expect(formatMessageTime(at(15, 19, 5), now, "en-US")).toBe("Yesterday 7:05 PM");
@@ -94,25 +114,6 @@ describe("shell updates", () => {
     expect(
       mergeLatestMessage([existing], { ...existing, text: "Finished", createdAt: at(16, 7, 12) }),
     ).toEqual([{ ...existing, text: "Finished" }]);
-  });
-});
-
-describe("project contact groups", () => {
-  it("puts no-project agents first without a label, then projects by name and contacts by activity", () => {
-    const contacts = [
-      { id: "older", name: "Older", projectId: "z", updatedAt: at(16, 7, 0) },
-      { id: "newer", name: "Newer", projectId: "z", updatedAt: at(16, 8, 0) },
-      { id: "free", name: "Free", projectId: null, updatedAt: at(16, 6, 0) },
-      { id: "alpha", name: "Alpha", projectId: "a", updatedAt: at(16, 5, 0) },
-    ] as AgentContact[];
-    const groups = groupAgentContacts(contacts, (agent) =>
-      agent.projectId
-        ? { key: agent.projectId, label: agent.projectId === "a" ? "Alpha" : "Zulu" }
-        : null,
-    );
-    expect(groups.map((group) => group.label)).toEqual([null, "Alpha", "Zulu"]);
-    expect(groups[0]?.agents.map((agent) => agent.id)).toEqual(["free"]);
-    expect(groups[2]?.agents.map((agent) => agent.id)).toEqual(["newer", "older"]);
   });
 });
 
@@ -211,5 +212,40 @@ describe("model availability", () => {
     expect(resolveAgentModelStatus([{ ...codex, models: [] }], pick("gpt-5.4")).status).toBe(
       "unknown",
     );
+  });
+});
+
+describe("agentStatusLabel", () => {
+  const status = (patch: Partial<Pick<AgentContact, "state" | "requests" | "approvals">> = {}) =>
+    agentStatusLabel({ state: "idle", requests: [], ...patch });
+  const request = (kind: "approval" | "question") => ({
+    id: kind,
+    kind,
+    text: kind,
+    createdAt: at(16, 10, 0),
+    canRespond: true,
+  });
+
+  it("calls an agent with nothing running idle, not active", () => {
+    expect(status()).toBe("Idle");
+    expect(status({ state: "done" })).toBe("Idle");
+    expect(status({ state: "asleep" })).toBe("Idle");
+  });
+
+  it("reports running only while a run is live", () => {
+    expect(status({ state: "thinking" })).toBe("Running");
+    expect(status({ state: "working" })).toBe("Running");
+  });
+
+  it("puts pending approvals and questions ahead of everything", () => {
+    expect(status({ state: "thinking", requests: [request("approval")] })).toBe("Needs approval");
+    expect(status({ requests: [request("question")] })).toBe("Needs you");
+    // The contact list knows only that a thread is waiting, not on what.
+    expect(status({ state: "blocked" })).toBe("Needs you");
+  });
+
+  it("asks for approval while the agent waits on an owner decision", () => {
+    const approval = { id: "approval-1" } as AgentContact["approvals"][number];
+    expect(status({ approvals: [approval] })).toBe("Needs approval");
   });
 });

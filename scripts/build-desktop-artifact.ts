@@ -948,6 +948,7 @@ interface StagePackageJson {
   readonly version: string;
   readonly buildVersion: string;
   readonly cogenlyCommitHash: string;
+  readonly cogenlyUpdatesSigned: boolean;
   readonly cogenlyWebAuthn?: MacWebAuthnEntitlements;
   readonly private: true;
   readonly packageManager: string;
@@ -2638,15 +2639,15 @@ export function resolveDesktopRuntimeDependencies(
   );
 }
 
-export function resolveDesktopUpdateChannel(version: string): "latest" | "nightly" {
-  return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
+export function resolveDesktopUpdateChannel(version: string): "latest" | "staging" {
+  return /^[^-+]+-staging\.\d{8}\.\d+$/.test(version) ? "staging" : "latest";
 }
 
 // Pull request builds (`-pr.<n>.`) and the maintainers' preview train
 // (`-preview.<date>.<run>`) are downloaded by hand and never through an
 // updater. Building them without a publish config means electron-builder
-// emits no `latest*.yml`/`nightly*.yml` manifests or blockmaps for them and
-// the app ships without `app-update.yml`, so neither a stable nor a nightly
+// emits no updater manifests for them and
+// the app ships without `app-update.yml`, so neither a prod nor a staging
 // install can be pointed at one of these releases, and the build itself
 // reports that no update feed is configured instead of polling.
 export function isDesktopPreviewVersion(version: string): boolean {
@@ -2654,11 +2655,13 @@ export function isDesktopPreviewVersion(version: string): boolean {
 }
 
 export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
-  return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version));
+  return resolveWebAssetBrandForChannel(
+    resolveDesktopUpdateChannel(version) === "staging" ? "nightly" : "latest",
+  );
 }
 
 export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
-  if (resolveDesktopUpdateChannel(version) === "nightly") {
+  if (resolveDesktopUpdateChannel(version) === "staging") {
     return {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
       linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
@@ -2691,8 +2694,8 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
 }
 
 export function resolveDesktopProductName(version: string): string {
-  return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "Cogenly (Nightly)"
+  return resolveDesktopUpdateChannel(version) === "staging"
+    ? "Cogenly (Staging)"
     : (desktopPackageJson.productName ?? "Cogenly");
 }
 
@@ -2746,16 +2749,24 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     ],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
-  // Cogenly never publishes an update feed: release builds ship without
-  // app-update.yml, so the app can never update itself (and never into T3
-  // Code). Only the local mock update server can be wired in for development.
-  if (!isDesktopPreviewVersion(version) && mockUpdates) {
+  if (!isDesktopPreviewVersion(version)) {
     buildConfig.publish = [
-      {
-        provider: "generic",
-        url: resolveMockUpdateServerUrl(mockUpdateServerPort),
-      },
+      mockUpdates
+        ? {
+            provider: "generic",
+            url: resolveMockUpdateServerUrl(mockUpdateServerPort),
+            channel: updateChannel,
+          }
+        : {
+            provider: "github",
+            owner: "aflekkas",
+            repo: "cogenly",
+            channel: updateChannel,
+            releaseType: updateChannel === "staging" ? "prerelease" : "release",
+          },
     ];
+    // Staging must never emit a prod manifest.
+    buildConfig.generateUpdatesFilesForAllChannels = false;
   }
 
   if (platform === "mac") {
@@ -2796,7 +2807,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           role: "Viewer",
         },
       ],
-      ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
+      ...(signed
+        ? {
+            sign: path.join(repoRoot, "scripts/sign-macos.ts"),
+            notarize: true,
+            hardenedRuntime: true,
+          }
+        : { identity: null }),
       ...(macPasskeySigning
         ? {
             entitlements: macPasskeySigning.entitlementsPath,
@@ -2812,7 +2829,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // DMG window backgrounds by volume name, so reusing a generic name can
       // make a newly built background look unchanged during testing.
       title: `${resolveDesktopProductName(version)} ${version} Installer`,
-      background: `dmg/dmg-background-${updateChannel}.png`,
+      background: `dmg/dmg-background-${updateChannel === "staging" ? "nightly" : "latest"}.png`,
       window: {
         width: 640,
         // The DMG backend derives bounds from the image, including Finder's
@@ -3694,7 +3711,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   if (options.platform === "mac" && options.target === "dmg") {
     yield* stageDesktopDmgBackground(
       stageResourcesDir,
-      resolveDesktopUpdateChannel(appVersion),
+      resolveDesktopUpdateChannel(appVersion) === "staging" ? "nightly" : "latest",
       options.verbose,
     );
   }
@@ -3744,7 +3761,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(stageResourcesDir, stageProdResourcesDir);
 
   const configuredMacPasskeySigning =
-    options.platform === "mac" && options.signed
+    options.platform === "mac" &&
+    options.signed &&
+    loadRepoEnv({ repoRoot }).COGENLY_MACOS_PROVISIONING_PROFILE?.trim()
       ? yield* Effect.try({
           try: () => resolveMacPasskeySigningConfiguration(loadRepoEnv({ repoRoot })),
           catch: MacPasskeySigningConfigurationResolutionError.fromCause,
@@ -3809,6 +3828,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     version: appVersion,
     buildVersion: appVersion,
     cogenlyCommitHash: commitHash,
+    cogenlyUpdatesSigned: options.signed,
     // Read by apps/desktop/src/preview/Passkeys.ts; must match the signed entitlements.
     ...(macWebAuthn ? { cogenlyWebAuthn: macWebAuthn } : {}),
     private: true,

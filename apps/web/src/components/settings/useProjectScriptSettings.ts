@@ -40,7 +40,7 @@ function reportScriptFailure(result: AtomCommandResult<unknown, unknown>) {
     const error = squashAtomCommandFailure(result);
     toastManager.add({
       type: "error",
-      title: "Failed to save project actions",
+      title: "Failed to save repository actions",
       description: error instanceof Error ? error.message : "An error occurred.",
     });
   }

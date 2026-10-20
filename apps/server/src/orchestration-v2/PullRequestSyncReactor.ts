@@ -51,6 +51,7 @@ interface LinkEntry {
 
 function snapshotFieldsOf(summary: PullRequestSummary): SnapshotFields {
   return {
+    ...(summary.headSha === undefined ? {} : { headSha: summary.headSha }),
     state: summary.state,
     title: summary.title,
     headBranch: summary.headBranch,
@@ -71,6 +72,7 @@ function snapshotFieldsOf(summary: PullRequestSummary): SnapshotFields {
 
 function snapshotFieldsEqual(left: SnapshotFields, right: SnapshotFields): boolean {
   return (
+    left.headSha === right.headSha &&
     left.state === right.state &&
     left.title === right.title &&
     left.headBranch === right.headBranch &&

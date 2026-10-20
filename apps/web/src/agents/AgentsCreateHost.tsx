@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -5,6 +6,7 @@ import type { AgentContact } from "./agents.types";
 import { useThreadShells } from "~/state/entities";
 import { useAgentCreationContext, useAgents } from "./agentsClient";
 import { CreateAgent } from "./AgentDetails";
+import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
 
 export function requestAgentCreation(environmentId: EnvironmentId | null) {
   window.dispatchEvent(new CustomEvent("cogenly:create-agent", { detail: environmentId }));
@@ -20,6 +22,7 @@ export function AgentsCreateHost() {
     projectId,
     workspaces,
   } = useAgentCreationContext(target);
+  const { labels } = useEnvironmentProjectLabels(target);
   useEffect(() => {
     const handler = (event: Event) =>
       setTarget((event as CustomEvent<EnvironmentId | null>).detail ?? primaryId);
@@ -47,15 +50,19 @@ export function AgentsCreateHost() {
     });
     setCreated(null);
   }, [created, agents, threads, navigate]);
-  if (!target) return null;
   return (
-    <CreateAgent
-      key={target}
-      environmentId={target}
-      workspaces={workspaces}
-      projectId={projectId}
-      onClose={() => setTarget(null)}
-      onCreated={setCreated}
-    />
+    <OverlayPresence when={target}>
+      {(target) => (
+        <CreateAgent
+          key={target}
+          environmentId={target}
+          workspaces={workspaces}
+          labels={labels}
+          projectId={projectId}
+          onClose={() => setTarget(null)}
+          onCreated={setCreated}
+        />
+      )}
+    </OverlayPresence>
   );
 }

@@ -145,7 +145,7 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
     if (project === null) {
       setState({
         status: "failed",
-        message: "None of your machines can start a thread without a project right now.",
+        message: "None of your machines can start a thread without a repository right now.",
       });
       return;
     }
@@ -204,7 +204,10 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
       () => null,
     );
     if (project === null) {
-      setState({ status: "failed", message: "The clone started, but its project did not appear." });
+      setState({
+        status: "failed",
+        message: "The clone started, but its repository did not appear.",
+      });
       return;
     }
     // A pull request checks out from the cloned repository, which is not there yet.
@@ -287,13 +290,13 @@ export function NewThreadLinkView({ link }: { readonly link: NewThreadLink }) {
       return (
         <LinkPage
           title={`You don't have ${name}`}
-          description="Clone it to work on it here, or start without a project."
+          description="Clone it to work on it here, or start without a repository."
         >
           <Button size="sm" onClick={() => void cloneRepository(state.repository)}>
             Clone {name}
           </Button>
           <Button size="sm" variant="outline" onClick={() => void openWithoutProject()}>
-            Use without project
+            Use without repository
           </Button>
         </LinkPage>
       );

@@ -1,3 +1,4 @@
+import { withWorkMetadata } from "@t3tools/shared/workMetadata";
 import { applyThreadPullRequestLinkUpdate } from "@t3tools/shared/threadPullRequests";
 import type {
   OrchestrationV2DomainEvent,
@@ -226,11 +227,11 @@ export function applyOrchestrationV2ProjectionEvent(
     case "thread.interaction-mode-updated":
     case "thread.model-selection-updated":
     case "thread.provider-switched":
-      return { ...base, thread: event.payload };
+      return { ...base, thread: withWorkMetadata(event.payload) };
     // Visited tracking is read state, not activity: skip the updatedAt bump.
     case "thread.visited":
     case "thread.marked-unread":
-      return { ...projection, thread: event.payload };
+      return { ...projection, thread: withWorkMetadata(event.payload) };
     case "run.created":
     case "run.updated": {
       const next = { ...base, runs: upsertEntity(base.runs, event.payload) };

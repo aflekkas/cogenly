@@ -1,18 +1,19 @@
 /**
  * The navigation rail: a narrow icon column at the window's left edge, beside
- * the thread list. Chats, Tasks and Agents switch the list from the top;
- * Usage and Settings sit at the bottom. It stays put while the list collapses,
- * so modes and settings remain one click away.
+ * the thread list. Chats, Work, Agents and Projects switch the list from the top;
+ * Search, Usage and Settings sit at the bottom. It stays put while the list
+ * collapses, so modes, search and settings remain one click away.
  *
  * Mobile keeps the segmented control inside the sheet instead (see
  * SidebarModeSwitcher), so the rail renders only on wider windows.
  */
 import { useAtomValue } from "@effect/atom-react";
 import { PanelLeft, PanelLeftClose } from "lucide";
-import { ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import { ChartNoAxesColumnIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactElement, useRef } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
+import { openCommandPalette } from "../../commandPaletteBus";
 import { isElectron } from "../../env";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { cn } from "../../lib/utils";
@@ -21,14 +22,16 @@ import { primaryServerKeybindingsAtom } from "../../state/server";
 import { useUiStateStore } from "../../uiStateStore";
 import { useSidebar, useSidebarVisibility } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
+import { isSidebarUtilityPage } from "./mainAppLocation";
 import { SIDEBAR_MODE_ICONS } from "./modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./modes/sidebarModes.logic";
+import { useSelectSidebarMode } from "./modes/useSelectSidebarMode";
 import { resolveVerticalTabIndex } from "./navRail.logic";
 import { useNavRailBadgeStore } from "./navRailState";
+import { decisionsWaitingLabel } from "../../agents/agentWorkspace.logic";
 
 const RAIL_BUTTON_CLASS =
-  "relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-rail outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:size-4.5 [&_svg]:shrink-0";
+  "relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-rail outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:size-4.5 [&_svg]:shrink-0";
 
 function railButtonTone(active: boolean) {
   return active ? "state-selected" : "text-sidebar-muted-foreground state-hover";
@@ -46,12 +49,11 @@ function RailTooltip(props: { label: string; children: ReactElement }) {
 export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boolean }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const mode = useUiStateStore((store) => store.sidebarMode);
-  const setMode = useUiStateStore((store) => store.setSidebarMode);
-  const agentsNeedingYou = useNavRailBadgeStore((store) => store.agentsNeedingYou);
+  const selectSidebarMode = useSelectSidebarMode();
+  const decisionsWaiting = useNavRailBadgeStore((store) => store.decisionsWaiting);
   const { open, setOpen, toggleSidebar } = useSidebar();
   const sidebarVisible = useSidebarVisibility();
   const navigate = useNavigate();
-  const navigateToMainApp = useNavigateToMainApp();
   const pathname = useLocation({ select: (location) => location.pathname });
   const onUtilityPage = isSidebarUtilityPage(pathname);
   const onSettings = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -59,14 +61,14 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
   const toggleShortcut = shortcutLabelForCommand(keybindings, "sidebar.toggle", {
     context: { usagePageOpen: onUsage },
   });
+  const searchShortcut = shortcutLabelForCommand(keybindings, "commandPalette.toggle");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const selectMode = (next: SidebarMode) => {
-    setMode(next);
-    // A collapsed list opens on the mode picked, and a utility page hands
-    // the column back to the thread list.
+    // A utility page hands the column back to the thread list.
+    selectSidebarMode(next, { leaveUtilityPage: true });
+    // A collapsed list opens on the mode picked.
     if (!open) setOpen(true);
-    if (onUtilityPage) void navigateToMainApp();
   };
 
   const handleTabsKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -74,7 +76,7 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
     const nextIndex = resolveVerticalTabIndex(event.key, index, SIDEBAR_MODES.length);
     if (nextIndex === null) return;
     event.preventDefault();
-    setMode(SIDEBAR_MODES[nextIndex]!);
+    selectSidebarMode(SIDEBAR_MODES[nextIndex]!);
     tabRefs.current[nextIndex]?.focus();
   };
 
@@ -132,9 +134,17 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
           const label = SIDEBAR_MODE_LABELS[segment];
           const Icon = SIDEBAR_MODE_ICONS[segment];
           const shortcut = shortcutLabelForCommand(keybindings, `sidebar.mode.${segment}`);
-          const badge = segment === "agents" && agentsNeedingYou > 0 ? agentsNeedingYou : null;
+          const badge = segment === "agents" && decisionsWaiting > 0 ? decisionsWaiting : null;
           return (
-            <RailTooltip key={segment} label={shortcut ? `${label} (${shortcut})` : label}>
+            <RailTooltip
+              key={segment}
+              label={[
+                shortcut ? `${label} (${shortcut})` : label,
+                badge !== null ? decisionsWaitingLabel(badge) : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            >
               <button
                 ref={(node) => {
                   tabRefs.current[segmentIndex] = node;
@@ -142,7 +152,7 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
                 type="button"
                 role="tab"
                 id={`sidebar-mode-tab-${segment}`}
-                aria-label={label}
+                aria-label={badge !== null ? `${label}, ${decisionsWaitingLabel(badge)}` : label}
                 aria-selected={selected}
                 tabIndex={segment === mode ? 0 : -1}
                 data-testid={`sidebar-mode-${segment}`}
@@ -152,7 +162,7 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
                 <Icon aria-hidden />
                 {badge !== null ? (
                   <span
-                    aria-label={`${badge} ${badge === 1 ? "agent needs" : "agents need"} you`}
+                    aria-hidden
                     className="absolute -top-0.5 -right-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-warning px-0.5 text-3xs font-semibold leading-none text-background tabular-nums ring-2 ring-sidebar"
                   >
                     {badge > 9 ? "9+" : badge}
@@ -165,6 +175,19 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
       </div>
       <div className="flex-1" />
       <div className="flex flex-col items-center gap-1">
+        {/* Search is the command palette: it finds threads in every mode,
+            agents, projects and settings, so it lives outside the modes. */}
+        <RailTooltip label={searchShortcut ? `Search (${searchShortcut})` : "Search"}>
+          <button
+            type="button"
+            aria-label="Search"
+            aria-haspopup="dialog"
+            onClick={() => openCommandPalette()}
+            className={cn(RAIL_BUTTON_CLASS, railButtonTone(false))}
+          >
+            <SearchIcon aria-hidden />
+          </button>
+        </RailTooltip>
         <RailTooltip label="Usage">
           <button
             type="button"

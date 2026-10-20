@@ -1,8 +1,9 @@
 /**
- * The sidebar header: one row holding search, add project and new thread.
+ * The sidebar header: one row holding search, add repository and new thread.
  *
- * Search owns the row's text and spans it; add-project and new-thread sit as
- * a pair of icons at the end.
+ * Search owns the row's text and spans it; add-repository and new-thread sit
+ * as a pair of icons at the end, after any mode-specific filter. Chats has no
+ * add-repository: repositories belong to Work.
  */
 import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import {
@@ -19,9 +20,12 @@ import { SidebarInput, SidebarMenuButton } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface SidebarThreadHeaderProps {
-  /** Add project only shows once a project exists; the empty state offers it otherwise. */
+  /** Add repository only shows once one exists; the empty state offers it otherwise. */
   hasProjects: boolean;
-  onNewProject: () => void;
+  /** Optional mode-specific control before the add/new pair, such as the Chats project filter. */
+  filterControl?: ReactNode;
+  /** Null hides add repository (Chats); the command palette still offers it. */
+  onNewProject: (() => void) | null;
   /** Receives the click so Shift+click can skip the project picker. */
   onNewThread: (event: ReactMouseEvent) => void;
   /** What the new button makes in the current sidebar mode; defaults to "New thread". */
@@ -43,6 +47,7 @@ export interface SidebarThreadHeaderProps {
 
 export function SidebarThreadHeader({
   hasProjects,
+  filterControl,
   onNewProject,
   onNewThread,
   newThreadLabel: newItemLabel = "New thread",
@@ -112,8 +117,9 @@ export function SidebarThreadHeader({
           hover states, and a background well reads far louder on themed
           palettes than on the base light and dark ones. */}
       <div className="flex shrink-0 items-center">
-        {hasProjects ? (
-          <SidebarHeaderIconButton label="Add project" onClick={onNewProject}>
+        {filterControl}
+        {hasProjects && onNewProject ? (
+          <SidebarHeaderIconButton label="Add repository" onClick={onNewProject}>
             <FolderPlusIcon />
           </SidebarHeaderIconButton>
         ) : null}
@@ -124,7 +130,7 @@ export function SidebarThreadHeader({
               <span className="flex flex-col gap-0.5">
                 <span>{newThreadLabel}</span>
                 <span className="text-muted-foreground">
-                  New thread in current project: Shift+click
+                  New thread in current repository: Shift+click
                   {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
                 </span>
               </span>

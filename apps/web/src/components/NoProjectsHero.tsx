@@ -22,18 +22,18 @@ export function NoProjectsHero() {
         {/* The desktop window only moves where CSS opts in, so keep a titlebar strip. */}
         {isElectron ? <WorkspacePageHeader electron /> : null}
         <Empty size="hero" className="flex-1">
-          <div className="w-full max-w-lg px-8 py-12">
+          <div className="w-full max-w-lg px-8 py-12" data-panel-flip="center">
             <EmptyHeader className="max-w-none">
               <EmptyTitle>What should we work on?</EmptyTitle>
               <EmptyDescription>
                 {scratchTargetEnvironmentId === null
-                  ? "Add a project to start your first thread."
-                  : "Add a project, or start without one."}
+                  ? "Add a repository to start your first thread."
+                  : "Add a repository, or start without one."}
               </EmptyDescription>
               <div className="mt-6 flex justify-center gap-2">
                 <Button size="sm" onClick={openAddProject}>
                   <PlusIcon className="size-4" />
-                  Add project
+                  Add repository
                 </Button>
                 {scratchTargetEnvironmentId === null ? null : (
                   <Button
@@ -42,7 +42,7 @@ export function NoProjectsHero() {
                     onClick={() => void startScratchThread(scratchTargetEnvironmentId)}
                   >
                     <MessageSquareDashedIcon className="size-4" />
-                    Start without a project
+                    Start without a repository
                   </Button>
                 )}
               </div>

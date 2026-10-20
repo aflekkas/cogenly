@@ -1,5 +1,6 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
+import { requestStartWork } from "../components/work/StartWorkDialog";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
@@ -13,7 +14,14 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
+import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import { useCallback, useMemo } from "react";
+
+import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
+import { hasUnseenCompletion, resolveThreadLastVisitedAt } from "../components/Sidebar.logic";
+import { threadCapabilities } from "../threadCapabilities";
+import { useUiStateStore } from "../uiStateStore";
+import { useThreadKindResolver } from "./useThreadKind";
 
 import { resolveSnoozePresets } from "../components/Sidebar.snooze";
 import {
@@ -96,7 +104,9 @@ export function useThreadActionMenu(input: {
     archiveThread,
     deleteThread,
     markThreadUnread,
+    markThreadRead,
   } = useThreadActions();
+  const resolveThreadKind = useThreadKindResolver();
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -116,6 +126,12 @@ export function useThreadActionMenu(input: {
       toastManager.add({ type: "success", title: "Branch copied", description: branch });
     },
     onError: (error) => failureToast("Failed to copy branch", error),
+  });
+  const { copyToClipboard: copyThreadLinkToClipboard } = useCopyToClipboard<{ link: string }>({
+    onCopy: ({ link }) => {
+      toastManager.add({ type: "success", title: "Thread link copied", description: link });
+    },
+    onError: (error) => failureToast("Failed to copy thread link", error),
   });
   const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{ threadId: ThreadId }>({
     onCopy: ({ threadId }) => {
@@ -143,9 +159,19 @@ export function useThreadActionMenu(input: {
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
+        const capabilities = threadCapabilities(resolveThreadKind(thread));
+        const isUnread = hasUnseenCompletion({
+          ...thread,
+          lastVisitedAt: resolveThreadLastVisitedAt(
+            thread.lastVisitedAt,
+            useUiStateStore.getState().threadLastVisitedAtById[scopedThreadKey(threadRef)],
+          ),
+        });
         const items = buildThreadActionMenuItems({
+          capabilities,
           canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
           branch: thread.branch ?? null,
+          isUnread,
           isSettled: supports.settlement && thread.settledOverride === "settled",
           autoSettleEnabled: thread.autoSettleDisabledAt == null,
           isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
@@ -222,6 +248,9 @@ export function useThreadActionMenu(input: {
             }
             return;
           }
+          case "start-work":
+            requestStartWork(threadRef);
+            return;
           case "settle":
             await reportFailure("Failed to settle thread", () => settleThread(threadRef));
             return;
@@ -252,6 +281,23 @@ export function useThreadActionMenu(input: {
           case "mark-unread":
             markThreadUnread(threadRef);
             return;
+          case "mark-read":
+            markThreadRead(threadRef);
+            return;
+          case "agent-settings":
+            requestAgentView(
+              agentViewKey({
+                environmentId: threadRef.environmentId,
+                conversationThreadId: threadRef.threadId,
+              }),
+              "responsibilities",
+            );
+            return;
+          case "copy-thread-link": {
+            const link = formatThreadLink(thread.id, thread.title);
+            copyThreadLinkToClipboard(link, { link });
+            return;
+          }
           case "copy-path": {
             const workspacePath = thread.worktreePath ?? projectCwd;
             if (!workspacePath) {
@@ -297,7 +343,8 @@ export function useThreadActionMenu(input: {
             return;
           }
           case "delete": {
-            if (confirmThreadDelete) {
+            if (capabilities.delete === false) return;
+            if (confirmThreadDelete || capabilities.delete === "always-confirm") {
               const confirmed = await settlePromise(() =>
                 api.dialogs.confirm(
                   [
@@ -334,14 +381,17 @@ export function useThreadActionMenu(input: {
       copyBranchToClipboard,
       copyPathToClipboard,
       copyThreadIdToClipboard,
+      copyThreadLinkToClipboard,
       deleteThread,
       handleNewThread,
       logicalProjectKeyByPhysicalKey,
+      markThreadRead,
       markThreadUnread,
       onStartRename,
       projectCwd,
       projectGroupingSettings,
       projects,
+      resolveThreadKind,
       router,
       setThreadAutoSettle,
       settleThread,

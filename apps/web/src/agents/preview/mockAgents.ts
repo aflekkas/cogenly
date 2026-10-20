@@ -1,13 +1,23 @@
+/**
+ * DEV PREVIEW ONLY. Fictional agents, items and runs for the standalone agents preview
+ * page (preview/main.tsx). Never imported by the app; nothing here reaches a server.
+ */
 import { randomUUID } from "~/lib/utils";
+import { useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
 import {
   AgentId,
   ScheduledTaskId,
   EnvironmentId,
+  ProjectId,
+  ProjectLabelId,
   ProviderInstanceId,
   ThreadId,
+  defaultAgentPermissions,
+  type AgentApproval,
+  type Commitment,
 } from "@t3tools/contracts";
 import type { AgentsClient, AgentsSnapshot } from "../agentsClient";
-import type { AgentContact, AgentMessage } from "../agents.types";
+import type { AgentContact, AgentMessage, AgentWorkspaceView } from "../agents.types";
 
 const environmentId = EnvironmentId.make("agents-preview");
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
@@ -38,18 +48,63 @@ export function createMockAgentsClient(): AgentsClient {
     modelSelection: models[0]!.selection,
     runtimeMode: "approval-required" as const,
     projectId: null,
-    enabled: true,
     dailyRunCap: 24,
     createdAt: ago(2800),
     updatedAt: ago(2),
     consecutiveFailures: 0,
     backoffUntil: null,
-    pauseReason: null,
+    responsibility: "",
+    permissions: defaultAgentPermissions,
+    notifyPolicy: "meaningful_changes" as const,
     memory: [],
     activity: [],
     requests: [],
+    approvals: [] as AgentApproval[],
     triggers: [],
   };
+  const label = {
+    id: ProjectLabelId.make("preview-project"),
+    name: "Preview project",
+    color: "blue",
+    createdAt: ago(5000),
+    updatedAt: ago(5000),
+    repositoryIds: [ProjectId.make("preview-repo")],
+  };
+  const repositories = [{ id: ProjectId.make("preview-repo"), title: "preview-repo" }];
+  let commitments: Commitment[] = [
+    {
+      id: "preview-item-1",
+      title: "Review the auth test cleanup",
+      description: "Juniper's three-file cleanup, before the next release.",
+      owner: { kind: "user" },
+      dueAt: ago(-1440),
+      reminderAt: null,
+      waitingOn: null,
+      labelIds: [label.id],
+      agentId: AgentId.make("juniper"),
+      sourceRefs: [{ kind: "message", id: "m3" }],
+      evidenceRefs: [],
+      status: "open",
+      createdAt: ago(43),
+      updatedAt: ago(43),
+    },
+    {
+      id: "preview-item-2",
+      title: "Drop the old auth helper after release",
+      description: "",
+      owner: { kind: "agent", agentId: AgentId.make("juniper") },
+      dueAt: null,
+      reminderAt: null,
+      waitingOn: null,
+      labelIds: [label.id],
+      agentId: AgentId.make("juniper"),
+      sourceRefs: [{ kind: "run", id: "preview-run-1" }],
+      evidenceRefs: [],
+      status: "proposed",
+      createdAt: ago(42),
+      updatedAt: ago(42),
+    },
+  ];
   const messages: AgentMessage[] = [
     {
       ...message(
@@ -84,6 +139,30 @@ export function createMockAgentsClient(): AgentsClient {
     avatar: { seed: "juniper-forest", color: "#90b79c" },
     conversationThreadId: ThreadId.make("preview-juniper"),
     state: "blocked",
+    responsibility: "Keep the test suite healthy and tell me what needs a decision.",
+    approvals: [
+      {
+        id: "preview-approval-1",
+        agentId: AgentId.make("juniper"),
+        actionKind: "start_work",
+        action: {
+          actionKind: "start_work",
+          payload: {
+            agentId: AgentId.make("juniper"),
+            projectId: ProjectId.make("preview-repo"),
+            title: "Replace the old auth helper in three tests",
+            prompt: "Swap the helper, run only the auth suite, and summarize.",
+          },
+        },
+        payload: {},
+        status: "pending",
+        requestedAt: ago(3),
+        decidedAt: null,
+        decidedBy: null,
+        sourceRunId: null,
+        resultThreadId: null,
+      },
+    ],
     preview: "Coffee-sized. Got it ☕",
     messages,
     triggers: [
@@ -187,7 +266,6 @@ export function createMockAgentsClient(): AgentsClient {
         id: AgentId.make("echo"),
         name: "Echo",
         avatar: { seed: "echo", color: "#7da9c9" },
-        enabled: false,
         state: "asleep",
         updatedAt: ago(1500),
         conversationThreadId: ThreadId.make("preview-echo"),
@@ -199,6 +277,60 @@ export function createMockAgentsClient(): AgentsClient {
     loading: false,
     error: null,
   };
+  const workspaceFor = (agent: AgentContact): Omit<AgentWorkspaceView, "refresh"> => ({
+    commitments: commitments.filter(
+      (item) => item.agentId === agent.id || item.labelIds.length > 0,
+    ),
+    activity: {
+      runs:
+        agent.id === "juniper"
+          ? [
+              {
+                id: "preview-run-1",
+                agentId: agent.id,
+                threadId: ThreadId.make("preview-work"),
+                triggerKind: "trigger",
+                status: "completed",
+                startedAt: ago(50),
+                finishedAt: ago(46),
+                modelSelection: agent.modelSelection,
+                summary: "All checks passed. Found three tests using the old auth helper.",
+              },
+            ]
+          : [],
+      actions:
+        agent.id === "juniper"
+          ? [
+              {
+                id: "preview-action-1",
+                agentId: agent.id,
+                runId: "preview-run-1",
+                kind: "commitment_proposed",
+                targetId: "preview-item-2",
+                at: ago(46),
+              },
+            ]
+          : [],
+    },
+    labels: [label],
+    repositories,
+    loading: false,
+    error: null,
+  });
+  const setCommitment = (id: string, edit: (item: Commitment) => Commitment) => {
+    commitments = commitments.map((item) => (item.id === id ? edit(item) : item));
+    snapshot = { ...snapshot };
+    emit();
+  };
+  // Mirrors the server: omitted policy fields keep their current value.
+  const policy = (
+    draft: Parameters<AgentsClient["save"]>[1],
+    current: Pick<AgentContact, "responsibility" | "permissions" | "notifyPolicy">,
+  ) => ({
+    responsibility: draft.responsibility ?? current.responsibility,
+    permissions: draft.permissions ?? current.permissions,
+    notifyPolicy: draft.notifyPolicy ?? current.notifyPolicy,
+  });
   const listeners = new Set<() => void>();
   const emit = () => listeners.forEach((listener) => listener());
   const update = (id: string, edit: (agent: AgentContact) => AgentContact) => {
@@ -208,21 +340,58 @@ export function createMockAgentsClient(): AgentsClient {
     };
     emit();
   };
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  };
+  function MockWorkspace({
+    agent,
+    children,
+  }: {
+    agent: AgentContact;
+    children: (view: AgentWorkspaceView) => ReactNode;
+  }) {
+    useSyncExternalStore(subscribe, () => snapshot);
+    return children({ ...workspaceFor(agent), refresh: () => {} });
+  }
+  // The preview has no audit log; it shows the one entry every item starts with.
+  function MockCommitmentHistory({
+    commitment,
+    children,
+  }: ComponentProps<AgentsClient["CommitmentHistory"]>) {
+    useSyncExternalStore(subscribe, () => snapshot);
+    const item = commitments.find((candidate) => candidate.id === commitment.id);
+    return children({
+      history: item
+        ? [
+            {
+              id: `${item.id}:created`,
+              commitmentId: item.id,
+              fromStatus: null,
+              toStatus: "proposed",
+              who: item.agentId ? `agent:${item.agentId}` : "user",
+              at: item.createdAt,
+              why: "Found in the conversation.",
+              evidenceRefs: item.sourceRefs,
+            },
+          ]
+        : [],
+      error: null,
+    });
+  }
   return {
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
+    subscribe,
     getSnapshot: () => snapshot,
     save: async (envId, draft, firstTrigger) => {
       if (draft.id) {
         update(draft.id, (agent) => ({
           ...agent,
           ...draft,
+          ...policy(draft, agent),
           id: agent.id,
-          state: draft.enabled ? (agent.enabled ? agent.state : "idle") : "asleep",
+          state: agent.state === "asleep" ? "idle" : agent.state,
           updatedAt: ago(0),
         }));
         return snapshot.agents.find((agent) => agent.id === draft.id)!;
@@ -231,6 +400,7 @@ export function createMockAgentsClient(): AgentsClient {
       const agent: AgentContact = {
         ...base,
         ...draft,
+        ...policy(draft, base),
         id,
         environmentId: envId,
         avatar: draft.avatar,
@@ -254,7 +424,7 @@ export function createMockAgentsClient(): AgentsClient {
     send: async (agent, text) =>
       update(agent.id, (current) => ({
         ...current,
-        state: current.enabled ? "thinking" : "asleep",
+        state: "thinking",
         updatedAt: ago(0),
         preview: text,
         messages: [
@@ -320,6 +490,11 @@ export function createMockAgentsClient(): AgentsClient {
           : [...current.triggers, { ...trigger, id: randomUUID() }],
       })),
     runTrigger: async (agent) => update(agent.id, (current) => ({ ...current, state: "thinking" })),
+    setTriggerEnabled: async (agent, id, enabled) =>
+      update(agent.id, (current) => ({
+        ...current,
+        triggers: current.triggers.map((item) => (item.id === id ? { ...item, enabled } : item)),
+      })),
     deleteTrigger: async (agent, id) =>
       update(agent.id, (current) => ({
         ...current,
@@ -327,6 +502,49 @@ export function createMockAgentsClient(): AgentsClient {
       })),
     openWork: (_agent, threadId) => {
       window.dispatchEvent(new CustomEvent("agents-preview-work", { detail: threadId }));
+    },
+    openExternal: (url) => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
+    Workspace: MockWorkspace,
+    CommitmentHistory: MockCommitmentHistory,
+    decideApproval: async (agent, id, decision) => {
+      const approval = agent.approvals.find((item) => item.id === id)!;
+      update(agent.id, (current) => ({
+        ...current,
+        approvals: current.approvals.filter((item) => item.id !== id),
+      }));
+      return {
+        ...approval,
+        status: decision === "approve" ? "approved" : "rejected",
+        decidedAt: ago(0),
+        decidedBy: "user",
+      };
+    },
+    startWork: async () => ({ threadId: ThreadId.make("preview-work"), approval: null }),
+    createCommitment: async (_agent, input) => {
+      commitments = [
+        ...commitments,
+        { ...input, id: randomUUID(), status: "open", createdAt: ago(0), updatedAt: ago(0) },
+      ];
+      snapshot = { ...snapshot };
+      emit();
+    },
+    setCommitmentStatus: async (_agent, input) =>
+      setCommitment(input.id, (item) => ({
+        ...item,
+        status: input.status,
+        evidenceRefs: [...item.evidenceRefs, ...input.evidenceRefs],
+        updatedAt: ago(0),
+      })),
+    confirmCommitment: async (_agent, id) =>
+      setCommitment(id, (item) => ({ ...item, status: "open", updatedAt: ago(0) })),
+    dismissCommitment: async (_agent, id) =>
+      setCommitment(id, (item) => ({ ...item, status: "dismissed", updatedAt: ago(0) })),
+    deleteCommitment: async (_agent, id) => {
+      commitments = commitments.filter((item) => item.id !== id);
+      snapshot = { ...snapshot };
+      emit();
     },
   };
 }

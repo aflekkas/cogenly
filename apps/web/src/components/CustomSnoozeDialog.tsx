@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useEffect, useId, useState } from "react";
 import { create } from "zustand";
 import {
@@ -50,7 +51,7 @@ function finish(choice: SnoozeChoice | null) {
 export function CustomSnoozeDialogHost() {
   const request = useRequest((state) => state.request);
   useEffect(() => () => finish(null), []);
-  return request ? <CustomSnoozeDialog /> : null;
+  return <OverlayPresence when={request}>{() => <CustomSnoozeDialog />}</OverlayPresence>;
 }
 
 function CustomSnoozeDialog() {

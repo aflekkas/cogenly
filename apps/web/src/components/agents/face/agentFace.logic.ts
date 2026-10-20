@@ -1,4 +1,4 @@
-import { BotEngine, type BotFrame } from "./engine/engine";
+import { BotEngine, type BotFrame, type Look } from "./engine/engine";
 import { EXPRESSION_BY_ID, type BotExpression, type ExpressionId } from "./engine/expressions";
 import { clamp, createRng, easings } from "./engine/math";
 import { RAYON } from "./engine/repere";
@@ -162,6 +162,11 @@ export class FaceDirector {
     this.engine.setState(target, now);
   }
 
+  /** True once nothing is left to play: the target is idle, or a one-shot has settled. */
+  get atRest(): boolean {
+    return this.target === "idle" || this.phase === "settled";
+  }
+
   tick(now: number) {
     const def = STATE_BY_ID.get(this.target);
     if (!def || def.minDuration === undefined || this.phase === "settled") return;
@@ -271,6 +276,153 @@ export class IndicatorDirector {
   }
 }
 
+/**
+ * Where a face looks while it follows the pointer, in screen axes (y down):
+ * the direction of the pointer scaled by how far out the face looks, so
+ * `hypot(x, y)` runs from 0 (straight at the viewer) to 1 (full reach).
+ */
+export interface FaceGaze {
+  x: number;
+  y: number;
+}
+
+/** Head yaw and pitch at full reach, in degrees, before a shape's eye fit. */
+export const GAZE_MAX_YAW = 34;
+export const GAZE_MAX_PITCH = 24;
+/** Whole-body lean toward the pointer at full reach, in ball radii. */
+export const GAZE_MAX_LEAN = 0.05;
+/** Pointer distance, in face sizes, at which the gaze is ~63% of the way out. */
+const GAZE_REACH_SIZES = 3;
+const GAZE_REACH_MIN_PX = 90;
+const GAZE_REACH_MAX_PX = 320;
+/** Ease back to the state's own gaze when the pointer leaves, in seconds. */
+export const GAZE_RELEASE_SECONDS = 0.6;
+
+/**
+ * Gaze for a pointer `dx`, `dy` px from the face's centre on a face `size` px
+ * wide. Reach grows with distance and saturates, so a pointer anywhere on screen
+ * gets a look and nothing past it.
+ */
+export function gazeToward(dx: number, dy: number, size: number): FaceGaze {
+  const distance = Math.hypot(dx, dy);
+  if (!Number.isFinite(distance) || distance === 0) return { x: 0, y: 0 };
+  const reach = clamp(size * GAZE_REACH_SIZES, GAZE_REACH_MIN_PX, GAZE_REACH_MAX_PX);
+  const strength = (1 - Math.exp(-distance / reach)) / distance;
+  return { x: dx * strength, y: dy * strength };
+}
+
+/** The engine look for a gaze, scaled by `fit` (0..1) so the eyes stay on the body. */
+export function gazeLook(gaze: FaceGaze, fit = 1): Look {
+  return {
+    yaw: GAZE_MAX_YAW * gaze.x * fit,
+    pitch: -GAZE_MAX_PITCH * gaze.y * fit,
+    leanX: GAZE_MAX_LEAN * gaze.x * fit,
+    leanY: GAZE_MAX_LEAN * gaze.y * fit,
+    mix: 1,
+    spin: 0,
+    wander: 0,
+  };
+}
+
+/** On-curve points of an engine body path: it is a Catmull-Rom loop through them. */
+function bodyPolygon(path: string): number[] {
+  const numbers = path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  const points = numbers.slice(0, 2);
+  for (let index = 2; index + 5 < numbers.length; index += 6) {
+    points.push(numbers[index + 4]!, numbers[index + 5]!);
+  }
+  return points;
+}
+
+function insidePolygon(x: number, y: number, polygon: number[]) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 2; i < polygon.length; j = i, i += 2) {
+    const xi = polygon[i]!;
+    const yi = polygon[i + 1]!;
+    const xj = polygon[j]!;
+    const yj = polygon[j + 1]!;
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Whether both eye holes are drawn and lie wholly inside the body outline. */
+export function eyesInsideBody(frame: BotFrame): boolean {
+  if (frame.eyes.length !== 2) return false;
+  const body = bodyPolygon(frame.bodyPath);
+  for (const eye of frame.eyes) {
+    const [a, b, c, d, e, f] = eye.matrix.slice(7, -1).split(",").map(Number) as number[];
+    // capsulePath: M(-w/2, -h/2 + r), then an arc of radius r = min(w, h) / 2.
+    const [left, top, radius] = (eye.d.match(/-?\d+(?:\.\d+)?/g) ?? []).map((n) =>
+      Math.abs(Number(n)),
+    );
+    const r = radius!;
+    const stretchX = left! - r;
+    const stretchY = top!;
+    for (let step = 0; step < 24; step++) {
+      const angle = (step / 24) * Math.PI * 2;
+      const x = Math.cos(angle) * r + Math.sign(Math.cos(angle)) * stretchX;
+      const y = Math.sin(angle) * r + Math.sign(Math.sin(angle)) * stretchY;
+      if (!insidePolygon(a! * x + c! * y + e!, b! * x + d! * y + f!, body)) return false;
+    }
+  }
+  return true;
+}
+
+/** Directions the eye fit is measured along, evenly around the face. */
+const GAZE_FIT_DIRECTIONS = 12;
+/** Head room under the measured fit, for breathing and the body's float. */
+const GAZE_FIT_MARGIN = 0.9;
+const NO_RADII: number[] = [];
+const gazeFits = new WeakMap<number[], Map<BotExpression | null, number[]>>();
+
+/**
+ * How far out (0..1 of full reach) the eyes can travel along each fit direction
+ * before an eye hole leaves the body. Narrow shapes and wide-eyed expressions
+ * get less room. Measured once per shape and expression, by bisection on idle
+ * engine samples, and cached.
+ */
+export function gazeFit(radii: number[] | null, expression: BotExpression | null): number[] {
+  const key = radii ?? NO_RADII;
+  let byExpression = gazeFits.get(key);
+  if (!byExpression) {
+    byExpression = new Map();
+    gazeFits.set(key, byExpression);
+  }
+  const cached = byExpression.get(expression);
+  if (cached) return cached;
+  const fits: number[] = [];
+  for (let index = 0; index < GAZE_FIT_DIRECTIONS; index++) {
+    const angle = (index / GAZE_FIT_DIRECTIONS) * Math.PI * 2;
+    const direction = { x: Math.cos(angle), y: Math.sin(angle) };
+    const fitsAt = (fit: number) => {
+      const engine = new BotEngine(RAYON, "idle", radii, expression);
+      engine.setLook(gazeLook(direction, fit), 0, 0.001);
+      return eyesInsideBody(engine.sample(1));
+    };
+    let lo = 0;
+    let hi = 1;
+    if (fitsAt(1)) lo = 1;
+    else {
+      for (let step = 0; step < 6; step++) {
+        const mid = (lo + hi) / 2;
+        if (fitsAt(mid)) lo = mid;
+        else hi = mid;
+      }
+    }
+    fits.push(lo * GAZE_FIT_MARGIN);
+  }
+  byExpression.set(expression, fits);
+  return fits;
+}
+
+/** The fit for a gaze direction: the tighter of the two measured directions around it. */
+function fitAlong(fits: number[], gaze: FaceGaze): number {
+  const turn = (Math.atan2(gaze.y, gaze.x) / (Math.PI * 2)) * fits.length;
+  const below = ((Math.floor(turn) % fits.length) + fits.length) % fits.length;
+  return Math.min(fits[below]!, fits[(below + 1) % fits.length]!);
+}
+
 export interface FaceRigTarget {
   state: AgentFaceState;
   /** Draw thinking, blocked, and asleep over the face instead of in place of it. */
@@ -285,6 +437,32 @@ export interface FaceRigFrame {
   /** Null while the indicator is fully faded out. */
   indicator: BotFrame | null;
   indicatorOpacity: number;
+  /**
+   * True when every later frame is this one until the next timed setter (a
+   * blink, a gaze, an update), so the caller can stop repainting.
+   */
+  settled: boolean;
+}
+
+/** Seconds between two blinks of a still idle face. */
+export const BLINK_MIN_SECONDS = 2.5;
+export const BLINK_SPREAD_SECONDS = 4;
+
+/**
+ * Successive delays, in seconds, between the blinks of the face seeded with
+ * `seed`. The first lands anywhere in one interval, so faces mounted together
+ * don't blink in unison.
+ */
+export function blinkSchedule(seed: string): () => number {
+  const next = createRng(hashSeed(seed) ^ 0xb1b1);
+  let first = true;
+  return () => {
+    if (first) {
+      first = false;
+      return next() * (BLINK_MIN_SECONDS + BLINK_SPREAD_SECONDS);
+    }
+    return BLINK_MIN_SECONDS + next() * BLINK_SPREAD_SECONDS;
+  };
 }
 
 /**
@@ -302,10 +480,18 @@ export class FaceRig {
   private fadeFrom = 0;
   private fadeTo = 0;
   private fadeAt = -Infinity;
+  private gaze: FaceGaze | null = null;
+  private gazeApplied = false;
+  private radii: number[] | null;
+  private expression: BotExpression | null;
 
   constructor(target: FaceRigTarget, now: number, onSettled?: () => void) {
     const layer = target.layered ? stateLayer(target.state) : null;
-    this.base = new BotEngine(RAYON, "idle", target.radii, FaceRig.expressionFor(target, layer));
+    this.radii = target.radii;
+    this.expression = FaceRig.expressionFor(target, layer);
+    this.base = new BotEngine(RAYON, "idle", this.radii, this.expression);
+    // An idle face sits still and blinks only when told to, so it can stop repainting.
+    this.base.restsStill = true;
     this.baseDirector = new FaceDirector(
       this.base,
       layer ? "idle" : engineStateFor(target.state),
@@ -327,9 +513,15 @@ export class FaceRig {
 
   update(target: FaceRigTarget, now: number) {
     const layer = target.layered ? stateLayer(target.state) : null;
+    const expression = FaceRig.expressionFor(target, layer);
+    // A new shape or expression has its own eye fit, so a held gaze is re-aimed.
+    const refit = target.radii !== this.radii || expression !== this.expression;
+    this.radii = target.radii;
+    this.expression = expression;
     this.base.setShape(target.radii, now);
-    this.base.setExpression(FaceRig.expressionFor(target, layer), now);
+    this.base.setExpression(expression, now);
     this.baseDirector.setTarget(layer ? "idle" : engineStateFor(target.state), now);
+    this.syncGaze(now, refit);
     if (layer) {
       // A faded-out indicator starts its state from the top; a visible one morphs.
       this.indicatorDirector.setTarget(layer.indicator, now, this.indicatorOpacity(now) === 0);
@@ -349,15 +541,52 @@ export class FaceRig {
     return this.fadeFrom + (this.fadeTo - this.fadeFrom) * easings.easeOutQuint(k);
   }
 
+  /**
+   * Points the face at the pointer, or `null` to hand the gaze back to its state.
+   * The engine eases toward each new target, so a still pointer settles.
+   */
+  setGaze(gaze: FaceGaze | null, now: number) {
+    this.gaze = gaze;
+    this.syncGaze(now, true);
+  }
+
+  /**
+   * Tracking only drives the idle body: the other states choreograph their own
+   * eyes, so the gaze is released while they play and re-applied after.
+   */
+  private syncGaze(now: number, changed: boolean) {
+    if (this.gaze && this.base.state === "idle") {
+      if (changed || !this.gazeApplied) {
+        const fit = fitAlong(gazeFit(this.radii, this.expression), this.gaze);
+        this.base.setLook(gazeLook(this.gaze, fit), now);
+      }
+      this.gazeApplied = true;
+    } else if (this.gazeApplied) {
+      this.base.setLook(null, now, GAZE_RELEASE_SECONDS);
+      this.gazeApplied = false;
+    }
+  }
+
+  /** Blinks the idle body once; other states keep their own eyes. */
+  blink(now: number) {
+    if (this.base.state === "idle") this.base.blink(now);
+  }
+
   frame(now: number): FaceRigFrame {
     this.baseDirector.tick(now);
+    this.syncGaze(now, false);
     const indicatorOpacity = this.indicatorOpacity(now);
     let indicator: BotFrame | null = null;
     if (indicatorOpacity > 0) {
       this.indicatorDirector.tick(now);
       indicator = this.indicator.sample(now);
     }
-    return { base: this.base.sample(now), indicator, indicatorOpacity };
+    const settled =
+      this.baseDirector.atRest &&
+      this.base.isStill(now) &&
+      this.fadeTo === 0 &&
+      now - this.fadeAt >= INDICATOR_FADE_SECONDS;
+    return { base: this.base.sample(now), indicator, indicatorOpacity, settled };
   }
 }
 
@@ -371,7 +600,7 @@ export function staticFaceFrame(target: FaceRigTarget): FaceRigFrame {
   const expression = layer ? faceExpression(layer.expression) : target.expression;
   const state = layer || target.state === "created" ? "idle" : engineStateFor(target.state);
   const base = new BotEngine(RAYON, state, target.radii, expression).sample(POSES[state]);
-  if (!layer) return { base, indicator: null, indicatorOpacity: 0 };
+  if (!layer) return { base, indicator: null, indicatorOpacity: 0, settled: true };
   const indicator = new BotEngine(RAYON, layer.indicator).sample(POSES[layer.indicator]);
-  return { base, indicator, indicatorOpacity: 1 };
+  return { base, indicator, indicatorOpacity: 1, settled: true };
 }

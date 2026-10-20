@@ -45,7 +45,7 @@ function compareCommands(
   );
 }
 
-export type KeybindingSource = "Default" | "Custom" | "Project";
+export type KeybindingSource = "Default" | "Custom" | "Repository";
 
 export interface KeybindingRow {
   readonly id: string;
@@ -132,7 +132,7 @@ export function parseWhenExpressionDraft(
 
 function sourceForBinding(binding: ResolvedKeybindingRule): KeybindingSource {
   if (String(binding.command).startsWith("script.")) {
-    return "Project";
+    return "Repository";
   }
 
   const bindingKey = shortcutToKeybindingInput(binding.shortcut);
@@ -219,7 +219,7 @@ const KEYBINDING_GROUPS = [
   { id: "composer", title: "Composer", prefixes: ["composer", "modelPicker"] },
   { id: "preview", title: "Preview & diff", prefixes: ["preview", "diff"] },
   { id: "appearance", title: "Appearance", prefixes: ["appearance"] },
-  { id: "scripts", title: "Project scripts", prefixes: ["script"] },
+  { id: "scripts", title: "Repository scripts", prefixes: ["script"] },
 ] as const;
 const OTHER_KEYBINDING_GROUP = { id: "other", title: "Other" } as const;
 
@@ -382,8 +382,13 @@ export function commandLabel(command: KeybindingCommand): string {
   if (usageMetric) return `Usage: ${usageMetric.label}`;
   const usagePeriod = WINDOW_OPTIONS.find((option) => option.command === command);
   if (usagePeriod) return `Usage: Period: ${usagePeriod.label}`;
+  // The mode id stays `tasks`; users know it as Work.
+  if (command === "sidebar.mode.tasks") return "Sidebar: Mode: Work";
   if (command === "view.reopenClosed") return "Reopen Closed Tab";
   if (command === "preview.focusUrl") return "Preview: Focus URL";
+  // Cogenly projects are repositories in the UI; Projects are context tags.
+  if (command === "chat.newWithoutProject") return "Chat: New Without Repository";
+  if (command === "projectSearch.toggle") return "Repository Search: Toggle";
   const raw = String(command);
   if (raw.startsWith("script.") && raw.endsWith(".run")) {
     return `Run Script: ${titleCaseCommandSegment(raw.slice("script.".length, -".run".length))}`;

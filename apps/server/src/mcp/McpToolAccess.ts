@@ -6,6 +6,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
+import * as Option from "effect/Option";
 import * as Struct from "effect/Struct";
 import type * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
@@ -55,6 +56,7 @@ interface CheckedHandler extends Struct.Lambda {
   readonly "~lambda.out": CheckedHandlerOf<this["~lambda.in"]>;
 }
 let checkedHandler: CheckedHandler;
+let nameDeclaration: (declaration: Declaration<unknown>, name: string) => void;
 
 /** Only `toLayer` below builds one. */
 let handlersLayer: <Tools extends Record<string, Tool.Any>, EX, RX>(
@@ -87,12 +89,31 @@ export class Declaration<out Handler> {
   // in to module-scoped functions. Copying a declaration's fields onto
   // anything else fails to typecheck and, at runtime, to run.
   readonly #handle: Handler;
+  #toolName: string | undefined;
   private constructor(token: typeof builtHere, handle: Handler) {
     refuseOutsideConstruction(token);
     this.#handle = handle;
   }
   static {
-    declare = (handle) => new Declaration(builtHere, handle);
+    declare = (handle) => {
+      const declaration = new Declaration(builtHere, (params: Parameters<typeof handle>[0]) =>
+        handle(params).pipe(
+          Effect.tap((result) =>
+            Effect.serviceOption(McpInvocationContext.McpInvocationContext).pipe(
+              Effect.flatMap((scope) =>
+                Option.isSome(scope) && declaration.#toolName !== undefined
+                  ? (scope.value.onToolSuccess?.(declaration.#toolName, result) ?? Effect.void)
+                  : Effect.void,
+              ),
+            ),
+          ),
+        ),
+      );
+      return declaration;
+    };
+    nameDeclaration = (declaration, name) => {
+      declaration.#toolName = name;
+    };
     checkedHandler = Struct.lambda<CheckedHandler>((declaration) => declaration.#handle);
   }
 }
@@ -307,8 +328,11 @@ export class HandlersLayer<Tools extends Record<string, Tool.Any>, EX = never, R
   }
 }
 
-const checkedHandlers = <Handlers>(declarations: Declarations<Handlers>): Handlers =>
-  Struct.map(declarations, checkedHandler);
+const checkedHandlers = <Handlers>(declarations: Declarations<Handlers>): Handlers => {
+  for (const [name, declaration] of Object.entries<Declaration<unknown>>(declarations))
+    nameDeclaration(declaration, name);
+  return Struct.map(declarations, checkedHandler);
+};
 
 /** `Toolkit.toLayer` for handlers that all declare their access. */
 export const toLayer = <Tools extends Record<string, Tool.Any>, EX = never, RX = never>(

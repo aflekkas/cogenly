@@ -1,5 +1,6 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useEffect, useState } from "react";
-import { PlusIcon, MessageCircleIcon, CheckCheckIcon } from "lucide-react";
+import { PlusIcon, MessageCircleIcon, HammerIcon } from "lucide-react";
 import { AgentContacts } from "../AgentContacts";
 import { AgentConversation } from "../AgentConversation";
 import { CreateAgent } from "../AgentDetails";
@@ -45,8 +46,8 @@ function PreviewContent() {
             Chats
           </span>
           <span>
-            <CheckCheckIcon size={13} />
-            Tasks
+            <HammerIcon size={13} />
+            Work
           </span>
           <span data-selected="true">Agents</span>
         </div>
@@ -89,17 +90,19 @@ function PreviewContent() {
           </div>
         )}
       </main>
-      {create && (
-        <CreateAgent
-          environmentId={environmentId}
-          projectId={null}
-          onClose={() => setCreate(false)}
-          onCreated={(contact) => {
-            setKey(agentContactKey(contact));
-            setMobileList(false);
-          }}
-        />
-      )}
+      <OverlayPresence when={create}>
+        {() => (
+          <CreateAgent
+            environmentId={environmentId}
+            projectId={null}
+            onClose={() => setCreate(false)}
+            onCreated={(contact) => {
+              setKey(agentContactKey(contact));
+              setMobileList(false);
+            }}
+          />
+        )}
+      </OverlayPresence>
     </div>
   );
 }

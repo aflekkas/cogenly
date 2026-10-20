@@ -8,8 +8,8 @@ One workspace for everything you do with AI: everyday chats, long-running coding
 ## What's in it
 
 - **Chats**: a plain list of conversations, grouped into folders and projects.
-- **Tasks**: coding work against GitHub repos, with settle and snooze to keep the list clean.
-- **Agents**: scheduled, always-on bots that each get a little face showing what they're doing (working, needs you, blocked, asleep).
+- **Work**: coding work against GitHub repos, including work your agents start, with settle and snooze to keep the list clean.
+- **Agents**: bots you message or schedule. Each has a little face and a plain status: enabled, running, paused, or needs you.
 - **Projects**: group chats, tasks, and agents together. Projects come from GitHub repos.
 - **One set of tools**: a single MCP server that every agent shares.
 - **Claude and Codex**: both run with full access, and follow-ups steer the running agent by default.

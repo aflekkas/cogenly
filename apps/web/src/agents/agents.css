@@ -14,9 +14,11 @@
 @utility agent-contact-header {
   position: relative;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   flex: none;
-  padding: 25px 24px 17px;
+  padding: 18px 24px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
 }
 @utility agent-header-person {
@@ -71,13 +73,13 @@
 }
 @utility agent-header-more {
   position: absolute;
-  right: 21px;
-  top: 22px;
+  right: 16px;
+  top: 16px;
 }
 @utility agent-back {
   position: absolute;
   left: 15px;
-  top: 22px;
+  top: 16px;
 }
 @utility agent-message-scroll {
   flex: 1;
@@ -361,8 +363,7 @@
   font-size: 12px;
   margin-top: 12px;
 }
-.agent-question input,
-.agent-question select {
+.agent-question > input {
   background: var(--background);
   color: var(--foreground);
   border: 1px solid var(--border);
@@ -371,6 +372,9 @@
   min-width: 0;
 }
 @utility agent-contacts {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   width: 100%;
   padding: 6px;
   color: var(--foreground);
@@ -464,9 +468,31 @@
   font-size: 9px;
   font-weight: 600;
 }
+@utility agent-contact-status {
+  margin-left: auto;
+  flex: none;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.agent-contact-status[data-status="Needs approval"],
+.agent-contact-status[data-status="Needs you"] {
+  color: var(--warning-foreground);
+}
+@utility agent-unread-dot {
+  flex: none;
+  margin-left: auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--primary);
+}
+/* Fills the list and sits in its vertical centre. */
 @utility agent-empty {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
+  justify-content: center;
   flex-direction: column;
   gap: 14px;
   text-align: center;
@@ -477,44 +503,6 @@
   font-size: 12px;
   color: var(--muted-foreground);
   line-height: 1.6;
-}
-@utility agent-sheet {
-  position: fixed;
-  inset: 0 0 0 auto;
-  margin: 0;
-  width: min(430px, 100vw);
-  height: 100dvh;
-  max-height: 100dvh;
-  max-width: 100vw;
-  border: 0;
-  border-left: 1px solid var(--border);
-  background: var(--background);
-  color: var(--foreground);
-  padding: 0;
-  overflow: auto;
-}
-.agent-sheet::backdrop {
-  background: #0003;
-}
-@utility agent-sheet-content {
-  padding: 22px 25px 35px;
-}
-@utility agent-sheet-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.agent-sheet-heading h2 {
-  font-size: 16px;
-  font-weight: 550;
-}
-
-@utility agent-section-intro {
-  font-size: 12px;
-  color: var(--muted-foreground);
-  line-height: 1.7;
-  margin: 14px 0 20px;
 }
 @utility agent-form {
   display: flex;
@@ -528,9 +516,8 @@
   font-size: 11px;
   font-weight: 500;
 }
-.agent-form input:not([type="checkbox"]),
-.agent-form textarea,
-.agent-form select {
+.agent-form label > input,
+.agent-form label > textarea {
   font: inherit;
   font-weight: 400;
   font-size: 13px;
@@ -548,32 +535,31 @@
   resize: vertical;
   min-height: 70px;
 }
-.agent-form input:focus-visible,
-.agent-form textarea:focus-visible,
-.agent-form select:focus-visible {
+.agent-form label > input:focus-visible,
+.agent-form label > textarea:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
-.agent-form label.agent-toggle-row,
 .agent-form label.agent-cap-row {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
 }
-.agent-toggle-row small {
-  display: block;
-  font-size: 10px;
-  color: var(--muted-foreground);
-  font-weight: 400;
-  margin-top: 4px;
-}
-.agent-toggle-row input {
-  accent-color: var(--primary);
-  width: 17px;
-  height: 17px;
-}
-.agent-form .agent-cap-row input {
+.agent-form .agent-cap-row > input {
   width: 80px;
+}
+.agent-form label small,
+.agent-form-field small {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+@utility agent-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 500;
 }
 @utility agent-face-picker {
   display: flex;
@@ -628,11 +614,11 @@
 
 @media (max-width: 600px) {
   .agent-contact-header {
-    padding: 19px 18px 14px;
+    padding: 14px 12px 10px;
   }
   .agent-header-person svg {
-    width: 62px;
-    height: 62px;
+    width: 48px;
+    height: 48px;
   }
   .agent-messages {
     padding: 12px 16px 20px;
@@ -647,9 +633,6 @@
   }
   .agent-composer-area {
     padding: 9px 13px max(16px, env(safe-area-inset-bottom));
-  }
-  .agent-sheet-content {
-    padding: 19px 21px 30px;
   }
 }
 

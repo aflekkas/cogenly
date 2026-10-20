@@ -1,3 +1,4 @@
+import { AgentEventContext } from "./agentEvent.ts";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
@@ -18,6 +19,37 @@ export const AgentAvatar = Schema.Struct({
   seed: TrimmedNonEmptyString,
   color: Schema.optional(TrimmedNonEmptyString),
 });
+export const AgentPermissions = Schema.Struct({
+  read: Schema.Boolean,
+  draft: Schema.Boolean,
+  execute: Schema.Boolean,
+  send: Schema.Boolean,
+  create_pr: Schema.Boolean,
+  merge: Schema.Boolean,
+  deploy: Schema.Boolean,
+  delete: Schema.Boolean,
+});
+export type AgentPermissions = typeof AgentPermissions.Type;
+/**
+ * New agents work on their own across every project: they read, draft and start Work.
+ * The high-impact grants stay off until the owner turns them on.
+ */
+export const defaultAgentPermissions: AgentPermissions = {
+  read: true,
+  draft: true,
+  execute: true,
+  send: false,
+  create_pr: false,
+  merge: false,
+  deploy: false,
+  delete: false,
+};
+/** Agents act on their own, within their permissions, across all of the owner's projects. */
+const AgentPolicyFields = {
+  responsibility: Schema.String.check(Schema.isMaxLength(32000)),
+  permissions: AgentPermissions,
+  notifyPolicy: Schema.Literals(["action_required", "meaningful_changes", "all"]),
+};
 const AgentFields = {
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   avatar: AgentAvatar,
@@ -25,24 +57,29 @@ const AgentFields = {
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   projectId: Schema.NullOr(ProjectId),
-  /** Pauses autonomous triggers; owner texts remain available for recovery. */
-  enabled: Schema.Boolean,
   /** Autonomous job starts per UTC day. Owner-initiated conversation turns are not capped. */
   dailyRunCap: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })),
 };
 export const Agent = Schema.Struct({
   id: AgentId,
   ...AgentFields,
+  ...AgentPolicyFields,
   conversationThreadId: ThreadId,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   consecutiveFailures: Schema.Int,
+  /** Failed background starts back off exponentially; agents are never paused. */
   backoffUntil: Schema.NullOr(IsoDateTime),
-  pauseReason: Schema.NullOr(Schema.String),
 });
 export type Agent = typeof Agent.Type;
 /** Omit id to create. A project is required for creation; null on edits keeps the conversation's workspace. */
-export const AgentUpsertInput = Schema.Struct({ id: Schema.optional(AgentId), ...AgentFields });
+export const AgentUpsertInput = Schema.Struct({
+  id: Schema.optional(AgentId),
+  ...AgentFields,
+  responsibility: Schema.optional(AgentPolicyFields.responsibility),
+  permissions: Schema.optional(AgentPermissions),
+  notifyPolicy: Schema.optional(AgentPolicyFields.notifyPolicy),
+});
 export type AgentUpsertInput = typeof AgentUpsertInput.Type;
 export const AgentKey = Schema.Struct({ id: AgentId });
 export const AgentListItem = Schema.Struct({
@@ -105,11 +142,13 @@ export const AgentMemoryForgetInput = Schema.Struct({
   agentId: AgentId,
   id: TrimmedNonEmptyString,
 });
-/** Work threads are backend-owned. Clients exclude these from normal chat lists and open them from run details. */
+/** Trigger runs retain their backend-owned Work threads. Clients show them in Work and can open them from agent activity. */
 export const AgentWorkRun = Schema.Struct({
   id: TrimmedNonEmptyString,
   agentId: AgentId,
   triggerId: ScheduledTaskId,
+  triggerKind: Schema.optional(Schema.Literals(["trigger", "event"])),
+  triggerContext: Schema.optional(AgentEventContext),
   workThreadId: ThreadId,
   status: Schema.Literals(["starting", "running", "completed", "failed"]),
   createdAt: IsoDateTime,

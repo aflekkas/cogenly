@@ -5,10 +5,11 @@ import {
   classifySidebarThreadMode,
   createChatDateGrouper,
   filterThreadsForSidebarMode,
-  groupTasksByProject,
   isSidebarMode,
+  newThreadShortcutTarget,
   sidebarModeForThread,
   sortChatsByActivity,
+  windowChatList,
   type SidebarModeThreadClassifier,
 } from "./sidebarModes.logic";
 
@@ -29,9 +30,18 @@ describe("classifySidebarThreadMode", () => {
     expect(classifySidebarThreadMode({ isAgent: false, isScratch: false })).toBe("tasks");
   });
 
-  it("lets a scheduled task binding win over the project", () => {
+  it("lets an agent conversation win over the project", () => {
     expect(classifySidebarThreadMode({ isAgent: true, isScratch: true })).toBe("agents");
     expect(classifySidebarThreadMode({ isAgent: true, isScratch: false })).toBe("agents");
+  });
+
+  it("puts agent work in tasks wherever it runs", () => {
+    expect(classifySidebarThreadMode({ isAgent: true, isScratch: true, isAgentWork: true })).toBe(
+      "tasks",
+    );
+    expect(classifySidebarThreadMode({ isAgent: true, isScratch: false, isAgentWork: true })).toBe(
+      "tasks",
+    );
   });
 });
 
@@ -60,7 +70,7 @@ describe("filterThreadsForSidebarMode", () => {
     thread("env-b", "scratch-agent", "scratch"),
   ];
 
-  it("hides agent work in scratch and project workspaces, retaining conversations", () => {
+  it("lists agent work beside user work and keeps conversations in agents", () => {
     const owned = [
       {
         ...thread("env-a", "scratch-work", "scratch"),
@@ -73,7 +83,10 @@ describe("filterThreadsForSidebarMode", () => {
       },
     ];
     expect(filterThreadsForSidebarMode(owned, "chats", classifier)).toEqual([]);
-    expect(filterThreadsForSidebarMode(owned, "tasks", classifier)).toEqual([]);
+    expect(filterThreadsForSidebarMode(owned, "tasks", classifier).map((t) => t.id)).toEqual([
+      "scratch-work",
+      "project-work",
+    ]);
     expect(filterThreadsForSidebarMode(owned, "agents", classifier).map((t) => t.id)).toEqual([
       "conversation",
     ]);
@@ -157,36 +170,55 @@ describe("sortChatsByActivity and createChatDateGrouper", () => {
   });
 });
 
-describe("groupTasksByProject", () => {
-  const task = (id: string, project: string, at: string) => ({
-    id,
-    project,
-    latestUserMessageAt: at,
-    updatedAt: at,
+describe("windowChatList", () => {
+  const chats = Array.from({ length: 7 }, (_, index) => `chat-${index}`);
+  const isOpen = (key: string | null) => (chat: string) => chat === key;
+
+  it("renders everything when the list fits the window", () => {
+    expect(windowChatList(chats, 10, isOpen(null))).toEqual({ visible: chats, hiddenCount: 0 });
   });
 
-  it("orders projects by their latest activity and keeps row order inside each", () => {
-    const rows = [
-      task("a1", "alpha", "2026-03-01T10:00:00.000Z"),
-      task("b1", "beta", "2026-03-01T09:00:00.000Z"),
-      task("a2", "alpha", "2026-03-01T08:00:00.000Z"),
-      task("b2", "beta", "2026-03-01T12:00:00.000Z"),
-      task("c1", "gamma", "2026-03-01T11:00:00.000Z"),
-    ];
-    const groups = groupTasksByProject(rows, (row) => row.project);
-    expect(groups.map((group) => group.projectKey)).toEqual(["beta", "gamma", "alpha"]);
-    expect(groups.map((group) => group.threads.map((row) => row.id))).toEqual([
-      ["b1", "b2"],
-      ["c1"],
-      ["a1", "a2"],
-    ]);
+  it("renders the newest page and counts the rest", () => {
+    expect(windowChatList(chats, 3, isOpen(null))).toEqual({
+      visible: ["chat-0", "chat-1", "chat-2"],
+      hiddenCount: 4,
+    });
   });
 
-  it("keeps first-seen order for ties and unparseable timestamps", () => {
-    const rows = [task("x", "one", "not-a-date"), task("y", "two", "not-a-date")];
-    expect(groupTasksByProject(rows, (row) => row.project).map((g) => g.projectKey)).toEqual([
-      "one",
-      "two",
-    ]);
+  it("keeps an open chat from beyond the window, after the page", () => {
+    expect(windowChatList(chats, 3, isOpen("chat-5"))).toEqual({
+      visible: ["chat-0", "chat-1", "chat-2", "chat-5"],
+      hiddenCount: 3,
+    });
+    expect(windowChatList(chats, 3, isOpen("chat-1")).visible).toHaveLength(3);
+  });
+});
+
+describe("newThreadShortcutTarget", () => {
+  it("starts a plain chat in Chats mode, whatever the repositories", () => {
+    expect(
+      newThreadShortcutTarget({ mode: "chats", legacySidebar: false, repositoryCount: 4 }),
+    ).toBe("chat");
+    expect(
+      newThreadShortcutTarget({ mode: "chats", legacySidebar: false, repositoryCount: 1 }),
+    ).toBe("chat");
+  });
+
+  it("keeps the repository flow in Work and Agents", () => {
+    expect(
+      newThreadShortcutTarget({ mode: "tasks", legacySidebar: false, repositoryCount: 3 }),
+    ).toBe("repository-picker");
+    expect(
+      newThreadShortcutTarget({ mode: "tasks", legacySidebar: false, repositoryCount: 1 }),
+    ).toBe("current-repository");
+    expect(
+      newThreadShortcutTarget({ mode: "agents", legacySidebar: false, repositoryCount: 3 }),
+    ).toBe("repository-picker");
+  });
+
+  it("leaves the legacy sidebar on its contextual create", () => {
+    expect(
+      newThreadShortcutTarget({ mode: "chats", legacySidebar: true, repositoryCount: 3 }),
+    ).toBe("current-repository");
   });
 });

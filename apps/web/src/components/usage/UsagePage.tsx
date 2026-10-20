@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ChatGptUsageButton } from "../settings/ChatGptUsageButton";
 import { usesChatGptSharing } from "@t3tools/shared/usageLimits";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
@@ -933,35 +934,39 @@ export function UsagePage() {
           </WorkspacePageContainer>
         </ScrollArea>
       </div>
-      {selectedModel !== undefined && !showingLimits ? (
-        <UsageModelDialog
-          model={selectedModel}
-          environments={selectedEnvironments}
-          metric={metric === "tokens" ? "tokens" : "cost"}
-          chartWindow={{
-            days,
-            hours,
-            resolution: shownHourly ? "hour" : "day",
-            timeZone: shownWindow.timeZone,
-            referenceTime: shownWindow.untilTime,
-          }}
-          onSetPrice={() => {
-            setSelectedModelKey(null);
-            setPriceDialog({ model: selectedModel.model });
-          }}
-          onClose={() => setSelectedModelKey(null)}
-        />
-      ) : null}
-      {priceDialog ? (
-        <UsagePriceOverrides
-          usage={environments}
-          initialSelectedEnvironmentIds={selectedEnvironmentIds}
-          initialModel={priceDialog.model}
-          onOpenChange={(open) => {
-            if (!open) setPriceDialog(null);
-          }}
-        />
-      ) : null}
+      <OverlayPresence when={!showingLimits && selectedModel}>
+        {(selectedModel) => (
+          <UsageModelDialog
+            model={selectedModel}
+            environments={selectedEnvironments}
+            metric={metric === "tokens" ? "tokens" : "cost"}
+            chartWindow={{
+              days,
+              hours,
+              resolution: shownHourly ? "hour" : "day",
+              timeZone: shownWindow.timeZone,
+              referenceTime: shownWindow.untilTime,
+            }}
+            onSetPrice={() => {
+              setSelectedModelKey(null);
+              setPriceDialog({ model: selectedModel.model });
+            }}
+            onClose={() => setSelectedModelKey(null)}
+          />
+        )}
+      </OverlayPresence>
+      <OverlayPresence when={priceDialog}>
+        {(priceDialog) => (
+          <UsagePriceOverrides
+            usage={environments}
+            initialSelectedEnvironmentIds={selectedEnvironmentIds}
+            initialModel={priceDialog.model}
+            onOpenChange={(open) => {
+              if (!open) setPriceDialog(null);
+            }}
+          />
+        )}
+      </OverlayPresence>
     </SidebarInset>
   );
 }

@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
 import * as Option from "effect/Option";
@@ -28,6 +29,7 @@ import type {
 } from "@t3tools/contracts";
 import { DEFAULT_WEBHOOK_PROMPT } from "@t3tools/client-runtime/scheduled-task-webhook";
 import {
+  AgentId,
   MAX_WEBHOOK_DELIVERY_AGE_MINUTES,
   MIN_SCHEDULED_TASK_INTERVAL_MS,
   ProviderInstanceId,
@@ -66,10 +68,22 @@ import { ConnectionStatusDot, connectionPhaseDotClassName } from "../ConnectionS
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { readEnvironmentScope } from "~/state/session";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { useAgents } from "../../agents/agentsClient";
+import {
+  EVENT_FILTER_OUT_OF_SCOPE_MESSAGE,
+  EVENT_RUN_NOW_UNSUPPORTED_MESSAGE,
+  describeSchedule,
+  eventFilterChoices,
+  scheduledTaskErrorCode,
+  triggerErrorMessage,
+} from "../../agents/agentWorkspace.logic";
+import { EventTriggerFields } from "../../agents/EventTriggerFields";
+import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { EnvironmentRow, environmentTransportLabel } from "./EnvironmentRow";
 import { SettingsGroup } from "./SettingsGroup";
 import { settingsScopeEnvironmentLabel, settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import {
+  DEFAULT_DRAFT_EVENT,
   WEBHOOK_SIGNATURE_DEFAULTS,
   matchesScheduledTaskScope,
   scheduleFromDraft,
@@ -117,7 +131,7 @@ const WEEKDAY_SHORT = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
 
 const WORKSPACE_MODE_LABELS: Record<WorkspaceMode, string> = {
   worktree: "Create a new worktree",
-  root: "Use the project checkout",
+  root: "Use the repository checkout",
   existing_worktree: "Use a specific checkout",
 };
 
@@ -144,6 +158,8 @@ const EMPTY_DRAFT: DraftState = {
   ...WEBHOOK_SIGNATURE_DEFAULTS,
   signatureSecret: "",
   maxDeliveryAgeMinutes: "",
+  agentId: null,
+  event: DEFAULT_DRAFT_EVENT,
 };
 
 /** Labelled field: a caption sitting above its control. */
@@ -180,8 +196,12 @@ function splitModelKey(value: string): ModelSelection | null {
   };
 }
 
-export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
+export function scheduleLabel(
+  schedule: ScheduledTaskSchedule,
+  names?: Parameters<typeof describeSchedule>[1],
+): string {
   if (schedule.type === "webhook") return "On webhook";
+  if (schedule.type === "event") return describeSchedule(schedule, names);
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / 60_000;
     return Number.isInteger(minutes)
@@ -329,14 +349,16 @@ export function ScheduledTasksSettings(target: {
           </div>
         )}
       </SettingsSection>
-      {editor ? (
-        <ScheduledTaskEditorDialog
-          key={`${editor.environmentId}:${editor.task?.id ?? "new"}`}
-          initialEnvironmentId={editor.environmentId}
-          task={editor.task}
-          onClose={() => setEditor(null)}
-        />
-      ) : null}
+      <OverlayPresence when={editor}>
+        {(editor) => (
+          <ScheduledTaskEditorDialog
+            key={`${editor.environmentId}:${editor.task?.id ?? "new"}`}
+            initialEnvironmentId={editor.environmentId}
+            task={editor.task}
+            onClose={() => setEditor(null)}
+          />
+        )}
+      </OverlayPresence>
     </SettingsPageContainer>
   );
 }
@@ -455,14 +477,14 @@ function ScheduledTaskEnvironmentList({
       {taskId && linkedState?.tasks && linkedState.error === null && !linkedTask ? (
         <SettingsRow
           title="Task unavailable"
-          description="This task no longer exists or is outside the selected project scope."
+          description="This task no longer exists or is outside the selected repository scope."
           role="status"
         />
       ) : null}
       {populated.length === 0 && loaded.length > 0 ? (
         <SettingsRow
           title="No scheduled tasks"
-          description="No tasks match this environment and project selection."
+          description="No tasks match this environment and repository selection."
         />
       ) : null}
       {Object.entries(summaries).map(([label, entries]) => {
@@ -547,14 +569,14 @@ function ScheduledTaskEnvironmentSection({
           {taskId && !linkedTask ? (
             <SettingsRow
               title="Task unavailable"
-              description="This task no longer exists or is outside the selected project scope."
+              description="This task no longer exists or is outside the selected repository scope."
               role="status"
             />
           ) : null}
           {tasks.length === 0 ? (
             <SettingsRow
               title="No scheduled tasks"
-              description="No tasks match this environment and project selection."
+              description="No tasks match this environment and repository selection."
             />
           ) : (
             tasks.map((task) => (
@@ -587,6 +609,15 @@ function ScheduledTaskRow({
   const [busy, setBusy] = useState(false);
   const [deliveriesOpen, setDeliveriesOpen] = useState(false);
   const isWebhook = task.schedule.type === "webhook";
+  const isEvent = task.schedule.type === "event";
+  const { labels } = useEnvironmentProjectLabels(isEvent ? environmentId : null);
+  const allProjects = useProjects();
+  const filterNames = {
+    labelName: (id: string) => labels.find((label) => label.id === id)?.name,
+    repositoryName: (id: string) =>
+      allProjects.find((project) => project.environmentId === environmentId && project.id === id)
+        ?.title,
+  };
   const toggle = useAtomCommand(serverEnvironment.setScheduledTaskEnabled, {
     label: "scheduled task enabled",
   });
@@ -611,7 +642,10 @@ function ScheduledTaskRow({
         stackedThreadToast({
           type: "error",
           title: "Could not update scheduled task",
-          description: String(squashAtomCommandFailure(result)),
+          description: triggerErrorMessage(
+            squashAtomCommandFailure(result),
+            "The server rejected the change.",
+          ),
         }),
       );
     }
@@ -623,10 +657,10 @@ function ScheduledTaskRow({
       status={
         <div className="flex flex-wrap items-center gap-2">
           <span>
-            {scheduleLabel(task.schedule)} ·{" "}
+            {scheduleLabel(task.schedule, filterNames)} ·{" "}
             {!task.enabled
               ? "Paused"
-              : isWebhook
+              : isWebhook || isEvent
                 ? "Listening"
                 : task.nextRunAt
                   ? `Next run ${relativeLabel(task.nextRunAt)}`
@@ -669,6 +703,17 @@ function ScheduledTaskRow({
                   <InboxIcon />
                   Deliveries
                 </MenuItem>
+              ) : isEvent ? (
+                // The server refuses manual runs: an event run needs a real source event.
+                <MenuItem disabled>
+                  <PlayIcon />
+                  <span className="flex flex-col">
+                    Run now
+                    <span className="text-xs text-muted-foreground">
+                      {EVENT_RUN_NOW_UNSUPPORTED_MESSAGE}
+                    </span>
+                  </span>
+                </MenuItem>
               ) : (
                 <MenuItem onClick={() => void act("run")}>
                   <PlayIcon />
@@ -682,13 +727,15 @@ function ScheduledTaskRow({
               </MenuItem>
             </MenuPopup>
           </Menu>
-          {deliveriesOpen ? (
-            <WebhookDeliveriesDialog
-              environmentId={environmentId}
-              task={task}
-              onClose={() => setDeliveriesOpen(false)}
-            />
-          ) : null}
+          <OverlayPresence when={deliveriesOpen}>
+            {() => (
+              <WebhookDeliveriesDialog
+                environmentId={environmentId}
+                task={task}
+                onClose={() => setDeliveriesOpen(false)}
+              />
+            )}
+          </OverlayPresence>
         </div>
       }
     />
@@ -980,6 +1027,8 @@ function ScheduledTaskEditorDialog({
     task ? taskToDraft(task) : { ...EMPTY_DRAFT, projectId: projects[0]?.id ?? "" },
   );
   const [saving, setSaving] = useState(false);
+  // Shown beside the event filter, where an out-of-scope project or repository is fixed.
+  const [eventFilterError, setEventFilterError] = useState<string | null>(null);
   const submissionPending = useRef(false);
   const editingTaskMissing =
     draft.editingId !== null &&
@@ -1050,7 +1099,11 @@ function ScheduledTaskEditorDialog({
       !projects.some((project) => project.id === selectedProjectId) ||
       selection === null
     ) {
-      reportFailure("Scheduled task is incomplete", "Add a title, prompt, project, and model.");
+      reportFailure("Scheduled task is incomplete", "Add a title, prompt, repository, and model.");
+      return;
+    }
+    if (draft.scheduleMode === "event" && draft.agentId === null) {
+      reportFailure("Choose an agent", "An event trigger wakes one of your agents.");
       return;
     }
     const schedule = scheduleFromDraft(draft);
@@ -1106,6 +1159,9 @@ function ScheduledTaskEditorDialog({
       prompt: draft.prompt.trim(),
       enabled: draft.enabled,
       schedule,
+      ...(draft.scheduleMode === "event" && draft.agentId
+        ? { agentId: AgentId.make(draft.agentId) }
+        : {}),
       projectId: selectedProjectId as ProjectId,
       threadId: draft.threadId ? (draft.threadId as ThreadId) : null,
       workspaceStrategy,
@@ -1117,12 +1173,16 @@ function ScheduledTaskEditorDialog({
     // Lock before React renders, and keep successful creates locked until the form closes.
     submissionPending.current = true;
     setSaving(true);
+    setEventFilterError(null);
     const result = await upsertTask({ environmentId, input });
     setSaving(false);
     if (result._tag === "Failure") {
       submissionPending.current = false;
       if (!isAtomCommandInterrupted(result)) {
-        reportFailure("Could not save scheduled task", squashAtomCommandFailure(result));
+        const failure = squashAtomCommandFailure(result);
+        if (scheduledTaskErrorCode(failure) === "event_filter_out_of_scope")
+          setEventFilterError(EVENT_FILTER_OUT_OF_SCOPE_MESSAGE);
+        else reportFailure("Could not save scheduled task", failure);
       }
       return;
     }
@@ -1140,8 +1200,8 @@ function ScheduledTaskEditorDialog({
         <DialogHeader>
           <DialogTitle>{draft.editingId ? "Edit task" : "New task"}</DialogTitle>
           <DialogDescription>
-            Run a prompt automatically — on an interval, at a fixed time, or when a webhook is
-            called.
+            Run a prompt automatically — on an interval, at a fixed time, when a webhook is called,
+            or when something happens in Work.
           </DialogDescription>
         </DialogHeader>
 
@@ -1234,15 +1294,17 @@ function ScheduledTaskEditorDialog({
             </Field>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Project" htmlFor="scheduled-task-project">
+              <Field label="Repository" htmlFor="scheduled-task-project">
                 <Select
                   value={selectedProjectId}
+                  // An event trigger runs in its agent's repository.
+                  disabled={draft.scheduleMode === "event" && draft.agentId !== null}
                   onValueChange={(projectId) =>
                     setDraft((current) => ({ ...current, projectId: projectId ?? "" }))
                   }
                 >
                   <SelectTrigger size="sm" id="scheduled-task-project">
-                    <SelectValue placeholder="Select a project">
+                    <SelectValue placeholder="Select a repository">
                       {selectedProject?.title}
                     </SelectValue>
                   </SelectTrigger>
@@ -1278,7 +1340,7 @@ function ScheduledTaskEditorDialog({
                   </SelectTrigger>
                   <SelectPopup>
                     <SelectItem value="worktree">Create a new worktree</SelectItem>
-                    <SelectItem value="root">Use the project checkout</SelectItem>
+                    <SelectItem value="root">Use the repository checkout</SelectItem>
                     <SelectItem value="existing_worktree">Use a specific checkout</SelectItem>
                   </SelectPopup>
                 </Select>
@@ -1364,7 +1426,12 @@ function ScheduledTaskEditorDialog({
                   value={[draft.scheduleMode]}
                   onValueChange={(values) => {
                     const mode = values[0] as ScheduleMode | undefined;
-                    if (mode === "fixed" || mode === "interval" || mode === "webhook")
+                    if (
+                      mode === "fixed" ||
+                      mode === "interval" ||
+                      mode === "webhook" ||
+                      mode === "event"
+                    )
                       setDraft((current) => ({
                         ...current,
                         scheduleMode: mode,
@@ -1378,10 +1445,23 @@ function ScheduledTaskEditorDialog({
                   <Toggle value="fixed">At a time</Toggle>
                   <Toggle value="interval">Every interval</Toggle>
                   <Toggle value="webhook">On webhook</Toggle>
+                  <Toggle value="event">On event</Toggle>
                 </ToggleGroup>
               </div>
 
-              {draft.scheduleMode === "webhook" ? (
+              {draft.scheduleMode === "event" ? (
+                <EventScheduleFields
+                  environmentId={environmentId}
+                  draft={draft}
+                  repositories={projects}
+                  agentLocked={task?.agentId != null}
+                  error={eventFilterError}
+                  onChange={(patch) => {
+                    setEventFilterError(null);
+                    setDraft((current) => ({ ...current, ...patch }));
+                  }}
+                />
+              ) : draft.scheduleMode === "webhook" ? (
                 <div className="space-y-4">
                   <WebhookEndpointField environmentId={environmentId} task={liveTask} />
                   <p className="text-xs text-muted-foreground">
@@ -1584,5 +1664,88 @@ function ScheduledTaskEditorDialog({
         </DialogFooter>
       </DialogPopup>
     </Dialog>
+  );
+}
+
+/**
+ * Which agent an event trigger wakes and what wakes it. Choosing the agent binds the
+ * task to its conversation, repository and model, as triggers made from the agent are.
+ */
+function EventScheduleFields({
+  environmentId,
+  draft,
+  repositories,
+  agentLocked,
+  error,
+  onChange,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly draft: DraftState;
+  readonly repositories: ReadonlyArray<{ id: ProjectId; title: string }>;
+  /** An agent's own trigger keeps its agent. */
+  readonly agentLocked: boolean;
+  /** Why the server rejected the filter, shown under it. */
+  readonly error: string | null;
+  readonly onChange: (patch: Partial<DraftState>) => void;
+}) {
+  const { agents } = useAgents();
+  const { labels } = useEnvironmentProjectLabels(environmentId);
+  const candidates = agents.filter((agent) => agent.environmentId === environmentId);
+  const selected = candidates.find((agent) => agent.id === draft.agentId);
+  // The filter may name only what the chosen agent can read; nothing before one is chosen.
+  const choices = selected
+    ? eventFilterChoices(selected, labels, repositories)
+    : { labels: [], repositories: [] };
+  return (
+    <div className="space-y-4">
+      <Field label="Wakes" htmlFor="scheduled-task-agent">
+        <Select
+          value={draft.agentId ?? ""}
+          disabled={agentLocked}
+          onValueChange={(id) => {
+            const agent = candidates.find((candidate) => candidate.id === id);
+            if (!agent) return;
+            onChange({
+              agentId: agent.id,
+              threadId: agent.conversationThreadId,
+              ...(agent.projectId ? { projectId: agent.projectId } : {}),
+              workspaceMode: "root",
+              runtimeMode: agent.runtimeMode,
+              modelKey: `${agent.modelSelection.instanceId}:${agent.modelSelection.model}`,
+              baseModelSelection: agent.modelSelection,
+            });
+          }}
+        >
+          <SelectTrigger size="sm" id="scheduled-task-agent">
+            <SelectValue placeholder="Choose an agent">
+              {selected?.name ?? (draft.agentId ? "Unknown agent" : undefined)}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            {candidates.map((agent) => (
+              <SelectItem key={agent.id} value={agent.id} label={agent.name}>
+                {agent.name}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </Field>
+      {candidates.length === 0 && draft.agentId === null ? (
+        <p className="text-xs text-muted-foreground">
+          Events wake an agent. Create one in Agents first.
+        </p>
+      ) : null}
+      <EventTriggerFields
+        value={draft.event}
+        {...choices}
+        Field={Field}
+        onChange={(event) => onChange({ event })}
+      />
+      {error ? (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }

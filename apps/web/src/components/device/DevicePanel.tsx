@@ -145,166 +145,172 @@ export function DevicePanel(props: {
       .map((platform) => ({ ...platform, hostId: host.id, hostLabel: host.label })),
   );
 
-  if (loaded && (!state.onboardingCompleted || hostDisabled)) {
-    return (
-      <Dialog
-        open={props.visible}
-        onOpenChange={(isOpen) => {
-          if (!isOpen) props.onDismissSetup();
-        }}
-      >
-        <WizardPopup>
-          <DeviceSetup environmentId={environmentId} state={state} />
-        </WizardPopup>
-      </Dialog>
-    );
-  }
+  const needsSetup = loaded && (!state.onboardingCompleted || hostDisabled);
+  // Setup stays mounted beside the panel, so finishing it animates the dialog
+  // out instead of swapping it for the panel at once.
+  const setupDialog = loaded ? (
+    <Dialog
+      open={props.visible && needsSetup}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) props.onDismissSetup();
+      }}
+    >
+      <WizardPopup>
+        <DeviceSetup environmentId={environmentId} state={state} />
+      </WizardPopup>
+    </Dialog>
+  ) : null;
+  if (needsSetup) return <>{setupDialog}</>;
 
   return (
-    <PreviewPanelShell mode={props.mode}>
-      {hostReady && !activeDevice && state.hostStatusDetail ? (
-        <div
-          role="status"
-          className="whitespace-pre-line border-b px-3 py-2 text-xs text-muted-foreground"
-        >
-          {state.hostStatusDetail}
-        </div>
-      ) : null}
-      <DeviceHostUpdates state={state} environmentId={environmentId} />
-      {bootingDevices.length > 0 ? (
-        <div role="status" className="border-b px-3 py-2 text-xs text-muted-foreground">
-          Starting {bootingDevices.map((device) => device.name).join(", ")}… This can take a minute.
-        </div>
-      ) : null}
-      {operationError ? (
-        <div
-          role="alert"
-          className="flex items-start gap-2 border-b bg-destructive/5 px-3 py-2 text-xs text-destructive"
-        >
-          <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">{operationError}</p>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Dismiss device error"
-            onClick={() => setOperationError(null)}
+    <>
+      {setupDialog}
+      <PreviewPanelShell mode={props.mode}>
+        {hostReady && !activeDevice && state.hostStatusDetail ? (
+          <div
+            role="status"
+            className="whitespace-pre-line border-b px-3 py-2 text-xs text-muted-foreground"
           >
-            <X className="size-3" />
-          </Button>
-        </div>
-      ) : null}
-      <div className="@container relative flex min-h-0 flex-1">
-        {activeDevice && activeSession ? (
-          <DeviceWorkspace
-            key={`${environmentId}\u0000${deviceKey(activeDevice)}`}
-            environmentId={environmentId}
-            device={activeDevice}
-            hostLabel={
-              state.hosts.find((host) => host.id === activeDevice.hostId)?.label ?? "Device host"
-            }
-            hostDiagnostics={state.hostStatusDetail}
-            visible={props.visible}
-            onFloat={floatActive}
-            onClose={() => closeActive(false)}
-            onPowerOff={() => closeActive(true)}
-          />
-        ) : pendingDevice || hostBusy || !loaded ? (
-          <DeviceLoadingView
-            name={pendingDevice?.name ?? "Devices"}
-            description={
-              pendingDevice
-                ? `${state.hosts.find((host) => host.id === pendingDevice.hostId)?.label ?? "Device host"} · ${pendingDevice.version}`
-                : ""
-            }
-            stage="opening"
-            message={
-              pendingDevice
-                ? pendingDevice.booted
-                  ? "Opening device…"
-                  : "Starting device…"
-                : state.hostStatus === "installing"
-                  ? (state.hostStatusDetail ?? "Installing device support…")
-                  : "Finding devices…"
-            }
-          />
-        ) : (
-          <div className="scrollbar-gutter-both flex size-full flex-col overflow-y-auto px-5 py-8 text-sm text-muted-foreground">
-            <div
-              className={cn(
-                "mx-auto flex w-full max-w-xl flex-col gap-6",
-                grouped.length === 0 && "my-auto items-center text-center",
-              )}
-            >
-              {grouped.length === 0 ? (
-                <>
-                  <Smartphone className="size-6 opacity-60" />
-                  <p className="max-w-sm">
-                    {state.hostStatus === "failed"
-                      ? (state.hostStatusDetail ?? "The device hub failed to start.")
-                      : "No simulators or emulators were found on this environment."}
-                  </p>
-                </>
-              ) : null}
-              {hostReady && grouped.length > 0 ? (
-                <div className="w-full space-y-6 text-left">
-                  {grouped.map((group) => (
-                    <section key={group.platform} className="space-y-3">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Smartphone className="size-4 shrink-0" />
-                        <h3 className="font-medium">{platformLabel(group.platform)}</h3>
-                      </div>
-                      <DiscoveryList>
-                        {group.devices.map((device) => (
-                          <DiscoveryListRow
-                            key={deviceKey(device)}
-                            icon={
-                              <span className="grid size-8 shrink-0 place-items-center rounded-md border border-border/60">
-                                <Smartphone className="size-4" />
-                              </span>
-                            }
-                            title={device.name}
-                            description={`${state.hosts.find((host) => host.id === device.hostId)?.label} · ${device.version} · ${device.booted ? "Running" : "Stopped"}`}
-                            disabled={pendingDeviceKey !== null}
-                            aria-label={`${device.booted ? "Open" : "Start"} ${device.name}`}
-                            onClick={() => void selectDevice(deviceKey(device))}
-                            action={
-                              pendingDeviceKey === deviceKey(device) ? (
-                                <Spinner size="xs" />
-                              ) : (
-                                <span className="text-xs text-muted-foreground">
-                                  {device.booted ? "Open" : "Start"}
-                                </span>
-                              )
-                            }
-                          />
-                        ))}
-                      </DiscoveryList>
-                    </section>
-                  ))}
-                </div>
-              ) : null}
-              {hostReady &&
-              !state.devices.some((device) => device.platform === "android") &&
-              !unavailablePlatforms.some((platform) => platform.platform === "android") ? (
-                <p className="max-w-sm text-xs">
-                  No Android virtual devices found. Create one in Android Studio's Device Manager,
-                  then refresh.
-                </p>
-              ) : null}
-              {loaded && !hostBusy ? (
-                <Button
-                  className={grouped.length > 0 ? "self-start" : "self-center"}
-                  variant={grouped.length > 0 ? "ghost" : "outline"}
-                  size="sm"
-                  onClick={() => void list({ environmentId, input: {} })}
-                >
-                  Refresh devices
-                </Button>
-              ) : null}
-            </div>
+            {state.hostStatusDetail}
           </div>
-        )}
-      </div>
-    </PreviewPanelShell>
+        ) : null}
+        <DeviceHostUpdates state={state} environmentId={environmentId} />
+        {bootingDevices.length > 0 ? (
+          <div role="status" className="border-b px-3 py-2 text-xs text-muted-foreground">
+            Starting {bootingDevices.map((device) => device.name).join(", ")}… This can take a
+            minute.
+          </div>
+        ) : null}
+        {operationError ? (
+          <div
+            role="alert"
+            className="flex items-start gap-2 border-b bg-destructive/5 px-3 py-2 text-xs text-destructive"
+          >
+            <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">{operationError}</p>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Dismiss device error"
+              onClick={() => setOperationError(null)}
+            >
+              <X className="size-3" />
+            </Button>
+          </div>
+        ) : null}
+        <div className="@container relative flex min-h-0 flex-1">
+          {activeDevice && activeSession ? (
+            <DeviceWorkspace
+              key={`${environmentId}\u0000${deviceKey(activeDevice)}`}
+              environmentId={environmentId}
+              device={activeDevice}
+              hostLabel={
+                state.hosts.find((host) => host.id === activeDevice.hostId)?.label ?? "Device host"
+              }
+              hostDiagnostics={state.hostStatusDetail}
+              visible={props.visible}
+              onFloat={floatActive}
+              onClose={() => closeActive(false)}
+              onPowerOff={() => closeActive(true)}
+            />
+          ) : pendingDevice || hostBusy || !loaded ? (
+            <DeviceLoadingView
+              name={pendingDevice?.name ?? "Devices"}
+              description={
+                pendingDevice
+                  ? `${state.hosts.find((host) => host.id === pendingDevice.hostId)?.label ?? "Device host"} · ${pendingDevice.version}`
+                  : ""
+              }
+              stage="opening"
+              message={
+                pendingDevice
+                  ? pendingDevice.booted
+                    ? "Opening device…"
+                    : "Starting device…"
+                  : state.hostStatus === "installing"
+                    ? (state.hostStatusDetail ?? "Installing device support…")
+                    : "Finding devices…"
+              }
+            />
+          ) : (
+            <div className="scrollbar-gutter-both flex size-full flex-col overflow-y-auto px-5 py-8 text-sm text-muted-foreground">
+              <div
+                className={cn(
+                  "mx-auto flex w-full max-w-xl flex-col gap-6",
+                  grouped.length === 0 && "my-auto items-center text-center",
+                )}
+              >
+                {grouped.length === 0 ? (
+                  <>
+                    <Smartphone className="size-6 opacity-60" />
+                    <p className="max-w-sm">
+                      {state.hostStatus === "failed"
+                        ? (state.hostStatusDetail ?? "The device hub failed to start.")
+                        : "No simulators or emulators were found on this environment."}
+                    </p>
+                  </>
+                ) : null}
+                {hostReady && grouped.length > 0 ? (
+                  <div className="w-full space-y-6 text-left">
+                    {grouped.map((group) => (
+                      <section key={group.platform} className="space-y-3">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Smartphone className="size-4 shrink-0" />
+                          <h3 className="font-medium">{platformLabel(group.platform)}</h3>
+                        </div>
+                        <DiscoveryList>
+                          {group.devices.map((device) => (
+                            <DiscoveryListRow
+                              key={deviceKey(device)}
+                              icon={
+                                <span className="grid size-8 shrink-0 place-items-center rounded-md border border-border/60">
+                                  <Smartphone className="size-4" />
+                                </span>
+                              }
+                              title={device.name}
+                              description={`${state.hosts.find((host) => host.id === device.hostId)?.label} · ${device.version} · ${device.booted ? "Running" : "Stopped"}`}
+                              disabled={pendingDeviceKey !== null}
+                              aria-label={`${device.booted ? "Open" : "Start"} ${device.name}`}
+                              onClick={() => void selectDevice(deviceKey(device))}
+                              action={
+                                pendingDeviceKey === deviceKey(device) ? (
+                                  <Spinner size="xs" />
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">
+                                    {device.booted ? "Open" : "Start"}
+                                  </span>
+                                )
+                              }
+                            />
+                          ))}
+                        </DiscoveryList>
+                      </section>
+                    ))}
+                  </div>
+                ) : null}
+                {hostReady &&
+                !state.devices.some((device) => device.platform === "android") &&
+                !unavailablePlatforms.some((platform) => platform.platform === "android") ? (
+                  <p className="max-w-sm text-xs">
+                    No Android virtual devices found. Create one in Android Studio's Device Manager,
+                    then refresh.
+                  </p>
+                ) : null}
+                {loaded && !hostBusy ? (
+                  <Button
+                    className={grouped.length > 0 ? "self-start" : "self-center"}
+                    variant={grouped.length > 0 ? "ghost" : "outline"}
+                    size="sm"
+                    onClick={() => void list({ environmentId, input: {} })}
+                  >
+                    Refresh devices
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </div>
+      </PreviewPanelShell>
+    </>
   );
 }
 

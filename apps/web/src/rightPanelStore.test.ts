@@ -75,4 +75,18 @@ describe("terminal surface actions", () => {
       { id: "terminal", kind: "terminal", activeTerminalId: "agent-2" },
     ]);
   });
+
+  it("keeps a selected shell when the agent starts a command", () => {
+    useRightPanelStore.getState().openTerminal(threadRef, "term-1");
+
+    useRightPanelStore.getState().revealAgentTerminal(threadRef, "agent-3");
+
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
+    expect(state.activeSurfaceId).toBe("terminal");
+    expect(state.surfaces).toContainEqual({
+      id: "terminal",
+      kind: "terminal",
+      activeTerminalId: "term-1",
+    });
+  });
 });

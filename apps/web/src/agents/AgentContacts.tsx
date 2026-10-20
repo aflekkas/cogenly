@@ -1,6 +1,8 @@
-import { Fragment, type ReactNode } from "react";
+import { PlusIcon } from "lucide-react";
 import { AgentFace } from "~/components/agents/face";
-import { agentContactKey } from "./agents.logic";
+import { Button } from "~/components/ui/button";
+import { agentContactKey, agentStatusLabel } from "./agents.logic";
+import { agentAttentionCount } from "./agentWorkspace.logic";
 import { useAgentUnread, useAgents } from "./agentsClient";
 import type { AgentContact } from "./agents.types";
 
@@ -8,12 +10,10 @@ export function AgentContacts({
   activeKey,
   onOpen,
   onCreate,
-  groups,
 }: {
   activeKey: string | null;
   onOpen: (agent: AgentContact) => void;
   onCreate: () => void;
-  groups?: ReadonlyArray<{ key: string; heading?: ReactNode; agents: ReadonlyArray<AgentContact> }>;
 }) {
   const { agents, loading, error } = useAgents();
   return (
@@ -30,27 +30,32 @@ export function AgentContacts({
       )}
       {!loading && agents.length === 0 && (
         <div className="agent-empty">
-          <AgentFace seed="new-friend" state="asleep" size={48} />
-          <p>A little help, always close.</p>
+          {/* Neutral and awake: drawn in the foreground ink, with eye holes
+              that show the panel behind. */}
+          <AgentFace
+            seed="new-friend"
+            expression="neutre"
+            color="currentColor"
+            paper="none"
+            size={48}
+            className="text-foreground/90"
+          />
+          <p>No agents yet</p>
           <span>Create an agent to talk to, give work to, and hear back from.</span>
-          <button className="agent-text-button" type="button" onClick={onCreate}>
+          <Button size="sm" onClick={onCreate}>
+            <PlusIcon aria-hidden />
             Create your first agent
-          </button>
+          </Button>
         </div>
       )}
       <ul aria-label="Agents">
-        {(groups ?? [{ key: "all", agents }]).map((group) => (
-          <Fragment key={group.key}>
-            {group.heading}
-            {group.agents.map((agent) => (
-              <Contact
-                key={agentContactKey(agent)}
-                agent={agent}
-                active={activeKey === agentContactKey(agent)}
-                onOpen={onOpen}
-              />
-            ))}
-          </Fragment>
+        {agents.map((agent) => (
+          <Contact
+            key={agentContactKey(agent)}
+            agent={agent}
+            active={activeKey === agentContactKey(agent)}
+            onOpen={onOpen}
+          />
         ))}
       </ul>
     </div>
@@ -66,6 +71,9 @@ function Contact({
   onOpen: (agent: AgentContact) => void;
 }) {
   const unread = useAgentUnread(agent);
+  const status = agentStatusLabel(agent);
+  // Only decisions waiting on the owner earn a count; unread replies get a dot.
+  const attention = agentAttentionCount(agent);
   return (
     <li>
       <button
@@ -84,14 +92,19 @@ function Contact({
         <span className="agent-contact-copy">
           <span className="agent-contact-name">
             <span>{agent.name}</span>
+            <small className="agent-contact-status" data-status={status}>
+              {status}
+            </small>
           </span>
           <span className="agent-contact-preview">
             <span>{agent.preview || "Say hello"}</span>
-            {unread > 0 && (
-              <span className="agent-unread" aria-label={`${unread} unread messages`}>
-                {unread > 99 ? "99+" : unread}
+            {attention > 0 ? (
+              <span className="agent-unread" aria-label={`${attention} waiting on you`}>
+                {attention > 99 ? "99+" : attention}
               </span>
-            )}
+            ) : unread > 0 ? (
+              <span className="agent-unread-dot" aria-label="Unread reply" />
+            ) : null}
           </span>
         </span>
       </button>

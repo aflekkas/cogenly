@@ -3,6 +3,7 @@ import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { CollapsibleSectionHeader, SectionHeaderStatus } from "../ui/collapsible-section-header";
+import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { PullRequestGlyph } from "../changeRequestIcons";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -154,14 +155,17 @@ function ThreadLineageGroup(props: {
           {!expanded && ` (${props.rows.length})`}
         </CollapsibleSectionHeader>
       ) : null}
-      {expanded ? (
-        <ThreadLineageRowList
-          hiddenCount={hiddenCount}
-          onShowMore={() => setVisibleCount((count) => count + THREAD_LINEAGE_PAGE_COUNT)}
-        >
-          {props.children(visibleRows)}
-        </ThreadLineageRowList>
-      ) : null}
+      {/* Height travels on the panel's measured height; closed, it unmounts. */}
+      <Collapsible open={expanded}>
+        <CollapsiblePanel>
+          <ThreadLineageRowList
+            hiddenCount={hiddenCount}
+            onShowMore={() => setVisibleCount((count) => count + THREAD_LINEAGE_PAGE_COUNT)}
+          >
+            {props.children(visibleRows)}
+          </ThreadLineageRowList>
+        </CollapsiblePanel>
+      </Collapsible>
     </div>
   );
 }

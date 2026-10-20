@@ -1,3 +1,9 @@
+import * as Search from "./search.ts";
+import * as Facts from "./fact.ts";
+import * as Exports from "./export.ts";
+import * as ProjectLabels from "./projectLabel.ts";
+import * as Work from "./work.ts";
+import * as AgentWorkspace from "./agentWorkspace.ts";
 import * as Agents from "./agent.ts";
 import {
   OrchestrationV2SearchThreadError,
@@ -480,6 +486,26 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Persistent agents and their scheduled-task triggers
+  searchQuery: "search.query",
+  exportCreate: "export.create",
+  exportValidate: "export.validate",
+  exportList: "export.list",
+  commitmentsDelete: "commitments.delete",
+  projectLabelsList: "projectLabels.list",
+  projectLabelsSubscribe: "projectLabels.subscribe",
+  projectLabelsCreate: "projectLabels.create",
+  projectLabelsUpdate: "projectLabels.update",
+  projectLabelsDelete: "projectLabels.delete",
+  projectLabelsLinkRepository: "projectLabels.linkRepository",
+  projectLabelsUnlinkRepository: "projectLabels.unlinkRepository",
+  projectLabelsGetThreadLabels: "projectLabels.getThreadLabels",
+  projectLabelsSubscribeThreadLabels: "projectLabels.subscribeThreadLabels",
+  projectLabelsSubscribeConfirmedThreadLabels: "projectLabels.subscribeConfirmedThreadLabels",
+  projectLabelsSetThreadLabels: "projectLabels.setThreadLabels",
+  projectLabelsReviewSuggestion: "projectLabels.reviewSuggestion",
+  projectLabelsSuggestLabels: "projectLabels.suggestLabels",
+  workStart: "work.start",
+  workProposeHandoff: "work.proposeHandoff",
   agentsList: "agents.list",
   agentsSubscribe: "agents.subscribe",
   agentsUpsert: "agents.upsert",
@@ -490,6 +516,28 @@ export const WS_METHODS = {
   agentsMemoryWrite: "agents.memoryWrite",
   agentsMemoryForget: "agents.memoryForget",
   agentsRuns: "agents.runs",
+  agentsApprovalsList: "agents.approvalsList",
+  agentsRequestApproval: "agents.requestApproval",
+  agentsApprove: "agents.approve",
+  agentsReject: "agents.reject",
+  agentsStartWork: "agents.startWork",
+  agentsActivity: "agents.activity",
+  factsList: "facts.list",
+  factsCreate: "facts.create",
+  factsUpdate: "facts.update",
+  factsSupersede: "facts.supersede",
+  factsRetract: "facts.retract",
+  factsHistory: "facts.history",
+  contextForRun: "context.forRun",
+  contextSettings: "context.settings",
+  contextSetEnabled: "context.setEnabled",
+  commitmentsList: "commitments.list",
+  commitmentsCreate: "commitments.create",
+  commitmentsUpdateStatus: "commitments.updateStatus",
+  commitmentsConfirm: "commitments.confirm",
+  commitmentsDismiss: "commitments.dismiss",
+  commitmentsHistory: "commitments.history",
+
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1694,6 +1742,224 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const WsSearchQueryRpc = Rpc.make(WS_METHODS.searchQuery, {
+  payload: Search.SearchQueryInput,
+  success: Search.SearchQueryResult,
+  error: Schema.Union([Search.SearchError, EnvironmentAuthorizationError]),
+});
+const WsExportCreateRpc = Rpc.make(WS_METHODS.exportCreate, {
+  payload: Exports.ExportCreateInput,
+  success: Exports.ExportResult,
+  error: Schema.Union([Exports.ExportError, EnvironmentAuthorizationError]),
+});
+const WsExportValidateRpc = Rpc.make(WS_METHODS.exportValidate, {
+  payload: Exports.ExportPathInput,
+  success: Exports.ExportValidation,
+  error: Schema.Union([Exports.ExportError, EnvironmentAuthorizationError]),
+});
+const WsExportListRpc = Rpc.make(WS_METHODS.exportList, {
+  payload: Schema.Struct({}),
+  success: Schema.Struct({ exports: Schema.Array(Exports.ExportResult) }),
+  error: Schema.Union([Exports.ExportError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsDeleteRpc = Rpc.make(WS_METHODS.commitmentsDelete, {
+  payload: AgentWorkspace.CommitmentHistoryInput,
+  success: Schema.Struct({ deleted: Schema.Boolean }),
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+
+const WsProjectLabelsListRpc = Rpc.make(WS_METHODS.projectLabelsList, {
+  payload: Schema.Struct({}),
+  success: ProjectLabels.ProjectLabelListResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsSubscribeRpc = Rpc.make(WS_METHODS.projectLabelsSubscribe, {
+  payload: Schema.Struct({}),
+  success: ProjectLabels.ProjectLabelListResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsProjectLabelsCreateRpc = Rpc.make(WS_METHODS.projectLabelsCreate, {
+  payload: ProjectLabels.ProjectLabelCreateInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsUpdateRpc = Rpc.make(WS_METHODS.projectLabelsUpdate, {
+  payload: ProjectLabels.ProjectLabelUpdateInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsDeleteRpc = Rpc.make(WS_METHODS.projectLabelsDelete, {
+  payload: ProjectLabels.ProjectLabelKey,
+  success: ProjectLabels.ProjectLabelDeleteResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsLinkRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsLinkRepository, {
+  payload: ProjectLabels.ProjectLabelRepository,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsUnlinkRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsUnlinkRepository, {
+  payload: ProjectLabels.ProjectLabelRepository,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsGetThreadLabelsRpc = Rpc.make(WS_METHODS.projectLabelsGetThreadLabels, {
+  payload: ProjectLabels.ThreadProjectLabelsInput,
+  success: ProjectLabels.ThreadProjectLabelsResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsSubscribeThreadLabelsRpc = Rpc.make(
+  WS_METHODS.projectLabelsSubscribeThreadLabels,
+  {
+    payload: ProjectLabels.ThreadProjectLabelsInput,
+    success: ProjectLabels.ThreadProjectLabelsResult,
+    error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+    stream: true,
+  },
+);
+/** Confirmed tags of every live thread, for list surfaces such as the sidebar. */
+const WsProjectLabelsSubscribeConfirmedThreadLabelsRpc = Rpc.make(
+  WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels,
+  {
+    payload: Schema.Struct({}),
+    success: ProjectLabels.ThreadProjectLabelsResult,
+    error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+    stream: true,
+  },
+);
+const WsProjectLabelsSetThreadLabelsRpc = Rpc.make(WS_METHODS.projectLabelsSetThreadLabels, {
+  payload: ProjectLabels.SetThreadProjectLabelsInput,
+  success: ProjectLabels.ThreadProjectLabelsResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsReviewSuggestionRpc = Rpc.make(WS_METHODS.projectLabelsReviewSuggestion, {
+  payload: ProjectLabels.ReviewThreadProjectLabelInput,
+  success: ProjectLabels.ThreadProjectLabelsResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsSuggestLabelsRpc = Rpc.make(WS_METHODS.projectLabelsSuggestLabels, {
+  payload: ProjectLabels.ThreadProjectLabelsInput,
+  success: ProjectLabels.ThreadProjectLabelsResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsWorkStartRpc = Rpc.make(WS_METHODS.workStart, {
+  payload: Work.WorkStartInput,
+  success: Work.WorkStartResult,
+  error: Schema.Union([Work.WorkHandoffError, EnvironmentAuthorizationError]),
+});
+const WsWorkProposeHandoffRpc = Rpc.make(WS_METHODS.workProposeHandoff, {
+  payload: Work.WorkProposeHandoffInput,
+  success: Work.WorkHandoffDraft,
+  error: Schema.Union([Work.WorkHandoffError, EnvironmentAuthorizationError]),
+});
+
+const WsAgentsApprovalsListRpc = Rpc.make(WS_METHODS.agentsApprovalsList, {
+  payload: AgentWorkspace.AgentApprovalListInput,
+  success: AgentWorkspace.AgentApprovalListResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsRequestApprovalRpc = Rpc.make(WS_METHODS.agentsRequestApproval, {
+  payload: AgentWorkspace.AgentApprovalRequestInput,
+  success: AgentWorkspace.AgentApprovalResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsApproveRpc = Rpc.make(WS_METHODS.agentsApprove, {
+  payload: AgentWorkspace.AgentApprovalKey,
+  success: AgentWorkspace.AgentApprovalResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsRejectRpc = Rpc.make(WS_METHODS.agentsReject, {
+  payload: AgentWorkspace.AgentApprovalKey,
+  success: AgentWorkspace.AgentApprovalResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsStartWorkRpc = Rpc.make(WS_METHODS.agentsStartWork, {
+  payload: AgentWorkspace.AgentStartWorkInput,
+  success: AgentWorkspace.AgentStartWorkResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsAgentsActivityRpc = Rpc.make(WS_METHODS.agentsActivity, {
+  payload: AgentWorkspace.AgentActivityInput,
+  success: AgentWorkspace.AgentActivityResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsFactsListRpc = Rpc.make(WS_METHODS.factsList, {
+  payload: Facts.FactListInput,
+  success: Facts.FactListResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsFactsCreateRpc = Rpc.make(WS_METHODS.factsCreate, {
+  payload: Facts.FactCreateInput,
+  success: Facts.FactResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsFactsUpdateRpc = Rpc.make(WS_METHODS.factsUpdate, {
+  payload: Facts.FactUpdateInput,
+  success: Facts.FactResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsFactsSupersedeRpc = Rpc.make(WS_METHODS.factsSupersede, {
+  payload: Facts.FactSupersedeInput,
+  success: Facts.FactResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsFactsRetractRpc = Rpc.make(WS_METHODS.factsRetract, {
+  payload: Facts.FactKey,
+  success: Facts.FactResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsFactsHistoryRpc = Rpc.make(WS_METHODS.factsHistory, {
+  payload: Facts.FactKey,
+  success: Facts.FactHistoryResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsContextForRunRpc = Rpc.make(WS_METHODS.contextForRun, {
+  payload: Facts.ContextForRunInput,
+  success: Facts.ContextForRunResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsContextSettingsRpc = Rpc.make(WS_METHODS.contextSettings, {
+  payload: Facts.ContextThreadInput,
+  success: Facts.ContextSettingsResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+const WsContextSetEnabledRpc = Rpc.make(WS_METHODS.contextSetEnabled, {
+  payload: Facts.ContextSetEnabledInput,
+  success: Facts.ContextSettingsResult,
+  error: Schema.Union([Facts.FactError, EnvironmentAuthorizationError]),
+});
+
+const WsCommitmentsListRpc = Rpc.make(WS_METHODS.commitmentsList, {
+  payload: AgentWorkspace.CommitmentListInput,
+  success: AgentWorkspace.CommitmentListResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsCreateRpc = Rpc.make(WS_METHODS.commitmentsCreate, {
+  payload: AgentWorkspace.CommitmentCreateInput,
+  success: AgentWorkspace.CommitmentResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsUpdateStatusRpc = Rpc.make(WS_METHODS.commitmentsUpdateStatus, {
+  payload: AgentWorkspace.CommitmentStatusInput,
+  success: AgentWorkspace.CommitmentResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsConfirmRpc = Rpc.make(WS_METHODS.commitmentsConfirm, {
+  payload: AgentWorkspace.CommitmentKey,
+  success: AgentWorkspace.CommitmentResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsDismissRpc = Rpc.make(WS_METHODS.commitmentsDismiss, {
+  payload: AgentWorkspace.CommitmentKey,
+  success: AgentWorkspace.CommitmentResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
+const WsCommitmentsHistoryRpc = Rpc.make(WS_METHODS.commitmentsHistory, {
+  payload: AgentWorkspace.CommitmentHistoryInput,
+  success: AgentWorkspace.CommitmentHistoryResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
 const WsAgentsListRpc = Rpc.make(WS_METHODS.agentsList, {
   payload: Schema.Struct({}),
   success: Agents.AgentListResult,
@@ -1888,6 +2154,47 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
+  WsSearchQueryRpc,
+  WsExportCreateRpc,
+  WsExportValidateRpc,
+  WsExportListRpc,
+  WsCommitmentsDeleteRpc,
+  WsProjectLabelsListRpc,
+  WsProjectLabelsSubscribeRpc,
+  WsProjectLabelsCreateRpc,
+  WsProjectLabelsUpdateRpc,
+  WsProjectLabelsDeleteRpc,
+  WsProjectLabelsLinkRepositoryRpc,
+  WsProjectLabelsUnlinkRepositoryRpc,
+  WsProjectLabelsGetThreadLabelsRpc,
+  WsProjectLabelsSubscribeThreadLabelsRpc,
+  WsProjectLabelsSubscribeConfirmedThreadLabelsRpc,
+  WsProjectLabelsSetThreadLabelsRpc,
+  WsProjectLabelsReviewSuggestionRpc,
+  WsProjectLabelsSuggestLabelsRpc,
+  WsWorkStartRpc,
+  WsWorkProposeHandoffRpc,
+  WsAgentsApprovalsListRpc,
+  WsAgentsRequestApprovalRpc,
+  WsAgentsApproveRpc,
+  WsAgentsRejectRpc,
+  WsAgentsStartWorkRpc,
+  WsAgentsActivityRpc,
+  WsFactsListRpc,
+  WsFactsCreateRpc,
+  WsFactsUpdateRpc,
+  WsFactsSupersedeRpc,
+  WsFactsRetractRpc,
+  WsFactsHistoryRpc,
+  WsContextForRunRpc,
+  WsContextSettingsRpc,
+  WsContextSetEnabledRpc,
+  WsCommitmentsListRpc,
+  WsCommitmentsCreateRpc,
+  WsCommitmentsUpdateStatusRpc,
+  WsCommitmentsConfirmRpc,
+  WsCommitmentsDismissRpc,
+  WsCommitmentsHistoryRpc,
   WsAgentsListRpc,
   WsAgentsSubscribeRpc,
   WsAgentsUpsertRpc,
