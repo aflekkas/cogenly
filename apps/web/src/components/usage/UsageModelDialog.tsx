@@ -4,7 +4,6 @@ import { useMemo } from "react";
 
 import { mergeAnsweredUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
-import { Button } from "../ui/button";
 import {
   Dialog,
   DialogDescription,
@@ -43,14 +42,12 @@ export function UsageModelDialog({
   environments,
   metric,
   chartWindow,
-  onSetPrice,
   onClose,
 }: {
   readonly model: ModelTotals;
   readonly environments: readonly EnvironmentUsageStatus[];
   readonly metric: UsageChartMetric;
   readonly chartWindow: UsageChartWindow;
-  readonly onSetPrice: () => void;
   readonly onClose: () => void;
 }) {
   const usage = useMemo(
@@ -144,11 +141,10 @@ export function UsageModelDialog({
           </div>
         </DialogPanel>
         {model.unpricedTokens > 0 ? (
-          <DialogFooter variant="bare" className="items-center sm:justify-between">
+          <DialogFooter variant="bare">
             <span className="text-xs text-muted-foreground">
               {formatTokens(model.unpricedTokens)} tokens have no known price
             </span>
-            <Button onClick={onSetPrice}>Set price</Button>
           </DialogFooter>
         ) : null}
       </DialogPopup>

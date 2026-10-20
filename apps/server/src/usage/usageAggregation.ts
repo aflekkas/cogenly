@@ -88,7 +88,6 @@ export interface AggregateOptions {
   readonly sinceDay: string;
   readonly untilDay: string;
   readonly rates: RateTable;
-  readonly priceOverrides?: RateTable;
   /** From {@link resolveModelAliases}. Mapped records bucket and price as their target. */
   readonly modelAliases?: ReadonlyMap<string, string>;
   readonly resolution?: UsageResolution;
@@ -205,7 +204,7 @@ export class UsageAggregator {
         : Math.floor((record.timestampMs - this.#hourlyWindow.sinceTimeMs) / HOUR_MS);
     const bucket = this.#bucketFor(day, hourIndex, record.provider, record.model, sourcePath ?? "");
 
-    const priced = priceUsage(this.#options.rates, record, this.#options.priceOverrides);
+    const priced = priceUsage(this.#options.rates, record);
 
     const totals = bucket.totals;
     totals.uncachedInputTokens += record.totals.uncachedInputTokens;
@@ -230,11 +229,7 @@ export class UsageAggregator {
     if (record.speed === "fast") bucket.fastCostUsd += priced.costUsd;
     if (record.speed === "ultrafast") bucket.ultrafastCostUsd += priced.costUsd;
     bucket.speedPremiumUsd += priced.speedPremiumUsd;
-    bucket.cacheSavingsUsd += cacheSavingsUsd(
-      this.#options.rates,
-      record,
-      this.#options.priceOverrides,
-    );
+    bucket.cacheSavingsUsd += cacheSavingsUsd(this.#options.rates, record);
     bucket.records += 1;
     if (priced.costSource === "unpriced") bucket.unpricedRecords += 1;
     if (priced.costSource === "providerReported") bucket.providerReportedRecords += 1;

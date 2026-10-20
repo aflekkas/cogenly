@@ -8,7 +8,7 @@ import {
   type EnvironmentId,
   type UsageProviderKind,
 } from "@t3tools/contracts";
-import { CircleAlertIcon, ChevronDownIcon, InfoIcon, SlidersHorizontalIcon } from "lucide-react";
+import { CircleAlertIcon, ChevronDownIcon, InfoIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { refreshUsageLimits } from "@t3tools/client-runtime/state/usage";
 import {
@@ -49,14 +49,7 @@ import {
 } from "@t3tools/shared/usageFormat";
 import { Button, InlineButton } from "../ui/button";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
-import {
-  Menu,
-  MenuCheckboxItem,
-  MenuItem,
-  MenuPopup,
-  MenuSeparator,
-  MenuTrigger,
-} from "../ui/menu";
+import { Menu, MenuCheckboxItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { ScrollArea } from "../ui/scroll-area";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SidebarInset } from "../ui/sidebar";
@@ -72,7 +65,6 @@ import {
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageLimitsSection } from "./UsageLimits";
-import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart } from "./UsageProviderChart";
 import { SpeedPremium, UsageModelDialog } from "./UsageModelDialog";
 import { UsageShareBar } from "./UsageShareBar";
@@ -133,7 +125,6 @@ export function UsagePage() {
   const [limitsNow, setLimitsNow] = useState(() => Date.now());
   const refreshingRef = useRef(false);
   const [breakdown, setBreakdown] = useState<"model" | "time">("model");
-  const [priceDialog, setPriceDialog] = useState<{ readonly model?: string } | null>(null);
   const [selectedModelKey, setSelectedModelKey] = useState<string | null>(null);
   const [selectedEnvironmentIds, setSelectedEnvironmentIds] =
     useState<ReadonlySet<EnvironmentId> | null>(null);
@@ -380,7 +371,6 @@ export function UsagePage() {
             isPartial={isPartial}
             duplicateSources={merged.duplicateSources}
             contractMismatches={merged.contractMismatches}
-            onOpenModelPrices={() => setPriceDialog({})}
           />
         </WorkspaceBreadcrumbItem>
         <WorkspaceBreadcrumbSeparator />
@@ -947,23 +937,7 @@ export function UsagePage() {
               timeZone: shownWindow.timeZone,
               referenceTime: shownWindow.untilTime,
             }}
-            onSetPrice={() => {
-              setSelectedModelKey(null);
-              setPriceDialog({ model: selectedModel.model });
-            }}
             onClose={() => setSelectedModelKey(null)}
-          />
-        )}
-      </OverlayPresence>
-      <OverlayPresence when={priceDialog}>
-        {(priceDialog) => (
-          <UsagePriceOverrides
-            usage={environments}
-            initialSelectedEnvironmentIds={selectedEnvironmentIds}
-            initialModel={priceDialog.model}
-            onOpenChange={(open) => {
-              if (!open) setPriceDialog(null);
-            }}
           />
         )}
       </OverlayPresence>
@@ -1072,7 +1046,6 @@ function UsageEnvironmentFilter({
   isPartial,
   duplicateSources,
   contractMismatches,
-  onOpenModelPrices,
 }: {
   readonly environments: readonly EnvironmentUsageStatus[];
   readonly selectedEnvironments: readonly EnvironmentUsageStatus[];
@@ -1083,7 +1056,6 @@ function UsageEnvironmentFilter({
   readonly isPartial: boolean;
   readonly duplicateSources: readonly string[];
   readonly contractMismatches: MergedUsage["contractMismatches"];
-  readonly onOpenModelPrices: () => void;
 }) {
   const allSelected = selectedEnvironmentIds === null;
   const label = allSelected
@@ -1188,11 +1160,6 @@ function UsageEnvironmentFilter({
             contractMismatches={contractMismatches}
           />
         ) : null}
-        <MenuSeparator />
-        <MenuItem onClick={onOpenModelPrices}>
-          <SlidersHorizontalIcon aria-hidden />
-          Model prices
-        </MenuItem>
       </MenuPopup>
     </Menu>
   );

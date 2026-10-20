@@ -409,7 +409,6 @@ export function applyServerSettingsPatch(
     // Merged per entry below; its `null` removals must not reach deepMerge.
     usageLimitSources: usageLimitSourcesPatch,
     sourceControlHosts: sourceControlHostsPatch,
-    usagePriceOverrides: usagePriceOverridesPatch,
     usageModelAliases: usageModelAliasesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
@@ -595,14 +594,6 @@ export function applyServerSettingsPatch(
           usageLimitSources: mergeSettingsEntries(
             current.usageLimitSources,
             usageLimitSourcesPatch,
-          ),
-        }
-      : {}),
-    ...(usagePriceOverridesPatch !== undefined
-      ? {
-          usagePriceOverrides: mergeSettingsEntries(
-            current.usagePriceOverrides,
-            usagePriceOverridesPatch,
           ),
         }
       : {}),

@@ -7,12 +7,7 @@
  *
  * @module usagePricing
  */
-import type {
-  UsageCategoryCost,
-  UsageCostSource,
-  UsageModelPriceOverride,
-  UsageTokenTotals,
-} from "@t3tools/contracts";
+import type { UsageCategoryCost, UsageCostSource, UsageTokenTotals } from "@t3tools/contracts";
 
 import type { UsageRecord, UsageSpeed } from "@t3tools/provider-core/server/usage";
 
@@ -43,30 +38,6 @@ export interface ModelRate extends TokenRates {
 }
 
 export type RateTable = ReadonlyMap<string, ModelRate>;
-
-/**
- * Custom IDs keep their case, provider prefix, and variant suffix. Custom rates
- * apply as entered, at every speed.
- */
-export function createOverrideRateTable(
-  overrides: Readonly<Record<string, UsageModelPriceOverride>>,
-): RateTable {
-  return new Map(
-    Object.entries(overrides).map(([model, prices]) => [
-      model.trim(),
-      {
-        inputCostPerToken: prices.inputCostPerMillionTokens / 1_000_000,
-        outputCostPerToken: prices.outputCostPerMillionTokens / 1_000_000,
-        cacheReadCostPerToken:
-          (prices.cacheReadCostPerMillionTokens ?? prices.inputCostPerMillionTokens) / 1_000_000,
-        cacheCreationCostPerToken:
-          (prices.cacheWriteCostPerMillionTokens ?? prices.inputCostPerMillionTokens) / 1_000_000,
-        fast: null,
-        ultrafast: null,
-      },
-    ]),
-  );
-}
 
 /** One raw LiteLLM entry. Field names carry a tier suffix, e.g. `_priority`. */
 type LiteLlmEntry = Readonly<Record<string, unknown>>;
@@ -299,24 +270,17 @@ function sumCategories(cost: UsageCategoryCost): number {
  * `reasoningTokens` is intentionally not charged separately: it is already
  * counted inside `outputTokens`.
  */
-export function priceUsage(
-  table: RateTable,
-  record: PricedRecord,
-  overrides?: RateTable,
-): PricedUsage {
+export function priceUsage(table: RateTable, record: PricedRecord): PricedUsage {
   const { model, totals, reportedCostUsd } = record;
-  const override = overrides?.get(model.trim());
   const reported =
-    override === undefined && reportedCostUsd !== null && Number.isFinite(reportedCostUsd)
-      ? reportedCostUsd
-      : null;
+    reportedCostUsd !== null && Number.isFinite(reportedCostUsd) ? reportedCostUsd : null;
   const unsplit = (costUsd: number, costSource: UsageCostSource): PricedUsage => ({
     costUsd,
     costSource,
     categoryCostUsd: null,
     speedPremiumUsd: 0,
   });
-  const rate = override ?? lookupRate(table, record.rateModel ?? model);
+  const rate = lookupRate(table, record.rateModel ?? model);
   if (rate === null) {
     return reported === null ? unsplit(0, "unpriced") : unsplit(reported, "providerReported");
   }
@@ -344,13 +308,8 @@ export function priceUsage(
  * What the cached input would have cost at full input rates, minus what it
  * actually cost. Drives the "cache savings" figure.
  */
-export function cacheSavingsUsd(
-  table: RateTable,
-  record: PricedRecord,
-  overrides?: RateTable,
-): number {
-  const rate =
-    overrides?.get(record.model.trim()) ?? lookupRate(table, record.rateModel ?? record.model);
+export function cacheSavingsUsd(table: RateTable, record: PricedRecord): number {
+  const rate = lookupRate(table, record.rateModel ?? record.model);
   if (rate === null) return 0;
   const rates = ratesAt(rate, record.speed);
   return record.totals.cachedInputTokens * (rates.inputCostPerToken - rates.cacheReadCostPerToken);

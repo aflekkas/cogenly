@@ -923,37 +923,17 @@ export function createServerEnvironmentAtoms<R, E>(
       Atom.withLabel(`environment-data:server:settings:${environmentId}`),
     ),
   );
-  const usagePricesAtom = Atom.family((environmentId: EnvironmentId) =>
-    Atom.make((get) => {
-      const overrides = get(settingsValueAtom(environmentId))?.usagePriceOverrides ?? {};
-      // Only changed prices should trigger another transcript scan. Settings
-      // snapshots can recreate the same mapping in a different property order.
-      return JSON.stringify(
-        Object.keys(overrides)
-          .sort()
-          .map((model) => {
-            const price = overrides[model]!;
-            return [
-              model,
-              price.inputCostPerMillionTokens,
-              price.outputCostPerMillionTokens,
-              price.cacheReadCostPerMillionTokens,
-              price.cacheWriteCostPerMillionTokens,
-            ];
-          }),
-      );
-    }).pipe(Atom.withLabel(`environment-data:server:usage-prices:${environmentId}`)),
-  );
   const usageScanSettingsAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get) => {
       const settings = get(settingsValueAtom(environmentId));
       const aliases = settings?.usageModelAliases ?? {};
-      return JSON.stringify([
-        get(usagePricesAtom(environmentId)),
+      // Only changed mappings should trigger another transcript scan. Settings
+      // snapshots can recreate the same mapping in a different property order.
+      return JSON.stringify(
         Object.keys(aliases)
           .sort()
           .map((model) => [model, aliases[model]]),
-      ]);
+      );
     }).pipe(Atom.withLabel(`environment-data:server:usage-scan-settings:${environmentId}`)),
   );
   const providersValueAtom = Atom.family((environmentId: EnvironmentId) =>

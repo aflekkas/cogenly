@@ -12,33 +12,6 @@ your app understands. Update the app to include newly supported providers.
 If recent work is missing or a new model shows no cost, refresh to rescan session history and
 update model pricing.
 
-## Set custom model prices
-
-On web or desktop, open the environment dropdown on **Usage**, then choose **Model prices** to add,
-edit, or reset a model's estimated price. **Apply to** starts with your current Usage filter;
-choose all environments or select individual destinations. Enter the exact model ID and USD
-rates per million input and output tokens. You can enter any model ID, including models
-without public pricing. When a model on **Usage** has no known price, select it under
-**Breakdown** and choose **Set price** to open this table with that model added.
-
-Cache read and cache write rates are optional and use the input rate when blank. Enter `0` for
-tokens that are free. Saved prices replace automatic pricing for all of that environment's
-history and are shared with clients connected to it. When environments have different prices,
-cells show **Mixed**. Edit rates directly in the table, then choose **Save changes** to apply all
-edited rows. Untouched cells keep each environment's rate. Select one environment to inspect its
-prices. **Reset to automatic** marks a model's override for removal when you save; you can undo
-it before saving.
-
-To count one model as another, such as a preview model under its released name, enter the target
-model ID under **Map to**. The mapped model no longer appears on **Usage**: its tokens and cost
-move to the target model and use the target's price. Clear **Map to** or reset the row to show
-the model on its own again.
-
-Each destination reports whether the change saved. Offline or unavailable environments are
-marked **Not saved**. Reconnect them and choose **Retry failed saves** to finish the same change
-without writing again to environments that already saved. Changes are not queued after you close
-the dialog.
-
 ## Track subscription limits
 
 **Usage → Limits** pools every subscription account it can see per provider, so with several Codex

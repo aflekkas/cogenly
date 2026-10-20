@@ -240,7 +240,6 @@ export const make = Effect.gen(function* () {
       projectProviderInstanceOverrides: true,
       threadSnooze: true,
       usageLimitSources: true,
-      usagePriceOverrides: true,
       usageModelAliases: true,
       threadPinning: true,
       threadPinReorder: true,
