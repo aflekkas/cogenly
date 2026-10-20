@@ -38,6 +38,8 @@
       #root {
         width: 100%;
         height: 100%;
+        /* The dot's orbit reaches past the glyph's 128 box. */
+        overflow: visible;
         margin: 0;
       }
 
@@ -78,54 +80,44 @@
         image-rendering: pixelated;
       }
 
+      /* The glyph's "c" is 72/128 of its box, so this makes it 12vmin tall (80px to 128px). */
       #boot-shell-mark {
         position: relative;
-        width: 104px;
-        height: 104px;
-      }
-
-      /* The mark's tile (rx 28 of 128), hidden on the splash; it fades in as the glyph lands. */
-      #boot-shell-tile {
-        position: absolute;
-        inset: 0;
-        border-radius: 21.875%;
-        background: linear-gradient(180deg, #ff7b3a, #e63e22);
-        opacity: 0;
+        width: clamp(142px, 21.33vmin, 228px);
+        height: clamp(142px, 21.33vmin, 228px);
       }
 
       #boot-shell-logo {
         position: relative;
         display: block;
-        width: 104px;
-        height: 104px;
+        width: 100%;
+        height: 100%;
+        /* The dot's orbit reaches past the glyph's 128 box. */
+        overflow: visible;
       }
 
-      /* Loading loop for the mark (assets/brand/cogenly-mark.svg): the dot steps out of the
-         "c", circles it once and docks; the "c" gives a small catch. Transform-only; it ends
-         when src/bootSplash.ts settles it and removes the splash. */
+      /* Loading loop for the mark (assets/brand/cogenly-mark.svg), 2.4s: the dot steps well out of
+         the "c" (orbit radius 70 of 128, clear of its outer edge at 36), circles it once, then glides back into the opening on a plain ease-out (no
+         overshoot) and rests. Transform-only; it ends when src/bootSplash.ts settles it and
+         removes the splash. */
       #boot-shell-logo * {
         transform-box: view-box;
       }
 
-      #boot-shell-logo .boot-mark-c {
-        transform-origin: 63px 64px;
-        animation: boot-mark-catch 1.6s ease-out infinite;
-      }
-
       #boot-shell-logo .boot-mark-arm {
         transform-origin: 63px 64px;
-        animation: boot-mark-orbit 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+        animation: boot-mark-orbit 2.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
       }
 
       #boot-shell-logo .boot-mark-dot {
-        animation: boot-mark-reach 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+        animation: boot-mark-reach 2.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
       }
 
       @keyframes boot-mark-orbit {
         0% {
           transform: rotate(0deg);
         }
-        78%,
+        66%,
         100% {
           transform: rotate(-360deg);
         }
@@ -135,30 +127,16 @@
         0% {
           transform: translateX(0);
         }
-        18%,
-        58% {
-          transform: translateX(18px);
+        14% {
+          transform: translateX(42px);
         }
-        78% {
-          transform: translateX(-2px);
+        52% {
+          transform: translateX(42px);
+          animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
         }
         88%,
         100% {
           transform: translateX(0);
-        }
-      }
-
-      @keyframes boot-mark-catch {
-        0%,
-        74% {
-          transform: scale(1);
-        }
-        82% {
-          transform: scale(0.95);
-        }
-        94%,
-        100% {
-          transform: scale(1);
         }
       }
 
@@ -198,7 +176,6 @@
     <div id="boot-shell" role="status" aria-label="Cogenly is loading">
       <canvas id="boot-shell-pixels" aria-hidden="true"></canvas>
       <div id="boot-shell-mark">
-        <div id="boot-shell-tile"></div>
         <!-- The white glyph of assets/brand/cogenly-mark.svg, inline so it animates before any fetch.
            Its 128 box matches the mark's tile, so scaling it onto the sidebar mark lines up. -->
         <svg
@@ -223,17 +200,22 @@
     </div>
     <script>
       // Pixel ember for the boot splash: an abstract mosaic of big blocks (1x1 and some 2x2
-      // cells, about 20 columns) in five quantized ember tones, drawn on one canvas at cell
-      // resolution and upscaled with image-rendering: pixelated. While loading, a few blocks at
-      // a time step to a neighboring tone (redrawn at 15fps). src/bootSplash.ts calls
-      // dissipate() to drop the blocks out bottom-up during the morph; the loop stops when the
-      // canvas is removed. Reduced motion draws one static frame.
+      // cells, about 25 columns) in five quantized ember tones. While loading it is drawn on
+      // one canvas at cell resolution, upscaled with image-rendering: pixelated, and a few
+      // blocks at a time step to a neighboring tone (redrawn at 15fps). For the exit,
+      // src/bootSplash.ts calls sweep(): a device-resolution canvas takes over and an eased,
+      // gently wavy front climbs from the bottom; as it reaches each block, the block shrinks
+      // to its center, fades and drifts up on one ease-out, revealing the app. The exit runs at
+      // full frame rate only for its duration; the loop stops when the canvas is removed.
+      // Reduced motion draws one static frame.
       (() => {
         const shell = document.getElementById("boot-shell");
         const canvas = document.getElementById("boot-shell-pixels");
         const context = canvas && canvas.getContext("2d");
         if (!shell || !context) return;
         const FRAME_MS = 66;
+        const LIFT_PX = 6;
+        const BRIGHTEN = 0.12;
         const TONES = [
           [255, 128, 64],
           [250, 108, 52],
@@ -247,12 +229,42 @@
         let rows = 0;
         let image = null;
         let blocks = [];
-        let dissipation = null;
+        let sweep = null;
         let lastFrame = -Infinity;
 
+        // cubic-bezier(x1, y1, x2, y2) as a function of x in [0, 1], solved by bisection.
+        function bezier(x1, y1, x2, y2) {
+          const axis = (t, p1, p2) =>
+            3 * (1 - t) * (1 - t) * t * p1 + 3 * (1 - t) * t * t * p2 + t * t * t;
+          return (x) => {
+            let low = 0;
+            let high = 1;
+            for (let i = 0; i < 24; i++) {
+              const mid = (low + high) / 2;
+              if (axis(mid, x1, x2) < x) low = mid;
+              else high = mid;
+            }
+            return axis((low + high) / 2, y1, y2);
+          };
+        }
+        // Each block's exit, and the front's progress up the window over time.
+        const blockEase = bezier(0.2, 0.7, 0.2, 1);
+        const frontEase = bezier(0.45, 0, 0.3, 1);
+        // Time (0..1) at which the eased front reaches sweep position s (0 = bottom).
+        function frontTimeAt(s) {
+          let low = 0;
+          let high = 1;
+          for (let i = 0; i < 24; i++) {
+            const mid = (low + high) / 2;
+            if (frontEase(mid) < s) low = mid;
+            else high = mid;
+          }
+          return (low + high) / 2;
+        }
+
         function resize() {
-          // About 20 columns, never finer than 48px or coarser than 96px blocks.
-          cell = Math.max(48, Math.min(96, Math.round(innerWidth / 20)));
+          // About 25 columns, never finer than 38px or coarser than 72px blocks.
+          cell = Math.max(38, Math.min(72, Math.round(innerWidth / 25)));
           cols = Math.ceil(innerWidth / cell);
           rows = Math.ceil(innerHeight / cell);
           canvas.width = cols;
@@ -274,45 +286,64 @@
               const t = rows > 1 ? (y + (merge ? 0.5 : 0)) / (rows - 1) : 0;
               blocks.push({
                 cells,
+                x,
+                y,
+                span: merge ? 2 : 1,
                 t,
                 // A jittered quantization gives the tone bands ragged, mosaic edges.
                 tone: Math.round(t * (TONES.length - 1) + (Math.random() - 0.5) * 1.1),
                 phase: Math.random() * 6.2832,
                 speed: 0.0005 + Math.random() * 0.0007,
                 step: Math.random() < 0.5 ? -1 : 1,
-                jitter: Math.random(),
               });
             }
           }
         }
 
+        function toneAt(block, time) {
+          // Each block spends a short slice of its slow cycle one tone off.
+          const shifted = !reduceMotion && Math.sin(time * block.speed + block.phase) > 0.94;
+          return Math.min(TONES.length - 1, Math.max(0, block.tone + (shifted ? block.step : 0)));
+        }
+
         function draw(time) {
           const data = image.data;
-          const elapsed = dissipation ? time - dissipation.start : 0;
           for (const block of blocks) {
-            // Each block spends a short slice of its slow cycle one tone off.
-            const shifted = !reduceMotion && Math.sin(time * block.speed + block.phase) > 0.94;
-            const tone = Math.min(
-              TONES.length - 1,
-              Math.max(0, block.tone + (shifted ? block.step : 0)),
-            );
-            let alpha = 255;
-            if (dissipation) {
-              // Bottom rows drop out first, with per-block jitter, all gone by the end.
-              const delay = ((1 - block.t) * 0.62 + block.jitter * 0.26) * dissipation.duration;
-              const progress = (elapsed - delay) / (0.12 * dissipation.duration);
-              alpha = progress <= 0 ? 255 : progress >= 1 ? 0 : progress < 0.5 ? 150 : 60;
-            }
-            const color = TONES[tone];
+            const color = TONES[toneAt(block, time)];
             for (const index of block.cells) {
               const offset = index * 4;
               data[offset] = color[0];
               data[offset + 1] = color[1];
               data[offset + 2] = color[2];
-              data[offset + 3] = alpha;
+              data[offset + 3] = 255;
             }
           }
           context.putImageData(image, 0, 0);
+        }
+
+        function drawExit(time) {
+          const { exitContext, start, frontMs, blockMs } = sweep;
+          const elapsed = time - start;
+          exitContext.clearRect(0, 0, innerWidth, innerHeight);
+          for (const block of blocks) {
+            const q = Math.min(1, Math.max(0, (elapsed - block.delay) / blockMs));
+            if (q >= 1) continue;
+            const eased = blockEase(q);
+            const size = block.span * cell;
+            const scaled = size * (1 - eased);
+            // One soft brighten as the front arrives, gone by the time the block is half out.
+            const glow = BRIGHTEN * Math.sin(Math.PI * Math.min(1, q * 2));
+            const [r, g, b] = block.exitColor;
+            exitContext.globalAlpha = 1 - eased;
+            exitContext.fillStyle = `rgb(${r + (255 - r) * glow},${g + (255 - g) * glow},${b + (255 - b) * glow})`;
+            exitContext.fillRect(
+              block.x * cell + (size - scaled) / 2,
+              block.y * cell + (size - scaled) / 2 - LIFT_PX * eased,
+              scaled,
+              scaled,
+            );
+          }
+          return elapsed >= frontMs + blockMs;
         }
 
         function tick(time) {
@@ -322,15 +353,17 @@
             delete shell.dataset.pixels;
             return;
           }
-          if (dissipation || time - lastFrame >= FRAME_MS) {
+          if (sweep) {
+            if (drawExit(time)) return;
+          } else if (time - lastFrame >= FRAME_MS) {
             lastFrame = time;
             draw(time);
           }
-          if (!reduceMotion || dissipation) requestAnimationFrame(tick);
+          if (!reduceMotion || sweep) requestAnimationFrame(tick);
         }
 
         function onResize() {
-          if (dissipation) return;
+          if (sweep) return;
           resize();
           draw(performance.now());
         }
@@ -341,10 +374,43 @@
         addEventListener("resize", onResize);
         if (!reduceMotion) requestAnimationFrame(tick);
 
+        // A smooth per-column offset (two low-frequency waves) so the front is gently wavy.
+        const wavePhase = [Math.random() * 6.2832, Math.random() * 6.2832];
+        const columnWave = (x) =>
+          0.04 * Math.sin(x * 0.32 + wavePhase[0]) + 0.025 * Math.sin(x * 0.81 + wavePhase[1]);
+
         window.cogenlyBootSplash = {
-          dissipate(duration) {
-            dissipation = { start: performance.now(), duration };
-            if (reduceMotion) requestAnimationFrame(tick);
+          // Starts the exit; returns when (ms after now) the front reaches a viewport y.
+          sweep(frontMs, blockMs) {
+            const start = performance.now();
+            const exit = document.createElement("canvas");
+            const ratio = devicePixelRatio || 1;
+            exit.width = Math.round(innerWidth * ratio);
+            exit.height = Math.round(innerHeight * ratio);
+            Object.assign(exit.style, {
+              position: "absolute",
+              inset: "0",
+              width: innerWidth + "px",
+              height: innerHeight + "px",
+            });
+            const exitContext = exit.getContext("2d");
+            exitContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+            for (const block of blocks) {
+              block.exitColor = TONES[toneAt(block, start)];
+              const center = (block.y + block.span / 2) * cell;
+              const position = Math.min(
+                1,
+                Math.max(0, 1 - center / innerHeight + columnWave(block.x)),
+              );
+              block.delay = frontTimeAt(position) * frontMs;
+            }
+            sweep = { exitContext, start, frontMs, blockMs };
+            // Paint the first exit frame, identical to the mosaic, before hiding the mosaic.
+            drawExit(start);
+            canvas.after(exit);
+            canvas.style.visibility = "hidden";
+            requestAnimationFrame(tick);
+            return (y) => frontTimeAt(Math.min(1, Math.max(0, 1 - y / innerHeight))) * frontMs;
           },
         };
       })();
