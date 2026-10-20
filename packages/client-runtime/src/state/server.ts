@@ -1127,7 +1127,7 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:threadProjectLabelsLive",
       tag: WS_METHODS.projectLabelsSubscribeThreadLabels,
     }),
-    /** Confirmed tags of every live thread; list rows read this instead of one stream per row. */
+    /** Legacy membership feed. New list views use each shell thread's projectFolderId. */
     confirmedThreadProjectLabelsLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:projectLabels:confirmedThreadProjectLabelsLive",
       tag: WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels,
@@ -1151,6 +1151,10 @@ export function createServerEnvironmentAtoms<R, E>(
     unlinkProjectLabelRepository: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:unlinkProjectLabelRepository",
       tag: WS_METHODS.projectLabelsUnlinkRepository,
+    }),
+    moveThreadProjectFolder: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:moveThreadProjectFolder",
+      tag: WS_METHODS.projectLabelsMoveThread,
     }),
     setThreadProjectLabels: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:setThreadProjectLabels",

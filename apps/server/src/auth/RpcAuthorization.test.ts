@@ -480,10 +480,11 @@ it.effect("denies manual cleanup before the handler without settings permission"
   }).pipe(Effect.scoped),
 );
 
-it.effect("context labels do not let read-only clients change tags or launch classification", () =>
+it.effect("project folders do not let read-only clients move threads or change membership", () =>
   Effect.gen(function* () {
     const tested = [
       WS_METHODS.projectLabelsList,
+      WS_METHODS.projectLabelsMoveThread,
       WS_METHODS.projectLabelsSetThreadLabels,
       WS_METHODS.projectLabelsSuggestLabels,
     ] as const;
@@ -498,6 +499,12 @@ it.effect("context labels do not let read-only clients change tags or launch cla
       Effect.provide(
         Layer.mergeAll(
           group.toLayerHandler(WS_METHODS.projectLabelsList, () => Effect.succeed({ labels: [] })),
+          group.toLayerHandler(WS_METHODS.projectLabelsMoveThread, (input) =>
+            Effect.sync(() => {
+              writes++;
+              return { threadId: input.threadId, projectFolderId: input.folderId };
+            }),
+          ),
           group.toLayerHandler(WS_METHODS.projectLabelsSetThreadLabels, () =>
             Effect.sync(() => {
               writes++;
@@ -515,6 +522,15 @@ it.effect("context labels do not let read-only clients change tags or launch cla
       ),
     );
     expect(yield* client[WS_METHODS.projectLabelsList]({})).toEqual({ labels: [] });
+    expect(
+      yield* client[WS_METHODS.projectLabelsMoveThread]({
+        threadId: ThreadId.make("filed"),
+        folderId: null,
+      }).pipe(Effect.flip),
+    ).toMatchObject({
+      _tag: "EnvironmentAuthorizationError",
+      requiredPermission: AuthOrchestrationOperateScope,
+    });
     expect(
       yield* client[WS_METHODS.projectLabelsSetThreadLabels]({
         threadId: ThreadId.make("tagged"),

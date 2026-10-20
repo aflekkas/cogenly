@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { IsoDateTime, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
-/** Context/relevance only. A label or repository link never grants access. */
+/** Project folders provide context only and never grant access. Legacy names/IDs are stable. */
 export const ProjectLabelId = TrimmedNonEmptyString.pipe(Schema.brand("ProjectLabelId"));
 export type ProjectLabelId = typeof ProjectLabelId.Type;
 const color = TrimmedNonEmptyString.check(Schema.isMaxLength(100));
@@ -21,6 +21,7 @@ export type ProjectLabel = typeof ProjectLabel.Type;
 export const ProjectLabelWithRepositories = Schema.Struct({
   ...ProjectLabel.fields,
   repositoryIds: Schema.Array(ProjectId),
+  threadCount: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 });
 export type ProjectLabelWithRepositories = typeof ProjectLabelWithRepositories.Type;
 export const ProjectLabelRepository = Schema.Struct({
@@ -28,6 +29,11 @@ export const ProjectLabelRepository = Schema.Struct({
   repositoryId: ProjectId,
 });
 export type ProjectLabelRepository = typeof ProjectLabelRepository.Type;
+/**
+ * Legacy membership envelope. Arrays contain at most one effective folder per
+ * thread; confidence/source/confirmation fields are fixed compatibility values.
+ * New clients use projectFolderId on shell entries or ThreadProjectFolderResult.
+ */
 export const ThreadProjectLabel = Schema.Struct({
   threadId: ThreadId,
   labelId: ProjectLabelId,
@@ -55,9 +61,20 @@ export const ProjectLabelDeleteResult = Schema.Struct({ deleted: Schema.Boolean 
 export const ThreadProjectLabelsInput = Schema.Struct({ threadId: ThreadId });
 export const SetThreadProjectLabelsInput = Schema.Struct({
   threadId: ThreadId,
-  labelIds: Schema.Array(ProjectLabelId).check(Schema.isMaxLength(100)),
+  labelIds: Schema.Array(ProjectLabelId).check(Schema.isMaxLength(1)),
 });
 export type SetThreadProjectLabelsInput = typeof SetThreadProjectLabelsInput.Type;
+/** Null removes explicit filing and restores the repository default for work. */
+export const MoveThreadProjectFolderInput = Schema.Struct({
+  threadId: ThreadId,
+  folderId: Schema.NullOr(ProjectLabelId),
+});
+export type MoveThreadProjectFolderInput = typeof MoveThreadProjectFolderInput.Type;
+export const ThreadProjectFolderResult = Schema.Struct({
+  threadId: ThreadId,
+  projectFolderId: Schema.NullOr(ProjectLabelId),
+});
+export type ThreadProjectFolderResult = typeof ThreadProjectFolderResult.Type;
 export const ReviewThreadProjectLabelInput = Schema.Struct({
   threadId: ThreadId,
   labelId: ProjectLabelId,
@@ -71,18 +88,20 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
   "ProjectLabelError",
   {
     operation: Schema.String,
-    reason: Schema.Literals(["storage", "not_found", "not_suggested"]),
+    reason: Schema.Literals(["storage", "not_found", "not_suggested", "invalid_membership"]),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     switch (this.reason) {
       case "not_found":
-        return "The label, repository, or thread was not found.";
+        return "The folder, repository, or thread was not found.";
+      case "invalid_membership":
+        return "A thread can belong to at most one project folder.";
       case "not_suggested":
-        return "The thread tag is not a pending suggestion.";
+        return "Project folders do not support suggestions.";
       case "storage":
-        return "Could not access project labels.";
+        return "Could not access project folders.";
     }
   }
 }

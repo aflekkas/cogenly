@@ -501,6 +501,7 @@ export const WS_METHODS = {
   projectLabelsGetThreadLabels: "projectLabels.getThreadLabels",
   projectLabelsSubscribeThreadLabels: "projectLabels.subscribeThreadLabels",
   projectLabelsSubscribeConfirmedThreadLabels: "projectLabels.subscribeConfirmedThreadLabels",
+  projectLabelsMoveThread: "projectLabels.moveThread",
   projectLabelsSetThreadLabels: "projectLabels.setThreadLabels",
   projectLabelsReviewSuggestion: "projectLabels.reviewSuggestion",
   projectLabelsSuggestLabels: "projectLabels.suggestLabels",
@@ -1828,6 +1829,11 @@ const WsProjectLabelsSubscribeConfirmedThreadLabelsRpc = Rpc.make(
     stream: true,
   },
 );
+const WsProjectLabelsMoveThreadRpc = Rpc.make(WS_METHODS.projectLabelsMoveThread, {
+  payload: ProjectLabels.MoveThreadProjectFolderInput,
+  success: ProjectLabels.ThreadProjectFolderResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsSetThreadLabelsRpc = Rpc.make(WS_METHODS.projectLabelsSetThreadLabels, {
   payload: ProjectLabels.SetThreadProjectLabelsInput,
   success: ProjectLabels.ThreadProjectLabelsResult,
@@ -2169,6 +2175,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsGetThreadLabelsRpc,
   WsProjectLabelsSubscribeThreadLabelsRpc,
   WsProjectLabelsSubscribeConfirmedThreadLabelsRpc,
+  WsProjectLabelsMoveThreadRpc,
   WsProjectLabelsSetThreadLabelsRpc,
   WsProjectLabelsReviewSuggestionRpc,
   WsProjectLabelsSuggestLabelsRpc,

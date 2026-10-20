@@ -9,6 +9,8 @@ import {
   type ProjectLabelRepository,
   type SetThreadProjectLabelsInput,
   type ReviewThreadProjectLabelInput,
+  type MoveThreadProjectFolderInput,
+  type ThreadProjectFolderResult,
   type ThreadId,
   type ApplicationStoredEvent,
 } from "@t3tools/contracts";
@@ -19,6 +21,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
+import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -32,6 +35,10 @@ export class ProjectLabelService extends Context.Service<
     readonly read: (
       id: ProjectLabelId,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    readonly subscribeChanges: Effect.Effect<Stream.Stream<void>, never, Scope.Scope>;
+    readonly moveThread: (
+      input: MoveThreadProjectFolderInput,
+    ) => Effect.Effect<ThreadProjectFolderResult, ProjectLabelError>;
     readonly list: () => Effect.Effect<Labels, ProjectLabelError>;
     readonly subscribe: () => Stream.Stream<Labels, ProjectLabelError>;
     readonly create: (
@@ -49,9 +56,9 @@ export class ProjectLabelService extends Context.Service<
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly getThreadLabels: (threadId: ThreadId) => Effect.Effect<Tags, ProjectLabelError>;
     readonly subscribeThreadLabels: (threadId: ThreadId) => Stream.Stream<Tags, ProjectLabelError>;
-    /** Confirmed tags across every live thread, so list views need one stream, not one per row. */
+    /** Effective folder memberships across every live thread. */
     readonly subscribeConfirmedThreadLabels: () => Stream.Stream<Tags, ProjectLabelError>;
-    /** MCP explicit edits are not human confirmations. */
+    /** Legacy singleton wrapper; use moveThread for new clients. */
     readonly setThreadLabels: (
       input: SetThreadProjectLabelsInput,
       confirmedByUser?: boolean,
@@ -85,6 +92,7 @@ const make = Effect.gen(function* () {
   const readLabels = (id?: ProjectLabelId) =>
     sql`SELECT label_id AS id, name, color, description, created_at AS createdAt, updated_at AS updatedAt,
     (SELECT json_group_array(repository_id) FROM (SELECT repository_id FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositories
+    , (SELECT count(*) FROM effective_thread_project_folders f WHERE f.folder_id = l.label_id) AS threadCount
     FROM project_labels l ${id === undefined ? sql`` : sql`WHERE label_id = ${id}`} ORDER BY name COLLATE NOCASE, label_id`.pipe(
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (row) =>
@@ -118,26 +126,25 @@ const make = Effect.gen(function* () {
         rows[0] ? Effect.succeed(rows[0]) : Effect.fail(missing("thread")),
       ),
     );
-  const tags = (threadId: ThreadId) =>
-    sql`SELECT thread_id AS threadId, label_id AS labelId, confidence, confirmed_by_user AS confirmedByUser, source FROM thread_project_labels WHERE thread_id = ${threadId} ORDER BY label_id`.pipe(
+  const memberships = (threadId?: ThreadId) =>
+    sql`SELECT thread_id AS threadId, folder_id AS labelId
+      FROM effective_thread_project_folders WHERE folder_id IS NOT NULL
+      ${threadId === undefined ? sql`` : sql`AND thread_id = ${threadId}`} ORDER BY thread_id`.pipe(
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (row) =>
-          decodeTag({ ...row, confirmedByUser: row.confirmedByUser === 1 }),
+          decodeTag({
+            ...row,
+            confidence: null,
+            confirmedByUser: true,
+            source: "user",
+          }),
         ),
       ),
       Effect.map((labels) => ({ labels })),
-      Effect.mapError(failure("threadLabels")),
+      Effect.mapError(failure("threadFolders")),
     );
-  const confirmedTags = () =>
-    sql`SELECT t.thread_id AS threadId, t.label_id AS labelId, t.confidence, t.confirmed_by_user AS confirmedByUser, t.source FROM thread_project_labels t JOIN orchestration_v2_projection_threads p ON p.thread_id = t.thread_id AND p.deleted_at IS NULL WHERE t.confirmed_by_user = 1 ORDER BY t.thread_id, t.label_id`.pipe(
-      Effect.flatMap((rows) =>
-        Effect.forEach(rows, (row) =>
-          decodeTag({ ...row, confirmedByUser: row.confirmedByUser === 1 }),
-        ),
-      ),
-      Effect.map((labels) => ({ labels })),
-      Effect.mapError(failure("confirmedThreadLabels")),
-    );
+  const tags = (threadId: ThreadId) => memberships(threadId);
+  const confirmedTags = () => memberships();
   const getThreadLabels = (threadId: ThreadId) =>
     requireThread(threadId).pipe(
       Effect.andThen(tags(threadId)),
@@ -198,39 +205,46 @@ const make = Effect.gen(function* () {
           const rows =
             yield* sql`SELECT project_id FROM projection_projects WHERE project_id = ${input.repositoryId} AND deleted_at IS NULL`;
           if (!rows.length) return yield* missing("repository");
-          yield* sql`INSERT OR IGNORE INTO label_repositories(label_id, repository_id) VALUES (${input.labelId}, ${input.repositoryId})`;
+          yield* sql`INSERT INTO label_repositories(label_id, repository_id) VALUES (${input.labelId}, ${input.repositoryId}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id`;
         } else
           yield* sql`DELETE FROM label_repositories WHERE label_id = ${input.labelId} AND repository_id = ${input.repositoryId}`;
         yield* sql`UPDATE project_labels SET updated_at = ${yield* now} WHERE label_id = ${input.labelId}`;
         return yield* get(input.labelId);
       }),
     );
+  const moveThread = (input: MoveThreadProjectFolderInput) =>
+    mutate(
+      "moveThread",
+      input,
+      Effect.gen(function* () {
+        yield* requireThread(input.threadId);
+        if (input.folderId !== null) yield* get(input.folderId);
+        yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${input.threadId}`;
+        if (input.folderId !== null)
+          yield* sql`INSERT INTO thread_project_labels(thread_id, label_id) VALUES (${input.threadId}, ${input.folderId})`;
+        const { labels } = yield* tags(input.threadId);
+        return { threadId: input.threadId, projectFolderId: labels[0]?.labelId ?? null };
+      }),
+    );
+  const membershipLifecycle = (stored: ApplicationStoredEvent) =>
+    ("type" in stored && stored.type === "project.deleted") ||
+    ("event" in stored &&
+      ["thread.created", "thread.deleted", "thread.metadata-updated"].includes(stored.event.type));
   return ProjectLabelService.of({
+    moveThread,
+    subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
     list,
     read: get,
-    subscribe: () =>
-      subscribe(list, (event) => "type" in event && event.type === "project.deleted"),
+    subscribe: () => subscribe(list, membershipLifecycle),
     getThreadLabels,
     subscribeThreadLabels: (threadId) =>
       Stream.unwrap(
         requireThread(threadId).pipe(
           Effect.mapError(failure("subscribeThreadLabels")),
-          Effect.as(
-            subscribe(
-              () => tags(threadId),
-              (stored) =>
-                "event" in stored &&
-                stored.event.type === "thread.deleted" &&
-                stored.event.threadId === threadId,
-            ),
-          ),
+          Effect.as(subscribe(() => tags(threadId), membershipLifecycle)),
         ),
       ),
-    subscribeConfirmedThreadLabels: () =>
-      subscribe(
-        confirmedTags,
-        (stored) => "event" in stored && stored.event.type === "thread.deleted",
-      ),
+    subscribeConfirmedThreadLabels: () => subscribe(confirmedTags, membershipLifecycle),
     create: (input) =>
       mutate(
         "create",
@@ -273,86 +287,36 @@ const make = Effect.gen(function* () {
       ),
     linkRepository: (input) => repository(input, true),
     unlinkRepository: (input) => repository(input, false),
-    setThreadLabels: (input, confirmedByUser = true) =>
-      mutate(
-        "setThreadLabels",
-        { ...input, confirmedByUser },
-        Effect.gen(function* () {
-          yield* requireThread(input.threadId);
-          const ids = [...new Set(input.labelIds)];
-          for (const id of ids) yield* get(id);
-          yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${input.threadId}`;
-          for (const id of ids) {
-            yield* sql`DELETE FROM thread_project_label_rejections WHERE thread_id = ${input.threadId} AND label_id = ${id}`;
-            yield* sql`INSERT INTO thread_project_labels(thread_id, label_id, confidence, confirmed_by_user, source) VALUES (${input.threadId}, ${id}, NULL, ${confirmedByUser ? 1 : 0}, 'user')`;
-          }
-          return yield* tags(input.threadId);
-        }),
+    setThreadLabels: (input) => {
+      const ids = [...new Set(input.labelIds)];
+      if (ids.length > 1)
+        return Effect.fail(
+          new ProjectLabelError({ operation: "setThreadLabels", reason: "invalid_membership" }),
+        );
+      return moveThread({ threadId: input.threadId, folderId: ids[0] ?? null }).pipe(
+        Effect.map(({ projectFolderId }) => ({
+          labels:
+            projectFolderId === null
+              ? []
+              : [
+                  {
+                    threadId: input.threadId,
+                    labelId: projectFolderId,
+                    confidence: null,
+                    confirmedByUser: true,
+                    source: "user" as const,
+                  },
+                ],
+        })),
+      );
+    },
+    // Kept as inert compatibility endpoints for older clients. Folder filing is
+    // always explicit or derived from the repository, never keyword-suggested.
+    reviewSuggestion: () =>
+      Effect.fail(
+        new ProjectLabelError({ operation: "reviewSuggestion", reason: "not_suggested" }),
       ),
-    reviewSuggestion: (input) =>
-      mutate(
-        "reviewSuggestion",
-        input,
-        Effect.gen(function* () {
-          yield* requireThread(input.threadId);
-          const pending =
-            yield* sql`SELECT 1 FROM thread_project_labels WHERE thread_id = ${input.threadId} AND label_id = ${input.labelId} AND source = 'suggested' AND confirmed_by_user = 0`;
-          if (!pending.length)
-            return yield* new ProjectLabelError({
-              operation: "reviewSuggestion",
-              reason: "not_suggested",
-            });
-          if (input.accept)
-            yield* sql`UPDATE thread_project_labels SET confirmed_by_user = 1 WHERE thread_id = ${input.threadId} AND label_id = ${input.labelId}`;
-          else {
-            yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${input.threadId} AND label_id = ${input.labelId}`;
-            yield* sql`INSERT OR IGNORE INTO thread_project_label_rejections(thread_id, label_id) VALUES (${input.threadId}, ${input.labelId})`;
-          }
-          return yield* tags(input.threadId);
-        }),
-      ),
-    // TextGeneration exposes purpose-specific title/Git operations, not general classification.
-    // Bound input to the first four messages and use explainable repo/keyword evidence.
-    suggestLabels: (threadId) =>
-      mutate(
-        "suggestLabels",
-        { threadId },
-        Effect.gen(function* () {
-          const thread = yield* requireThread(threadId);
-          const messages = yield* sql<{
-            text: string;
-          }>`SELECT substr(json_extract(payload_json, '$.text'), 1, 2000) AS text FROM orchestration_v2_projection_messages WHERE thread_id = ${threadId} AND role IN ('user', 'assistant') ORDER BY created_at, message_id LIMIT 4`;
-          const words = new Set(
-            messages.flatMap((m) => (m.text ?? "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []),
-          );
-          const { labels } = yield* list();
-          const rejected = yield* sql<{
-            label_id: string;
-          }>`SELECT label_id FROM thread_project_label_rejections WHERE thread_id = ${threadId}`;
-          const blocked = new Set(rejected.map((r) => r.label_id));
-          for (const label of labels) {
-            if (blocked.has(label.id)) continue;
-            const nameWords = label.name.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-            const descriptionWords =
-              label.description?.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-            const repoMatch = label.repositoryIds.some((id) => id === thread.project_id);
-            const nameMatch = nameWords.some((w) => w.length >= 3 && words.has(w));
-            const descriptionMatches = new Set(
-              descriptionWords.filter((w) => w.length >= 4 && words.has(w)),
-            ).size;
-            if (!repoMatch && !nameMatch && descriptionMatches < 2) continue;
-            const confidence = Math.min(
-              0.95,
-              (repoMatch ? 0.7 : 0) +
-                (nameMatch ? 0.2 : 0) +
-                Math.min(0.15, descriptionMatches * 0.05),
-            );
-            // Existing explicit/confirmed assignments always win; suggestions never confirm themselves.
-            yield* sql`INSERT INTO thread_project_labels(thread_id, label_id, confidence, confirmed_by_user, source) VALUES (${threadId}, ${label.id}, ${confidence}, 0, 'suggested') ON CONFLICT(thread_id, label_id) DO UPDATE SET confidence = excluded.confidence WHERE source = 'suggested' AND confirmed_by_user = 0`;
-          }
-          return yield* tags(threadId);
-        }),
-      ),
+    suggestLabels: getThreadLabels,
   });
 });
 export const layer = Layer.effect(ProjectLabelService, make);

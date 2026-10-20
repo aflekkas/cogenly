@@ -1,3 +1,4 @@
+import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as Facts from "../context/FactService.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -54,72 +55,70 @@ describe("project labels", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  it.effect(
-    "replaces multiple tags atomically, deduplicates, and keeps MCP assignments unconfirmed",
-    () =>
-      Effect.gen(function* () {
-        yield* seed;
-        const service = yield* Labels.ProjectLabelService;
-        const a = (yield* service.create({ name: "A" })).label.id;
-        const b = (yield* service.create({ name: "B" })).label.id;
-        const both = yield* service.setThreadLabels({ threadId, labelIds: [a, b, a] });
-        expect(both.labels).toHaveLength(2);
-        expect(
-          both.labels.every(
-            (t) => t.source === "user" && t.confirmedByUser && t.confidence === null,
-          ),
-        ).toBe(true);
-        const bad = yield* service
-          .setThreadLabels({ threadId, labelIds: [b, ProjectLabelId.make("missing")] })
-          .pipe(Effect.flip);
-        expect(bad.reason).toBe("not_found");
-        expect((yield* service.getThreadLabels(threadId)).labels).toHaveLength(2);
-        const replaced = yield* service.setThreadLabels({ threadId, labelIds: [b] }, false);
-        expect(replaced.labels).toEqual([
-          { threadId, labelId: b, confidence: null, source: "user", confirmedByUser: false },
-        ]);
-        expect((yield* service.setThreadLabels({ threadId, labelIds: [] })).labels).toEqual([]);
-      }).pipe(Effect.provide(layer)),
-  );
-
-  it.effect(
-    "suggests from repository and first-message keywords, never confirms, and respects rejections",
-    () =>
-      Effect.gen(function* () {
-        yield* seed;
-        const service = yield* Labels.ProjectLabelService;
-        const repoLabel = (yield* service.create({ name: "Spawn" })).label;
-        const keywordLabel = (yield* service.create({ name: "Bartr" })).label;
-        yield* service.create({ name: "Unrelated" });
-        yield* service.linkRepository({ labelId: repoLabel.id, repositoryId: repoA });
-        const sql = yield* SqlClient.SqlClient;
-        yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id, thread_id, role, streaming, created_at, updated_at, payload_json) VALUES ('message', ${threadId}, 'user', 0, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '{"text":"Discuss Bartr pricing"}')`;
-        const suggested = yield* service.suggestLabels(threadId);
-        expect(suggested.labels).toHaveLength(2);
-        expect(
-          suggested.labels.every(
-            (t) =>
-              t.source === "suggested" &&
-              !t.confirmedByUser &&
-              t.confidence! > 0 &&
-              t.confidence! <= 1,
-          ),
-        ).toBe(true);
-        yield* service.reviewSuggestion({ threadId, labelId: repoLabel.id, accept: true });
-        yield* service.reviewSuggestion({ threadId, labelId: keywordLabel.id, accept: false });
-        const again = yield* service.suggestLabels(threadId);
-        expect(again.labels).toEqual([
-          { ...suggested.labels.find((t) => t.labelId === repoLabel.id)!, confirmedByUser: true },
-        ]);
-        expect(
-          (yield* service
-            .reviewSuggestion({ threadId, labelId: repoLabel.id, accept: false })
-            .pipe(Effect.flip)).reason,
-        ).toBe("not_suggested");
-        // Explicit edits can restore a rejected suggestion.
-        yield* service.setThreadLabels({ threadId, labelIds: [keywordLabel.id] });
-        expect((yield* service.getThreadLabels(threadId)).labels[0]?.confirmedByUser).toBe(true);
-      }).pipe(Effect.provide(layer)),
+  it.effect("enforces one folder and derives work membership while explicit filing wins", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const service = yield* Labels.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const a = (yield* service.create({ name: "A" })).label.id;
+      const b = (yield* service.create({ name: "B" })).label.id;
+      yield* service.linkRepository({ labelId: a, repositoryId: repoA });
+      expect((yield* service.getThreadLabels(threadId)).labels.map((t) => t.labelId)).toEqual([a]);
+      expect((yield* service.list()).labels.find((l) => l.id === a)?.threadCount).toBe(1);
+      expect(yield* service.moveThread({ threadId, folderId: b })).toEqual({
+        threadId,
+        projectFolderId: b,
+      });
+      expect((yield* service.list()).labels.find((l) => l.id === a)?.threadCount).toBe(0);
+      expect((yield* service.list()).labels.find((l) => l.id === b)?.threadCount).toBe(1);
+      // Repository moves affect only threads without explicit filing.
+      yield* service.linkRepository({ labelId: b, repositoryId: repoA });
+      expect((yield* service.read(a)).label.repositoryIds).toEqual([]);
+      yield* service.linkRepository({ labelId: a, repositoryId: repoA });
+      expect((yield* service.getThreadLabels(threadId)).labels[0]?.labelId).toBe(b);
+      expect(yield* service.moveThread({ threadId, folderId: null })).toEqual({
+        threadId,
+        projectFolderId: a,
+      });
+      const bad = yield* service.setThreadLabels({ threadId, labelIds: [a, b] }).pipe(Effect.flip);
+      expect(bad.reason).toBe("invalid_membership");
+      expect((yield* service.getThreadLabels(threadId)).labels[0]?.labelId).toBe(a);
+      expect(
+        (yield* service
+          .moveThread({ threadId, folderId: ProjectLabelId.make("missing") })
+          .pipe(Effect.flip)).reason,
+      ).toBe("not_found");
+      expect((yield* service.getThreadLabels(threadId)).labels[0]?.labelId).toBe(a);
+      // Chats do not inherit a folder even if they have a repository record.
+      yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json = '{"surface":"chat"}' WHERE thread_id = ${threadId}`;
+      expect((yield* service.getThreadLabels(threadId)).labels).toEqual([]);
+      expect(yield* service.moveThread({ threadId, folderId: b })).toEqual({
+        threadId,
+        projectFolderId: b,
+      });
+      yield* service.delete(b);
+      expect((yield* service.getThreadLabels(threadId)).labels).toEqual([]);
+      expect((yield* sql`SELECT * FROM projection_projects`).length).toBe(2);
+      expect((yield* sql`SELECT * FROM orchestration_v2_projection_threads`).length).toBe(1);
+      yield* service.moveThread({ threadId, folderId: a });
+      yield* service.moveThread({ threadId, folderId: null });
+      expect((yield* service.suggestLabels(threadId)).labels).toEqual([]);
+      expect(
+        (yield* service.reviewSuggestion({ threadId, labelId: a, accept: true }).pipe(Effect.flip))
+          .reason,
+      ).toBe("not_suggested");
+      // No-repository work (the app's scratch project) can be explicitly filed.
+      yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json = '{"surface":"work"}' WHERE thread_id = ${threadId}`;
+      yield* service.unlinkRepository({ labelId: a, repositoryId: repoA });
+      expect(yield* service.moveThread({ threadId, folderId: a })).toEqual({
+        threadId,
+        projectFolderId: a,
+      });
+      expect(yield* service.moveThread({ threadId, folderId: null })).toEqual({
+        threadId,
+        projectFolderId: null,
+      });
+    }).pipe(Effect.provide(layer)),
   );
 
   it.effect(
@@ -131,7 +130,7 @@ describe("project labels", () => {
         const sql = yield* SqlClient.SqlClient;
         const a = (yield* service.create({ name: "A" })).label.id;
         const b = (yield* service.create({ name: "B" })).label.id;
-        yield* service.setThreadLabels({ threadId, labelIds: [a, b] });
+        yield* service.setThreadLabels({ threadId, labelIds: [b] });
         yield* service.delete(a);
         expect((yield* service.getThreadLabels(threadId)).labels.map((t) => t.labelId)).toEqual([
           b,
@@ -219,29 +218,75 @@ describe("project labels", () => {
       }),
     ).pipe(Effect.provide(layer)),
   );
+  it.effect("streams derived and explicitly filed folders without confirmation state", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* seed;
+        const service = yield* Labels.ProjectLabelService;
+        const a = (yield* service.create({ name: "A" })).label.id;
+        const b = (yield* service.create({ name: "B" })).label.id;
+        const live = yield* service
+          .subscribeConfirmedThreadLabels()
+          .pipe(Stream.toQueue({ capacity: 16 }));
+        expect((yield* Queue.take(live)).labels).toEqual([]);
+        yield* service.linkRepository({ labelId: a, repositoryId: repoA });
+        expect((yield* Queue.take(live)).labels.map((t) => t.labelId)).toEqual([a]);
+        yield* service.setThreadLabels({ threadId, labelIds: [b] }, false);
+        expect((yield* Queue.take(live)).labels.map((t) => t.labelId)).toEqual([b]);
+        yield* service.moveThread({ threadId, folderId: null });
+        expect((yield* Queue.take(live)).labels.map((t) => t.labelId)).toEqual([a]);
+        yield* service.unlinkRepository({ labelId: a, repositoryId: repoA });
+        expect((yield* Queue.take(live)).labels).toEqual([]);
+      }),
+    ).pipe(Effect.provide(layer)),
+  );
   it.effect(
-    "streams only confirmed tags across threads, updating as suggestions are reviewed",
+    "carries effective folders in full projections, initial shells and per-thread shell updates",
     () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          yield* seed;
-          const service = yield* Labels.ProjectLabelService;
-          const repoLabel = (yield* service.create({ name: "Spawn" })).label;
-          const explicit = (yield* service.create({ name: "Explicit" })).label;
-          yield* service.linkRepository({ labelId: repoLabel.id, repositoryId: repoA });
-          const live = yield* service
-            .subscribeConfirmedThreadLabels()
-            .pipe(Stream.toQueue({ capacity: 16 }));
-          expect((yield* Queue.take(live)).labels).toEqual([]);
-          yield* service.suggestLabels(threadId);
-          expect((yield* Queue.take(live)).labels).toEqual([]);
-          yield* service.reviewSuggestion({ threadId, labelId: repoLabel.id, accept: true });
-          expect((yield* Queue.take(live)).labels.map((t) => t.labelId)).toEqual([repoLabel.id]);
-          // MCP assignments are not human confirmations, so list surfaces skip them.
-          yield* service.setThreadLabels({ threadId, labelIds: [explicit.id] }, false);
-          expect((yield* Queue.take(live)).labels).toEqual([]);
-        }),
-      ).pipe(Effect.provide(layer)),
+      Effect.gen(function* () {
+        yield* seed;
+        const sql = yield* SqlClient.SqlClient;
+        const payload = JSON.stringify({
+          id: threadId,
+          projectId: repoA,
+          title: "Work",
+          surface: "work",
+          createdBy: "user",
+          creationSource: "web",
+          providerInstanceId: "codex",
+          modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          forkedFrom: null,
+          activeProviderThreadId: null,
+          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          archivedAt: null,
+          deletedAt: null,
+        });
+        yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json = ${payload} WHERE thread_id = ${threadId}`;
+        const projections = yield* Projections.ProjectionStoreV2.pipe(
+          Effect.provide(Projections.layer),
+        );
+        const folders = yield* Labels.ProjectLabelService;
+        const a = (yield* folders.create({ name: "A" })).label.id;
+        const b = (yield* folders.create({ name: "B" })).label.id;
+        expect((yield* projections.getThreadShell(threadId))?.projectFolderId).toBeNull();
+        yield* folders.linkRepository({ labelId: a, repositoryId: repoA });
+        expect((yield* projections.getShellSnapshot()).threads[0]?.projectFolderId).toBe(a);
+        expect((yield* projections.getThreadProjection(threadId)).thread.projectFolderId).toBe(a);
+        yield* folders.moveThread({ threadId, folderId: b });
+        expect((yield* projections.getThreadShell(threadId))?.projectFolderId).toBe(b);
+        yield* folders.delete(b);
+        expect((yield* projections.getThreadShell(threadId))?.projectFolderId).toBe(a);
+        yield* folders.unlinkRepository({ labelId: a, repositoryId: repoA });
+        expect(
+          (yield* projections.getThreadProjection(threadId)).thread.projectFolderId,
+        ).toBeNull();
+      }).pipe(Effect.provide(layer)),
   );
   it.effect("removes deleted label metadata from facts while preserving change history", () =>
     Effect.gen(function* () {

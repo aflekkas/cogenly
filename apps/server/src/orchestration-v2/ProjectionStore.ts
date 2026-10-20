@@ -1527,6 +1527,7 @@ export function threadShellFromProjection(
     creationSource: projection.thread.creationSource,
     id: projection.thread.id,
     projectId: projection.thread.projectId,
+    projectFolderId: projection.thread.projectFolderId ?? null,
     title: projection.thread.title,
     providerInstanceId: projection.thread.providerInstanceId,
     modelSelection: projection.thread.modelSelection,
@@ -1802,6 +1803,7 @@ function shellFromState(input: {
     creationSource: input.state.thread.creationSource,
     id: input.state.thread.id,
     projectId: input.state.thread.projectId,
+    projectFolderId: input.state.thread.projectFolderId ?? null,
     title: input.state.thread.title,
     providerInstanceId: input.state.thread.providerInstanceId,
     modelSelection: input.state.thread.modelSelection,
@@ -2794,7 +2796,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     ) =>
       Effect.gen(function* () {
         const threadRows = yield* sql<PayloadRow>`
-          SELECT payload_json
+          SELECT json_set(payload_json, '$.projectFolderId',
+            (SELECT folder_id FROM effective_thread_project_folders WHERE thread_id = ${threadId})) AS payload_json
           FROM orchestration_v2_projection_threads
           WHERE thread_id = ${threadId}
           LIMIT 1
@@ -5324,7 +5327,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sql<ShellThreadRow>`
             SELECT
               t.thread_id,
-              t.payload_json,
+              json_set(t.payload_json, '$.projectFolderId',
+                (SELECT folder_id FROM effective_thread_project_folders f WHERE f.thread_id = t.thread_id)) AS payload_json,
               CASE
                 WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
                   THEN json_extract(t.payload_json, '$.forkedFrom.threadId')

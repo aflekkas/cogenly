@@ -1,3 +1,9 @@
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import type * as HttpClient from "effect/http/HttpClient";
+import type * as CodexInstallation from "./provider/CodexInstallation.ts";
+import type * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
+import type * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import type * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
@@ -129,7 +135,6 @@ import {
   shellStreamItemFromEnrichmentRefresh,
   shellStreamItemFromThreadShell,
   shellStreamItemsFromInitialSnapshot,
-  shellStreamItemsFromResumeSnapshot,
   skipUnchangedThreadShells,
   toShellApplicationEvent,
   type ShellApplicationEvent,
@@ -452,17 +457,6 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 // Middleware added later wraps middleware added earlier, so instrumentation wraps authorization.
 const ServerWsRpcGroup = WsRpcGroup.middleware(RpcInstrumentation);
-// When a resuming client's cursor is more than this many events behind the
-// current head, skip the per-event catch-up replay and send a fresh shell
-// snapshot instead. Replaying each intervening event costs a shell refetch;
-// past this gap a single O(active-threads) snapshot is cheaper and bounded.
-// Matches the event store's default page size (DEFAULT_READ_FROM_SEQUENCE_LIMIT).
-const SHELL_RESUME_MAX_GAP = 1_000;
-// Row count alone does not bound replay memory: a few events with large tool
-// payloads can decode to gigabytes. Before replaying, sum the serialized
-// payload bytes of the range in SQL and reset with a snapshot past this budget.
-const ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES = 8 * 1024 * 1024;
-
 function toAuthAccessStreamEvent(
   change: PairingGrantStore.BootstrapCredentialChange | SessionStore.SessionCredentialChange,
   revision: number,
@@ -591,35 +585,6 @@ function readClientAnalyticsProps(request: HttpServerRequest.HttpServerRequest) 
     ...(isClientConnectionMethod(connectionMethod) ? { connectionMethod } : {}),
   };
 }
-
-const canReplayPersistedRange = Effect.fnUntraced(function* (
-  afterSequence: number,
-  headSequence: number,
-  maxGap: number,
-) {
-  const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
-
-  const replayGap = headSequence - afterSequence;
-  if (replayGap < 0 || replayGap > maxGap) {
-    return false;
-  }
-  const stats = yield* applicationEvents.getReplayStats({
-    afterSequence,
-    throughSequence: headSequence,
-  });
-  if (stats.rawPayloadBytes > ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES) {
-    yield* Effect.logDebug("orchestration replay replaced by snapshot", {
-      afterSequence,
-      headSequence,
-      replayGap,
-      eventCount: stats.eventCount,
-      payloadBytes: stats.rawPayloadBytes,
-      payloadBudgetBytes: ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES,
-    });
-    return false;
-  }
-  return true;
-});
 
 const enrichProjectShells = Effect.fn("ws.orchestrationV2.enrichProjectShells")(
   (projects: ReadonlyArray<OrchestrationProjectShell>) =>
@@ -866,21 +831,8 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
 
     const enrichmentChanges = yield* projectEnrichment.subscribeChanges;
-    const loadProjectMetadataSnapshot = Effect.fn("ws.orchestrationV2.loadProjectMetadataSnapshot")(
-      function* (snapshotSequence: number) {
-        const enriched = yield* enrichProjectShells(yield* projects.listShells());
-        return {
-          snapshot: {
-            schemaVersion: ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION,
-            snapshotSequence,
-            projects: enriched.projects,
-            threads: [],
-            archivedThreads: [],
-          } as OrchestrationV2ShellSnapshot,
-          resolvedRepositoryIdentityRoots: enriched.resolvedRepositoryIdentityRoots,
-        };
-      },
-    );
+    const folders = yield* ProjectLabels.ProjectLabelService;
+    const folderChanges = yield* folders.subscribeChanges;
     const loadSnapshot = Effect.fn("ws.orchestrationV2.loadShellSnapshot")(function* () {
       const base = buildActiveShellSnapshot(
         yield* loadShellSnapshotParts({
@@ -896,6 +848,12 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
         resolvedRepositoryIdentityRoots: enriched.resolvedRepositoryIdentityRoots,
       };
     });
+    // Folder edits live outside the orchestration log. Push a fresh authoritative
+    // shell, including the current sequence, so clients need no membership query.
+    const folderRefreshes = folderChanges.pipe(
+      Stream.mapEffect(() => loadSnapshot()),
+      Stream.map(({ snapshot }) => ({ kind: "snapshot" as const, snapshot })),
+    );
     const projectItem = Effect.fn("ws.orchestrationV2.projectShellItem")(function* (
       stored: Extract<ShellApplicationEvent, { readonly aggregateKind: "project" }>,
     ) {
@@ -995,22 +953,8 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       ),
     );
 
-    // Always attach the enrichment subscription before the first load so
-    // completions that race HTTP snapshot fetch still push a refresh.
-    // When the client already holds a shell snapshot (cached, or loaded
-    // over HTTP) it passes that snapshot's sequence. We still emit one
-    // compact metadata refresh up front: getAvailable may have been cold on the
-    // HTTP path (null identity), and enrichment PubSub events published
-    // before this subscribe attached are dropped. Rehydrating here fills
-    // repositoryIdentity for cross-environment project grouping even on
-    // afterSequence resumes. Application events after the sequence still
-    // stream as deltas; overlapping events are deduped by sequence on the
-    // client.
-    //
-    // After the unmarked authoritative frame, emit a same-sequence
-    // metadata-only frame for roots that already resolved successfully
-    // (including cached null). Cold/failed roots stay unmarked and use
-    // the PubSub enrichment path when they complete later.
+    // Subscribe before the initial read so repository-identity completions
+    // racing the snapshot still reach the client.
     const completionMarker =
       input.requestCompletionMarker === true
         ? Stream.make({ kind: "synchronized" as const })
@@ -1025,16 +969,6 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
           resolvedRepositoryIdentityRoots: loaded.resolvedRepositoryIdentityRoots,
         }),
       );
-    const initialEnrichmentItems = (loaded: {
-      readonly snapshot: OrchestrationV2ShellSnapshot;
-      readonly resolvedRepositoryIdentityRoots: ReadonlyArray<string>;
-    }) =>
-      rpcInitialItems(
-        shellStreamItemsFromResumeSnapshot({
-          snapshot: loaded.snapshot,
-          resolvedRepositoryIdentityRoots: loaded.resolvedRepositoryIdentityRoots,
-        }),
-      );
     // Initial unmarked (+ optional same-load marked) always drains first.
     // Enrichment merges only with the post-prefix tail so a ready marked
     // refresh cannot interleave before the authoritative initial frame.
@@ -1042,40 +976,13 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       Stream.concat(completionMarker, liveFrom(afterSequence));
 
     const stream = yield* Effect.gen(function* () {
-      if (input.afterSequence === undefined) {
-        const loaded = yield* loadSnapshot();
-        return composeShellStreamWithEnrichment({
-          initial: initialSnapshotItems(loaded),
-          tail: completionThenLive(loaded.snapshot.snapshotSequence),
-          enrichment: enrichmentRefreshes,
-        });
-      }
-
-      const highWater = yield* applicationEvents.latestApplicationSequence;
-      if (!(yield* canReplayPersistedRange(input.afterSequence, highWater, SHELL_RESUME_MAX_GAP))) {
-        const loaded = yield* loadSnapshot();
-        return composeShellStreamWithEnrichment({
-          initial: initialSnapshotItems(loaded),
-          tail: completionThenLive(loaded.snapshot.snapshotSequence),
-          enrichment: enrichmentRefreshes,
-        });
-      }
-
-      const loaded = yield* loadProjectMetadataSnapshot(highWater);
-      const replay = toShellStream(
-        applicationEvents.readApplicationEvents({
-          afterSequence: input.afterSequence,
-          throughSequence: highWater,
-          // A row a newer build wrote (e.g. after a downgrade) must not fail
-          // every shell resubscribe. The live tail below resumes from
-          // highWater, so a dropped row never hides later events.
-          skipUnknownEventTypes: true,
-        }),
-      );
+      // Folder edits are audited outside the application event sequence. Always
+      // refresh on reconnect as well as on live edits to recover missed filing.
+      const loaded = yield* loadSnapshot();
       return composeShellStreamWithEnrichment({
-        initial: initialEnrichmentItems(loaded),
-        tail: Stream.concat(Stream.concat(replay, completionMarker), liveFrom(highWater)),
-        enrichment: enrichmentRefreshes,
+        initial: initialSnapshotItems(loaded),
+        tail: completionThenLive(loaded.snapshot.snapshotSequence),
+        enrichment: Stream.merge(enrichmentRefreshes, folderRefreshes),
       });
     }).pipe(
       Effect.mapError(
@@ -1371,7 +1278,12 @@ const makeWsRpcHandlers = (
     const subscribeOrchestrationV2ArchivedShell = Effect.fn(
       "ws.orchestrationV2.subscribeArchivedShell",
     )(function* () {
+      const folderChanges = yield* projectLabels.subscribeChanges;
       const snapshot = yield* getOrchestrationV2ArchivedShellSnapshot;
+      const folderRefreshes = folderChanges.pipe(
+        Stream.mapEffect(() => getOrchestrationV2ArchivedShellSnapshot),
+        Stream.map((snapshot) => ({ kind: "snapshot" as const, snapshot })),
+      );
       const live = threadManagement
         .streamStoredEventsFrom({ afterSequence: snapshot.snapshotSequence })
         .pipe(
@@ -1401,7 +1313,10 @@ const makeWsRpcHandlers = (
               }),
           ),
         );
-      return Stream.concat(rpcInitialItems([{ kind: "snapshot" as const, snapshot }]), live);
+      return Stream.concat(
+        rpcInitialItems([{ kind: "snapshot" as const, snapshot }]),
+        Stream.merge(live, folderRefreshes),
+      );
     });
 
     const mutateProject = Effect.fn("ws.projects.mutate")(function* (mutation: ProjectMutation) {
@@ -1670,6 +1585,7 @@ const makeWsRpcHandlers = (
         projectLabels.subscribeThreadLabels(input.threadId),
       [WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels]: () =>
         projectLabels.subscribeConfirmedThreadLabels(),
+      [WS_METHODS.projectLabelsMoveThread]: (input) => projectLabels.moveThread(input),
       [WS_METHODS.projectLabelsSetThreadLabels]: (input) => projectLabels.setThreadLabels(input),
       [WS_METHODS.projectLabelsReviewSuggestion]: (input) => projectLabels.reviewSuggestion(input),
       [WS_METHODS.projectLabelsSuggestLabels]: (input) =>
@@ -2680,12 +2596,7 @@ type WsRpcs = RpcGroup.Rpcs<typeof ServerWsRpcGroup>;
 type WsRpcHandlersEffect = ReturnType<typeof makeWsRpcHandlers>;
 type WsRpcHandlers = Effect.Success<WsRpcHandlersEffect>;
 type WsRpcHandlerKeysA = Extract<keyof WsRpcHandlers, `p${string}` | `s${string}`>;
-/**
- * The services the WS handlers still require. `toLayer` derives this as
- * `HandlersServices<Rpcs, Handlers>`, one conditional per handler over every RPC
- * (~300 x 300). As a single expression that exceeds the checker's instantiation
- * budget (TS2589), so it is resolved in two halves.
- */
+/** Resolve in halves to stay within the RPC conditional type's instantiation budget. */
 type WsRpcHandlerServices =
   | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysA>>
   | RpcGroup.HandlersServices<WsRpcs, Omit<WsRpcHandlers, WsRpcHandlerKeysA>>;
@@ -2706,7 +2617,98 @@ export const WS_RPC_SERVER_OPTIONS = {
   disableFatalDefects: true,
 } as const;
 
-export const layer = Layer.unwrap(
+// Keep the transport's public dependency type concrete. Expanding the full RPC
+// handler conditional here makes downstream server layers infer `any`.
+type WsRequestServices =
+  | Agents.AgentService
+  | AgentSessionImporter.AgentSessionImporter
+  | AgentStore.AgentStore
+  | AgentWorkspace.AgentWorkspaceService
+  | AnalyticsService.AnalyticsService
+  | BackgroundPolicy.BackgroundPolicy
+  | CheckpointDiffQuery.CheckpointDiffQuery
+  | ChildProcessSpawner.ChildProcessSpawner
+  | CodexInstallation.CodexInstallation
+  | CommandOutputHub.CommandOutputHub
+  | Retrieval.ContextRetrievalService
+  | Crypto.Crypto
+  | DatabaseStorage.DatabaseStorage
+  | DeviceService.DeviceService
+  | DirectEndpoints.DirectEndpoints
+  | EnvironmentAuth.EnvironmentAuth
+  | Exports.ExportService
+  | ExternalLauncher.ExternalLauncher
+  | Facts.FactService
+  | FileSystem.FileSystem
+  | GitWorkflowService.GitWorkflowService
+  | GlobalSearch.GlobalSearch
+  | HostResources.HostResources
+  | HttpClient.HttpClient
+  | Keybindings.Keybindings
+  | ManagedProjectFolders.ManagedProjectFolders
+  | McpAppRequests.McpAppRequests
+  | ModelManifest.ModelManifest
+  | OrchestrationEventStore.OrchestrationEventStore
+  | Orchestrator.OrchestratorV2
+  | PairingGrantStore.PairingGrantStore
+  | Path.Path
+  | PortScanner.PortDiscovery
+  | PreviewManager.PreviewManager
+  | ProcessDiagnostics.ProcessDiagnostics
+  | ProcessResourceMonitor.ProcessResourceMonitor
+  | ProjectCloneTracker.ProjectCloneTracker
+  | ProjectEnrichmentService.ProjectEnrichmentService
+  | ProjectFaviconResolver.ProjectFaviconResolver
+  | ProjectLabels.ProjectLabelService
+  | ProjectService.ProjectService
+  | ProjectStore.ProjectStoreV2
+  | ProviderAuthService.ProviderAuthService
+  | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | ProviderLatestVersions.ProviderLatestVersions
+  | ProviderRegistry.ProviderRegistry
+  | ProviderSessionManager.ProviderSessionManagerV2
+  | PullRequestSyncReactor.PullRequestSyncReactor
+  | RelayClient.RelayClient
+  | RepositoryIdentityResolver.RepositoryIdentityResolver
+  | ResourceTelemetry.ResourceTelemetry
+  | ReviewService.ReviewService
+  | ScheduledTasks.ScheduledTaskService
+  | SecretRequests.SecretRequests
+  | ServerConfig.ServerConfig
+  | ServerEnvironment.ServerEnvironment
+  | ServerLifecycleEvents.ServerLifecycleEvents
+  | ServerRuntimeStartup.ServerRuntimeStartup
+  | ServerSecretStore.ServerSecretStore
+  | ServerSettings.ServerSettingsService
+  | SessionStore.SessionStore
+  | SourceControlRepositoryService.SourceControlRepositoryService
+  | StorageCleanup.StorageCleanup
+  | TerminalManager.TerminalManager
+  | ThreadLaunchService.ThreadLaunchService
+  | ThreadManagementService.ThreadManagementService
+  | ThreadSearch.ThreadSearch
+  | TraceDiagnostics.TraceDiagnostics
+  | UsageLimitSources.UsageLimitSources
+  | UsageService.UsageService
+  | VcsProcess.VcsProcess
+  | VcsProvisioningService.VcsProvisioningService
+  | VcsStatusBroadcaster.VcsStatusBroadcaster
+  | WorkHandoff.WorkHandoffService
+  | WorkspaceEntries.WorkspaceEntries
+  | WorkspaceFileSystem.WorkspaceFileSystem
+  | WorkspacePaths.WorkspacePaths
+  | WorktreeSetupTracker.WorktreeSetupTracker;
+type WsLayerServices =
+  | HttpRouter.HttpRouter
+  | PreviewAutomationBroker.PreviewAutomationBroker
+  | PullRequestReviewGuideService.PullRequestReviewGuideService
+  | PullRequestService.PullRequestService
+  | ServerBrowser.ServerBrowser
+  | ServerSelfUpdate.ServerSelfUpdate
+  | SqlClient.SqlClient
+  | HttpRouter.Request.From<"Requires", WsRequestServices>;
+
+export const layer: Layer.Layer<never, never, WsLayerServices> = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;

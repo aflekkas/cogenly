@@ -287,7 +287,12 @@ const smokeCases = [
   },
   {
     toolkit: "projectLabels",
-    names: ["t3_project_label_list", "t3_project_label_read", "t3_thread_set_project_labels"],
+    names: [
+      "t3_project_label_list",
+      "t3_project_label_read",
+      "t3_thread_move_project_folder",
+      "t3_thread_set_project_labels",
+    ],
     tool: "t3_project_label_list",
     args: {},
     expected: { labels: [] },

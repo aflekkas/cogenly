@@ -21,6 +21,14 @@ export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
       return yield* labels.read(input.id).pipe(Effect.mapError(failure));
     }),
   ),
+  t3_thread_move_project_folder: McpToolAccess.writesThreads(
+    (input) => [input.threadId],
+    (input) =>
+      Effect.gen(function* () {
+        const labels = yield* Labels.ProjectLabelService;
+        return yield* labels.moveThread(input).pipe(Effect.mapError(failure));
+      }),
+  ),
   t3_thread_set_project_labels: McpToolAccess.writesThreads(
     (input) => [input.threadId],
     (input) =>

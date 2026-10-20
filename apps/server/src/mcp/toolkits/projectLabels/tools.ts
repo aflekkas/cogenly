@@ -4,6 +4,8 @@ import {
   ProjectLabelKey,
   ProjectLabelMutationResult,
   SetThreadProjectLabelsInput,
+  MoveThreadProjectFolderInput,
+  ThreadProjectFolderResult,
   ThreadProjectLabelsResult,
 } from "@t3tools/contracts";
 import { Tool, Toolkit } from "effect/ai";
@@ -25,7 +27,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: Tool.EmptyParams,
     success: ProjectLabelListResult,
     description:
-      "List context labels and their linked repository IDs. Labels convey relevance only and never grant access.",
+      "List project folders, their repositories and effective thread counts. Folders provide context only and never grant access.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -34,15 +36,22 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ProjectLabelKey,
     success: ProjectLabelMutationResult,
     description:
-      "Read one context label and its linked repositories. This does not authorize reading any repository or thread.",
+      "Read one project folder and its repositories. This does not authorize reading any repository or thread.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
+  Tool.make("t3_thread_move_project_folder", {
+    ...shared,
+    parameters: MoveThreadProjectFolderInput,
+    success: ThreadProjectFolderResult,
+    description:
+      "Move a thread into one project folder. folderId null clears explicit filing and restores the repository default for work. Folders provide context only and never grant access.",
+  }).annotate(Tool.Destructive, false),
   Tool.make("t3_thread_set_project_labels", {
     ...shared,
     parameters: SetThreadProjectLabelsInput,
     success: ThreadProjectLabelsResult,
     description:
-      "Replace a thread's context labels with labelIds (empty removes all). Agent assignments are explicit but never marked confirmed by the user. Labels never widen access.",
+      "Move a thread into one project folder using a singleton labelIds array. Empty clears explicit filing and restores the repository default for work. Folders never widen access.",
   }).annotate(Tool.Destructive, true),
 );

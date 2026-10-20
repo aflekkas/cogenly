@@ -175,6 +175,7 @@ describe("command permissions", () => {
     WS_METHODS.projectLabelsDelete,
     WS_METHODS.projectLabelsLinkRepository,
     WS_METHODS.projectLabelsUnlinkRepository,
+    WS_METHODS.projectLabelsMoveThread,
     WS_METHODS.projectLabelsSetThreadLabels,
     WS_METHODS.projectLabelsReviewSuggestion,
     WS_METHODS.projectLabelsSuggestLabels,
