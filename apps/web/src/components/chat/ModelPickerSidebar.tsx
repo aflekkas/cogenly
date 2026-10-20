@@ -2,7 +2,7 @@ import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { HistoryIcon, SparklesIcon } from "lucide-react";
-import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
+import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
 import { cn } from "~/lib/utils";
 import {
   isProviderInstancePickerReady,
@@ -30,7 +30,7 @@ function describeUnavailableInstance(entry: ProviderInstanceEntry): string {
 }
 
 const SELECTED_INDICATOR_CLASS =
-  "pointer-events-none absolute -right-1 top-1/2 z-10 h-5 w-0.75 -translate-y-1/2 rounded-l-full bg-primary";
+  "pointer-events-none absolute -right-1 top-1/2 z-10 h-5 w-0.75 -translate-y-1/2 rounded-l-full";
 const BADGE_BASE_CLASS =
   "pointer-events-none absolute -right-0.5 top-0.5 z-10 flex size-3.5 items-center justify-center rounded-full bg-transparent shadow-sm ";
 const NEW_BADGE_CLASS = `${BADGE_BASE_CLASS} text-update-foreground `;
@@ -86,6 +86,11 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
     setSelectedIndicatorTop(selectedItem.offsetTop + selectedItem.offsetHeight / 2 - 10);
   }, [props.instanceEntries, props.selectedInstanceId, props.showRecent]);
 
+  const selectedEntry = props.instanceEntries.find(
+    (entry) => entry.instanceId === props.selectedInstanceId,
+  );
+  const indicatorColor = selectedEntry ? providerTextColor(selectedEntry.driverKind) : {};
+
   return (
     <Toolbar.Root
       className="w-11 shrink-0 overflow-hidden bg-muted/30"
@@ -108,9 +113,16 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               data-model-picker-selected-indicator="true"
               className={cn(
                 SELECTED_INDICATOR_CLASS,
-                "top-0 right-0 translate-y-(--indicator-y) transition-[translate] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
+                indicatorColor.className ? "bg-current" : "bg-primary",
+                indicatorColor.className,
+                "top-0 right-0 translate-y-(--indicator-y) transition-[translate,background-color] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
               )}
-              style={{ "--indicator-y": `${selectedIndicatorTop}px` } as CSSProperties}
+              style={
+                {
+                  ...indicatorColor.style,
+                  "--indicator-y": `${selectedIndicatorTop}px`,
+                } as CSSProperties
+              }
             />
           ) : null}
           {props.showRecent ? (
