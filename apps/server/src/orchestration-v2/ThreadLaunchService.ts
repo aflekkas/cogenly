@@ -74,6 +74,7 @@ export interface ThreadLaunchInitialMessage {
 }
 
 export interface ThreadLaunchInput {
+  readonly surface?: import("@t3tools/contracts").ThreadSurface;
   readonly workOrigin?: import("@t3tools/contracts").WorkOrigin;
   readonly sourceThreadId?: ThreadId;
   readonly sourceAgentId?: import("@t3tools/contracts").AgentId;
@@ -939,6 +940,7 @@ const make = Effect.gen(function* () {
               })
             : threads.dispatch({
                 type: "thread.create",
+                ...(input.surface === undefined ? {} : { surface: input.surface }),
                 ...(input.workOrigin === undefined ? {} : { workOrigin: input.workOrigin }),
                 ...(input.sourceThreadId === undefined
                   ? {}

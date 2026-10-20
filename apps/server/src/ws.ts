@@ -1554,6 +1554,7 @@ const makeWsRpcHandlers = (
               .enqueueCommand(
                 ThreadMessageIntake.launchThread({
                   commandId: input.commandId,
+                  ...(input.surface === undefined ? {} : { surface: input.surface }),
                   ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
                   ...(input.reuseExistingThread === undefined
                     ? {}

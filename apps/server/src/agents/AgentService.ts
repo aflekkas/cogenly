@@ -452,6 +452,7 @@ const make = Effect.gen(function* () {
         const result = yield* Effect.result(
           launch.launch({
             agent: { id: agent.id, role: "work" },
+            surface: "work",
             workOrigin: "agent",
             sourceAgentId: agent.id,
             sourceAgentRunId: id,

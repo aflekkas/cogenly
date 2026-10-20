@@ -1518,6 +1518,7 @@ export function threadShellFromProjection(
   return {
     createdBy: projection.thread.createdBy,
     agent: projection.thread.agent,
+    surface: projection.thread.surface,
     workOrigin: withWorkMetadata(projection.thread).workOrigin,
     sourceThreadId: projection.thread.sourceThreadId,
     sourceAgentId: withWorkMetadata(projection.thread).sourceAgentId,
@@ -1792,6 +1793,7 @@ function shellFromState(input: {
   return {
     createdBy: input.state.thread.createdBy,
     agent: input.state.thread.agent,
+    surface: input.state.thread.surface,
     workOrigin: withWorkMetadata(input.state.thread).workOrigin,
     sourceThreadId: input.state.thread.sourceThreadId,
     sourceAgentId: withWorkMetadata(input.state.thread).sourceAgentId,

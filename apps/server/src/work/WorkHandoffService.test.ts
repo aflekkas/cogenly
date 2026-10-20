@@ -253,6 +253,8 @@ it.effect(
         expect(projection.thread.worktreePath).toBe("/workspace/isolated-audit");
         expect(projection.thread.branch).toBeTruthy();
         expect(projection.thread.workOrigin).toBe("chat");
+        // A handoff is Work even when the repository it targets is the scratch project.
+        expect(projection.thread.surface).toBe("work");
         expect(projection.thread.sourceThreadId).toBe(sourceId);
         expect(projection.runs[0]?.workspacePreparation?.type).toBe("worktree");
         expect(projection.messages[0]?.text).toContain(input.scopeSummary);
@@ -279,6 +281,7 @@ it.effect(
           return yield* store.getThreadProjection(result.threadId);
         }).pipe(Effect.provide(Projections.layerMemory));
         expect(replay.thread.workOrigin).toBe("chat");
+        expect(replay.thread.surface).toBe("work");
         expect(replay.thread.sourceThreadId).toBe(sourceId);
         expect(replay.contextHandoffs[0]?.summaryText).toBe(input.scopeSummary);
       }).pipe(Effect.provide(h.work));
@@ -297,6 +300,23 @@ it.effect("proposes a bounded editable draft without launching", () =>
       expect(draft.suggestedProjectId).toBe(null);
       expect(h.worktrees).toEqual([]);
     }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("records the surface a thread was created from, independent of its project", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const workId = ThreadId.make("thread:surface-work");
+    const chatId = ThreadId.make("thread:surface-chat");
+    const legacyId = ThreadId.make("thread:surface-legacy");
+    // Same project for all three: only the recorded surface differs.
+    yield* h.orchestrator.dispatch({ ...create(workId), surface: "work" });
+    yield* h.orchestrator.dispatch({ ...create(chatId), surface: "chat" });
+    yield* h.orchestrator.dispatch(create(legacyId));
+    expect((yield* h.orchestrator.getThreadProjection(workId)).thread.surface).toBe("work");
+    expect((yield* h.orchestrator.getThreadProjection(chatId)).thread.surface).toBe("chat");
+    // Threads from before the field stay unset, so clients keep their old guess.
+    expect((yield* h.orchestrator.getThreadProjection(legacyId)).thread.surface).toBeUndefined();
   }).pipe(Effect.provide(runtime)),
 );
 

@@ -62,11 +62,20 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
 export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
   resolve: (input) =>
     Effect.succeed({
-      runtimeMode: input.thread.runtimeMode,
+      runtimeMode: chatRuntimeMode(input.thread) ?? input.thread.runtimeMode,
       interactionMode: input.thread.interactionMode,
       cwd: input.thread.worktreePath,
     }),
 });
+
+/**
+ * A chat is a quick conversation with no repository to act on, so it always
+ * runs supervised, the most restrictive mode both Claude and Codex offer,
+ * whatever mode a client or stale draft recorded.
+ */
+function chatRuntimeMode(thread: { readonly surface?: "chat" | "work" | undefined }) {
+  return thread.surface === "chat" ? ("approval-required" as const) : undefined;
+}
 
 /**
  * The mode a provider runs a thread in. A mode the provider does not offer
@@ -126,7 +135,9 @@ export const layerFromProjectStore: Layer.Layer<
             ),
           ));
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-          runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
+          runtimeMode:
+            chatRuntimeMode(input.thread) ??
+            providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
         });

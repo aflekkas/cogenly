@@ -2255,6 +2255,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
     const thread: OrchestrationV2AppThread = {
+      ...(command.surface === undefined ? {} : { surface: command.surface }),
       workOrigin:
         command.workOrigin ??
         (command.agent?.role === "work" || command.createdBy === "agent" ? "agent" : "direct"),

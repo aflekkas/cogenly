@@ -30,9 +30,11 @@ function makeThread(input: {
   readonly now: DateTime.Utc;
   readonly worktreePath: string | null;
   readonly runtimeMode?: RuntimeMode;
+  readonly surface?: "chat" | "work";
 }): OrchestrationV2AppThread {
   const threadId = ThreadId.make("thread:runtime-policy");
   return {
+    ...(input.surface === undefined ? {} : { surface: input.surface }),
     createdBy: "user",
     creationSource: "web",
     id: threadId,
@@ -161,6 +163,23 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
       assert.equal(yield* modeFor(grokInstanceId, "full-access"), "full-access");
       // A provider without Full access still runs Supervised rather than T3 imitating it.
       assert.equal(yield* modeFor(supervisedOnlyInstanceId, "full-access"), "approval-required");
+    }),
+  );
+
+  it.effect("runs a chat supervised whatever access mode it stored", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const modeFor = (surface: "chat" | "work") =>
+        policy
+          .resolve({
+            thread: makeThread({ now, worktreePath: null, runtimeMode: "full-access", surface }),
+            modelSelection,
+          })
+          .pipe(Effect.map((resolved) => resolved.runtimeMode));
+
+      assert.equal(yield* modeFor("chat"), "approval-required");
+      assert.equal(yield* modeFor("work"), "full-access");
     }),
   );
 });

@@ -368,7 +368,15 @@ const AgentThreadIdentity = Schema.Struct({
 });
 export const WorkOrigin = Schema.Literals(["direct", "chat", "agent"]);
 export type WorkOrigin = typeof WorkOrigin.Type;
+/**
+ * The sidebar surface a thread was created from. Decided once at creation and
+ * never inferred from the project: Work can run without a project, and a chat
+ * can sit in a real one. Threads from before this field omit it.
+ */
+export const ThreadSurface = Schema.Literals(["chat", "work"]);
+export type ThreadSurface = typeof ThreadSurface.Type;
 const WorkMetadataFields = {
+  surface: Schema.optional(ThreadSurface),
   // Optional on the wire for older servers/events. Projection replay fills the defaults.
   workOrigin: Schema.optional(WorkOrigin),
   sourceThreadId: Schema.optional(ThreadId),
@@ -3391,6 +3399,7 @@ export type OrchestrationV2ArchivedShellStreamItem =
 export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   commandId: CommandId,
   creationSource: Schema.optional(OrchestrationV2CreationSource),
+  surface: Schema.optional(ThreadSurface),
   threadId: Schema.optional(ThreadId),
   reuseExistingThread: Schema.optional(Schema.Boolean),
   projectId: ProjectId,

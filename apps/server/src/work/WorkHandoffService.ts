@@ -98,6 +98,7 @@ const make = Effect.gen(function* () {
           ...(actor?.threadId === undefined ? {} : { threadId: actor.threadId }),
           projectId: input.targetProjectId,
           title: input.title,
+          surface: "work" as const,
           workOrigin: origin,
           sourceThreadId: input.sourceThreadId,
           ...(sourceAgentId === undefined

@@ -2366,6 +2366,9 @@ const make = Effect.gen(function* () {
                   type: "thread.create",
                   createdBy: "agent",
                   creationSource: "mcp",
+                  ...(parent.thread.surface === undefined
+                    ? {}
+                    : { surface: parent.thread.surface }),
                   commandId: stableCommandId({
                     scope,
                     requestKey: key,

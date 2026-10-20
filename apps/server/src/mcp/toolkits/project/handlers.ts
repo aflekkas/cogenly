@@ -140,6 +140,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           threadId,
           projectId,
           title: input.title,
+          surface: "work",
           workOrigin: "agent",
           ...(caller === undefined ? {} : { sourceThreadId: caller.id }),
           ...(caller?.agent === undefined ? {} : { sourceAgentId: caller.agent.id }),
