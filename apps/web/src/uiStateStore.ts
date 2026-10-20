@@ -1,5 +1,4 @@
 import { Debouncer } from "@tanstack/react-pacer";
-import type { PullRequestMergeMethod } from "@t3tools/contracts";
 import { create } from "zustand";
 import { normalizeProjectPathForComparison } from "./lib/projectPaths";
 import {
@@ -32,7 +31,6 @@ export interface PersistedUiState {
   projectOrderCwds?: string[];
   defaultAdvertisedEndpointKey?: string | null;
   sidebarMode?: string;
-  pullRequestMergeMethod?: string;
 }
 
 export interface UiProjectState {
@@ -50,12 +48,7 @@ export interface UiEndpointState {
   defaultAdvertisedEndpointKey: string | null;
 }
 
-export interface UiPullRequestState {
-  pullRequestMergeMethod: PullRequestMergeMethod;
-}
-
-export interface UiState
-  extends UiProjectState, UiThreadState, UiEndpointState, UiPullRequestState {}
+export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {}
 
 const initialState: UiState = {
   projectExpandedById: {},
@@ -63,7 +56,6 @@ const initialState: UiState = {
   sidebarMode: DEFAULT_SIDEBAR_MODE,
   threadLastVisitedAtById: {},
   defaultAdvertisedEndpointKey: null,
-  pullRequestMergeMethod: "merge",
 };
 
 const LEGACY_PROJECT_CWD_PREFERENCE_PREFIX = "legacy-project-cwd:";
@@ -115,10 +107,6 @@ function sanitizeTimestampRecord(value: unknown): Record<string, string> {
   );
 }
 
-function isPullRequestMergeMethod(value: unknown): value is PullRequestMergeMethod {
-  return value === "merge" || value === "squash" || value === "rebase";
-}
-
 export function parsePersistedState(parsed: PersistedUiState): UiState {
   const projectExpandedById =
     parsed.projectExpandedById === undefined
@@ -149,9 +137,6 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
     threadLastVisitedAtById: sanitizeTimestampRecord(parsed.threadLastVisitedAtById),
     defaultAdvertisedEndpointKey: sanitizeOptionalKey(parsed.defaultAdvertisedEndpointKey),
     sidebarMode: isSidebarMode(parsed.sidebarMode) ? parsed.sidebarMode : DEFAULT_SIDEBAR_MODE,
-    pullRequestMergeMethod: isPullRequestMergeMethod(parsed.pullRequestMergeMethod)
-      ? parsed.pullRequestMergeMethod
-      : initialState.pullRequestMergeMethod,
   };
 }
 
@@ -195,7 +180,6 @@ export function persistState(state: UiState): void {
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         sidebarMode: state.sidebarMode,
-        pullRequestMergeMethod: state.pullRequestMergeMethod,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -270,12 +254,6 @@ export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | nu
   };
 }
 
-function setPullRequestMergeMethod(state: UiState, method: PullRequestMergeMethod): UiState {
-  return state.pullRequestMergeMethod === method
-    ? state
-    : { ...state, pullRequestMergeMethod: method };
-}
-
 export function resolveProjectExpanded(
   projectExpandedById: Readonly<Record<string, boolean>>,
   preferenceKeys: readonly string[],
@@ -314,7 +292,6 @@ interface UiStateStore extends UiState {
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   setSidebarMode: (mode: SidebarMode) => void;
-  setPullRequestMergeMethod: (method: PullRequestMergeMethod) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
 }
 
@@ -328,7 +305,6 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
   setSidebarMode: (mode) =>
     set((state) => (state.sidebarMode === mode ? state : { ...state, sidebarMode: mode })),
-  setPullRequestMergeMethod: (method) => set((state) => setPullRequestMergeMethod(state, method)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
 }));

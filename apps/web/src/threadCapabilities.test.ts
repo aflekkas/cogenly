@@ -23,10 +23,8 @@ describe("threadCapabilities", () => {
       copyWorkspace: false,
       repositorySettings: false,
       git: false,
-      diff: false,
       terminal: false,
       files: false,
-      threadDetails: true,
       agentSettings: false,
     });
   });
@@ -47,10 +45,8 @@ describe("threadCapabilities", () => {
       copyWorkspace: true,
       repositorySettings: true,
       git: true,
-      diff: true,
       terminal: true,
       files: true,
-      threadDetails: true,
       agentSettings: false,
     });
   });
@@ -71,10 +67,8 @@ describe("threadCapabilities", () => {
       copyWorkspace: false,
       repositorySettings: false,
       git: false,
-      diff: false,
       terminal: false,
       files: false,
-      threadDetails: false,
       agentSettings: true,
     });
   });

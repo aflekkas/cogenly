@@ -386,6 +386,8 @@ export function commandLabel(command: KeybindingCommand): string {
   // The mode id stays `tasks`; users know it as Work.
   if (command === "sidebar.mode.tasks") return "Sidebar: Mode: Work";
   if (command === "view.reopenClosed") return "Reopen Closed Tab";
+  // Kept under its old id so stored bindings still apply; it only opens an agent's settings now.
+  if (command === "threadPanel.toggle") return "Agent Settings: Open";
   if (command === "preview.focusUrl") return "Preview: Focus URL";
   // Cogenly projects are repositories in the UI; Projects are context tags.
   if (command === "chat.newWithoutProject") return "Chat: New Without Repository";

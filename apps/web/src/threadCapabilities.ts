@@ -45,12 +45,9 @@ export interface ThreadCapabilities {
   readonly repositorySettings: boolean;
   /** Branch, worktree and git actions, the composer's workspace and branch pickers, and new thread on branch. */
   readonly git: boolean;
-  readonly diff: boolean;
   readonly terminal: boolean;
   /** Files panel, go to file and repository search. */
   readonly files: boolean;
-  /** The thread-details card (automations and related threads; git sections follow `git`). */
-  readonly threadDetails: boolean;
   readonly agentSettings: boolean;
 }
 
@@ -73,12 +70,8 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     copyWorkspace: false,
     repositorySettings: false,
     git: false,
-    diff: false,
     terminal: false,
     files: false,
-    // Automations and related threads apply to chats too; the card's git
-    // sections follow `git`.
-    threadDetails: true,
     agentSettings: false,
   },
   work: {
@@ -96,10 +89,8 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     copyWorkspace: true,
     repositorySettings: true,
     git: true,
-    diff: true,
     terminal: true,
     files: true,
-    threadDetails: true,
     agentSettings: false,
   },
   // The agent owns this thread: its name is the title, and deleting the agent
@@ -120,10 +111,8 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     copyWorkspace: false,
     repositorySettings: false,
     git: false,
-    diff: false,
     terminal: false,
     files: false,
-    threadDetails: false,
     agentSettings: true,
   },
 };

@@ -298,8 +298,7 @@ and **Edit** to rename, recolor, describe or delete the project. Deleting a proj
 keeps its chats, Work and repositories; they are just no longer in a folder. Start one
 with **New project** at the top of the list or in the command palette.
 
-To file a thread, right-click it and choose **Move to folder**, use the folder picker
-in the thread's details, or run **Move to folder…** from the command palette. Choose
+To file a thread, right-click it and choose **Move to folder**, or run **Move to folder…** from the command palette. Choose
 **Remove from folder** to take it out; Work then falls back to its repository's
 project. A filed chat also gets
 [project context](./memory-and-export.md#project-context-in-chats).

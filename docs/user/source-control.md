@@ -1,14 +1,7 @@
 # Source control
 
-Cogenly integrates with GitHub to clone and publish repositories and create pull requests.
+Cogenly integrates with GitHub to clone repositories, and agents use it to publish repositories and create pull requests.
 Repositories on other hosts continue to work as plain Git repositories.
-
-## Review turn changes
-
-A turn's changed files and diff show only the turn's own work. When a turn pulls, merges, or
-rebases, the files Git brought in are left out. A file stays in the list when the turn edited it,
-committed it, or fixed a conflict in it. Use the branch comparison to review everything that changed
-against your base branch. Restore still returns the complete saved workspace.
 
 ## Connect an account
 
@@ -51,22 +44,7 @@ clone runs in the background: you can write your first prompt, and sending waits
 are in place. A toast tracks progress and lets you cancel; if the clone fails, retry it from the
 toast or from the banner above the composer.
 
-For a local Git repository without a remote, **Publish Repository** creates a hosted repository,
-adds it as `origin`, and pushes your commits. If there are no commits yet, it creates the remote;
-make your first commit before pushing.
-
-## Create a pull request
-
-Use a thread's Git actions to commit, push, and create a pull request. Cogenly can generate commit
-messages, review titles, and descriptions from your changes.
-
-An existing fork PR can appear beside the branch even if you pushed without setting an upstream.
-If its badge is missing because several remotes hold that branch, set the branch's upstream to
-the intended remote with `git branch --set-upstream-to=<remote>/<branch>`.
-
-Choose the writing style and model in **Settings → Source Control**. **Repository conventions**
-uses the project's instructions and recent commit subjects.
-
 ## Pull requests with agents
 
-Ask Claude Code or Codex to inspect or manage a GitHub pull request. Agents can link pull requests to a thread and watch their checks and reviews. Pull request links open through your normal browser preference.
+Ask Claude Code or Codex to commit, push, publish a repository without a remote, or open, inspect
+and manage a GitHub pull request. Agents can link pull requests to a thread and watch their checks and reviews. Pull request links open through your normal browser preference.

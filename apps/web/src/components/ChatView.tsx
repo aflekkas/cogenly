@@ -50,7 +50,6 @@ import {
 import { useAttachmentUploadStore } from "../lib/attachmentUploadQueue";
 import {
   AuthOrchestrationOperateScope,
-  AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   AuthPreviewOperateScope,
   AuthTerminalReadScope,
@@ -61,7 +60,6 @@ import {
   DEFAULT_MODEL,
   isProviderNativeSubagentThread,
   type ChatAttachment as ContractChatAttachment,
-  EnvironmentAuthorizationError,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
@@ -75,7 +73,6 @@ import {
   type ThreadId,
   type RunId,
   type RuntimeRequestId,
-  type KeybindingCommand,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -178,7 +175,6 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
@@ -244,15 +240,10 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { FileMetadataThreadProvider } from "../hooks/FileMetadataThreadProvider";
 import { usePreviewPanelInlineSize } from "../hooks/usePreviewPanelInlineSize";
-import {
-  RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY,
-  type ThreadPanelPresentation,
-} from "../rightPanelLayout";
-import { PopoverCreateHandle } from "./ui/popover";
+import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
-  selectThreadPanelOpen,
   selectThreadRightPanelState,
   type RightPanelSurface,
   useRightPanelStore,
@@ -303,18 +294,7 @@ import {
 import { cn, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import {
-  decodeProjectScriptKeybindingRule,
-  keybindingValueForCommand,
-} from "~/lib/projectScriptKeybindings";
-import { type NewProjectScriptInput } from "./ProjectScriptsControl";
-import {
-  buildProjectScript,
-  commandForProjectScript,
-  nextProjectScriptId,
-  projectScriptIdFromCommand,
-  releaseClaimedRoles,
-} from "~/projectScripts";
+import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { registerFaviconProjectForThread } from "~/browserFaviconStore";
 import { getProviderModelCapabilities } from "../providerModels";
@@ -440,7 +420,6 @@ import {
   RightPanelMaximizeControl,
 } from "./chat/PanelLayoutControls";
 import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
-import { ThreadDetailsPanel, type ThreadDetailsPanelProps } from "./chat/ThreadDetailsPanel";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import {
   type EnvironmentOption,
@@ -510,8 +489,6 @@ import {
   shouldReleaseTimelineAnchorForToolActivity,
   shouldRenderPreviewMiniPlayer,
   getStartedThreadModelChangeBlockReason,
-  LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
-  LastInvokedScriptByProjectSchema,
   type LocalDispatchSnapshot,
   cloneComposerImageForRetry,
   deriveLockedProvider,
@@ -1051,15 +1028,6 @@ export default function ChatView(props: ChatViewProps) {
       currentRouteThreadKeyRef.current = null;
     };
   }, [routeThreadKey]);
-  const updateProjectScriptSettings = useAtomCommand(serverEnvironment.updateSettings, {
-    reportFailure: false,
-  });
-  const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
-    reportFailure: false,
-  });
-  const removeKeybinding = useAtomCommand(serverEnvironment.removeKeybinding, {
-    reportFailure: false,
-  });
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const createThread = useOrchestrationCommand(threadEnvironment.create, { reportFailure: false });
@@ -1389,7 +1357,6 @@ export default function ChatView(props: ChatViewProps) {
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const isMobileViewport = useMediaQuery("max-sm");
   const [workspaceLayoutElement, setWorkspaceLayoutElement] = useState<HTMLDivElement | null>(null);
-  const threadPanelPopoverAnchorRef = useRef<HTMLElement | null>(null);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
   // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
@@ -1404,11 +1371,6 @@ export default function ChatView(props: ChatViewProps) {
     pendingServerThreadStartFromOriginByThreadId,
     setPendingServerThreadStartFromOriginByThreadId,
   ] = useState<Record<string, boolean>>({});
-  const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
-    LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
-    {},
-    LastInvokedScriptByProjectSchema,
-  );
   const legendListRef = useRef<LegendListRef | null>(null);
   const getTimelineScrollableNode = () => legendListRef.current?.getScrollableNode() ?? null;
   const getTimelineScrollableNodeStable = useStableCallback(getTimelineScrollableNode);
@@ -1770,16 +1732,6 @@ export default function ChatView(props: ChatViewProps) {
   const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized = canMaximizeRightPanel && rightPanelState.maximized === true;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
-  const [threadPanelPresentation, setThreadPanelPresentation] =
-    useState<ThreadPanelPresentation>("inline");
-  const [threadPanelPopoverHandle] = useState(PopoverCreateHandle);
-  const threadPanelOpen = useRightPanelStore((state) =>
-    selectThreadPanelOpen(
-      state.threadPanelVisibilityByThreadKey,
-      activeThreadRef,
-      threadPanelPresentation,
-    ),
-  );
 
   useEffect(() => {
     if (!activeThreadRef || !previewSessionsReady) return;
@@ -3920,16 +3872,9 @@ export default function ChatView(props: ChatViewProps) {
       cwd?: string;
       env?: Record<string, string>;
       worktreePath?: string | null;
-      rememberAsLastInvoked?: boolean;
     },
   ) => {
     if (!hasTerminalWriteAccess() || !activeThreadId || !activeProject || !activeThread) return;
-    if (options?.rememberAsLastInvoked !== false) {
-      setLastInvokedScriptByProjectId((current) => {
-        if (current[activeProject.id] === script.id) return current;
-        return { ...current, [activeProject.id]: script.id };
-      });
-    }
     const targetCwd = options?.cwd ?? gitCwd ?? activeProject.workspaceRoot;
     const targetWorktreePath = options?.worktreePath ?? activeThread.worktreePath ?? null;
     if (!activeThreadRef) {
@@ -4013,238 +3958,15 @@ export default function ChatView(props: ChatViewProps) {
     runProjectScriptRef.current = runProjectScriptStable;
   }, [runProjectScriptStable]);
   const runShellCommand = (command: string) => {
-    void runProjectScriptRef.current(
-      {
-        id: "chat-code-block",
-        name: "Chat code block",
-        command,
-        icon: "play",
-        runOnWorktreeCreate: false,
-      },
-      { rememberAsLastInvoked: false },
-    );
+    void runProjectScriptRef.current({
+      id: "chat-code-block",
+      name: "Chat code block",
+      command,
+      icon: "play",
+      runOnWorktreeCreate: false,
+    });
   };
   const runShellCommandStable = useStableCallback(runShellCommand);
-
-  const supportsProjectSettingsOverrides =
-    environmentById.get(environmentId)?.serverConfig?.environment.capabilities
-      .projectSettingsOverrides === true;
-  const persistProjectScripts = async (input: {
-    projectId: ProjectId;
-    projectCwd: string;
-    previousScripts: ReadonlyArray<ProjectScript>;
-    nextScripts: ReadonlyArray<ProjectScript>;
-    keybinding: NewProjectScriptInput["keybinding"];
-    keybindingCommand: KeybindingCommand | null;
-  }): Promise<AtomCommandResult<void, unknown>> => {
-    const previousKeybinding = keybindingValueForCommand(
-      appAtomRegistry.get(serverEnvironment.configValueAtom(environmentId))?.keybindings ?? [],
-      input.keybindingCommand,
-    );
-    const isDeletingScript = !input.nextScripts.some(
-      (script) => commandForProjectScript(script.id) === input.keybindingCommand,
-    );
-    const changesKeybinding =
-      input.keybinding !== undefined &&
-      (input.keybinding?.trim() || null) !== previousKeybinding &&
-      (!isDeletingScript || readEnvironmentScope(environmentId, AuthSettingsWriteScope));
-    if (changesKeybinding && !readEnvironmentScope(environmentId, AuthSettingsWriteScope)) {
-      return AsyncResult.failure(
-        Cause.fail(
-          new EnvironmentAuthorizationError({
-            requiredScope: AuthSettingsWriteScope,
-            message: "This connection cannot change keyboard shortcuts.",
-          }),
-        ),
-      );
-    }
-    const keybindingRule = changesKeybinding
-      ? decodeProjectScriptKeybindingRule({
-          keybinding: input.keybinding,
-          command: input.keybindingCommand,
-        })
-      : null;
-    const updateResult = mapAtomCommandResult(
-      await updateProjectScriptSettings({
-        environmentId,
-        input: {
-          // The canonical key on servers that understand it; the legacy
-          // per-project map is still translated on older ones.
-          patch: supportsProjectSettingsOverrides
-            ? {
-                projectSettingsOverrides: {
-                  [input.projectId]: {
-                    ...settings.projectSettingsOverrides[input.projectId],
-                    defaultProjectScripts: input.nextScripts,
-                  },
-                },
-              }
-            : {
-                projectScriptOverrides: {
-                  [input.projectId]: input.nextScripts,
-                },
-              },
-        },
-      }),
-      () => undefined,
-    );
-    if (updateResult._tag === "Failure") {
-      return updateResult;
-    }
-
-    if (!changesKeybinding) return updateResult;
-    if (!readEnvironmentScope(environmentId, AuthSettingsWriteScope)) {
-      return AsyncResult.failure(
-        Cause.fail(
-          new EnvironmentAuthorizationError({
-            requiredScope: AuthSettingsWriteScope,
-            message: isDeletingScript
-              ? "The script was deleted, but its keyboard shortcut could not be removed because permission changed."
-              : "The script was saved, but this connection can no longer change keyboard shortcuts.",
-          }),
-        ),
-      );
-    }
-
-    const scriptId = input.keybindingCommand
-      ? projectScriptIdFromCommand(input.keybindingCommand)
-      : null;
-    if (!keybindingRule && !input.previousScripts.some((script) => script.id === scriptId)) {
-      return updateResult;
-    }
-    const retainedElsewhere =
-      !input.nextScripts.some((script) => script.id === scriptId) &&
-      (settings.defaultProjectScripts.some((script) => script.id === scriptId) ||
-        Object.entries(settings.projectSettingsOverrides).some(
-          ([projectId, entry]) =>
-            projectId !== input.projectId &&
-            entry.defaultProjectScripts?.some((script) => script.id === scriptId),
-        ) ||
-        allProjects.some(
-          (other) =>
-            other.environmentId === environmentId &&
-            other.id !== input.projectId &&
-            resolveProjectScripts(settings, other).some((script) => script.id === scriptId),
-        ));
-    if (!keybindingRule && retainedElsewhere) return updateResult;
-
-    const previousRules = (
-      environmentById.get(environmentId)?.serverConfig?.keybindings ?? []
-    ).flatMap((binding) => {
-      if (binding.command !== input.keybindingCommand || binding.whenAst) return [];
-      const previous = decodeProjectScriptKeybindingRule({
-        keybinding: keybindingValueForCommand([binding], input.keybindingCommand),
-        command: input.keybindingCommand,
-      });
-      return previous ? [previous] : [];
-    });
-    const previous = previousRules.at(-1);
-    for (const rule of keybindingRule ? previousRules.slice(0, -1) : previousRules) {
-      const result = await removeKeybinding({ environmentId, input: rule });
-      if (result._tag === "Failure") return mapAtomCommandResult(result, () => undefined);
-    }
-    return keybindingRule
-      ? mapAtomCommandResult(
-          await upsertKeybinding({
-            environmentId,
-            input:
-              previous && previous.key !== keybindingRule.key
-                ? { ...keybindingRule, replace: previous }
-                : keybindingRule,
-          }),
-          () => undefined,
-        )
-      : updateResult;
-  };
-  const saveProjectScript = async (
-    input: NewProjectScriptInput,
-  ): Promise<AtomCommandResult<void, unknown>> => {
-    if (!activeProject) {
-      return AsyncResult.success(undefined);
-    }
-    const nextId = nextProjectScriptId(
-      input.name,
-      activeProjectScripts.map((script) => script.id),
-    );
-    const nextScript = buildProjectScript(nextId, input);
-    const nextScripts = [
-      ...activeProjectScripts.map((script) => releaseClaimedRoles(script, input)),
-      nextScript,
-    ];
-
-    return persistProjectScripts({
-      projectId: activeProject.id,
-      projectCwd: activeProject.workspaceRoot,
-      previousScripts: activeProjectScripts,
-      nextScripts,
-      keybinding: input.keybinding,
-      keybindingCommand: commandForProjectScript(nextId),
-    });
-  };
-  const saveProjectScriptStable = useStableCallback(saveProjectScript);
-  const updateProjectScript = async (
-    scriptId: string,
-    input: NewProjectScriptInput,
-  ): Promise<AtomCommandResult<void, unknown>> => {
-    if (!activeProject) {
-      return AsyncResult.success(undefined);
-    }
-    const existingScript = activeProjectScripts.find((script) => script.id === scriptId);
-    if (!existingScript) {
-      return AsyncResult.failure(Cause.fail(new Error("Script not found.")));
-    }
-
-    const updatedScript = buildProjectScript(existingScript.id, input);
-    const nextScripts = activeProjectScripts.map((script) =>
-      script.id === scriptId ? updatedScript : releaseClaimedRoles(script, input),
-    );
-
-    return persistProjectScripts({
-      projectId: activeProject.id,
-      projectCwd: activeProject.workspaceRoot,
-      previousScripts: activeProjectScripts,
-      nextScripts,
-      keybinding: input.keybinding,
-      keybindingCommand: commandForProjectScript(scriptId),
-    });
-  };
-  const updateProjectScriptStable = useStableCallback(updateProjectScript);
-  const deleteProjectScript = async (
-    scriptId: string,
-  ): Promise<AtomCommandResult<void, unknown>> => {
-    if (!activeProject) {
-      return AsyncResult.success(undefined);
-    }
-    const nextScripts = activeProjectScripts.filter((script) => script.id !== scriptId);
-
-    const deletedName = activeProjectScripts.find((s) => s.id === scriptId)?.name;
-
-    const result = await persistProjectScripts({
-      projectId: activeProject.id,
-      projectCwd: activeProject.workspaceRoot,
-      previousScripts: activeProjectScripts,
-      nextScripts,
-      keybinding: null,
-      keybindingCommand: commandForProjectScript(scriptId),
-    });
-    if (result._tag === "Success") {
-      toastManager.add({
-        type: "success",
-        title: `Deleted action "${deletedName ?? "Unknown"}"`,
-      });
-    } else if (!isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not delete action",
-          description: error instanceof Error ? error.message : "An unexpected error occurred.",
-        }),
-      );
-    }
-    return result;
-  };
-  const deleteProjectScriptStable = useStableCallback(deleteProjectScript);
 
   const handleInteractionModeChange = (mode: ProviderInteractionMode) => {
     if (mode === "plan" && !interactionModeEnabled) return;
@@ -4499,13 +4221,8 @@ export default function ChatView(props: ChatViewProps) {
     useRightPanelStore.getState().toggleVisibility(activeThreadRef);
   };
   const toggleRightPanelStable = useStableCallback(toggleRightPanel);
-  const toggleThreadPanel = () => {
-    if (!activeThreadRef) return;
-    useRightPanelStore.getState().toggleThreadPanel(activeThreadRef, threadPanelPresentation);
-  };
-  const toggleThreadPanelStable = useStableCallback(toggleThreadPanel);
-  // An agent's conversation has no thread details of its own: the header opens the
-  // agent's settings (its Responsibilities view) instead.
+  // An agent's conversation shows its agent's settings (the Responsibilities view)
+  // in the header instead of thread controls.
   const agentConversationViewKey =
     activeThreadRef && activeThreadShell?.source.agent?.role === "conversation"
       ? agentViewKey({
@@ -6418,8 +6135,8 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "threadPanel.toggle") {
         event.preventDefault();
         event.stopPropagation();
+        // The thread details panel is gone; only an agent's conversation answers.
         if (activeThreadCapabilities.agentSettings) openAgentSettingsStable();
-        else if (activeThreadCapabilities.threadDetails) toggleThreadPanelStable();
         return;
       }
 
@@ -6571,7 +6288,6 @@ export default function ChatView(props: ChatViewProps) {
     isThreadFindActive,
     toggleRightPanelStable,
     toggleRightPanelMaximizedStable,
-    toggleThreadPanelStable,
     composerRef,
     draftId,
     environmentId,
@@ -9263,68 +8979,18 @@ export default function ChatView(props: ChatViewProps) {
       </Suspense>
     ) : null
   ) : null;
-  const threadDetailsPanelProps: ThreadDetailsPanelProps = {
-    anchor: threadPanelPopoverAnchorRef,
-    handle: threadPanelPopoverHandle,
-    onPresentationChange: setThreadPanelPresentation,
-    forceNewWorktree: multipleModelSelections !== null,
-    showProjectTags: isServerThread && activeThreadCapabilities.projectFolder,
-    environmentId: activeThread.environmentId,
-    threadId: activeThread.id,
-    ...(draftId ? { draftId } : {}),
-    activeProjectName: activeProject?.title,
-    // Scripts run in a terminal, and the card's git sections follow the kind's git controls.
-    activeProjectScripts:
-      activeProject && activeThreadCapabilities.terminal ? activeProjectScripts : undefined,
-    preferredScriptId: activeProject
-      ? (lastInvokedScriptByProjectId[activeProject.id] ?? null)
-      : null,
-    keybindings,
-    gitCwd: activeThreadCapabilities.git ? gitCwd : null,
-    isGitRepo,
-    envLocked,
-    availableEnvironments: logicalProjectEnvironments,
-    autoEnvironmentLabel,
-    onAutoEnvironment:
-      draftId &&
-      !envLocked &&
-      canAutoBalanceEnvironments &&
-      loadBalancingSettings.loadBalancingEnabled
-        ? onAutoEnvironmentStable
-        : undefined,
-    onEnvironmentChange: onEnvironmentChangeStable,
-    onEnvModeChange: onEnvModeChangeStable,
-    envMode,
-    ...(canOverrideServerThreadEnvMode
-      ? {
-          activeThreadBranchOverride: activeThreadBranch,
-          onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
-        }
-      : {}),
-    startFromOrigin,
-    onStartFromOriginChange,
-    onComposerFocusRequest: scheduleComposerFocusStable,
-    onRunProjectScript: runProjectScriptStable,
-    onAddProjectScript: saveProjectScriptStable,
-    onUpdateProjectScript: updateProjectScriptStable,
-    onDeleteProjectScript: deleteProjectScriptStable,
-  };
   const panelToggleControlProps = {
-    threadPanelOpen,
-    threadPanelPresentation,
-    threadPanelPopoverHandle,
-    threadPanelShortcutLabel: shortcutLabelForCommand(keybindings, "threadPanel.toggle"),
+    agentSettingsShortcutLabel: shortcutLabelForCommand(keybindings, "threadPanel.toggle"),
     rightPanelAvailable: activeProject !== null,
     rightPanelOpen,
     rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
-    onToggleThreadPanel: toggleThreadPanelStable,
     onToggleRightPanel: toggleRightPanelStable,
     onOpenAgentSettings: agentConversationViewKey ? openAgentSettingsStable : undefined,
   } satisfies PanelLayoutControlsProps;
   const panelToggleControls = (
     <PanelLayoutControls
       {...panelToggleControlProps}
-      showThreadPanelControl={!inlineRightPanelOwnsTitleBar}
+      showThreadControls={!inlineRightPanelOwnsTitleBar}
     />
   );
   const threadPanelHeaderControl = (
@@ -9420,7 +9086,6 @@ export default function ChatView(props: ChatViewProps) {
       >
         {/* Top bar */}
         <header
-          ref={threadPanelPopoverAnchorRef}
           data-chat-header
           className={cn(
             "relative bg-background",
@@ -10027,8 +9692,6 @@ export default function ChatView(props: ChatViewProps) {
                 </AlertDialogFooter>
               </AlertDialogPopup>
             </AlertDialog>
-
-            <ThreadDetailsPanel {...threadDetailsPanelProps} />
           </ThreadFindCanvas>
           {/* end chat column */}
         </div>

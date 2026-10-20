@@ -60,7 +60,7 @@ export function useNewProject() {
             stackedThreadToast({
               type: "error",
               title: `Could not create the ${label} repository`,
-              description: `${errorMessage(squashAtomCommandFailure(result))} Use Publish Repository in the Git menu to try again.`,
+              description: `${errorMessage(squashAtomCommandFailure(result))} Ask the agent in a Work thread to publish it.`,
             }),
           );
         }
