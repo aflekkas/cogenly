@@ -241,6 +241,14 @@ import {
   useSidebarModeState,
   windowChatList,
 } from "./sidebar/modes";
+import { sidebarModeForThread } from "./sidebar/modes/sidebarModes.logic";
+import {
+  threadCapabilities,
+  threadKindForSidebarMode,
+  type ThreadCapabilities,
+} from "../threadCapabilities";
+import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
+import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
@@ -2368,6 +2376,7 @@ export default function Sidebar() {
     unsnoozeThread,
     setThreadAutoSettle,
     markThreadUnread,
+    markThreadRead,
     archiveThread,
     deleteThread,
   } = useThreadActions();
@@ -2406,6 +2415,20 @@ export default function Sidebar() {
         stackedThreadToast({
           type: "error",
           title: "Failed to copy branch",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    },
+  });
+  const { copyToClipboard: copyThreadLinkToClipboard } = useCopyToClipboard<{ link: string }>({
+    onCopy: ({ link }) => {
+      toastManager.add({ type: "success", title: "Thread link copied", description: link });
+    },
+    onError: (error) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to copy thread link",
           description: error instanceof Error ? error.message : "An error occurred.",
         }),
       );
@@ -3684,18 +3707,33 @@ export default function Sidebar() {
       const settlingThreads = selectedThreads.filter(
         (thread) => thread.settledOverride !== "settled",
       );
-      const offersLifecycle = sidebarMode !== "chats";
+      // An action is offered only when every selected thread's kind has it.
+      const selectedCapabilities = selectedThreads.map((thread) =>
+        threadCapabilities(
+          threadKindForSidebarMode(sidebarModeForThread(thread, sidebarModes.classifier)),
+        ),
+      );
+      const everySelected = (allows: (capabilities: ThreadCapabilities) => boolean) =>
+        selectedCapabilities.every(allows);
+      const offersLifecycle = everySelected((capabilities) => capabilities.settle);
       const canSnoozeSelection =
-        offersLifecycle &&
+        everySelected((capabilities) => capabilities.snooze) &&
         selectedThreads.every(
           (thread) =>
             serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze ===
               true && canSnooze(thread, { now: selectionNow.toISOString() }),
         );
-      const titleRegenerationThreads = selectedThreads.filter(
-        (thread) =>
-          serverConfigs.get(thread.environmentId)?.environment.capabilities
-            .threadTitleRegeneration === true,
+      const titleRegenerationThreads = everySelected((capabilities) => capabilities.regenerateTitle)
+        ? selectedThreads.filter(
+            (thread) =>
+              serverConfigs.get(thread.environmentId)?.environment.capabilities
+                .threadTitleRegeneration === true,
+          )
+        : [];
+      const offersMarkUnread = everySelected((capabilities) => capabilities.markUnread);
+      const offersDelete = everySelected((capabilities) => capabilities.delete !== false);
+      const deleteAlwaysConfirms = selectedCapabilities.some(
+        (capabilities) => capabilities.delete === "always-confirm",
       );
       const regeneratableTitleThreads = titleRegenerationThreads.filter(
         (thread) => thread.titleRegeneration == null,
@@ -3749,13 +3787,17 @@ export default function Sidebar() {
                   },
                 ]
               : []),
-            { id: "mark-unread", label: `Mark unread (${count})` },
-            {
-              id: "delete",
-              label: `Delete (${count})`,
-              destructive: true,
-              disabled: !canOperateThreads(selectedThreads),
-            },
+            ...(offersMarkUnread ? [{ id: "mark-unread", label: `Mark unread (${count})` }] : []),
+            ...(offersDelete
+              ? [
+                  {
+                    id: "delete",
+                    label: `Delete (${count})`,
+                    destructive: true,
+                    disabled: !canOperateThreads(selectedThreads),
+                  },
+                ]
+              : []),
           ],
           position,
         ),
@@ -3854,8 +3896,8 @@ export default function Sidebar() {
         clearSelection();
         return;
       }
-      if (clicked.value !== "delete") return;
-      if (confirmThreadDelete) {
+      if (clicked.value !== "delete" || !offersDelete) return;
+      if (confirmThreadDelete || deleteAlwaysConfirms) {
         const confirmed = await settlePromise(() =>
           api.dialogs.confirm(
             [
@@ -3920,12 +3962,20 @@ export default function Sidebar() {
         const workspacePath =
           session.worktreePath ??
           projectByKey.get(`${session.environmentId}:${session.projectId}`)?.workspaceRoot;
+        // A chat draft has no repository to copy from or configure.
+        const draftCapabilities = threadCapabilities(
+          sidebarModes.classifier.scratchProjectKeys.has(
+            `${session.environmentId}:${session.projectId}`,
+          )
+            ? "chat"
+            : "work",
+        );
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildDraftActionMenuItems({
-              hasPath: Boolean(workspacePath),
-              hasBranch: Boolean(session.branch),
-              hasProject: projectGroup != null,
+              hasPath: draftCapabilities.copyWorkspace && Boolean(workspacePath),
+              hasBranch: draftCapabilities.copyWorkspace && Boolean(session.branch),
+              hasProject: draftCapabilities.repositorySettings && projectGroup != null,
             }),
             position,
           ),
@@ -3974,19 +4024,18 @@ export default function Sidebar() {
           thread.worktreePath ??
           projectByKey.get(`${thread.environmentId}:${thread.projectId}`)?.workspaceRoot ??
           null;
-        // Environments without the settlement capability get no lifecycle
-        // items at all, and neither do chats: their list has no shelves to
-        // show a settled or snoozed chat in.
-        const offersLifecycle = sidebarMode !== "chats";
+        // The thread's kind decides which actions exist; its environment's
+        // capabilities decide whether the server can run them.
+        const threadKind = threadKindForSidebarMode(
+          sidebarModeForThread(thread, sidebarModes.classifier),
+        );
+        const capabilities = threadCapabilities(threadKind);
         const supportsSettlement =
-          offersLifecycle &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
-            true;
+          true;
         const supportsSnooze =
-          offersLifecycle &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
         const supportsAutoSettleOptOut =
-          offersLifecycle &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities
             .threadAutoSettleOptOut === true;
         const supportsTitleRegeneration =
@@ -3999,7 +4048,7 @@ export default function Sidebar() {
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
         // The projects its row shows: Work's chips, or a chat's confirmed tags.
         const threadProjects =
-          sidebarMode === "tasks"
+          threadKind === "work"
             ? workProjectTagsFor(thread)
             : (
                 projectLabelDirectory.confirmedByThread.get(
@@ -4024,8 +4073,15 @@ export default function Sidebar() {
                 threadRef.environmentId,
                 AuthOrchestrationOperateScope,
               ),
+              capabilities,
               branch: thread.branch ?? null,
-              canStartWork: thread.source.agent === undefined,
+              isUnread: hasUnseenCompletion({
+                ...thread,
+                lastVisitedAt: resolveThreadLastVisitedAt(
+                  thread.lastVisitedAt,
+                  useUiStateStore.getState().threadLastVisitedAtById[threadKey],
+                ),
+              }),
               isSettled,
               autoSettleEnabled: thread.autoSettleDisabledAt == null,
               isSnoozed,
@@ -4146,6 +4202,24 @@ export default function Sidebar() {
           case "mark-unread":
             markThreadUnread(threadRef);
             return;
+          case "mark-read":
+            markThreadRead(threadRef);
+            return;
+          case "agent-settings":
+            navigateToThread(threadRef);
+            requestAgentView(
+              agentViewKey({
+                environmentId: threadRef.environmentId,
+                conversationThreadId: threadRef.threadId,
+              }),
+              "responsibilities",
+            );
+            return;
+          case "copy-thread-link": {
+            const link = formatThreadLink(thread.id, thread.title);
+            copyThreadLinkToClipboard(link, { link });
+            return;
+          }
           case "copy-path":
             if (!threadWorkspacePath) {
               toastManager.add(
@@ -4196,7 +4270,8 @@ export default function Sidebar() {
             return;
           }
           case "delete": {
-            if (confirmThreadDelete) {
+            if (capabilities.delete === false) return;
+            if (confirmThreadDelete || capabilities.delete === "always-confirm") {
               const confirmed = await settlePromise(() =>
                 api.dialogs.confirm(
                   [

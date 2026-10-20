@@ -76,6 +76,8 @@ export interface SidebarModeState {
   readonly decisionsWaiting: number;
   /** Agent names by `environmentId:agentId`, for marking the Work an agent started. */
   readonly agentNameByKey: ReadonlyMap<string, string>;
+  /** Which mode lists each thread, and so its kind. */
+  readonly classifier: SidebarModeThreadClassifier;
 }
 
 /**
@@ -163,5 +165,13 @@ export function useSidebarModeState(input: {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [keybindings, setMode]);
 
-  return { mode, setMode, modeThreads, draftProjectKeys, decisionsWaiting, agentNameByKey };
+  return {
+    mode,
+    setMode,
+    modeThreads,
+    draftProjectKeys,
+    decisionsWaiting,
+    agentNameByKey,
+    classifier,
+  };
 }

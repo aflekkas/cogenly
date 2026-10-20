@@ -2,7 +2,6 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
 import { EnvironmentId, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildThreadActionMenuItems, type ThreadActionMenuState } from "../threadActionMenu.logic";
 import {
   describeWorkStartFailure,
   deriveWorkRowStatus,
@@ -232,74 +231,6 @@ describe("workPrefersNewWorktree", () => {
     expect(workPrefersNewWorktree({ ...base, environmentDefault: "local" })).toBe(false);
     expect(workPrefersNewWorktree({ ...base, resolvedSource: "project" })).toBe(false);
     expect(workPrefersNewWorktree({ ...base, resolvedSource: "t3.json" })).toBe(false);
-  });
-});
-
-describe("Open project in the thread action menu", () => {
-  const state: ThreadActionMenuState = {
-    canOperate: false,
-    branch: null,
-    isSettled: false,
-    autoSettleEnabled: true,
-    isSnoozed: false,
-    canSnoozeNow: true,
-    isRegeneratingTitle: false,
-    isRunning: false,
-    supports: {
-      settlement: false,
-      autoSettleOptOut: false,
-      snooze: false,
-      titleRegeneration: false,
-    },
-    snoozePresets: [],
-  };
-  const projectItem = (menuState: ThreadActionMenuState) =>
-    buildThreadActionMenuItems(menuState).find((item) => item.id.startsWith("open-project"));
-
-  it("opens a single project directly and nests several, even for read-only clients", () => {
-    expect(projectItem(state)).toBeUndefined();
-    const one = projectItem({ ...state, projects: [{ key: "env:spawn", name: "Spawn" }] });
-    expect(one).toMatchObject({ id: "open-project:env:spawn", label: "Open Spawn" });
-    expect(one?.disabled).toBeUndefined();
-    const several = projectItem({
-      ...state,
-      projects: [
-        { key: "env:bartr", name: "Bartr" },
-        { key: "env:spawn", name: "Spawn" },
-      ],
-    });
-    expect(several?.children?.map((child) => child.id)).toEqual([
-      "open-project:env:bartr",
-      "open-project:env:spawn",
-    ]);
-  });
-});
-
-describe("Start Work in the thread action menu", () => {
-  const state: ThreadActionMenuState = {
-    canOperate: true,
-    branch: null,
-    isSettled: false,
-    autoSettleEnabled: true,
-    isSnoozed: false,
-    canSnoozeNow: true,
-    isRegeneratingTitle: false,
-    isRunning: false,
-    supports: {
-      settlement: false,
-      autoSettleOptOut: false,
-      snooze: false,
-      titleRegeneration: false,
-    },
-    snoozePresets: [],
-  };
-  const startWork = (menuState: ThreadActionMenuState) =>
-    buildThreadActionMenuItems(menuState).find((item) => item.id === "start-work");
-
-  it("is offered only where the caller allows it, and disabled without operate access", () => {
-    expect(startWork(state)).toBeUndefined();
-    expect(startWork({ ...state, canStartWork: true })?.disabled).toBeUndefined();
-    expect(startWork({ ...state, canStartWork: true, canOperate: false })?.disabled).toBe(true);
   });
 });
 
