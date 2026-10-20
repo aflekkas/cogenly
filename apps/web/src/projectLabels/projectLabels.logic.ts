@@ -1,16 +1,15 @@
 /**
- * Projects are context tags (`ProjectLabel` in code). A project links many
- * repositories (Cogenly projects) and tags many threads; it never grants
- * access. Labels live per environment, so every key here is scoped by
- * environment id.
+ * Projects are folders (`ProjectLabel` in code). A folder holds many
+ * repositories (Cogenly projects) and threads; each repository and thread is
+ * in at most one. Work without an explicit folder follows its repository's.
+ * Folders are context only and never grant access. They live per
+ * environment, so every key here is scoped by environment id.
  */
 import type {
   EnvironmentId,
   ProjectId,
   ProjectLabelId,
   ProjectLabelWithRepositories,
-  ThreadId,
-  ThreadProjectLabel,
 } from "@t3tools/contracts";
 
 import { PROJECT_ICON_COLORS } from "../projectIconColors";
@@ -37,13 +36,6 @@ export function scopedRepositoryKey(
   return `${environmentId}:${repositoryId}`;
 }
 
-export function scopedThreadTagKey(
-  environmentId: EnvironmentId | string,
-  threadId: ThreadId | string,
-): string {
-  return `${environmentId}:${threadId}`;
-}
-
 /** The palette repositories already use for icons; a project stores the value name. */
 export const PROJECT_LABEL_COLORS = PROJECT_ICON_COLORS;
 const DEFAULT_PROJECT_LABEL_COLOR = "gray";
@@ -63,94 +55,66 @@ export function sortProjectLabels<T extends { readonly label: { readonly name: s
   );
 }
 
-export interface ResolvedThreadTag {
-  readonly label: ProjectLabelWithRepositories;
-  readonly tag: ThreadProjectLabel;
-  readonly suggested: boolean;
+/** The folder a thread is filed in, as the server resolved it (explicit, else its repository's). */
+export function threadProjectFolderId(thread: {
+  readonly source: { readonly projectFolderId?: ProjectLabelId | null | undefined };
+}): ProjectLabelId | null {
+  return thread.source.projectFolderId ?? null;
 }
 
-/**
- * Confirmed tags first, alphabetically; then pending suggestions, most
- * confident first. Tags whose project no longer exists are dropped.
- */
-export function resolveThreadTags(
-  tags: ReadonlyArray<ThreadProjectLabel>,
-  labelsById: ReadonlyMap<string, ProjectLabelWithRepositories>,
-): ResolvedThreadTag[] {
-  const confirmed: ResolvedThreadTag[] = [];
-  const suggested: ResolvedThreadTag[] = [];
-  for (const tag of tags) {
-    const label = labelsById.get(tag.labelId);
-    if (!label) continue;
-    if (tag.confirmedByUser) confirmed.push({ label, tag, suggested: false });
-    else suggested.push({ label, tag, suggested: true });
-  }
-  confirmed.sort((left, right) =>
-    left.label.name.localeCompare(right.label.name, undefined, { sensitivity: "base" }),
-  );
-  suggested.sort((left, right) => (right.tag.confidence ?? 0) - (left.tag.confidence ?? 0));
-  return [...confirmed, ...suggested];
+export interface RepositoryFolderMove {
+  /** The folder the repository is in now, if any. */
+  readonly from: EnvironmentProjectLabel | null;
+  /** True when adding it here takes it out of another folder, which needs a confirm. */
+  readonly needsConfirm: boolean;
 }
 
-/** Header chips: at most `max` show, the rest collapse into a "+N" count. */
-export function splitTagChips<T>(
-  tags: ReadonlyArray<T>,
-  max = 2,
-): { readonly visible: ReadonlyArray<T>; readonly overflow: ReadonlyArray<T> } {
-  if (tags.length <= max) return { visible: tags, overflow: [] };
-  return { visible: tags.slice(0, max), overflow: tags.slice(max) };
+/** What adding a repository to `targetKey` would do, given where it is filed now. */
+export function repositoryFolderMove(
+  targetKey: ProjectLabelKey,
+  current: EnvironmentProjectLabel | undefined,
+): RepositoryFolderMove {
+  if (current === undefined) return { from: null, needsConfirm: false };
+  return { from: current, needsConfirm: current.key !== targetKey };
 }
 
-/**
- * The label ids to send when the user toggles one project. The server
- * replaces the whole set and confirms every id sent, so only confirmed tags
- * carry over; sending a pending suggestion would confirm it behind the
- * user's back. Pending suggestions are dropped by an explicit edit.
- */
-export function nextThreadLabelIds(
-  tags: ReadonlyArray<ThreadProjectLabel>,
-  labelId: ProjectLabelId,
-  selected: boolean,
-): ProjectLabelId[] {
-  const confirmed = tags.filter((tag) => tag.confirmedByUser).map((tag) => tag.labelId);
-  const without = confirmed.filter((id) => id !== labelId);
-  return selected ? [...without, labelId] : without;
+export interface ThreadFolderState {
+  /** The folder the thread is in now; null when unfiled or the folder is unknown here. */
+  readonly current: EnvironmentProjectLabel | null;
+  /**
+   * True when Work sits in its repository's folder, so "Remove from folder"
+   * would leave it where it is. Moving it elsewhere still works.
+   */
+  readonly viaRepository: boolean;
+  /** Folders on the thread's environment it can move to, alphabetical. */
+  readonly options: ReadonlyArray<EnvironmentProjectLabel>;
 }
 
-// Work sidebar ---------------------------------------------------------------
-
-export interface ProjectTagSummary {
-  readonly key: ProjectLabelKey;
-  readonly name: string;
-  readonly color: string | undefined;
-}
-
-/**
- * The projects a Work row shows as chips: the thread's confirmed tags plus
- * the projects linking its repository, under any of the repository's
- * checkouts. Each project once, alphabetically.
- */
-export function workRowProjectTags(
-  confirmedKeys: ReadonlyArray<ProjectLabelKey>,
-  repositoryKeys: ReadonlyArray<string>,
-  directory: {
-    readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
-    readonly projectsByRepository: ReadonlyMap<string, ReadonlyArray<EnvironmentProjectLabel>>;
+/** Where a thread is filed and where it could go, for move menus. */
+export function threadFolderState(
+  thread: {
+    readonly environmentId: EnvironmentId;
+    readonly projectId: ProjectId;
+    readonly source: { readonly projectFolderId?: ProjectLabelId | null | undefined };
   },
-): ProjectTagSummary[] {
-  const entries = new Map<ProjectLabelKey, EnvironmentProjectLabel>();
-  for (const key of confirmedKeys) {
-    const entry = directory.byKey.get(key);
-    if (entry) entries.set(key, entry);
-  }
-  for (const repositoryKey of repositoryKeys) {
-    for (const entry of directory.projectsByRepository.get(repositoryKey) ?? []) {
-      entries.set(entry.key, entry);
-    }
-  }
-  return sortProjectLabels([...entries.values()]).map((entry) => ({
-    key: entry.key,
-    name: entry.label.name,
-    color: entry.label.color,
-  }));
+  isWork: boolean,
+  directory: {
+    readonly labels: ReadonlyArray<EnvironmentProjectLabel>;
+    readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
+    readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
+  },
+): ThreadFolderState {
+  const folderId = threadProjectFolderId(thread);
+  const current =
+    folderId === null
+      ? null
+      : (directory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
+  const repositoryFolder = isWork
+    ? directory.folderByRepository.get(scopedRepositoryKey(thread.environmentId, thread.projectId))
+    : undefined;
+  return {
+    current,
+    viaRepository: current !== null && repositoryFolder?.key === current.key,
+    options: directory.labels.filter((entry) => entry.environmentId === thread.environmentId),
+  };
 }

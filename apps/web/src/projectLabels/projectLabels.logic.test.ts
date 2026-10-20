@@ -2,111 +2,82 @@ import {
   type EnvironmentId,
   ProjectId,
   ProjectLabelId,
-  ThreadId,
   type ProjectLabelWithRepositories,
-  type ThreadProjectLabel,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  nextThreadLabelIds,
-  resolveThreadTags,
-  splitTagChips,
-  workRowProjectTags,
-  type ProjectLabelKey,
+  projectLabelKey,
+  repositoryFolderMove,
+  scopedRepositoryKey,
+  threadFolderState,
+  type EnvironmentProjectLabel,
 } from "./projectLabels.logic";
 
-describe("workRowProjectTags", () => {
-  const entry = (key: ProjectLabelKey, name: string) => ({
-    key,
-    environmentId: "env" as EnvironmentId,
-    label: { name, color: "green" } as ProjectLabelWithRepositories,
-  });
-  const spawn = entry("env:spawn", "Spawn Partners");
-  const bartr = entry("env:bartr", "Bartr");
-  const directory = {
-    byKey: new Map([
-      [spawn.key, spawn],
-      [bartr.key, bartr],
-    ]),
-    projectsByRepository: new Map([
-      ["env:server", [spawn]],
-      ["other:server", [bartr, spawn]],
-    ]),
-  };
+const env = "env" as EnvironmentId;
+const other = "other" as EnvironmentId;
 
-  it("merges confirmed tags with every checkout's linked projects, once each, alphabetically", () => {
-    expect(
-      workRowProjectTags(["env:spawn"], ["env:server", "other:server"], directory).map(
-        (tag) => tag.name,
-      ),
-    ).toEqual(["Bartr", "Spawn Partners"]);
-  });
-
-  it("drops tags whose project no longer exists and shows nothing for untagged scratch work", () => {
-    expect(workRowProjectTags(["env:gone"], [], directory)).toEqual([]);
-  });
-});
-
-describe("thread tags", () => {
-  const threadId = ThreadId.make("chat");
-  const label = (id: string, name: string): ProjectLabelWithRepositories => ({
+function folder(
+  environmentId: EnvironmentId,
+  id: string,
+  name: string,
+  repositoryIds: string[] = [],
+): EnvironmentProjectLabel {
+  const label: ProjectLabelWithRepositories = {
     id: ProjectLabelId.make(id),
     name,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
-    repositoryIds: [ProjectId.make("repo")],
+    repositoryIds: repositoryIds.map((repositoryId) => ProjectId.make(repositoryId)),
     threadCount: 0,
-  });
-  const tag = (
-    labelId: string,
-    confirmedByUser: boolean,
-    confidence: number | null = null,
-  ): ThreadProjectLabel => ({
-    threadId,
-    labelId: ProjectLabelId.make(labelId),
-    confidence,
-    confirmedByUser,
-    source: confirmedByUser ? "user" : "suggested",
-  });
-  const labelsById = new Map(
-    [label("a", "Spawn"), label("b", "bartr"), label("c", "School"), label("d", "Investing")].map(
-      (entry) => [entry.id, entry] as const,
-    ),
-  );
+  };
+  return { key: projectLabelKey(environmentId, id), environmentId, label };
+}
 
-  it("puts confirmed tags before suggestions and drops tags for deleted projects", () => {
-    const resolved = resolveThreadTags(
-      [
-        tag("c", false, 0.2),
-        tag("a", true),
-        tag("gone", true),
-        tag("d", false, 0.9),
-        tag("b", true),
-      ],
-      labelsById,
-    );
-    expect(resolved.map((entry) => [entry.label.name, entry.suggested])).toEqual([
-      ["bartr", false],
-      ["Spawn", false],
-      ["Investing", true],
-      ["School", true],
-    ]);
+const spawn = folder(env, "spawn", "Spawn Partners", ["server"]);
+const bartr = folder(env, "bartr", "Bartr");
+const remote = folder(other, "remote", "Remote");
+const directory = {
+  labels: [bartr, remote, spawn],
+  byKey: new Map([bartr, remote, spawn].map((entry) => [entry.key, entry] as const)),
+  folderByRepository: new Map([[scopedRepositoryKey(env, "server"), spawn]]),
+};
+const thread = (projectId: string, projectFolderId: string | null) => ({
+  environmentId: env,
+  projectId: ProjectId.make(projectId),
+  source: {
+    projectFolderId: projectFolderId === null ? null : ProjectLabelId.make(projectFolderId),
+  },
+});
+
+describe("threadFolderState", () => {
+  it("offers only folders on the thread's own environment", () => {
+    const state = threadFolderState(thread("scratch", null), false, directory);
+    expect(state.current).toBeNull();
+    expect(state.options.map((entry) => entry.label.name)).toEqual(["Bartr", "Spawn Partners"]);
   });
 
-  it("shows two chips and counts the rest", () => {
-    expect(splitTagChips(["a", "b"])).toEqual({ visible: ["a", "b"], overflow: [] });
-    expect(splitTagChips(["a", "b", "c", "d"])).toEqual({
-      visible: ["a", "b"],
-      overflow: ["c", "d"],
+  it("marks Work in its repository's folder, so removing it is not offered", () => {
+    expect(threadFolderState(thread("server", "spawn"), true, directory)).toMatchObject({
+      current: spawn,
+      viaRepository: true,
     });
-    expect(splitTagChips([])).toEqual({ visible: [], overflow: [] });
+    // Work filed elsewhere, and chats, can always come back out.
+    expect(threadFolderState(thread("server", "bartr"), true, directory).viaRepository).toBe(false);
+    expect(threadFolderState(thread("server", "spawn"), false, directory).viaRepository).toBe(
+      false,
+    );
   });
 
-  it("never sends a pending suggestion when toggling, so an edit cannot confirm it", () => {
-    const tags = [tag("a", true), tag("c", false, 0.7)];
-    expect(nextThreadLabelIds(tags, ProjectLabelId.make("b"), true)).toEqual(["a", "b"]);
-    expect(nextThreadLabelIds(tags, ProjectLabelId.make("a"), false)).toEqual([]);
-    expect(nextThreadLabelIds(tags, ProjectLabelId.make("a"), true)).toEqual(["a"]);
+  it("treats a folder this client does not know as unfiled", () => {
+    expect(threadFolderState(thread("scratch", "gone"), false, directory).current).toBeNull();
+  });
+});
+
+describe("repositoryFolderMove", () => {
+  it("asks before taking a repository out of another folder", () => {
+    expect(repositoryFolderMove(bartr.key, undefined)).toEqual({ from: null, needsConfirm: false });
+    expect(repositoryFolderMove(spawn.key, spawn)).toEqual({ from: spawn, needsConfirm: false });
+    expect(repositoryFolderMove(bartr.key, spawn)).toEqual({ from: spawn, needsConfirm: true });
   });
 });

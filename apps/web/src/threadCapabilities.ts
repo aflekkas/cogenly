@@ -24,7 +24,8 @@ export interface ThreadCapabilities {
   readonly regenerateTitle: boolean;
   /** Mark unread, and its reverse, mark read. */
   readonly markUnread: boolean;
-  readonly projectTags: boolean;
+  /** Move to a project folder, and remove from it. */
+  readonly projectFolder: boolean;
   /** Settle, and un-settle. */
   readonly settle: boolean;
   /** Snooze, and wake. */
@@ -62,7 +63,7 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     rename: true,
     regenerateTitle: true,
     markUnread: true,
-    projectTags: true,
+    projectFolder: true,
     settle: false,
     snooze: false,
     autoSettle: false,
@@ -85,7 +86,7 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     rename: true,
     regenerateTitle: true,
     markUnread: true,
-    projectTags: true,
+    projectFolder: true,
     settle: true,
     snooze: true,
     autoSettle: true,
@@ -109,7 +110,7 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     rename: false,
     regenerateTitle: false,
     markUnread: true,
-    projectTags: false,
+    projectFolder: false,
     settle: false,
     snooze: false,
     autoSettle: false,

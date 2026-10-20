@@ -3,10 +3,9 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId, ProjectId, ProjectLabelId, ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { BotIcon, FolderIcon, MessageCircleIcon, PencilIcon, SettingsIcon } from "lucide-react";
+import { FolderIcon, MessageCircleIcon, PencilIcon, SettingsIcon } from "lucide-react";
 import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 
-import { useAgents } from "../../agents/agentsClient";
 import { isElectron } from "../../env";
 import { useSidebarProjectGroups } from "../../hooks/useSidebarProjectGroups";
 import { useClientSettings } from "../../hooks/useSettings";
@@ -94,7 +93,6 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
   const repositories = useEnvironmentRepositories(environmentId);
   const canEdit = useAtomValue(serverEnvironment.updateProjectLabel.permissionAtom(environmentId));
   const [editing, setEditing] = useState(false);
-  const { agents } = useAgents();
   const projects = useProjects();
   const projectGroups = useSidebarProjectGroups();
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
@@ -217,25 +215,6 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
                 ))
               ) : (
                 <EmptyRow>No chats tagged with this project.</EmptyRow>
-              )}
-            </SettingsSection>
-            <SettingsSection title="Agents" icon={<BotIcon className="size-3.5" />}>
-              {contents && contents.agents.length > 0 ? (
-                contents.agents.map((agent) => (
-                  <SettingsRow
-                    key={`${agent.environmentId}:${agent.id}`}
-                    {...openableRowProps(() =>
-                      openThread(scopeThreadRef(agent.environmentId, agent.conversationThreadId)),
-                    )}
-                    title={<span className="min-w-0 truncate">{agent.name}</span>}
-                  />
-                ))
-              ) : (
-                <EmptyRow>
-                  {agents.length === 0
-                    ? "No agents yet."
-                    : "No agent has this project in its scope."}
-                </EmptyRow>
               )}
             </SettingsSection>
             <SettingsSection

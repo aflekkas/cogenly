@@ -23,7 +23,15 @@ function stateFor(kind: ThreadKind, overrides: Partial<ThreadActionMenuState> = 
     isRunning: false,
     supports: { settlement: true, autoSettleOptOut: true, snooze: true, titleRegeneration: true },
     snoozePresets: [],
-    projects: [{ key: "env:spawn", name: "Spawn" }],
+    folder: {
+      current: { key: "env:spawn", id: "spawn", name: "Spawn" },
+      viaRepository: false,
+      options: [
+        { id: "bartr", name: "Bartr" },
+        { id: "spawn", name: "Spawn" },
+      ],
+      canMove: true,
+    },
     ...overrides,
   };
   return state;
@@ -46,6 +54,11 @@ describe("buildThreadActionMenuItems per thread kind", () => {
       "copy-thread-link",
       "copy-thread-id",
       "open-project:env:spawn",
+      "move-folder",
+      "move-folder:bartr",
+      "move-folder:spawn",
+      "remove-folder",
+      "new-folder",
       "delete",
     ]);
   });
@@ -69,6 +82,11 @@ describe("buildThreadActionMenuItems per thread kind", () => {
       "copy-thread-id",
       "project-settings",
       "open-project:env:spawn",
+      "move-folder",
+      "move-folder:bartr",
+      "move-folder:spawn",
+      "remove-folder",
+      "new-folder",
       "archive",
       "delete",
     ]);
@@ -141,27 +159,52 @@ describe("buildThreadActionMenuItems per thread kind", () => {
   });
 });
 
-describe("Open project in the thread action menu", () => {
-  const projectItem = (menuState: ThreadActionMenuState) =>
-    buildThreadActionMenuItems(menuState).find((item) => item.id.startsWith("open-project"));
+describe("Move to folder in the thread action menu", () => {
+  const folderItems = (menuState: ThreadActionMenuState) =>
+    buildThreadActionMenuItems(menuState).filter(
+      (item) => item.id.startsWith("open-project") || item.id === "move-folder",
+    );
+  const base = stateFor("chat").folder!;
 
-  it("opens a single project directly and nests several, even for read-only clients", () => {
-    const readOnly = stateFor("work", { canOperate: false, projects: [] });
-    expect(projectItem(readOnly)).toBeUndefined();
-    const one = projectItem({ ...readOnly, projects: [{ key: "env:spawn", name: "Spawn" }] });
-    expect(one).toMatchObject({ id: "open-project:env:spawn", label: "Open Spawn" });
-    expect(one?.disabled).toBeUndefined();
-    const several = projectItem({
-      ...readOnly,
-      projects: [
-        { key: "env:bartr", name: "Bartr" },
-        { key: "env:spawn", name: "Spawn" },
-      ],
-    });
-    expect(several?.children?.map((child) => child.id)).toEqual([
-      "open-project:env:bartr",
-      "open-project:env:spawn",
+  it("offers an unfiled thread every folder and a new one, with no way out to show", () => {
+    const items = folderItems(stateFor("chat", { folder: { ...base, current: null } }));
+    expect(ids(items)).toEqual([
+      "move-folder",
+      "move-folder:bartr",
+      "move-folder:spawn",
+      "new-folder",
     ]);
+    expect(items[0]?.children?.some((child) => child.checked)).toBe(false);
+  });
+
+  it("checks the current folder and offers the way back out", () => {
+    const move = folderItems(stateFor("chat")).find((item) => item.id === "move-folder");
+    expect(move?.children?.find((child) => child.id === "move-folder:spawn")).toMatchObject({
+      checked: true,
+      disabled: true,
+    });
+    expect(move?.children?.some((child) => child.id === "remove-folder")).toBe(true);
+  });
+
+  it("does not offer removal for Work that sits in its repository's folder", () => {
+    const items = folderItems(stateFor("work", { folder: { ...base, viaRepository: true } }));
+    expect(ids(items)).not.toContain("remove-folder");
+    expect(ids(items)).toContain("move-folder:bartr");
+  });
+
+  it("disables moves without permission but still opens the folder", () => {
+    const items = folderItems(stateFor("chat", { folder: { ...base, canMove: false } }));
+    const move = items.find((item) => item.id === "move-folder");
+    expect(
+      move?.children?.filter((child) => child.id !== "new-folder").every((c) => c.disabled),
+    ).toBe(true);
+    const readOnly = folderItems(stateFor("chat", { canOperate: false }));
+    expect(readOnly.find((item) => item.id === "open-project:env:spawn")?.disabled).toBeUndefined();
+    expect(readOnly.find((item) => item.id === "move-folder")?.disabled).toBe(true);
+  });
+
+  it("leaves folders off agent conversations", () => {
+    expect(folderItems(stateFor("agentConversation"))).toEqual([]);
   });
 });
 

@@ -12,8 +12,11 @@ export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "start-work"
   | "project-settings"
-  | "open-project"
   | `open-project:${string}`
+  | "move-folder"
+  | `move-folder:${string}`
+  | "remove-folder"
+  | "new-folder"
   | "settle"
   | "unsettle"
   | "auto-settle"
@@ -96,13 +99,23 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
-  /** The thread's projects, each opening its project view; omitted where the surface shows tags itself. */
-  readonly projects?: ReadonlyArray<{ readonly key: string; readonly name: string }>;
+  /** The thread's project folder and where it can move; omitted where folders are unknown. */
+  readonly folder?: ThreadActionMenuFolder;
+}
+
+export interface ThreadActionMenuFolder {
+  /** `key` opens the folder's view; `id` is what a move sends. */
+  readonly current: { readonly key: string; readonly id: string; readonly name: string } | null;
+  /** Work in its repository's folder: removing would leave it there, so it is not offered. */
+  readonly viaRepository: boolean;
+  readonly options: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  /** The move command's permission on the thread's environment. */
+  readonly canMove: boolean;
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
 export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean {
-  if (action.startsWith("open-project")) return false;
+  if (action.startsWith("open-project") || action === "new-folder") return false;
   return ![
     "new-thread-on-branch",
     "project-settings",
@@ -117,25 +130,46 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
   ].includes(action);
 }
 
-/** One project opens directly; several nest under "Open project". */
-function projectMenuItems(
-  projects: ReadonlyArray<{ readonly key: string; readonly name: string }>,
+/**
+ * "Open <folder>" when filed, then "Move to folder" with every folder (the
+ * current one checked), "Remove from folder", and "New project…" at the end.
+ */
+function folderMenuItems(
+  folder: ThreadActionMenuFolder | undefined,
 ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
-  if (projects.length === 0) return [];
-  if (projects.length === 1)
-    return [
-      { id: `open-project:${projects[0]!.key}`, label: `Open ${projects[0]!.name}`, icon: "tag" },
-    ];
+  if (folder === undefined) return [];
+  const { current } = folder;
+  const disabled = !folder.canMove;
+  const children: Array<ContextMenuItem<ThreadActionMenuId>> = folder.options.map((option) => ({
+    id: `move-folder:${option.id}` as const,
+    label: option.name,
+    checked: option.id === current?.id,
+    disabled: disabled || option.id === current?.id,
+  }));
+  if (current !== null && !folder.viaRepository) {
+    children.push({
+      id: "remove-folder",
+      label: "Remove from folder",
+      disabled,
+      separatorBefore: children.length > 0,
+    });
+  }
+  children.push({
+    id: "new-folder",
+    label: "New project…",
+    separatorBefore: children.length > 0,
+  });
   return [
-    {
-      id: "open-project",
-      label: "Open project",
-      icon: "tag",
-      children: projects.map((project) => ({
-        id: `open-project:${project.key}` as const,
-        label: project.name,
-      })),
-    },
+    ...(current !== null
+      ? [
+          {
+            id: `open-project:${current.key}` as const,
+            label: `Open ${current.name}`,
+            icon: "folder",
+          },
+        ]
+      : []),
+    { id: "move-folder", label: "Move to folder", icon: "folder", children },
   ];
 }
 
@@ -251,7 +285,7 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
     ...(can.repositorySettings
       ? [{ id: "project-settings" as const, label: "Repository settings", icon: "settings" }]
       : []),
-    ...(can.projectTags ? projectMenuItems(state.projects ?? []) : []),
+    ...(can.projectFolder ? folderMenuItems(state.folder) : []),
     ...(can.agentSettings
       ? [{ id: "agent-settings" as const, label: "Agent settings", icon: "settings" }]
       : []),

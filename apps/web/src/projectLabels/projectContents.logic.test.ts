@@ -4,31 +4,30 @@ import { indexProjectContents, projectContentsCount } from "./projectContents.lo
 
 describe("indexProjectContents", () => {
   const threads = [
-    { id: "fix-ui", mode: "tasks" as const, work: ["env:spawn"], tags: ["env:spawn"] },
-    { id: "audit", mode: "tasks" as const, work: ["env:spawn", "env:bartr"], tags: [] },
-    { id: "brainstorm", mode: "chats" as const, work: ["env:bartr"], tags: ["env:spawn"] },
-    { id: "agent-chat", mode: "agents" as const, work: [], tags: ["env:spawn"] },
+    { id: "fix-ui", mode: "tasks" as const, folder: "env:spawn" as const },
+    { id: "brainstorm", mode: "chats" as const, folder: "env:spawn" as const },
+    { id: "audit", mode: "tasks" as const, folder: "env:bartr" as const },
+    { id: "loose", mode: "chats" as const, folder: null },
+    { id: "agent-chat", mode: "agents" as const, folder: "env:spawn" as const },
   ];
   const index = indexProjectContents({
     threads,
     modeOf: (thread) => thread.mode,
-    workProjectKeys: (thread) => thread.work as Array<`${string}:${string}`>,
-    chatProjectKeys: (thread) => thread.tags as Array<`${string}:${string}`>,
-    agents: [{ name: "Scout", scope: ["env:spawn", "env:spawn"] }],
-    agentProjectKeys: (agent) => agent.scope as Array<`${string}:${string}`>,
+    folderKeyOf: (thread) => thread.folder,
   });
 
-  it("files Work by its projects, chats by their tags, and agents by scope, each once", () => {
+  it("files each thread once, under its one folder, split into chats and Work", () => {
     const spawn = index.get("env:spawn")!;
-    expect(spawn.work.map((thread) => thread.id)).toEqual(["fix-ui", "audit"]);
+    expect(spawn.work.map((thread) => thread.id)).toEqual(["fix-ui"]);
     expect(spawn.chats.map((thread) => thread.id)).toEqual(["brainstorm"]);
-    expect(spawn.agents.map((agent) => agent.name)).toEqual(["Scout"]);
-    expect(projectContentsCount(spawn)).toBe(4);
+    expect(projectContentsCount(spawn)).toBe(2);
+    expect(index.get("env:bartr")!.work.map((thread) => thread.id)).toEqual(["audit"]);
   });
 
-  it("leaves agent conversations to their agent and empty projects out", () => {
-    expect(index.get("env:bartr")!.chats).toEqual([]);
-    expect(index.has("env:empty")).toBe(false);
+  it("leaves unfiled threads, agent conversations and empty folders out", () => {
+    const all = [...index.values()].flatMap((entry) => [...entry.chats, ...entry.work]);
+    expect(all.map((thread) => thread.id)).not.toContain("loose");
+    expect(all.map((thread) => thread.id)).not.toContain("agent-chat");
     expect(projectContentsCount(index.get("env:empty"))).toBe(0);
   });
 });

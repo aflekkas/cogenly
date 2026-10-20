@@ -74,11 +74,14 @@ import {
   SettingsIcon,
   SquarePenIcon,
   SunIcon,
-  TagIcon,
+  FolderMinusIcon,
   TextSearchIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
-import { requestThreadProjectTagsOpen } from "../projectLabels/projectTagsActionBus";
+import { ProjectColorDot } from "../projectLabels/ProjectTag";
+import { threadFolderState } from "../projectLabels/projectLabels.logic";
+import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
+import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
 import { requestAgentCreation } from "../agents/AgentsCreateHost";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { requestStartWork } from "./work/StartWorkDialog";
@@ -644,6 +647,15 @@ function OpenCommandPaletteDialog(props: {
   const activeThreadKind = useThreadKind(activeThread ?? activeDraftThread ?? null);
   const activeCapabilities =
     activeThreadKind === null ? null : threadCapabilities(activeThreadKind);
+  const activeFolderEnvironmentIds = useMemo(
+    () => (activeThread ? [activeThread.environmentId] : []),
+    [activeThread],
+  );
+  const activeFolderDirectory = useProjectLabelDirectory(activeFolderEnvironmentIds);
+  const canMoveActiveThread = useAtomValue(
+    serverEnvironment.moveThreadProjectFolder.permissionAtom(activeThread?.environmentId ?? null),
+  );
+  const moveThreadToFolder = useMoveThreadToFolder();
   const activeThreadReferenceCopyTarget =
     referenceThreadRef === null
       ? null
@@ -1875,13 +1887,13 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
-  // Projects are context tags; their home is the Projects sidebar and /project.
+  // Projects are folders; their home is the Projects sidebar and /project.
   actionItems.push({
     kind: "action",
     value: "action:new-project-label",
-    searchTerms: ["new project", "create project", "project tag", "label"],
+    searchTerms: ["new project", "create project", "new folder", "project folder"],
     title: "New project",
-    icon: <TagIcon className={ITEM_ICON_CLASS} />,
+    icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({
         to: "/project",
@@ -1895,24 +1907,82 @@ function OpenCommandPaletteDialog(props: {
   actionItems.push({
     kind: "action",
     value: "action:manage-project-labels",
-    searchTerms: ["manage projects", "projects", "project tags", "labels", "link repository"],
-    title: "Manage projects",
-    icon: <TagIcon className={ITEM_ICON_CLASS} />,
+    searchTerms: ["projects", "manage projects", "folders", "add repository"],
+    title: "Open projects",
+    icon: <FolderIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/project" });
     },
   });
-  if (activeThreadId && (activeCapabilities?.projectTags ?? true)) {
-    actionItems.push({
-      kind: "action",
-      value: "action:edit-thread-project-labels",
-      searchTerms: ["tag", "projects", "add to project", "set project", "no project"],
-      title: "Edit this thread's projects",
-      icon: <TagIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        requestThreadProjectTagsOpen();
-      },
-    });
+  if (activeThread && (activeCapabilities?.projectFolder ?? true)) {
+    const folderState = threadFolderState(
+      activeThread,
+      activeThreadKind === "work",
+      activeFolderDirectory,
+    );
+    const thread = activeThread;
+    const previous = folderState.current && {
+      id: folderState.current.label.id,
+      name: folderState.current.label.name,
+    };
+    if (folderState.options.length > 0) {
+      actionItems.push({
+        kind: "submenu",
+        value: "action:move-thread-to-folder",
+        searchTerms: ["move to folder", "move to project", "file", "folder", "project"],
+        title: "Move to folder…",
+        icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+        addonIcon: <FolderIcon className={ADDON_ICON_CLASS} />,
+        disabled: !canMoveActiveThread,
+        groups: [
+          {
+            value: "folders",
+            label: "Projects",
+            items: folderState.options.map((entry) => ({
+              kind: "action" as const,
+              value: `move-folder:${entry.key}`,
+              searchTerms: [entry.label.name],
+              title: entry.label.name,
+              icon: <ProjectColorDot color={entry.label.color} className="size-2.5" />,
+              disabled: entry.key === folderState.current?.key,
+              ...(entry.key === folderState.current?.key
+                ? {
+                    titleTrailingContent: (
+                      <span className="text-xs text-muted-foreground/70">Current</span>
+                    ),
+                  }
+                : {}),
+              run: async () => {
+                await moveThreadToFolder({
+                  environmentId: thread.environmentId,
+                  threadId: thread.id,
+                  folder: { id: entry.label.id, name: entry.label.name },
+                  previous,
+                });
+              },
+            })),
+          },
+        ],
+      });
+    }
+    if (folderState.current !== null && !folderState.viaRepository) {
+      actionItems.push({
+        kind: "action",
+        value: "action:remove-thread-from-folder",
+        searchTerms: ["remove from folder", "remove from project", "unfile", "folder"],
+        title: `Remove from ${folderState.current.label.name}`,
+        icon: <FolderMinusIcon className={ITEM_ICON_CLASS} />,
+        disabled: !canMoveActiveThread,
+        run: async () => {
+          await moveThreadToFolder({
+            environmentId: thread.environmentId,
+            threadId: thread.id,
+            folder: null,
+            previous,
+          });
+        },
+      });
+    }
   }
 
   for (const mode of SIDEBAR_MODES) {

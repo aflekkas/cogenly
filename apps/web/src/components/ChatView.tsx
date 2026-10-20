@@ -9418,7 +9418,7 @@ export default function ChatView(props: ChatViewProps) {
     handle: threadPanelPopoverHandle,
     onPresentationChange: setThreadPanelPresentation,
     forceNewWorktree: multipleModelSelections !== null,
-    showProjectTags: isServerThread && activeThreadCapabilities.projectTags,
+    showProjectTags: isServerThread && activeThreadCapabilities.projectFolder,
     environmentId: activeThread.environmentId,
     threadId: activeThread.id,
     ...(draftId ? { draftId } : {}),

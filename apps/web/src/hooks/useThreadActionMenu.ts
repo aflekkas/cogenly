@@ -50,6 +50,11 @@ import {
 } from "../logicalProject";
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
+import { threadFolderState } from "../projectLabels/projectLabels.logic";
+import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
+import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { serverEnvironment } from "../state/server";
 import { useCopyToClipboard } from "./useCopyToClipboard";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
@@ -107,6 +112,12 @@ export function useThreadActionMenu(input: {
     markThreadRead,
   } = useThreadActions();
   const resolveThreadKind = useThreadKindResolver();
+  const folderEnvironmentIds = useMemo(
+    () => (threadRef ? [threadRef.environmentId] : []),
+    [threadRef],
+  );
+  const folderDirectory = useProjectLabelDirectory(folderEnvironmentIds);
+  const moveThreadToFolder = useMoveThreadToFolder();
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -159,7 +170,9 @@ export function useThreadActionMenu(input: {
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
-        const capabilities = threadCapabilities(resolveThreadKind(thread));
+        const threadKind = resolveThreadKind(thread);
+        const capabilities = threadCapabilities(threadKind);
+        const folderState = threadFolderState(thread, threadKind === "work", folderDirectory);
         const isUnread = hasUnseenCompletion({
           ...thread,
           lastVisitedAt: resolveThreadLastVisitedAt(
@@ -180,6 +193,21 @@ export function useThreadActionMenu(input: {
           isRunning: !threadRuntimeCanArchive(thread.runtime),
           supports,
           snoozePresets,
+          folder: {
+            current: folderState.current && {
+              key: folderState.current.key,
+              id: folderState.current.label.id,
+              name: folderState.current.label.name,
+            },
+            viaRepository: folderState.viaRepository,
+            options: folderState.options.map((entry) => ({
+              id: entry.label.id,
+              name: entry.label.name,
+            })),
+            canMove: appAtomRegistry.get(
+              serverEnvironment.moveThreadProjectFolder.permissionAtom(threadRef.environmentId),
+            ),
+          },
         });
         const clicked = await settlePromise(() => api.contextMenu.show(items, position));
         if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -192,6 +220,40 @@ export function useThreadActionMenu(input: {
             "Thread action unavailable",
             new Error("This connection cannot change threads."),
           );
+          return;
+        }
+        if (action.startsWith("open-project:") && folderState.current) {
+          void router.navigate({
+            to: "/project/$environmentId/$labelId",
+            params: {
+              environmentId: folderState.current.environmentId,
+              labelId: folderState.current.label.id,
+            },
+          });
+          return;
+        }
+        if (action === "new-folder") {
+          void router.navigate({
+            to: "/project",
+            search: { create: true, environmentId: threadRef.environmentId },
+          });
+          return;
+        }
+        if (action === "remove-folder" || action.startsWith("move-folder:")) {
+          const target =
+            action === "remove-folder"
+              ? null
+              : folderState.options.find(
+                  (entry) => entry.label.id === action.slice("move-folder:".length),
+                );
+          if (target === undefined) return;
+          const previous = folderState.current;
+          await moveThreadToFolder({
+            environmentId: threadRef.environmentId,
+            threadId: threadRef.threadId,
+            folder: target && { id: target.label.id, name: target.label.name },
+            previous: previous && { id: previous.label.id, name: previous.label.name },
+          });
           return;
         }
         if (action.startsWith("snooze:")) {
@@ -383,10 +445,12 @@ export function useThreadActionMenu(input: {
       copyThreadIdToClipboard,
       copyThreadLinkToClipboard,
       deleteThread,
+      folderDirectory,
       handleNewThread,
       logicalProjectKeyByPhysicalKey,
       markThreadRead,
       markThreadUnread,
+      moveThreadToFolder,
       onStartRename,
       projectCwd,
       projectGroupingSettings,

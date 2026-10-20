@@ -218,18 +218,17 @@ import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { RepositoryGroupHeading } from "./sidebar/modes/RepositoryGroupHeading";
-import { ChatsProjectFilter } from "../projectLabels/ChatsProjectFilter";
 import {
   projectLabelKey,
-  scopedRepositoryKey,
-  scopedThreadTagKey,
-  splitTagChips,
-  workRowProjectTags,
+  threadFolderState,
+  threadProjectFolderId,
   type ProjectLabelKey,
-  type ProjectTagSummary,
 } from "../projectLabels/projectLabels.logic";
-import { ProjectTag } from "../projectLabels/ProjectTag";
+import { ProjectColorDot } from "../projectLabels/ProjectTag";
+import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { serverEnvironment } from "../state/server";
 import { useNavRailBadgeStore } from "./sidebar/navRailState";
 import {
   CHAT_DATE_GROUP_LABELS,
@@ -270,7 +269,11 @@ import {
 // Settled-tail paging: recent history is the common lookup; the deep tail
 // stays behind an explicit Show more.
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new Map();
-const NO_PROJECT_TAGS: ReadonlyArray<ProjectTagSummary> = [];
+/** The folder a row's hover card names; null when unfiled. */
+interface SidebarRowFolder {
+  readonly name: string;
+  readonly color: string | undefined;
+}
 // Collapsed shelves share one empty list so a route change alone does not
 // give the sidebar list a new identity.
 const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
@@ -417,12 +420,12 @@ function SidebarThreadTooltip({
   branchMismatch,
   terminalStatus,
   terminalProcessCount,
-  projectTags = NO_PROJECT_TAGS,
+  folder = null,
 }: {
   thread: SidebarThreadSummary;
   project: ProjectFaviconProject | null;
   projectDisplayName: string | null;
-  projectTags?: ReadonlyArray<ProjectTagSummary>;
+  folder?: SidebarRowFolder | null;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
   providerEntry: ProviderInstanceEntry | null;
@@ -450,11 +453,10 @@ function SidebarThreadTooltip({
             <div className="min-w-0 truncate text-foreground/75">{projectDisplayName}</div>
           </div>
         ) : null}
-        {projectTags.length > 0 ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
-            {projectTags.map((tag) => (
-              <ProjectTag key={tag.key} name={tag.name} color={tag.color} dot />
-            ))}
+        {folder ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <ProjectColorDot color={folder.color} className="size-2" />
+            <div className="min-w-0 truncate text-foreground/75">{folder.name}</div>
           </div>
         ) : null}
         {environmentLabel ? (
@@ -1192,8 +1194,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   snoozeSupported: boolean;
   // The repository label on the meta line; null for scratch work.
   repositoryName: string | null;
-  // Project chips on the meta line, alphabetical.
-  projectTags: ReadonlyArray<ProjectTagSummary>;
+  // The folder the row is filed in, named in its hover card.
+  folder: SidebarRowFolder | null;
   // The action this row will take when the sweep is released.
   sweepAction: SidebarSweepAction | null;
   // Compact wake countdown ("2h") for rows in the snoozed shelf.
@@ -1428,7 +1430,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       thread={thread}
       project={props.project}
       projectDisplayName={props.projectDisplayName}
-      projectTags={props.projectTags}
+      folder={props.folder}
       environmentLabel={props.environmentLabel}
       environmentMachine={props.environmentMachine}
       providerEntry={providerEntry}
@@ -1875,23 +1877,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   }
 
   const diff = latestRunDiff(thread);
-  const { visible: visibleProjectTags, overflow: overflowProjectTags } = splitTagChips(
-    props.projectTags,
-    1,
-  );
-  const projectChips =
-    visibleProjectTags.length > 0 ? (
-      <span className="inline-flex min-w-0 shrink items-center gap-1">
-        {visibleProjectTags.map((tag) => (
-          <ProjectTag key={tag.key} name={tag.name} color={tag.color} dot className="max-w-24" />
-        ))}
-        {overflowProjectTags.length > 0 ? (
-          <span className="shrink-0 tabular-nums text-muted-foreground/60">
-            +{overflowProjectTags.length}
-          </span>
-        ) : null}
-      </span>
-    ) : null;
 
   return (
     <li
@@ -2130,7 +2115,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : (
                 <span className="flex-1" />
               )}
-              {projectChips}
               {terminalStatusIcon}
               {props.showWorkStatus ? <WorkRowStatusMarker thread={thread} /> : null}
 
@@ -2537,18 +2521,6 @@ export default function Sidebar() {
       ),
     [projectGroups],
   );
-  // A logical repository spans its checkouts on every machine.
-  const projectGroupKeyByKey = useMemo(
-    () =>
-      new Map(
-        projectGroups.flatMap((group) =>
-          group.memberProjects.map(
-            (project) => [`${project.environmentId}:${project.id}`, group.projectKey] as const,
-          ),
-        ),
-      ),
-    [projectGroups],
-  );
 
   const nowMinute = useNowMinute();
   // Snooze wake times are second-precise, so classifying with the quantized
@@ -2590,19 +2562,10 @@ export default function Sidebar() {
     }
     return projectDisplayNameByKey.get(projectKey) ?? project.title;
   };
-  const projectGroupByKey = useMemo(
-    () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
-    [projectGroups],
-  );
-  // Projects (context tags) group Work and tag Chats rows, across environments.
+  // Project folders hold chats and Work, across environments.
   const labelEnvironmentIds = useConnectedEnvironmentIds();
   const projectLabelDirectory = useProjectLabelDirectory(labelEnvironmentIds);
-  const [chatProjectFilter, setChatProjectFilter] = useState<ProjectLabelKey | null>(null);
-  // A deleted project silently stops filtering instead of emptying the list.
-  const activeChatProjectFilter =
-    chatProjectFilter !== null && projectLabelDirectory.byKey.has(chatProjectFilter)
-      ? chatProjectFilter
-      : null;
+  const moveThreadToFolder = useMoveThreadToFolder();
   // Chats | Work | Agents: the list below shows one mode's threads at a time.
   const sidebarModes = useSidebarModeState({
     threads,
@@ -2622,34 +2585,20 @@ export default function Sidebar() {
   useEffect(() => {
     if (routeProjectKey !== null) setSidebarMode("projects");
   }, [routeProjectKey, setSidebarMode]);
-  // Work rows show their projects as chips. Cached per thread and repository
-  // while the directory holds, so memoized rows keep the same array.
-  const workProjectTagsFor = useMemo(() => {
-    const cache = new Map<string, ReadonlyArray<ProjectTagSummary>>();
-    const none: ReadonlyArray<ProjectTagSummary> = [];
-    return (thread: Pick<SidebarThreadSummary, "environmentId" | "id" | "projectId">) => {
-      const threadTagKey = scopedThreadTagKey(thread.environmentId, thread.id);
-      const projectKey = `${thread.environmentId}:${thread.projectId}` as const;
-      const cacheKey = `${threadTagKey}|${projectKey}`;
-      const cached = cache.get(cacheKey);
-      if (cached) return cached;
-      const groupKey = projectGroupKeyByKey.get(projectKey);
-      const repositoryKeys = (groupKey
-        ? projectGroupByKey.get(groupKey)
-        : undefined
-      )?.memberProjectRefs.map((ref) => scopedRepositoryKey(ref.environmentId, ref.projectId)) ?? [
-        projectKey,
-      ];
-      const tags = workRowProjectTags(
-        projectLabelDirectory.confirmedByThread.get(threadTagKey) ?? [],
-        repositoryKeys,
-        projectLabelDirectory,
-      );
-      const result = tags.length > 0 ? tags : none;
-      cache.set(cacheKey, result);
-      return result;
+  // Rows name their folder in the hover card. One object per folder, so
+  // memoized rows keep the same prop while the directory holds.
+  const folderFor = useMemo(() => {
+    const byKey = new Map<string, SidebarRowFolder>();
+    for (const entry of projectLabelDirectory.labels) {
+      byKey.set(entry.key, { name: entry.label.name, color: entry.label.color });
+    }
+    return (thread: SidebarThreadSummary): SidebarRowFolder | null => {
+      const folderId = threadProjectFolderId(thread);
+      return folderId === null
+        ? null
+        : (byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
     };
-  }, [projectGroupByKey, projectGroupKeyByKey, projectLabelDirectory]);
+  }, [projectLabelDirectory]);
   const setNavRailDecisionsWaiting = useNavRailBadgeStore((store) => store.setDecisionsWaiting);
   useEffect(() => {
     setNavRailDecisionsWaiting(sidebarModes.decisionsWaiting);
@@ -2725,14 +2674,7 @@ export default function Sidebar() {
       // Subagent child threads live in the parent's Agents surface, not the
       // sidebar roster (v2 models them as real threads with lineage).
       const roster = filterSidebarV2VisibleThreads(sidebarModes.modeThreads, null);
-      const visible =
-        sidebarMode === "chats" && activeChatProjectFilter !== null
-          ? roster.filter((thread) =>
-              projectLabelDirectory.confirmedByThread
-                .get(scopedThreadTagKey(thread.environmentId, thread.id))
-                ?.includes(activeChatProjectFilter),
-            )
-          : roster;
+      const visible = roster;
       inboxReturns.observe(workingShelfEnabled ? threads : null);
       const active: EnvironmentThreadShell[] = [];
       const working: EnvironmentThreadShell[] = [];
@@ -2787,9 +2729,7 @@ export default function Sidebar() {
         snoozeNow: preciseNow,
       };
     }, [
-      activeChatProjectFilter,
       nowMinute,
-      projectLabelDirectory,
       serverConfigs,
       sidebarMode,
       sidebarModes.modeThreads,
@@ -2800,9 +2740,9 @@ export default function Sidebar() {
 
   // Chats render a page at a time; the sentinel after the last row reveals
   // the next page as it scrolls into view. Every chat summary is already in
-  // the shell, so this only bounds rendering. A mode or filter change starts
-  // over at the first page.
-  const chatWindowResetKey = `${sidebarMode}:${activeChatProjectFilter ?? ""}`;
+  // the shell, so this only bounds rendering. A mode change starts over at
+  // the first page.
+  const chatWindowResetKey = sidebarMode;
   const [chatWindowState, setChatWindowState] = useState({
     resetKey: chatWindowResetKey,
     count: CHAT_LIST_PAGE_SIZE,
@@ -4068,18 +4008,7 @@ export default function Sidebar() {
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
-        // The projects its row shows: Work's chips, or a chat's confirmed tags.
-        const threadProjects =
-          threadKind === "work"
-            ? workProjectTagsFor(thread)
-            : (
-                projectLabelDirectory.confirmedByThread.get(
-                  scopedThreadTagKey(thread.environmentId, thread.id),
-                ) ?? []
-              ).flatMap((key) => {
-                const entry = projectLabelDirectory.byKey.get(key);
-                return entry ? [{ key, name: entry.label.name }] : [];
-              });
+        const folderState = threadFolderState(thread, threadKind === "work", projectLabelDirectory);
         const threadProjectGroup =
           projectGroupsRef.current.find((project) =>
             project.memberProjectRefs.some(
@@ -4117,7 +4046,21 @@ export default function Sidebar() {
                 titleRegeneration: supportsTitleRegeneration,
               },
               snoozePresets,
-              projects: threadProjects,
+              folder: {
+                current: folderState.current && {
+                  key: folderState.current.key,
+                  id: folderState.current.label.id,
+                  name: folderState.current.label.name,
+                },
+                viaRepository: folderState.viaRepository,
+                options: folderState.options.map((entry) => ({
+                  id: entry.label.id,
+                  name: entry.label.name,
+                })),
+                canMove: appAtomRegistry.get(
+                  serverEnvironment.moveThreadProjectFolder.permissionAtom(thread.environmentId),
+                ),
+              },
             }),
             position,
           ),
@@ -4128,6 +4071,28 @@ export default function Sidebar() {
             clicked.value.slice("open-project:".length) as ProjectLabelKey,
           );
           if (entry) openProjectView(entry);
+          return;
+        }
+        if (clicked.value === "new-folder") {
+          sidebarModeActions.createProject();
+          return;
+        }
+        const clickedId = clicked.value;
+        if (clickedId === "remove-folder" || clickedId.startsWith("move-folder:")) {
+          const target =
+            clickedId === "remove-folder"
+              ? null
+              : (folderState.options.find(
+                  (entry) => entry.label.id === clickedId.slice("move-folder:".length),
+                ) ?? null);
+          if (clickedId !== "remove-folder" && target === null) return;
+          const previous = folderState.current;
+          await moveThreadToFolder({
+            environmentId: thread.environmentId,
+            threadId: thread.id,
+            folder: target && { id: target.label.id, name: target.label.name },
+            previous: previous && { id: previous.label.id, name: previous.label.name },
+          });
           return;
         }
         if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
@@ -4432,20 +4397,6 @@ export default function Sidebar() {
   const threadHeader = (
     <SidebarThreadHeader
       hasProjects={projectGroups.length > 0}
-      filterControl={
-        sidebarMode === "chats" ? (
-          <ChatsProjectFilter
-            labels={projectLabelDirectory.labels}
-            value={activeChatProjectFilter}
-            onChange={setChatProjectFilter}
-            environmentLabel={(entry) =>
-              labelEnvironmentIds.length > 1
-                ? (environmentLabelById.get(entry.environmentId) ?? null)
-                : null
-            }
-          />
-        ) : null
-      }
       onNewProject={sidebarMode === "tasks" ? openAddProjectCommandPalette : null}
       onNewThread={sidebarModeActions.createInMode ?? handleNewThreadClick}
       newThreadLabel={sidebarModeActions.newItemLabel}
@@ -4690,9 +4641,7 @@ export default function Sidebar() {
                         }
                         // The group heading names the repository in Work.
                         repositoryName={sidebarMode === "tasks" ? null : repositoryNameFor(thread)}
-                        projectTags={
-                          sidebarMode === "tasks" ? workProjectTagsFor(thread) : NO_PROJECT_TAGS
-                        }
+                        folder={folderFor(thread)}
                         sweepAction={actionSweep?.keys.has(threadKey) ? actionSweep.action : null}
                         snoozeWakeLabelText={
                           section === "snoozed" && thread.snoozedUntil != null
@@ -4927,22 +4876,18 @@ export default function Sidebar() {
             0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground">
               {sidebarMode === "chats" ? (
-                activeChatProjectFilter !== null ? (
-                  "No chats in this project"
-                ) : (
-                  // Chats need no repository, so the empty list offers a chat.
-                  <>
-                    <span>No chats yet</span>
-                    <button
-                      type="button"
-                      onClick={sidebarModeActions.startChat}
-                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
-                    >
-                      <SquarePenIcon className="-mx-0.5 size-3" />
-                      New chat
-                    </button>
-                  </>
-                )
+                // Chats need no repository, so the empty list offers a chat.
+                <>
+                  <span>No chats yet</span>
+                  <button
+                    type="button"
+                    onClick={sidebarModeActions.startChat}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
+                  >
+                    <SquarePenIcon className="-mx-0.5 size-3" />
+                    New chat
+                  </button>
+                </>
               ) : projects.length === 0 ? (
                 <>
                   <span>No repositories yet</span>
