@@ -18,7 +18,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { Input } from "../ui/input";
+import { SearchInput } from "../ui/search-input";
 import { ScrollArea } from "../ui/scroll-area";
 
 const DEFAULT_ICON: IconName = "folder-code";
@@ -102,12 +102,13 @@ export function ProjectIconPickerDialog({
             </div>
           </div>
 
-          <Input
-            type="search"
+          <SearchInput
             value={query}
             aria-label="Search Lucide icons"
             placeholder="Search all Lucide icons"
             onChange={(event) => setQuery(event.currentTarget.value)}
+            clearLabel="Clear icon search"
+            onClear={() => setQuery("")}
           />
           <ScrollArea scrollFade className="max-h-64">
             <div className="grid grid-cols-8 gap-1 p-0.5 sm:grid-cols-10">

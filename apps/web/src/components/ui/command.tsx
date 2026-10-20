@@ -1,7 +1,7 @@
 "use client";
 
 import { Dialog as CommandDialogPrimitive } from "@base-ui/react/dialog";
-import { SearchIcon } from "lucide-react";
+import { Autocomplete as AutocompletePrimitive } from "@base-ui/react/autocomplete";
 import type * as React from "react";
 import { cn } from "~/lib/utils";
 import { OverlayPresenceBoundary, useOverlayPresenceRoot } from "~/components/ui/overlay-presence";
@@ -10,7 +10,6 @@ import {
   AutocompleteCollection,
   AutocompleteGroup,
   AutocompleteGroupLabel,
-  AutocompleteInput,
   AutocompleteItem,
   AutocompleteList,
   AutocompleteListHeading,
@@ -18,6 +17,7 @@ import {
 } from "~/components/ui/autocomplete";
 import { DIALOG_BACKDROP_CLASS, DIALOG_POPUP_CLASS } from "~/components/ui/dialog-styles";
 import { Button } from "~/components/ui/button";
+import { SearchField, searchFieldInputClassName } from "~/components/ui/search-input";
 
 /** Closes with its exit motion when an OverlayPresence around it empties. */
 function CommandDialog<Payload>({
@@ -113,21 +113,31 @@ function Command({
 function CommandInput({
   className,
   placeholder,
+  startAddon,
   ...props
-}: React.ComponentProps<typeof AutocompleteInput>) {
+}: Omit<AutocompletePrimitive.Input.Props, "size" | "className"> & {
+  /** Classes for the field around the input (the palette adds end padding for its action label). */
+  className?: string | undefined;
+  /** Replaces the search icon, as the palette's submenu back button does. */
+  startAddon?: React.ReactNode;
+  ref?: React.Ref<HTMLInputElement>;
+}) {
   return (
-    <div className="px-[var(--command-shell-inset)] py-1.5 [&_[data-slot=autocomplete-start-addon]]:ps-[calc(var(--command-shell-inset)+0.0625rem)]">
-      <AutocompleteInput
-        autoFocus
-        className={cn(
-          "border-transparent! bg-transparent! shadow-none before:hidden has-focus-visible:ring-0 placeholder:text-placeholder *:data-[slot=autocomplete-input]:ps-9! sm:*:data-[slot=autocomplete-input]:ps-[calc(var(--command-shell-inset)+1.5rem)]!",
-          className,
-        )}
-        placeholder={placeholder}
-        size="lg"
-        startAddon={<SearchIcon className="translate-x-0.5 text-icon-muted" />}
-        {...props}
-      />
+    <div className="px-[var(--command-shell-inset)] py-1.5">
+      <SearchField
+        size="md"
+        variant="bare"
+        {...(startAddon ? { icon: startAddon } : {})}
+        {...(className ? { className } : {})}
+      >
+        <AutocompletePrimitive.Input
+          autoFocus
+          className={cn(searchFieldInputClassName, "text-base")}
+          data-slot="autocomplete-input"
+          placeholder={placeholder}
+          {...props}
+        />
+      </SearchField>
     </div>
   );
 }

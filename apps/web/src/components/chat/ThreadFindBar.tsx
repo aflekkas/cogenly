@@ -1,7 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
+import { SearchInput } from "../ui/search-input";
 import { cn } from "~/lib/utils";
 import { formatThreadFindCount } from "./threadFind";
 import { THREAD_DETAILS_CARD_GAP } from "./threadDetailsCardLayout";
@@ -65,19 +65,16 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
       data-panel-flip="end"
       className="absolute top-3 right-3 z-40 w-[min(var(--thread-details-panel-width),calc(100%-1.5rem))] transition-opacity duration-150 ease-out starting:opacity-0 motion-reduce:transition-none"
     >
-      <InputGroup
-        variant="popover"
-        size="lg"
+      <div
         onContextMenu={(event) => event.stopPropagation()}
         role="search"
         aria-label="Find in thread"
         aria-busy={props.status === "loading" || props.counting === true}
         className="w-full"
       >
-        <InputGroupInput
+        <SearchInput
           ref={inputRef}
-          type="search"
-          size="sm"
+          frameClassName="h-9"
           value={props.query}
           aria-label="Find in thread"
           placeholder="Find in thread"
@@ -86,45 +83,52 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
           autoComplete="off"
           onChange={(event) => props.onQueryChange(event.target.value)}
           onKeyDown={handleKeyDown}
+          actions={
+            <>
+              <span
+                aria-live="polite"
+                className={cn(
+                  "min-w-10 text-center text-xs tabular-nums",
+                  noResults ? "text-destructive" : "text-muted-foreground",
+                )}
+              >
+                {label}
+              </span>
+              {props.status === "error" ? (
+                <Button size="xs" variant="ghost" onClick={props.onRetry}>
+                  Retry
+                </Button>
+              ) : null}
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Previous match"
+                disabled={navigationDisabled}
+                onClick={props.onPrevious}
+              >
+                <ChevronUpIcon />
+              </Button>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Next match"
+                disabled={navigationDisabled}
+                onClick={props.onNext}
+              >
+                <ChevronDownIcon />
+              </Button>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Close find"
+                onClick={props.onClose}
+              >
+                <XIcon />
+              </Button>
+            </>
+          }
         />
-        <InputGroupAddon align="inline-end" inset="pill">
-          <span
-            aria-live="polite"
-            className={cn(
-              "min-w-10 text-center text-xs tabular-nums",
-              noResults ? "text-destructive" : "text-muted-foreground",
-            )}
-          >
-            {label}
-          </span>
-          {props.status === "error" ? (
-            <Button size="xs" variant="ghost" onClick={props.onRetry}>
-              Retry
-            </Button>
-          ) : null}
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Previous match"
-            disabled={navigationDisabled}
-            onClick={props.onPrevious}
-          >
-            <ChevronUpIcon />
-          </Button>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Next match"
-            disabled={navigationDisabled}
-            onClick={props.onNext}
-          >
-            <ChevronDownIcon />
-          </Button>
-          <Button size="icon-xs" variant="ghost" aria-label="Close find" onClick={props.onClose}>
-            <XIcon />
-          </Button>
-        </InputGroupAddon>
-      </InputGroup>
+      </div>
     </div>
   );
 }

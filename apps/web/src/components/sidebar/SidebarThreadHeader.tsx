@@ -6,7 +6,7 @@
  * as a pair of icons at the end, after any mode-specific filter. Chats has no
  * add-repository: repositories belong to Work.
  */
-import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { FolderPlusIcon, SquarePenIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -16,8 +16,8 @@ import {
 } from "react";
 
 import { cn } from "~/lib/utils";
-import { Button } from "../ui/button";
-import { SidebarInput, SidebarMenuButton } from "../ui/sidebar";
+import { SearchInput } from "../ui/search-input";
+import { SidebarMenuButton } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface SidebarThreadHeaderProps {
@@ -75,77 +75,60 @@ export function SidebarThreadHeader({
     : newItemLabel;
 
   return (
-    <div className="corner-glow relative flex h-11 items-center [--corner-glow:1%] [--corner-glow-top:1%] gap-1 rounded-rail border border-(--surface-edge,rgb(255_255_255/6%)) bg-(--sidebar-input-surface) shadow-(--surface-halo,none) pr-1 pl-2.5">
-      <div className="flex h-8 min-w-0 flex-1 items-center gap-2 text-sm font-medium text-sidebar-muted-foreground">
-        <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
-        <SidebarInput
-          ref={searchInputRef}
-          nativeInput
-          type="search"
-          value={searchQuery}
-          onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
-          onKeyDown={onSearchKeyDown}
-          placeholder="Search"
-          aria-label="Search threads"
-          role="combobox"
-          aria-autocomplete="list"
-          aria-expanded={resultsVisible}
-          aria-controls={resultsVisible ? "sidebar-thread-search-results" : undefined}
-          aria-activedescendant={
-            activeResultExists
-              ? `sidebar-thread-search-result-${activeSearchResultIndex}`
-              : undefined
-          }
-          className="min-w-0 flex-1"
-        />
-        {isSearching ? (
-          <Button
-            type="button"
-            size="icon-micro"
-            variant="ghost-muted"
-            className="shrink-0"
-            aria-label="Clear thread search"
-            onClick={() => {
-              onClearSearch();
-              searchInputRef.current?.focus();
-            }}
-          >
-            <XIcon className="size-3" />
-          </Button>
-        ) : null}
-      </div>
-      {/* Unfilled like the search field beside it: the buttons carry their own
-          hover states, and a background well reads far louder on themed
-          palettes than on the base light and dark ones. */}
-      <div className="flex shrink-0 items-center">
-        {filterControl}
-        {hasProjects && onNewProject ? (
-          <SidebarHeaderIconButton label="Add repository" onClick={onNewProject}>
-            <FolderPlusIcon />
-          </SidebarHeaderIconButton>
-        ) : null}
-        <SidebarHeaderIconButton
-          label={newItemLabel}
-          tooltip={
-            showNewThreadInProjectHint ? (
-              <span className="flex flex-col gap-0.5">
-                <span>{newThreadLabel}</span>
-                <span className="text-muted-foreground">
-                  New thread in current repository: Shift+click
-                  {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
+    <SearchInput
+      ref={searchInputRef}
+      size="md"
+      value={searchQuery}
+      onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
+      onKeyDown={onSearchKeyDown}
+      placeholder="Search"
+      aria-label="Search threads"
+      role="combobox"
+      aria-autocomplete="list"
+      aria-expanded={resultsVisible}
+      aria-controls={resultsVisible ? "sidebar-thread-search-results" : undefined}
+      aria-activedescendant={
+        activeResultExists ? `sidebar-thread-search-result-${activeSearchResultIndex}` : undefined
+      }
+      clearLabel="Clear thread search"
+      onClear={() => {
+        onClearSearch();
+        searchInputRef.current?.focus();
+      }}
+      // Unfilled like the search field beside it: the buttons carry their own hover states, and
+      // a background well reads far louder on themed palettes than on the base light and dark
+      // ones.
+      actions={
+        <>
+          {filterControl}
+          {hasProjects && onNewProject ? (
+            <SidebarHeaderIconButton label="Add repository" onClick={onNewProject}>
+              <FolderPlusIcon />
+            </SidebarHeaderIconButton>
+          ) : null}
+          <SidebarHeaderIconButton
+            label={newItemLabel}
+            tooltip={
+              showNewThreadInProjectHint ? (
+                <span className="flex flex-col gap-0.5">
+                  <span>{newThreadLabel}</span>
+                  <span className="text-muted-foreground">
+                    New thread in current repository: Shift+click
+                    {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
+                  </span>
                 </span>
-              </span>
-            ) : (
-              newThreadLabel
-            )
-          }
-          disabled={newThreadDisabled}
-          onClick={onNewThread}
-        >
-          <SquarePenIcon />
-        </SidebarHeaderIconButton>
-      </div>
-    </div>
+              ) : (
+                newThreadLabel
+              )
+            }
+            disabled={newThreadDisabled}
+            onClick={onNewThread}
+          >
+            <SquarePenIcon />
+          </SidebarHeaderIconButton>
+        </>
+      }
+    />
   );
 }
 

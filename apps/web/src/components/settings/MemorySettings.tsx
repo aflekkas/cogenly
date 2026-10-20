@@ -11,7 +11,7 @@ import { sortProjectLabels } from "../../projectLabels/projectLabels.logic";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
-import { Input } from "../ui/input";
+import { SearchInput } from "../ui/search-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
@@ -72,14 +72,14 @@ export function MemorySettings() {
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4">
-              <Input
-                size="sm"
-                className="min-w-40 flex-1"
-                type="search"
+              <SearchInput
+                frameClassName="min-w-40 flex-1"
                 aria-label="Search memory"
                 placeholder="Search memory"
                 value={query}
                 onChange={(event) => setQuery(event.currentTarget.value)}
+                clearLabel="Clear memory search"
+                onClear={() => setQuery("")}
               />
               <Select value={labelId} onValueChange={(value) => setLabelId(value ?? ALL)}>
                 <SelectTrigger size="sm" aria-label="Project">

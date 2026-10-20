@@ -5,7 +5,6 @@ import {
   EllipsisIcon,
   MinusIcon,
   PlusIcon,
-  SearchIcon,
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
@@ -41,6 +40,7 @@ import { useSettingsScope } from "./SettingsScopeContext";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { SearchInput } from "../ui/search-input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Kbd, KbdGroup } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -117,28 +117,24 @@ function KeybindingsSearchInput({
   inputRef: RefObject<HTMLInputElement | null>;
 }) {
   return (
-    <InputGroup className="min-w-0 basis-full **:[input]:h-9 sm:basis-0 sm:flex-1 sm:**:[input]:h-8">
-      <InputGroupAddon>
-        <SearchIcon aria-hidden className="size-3.5" />
-      </InputGroupAddon>
-      <InputGroupInput
-        ref={inputRef}
-        type="search"
-        value={query}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          // The settings route treats an unhandled Escape as "go back";
-          // inside the search box it clears, then leaves the field.
-          if (event.key !== "Escape") return;
-          event.preventDefault();
-          if (query.length > 0) onChange("");
-          else event.currentTarget.blur();
-        }}
-        placeholder="Search keybindings"
-        aria-label="Search keybindings"
-        size="sm"
-      />
-    </InputGroup>
+    <SearchInput
+      ref={inputRef}
+      frameClassName="basis-full sm:basis-0 sm:flex-1"
+      value={query}
+      onChange={(event) => onChange(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        // The settings route treats an unhandled Escape as "go back";
+        // inside the search box it clears, then leaves the field.
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        if (query.length > 0) onChange("");
+        else event.currentTarget.blur();
+      }}
+      placeholder="Search keybindings"
+      aria-label="Search keybindings"
+      clearLabel="Clear keybinding search"
+      onClear={() => onChange("")}
+    />
   );
 }
 

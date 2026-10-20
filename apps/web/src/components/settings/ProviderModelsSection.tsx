@@ -14,6 +14,7 @@ import { sortModelsForProviderInstance } from "../../modelOrdering";
 import { MAX_CUSTOM_MODEL_LENGTH } from "../../modelSelection";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { SearchInput } from "../ui/search-input";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CustomModelEditor } from "./CustomModelEditor";
@@ -462,14 +463,15 @@ export function ProviderModelsSection({
     <div className="lg:flex lg:h-full lg:min-h-0 lg:flex-col">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {showFilter ? (
-          <Input
+          <SearchInput
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             placeholder="Filter models"
-            size="sm"
-            className="w-56 max-w-full"
+            frameClassName="w-56 max-w-full"
             spellCheck={false}
             aria-label="Filter models"
+            clearLabel="Clear model filter"
+            onClear={() => setFilter("")}
           />
         ) : null}
         <div className="flex items-center gap-2">

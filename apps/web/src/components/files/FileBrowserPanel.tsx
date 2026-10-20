@@ -10,7 +10,7 @@ import { ChevronsDownUp, ChevronsUpDown } from "lucide";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
-import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
+import { SearchInput } from "~/components/ui/search-input";
 import { MorphIcon } from "~/components/MorphIcon";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
@@ -83,23 +83,22 @@ function FileSearchField(props: {
   value: string;
 }) {
   return (
-    <InputGroup variant="ghost" className="h-7 min-w-0 flex-1">
-      <InputGroupInput
-        type="search"
-        name={props.name}
-        size="sm"
-        value={props.value}
-        aria-label={props.ariaLabel}
-        placeholder="Search files"
-        spellCheck={false}
-        onChange={(event) => props.onValueChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
-          props.onClose();
-          event.currentTarget.blur();
-        }}
-      />
-    </InputGroup>
+    <SearchInput
+      frameClassName="h-7 flex-1"
+      name={props.name}
+      value={props.value}
+      aria-label={props.ariaLabel}
+      placeholder="Search files"
+      spellCheck={false}
+      onChange={(event) => props.onValueChange(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        props.onClose();
+        event.currentTarget.blur();
+      }}
+      clearLabel="Clear file search"
+      onClear={() => props.onValueChange("")}
+    />
   );
 }
 

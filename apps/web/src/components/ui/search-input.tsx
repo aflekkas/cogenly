@@ -22,7 +22,7 @@ import { Kbd } from "./kbd";
  */
 const searchFieldVariants = {
   field:
-    "corner-glow relative rounded-rail border border-(--surface-edge,rgb(255_255_255/6%)) bg-(--sidebar-input-surface) shadow-(--surface-halo,none) [--corner-glow-top:1%] [--corner-glow:1%] transition-colors focus-within:border-foreground/25",
+    "corner-glow relative rounded-rail border border-(--surface-edge,rgb(255_255_255/6%)) bg-(--sidebar-input-surface,var(--message-surface)) shadow-(--surface-halo,none) [--corner-glow-top:1%] [--corner-glow:1%] transition-colors focus-within:border-foreground/25",
   bare: "relative",
 } as const;
 

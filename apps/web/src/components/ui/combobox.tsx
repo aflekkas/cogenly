@@ -1,12 +1,13 @@
 "use client";
 
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
-import { ChevronsUpDownIcon, SearchIcon, XIcon } from "lucide-react";
+import { ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "~/lib/utils";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
+import { SearchField, searchFieldInputClassName } from "~/components/ui/search-input";
 
 const ComboboxContext = React.createContext<{
   chipsRef: React.RefObject<Element | null> | null;
@@ -106,22 +107,20 @@ function ComboboxInput({
   );
 }
 
-function ComboboxSearchInput(props: React.ComponentProps<typeof ComboboxInput>) {
+/** The search row at the top of a combobox popup: the shared search field around the combobox input. */
+function ComboboxSearchInput({
+  className,
+  ...props
+}: Omit<ComboboxPrimitive.Input.Props, "size" | "className"> & { className?: string }) {
   return (
-    <div className="min-w-0 shrink-0 px-3 pt-2.5">
-      <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
-        <SearchIcon
-          aria-hidden="true"
-          className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground/55"
-        />
-        <ComboboxInput
+    <div className="min-w-0 shrink-0 px-2 pt-2">
+      <SearchField size="sm">
+        <ComboboxPrimitive.Input
+          data-slot="combobox-input"
+          className={cn(searchFieldInputClassName, className)}
           {...props}
-          className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
-          showTrigger={false}
-          size="sm"
-          unstyled
         />
-      </div>
+      </SearchField>
     </div>
   );
 }

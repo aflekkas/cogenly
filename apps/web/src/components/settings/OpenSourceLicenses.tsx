@@ -12,7 +12,7 @@ import {
 
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
+import { SearchInput } from "../ui/search-input";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 
@@ -167,29 +167,25 @@ function LicenseHeaderAction({
       <div className="hidden sm:block">
         <LicenseCount filteredCount={filteredCount} totalCount={totalCount} />
       </div>
-      <InputGroup className="w-36 sm:w-44">
-        <InputGroupAddon>
-          <SearchIcon aria-hidden className="size-3" />
-        </InputGroupAddon>
-        <InputGroupInput
-          aria-label="Search open-source licenses"
-          autoFocus
-          onBlur={() => {
-            if (query.length === 0) onSearchOpenChange(false);
-          }}
-          onChange={(event) => onQueryChange(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            event.preventDefault();
-            onQueryChange("");
-            onSearchOpenChange(false);
-          }}
-          placeholder="Search licenses"
-          size="sm"
-          type="search"
-          value={query}
-        />
-      </InputGroup>
+      <SearchInput
+        aria-label="Search open-source licenses"
+        autoFocus
+        frameClassName="w-36 sm:w-44"
+        onBlur={() => {
+          if (query.length === 0) onSearchOpenChange(false);
+        }}
+        onChange={(event) => onQueryChange(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          onQueryChange("");
+          onSearchOpenChange(false);
+        }}
+        placeholder="Search licenses"
+        value={query}
+        clearLabel="Clear license search"
+        onClear={() => onQueryChange("")}
+      />
     </div>
   );
 }
