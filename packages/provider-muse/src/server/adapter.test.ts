@@ -1148,6 +1148,33 @@ describe("MuseAdapterV2", () => {
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
+  it.effect("a user stop leaves the session without an error", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeMuse();
+      const harness = yield* makeHarness(fake);
+      const turn = yield* startConversation(harness, fake);
+      const interrupt = yield* harness.runtime
+        .interruptTurn({
+          providerThread: harness.providerThread,
+          providerTurnId: turn.providerTurn.id,
+        })
+        .pipe(Effect.forkScoped);
+      yield* fake.takeCall("turn/interrupt");
+      yield* fake.emit("turn/completed", {
+        turnId: turn.nativeId,
+        terminal: "cancelled",
+        reason: "cancelled during model step",
+      });
+      yield* Fiber.join(interrupt);
+      const session = yield* harness.takeEvent(
+        "provider_session.updated",
+        (event) => event.providerSession.status === "ready",
+      );
+      assert.strictEqual(session.providerSession.lastError, null);
+      assert.strictEqual((yield* harness.takeEvent("turn.terminal")).status, "interrupted");
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
   it.effect("resumes the requested native session and reads the same session snapshot", () =>
     Effect.gen(function* () {
       const fake = yield* makeFakeMuse();

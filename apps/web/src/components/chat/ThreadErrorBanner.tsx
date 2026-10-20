@@ -1,11 +1,7 @@
-import type { OrchestrationV2ProviderFailureClass } from "@t3tools/contracts";
-import { memo } from "react";
-import { Alert, AlertAction, AlertDescription } from "../ui/alert";
-import { Button } from "../ui/button";
-import { CircleAlertIcon, XIcon } from "lucide-react";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { OpenAI } from "../Icons";
-import { ChatGptUsageButton } from "../settings/ChatGptUsageButton";
+import type { OrchestrationV2ProviderFailureClass, ScopedThreadRef } from "@t3tools/contracts";
+import { useEffect } from "react";
+import { useStableCallback } from "../../hooks/useStableCallback";
+import { toastManager } from "../ui/toast";
 
 export function getThreadErrorBannerKey(threadKey: string, error: string | null): string | null {
   return error === null ? null : `${threadKey}\u0000${error}`;
@@ -36,53 +32,47 @@ export function isThreadErrorBannerDismissedForSession(bannerKey: string | null)
   return bannerKey !== null && sessionDismissedThreadErrorBannerKeys.has(bannerKey);
 }
 
-export const ThreadErrorBanner = memo(function ThreadErrorBanner({
+/**
+ * Shows a thread's error as a top toast, persistent until dismissed, so it sits
+ * with the app's other toasts above the header instead of over the transcript.
+ * Renders nothing itself. The toast closes when the error clears, changes or
+ * the thread changes; only the user's own dismissal calls `onDismiss`.
+ */
+export function ThreadErrorToast({
+  threadRef,
   error,
-  onDismiss,
   errorClass,
-  chatGptUsageLimit = false,
+  onDismiss,
 }: {
+  threadRef: ScopedThreadRef;
   error: string | null;
   errorClass?: OrchestrationV2ProviderFailureClass | null;
-  onDismiss?: () => void;
-  chatGptUsageLimit?: boolean;
+  onDismiss: () => void;
 }) {
-  if (!error) return null;
-  const variant = errorClass === "usage_limit" ? "warning" : "error";
-  return (
-    <div className="pointer-events-auto mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
-      <Alert variant={variant} surface="glass" controlAlignment="first-line" data-variant={variant}>
-        {chatGptUsageLimit ? (
-          <OpenAI className="size-4 text-foreground!" aria-hidden="true" />
-        ) : (
-          <CircleAlertIcon />
-        )}
-        <AlertDescription>
-          {chatGptUsageLimit ? (
-            <div className="space-y-1">
-              <p className="font-medium">ChatGPT usage limit reached</p>
-              <p>Review your usage settings in ChatGPT to continue.</p>
-            </div>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger render={<div className="line-clamp-3" />}>{error}</TooltipTrigger>
-              <TooltipPopup side="top" className="whitespace-pre-wrap">
-                {error}
-              </TooltipPopup>
-            </Tooltip>
-          )}
-        </AlertDescription>
-        {(chatGptUsageLimit || onDismiss) && (
-          <AlertAction>
-            {chatGptUsageLimit ? <ChatGptUsageButton variant="default" size="sm" /> : null}
-            {onDismiss ? (
-              <Button variant="ghost" size="icon-xs" aria-label="Dismiss error" onClick={onDismiss}>
-                <XIcon />
-              </Button>
-            ) : null}
-          </AlertAction>
-        )}
-      </Alert>
-    </div>
-  );
-});
+  const dismiss = useStableCallback(onDismiss);
+  const usageLimit = errorClass === "usage_limit";
+  const { environmentId, threadId } = threadRef;
+
+  useEffect(() => {
+    if (!error) return;
+    let closingFromCode = false;
+    const toastId = toastManager.add({
+      type: usageLimit ? "warning" : "error",
+      title: usageLimit ? "Usage limit reached" : "Run failed",
+      description: error,
+      timeout: 0,
+      priority: "high",
+      data: { threadRef: { environmentId, threadId } },
+      // Base UI closes on the corner button and on swipe; both are the user's dismissal.
+      onClose: () => {
+        if (!closingFromCode) dismiss();
+      },
+    });
+    return () => {
+      closingFromCode = true;
+      toastManager.close(toastId);
+    };
+  }, [dismiss, environmentId, error, threadId, usageLimit]);
+
+  return null;
+}

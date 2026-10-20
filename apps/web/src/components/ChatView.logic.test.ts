@@ -39,6 +39,7 @@ import {
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
   shouldWriteThreadErrorToCurrentServerThread,
+  resolveServerThreadError,
   waitForRevertedMessage,
 } from "./ChatView.logic";
 import { findRecordedWorktreeSetup, resolveVisibleWorktreeSetup } from "./ChatView.logic";
@@ -443,6 +444,53 @@ describe("shouldWriteThreadErrorToCurrentServerThread", () => {
         targetThreadId: threadId,
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolveServerThreadError", () => {
+  const cancelReason = "cancelled during model step";
+
+  it("treats a user stop as a stop, not an error", () => {
+    for (const latestRunStatus of ["interrupted", "cancelled"] as const) {
+      expect(
+        resolveServerThreadError({
+          localError: null,
+          sessionError: cancelReason,
+          latestRunStatus,
+          sessionStatus: "ready",
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("still reports a session that broke while stopping", () => {
+    expect(
+      resolveServerThreadError({
+        localError: null,
+        sessionError: "Muse session closed",
+        latestRunStatus: "interrupted",
+        sessionStatus: "error",
+      }),
+    ).toBe("Muse session closed");
+  });
+
+  it("reports real failures and local request errors", () => {
+    expect(
+      resolveServerThreadError({
+        localError: null,
+        sessionError: "API Error: 500",
+        latestRunStatus: "failed",
+        sessionStatus: "ready",
+      }),
+    ).toBe("API Error: 500");
+    expect(
+      resolveServerThreadError({
+        localError: "Could not send",
+        sessionError: cancelReason,
+        latestRunStatus: "interrupted",
+        sessionStatus: "ready",
+      }),
+    ).toBe("Could not send");
   });
 });
 

@@ -1012,7 +1012,12 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
             ? { nativeConversationHeadRef: nativeRef(turn.nativeId) }
             : {}),
         });
-        yield* updateSession(disposition === "broken" ? "error" : "ready", detail ?? null);
+        // A stop is not an error: Muse reports why it cancelled ("cancelled during
+        // model step"), but only a failed turn or a broken session keeps a reason.
+        yield* updateSession(
+          disposition === "broken" ? "error" : "ready",
+          status === "failed" || disposition === "broken" ? (detail ?? null) : null,
+        );
         active = undefined;
         if (status === "failed") {
           const failure =

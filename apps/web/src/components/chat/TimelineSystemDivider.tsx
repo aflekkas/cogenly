@@ -9,6 +9,9 @@ export function TimelineSystemDivider(props: {
   readonly detail?: ReactNode | null;
   readonly tone?: "neutral" | "danger";
   readonly icon?: LucideIcon;
+  readonly iconClassName?: string;
+  /** Shown in a tooltip when hovering the label, e.g. when it happened. */
+  readonly hint?: ReactNode;
   readonly showDetailSeparator?: boolean;
   readonly actionLabel?: string;
   readonly onAction?: () => void;
@@ -16,7 +19,7 @@ export function TimelineSystemDivider(props: {
   const Icon = props.icon;
   const content = (
     <>
-      {Icon ? <Icon className="size-3 shrink-0" /> : null}
+      {Icon ? <Icon className={cn("size-3 shrink-0", props.iconClassName)} /> : null}
       <span className="font-medium">{props.label}</span>
       {props.detail ? (
         <span
@@ -55,6 +58,17 @@ export function TimelineSystemDivider(props: {
             {content}
           </TooltipTrigger>
           <TooltipPopup side="top">{props.actionLabel}</TooltipPopup>
+        </Tooltip>
+      ) : props.hint ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span className="flex min-w-0 flex-wrap items-center justify-center gap-1.5 rounded-full px-2 py-1" />
+            }
+          >
+            {content}
+          </TooltipTrigger>
+          <TooltipPopup side="top">{props.hint}</TooltipPopup>
         </Tooltip>
       ) : (
         <span className="flex min-w-0 flex-wrap items-center justify-center gap-1.5 rounded-full px-2 py-1">

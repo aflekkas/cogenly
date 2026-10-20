@@ -11,6 +11,8 @@ import {
   type MessageId,
   type ModelSelection,
   type OrchestrationV2ProjectedTurnItem,
+  type OrchestrationV2ProviderSession,
+  type OrchestrationV2RunStatus,
   type PreviewAnnotationPayload,
   type ProviderInteractionMode,
   ProviderDriverKind,
@@ -470,6 +472,23 @@ export function shouldWriteThreadErrorToCurrentServerThread(input: {
     input.serverThread.environmentId === input.routeThreadRef.environmentId &&
     input.serverThread.id === input.targetThreadId,
   );
+}
+
+/**
+ * The error a server thread shows, or null. A stop is not an error: once the
+ * latest run was interrupted or cancelled, a session error left over from that
+ * stop (Muse reports "cancelled during model step") stays hidden, unless the
+ * session itself broke. A local error from a failed request always shows.
+ */
+export function resolveServerThreadError(input: {
+  localError: string | null;
+  sessionError: string | null;
+  latestRunStatus: OrchestrationV2RunStatus | null;
+  sessionStatus: OrchestrationV2ProviderSession["status"] | null;
+}): string | null {
+  if (input.localError !== null) return input.localError;
+  const stopped = input.latestRunStatus === "interrupted" || input.latestRunStatus === "cancelled";
+  return stopped && input.sessionStatus !== "error" ? null : input.sessionError;
 }
 
 /** Use the same enabled instance for the composer, provider status, and chat actions. */

@@ -39,6 +39,7 @@ import {
   GitForkIcon,
   MessageSquareIcon,
   MinusIcon,
+  SquareIcon,
   XIcon,
 } from "lucide-react";
 
@@ -107,12 +108,15 @@ export function V2LifecycleRow(props: {
     );
   }
   if (item.type === "run_interrupt_result") {
-    return (
+    // A stop is the user's choice, so it reads calm; only a stop that failed is red.
+    return item.status === "failed" ? (
+      <TimelineSystemDivider label="Failed" detail={item.message} tone="danger" icon={XIcon} />
+    ) : (
       <TimelineSystemDivider
-        label="Run interrupted"
-        detail={item.message}
-        tone="danger"
-        icon={XIcon}
+        label="Stopped"
+        icon={SquareIcon}
+        iconClassName="size-2 fill-current"
+        hint={`Stopped ${formatShortTimestamp(props.createdAt, props.timestampFormat)}`}
       />
     );
   }

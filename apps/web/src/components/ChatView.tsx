@@ -6,6 +6,7 @@ import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveDraftHeroState,
   shouldDockDraftHeroForSubmission,
+  resolveServerThreadError,
   resolveVisibleWorktreeSetup,
   resolveWorktreeSetupProgress,
 } from "./ChatView.logic";
@@ -437,7 +438,7 @@ import {
   getThreadErrorBannerKey,
   isThreadErrorBannerDismissedForSession,
   shouldShowThreadErrorBanner,
-  ThreadErrorBanner,
+  ThreadErrorToast,
 } from "./chat/ThreadErrorBanner";
 import {
   QueuedRunsControl,
@@ -1535,8 +1536,24 @@ export default function ChatView(props: ChatViewProps) {
           },
     [parentSubagentThread?.title, parentSubagentThreadRef],
   );
+  const serverSessionStatus = useMemo(
+    () =>
+      serverProjection?.providerSessions.findLast(
+        (session) => session.providerInstanceId === serverProjection.thread.providerInstanceId,
+      )?.status ?? null,
+    [serverProjection],
+  );
+  const serverLatestExecutedRunStatus = useMemo(
+    () => (serverProjection ? (latestExecutedRun(serverProjection.runs)?.status ?? null) : null),
+    [serverProjection],
+  );
   const threadError = isServerThread
-    ? (localServerError ?? serverRuntime?.lastError ?? null)
+    ? resolveServerThreadError({
+        localError: localServerError,
+        sessionError: serverRuntime?.lastError ?? null,
+        latestRunStatus: serverLatestExecutedRunStatus,
+        sessionStatus: serverSessionStatus,
+      })
     : localDraftError;
   // Dismissals can only mask the shown error, never clear it: a server thread
   // keeps its error in session.lastError, so clearing the local shadow would
@@ -9188,20 +9205,22 @@ export default function ChatView(props: ChatViewProps) {
                 onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
                 onOpenProviderSetup={openProviderSetupStable}
               />
-              <ThreadErrorBanner
-                error={timelineThreadError}
-                errorClass={
-                  localServerError === null && visibleThreadError === serverRuntime?.lastError
-                    ? (serverRuntime?.lastErrorClass ?? null)
-                    : null
-                }
-                onDismiss={() => {
-                  setThreadError(activeThread.id, null);
-                  dismissThreadErrorBannerForSession(threadErrorBannerKey);
-                  setThreadErrorBannerDismissTick((tick) => tick + 1);
-                }}
-              />
             </div>
+            {/* Thread errors surface as top toasts, above the header. */}
+            <ThreadErrorToast
+              threadRef={routeThreadRef}
+              error={timelineThreadError}
+              errorClass={
+                localServerError === null && visibleThreadError === serverRuntime?.lastError
+                  ? (serverRuntime?.lastErrorClass ?? null)
+                  : null
+              }
+              onDismiss={() => {
+                setThreadError(activeThread.id, null);
+                dismissThreadErrorBannerForSession(threadErrorBannerKey);
+                setThreadErrorBannerDismissTick((tick) => tick + 1);
+              }}
+            />
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
