@@ -267,18 +267,14 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --color-update-surface: var(--update-surface);
   --color-success-foreground: var(--success-foreground);
   --color-success: var(--success);
-  /* The send button: a plain standard blue in every theme and channel. */
-  --color-send: #2563eb;
-  --color-send-hover: #3b82f6;
-  /* The reference's send button: a navy tile lit from the bottom right,
-     (33,42,97) at the top-left to (46,69,126) at the bottom-right, under a
-     faint rim; while nothing can be sent it is a flat grey (89,92,93) with
-     a dark arrow. */
-  --color-send-top: #212a61;
-  --color-send-bottom: #2e457e;
-  --color-send-top-hover: #283474;
-  --color-send-bottom-hover: #375291;
-  --color-send-foreground: #c9cdd6;
+  /* The send button: the accent, run as the logo's ember gradient from the
+     top-left to the bottom-right. While nothing can be sent it is a flat
+     grey (89,92,93) with a dark arrow, as in the reference. */
+  --color-send-top: var(--accent-fill);
+  --color-send-bottom: var(--accent-fill-deep);
+  --color-send-top-hover: var(--accent-fill-hover);
+  --color-send-bottom-hover: var(--accent-fill);
+  --color-send-foreground: var(--accent-fill-foreground);
   --color-send-idle: #595c5d;
   --color-send-idle-foreground: #121516;
   --color-diff-addition: var(--diff-addition);
@@ -1430,8 +1426,20 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --card-foreground: var(--color-zinc-800);
   --popover: var(--color-white);
   --popover-foreground: var(--color-zinc-800);
-  --primary: oklch(0.488 0.217 264);
-  --primary-foreground: var(--color-white);
+  /* The accent is the Cogenly orange from the logo (--color-brand-ember-*).
+     Every accent use (primary, ring, message action, update, send button,
+     text selection) derives from these five, so it changes in one place.
+     Light: a burnt orange that keeps white text at 4.7:1 and reads at 4.7:1
+     as link text on white; the reds stay at hue 0, this sits at 18. */
+  --accent-fill: #c94a14;
+  --accent-fill-hover: #b8420f;
+  --accent-fill-deep: #b03d10;
+  --accent-fill-foreground: var(--color-white);
+  --accent-tint: color-mix(in srgb, var(--accent-fill) 12%, transparent);
+  --accent-ring: var(--accent-fill);
+  --accent-selection: color-mix(in srgb, var(--accent-fill) 28%, transparent);
+  --primary: var(--accent-fill);
+  --primary-foreground: var(--accent-fill-foreground);
   --secondary: var(--color-zinc-50);
   --secondary-foreground: var(--color-zinc-800);
   --muted: var(--color-zinc-50);
@@ -1453,7 +1461,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --destructive: var(--error);
   --border: var(--color-zinc-200);
   --input: var(--color-zinc-300);
-  --ring: var(--primary);
+  --ring: var(--accent-ring);
   --destructive-foreground: var(--error-foreground);
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-700);
@@ -1464,7 +1472,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --warning-surface: color-mix(in srgb, var(--warning) 8%, transparent);
   --update: var(--primary);
   --update-foreground: var(--primary);
-  --update-surface: color-mix(in srgb, var(--update) 12%, transparent);
+  --update-surface: var(--accent-tint);
   /* Keep every sidebar primitive on the same light surface hierarchy, including
      portaled mobile sheets and settings navigation outside the app sidebar. */
   --sidebar: var(--color-zinc-50);
@@ -1550,7 +1558,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --card-foreground: #f2f4f7;
     --popover: #16181b;
     --popover-foreground: #f2f4f7;
-    --primary: oklch(0.571 0.21 264);
+    /* Dark: the brand orange itself (hue 20). It reads at 7.5:1 as text on
+       the canvas; white on it is only 2.6:1, so text on an orange fill is
+       near-black (7.6:1), as the glyph sits on the app icon. */
+    --accent-fill: #ff7b3a;
+    --accent-fill-hover: #ff8a4c;
+    --accent-fill-deep: #e63e22;
+    --accent-fill-foreground: #140a06;
+    --accent-tint: color-mix(in srgb, var(--accent-fill) 14%, transparent);
+    --accent-selection: color-mix(in srgb, var(--accent-fill) 32%, transparent);
     --secondary: --alpha(var(--color-white) / 3%);
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 3%);
@@ -1572,8 +1588,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --success-foreground: var(--color-emerald-400);
     --warning-foreground: var(--color-amber-400);
     --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
-    --update-foreground: var(--color-blue-400);
-    --update-surface: color-mix(in srgb, var(--update) 18%, transparent);
+    --update-foreground: var(--primary);
+    --update-surface: var(--accent-tint);
     --sidebar: var(--card);
     --sidebar-control-surface: var(--muted);
     --sidebar-row-hover: var(--accent);
@@ -2178,6 +2194,10 @@ code {
   .drag-region > * {
     -webkit-app-region: initial;
   }
+  /* Text selection carries the accent, not the browser's blue. */
+  ::selection {
+    background-color: var(--accent-selection);
+  }
 }
 
 .drag-region button,
@@ -2328,7 +2348,7 @@ code {
 
 /* File links are Chips and own their color and focus ring. */
 .chat-markdown a:not(.chat-markdown-file-link) {
-  color: var(--info-foreground);
+  color: var(--primary);
 }
 
 .chat-markdown a:not(.chat-markdown-file-link, [data-markdown-image-link]):hover,
