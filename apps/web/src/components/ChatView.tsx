@@ -402,7 +402,7 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
-import { CollapsePresence } from "./chat/StateTransition";
+import { CollapsePresence, useExtendedAfterFrame } from "./chat/StateTransition";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
@@ -3496,6 +3496,10 @@ export default function ChatView(props: ChatViewProps) {
   const showComposerModelStrip = mountComposerModelStrip && restingComposerControlsVisible;
 
   const needsLoadBalancing = automaticEnvironment && !draftThread?.loadBalancedEnvironmentId;
+  // The shell's silhouette follows the strip while it grows and collapses.
+  const composerStripVisible = showComposerContextStrip || showComposerModelStrip;
+  const [composerStripLingering, setComposerStripLingering] = useState(false);
+  const composerStripExtended = useExtendedAfterFrame(composerStripVisible);
   const loadBalancingCandidates = useMemo(
     () =>
       needsLoadBalancing
@@ -9373,7 +9377,10 @@ export default function ChatView(props: ChatViewProps) {
                     }
                   >
                     <ComposerSurface.Shell
-                      contextStrip={showComposerContextStrip || showComposerModelStrip}
+                      contextStrip={
+                        composerStripVisible || composerStripLingering || composerStripExtended
+                      }
+                      contextStripCollapsed={!composerStripExtended}
                     >
                       <ComposerSurface.Host
                         inert={isSavingQueuedEdit}
@@ -9591,7 +9598,10 @@ export default function ChatView(props: ChatViewProps) {
                               />
                             </ComposerSurface.ContextStrip>
                           ) : null}
-                          <CollapsePresence open={mountComposerContextStrip}>
+                          <CollapsePresence
+                            open={mountComposerContextStrip}
+                            onLingerChange={setComposerStripLingering}
+                          >
                             <div className="pointer-events-auto">
                               <BranchToolbar
                                 forceNewWorktree={multipleModelSelections !== null}

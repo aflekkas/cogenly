@@ -433,6 +433,7 @@ export function DraftHeroHeadline({
         className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
       >
         <FadeSwap
+          group="draft-heading"
           swapKey={
             isChatDraft
               ? "chat"
@@ -458,7 +459,7 @@ export function DraftHeroHeadline({
           move. Without a project, the picker moves here to choose one. */}
       {isChatDraft || scratchWorkspaceRoot === null ? null : (
         <p className="mt-2 flex h-6 items-center text-sm">
-          <FadeSwap swapKey={isScratchDraft ? "picker" : "start-without"}>
+          <FadeSwap group="draft-subline" swapKey={isScratchDraft ? "picker" : "start-without"}>
             {isScratchDraft ? projectSelector : orStartWithoutProject}
           </FadeSwap>
         </p>
