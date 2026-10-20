@@ -316,11 +316,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  /* Rail buttons sit a touch rounder than rows (10px at the default radius). */
-  --radius-rail: calc(var(--radius) + 2px);
-  --radius-2xl: calc(var(--radius) + 8px);
-  --radius-3xl: calc(var(--radius) + 12px);
+  /* The larger steps sit close together, as in the reference design: cards
+     and rail buttons 8px, panels 11px, bubbles 12px, the composer 16px. */
+  --radius-xl: calc(var(--radius) + 3px);
+  --radius-rail: var(--radius);
+  --radius-2xl: calc(var(--radius) + 4px);
+  --radius-3xl: calc(var(--radius) + 8px);
   @keyframes skeleton {
     /* The single loading-bar breath used by every skeleton: one opacity pulse
        per container, stepped so however many bars sit under it, the compositor
@@ -1515,7 +1516,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --secondary: --alpha(var(--color-white) / 3%);
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 3%);
-    --muted-foreground: #7d7d7d;
+    --muted-foreground: #737579;
     --accent: --alpha(var(--color-white) / 4%);
     /* User bubbles sit one step above the page, like the reference cards. */
     --message-surface: #161616;
@@ -1588,7 +1589,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --accent: #191a1d;
     --accent-foreground: #f7f9ff;
     --muted: #080808;
-    --muted-foreground: #7d7d7d;
+    --muted-foreground: #737579;
     --border: rgb(255 255 255 / 8%);
     --input: rgb(255 255 255 / 18%);
     /* Seamless shell: rail, list and main pane share one surface with no
