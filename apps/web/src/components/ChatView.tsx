@@ -1674,7 +1674,8 @@ export default function ChatView(props: ChatViewProps) {
     isScratch: activeProjectIsScratch,
   });
   const activeThreadCapabilities = threadCapabilities(activeThreadKind);
-  // A chat has no right panel: nothing below opens, shows or toggles one for it.
+  // A thread kind without panel surfaces has no right panel: nothing below opens,
+  // shows or toggles one for it. Chats offer the browser only.
   const rightPanelSupported = hasRightPanel(activeThreadCapabilities);
   const activeRightPanelKind = useRightPanelStore((state) =>
     rightPanelSupported ? selectActiveRightPanel(state.byThreadKey, activeThreadRef) : null,
@@ -9059,11 +9060,17 @@ export default function ChatView(props: ChatViewProps) {
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
-        {/* Top bar */}
+        {/* Top bar. It floats over the transcript, which scrolls up under it and
+            fades out across its height (.messages-timeline-scroll), so it reserves
+            no dead band and has no fill of its own. On desktop it stays the
+            window's drag region and keeps clear of the traffic lights; in the
+            browser it lets pointer events through to the transcript except on
+            its controls. */}
         <header
           data-chat-header
           className={cn(
-            "relative bg-background",
+            "relative z-30",
+            !isElectron && "pointer-events-none *:pointer-events-auto",
             isElectron
               ? cn(
                   "drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 sm:px-5",
@@ -9098,7 +9105,11 @@ export default function ChatView(props: ChatViewProps) {
 
         {/* Main content area with optional plan sidebar. Its centered lane
             glides to its new center when a panel opens or closes (panelFlip). */}
-        <div className="relative flex min-h-0 min-w-0 flex-1" data-panel-flip="center">
+        <div
+          className="relative flex min-h-0 min-w-0 flex-1"
+          data-panel-flip="center"
+          data-chat-header-overlap
+        >
           {/* Chat column */}
           <ThreadFindCanvas
             findOptions={{
