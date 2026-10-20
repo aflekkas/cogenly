@@ -17,6 +17,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.exportValidate]: AuthSettingsWriteScope,
   [WS_METHODS.exportList]: AuthSettingsWriteScope,
   [WS_METHODS.commitmentsDelete]: AuthOrchestrationOperateScope,
+  [WS_METHODS.visualStateGet]: AuthOrchestrationReadScope,
+  [WS_METHODS.visualStateSet]: AuthOrchestrationOperateScope,
+  [WS_METHODS.visualStateSubmit]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverRunStorageCleanup]: AuthSettingsWriteScope,
   // Endpoint checks exist to configure exports, so they need the same grant as saving them.
   [WS_METHODS.serverCheckOtlpEndpoint]: AuthSettingsWriteScope,

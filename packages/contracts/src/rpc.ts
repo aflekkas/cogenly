@@ -1,5 +1,6 @@
 import * as Search from "./search.ts";
 import * as Facts from "./fact.ts";
+import * as Visual from "./visual.ts";
 import * as Exports from "./export.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Work from "./work.ts";
@@ -384,6 +385,11 @@ export const WS_METHODS = {
   mcpAppsToolInfo: "mcpApps.toolInfo",
   mcpAppsReadResource: "mcpApps.readResource",
   mcpAppsUpdateModelContext: "mcpApps.updateModelContext",
+
+  // Interactive HTML render state methods
+  visualStateGet: "visual.state.get",
+  visualStateSet: "visual.state.set",
+  visualStateSubmit: "visual.state.submit",
 
   // Provider methods
   providerUploadFeedback: "provider.uploadFeedback",
@@ -1296,6 +1302,24 @@ const WsMcpAppsReadResourceRpc = Rpc.make(WS_METHODS.mcpAppsReadResource, {
   payload: McpAppReadResourceInput,
   success: McpAppReadResourceResult,
   error: Schema.Union([McpAppRequestError, EnvironmentAuthorizationError]),
+});
+
+const WsVisualStateGetRpc = Rpc.make(WS_METHODS.visualStateGet, {
+  payload: Visual.VisualStateGetInput,
+  success: Visual.VisualStateGetResult,
+  error: Schema.Union([Visual.VisualStateError, EnvironmentAuthorizationError]),
+});
+
+const WsVisualStateSetRpc = Rpc.make(WS_METHODS.visualStateSet, {
+  payload: Visual.VisualStateSetInput,
+  success: Visual.VisualState,
+  error: Schema.Union([Visual.VisualStateError, EnvironmentAuthorizationError]),
+});
+
+const WsVisualStateSubmitRpc = Rpc.make(WS_METHODS.visualStateSubmit, {
+  payload: Visual.VisualStateSubmitInput,
+  success: Visual.VisualStateSubmitResult,
+  error: Schema.Union([Visual.VisualStateError, EnvironmentAuthorizationError]),
 });
 
 const WsProviderUploadFeedbackRpc = Rpc.make(WS_METHODS.providerUploadFeedback, {
@@ -2266,6 +2290,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsMcpAppsToolInfoRpc,
   WsMcpAppsReadResourceRpc,
   WsMcpAppsUpdateModelContextRpc,
+  WsVisualStateGetRpc,
+  WsVisualStateSetRpc,
+  WsVisualStateSubmitRpc,
   WsProviderUploadFeedbackRpc,
   WsSubscribeVcsStatusRpc,
   WsSubscribeWorktreeSetupRpc,

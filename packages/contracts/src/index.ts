@@ -73,5 +73,6 @@ export * from "./agentWorkspace.ts";
 
 export * from "./search.ts";
 export * from "./fact.ts";
+export * from "./visual.ts";
 export * from "./export.ts";
 export * from "./agentEvent.ts";

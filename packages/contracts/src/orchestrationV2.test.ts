@@ -83,6 +83,7 @@ function emptyThreadProjection() {
     checkpoints: [],
     contextHandoffs: [],
     contextTransfers: [],
+    visualStates: [],
     visibleTurnItems: [],
     updatedAt: now,
   };
@@ -293,6 +294,7 @@ describe("orchestration V2 contracts", () => {
       checkpoints: [],
       contextHandoffs: [],
       contextTransfers: [],
+      visualStates: [],
       visibleTurnItems: [projected(0, future), projected(1, known)],
       updatedAt: DateTime.formatIso(now),
     };
@@ -1116,6 +1118,7 @@ describe("orchestration V2 contracts", () => {
       checkpoints: [],
       contextHandoffs: [],
       contextTransfers: [],
+      visualStates: [],
       updatedAt: now,
     });
 

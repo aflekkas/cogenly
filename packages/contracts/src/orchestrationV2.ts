@@ -74,6 +74,7 @@ import {
   ToolActivitySource,
 } from "./providerRuntime.ts";
 import { ThreadTokenUsageSnapshot } from "./providerRuntime.ts";
+import { VisualState, VisualStateJson } from "./visual.ts";
 
 export const OrchestrationV2Actor = Schema.Literals(["user", "agent", "system"]);
 export type OrchestrationV2Actor = typeof OrchestrationV2Actor.Type;
@@ -1889,6 +1890,11 @@ export const OrchestrationV2DomainEvent = Schema.Union([
   }),
   Schema.Struct({
     ...OrchestrationV2EventBase.fields,
+    type: Schema.Literal("visual-state.updated"),
+    payload: VisualState,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2EventBase.fields,
     type: Schema.Literal("checkpoint-scope.created"),
     payload: OrchestrationV2CheckpointScope,
   }),
@@ -1932,6 +1938,7 @@ export const OrchestrationV2ThreadProjection = Schema.Struct({
   runtimeRequests: Schema.Array(OrchestrationV2RuntimeRequest),
   messages: Schema.Array(OrchestrationV2ConversationMessage),
   plans: Schema.Array(OrchestrationV2PlanArtifact),
+  visualStates: Schema.Array(VisualState),
   turnItems: turnItemArray(OrchestrationV2TurnItem),
   checkpointScopes: Schema.Array(OrchestrationV2CheckpointScope),
   checkpoints: Schema.Array(OrchestrationV2Checkpoint),
@@ -2528,6 +2535,7 @@ export const OrchestrationV2ThreadProjectionJson = OrchestrationV2ThreadProjecti
     runtimeRequests: Schema.Array(OrchestrationV2RuntimeRequestJson),
     messages: Schema.Array(OrchestrationV2ConversationMessageJson),
     plans: Schema.Array(OrchestrationV2PlanArtifact),
+    visualStates: Schema.Array(VisualStateJson),
     turnItems: turnItemArray(OrchestrationV2TurnItemJson),
     checkpointScopes: Schema.Array(OrchestrationV2CheckpointScopeJson),
     checkpoints: Schema.Array(OrchestrationV2CheckpointJson),
@@ -2726,6 +2734,11 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
     ...OrchestrationV2JsonEventBaseFields,
     type: Schema.Literal("plan.updated"),
     payload: OrchestrationV2PlanArtifact,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2JsonEventBaseFields,
+    type: Schema.Literal("visual-state.updated"),
+    payload: VisualStateJson,
   }),
   Schema.Struct({
     ...OrchestrationV2JsonEventBaseFields,
@@ -3221,6 +3234,25 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     modelSelection: ModelSelection,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("visual-state.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    renderId: Schema.String,
+    title: Schema.optional(Schema.String),
+    state: Schema.Unknown,
+    expectedVersion: NonNegativeInt,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("visual-state.submit"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    renderId: Schema.String,
+    title: Schema.optional(Schema.String),
+    payload: Schema.Unknown,
+    lock: Schema.optional(Schema.Boolean),
+    messageId: MessageId,
   }),
 ]);
 export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
