@@ -294,6 +294,7 @@ const layerWorkHandoffProvided = WorkHandoff.layer.pipe(
       layerThreadLaunchProvided,
       layerThreadManagementProvided,
       layerProjectService,
+      layerManagedProjectFoldersProvided,
       AgentStore.layer,
     ),
   ),

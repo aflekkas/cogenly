@@ -76,6 +76,12 @@ const repo: Project = {
   updatedAt: "2026-01-01T00:00:00.000Z",
   deletedAt: null,
 };
+const scratch: Project = {
+  ...repo,
+  id: ProjectId.make("scratch:project"),
+  title: "Scratch",
+  workspaceRoot: "/workspace/scratch",
+};
 const create = (
   threadId: ThreadId,
 ): Extract<OrchestrationV2Command, { type: "thread.create" }> => ({
@@ -142,6 +148,8 @@ const makeHarness = (
   options: {
     summary?: Text.TextGeneration["Service"]["generateWorkScopeSummary"];
     messages?: OrchestrationV2ThreadProjection["messages"];
+    /** Makes `scratch` the scratch project, so Work can target "No repository". */
+    scratch?: boolean;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -171,7 +179,14 @@ const makeHarness = (
         assertProviderInstanceEnabled: () => Effect.void,
       }),
       Layer.mock(Projects.ProjectService)({
-        getById: (id) => Effect.succeed(id === targetId ? Option.some(repo) : Option.none()),
+        getById: (id) =>
+          Effect.succeed(
+            id === targetId
+              ? Option.some(repo)
+              : id === scratch.id
+                ? Option.some(scratch)
+                : Option.none(),
+          ),
         listShells: () => Effect.succeed([{ ...repo, repositoryIdentity: null }]),
       }),
       Layer.mock(Git.GitWorkflowService)({
@@ -207,8 +222,15 @@ const makeHarness = (
       }),
       Layer.mock(Folders.ManagedProjectFolders)({
         namedProjectsRoot: "/unused",
-        scratchRoot: Effect.succeed(Option.none()),
-        folderForThread: () => Effect.succeed(Option.none()),
+        scratchRoot: Effect.succeed(
+          options.scratch ? Option.some(scratch.workspaceRoot) : Option.none(),
+        ),
+        folderForThread: (request) =>
+          Effect.succeed(
+            options.scratch && request.projectId === scratch.id
+              ? Option.some(`${scratch.workspaceRoot}/own-folder`)
+              : Option.none(),
+          ),
       }),
       Layer.mock(Terminals.TerminalManager)({}),
       Layer.mock(Providers.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
@@ -645,4 +667,100 @@ it.effect(
         );
       }).pipe(Effect.provide(h.work));
     }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("drafts only from the chat up to and including the chosen message", () =>
+  Effect.gen(function* () {
+    const requests: string[] = [];
+    const h = yield* makeHarness({
+      messages: [
+        message("user", "Add booking-audit validation.", 0),
+        message("assistant", "Here is a plan for the validation.", 1),
+        message("user", "Unrelated: rename the marketing page.", 2),
+      ],
+      summary: (request) =>
+        Effect.sync(() => {
+          requests.push(request.requirements);
+          return { summary: "- Add booking-audit validation." };
+        }),
+    });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      yield* service.proposeHandoff(sourceId, { throughMessageId: MessageId.make("scope:1") });
+      expect(JSON.parse(requests[0]!)).toEqual(["Add booking-audit validation."]);
+      // A message that is not in the chat is a read failure, not a whole-chat draft.
+      const missing = yield* service
+        .proposeHandoff(sourceId, { throughMessageId: MessageId.make("elsewhere") })
+        .pipe(Effect.flip);
+      expect(missing.stage).toBe("read-source");
+      expect(requests).toHaveLength(1);
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("reads an older cut-off from the chat's own user messages", () =>
+  Effect.gen(function* () {
+    const requests: string[] = [];
+    // The recent window is empty, so the cut-off is only found in the records.
+    const h = yield* makeHarness({
+      messages: [],
+      summary: (request) =>
+        Effect.sync(() => {
+          requests.push(request.requirements);
+          return { summary: "- Fix booking-audit." };
+        }),
+    });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    for (const [id, text] of [
+      ["chat:first", "Fix booking-audit validation."],
+      ["chat:second", "Also rename the marketing page."],
+    ] as const) {
+      yield* h.orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(id),
+        messageId: MessageId.make(id),
+        threadId: sourceId,
+        text,
+        attachments: [],
+        modelSelection: selection,
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+    }
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      yield* service.proposeHandoff(sourceId, { throughMessageId: MessageId.make("chat:first") });
+      expect(JSON.parse(requests[0]!)).toEqual(["Fix booking-audit validation."]);
+      yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("starts Work without a repository at the scratch root and names the cut-off", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness({ scratch: true });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      // No workspace choice: a repository would get a worktree, the scratch project cannot.
+      const result = yield* service.start({
+        ...input,
+        targetProjectId: scratch.id,
+        throughMessageId: MessageId.make("scope:1"),
+      });
+      yield* Deferred.await(h.finished);
+      const projection = yield* h.orchestrator.getThreadProjection(result.threadId);
+      expect(projection.thread.projectId).toBe(scratch.id);
+      expect(projection.thread.surface).toBe("work");
+      expect(projection.thread.worktreePath).toBe(`${scratch.workspaceRoot}/own-folder`);
+      expect(h.worktrees).toEqual([]);
+      expect(projection.messages[0]?.text).toContain("through message scope:1");
+      expect(
+        (yield* h.orchestrator.getThreadProjection(sourceId)).thread.workHandoffs?.[0]?.threadId,
+      ).toBe(result.threadId);
+      yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
 );

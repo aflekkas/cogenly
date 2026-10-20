@@ -2,6 +2,7 @@ import {
   CommandId,
   WorkHandoffError,
   type AgentId,
+  type MessageId,
   type ProviderInteractionMode,
   type RuntimeMode,
   type ThreadId,
@@ -9,14 +10,17 @@ import {
   type WorkStartResult,
   type WorkHandoffDraft,
   type OrchestrationV2ThreadLaunchWorkspaceStrategy,
+  type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Launch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Projects from "../project/ProjectService.ts";
+import * as ManagedFolders from "../project/ManagedProjectFolders.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -38,8 +42,10 @@ export class WorkHandoffService extends Context.Service<
       input: WorkStartInput,
       actor?: WorkHandoffActor,
     ) => Effect.Effect<WorkStartResult, WorkHandoffError>;
+    /** `throughMessageId` drafts from the chat up to and including that message. */
     readonly proposeHandoff: (
       sourceThreadId: ThreadId,
+      options?: { readonly throughMessageId?: MessageId | undefined },
     ) => Effect.Effect<WorkHandoffDraft, WorkHandoffError>;
   }
 >()("t3/work/WorkHandoffService") {}
@@ -51,6 +57,7 @@ const make = Effect.gen(function* () {
   const text = yield* TextGeneration.TextGeneration;
   const settings = yield* ServerSettings.ServerSettingsService;
   const agents = yield* AgentStore.AgentStore;
+  const folders = yield* ManagedFolders.ManagedProjectFolders;
   const sourceThread = Effect.fn("WorkHandoffService.sourceThread")(function* (
     sourceThreadId: ThreadId,
   ) {
@@ -85,11 +92,24 @@ const make = Effect.gen(function* () {
               ),
             ))?.id)
           : undefined;
+      // Work with no repository runs in the scratch project, which has no git
+      // to make a worktree from, so it always launches at the root (its own folder).
+      const scratchRoot = yield* folders.scratchRoot;
+      const targetIsScratch =
+        Option.isSome(scratchRoot) &&
+        (yield* projects.getById(input.targetProjectId).pipe(
+          Effect.map(Option.exists((project) => project.workspaceRoot === scratchRoot.value)),
+          Effect.orElseSucceed(() => false),
+        ));
       const workspaceStrategy =
         actor?.workspaceStrategy ??
-        (input.workspace === "local"
+        (input.workspace === "local" || targetIsScratch
           ? { type: "root" as const }
           : { type: "worktree" as const, baseRef: "HEAD", startFromOrigin: false });
+      const cutOff =
+        input.throughMessageId === undefined
+          ? ""
+          : `\nThe handoff covers the source conversation through message ${input.throughMessageId}; ignore anything after it.`;
       // The existing launch service owns repository validation, provisioning, setup,
       // deferred execution, receipts and retries. No transcript is copied into Work.
       const result = yield* launches
@@ -114,7 +134,7 @@ const make = Effect.gen(function* () {
           createdBy: origin === "agent" ? "agent" : "user",
           creationSource: origin === "agent" ? "mcp" : "web",
           initialMessage: {
-            text: `${input.scopeSummary}\n\nSource conversation: [${source.thread.title}](t3-thread://v1/${input.sourceThreadId})\nSource thread ID: ${input.sourceThreadId}\nUse this approved scope; follow the source reference if more context is needed.`,
+            text: `${input.scopeSummary}\n\nSource conversation: [${source.thread.title}](t3-thread://v1/${input.sourceThreadId})\nSource thread ID: ${input.sourceThreadId}${cutOff}\nUse this approved scope; follow the source reference if more context is needed.`,
             senderThreadId: input.sourceThreadId,
             attachments: [],
           },
@@ -152,10 +172,40 @@ const make = Effect.gen(function* () {
       return { threadId: result.threadId };
     },
   );
+  /**
+   * The chat's messages up to and including `throughMessageId`. The recent
+   * window answers most cut-offs; an older one reads the source's own user
+   * messages up to that point. A message that is not in the chat fails.
+   */
+  const messagesThrough = Effect.fn("WorkHandoffService.messagesThrough")(function* (
+    sourceThreadId: ThreadId,
+    recent: OrchestrationV2ThreadProjection["messages"],
+    throughMessageId: MessageId | undefined,
+  ) {
+    if (throughMessageId === undefined) return recent;
+    const index = recent.findIndex((message) => message.id === throughMessageId);
+    if (index !== -1) return recent.slice(0, index + 1);
+    const cutOff = (yield* threads.getThreadRecords(sourceThreadId, ["messages"], {
+      messageIds: [throughMessageId],
+    })).messages[0];
+    if (cutOff === undefined) return yield* Effect.fail("Cut-off message is not in this chat.");
+    const users = (yield* threads.getThreadRecords(sourceThreadId, ["messages"], {
+      messageRoles: ["user"],
+    })).messages;
+    // Records come in chat order, which also breaks ties between equal timestamps.
+    const cutOffIndex = users.findIndex((message) => message.id === cutOff.id);
+    return cutOffIndex !== -1
+      ? users.slice(0, cutOffIndex + 1)
+      : users
+          .filter((message) => DateTime.isLessThanOrEqualTo(message.createdAt, cutOff.createdAt))
+          .concat(cutOff);
+  });
   const proposeHandoff: WorkHandoffService["Service"]["proposeHandoff"] = Effect.fn(
     "WorkHandoffService.proposeHandoff",
-  )(function* (sourceThreadId) {
+  )(function* (sourceThreadId, options) {
     yield* sourceThread(sourceThreadId);
+    const readSourceError = (cause?: unknown) =>
+      new WorkHandoffError({ sourceThreadId, stage: "read-source", cause });
     const source = (yield* threads
       .getThreadSnapshotWindow(sourceThreadId, { rowLimit: 30, userTurnLimit: 3 })
       .pipe(
@@ -164,9 +214,14 @@ const make = Effect.gen(function* () {
             new WorkHandoffError({ sourceThreadId: sourceThreadId, stage: "read-source", cause }),
         ),
       )).projection;
+    const messages = yield* messagesThrough(
+      sourceThreadId,
+      source.messages,
+      options?.throughMessageId,
+    ).pipe(Effect.mapError(readSourceError));
     // User messages carry the requirements. Omitting assistant replies also keeps
     // confirmations and other meta-chatter out of both generation and fallback.
-    const requirements = source.messages
+    const requirements = messages
       .filter((message) => message.role === "user" && !message.streaming && message.text.trim())
       .slice(-6)
       .map((message) => message.text.trim().slice(0, 2000));
