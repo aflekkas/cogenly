@@ -1,11 +1,10 @@
 import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { CogenlyMark } from "../CogenlyMark";
 import {
   resolveEnvironmentIdentificationPillLabel,
   useEnvironmentStageLabel,
@@ -54,10 +53,9 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           aria-label="Toggle main sidebar"
         />
       </div>
-      {/* One visible line: the pill wraps onto the clipped second line once it no longer fits.
-          The padding keeps the brand's focus ring inside the clip. */}
+      {/* One visible line: the pill wraps onto the clipped second line once it no longer fits. */}
       <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center gap-x-2 overflow-hidden py-0.5">
-        <SidebarBrand />
+        <SidebarTitle />
         {pillLabel ? (
           <div className="ml-1 flex h-7 items-center">
             <Badge data-environment-identification="pill" size="sm" variant="secondary">
@@ -70,7 +68,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   );
 });
 
-// Measures the brand at its titlebar inset, plus the header's right padding and the
+// Measures the header title at its titlebar inset, plus the header's right padding and the
 // sidebar border, so the sidebar minimum follows font size, zoom and macOS window controls.
 export function SidebarBrandWidthProbe({
   onWidthChange,
@@ -94,40 +92,36 @@ export function SidebarBrandWidthProbe({
     >
       <div className="ml-[max(var(--sidebar-content-inset),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] flex">
         {/* The longest title the header can show, so the minimum width doesn't jump between modes. */}
-        <SidebarBrandMark label="Settings" />
+        <SidebarTitleText label="Settings" />
       </div>
     </div>
   );
 }
 
-// The header names the app, or Settings / Usage on those pages; the rail shows the mode.
-function useSidebarTitle(): string {
+// The header titles the Settings and Usage pages; elsewhere it stays empty and the rail
+// shows the mode.
+function useSidebarTitle(): string | null {
   const pathname = useLocation({ select: (location) => location.pathname });
   if (pathname === "/settings" || pathname.startsWith("/settings/")) return "Settings";
   if (pathname === "/usage" || pathname.startsWith("/usage/")) return "Usage";
-  // The wordmark is lowercase, matching the mark's "c"; prose still says "Cogenly".
-  return "cogenly";
+  return null;
 }
 
-function SidebarBrand() {
+function SidebarTitle() {
   const title = useSidebarTitle();
+  if (!title) return null;
   return (
-    <Link
-      aria-label="Go to threads"
-      className="relative z-10 ml-[max(var(--sidebar-content-inset),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md text-foreground outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex"
-      to="/"
-    >
-      <SidebarBrandMark label={title} />
-    </Link>
+    <div className="relative z-10 ml-[max(var(--sidebar-content-inset),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden text-foreground md:flex">
+      <SidebarTitleText label={title} />
+    </div>
   );
 }
 
-function SidebarBrandMark({ label }: { label: string }) {
+function SidebarTitleText({ label }: { label: string }) {
   return (
-    // Center the visible capitals on the mark, without the font's ascender/descender space.
+    // Center the visible capitals, without the font's ascender/descender space.
     // Padding keeps ascenders and round-letter overshoot inside the truncation clip.
-    <span className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold tracking-brand">
-      <CogenlyMark />
+    <span className="inline-flex min-w-0 items-baseline text-sm font-medium tracking-tight">
       <span className="truncate [text-box:trim-both_cap_alphabetic] supports-[text-box:trim-both_cap_alphabetic]:py-1">
         {label}
       </span>

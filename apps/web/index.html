@@ -200,22 +200,24 @@
     </div>
     <script>
       // Pixel ember for the boot splash: an abstract mosaic of big blocks (1x1 and some 2x2
-      // cells, about 25 columns) in five quantized ember tones. While loading it is drawn on
-      // one canvas at cell resolution, upscaled with image-rendering: pixelated, and a few
-      // blocks at a time step to a neighboring tone (redrawn at 15fps). For the exit,
-      // src/bootSplash.ts calls sweep(): a device-resolution canvas takes over and an eased,
-      // gently wavy front climbs from the bottom; as it reaches each block, the block shrinks
-      // to its center, fades and drifts up on one ease-out, revealing the app. The exit runs at
-      // full frame rate only for its duration; the loop stops when the canvas is removed.
-      // Reduced motion draws one static frame.
+      // cells, about 25 columns) in five quantized ember tones, drawn on one canvas at cell
+      // resolution and upscaled with image-rendering: pixelated. While loading, a few blocks
+      // at a time step to a neighboring tone (redrawn at 15fps). For the exit,
+      // src/bootSplash.ts calls dissolve(): a stop-motion dissolve that rises up the window
+      // on evenly spaced 19fps ticks. Blocks are ordered by height plus an ordered dither
+      // (a soft band about 30% of the window tall), then spread over the ticks along a
+      // trapezoidal density, so each tick clears a small, even batch. A block shows one
+      // deeper frame on its tick and is gone after, revealing the app; the glyph steps out
+      // in six opacity steps as the band crosses its rows. The loop stops when
+      // the canvas is removed. Reduced motion draws one static frame.
       (() => {
         const shell = document.getElementById("boot-shell");
         const canvas = document.getElementById("boot-shell-pixels");
+        const mark = document.getElementById("boot-shell-mark");
         const context = canvas && canvas.getContext("2d");
         if (!shell || !context) return;
         const FRAME_MS = 66;
-        const LIFT_PX = 6;
-        const BRIGHTEN = 0.12;
+        const TICK_MS = 52;
         const TONES = [
           [255, 128, 64],
           [250, 108, 52],
@@ -223,44 +225,20 @@
           [235, 72, 36],
           [222, 58, 30],
         ];
+        // The one in-between frame a block shows before it is gone.
+        const DEEP = [196, 48, 26];
+        const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+        // Height of the dissolving band, as a share of the window.
+        const BAND = 0.3;
+        const GLYPH_STEPS = 6;
         const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
         let cell = 64;
         let cols = 0;
         let rows = 0;
         let image = null;
         let blocks = [];
-        let sweep = null;
+        let exit = null;
         let lastFrame = -Infinity;
-
-        // cubic-bezier(x1, y1, x2, y2) as a function of x in [0, 1], solved by bisection.
-        function bezier(x1, y1, x2, y2) {
-          const axis = (t, p1, p2) =>
-            3 * (1 - t) * (1 - t) * t * p1 + 3 * (1 - t) * t * t * p2 + t * t * t;
-          return (x) => {
-            let low = 0;
-            let high = 1;
-            for (let i = 0; i < 24; i++) {
-              const mid = (low + high) / 2;
-              if (axis(mid, x1, x2) < x) low = mid;
-              else high = mid;
-            }
-            return axis((low + high) / 2, y1, y2);
-          };
-        }
-        // Each block's exit, and the front's progress up the window over time.
-        const blockEase = bezier(0.2, 0.7, 0.2, 1);
-        const frontEase = bezier(0.45, 0, 0.3, 1);
-        // Time (0..1) at which the eased front reaches sweep position s (0 = bottom).
-        function frontTimeAt(s) {
-          let low = 0;
-          let high = 1;
-          for (let i = 0; i < 24; i++) {
-            const mid = (low + high) / 2;
-            if (frontEase(mid) < s) low = mid;
-            else high = mid;
-          }
-          return (low + high) / 2;
-        }
 
         function resize() {
           // About 25 columns, never finer than 38px or coarser than 72px blocks.
@@ -286,10 +264,15 @@
               const t = rows > 1 ? (y + (merge ? 0.5 : 0)) / (rows - 1) : 0;
               blocks.push({
                 cells,
-                x,
-                y,
-                span: merge ? 2 : 1,
                 t,
+                // Dissolve order: bottom first, spread over a band by a 4x4 Bayer matrix with
+                // a little noise so the dither grid doesn't read.
+                order:
+                  1 -
+                  t +
+                  BAND * (0.8 * ((BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16) + 0.2 * Math.random()),
+                top: y * cell,
+                bottom: (y + (merge ? 2 : 1)) * cell,
                 // A jittered quantization gives the tone bands ragged, mosaic edges.
                 tone: Math.round(t * (TONES.length - 1) + (Math.random() - 0.5) * 1.1),
                 phase: Math.random() * 6.2832,
@@ -300,50 +283,72 @@
           }
         }
 
-        function toneAt(block, time) {
-          // Each block spends a short slice of its slow cycle one tone off.
-          const shifted = !reduceMotion && Math.sin(time * block.speed + block.phase) > 0.94;
-          return Math.min(TONES.length - 1, Math.max(0, block.tone + (shifted ? block.step : 0)));
+        // Share of blocks cleared by time f (0..1): eases in over the first 20%, runs steady,
+        // and eases out over the last 15% (a trapezoidal rate).
+        function clearedBy(f) {
+          const rate = 1 / (1 - 0.1 - 0.075);
+          if (f < 0.2) return (rate * f * f) / 0.4;
+          if (f > 0.85) return 1 - (rate * (1 - f) * (1 - f)) / 0.3;
+          return rate * (f - 0.1);
+        }
+
+        function timeForShare(u) {
+          let low = 0;
+          let high = 1;
+          for (let i = 0; i < 24; i++) {
+            const mid = (low + high) / 2;
+            if (clearedBy(mid) < u) low = mid;
+            else high = mid;
+          }
+          return (low + high) / 2;
         }
 
         function draw(time) {
           const data = image.data;
           for (const block of blocks) {
-            const color = TONES[toneAt(block, time)];
+            let color = exit ? block.frozen : null;
+            if (!color) {
+              // Each block spends a short slice of its slow cycle one tone off.
+              const shifted = !reduceMotion && Math.sin(time * block.speed + block.phase) > 0.94;
+              color =
+                TONES[
+                  Math.min(TONES.length - 1, Math.max(0, block.tone + (shifted ? block.step : 0)))
+                ];
+              if (exit) block.frozen = color;
+            }
+            let alpha = 255;
+            if (exit) {
+              if (exit.tick > block.tick) alpha = 0;
+              else if (exit.tick === block.tick) color = DEEP;
+            }
             for (const index of block.cells) {
               const offset = index * 4;
               data[offset] = color[0];
               data[offset + 1] = color[1];
               data[offset + 2] = color[2];
-              data[offset + 3] = 255;
+              data[offset + 3] = alpha;
             }
           }
           context.putImageData(image, 0, 0);
         }
 
-        function drawExit(time) {
-          const { exitContext, start, frontMs, blockMs } = sweep;
-          const elapsed = time - start;
-          exitContext.clearRect(0, 0, innerWidth, innerHeight);
-          for (const block of blocks) {
-            const q = Math.min(1, Math.max(0, (elapsed - block.delay) / blockMs));
-            if (q >= 1) continue;
-            const eased = blockEase(q);
-            const size = block.span * cell;
-            const scaled = size * (1 - eased);
-            // One soft brighten as the front arrives, gone by the time the block is half out.
-            const glow = BRIGHTEN * Math.sin(Math.PI * Math.min(1, q * 2));
-            const [r, g, b] = block.exitColor;
-            exitContext.globalAlpha = 1 - eased;
-            exitContext.fillStyle = `rgb(${r + (255 - r) * glow},${g + (255 - g) * glow},${b + (255 - b) * glow})`;
-            exitContext.fillRect(
-              block.x * cell + (size - scaled) / 2,
-              block.y * cell + (size - scaled) / 2 - LIFT_PX * eased,
-              scaled,
-              scaled,
-            );
+        // Ticks run on a fixed schedule from the exit's start, so a late frame never shifts
+        // or doubles one.
+        function exitTick(time) {
+          const tick = Math.floor((time - exit.start) / TICK_MS);
+          if (tick === exit.tick) return false;
+          exit.tick = tick;
+          draw(time);
+          if (mark) {
+            const share = (tick - exit.glyphFrom + 1) / (exit.glyphTo - exit.glyphFrom + 1);
+            const step = Math.min(GLYPH_STEPS, Math.max(0, Math.round(share * GLYPH_STEPS)));
+            mark.style.opacity = String(1 - step / GLYPH_STEPS);
           }
-          return elapsed >= frontMs + blockMs;
+          if (tick > exit.lastTick) {
+            exit.done(exit.counts);
+            return true;
+          }
+          return false;
         }
 
         function tick(time) {
@@ -353,17 +358,17 @@
             delete shell.dataset.pixels;
             return;
           }
-          if (sweep) {
-            if (drawExit(time)) return;
+          if (exit) {
+            if (exitTick(time)) return;
           } else if (time - lastFrame >= FRAME_MS) {
             lastFrame = time;
             draw(time);
           }
-          if (!reduceMotion || sweep) requestAnimationFrame(tick);
+          if (!reduceMotion || exit) requestAnimationFrame(tick);
         }
 
         function onResize() {
-          if (sweep) return;
+          if (exit) return;
           resize();
           draw(performance.now());
         }
@@ -374,43 +379,36 @@
         addEventListener("resize", onResize);
         if (!reduceMotion) requestAnimationFrame(tick);
 
-        // A smooth per-column offset (two low-frequency waves) so the front is gently wavy.
-        const wavePhase = [Math.random() * 6.2832, Math.random() * 6.2832];
-        const columnWave = (x) =>
-          0.04 * Math.sin(x * 0.32 + wavePhase[0]) + 0.025 * Math.sin(x * 0.81 + wavePhase[1]);
-
         window.cogenlyBootSplash = {
-          // Starts the exit; returns when (ms after now) the front reaches a viewport y.
-          sweep(frontMs, blockMs) {
-            const start = performance.now();
-            const exit = document.createElement("canvas");
-            const ratio = devicePixelRatio || 1;
-            exit.width = Math.round(innerWidth * ratio);
-            exit.height = Math.round(innerHeight * ratio);
-            Object.assign(exit.style, {
-              position: "absolute",
-              inset: "0",
-              width: innerWidth + "px",
-              height: innerHeight + "px",
+          // Runs the exit dissolve; resolves after its last tick with the blocks cleared per
+          // tick.
+          dissolve(duration) {
+            const ticks = Math.max(2, Math.round(duration / TICK_MS));
+            const ordered = blocks.slice().sort((a, b) => a.order - b.order);
+            const counts = new Array(ticks).fill(0);
+            ordered.forEach((block, rank) => {
+              const at = timeForShare((rank + 0.5) / ordered.length);
+              block.tick = Math.min(ticks - 1, Math.floor(at * ticks));
+              counts[block.tick]++;
             });
-            const exitContext = exit.getContext("2d");
-            exitContext.setTransform(ratio, 0, 0, ratio, 0, 0);
-            for (const block of blocks) {
-              block.exitColor = TONES[toneAt(block, start)];
-              const center = (block.y + block.span / 2) * cell;
-              const position = Math.min(
-                1,
-                Math.max(0, 1 - center / innerHeight + columnWave(block.x)),
-              );
-              block.delay = frontTimeAt(position) * frontMs;
-            }
-            sweep = { exitContext, start, frontMs, blockMs };
-            // Paint the first exit frame, identical to the mosaic, before hiding the mosaic.
-            drawExit(start);
-            canvas.after(exit);
-            canvas.style.visibility = "hidden";
-            requestAnimationFrame(tick);
-            return (y) => frontTimeAt(Math.min(1, Math.max(0, 1 - y / innerHeight))) * frontMs;
+            // The glyph steps out over the ticks that clear the blocks behind it.
+            const glyph = mark ? mark.getBoundingClientRect() : null;
+            const behind = glyph
+              ? blocks.filter((block) => block.bottom > glyph.top && block.top < glyph.bottom)
+              : [];
+            const glyphTicks = behind.map((block) => block.tick);
+            return new Promise((resolve) => {
+              exit = {
+                start: performance.now(),
+                tick: -1,
+                lastTick: ticks - 1,
+                glyphFrom: glyphTicks.length ? Math.min(...glyphTicks) : 0,
+                glyphTo: glyphTicks.length ? Math.max(...glyphTicks) : ticks - 1,
+                counts,
+                done: resolve,
+              };
+              requestAnimationFrame(tick);
+            });
           },
         };
       })();
