@@ -438,6 +438,13 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END = {
 } as const satisfies MaintainScrollAtEndOptions;
 const EMPTY_TIMELINE_RUNS: ReadonlyArray<HandoffTimelineRun> = [];
 const EMPTY_RUN_IDS: ReadonlySet<RunId> = new Set();
+/** An opened thread shows after this many frames without a row resize... */
+const FIRST_LAYOUT_STABLE_FRAMES = 2;
+/** ...or this long after it reached its position, whichever comes first. */
+const FIRST_LAYOUT_HOLD_MAX_MS = 150;
+/** The longest an opened thread stays hidden, positioned or not. */
+const FIRST_LAYOUT_HOLD_LIMIT_MS = 600;
+const FIRST_LAYOUT_HOLD_STYLE = { opacity: 0 } as const;
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -661,6 +668,14 @@ const ConversationTimeline = memo(function ConversationTimeline({
     rememberedPosition?.atEnd === false ? null : listIdentityKey,
   );
   const restoringThreadPosition = positionedThreadKey !== listIdentityKey;
+  // A thread opens hidden and shows once its first layout has settled at the
+  // target position, so estimate corrections and scroll restoration happen
+  // out of sight. A held paint of the previous thread has already settled.
+  const [revealedThreadKey, setRevealedThreadKey] = useState<string | null>(() =>
+    paintOnly ? listIdentityKey : null,
+  );
+  const holdingFirstLayout = !paintOnly && revealedThreadKey !== listIdentityKey;
+  const itemSizeChangesRef = useRef(0);
   const listIdentityRef = useRef(listIdentityKey);
   const previousLatestRunRef = useRef(latestRun);
   let paintedExpandedRunIds = expandedRunIds;
@@ -1217,6 +1232,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     });
   }, [measureContentOverflow, onContentOverflowChange]);
   const handleItemSizeChanged = useCallback(() => {
+    itemSizeChangesRef.current += 1;
     if (disclosurePinsEndRef.current) {
       queueMicrotask(pinDisclosureToEnd);
       scheduleDisclosureSettle();
@@ -1228,6 +1244,36 @@ const ConversationTimeline = memo(function ConversationTimeline({
     reportContentOverflow();
   }, [pinDisclosureToEnd, reportContentOverflow, scheduleDisclosureSettle]);
   useEffect(() => cancelContentOverflowFrame, [cancelContentOverflowFrame]);
+  // Shows the opened thread two frames after its rows last resized, or at the
+  // cap, so a slow row cannot keep the thread hidden.
+  useEffect(() => {
+    if (!holdingFirstLayout || restoringThreadPosition || rows.length === 0) return;
+    const threadKey = listIdentityKey;
+    const startedAt = performance.now();
+    let seenChanges = itemSizeChangesRef.current;
+    let stableFrames = 0;
+    let frame = requestAnimationFrame(function settle() {
+      const changes = itemSizeChangesRef.current;
+      stableFrames = changes === seenChanges ? stableFrames + 1 : 0;
+      seenChanges = changes;
+      if (
+        stableFrames >= FIRST_LAYOUT_STABLE_FRAMES ||
+        performance.now() - startedAt >= FIRST_LAYOUT_HOLD_MAX_MS
+      ) {
+        setRevealedThreadKey(threadKey);
+        return;
+      }
+      frame = requestAnimationFrame(settle);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [holdingFirstLayout, listIdentityKey, restoringThreadPosition, rows.length]);
+  // A restoration that never reports back must not leave the thread hidden.
+  useEffect(() => {
+    if (!holdingFirstLayout) return;
+    const threadKey = listIdentityKey;
+    const timeout = setTimeout(() => setRevealedThreadKey(threadKey), FIRST_LAYOUT_HOLD_LIMIT_MS);
+    return () => clearTimeout(timeout);
+  }, [holdingFirstLayout, listIdentityKey]);
   // The list's own layout effects have already run here, so estimated row
   // positions are in place. Reporting before the first paint lets a thread
   // open in its final composer layout instead of correcting it a frame later.
@@ -1659,7 +1705,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
           <TooltipScrollDismissArea
             ref={setTimelineViewportElement}
             className="relative h-full min-h-0"
+            style={holdingFirstLayout ? FIRST_LAYOUT_HOLD_STYLE : undefined}
             data-assistant-citation-viewport="true"
+            data-timeline-hold={holdingFirstLayout ? "true" : undefined}
           >
             {onCiteAssistantText && citationThreadRef ? (
               <AssistantSelectionToolbar

@@ -28,6 +28,24 @@ import { observeResize } from "~/lib/observeResize";
 const MIN_URL_LIFE_MS = 5 * 60_000;
 
 /**
+ * The height each page last reported, at the width it reported it. A frame
+ * that mounts again (reopening a thread, scrolling a virtualized row back in)
+ * starts at that height and without the loading skeleton, so its row does not
+ * resize and the page does not fade in a second time.
+ */
+const reportedPageHeights = new Map<string, { readonly width: number; readonly height: number }>();
+const MAX_REPORTED_PAGE_HEIGHTS = 500;
+
+function rememberPageHeight(attachmentId: string, width: number, height: number) {
+  reportedPageHeights.delete(attachmentId);
+  reportedPageHeights.set(attachmentId, { width, height });
+  if (reportedPageHeights.size > MAX_REPORTED_PAGE_HEIGHTS) {
+    const oldest = reportedPageHeights.keys().next();
+    if (!oldest.done) reportedPageHeights.delete(oldest.value);
+  }
+}
+
+/**
  * An agent's HTML render inline in the thread: the page itself on the thread's
  * own background, at the server's measured height for this width until the
  * page reports its own. Loading and failure hold the same box so nothing below
@@ -45,17 +63,25 @@ export function HtmlRenderFrame(props: {
   // first paint so the reserved box is already the right size.
   const boxRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(HTML_RENDER_COLUMN_WIDTH);
+  // Client fonts can wrap a page taller than the server measured it; a frame
+  // left short would scroll inside the thread and take the reader's scroll.
+  const [contentHeight, setContentHeight] = useState<number>();
+  // A page shown before keeps its last height and skips the skeleton.
+  const [shownBefore] = useState(() => reportedPageHeights.has(attachmentId));
   useLayoutEffect(() => {
     const box = boxRef.current;
     if (!box) return;
     setWidth(box.clientWidth);
+    // Read before first paint, at the width the page reported it.
+    const reported = reportedPageHeights.get(attachmentId);
+    if (reported !== undefined && Math.abs(reported.width - box.clientWidth) < 1) {
+      setContentHeight(reported.height);
+    }
     return observeResize(box, ([entry]) => {
       if (entry) setWidth(entry.contentRect.width);
     });
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- The row is keyed by attachment.
   }, []);
-  // Client fonts can wrap a page taller than the server measured it; a frame
-  // left short would scroll inside the thread and take the reader's scroll.
-  const [contentHeight, setContentHeight] = useState<number>();
   const height = htmlRenderFrameHeight(props.htmlRender, width, contentHeight);
   const fileName = htmlRenderFileName(title);
   const resource = useMemo(
@@ -77,12 +103,17 @@ export function HtmlRenderFrame(props: {
   const srcExpiresAt = useRef(0);
   const [expandedSrc, setExpandedSrc] = useState<string | null>(null);
   // The page stays hidden behind a skeleton until it reports its content.
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(shownBefore);
   const showPage = useCallback(() => setReady(true), []);
-  const fitPage = useCallback((contentHeight: number) => {
-    setContentHeight(contentHeight);
-    setReady(true);
-  }, []);
+  const fitPage = useCallback(
+    (contentHeight: number) => {
+      const width = boxRef.current?.clientWidth;
+      if (width !== undefined) rememberPageHeight(attachmentId, width, contentHeight);
+      setContentHeight(contentHeight);
+      setReady(true);
+    },
+    [attachmentId],
+  );
   const { onFullscreenChange } = props;
   useEffect(() => {
     if (expandedSrc === null) return;
