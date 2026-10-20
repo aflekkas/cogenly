@@ -5,11 +5,13 @@ import {
   ContextForRunResult,
   ContextItem,
   ContextSet,
+  Fact,
   FactError,
+  MessageId,
   ProjectLabelId,
+  ThreadId,
   type ContextPrincipal,
   type RunId,
-  type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -43,6 +45,10 @@ const wrap = (cause: unknown) =>
   isFactError(cause) ? cause : new FactError({ operation: "retrieve", reason: "storage", cause });
 const renderItem = (item: ContextItem) =>
   `[${item.kind}:${item.id}] ${item.text}\nSources: ${JSON.stringify(item.refs)}`;
+// What the "Context used" panel shows per item. Long enough to identify the
+// source, short enough to keep stored run payloads small.
+const SNIPPET_CHARS = 280;
+const snippetOf = (text: string) => text.trim().slice(0, SNIPPET_CHARS);
 
 export class ContextRetrievalService extends Context.Service<
   ContextRetrievalService,
@@ -98,6 +104,13 @@ const make = Effect.gen(function* () {
         labels = labels.filter((id) => input.labelIds!.includes(id));
       const labelSet = new Set(labels);
       const candidates: ContextItem[] = [];
+      const nameRows = yield* sql<{
+        label_id: string;
+        name: string;
+      }>`SELECT label_id, name FROM project_labels`;
+      const labelName = new Map(nameRows.map((row) => [row.label_id, row.name] as const));
+      const namesOf = (ids: ReadonlyArray<ProjectLabelId>) =>
+        ids.map((id) => labelName.get(id) ?? id);
       const selected = yield* facts.list(
         { status: "confirmed", labelIds: labels, ...(input.query ? { query: input.query } : {}) },
         input.principal,
@@ -108,13 +121,21 @@ const make = Effect.gen(function* () {
           !(agentId !== undefined && fact.agentId === agentId)
         )
           continue;
+        const subject = `${fact.subject}${fact.predicate ? ` / ${fact.predicate}` : ""}`;
         candidates.push({
           kind: "fact",
           id: fact.id,
-          text: `${fact.subject}${fact.predicate ? ` / ${fact.predicate}` : ""}: ${fact.text}`,
+          text: `${subject}: ${fact.text}`,
           refs: fact.sourceRefs,
           labelIds: fact.labelIds,
           updatedAt: fact.updatedAt,
+          title: subject,
+          snippet: snippetOf(fact.text),
+          createdAt: fact.createdAt,
+          reason:
+            fact.labelIds.length > 0
+              ? `Confirmed fact from ${namesOf(fact.labelIds).join(", ")}`
+              : "Confirmed fact",
         });
       }
       if (labels.length || (agentId !== undefined && scope?.agent.permissions.read)) {
@@ -130,6 +151,10 @@ const make = Effect.gen(function* () {
             refs: [...item.sourceRefs, ...item.evidenceRefs],
             labelIds: item.labelIds,
             updatedAt: item.updatedAt,
+            title: item.title,
+            snippet: snippetOf(`${item.title} (${item.status}): ${item.description}`),
+            createdAt: item.createdAt,
+            reason: "Open commitment",
           });
         }
       }
@@ -139,11 +164,15 @@ const make = Effect.gen(function* () {
           id: string;
           title: string;
           updatedAt: string;
+          createdAt: string;
           status: string;
           refs: string;
           labels: string;
           runId: string;
-        }>`SELECT t.thread_id AS id,t.title,t.updated_at AS updatedAt,r.status,r.run_id AS runId,
+          projectId: string;
+          projectTitle: string | null;
+        }>`SELECT t.thread_id AS id,t.title,t.updated_at AS updatedAt,t.created_at AS createdAt,r.status,r.run_id AS runId,t.project_id AS projectId,
+        (SELECT p.title FROM projection_projects p WHERE p.project_id=t.project_id) AS projectTitle,
         (SELECT json_group_array(f.folder_id) FROM effective_thread_project_folders f WHERE f.thread_id=t.thread_id AND f.folder_id IN ${sql.in(labels)}) AS labels,
         COALESCE((SELECT json_group_array(json_object('kind','pr','id',json_extract(p.value,'$.url'))) FROM json_each(t.payload_json,'$.pullRequests') p WHERE json_extract(p.value,'$.url') IS NOT NULL AND json_extract(p.value,'$.source') <> 'stack-dismissed'),'[]') AS refs
         FROM orchestration_v2_projection_threads t JOIN orchestration_v2_projection_runs r ON r.run_id=(SELECT rr.run_id FROM orchestration_v2_projection_runs rr WHERE rr.thread_id=t.thread_id ORDER BY rr.ordinal DESC LIMIT 1)
@@ -159,6 +188,12 @@ const make = Effect.gen(function* () {
             refs: [{ kind: "thread", id: row.id }, { kind: "run", id: row.runId }, ...refs],
             labelIds: matchedLabels,
             updatedAt: row.updatedAt,
+            title: row.title,
+            snippet: snippetOf(`${row.title} — run ${row.status}`),
+            sourceThreadId: ThreadId.make(row.id),
+            sourceThreadTitle: row.title,
+            createdAt: row.createdAt,
+            reason: `Work outcome from ${row.projectTitle ?? row.projectId}`,
           });
         }
       }
@@ -169,7 +204,10 @@ const make = Effect.gen(function* () {
           updated_at: string;
         }>`SELECT c.summary,a.conversation_thread_id AS thread_id,json_extract(a.payload_json,'$.updatedAt') AS updated_at FROM agent_conversation_context c JOIN agents a ON a.agent_id=c.agent_id WHERE a.agent_id=${agentId} AND json_extract(a.payload_json,'$.permissions.read')=1`;
         for (const row of summaries)
-          if (row.summary)
+          if (row.summary) {
+            const threadRows = yield* sql<{
+              title: string;
+            }>`SELECT title FROM orchestration_v2_projection_threads WHERE thread_id=${row.thread_id}`;
             candidates.push({
               kind: "message",
               id: `summary:${agentId}`,
@@ -177,7 +215,13 @@ const make = Effect.gen(function* () {
               refs: [{ kind: "thread", id: row.thread_id }],
               labelIds: [],
               updatedAt: row.updated_at,
+              title: "Earlier conversation summary",
+              snippet: snippetOf(row.summary),
+              sourceThreadId: ThreadId.make(row.thread_id),
+              sourceThreadTitle: threadRows[0]?.title,
+              reason: "Earlier conversation summary",
             });
+          }
       }
       if (input.threadId !== undefined) {
         const owned =
@@ -186,18 +230,35 @@ const make = Effect.gen(function* () {
             : (yield* sql`SELECT 1 FROM agents a WHERE a.agent_id=${agentId} AND json_extract(a.payload_json,'$.permissions.read')=1 AND (a.conversation_thread_id=${input.threadId} OR EXISTS(SELECT 1 FROM agent_work_runs r WHERE r.agent_id=a.agent_id AND r.work_thread_id=${input.threadId}) OR EXISTS(SELECT 1 FROM agent_run_threads r WHERE r.agent_id=a.agent_id AND r.thread_id=${input.threadId}))`)
                 .length > 0;
         if (owned) {
-          const messages =
-            yield* sql`SELECT message_id AS id,substr(json_extract(payload_json,'$.text'),1,16000) AS text,updated_at AS updatedAt FROM orchestration_v2_projection_messages WHERE thread_id=${input.threadId} AND streaming=0 AND role IN ('user','assistant') AND trim(json_extract(payload_json,'$.text')) <> '' ORDER BY created_at DESC,message_id DESC LIMIT 8`;
+          const threads = yield* sql<{
+            title: string;
+          }>`SELECT title FROM orchestration_v2_projection_threads WHERE thread_id=${input.threadId}`;
+          const sourceThreadTitle = threads[0]?.title;
+          const messages = yield* sql<{
+            id: string;
+            role: string;
+            text: string;
+            createdAt: string;
+            updatedAt: string;
+          }>`SELECT message_id AS id,role,substr(json_extract(payload_json,'$.text'),1,16000) AS text,created_at AS createdAt,updated_at AS updatedAt FROM orchestration_v2_projection_messages WHERE thread_id=${input.threadId} AND streaming=0 AND role IN ('user','assistant') AND trim(json_extract(payload_json,'$.text')) <> '' ORDER BY created_at DESC,message_id DESC LIMIT 8`;
           for (const row of messages)
             candidates.push(
               yield* decodeItem({
                 kind: "message",
                 ...row,
+                role: row.role,
                 refs: [
                   { kind: "thread", id: input.threadId },
                   { kind: "message", id: row.id },
                 ],
                 labelIds: labels,
+                title: sourceThreadTitle ?? "Message",
+                snippet: snippetOf(`${row.role}: ${row.text}`),
+                sourceThreadId: input.threadId,
+                sourceThreadTitle,
+                sourceMessageId: MessageId.make(row.id),
+                createdAt: row.createdAt,
+                reason: "Recent message in this project",
               }),
             );
         }
@@ -225,6 +286,189 @@ const make = Effect.gen(function* () {
       }
       return { items, text };
     }).pipe(Effect.mapError(wrap));
+  const decodeFact = Schema.decodeUnknownEffect(Schema.fromJsonString(Fact));
+  // Runs recorded before display metadata existed store items with empty text.
+  // Derive what the panel needs at read time; anything unresolvable stays as-is.
+  const backfillItems = (recorded: typeof ContextForRunResult.Type) =>
+    Effect.gen(function* () {
+      const stale = recorded.items.filter((item) => item.snippet === undefined);
+      if (stale.length === 0) return recorded;
+      const filled = new Map<string, ContextItem>();
+      const messageIds = [
+        ...new Set(
+          stale.flatMap((item) =>
+            item.kind === "message" && !item.id.startsWith("summary:")
+              ? [item.id, ...item.refs.filter((ref) => ref.kind === "message").map((ref) => ref.id)]
+              : item.refs.filter((ref) => ref.kind === "message").map((ref) => ref.id),
+          ),
+        ),
+      ];
+      const messageRows =
+        messageIds.length > 0
+          ? yield* sql<{
+              id: string;
+              threadId: string;
+              role: string;
+              text: string;
+              createdAt: string;
+              updatedAt: string;
+            }>`SELECT message_id AS id,thread_id AS threadId,role,substr(json_extract(payload_json,'$.text'),1,300) AS text,created_at AS createdAt,updated_at AS updatedAt FROM orchestration_v2_projection_messages WHERE message_id IN ${sql.in(messageIds)}`
+          : [];
+      const messageById = new Map(messageRows.map((row) => [row.id, row]));
+      const summaryIds = stale.flatMap((item) =>
+        item.kind === "message" && item.id.startsWith("summary:") ? [item.id.slice(8)] : [],
+      );
+      const summaryRows =
+        summaryIds.length > 0
+          ? yield* sql<{
+              id: string;
+              summary: string;
+              threadId: string;
+            }>`SELECT c.agent_id AS id,substr(c.summary,1,300) AS summary,a.conversation_thread_id AS threadId FROM agent_conversation_context c JOIN agents a ON a.agent_id=c.agent_id WHERE c.agent_id IN ${sql.in(summaryIds)}`
+          : [];
+      const summaryById = new Map(summaryRows.map((row) => [row.id, row]));
+      const factRows = stale.some((item) => item.kind === "fact")
+        ? yield* sql<{
+            id: string;
+            payload_json: string;
+          }>`SELECT id,payload_json FROM facts WHERE id IN ${sql.in(stale.filter((item) => item.kind === "fact").map((item) => item.id))}`
+        : [];
+      const factById = new Map<string, Fact>();
+      for (const row of factRows) {
+        const fact = yield* decodeFact(row.payload_json).pipe(Effect.option);
+        if (fact._tag === "Some") factById.set(row.id, fact.value);
+      }
+      const commitmentRows = stale.some((item) => item.kind === "commitment")
+        ? yield* sql<{
+            id: string;
+            payload_json: string;
+          }>`SELECT id,payload_json FROM commitments WHERE id IN ${sql.in(stale.filter((item) => item.kind === "commitment").map((item) => item.id))}`
+        : [];
+      const commitmentById = new Map<string, Commitment>();
+      for (const row of commitmentRows) {
+        const item = yield* decodeCommitment(row.payload_json).pipe(Effect.option);
+        if (item._tag === "Some") commitmentById.set(row.id, item.value);
+      }
+      const workIds = stale.filter((item) => item.kind === "work").map((item) => item.id);
+      const threadIds = [
+        ...new Set([
+          ...workIds,
+          ...stale.flatMap((item) =>
+            item.refs.filter((ref) => ref.kind === "thread").map((ref) => ref.id),
+          ),
+          ...messageRows.map((row) => row.threadId),
+          ...summaryRows.map((row) => row.threadId),
+        ]),
+      ];
+      const threadRows =
+        threadIds.length > 0
+          ? yield* sql<{
+              id: string;
+              title: string;
+              projectId: string;
+              projectTitle: string | null;
+            }>`SELECT t.thread_id AS id,t.title,t.project_id AS projectId,(SELECT p.title FROM projection_projects p WHERE p.project_id=t.project_id) AS projectTitle FROM orchestration_v2_projection_threads t WHERE t.thread_id IN ${sql.in(threadIds)}`
+          : [];
+      const threadById = new Map(threadRows.map((row) => [row.id, row]));
+      const runRows =
+        workIds.length > 0
+          ? yield* sql<{
+              threadId: string;
+              status: string;
+            }>`SELECT thread_id AS threadId,status FROM orchestration_v2_projection_runs WHERE thread_id IN ${sql.in(workIds)} ORDER BY ordinal DESC`
+          : [];
+      const statusByThread = new Map<string, string>();
+      for (const row of runRows) statusByThread.set(row.threadId, row.status);
+      for (const item of stale) {
+        const key = `${item.kind}:${item.id}`;
+        const threadRef = item.refs.find((ref) => ref.kind === "thread");
+        const messageRef = item.refs.find((ref) => ref.kind === "message");
+        const messageRow =
+          messageById.get(item.id) ?? (messageRef ? messageById.get(messageRef.id) : undefined);
+        const threadRow =
+          (item.kind === "work" ? threadById.get(item.id) : undefined) ??
+          (threadRef ? threadById.get(threadRef.id) : undefined) ??
+          (messageRow ? threadById.get(messageRow.threadId) : undefined);
+        if (item.kind === "message" && item.id.startsWith("summary:")) {
+          const summary = summaryById.get(item.id.slice(8));
+          if (summary) {
+            filled.set(key, {
+              ...item,
+              text: summary.summary,
+              title: "Earlier conversation summary",
+              snippet: snippetOf(summary.summary),
+              sourceThreadId: ThreadId.make(summary.threadId),
+              sourceThreadTitle: threadById.get(summary.threadId)?.title,
+              reason: "Earlier conversation summary",
+            });
+          }
+          continue;
+        }
+        if (messageRow) {
+          const threadId = ThreadId.make(messageRow.threadId);
+          const text = snippetOf(`${messageRow.role}: ${messageRow.text}`);
+          filled.set(key, {
+            ...item,
+            text,
+            title: threadRow?.title ?? "Message",
+            snippet: text,
+            role: messageRow.role === "assistant" ? "assistant" : "user",
+            sourceThreadId: threadId,
+            sourceThreadTitle: threadRow?.title,
+            sourceMessageId: MessageId.make(messageRow.id),
+            createdAt: messageRow.createdAt,
+            reason: "Recent message in this project",
+          });
+          continue;
+        }
+        if (item.kind === "work" && threadRow) {
+          const status = statusByThread.get(item.id) ?? "completed";
+          const text = snippetOf(`${threadRow.title} — run ${status}`);
+          filled.set(key, {
+            ...item,
+            text,
+            title: threadRow.title,
+            snippet: text,
+            sourceThreadId: ThreadId.make(item.id),
+            sourceThreadTitle: threadRow.title,
+            reason: `Work outcome from ${threadRow.projectTitle ?? threadRow.projectId}`,
+          });
+          continue;
+        }
+        const fact = factById.get(item.id);
+        if (item.kind === "fact" && fact) {
+          const subject = `${fact.subject}${fact.predicate ? ` / ${fact.predicate}` : ""}`;
+          const text = snippetOf(fact.text);
+          filled.set(key, {
+            ...item,
+            text,
+            title: subject,
+            snippet: text,
+            createdAt: fact.createdAt,
+            reason: "Confirmed fact",
+          });
+          continue;
+        }
+        const commitment = commitmentById.get(item.id);
+        if (item.kind === "commitment" && commitment) {
+          const text = snippetOf(
+            `${commitment.title} (${commitment.status}): ${commitment.description}`,
+          );
+          filled.set(key, {
+            ...item,
+            text,
+            title: commitment.title,
+            snippet: text,
+            createdAt: commitment.createdAt,
+            reason: "Open commitment",
+          });
+        }
+      }
+      return {
+        ...recorded,
+        items: recorded.items.map((item) => filled.get(`${item.kind}:${item.id}`) ?? item),
+      };
+    }).pipe(Effect.catch(() => Effect.succeed(recorded)));
   const forRun = (runId: RunId) =>
     sql<{ payload_json: string }>`SELECT payload_json FROM context_refs WHERE run_id=${runId}`.pipe(
       Effect.flatMap((rows) =>
@@ -232,6 +476,7 @@ const make = Effect.gen(function* () {
           ? decodeRecorded(rows[0].payload_json)
           : Effect.succeed({ runId, refs: [], items: [] }),
       ),
+      Effect.flatMap(backfillItems),
       Effect.mapError(wrap),
     );
   return ContextRetrievalService.of({
@@ -272,11 +517,12 @@ const make = Effect.gen(function* () {
                 ...new Map(
                   [...previous.items, ...result.items].map((item) => [
                     `${item.kind}:${item.id}`,
-                    { ...item, text: "" },
+                    // Keep the panel-sized excerpt, not the full prompt body:
+                    // enough to identify the source without duplicating it.
+                    { ...item, text: item.snippet ?? item.text.slice(0, SNIPPET_CHARS) },
                   ]),
                 ).values(),
               ];
-              // Keep references and display metadata, without duplicating private source bodies.
               // Continuations accumulate evidence already used by the same run.
               const payload = yield* encodeRecorded({ runId, refs, items });
               yield* sql`INSERT INTO context_refs(run_id,thread_id,payload_json) VALUES (${runId},${input.threadId},${payload}) ON CONFLICT(run_id) DO UPDATE SET payload_json=excluded.payload_json`;

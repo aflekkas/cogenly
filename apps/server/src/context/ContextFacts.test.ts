@@ -387,6 +387,145 @@ describe("shared facts and scoped context", () => {
       }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("records title, snippet, source and reason for every context kind", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const facts = yield* Facts.FactService,
+        retrieval = yield* Retrieval.ContextRetrievalService,
+        sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES ('repo','Repo','/repo','[]',${at},${at})`;
+      yield* sql`INSERT INTO label_repositories(label_id,repository_id) VALUES (${a},'repo')`;
+      yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES (${threadId},${a})`;
+      yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,role,streaming,created_at,updated_at,payload_json) VALUES ('recent',${threadId},'assistant',0,${at},${at},'{"text":"A recent message"}')`;
+      const commitment = {
+        id: "open",
+        title: "Follow up",
+        description: "File the report",
+        status: "open",
+        owner: { kind: "user" },
+        dueAt: null,
+        reminderAt: null,
+        waitingOn: null,
+        labelIds: [a],
+        agentId: null,
+        sourceRefs: [{ kind: "message", id: "origin" }],
+        evidenceRefs: [],
+        createdAt: at,
+        updatedAt: at,
+      };
+      yield* sql`INSERT INTO commitments(id,status,payload_json,created_at,updated_at) VALUES ('open','open',${JSON.stringify(commitment)},${at},${at})`;
+      yield* sql`INSERT INTO commitment_labels(commitment_id,label_id) VALUES ('open',${a})`;
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES ('work','repo','Shipped fix','codex','full-access','default',${at},${at},'{"workOrigin":"direct","pullRequests":[{"url":"https://github.com/acme/repo/pull/1","source":"manual"}]}')`;
+      yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,completed_at,payload_json) VALUES ('work-run','work',1,'codex','completed',${at},${at},'{}')`;
+      yield* facts.create(input("Shared decision"));
+      const runId = RunId.make("run-display");
+      const selected = yield* retrieval.forTurn({
+        threadId,
+        runId,
+        principal: "user",
+        budgetChars: 4000,
+      });
+      expect(selected.items.map((i) => i.kind).sort()).toEqual([
+        "commitment",
+        "fact",
+        "message",
+        "work",
+      ]);
+      const recorded = yield* retrieval.forRun(runId);
+      for (const item of recorded.items) {
+        expect(item.title, `${item.kind} title`).toBeTruthy();
+        expect(item.snippet, `${item.kind} snippet`).toBeTruthy();
+        expect(item.snippet!.length).toBeLessThanOrEqual(280);
+        expect(item.reason, `${item.kind} reason`).toBeTruthy();
+        expect(item.text, `${item.kind} text`).not.toBe("");
+      }
+      expect(recorded.items.find((i) => i.kind === "message")).toMatchObject({
+        role: "assistant",
+        title: "Chat",
+        sourceThreadId: threadId,
+        sourceThreadTitle: "Chat",
+        sourceMessageId: "recent",
+        reason: "Recent message in this project",
+      });
+      expect(recorded.items.find((i) => i.kind === "message")?.snippet).toContain(
+        "A recent message",
+      );
+      expect(recorded.items.find((i) => i.kind === "work")).toMatchObject({
+        title: "Shipped fix",
+        sourceThreadId: "work",
+        sourceThreadTitle: "Shipped fix",
+        reason: "Work outcome from Repo",
+      });
+      expect(recorded.items.find((i) => i.kind === "fact")?.reason).toContain("Confirmed fact");
+      expect(recorded.items.find((i) => i.kind === "commitment")).toMatchObject({
+        title: "Follow up",
+        reason: "Open commitment",
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("backfills display metadata for runs recorded without it", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const retrieval = yield* Retrieval.ContextRetrievalService,
+        sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES ('repo','Repo','/repo','[]',${at},${at})`;
+      yield* sql`INSERT INTO label_repositories(label_id,repository_id) VALUES (${a},'repo')`;
+      yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES (${threadId},${a})`;
+      yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,role,streaming,created_at,updated_at,payload_json) VALUES ('recent',${threadId},'assistant',0,${at},${at},'{"text":"A recent message"}')`;
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES ('work','repo','Shipped fix','codex','full-access','default',${at},${at},'{"workOrigin":"direct"}')`;
+      yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,completed_at,payload_json) VALUES ('work-run','work',1,'codex','completed',${at},${at},'{}')`;
+      const legacy = {
+        runId: "legacy-run",
+        refs: [
+          { kind: "thread", id: threadId },
+          { kind: "message", id: "recent" },
+          { kind: "thread", id: "work" },
+        ],
+        items: [
+          {
+            kind: "message",
+            id: "recent",
+            text: "",
+            refs: [
+              { kind: "thread", id: threadId },
+              { kind: "message", id: "recent" },
+            ],
+            labelIds: [a],
+            updatedAt: at,
+          },
+          {
+            kind: "work",
+            id: "work",
+            text: "",
+            refs: [
+              { kind: "thread", id: "work" },
+              { kind: "run", id: "work-run" },
+            ],
+            labelIds: [a],
+            updatedAt: at,
+          },
+        ],
+      };
+      yield* sql`INSERT INTO context_refs(run_id,thread_id,payload_json) VALUES ('legacy-run',${threadId},${JSON.stringify(legacy)})`;
+      const recorded = yield* retrieval.forRun(RunId.make("legacy-run"));
+      expect(recorded.items.find((i) => i.kind === "message")).toMatchObject({
+        title: "Chat",
+        sourceThreadId: threadId,
+        sourceMessageId: "recent",
+        reason: "Recent message in this project",
+      });
+      expect(recorded.items.find((i) => i.kind === "message")?.snippet).toContain(
+        "A recent message",
+      );
+      expect(recorded.items.find((i) => i.kind === "work")).toMatchObject({
+        title: "Shipped fix",
+        sourceThreadTitle: "Shipped fix",
+        reason: "Work outcome from Repo",
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect(
     "enforces the complete rendered budget, records exact selected refs, and respects opt-out and untagged chats",
     () =>
@@ -414,7 +553,11 @@ describe("shared facts and scoped context", () => {
         expect((yield* retrieval.forRun(runId)).refs).toEqual(
           selected.items.flatMap((i) => i.refs),
         );
-        expect((yield* retrieval.forRun(runId)).items.every((i) => i.text === "")).toBe(true);
+        expect(
+          (yield* retrieval.forRun(runId)).items.every(
+            (i) => i.text !== "" && i.snippet !== undefined,
+          ),
+        ).toBe(true);
         expect((yield* retrieval.forRun(RunId.make("missing"))).refs).toEqual([]);
         expect(
           (yield* retrieval.retrieve({ principal: "user", labelIds: [a], budgetChars: 0 })).text,

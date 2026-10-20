@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { AgentId } from "./agent.ts";
 import { CommitmentRef } from "./agentWorkspace.ts";
-import { IsoDateTime, RunId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, MessageId, RunId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 
 export const FactId = TrimmedNonEmptyString.pipe(Schema.brand("FactId"));
@@ -80,6 +80,16 @@ export const ContextItem = Schema.Struct({
   refs: Schema.Array(CommitmentRef),
   labelIds: Schema.Array(ProjectLabelId),
   updatedAt: IsoDateTime,
+  // Display metadata for the "Context used" panel. All optional so payloads
+  // recorded before these fields existed still decode.
+  title: Schema.optional(Schema.String),
+  snippet: Schema.optional(Schema.String),
+  role: Schema.optional(Schema.Literals(["user", "assistant"])),
+  sourceThreadId: Schema.optional(ThreadId),
+  sourceThreadTitle: Schema.optional(Schema.String),
+  sourceMessageId: Schema.optional(MessageId),
+  createdAt: Schema.optional(IsoDateTime),
+  reason: Schema.optional(Schema.String),
 });
 export type ContextItem = typeof ContextItem.Type;
 export const ContextSet = Schema.Struct({ items: Schema.Array(ContextItem), text: Schema.String });
