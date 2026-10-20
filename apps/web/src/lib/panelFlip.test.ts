@@ -35,6 +35,40 @@ describe("resolvePanelFlipOffsets", () => {
     expect(offsets).toEqual([140, -140, 0]);
   });
 
+  it("contained, holds a column that resizes with the pane at its fixed edge", () => {
+    // The sidebar closes over a narrow window: the column fills the pane and
+    // widens with it. Gliding its center would start it 128px past the window.
+    expect(
+      resolvePanelFlipOffsets(
+        [{ anchor: "center", before: bounds(313, 960), after: bounds(57, 960), parent: null }],
+        { contain: true },
+      ),
+    ).toEqual([0]);
+    // Opening, it narrows: it stays at its new place while the panel covers the rest.
+    expect(
+      resolvePanelFlipOffsets(
+        [{ anchor: "center", before: bounds(57, 960), after: bounds(313, 960), parent: null }],
+        { contain: true },
+      ),
+    ).toEqual([0]);
+  });
+
+  it("contained, still glides content of a fixed width by its anchor", () => {
+    const offsets = resolvePanelFlipOffsets(
+      [
+        // A capped column centred in a wider pane.
+        { anchor: "center", before: bounds(405, 1173), after: bounds(270, 1038), parent: null },
+        // A breadcrumb held to the pane's left edge.
+        { anchor: "start", before: bounds(313, 400), after: bounds(57, 144), parent: null },
+        // A column that is capped only once the pane widens: it starts no
+        // further right than its old right edge.
+        { anchor: "center", before: bounds(379, 1199), after: bounds(228, 1081), parent: null },
+      ],
+      { contain: true },
+    );
+    expect(offsets).toEqual([135, 256, 118]);
+  });
+
   it("ignores subpixel shifts", () => {
     expect(
       resolvePanelFlipOffsets([
@@ -60,6 +94,7 @@ function fakeElement(left: number) {
     isConnected: true,
     dataset: { panelFlip: "start" },
     matches: () => true,
+    querySelector: () => null,
     parentElement: null,
     getBoundingClientRect: () => ({
       left: fake.left,

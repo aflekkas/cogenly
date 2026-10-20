@@ -211,6 +211,8 @@ export function ChatCanvas({
         <div
           ref={widthProbeRef}
           aria-hidden
+          // The chat column's width, for panel motion (panelFlip).
+          data-panel-flip-column=""
           className="pointer-events-none invisible absolute h-0 w-(--chat-content-max-width) min-w-[40rem] box-content ps-3 sm:ps-12"
         />
         {children}

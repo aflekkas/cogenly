@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { resolveShortcutCommand } from "../../../keybindings";
 import { useSelectSidebarMode } from "./useSelectSidebarMode";
 import { useUiStateStore } from "../../../uiStateStore";
+import { useComposerDraftStore, type DraftId } from "../../../composerDraftStore";
 import {
   classifySidebarThreadMode,
   filterThreadsForSidebarMode,
@@ -107,12 +108,21 @@ export function useSidebarModeState(input: {
   /** The sidebar's project scope, or null for all projects. */
   readonly scopedProjectKeys: ReadonlySet<string> | null;
   readonly routeThreadRef: ScopedThreadRef | null;
+  /** The new-thread draft the main panel shows, if any. */
+  readonly routeDraftId: DraftId | null;
   readonly keybindings: ResolvedKeybindingsConfig;
   /** Group label per `environmentId:projectId`. */
   readonly projectDisplayNameByKey: ReadonlyMap<string, string>;
 }): SidebarModeState {
-  const { threads, projects, serverConfigs, scopedProjectKeys, routeThreadRef, keybindings } =
-    input;
+  const {
+    threads,
+    projects,
+    serverConfigs,
+    scopedProjectKeys,
+    routeThreadRef,
+    routeDraftId,
+    keybindings,
+  } = input;
   const mode = useUiStateStore((store) => store.sidebarMode);
   const setMode = useUiStateStore((store) => store.setSidebarMode);
   const selectMode = useSelectSidebarMode();
@@ -171,6 +181,20 @@ export function useSidebarModeState(input: {
   useEffect(() => {
     if (routeThreadKey !== null && routeThreadMode !== null) setMode(routeThreadMode);
   }, [routeThreadKey, routeThreadMode, setMode]);
+  // A draft follows the same way (a reload, a link, a restored tab), so Chats
+  // never sits beside a Work draft. Its mode is fixed when it is made.
+  const routeDraftMode = useComposerDraftStore((store) => {
+    const draft = routeDraftId === null ? null : store.getDraftSession(routeDraftId);
+    if (!draft) return null;
+    return classifySidebarThreadMode({
+      isAgent: false,
+      isScratch: scratchProjectKeys.has(`${draft.environmentId}:${draft.projectId}`),
+      surface: draft.surface,
+    });
+  });
+  useEffect(() => {
+    if (routeDraftId !== null && routeDraftMode !== null) setMode(routeDraftMode);
+  }, [routeDraftId, routeDraftMode, setMode]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

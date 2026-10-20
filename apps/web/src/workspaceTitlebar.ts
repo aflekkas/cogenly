@@ -1,8 +1,8 @@
 import { NAV_RAIL_WIDTH_PX } from "./components/sidebar/navRail.logic";
 
 // Clears the fixed sidebar toggle once the sidebar no longer sits under it.
-// With the navigation rail there is no fixed toggle: the rail clears the window
-// controls itself, so the header keeps its gutter after the rail.
+// Beside the rail, only the macOS toggle after the traffic lights is fixed; the
+// header otherwise keeps its gutter after the rail.
 export const COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS =
   "[[data-sidebar-state=collapsed]:not([data-nav-rail])_&]:pl-[var(--workspace-titlebar-content-left)] [[data-sidebar-state=collapsed][data-nav-rail]_&]:pl-[max(var(--workspace-gutter-start),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width)))] max-md:[[data-sidebar-state=expanded]_&]:pl-[var(--workspace-titlebar-content-left)]";
 
@@ -20,9 +20,7 @@ const MACOS_NAV_RAIL_WIDTH_PX = 70 + MACOS_WINDOW_CONTROLS_CLEARANCE_PX;
 export type SidebarTogglePlacement =
   /** The rail's titlebar row, centred like the mode buttons. */
   | "rail-titlebar"
-  /** The rail's first button, below a titlebar row the traffic lights own. */
-  | "rail-below-titlebar"
-  /** Fixed in the titlebar, after the window controls. Layouts without the rail. */
+  /** Fixed in the titlebar row, just after the macOS window controls. */
   | "fixed";
 
 export interface WorkspaceTitlebarLayout {
@@ -38,10 +36,11 @@ export interface WorkspaceTitlebarLayout {
 /**
  * Lays out the titlebar strip around the native window controls. macOS paints
  * the traffic lights over the window's top-left corner unless it is fullscreen.
- * With the rail, the rail owns that corner and is wide enough to hold them, so
- * the sidebar and main pane start clear of them and their headers keep their
- * own insets. Without the rail, a fixed toggle sits after the window controls
- * and collapsed headers start after the toggle.
+ * There the rail widens to hold them in its titlebar row, and the sidebar
+ * toggle sits fixed just after them, centred on the same row; the rail's
+ * buttons start below that row, and collapsed headers start after the toggle.
+ * Without the traffic lights the toggle leads the rail in its titlebar row.
+ * Without the rail, a fixed toggle sits after the window controls.
  */
 export function resolveWorkspaceTitlebarLayout(input: {
   readonly navRailVisible: boolean;
@@ -60,16 +59,24 @@ export function resolveWorkspaceTitlebarLayout(input: {
     };
   }
 
+  if (input.macosWindowControlsVisible) {
+    return {
+      sidebarToggle: "fixed",
+      navRailWidthPx: MACOS_NAV_RAIL_WIDTH_PX,
+      // Collapsed headers clear the fixed toggle through the sidebar's default
+      // --workspace-titlebar-content-left.
+      style: { "--nav-rail-width": MACOS_NAV_RAIL_WIDTH, ...windowControlsStyle },
+      windowControlsStyle,
+    };
+  }
+
   return {
-    sidebarToggle: input.macosWindowControlsVisible ? "rail-below-titlebar" : "rail-titlebar",
-    navRailWidthPx: input.macosWindowControlsVisible ? MACOS_NAV_RAIL_WIDTH_PX : NAV_RAIL_WIDTH_PX,
+    sidebarToggle: "rail-titlebar",
+    navRailWidthPx: NAV_RAIL_WIDTH_PX,
     style: {
-      "--nav-rail-width": input.macosWindowControlsVisible
-        ? MACOS_NAV_RAIL_WIDTH
-        : `${NAV_RAIL_WIDTH_PX}px`,
+      "--nav-rail-width": `${NAV_RAIL_WIDTH_PX}px`,
       // Nothing fixed sits in the titlebar, so content only has to clear the rail.
       "--workspace-titlebar-content-left": "0px",
-      ...windowControlsStyle,
     },
     windowControlsStyle,
   };

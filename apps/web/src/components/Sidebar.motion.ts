@@ -1,5 +1,5 @@
 // Matches --motion-duration-base and ease-standard in index.css.
-const motionTiming = { duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" };
+const motionTiming = { duration: 220, easing: "cubic-bezier(0.32, 0.72, 0, 1)" };
 // Rows normally ride their displaced neighbour's travel. Absent a moving
 // neighbour, a row still travels on its own, clamped so a tall card does not
 // slide its full height.

@@ -2574,6 +2574,7 @@ export default function Sidebar() {
     serverConfigs,
     scopedProjectKeys: null,
     routeThreadRef,
+    routeDraftId: routeTarget?.kind === "draft" ? routeTarget.draftId : null,
     keybindings,
     projectDisplayNameByKey,
   });
@@ -4536,7 +4537,7 @@ export default function Sidebar() {
             ) : (
               <p
                 role="status"
-                className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
+                className="flex flex-1 items-center justify-center px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
               >
                 {threadSearch.isPending ? "Searching thread messages…" : "No threads found"}
               </p>
@@ -4841,7 +4842,8 @@ export default function Sidebar() {
                       items.push(
                         <li
                           key="empty-shelf"
-                          className="list-none px-2 py-6 text-center text-muted-foreground text-xs"
+                          // Fills the bottom-anchored list, so it sits centred in the column.
+                          className="flex flex-1 list-none items-center justify-center px-2 py-6 text-center text-muted-foreground text-xs"
                         >
                           {shownSection === "working"
                             ? "Nothing working right now"

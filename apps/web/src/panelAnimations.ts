@@ -7,7 +7,7 @@ import { useMediaQuery } from "./hooks/useMediaQuery";
  * Panels, including the sidebar, always animate open and close at this
  * duration: --motion-duration-slow, the token for panels and larger surfaces.
  */
-const PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 250;
+const PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 400;
 
 const PanelAnimationSuppressionContext = createContext(false);
 

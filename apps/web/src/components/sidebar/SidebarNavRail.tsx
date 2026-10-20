@@ -53,10 +53,17 @@ function RailTooltip(props: { label: string; children: ReactElement }) {
   );
 }
 
+// The sidebar toggle is chrome, not a tab: its state is aria-pressed and the
+// icon, and hover only lifts the icon. A hover fill would match the selected
+// tab's fill on the dark rail and read as a second selected tab.
+const RAIL_TOGGLE_TONE =
+  "text-sidebar-muted-foreground transition-colors duration-(--motion-duration-fast) ease-standard hover:text-sidebar-foreground motion-reduce:transition-none";
+
 export function SidebarNavRail({
-  sidebarToggleBelowTitlebar,
+  showSidebarToggle = true,
 }: {
-  sidebarToggleBelowTitlebar: boolean;
+  /** False where the toggle sits fixed after the macOS traffic lights instead. */
+  showSidebarToggle?: boolean;
 }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const mode = useUiStateStore((store) => store.sidebarMode);
@@ -105,7 +112,7 @@ export function SidebarNavRail({
         aria-pressed={sidebarVisible}
         data-sidebar="trigger"
         onClick={toggleSidebar}
-        className={cn(RAIL_BUTTON_CLASS, railButtonTone(false), "[-webkit-app-region:no-drag]")}
+        className={cn(RAIL_BUTTON_CLASS, RAIL_TOGGLE_TONE, "[-webkit-app-region:no-drag]")}
       >
         <MorphIcon icon={sidebarVisible ? PanelLeftClose : PanelLeft} />
       </button>
@@ -124,16 +131,16 @@ export function SidebarNavRail({
     >
       {/* The titlebar row. It holds the sidebar toggle, sized and centred like
           the mode buttons. Where the macOS traffic lights own the row, it stays
-          an empty drag strip and the toggle leads the buttons below it. */}
+          a drag strip under them and the toggle sits fixed just after them
+          (AppSidebarLayout's SidebarControl). */}
       <div
         className={cn(
           "flex h-[var(--workspace-topbar-height)] w-full shrink-0 items-center justify-center",
           isElectron && "drag-region",
         )}
       >
-        {sidebarToggleBelowTitlebar || listColumnHidden ? null : sidebarToggle}
+        {showSidebarToggle && !listColumnHidden ? sidebarToggle : null}
       </div>
-      {sidebarToggleBelowTitlebar && !listColumnHidden ? sidebarToggle : null}
       <div
         role="tablist"
         aria-label="Sidebar view"

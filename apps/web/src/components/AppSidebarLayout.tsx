@@ -303,7 +303,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <ProjectProjectionRetention />
         {navRailVisible ? (
           <SidebarNavRail
-            sidebarToggleBelowTitlebar={titlebarLayout.sidebarToggle === "rail-below-titlebar"}
+            showSidebarToggle={titlebarLayout.sidebarToggle === "rail-titlebar"}
           />
         ) : null}
         {listSidebarHidden ? null : (
@@ -345,7 +345,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           </Sidebar>
         )}
         {children}
-        <SidebarControl showButton={titlebarLayout.sidebarToggle === "fixed"} />
+        {/* Without the rail, or after the macOS traffic lights beside it. A page
+            without the list column has nothing to toggle. */}
+        <SidebarControl
+          showButton={titlebarLayout.sidebarToggle === "fixed" && !listSidebarHidden}
+        />
         <NavigationHistoryShortcuts />
         <MainAppLocationTracker />
       </SidebarProvider>

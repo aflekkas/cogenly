@@ -15,25 +15,27 @@ describe("resolveWorkspaceTitlebarLayout", () => {
     expect(layout.style["--workspace-controls-left"]).toBeUndefined();
   });
 
-  it("gives the traffic lights the rail's titlebar row and moves the toggle below it", () => {
+  it("gives the traffic lights the rail's titlebar row and fixes the toggle just after them", () => {
     const layout = resolveWorkspaceTitlebarLayout({
       navRailVisible: true,
       macosWindowControlsVisible: true,
     });
-    expect(layout.sidebarToggle).toBe("rail-below-titlebar");
+    expect(layout.sidebarToggle).toBe("fixed");
     // The lights end 70pt in; the rail clears them.
     expect(layout.navRailWidthPx).toBeGreaterThan(70);
     expect(layout.style["--nav-rail-width"]).toContain("--desktop-window-controls-right");
+    // The toggle sits at the inset after the lights, and collapsed headers clear
+    // it through the sidebar's default content inset.
+    expect(layout.style["--workspace-controls-left"]).toContain("--desktop-window-controls-inset");
+    expect(layout.style["--workspace-titlebar-content-left"]).toBeUndefined();
   });
 
-  it("starts titlebar content after the rail, never after a fixed toggle, whenever the rail shows", () => {
-    for (const macosWindowControlsVisible of [false, true]) {
-      const layout = resolveWorkspaceTitlebarLayout({
-        navRailVisible: true,
-        macosWindowControlsVisible,
-      });
-      expect(layout.style["--workspace-titlebar-content-left"]).toBe("0px");
-    }
+  it("starts titlebar content after the rail when the toggle leads the rail", () => {
+    const layout = resolveWorkspaceTitlebarLayout({
+      navRailVisible: true,
+      macosWindowControlsVisible: false,
+    });
+    expect(layout.style["--workspace-titlebar-content-left"]).toBe("0px");
   });
 
   it("falls back to a fixed toggle after the window controls without the rail", () => {

@@ -23,6 +23,8 @@ import { isSidebarUtilityPage } from "./mainAppLocation";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { observeResize } from "~/lib/observeResize";
+import { useUiStateStore } from "../../uiStateStore";
+import { SIDEBAR_MODE_LABELS } from "./modes/sidebarModes.logic";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -35,6 +37,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     environmentIdentificationMode === "pill"
       ? resolveEnvironmentIdentificationPillLabel(stageLabel)
       : null;
+  const title = useSidebarTitle();
 
   return (
     // The titlebar row, not a padded SidebarHeader: it aligns to the window controls.
@@ -54,7 +57,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       </div>
       {/* One visible line: the pill wraps onto the clipped second line once it no longer fits. */}
       <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center gap-x-2 overflow-hidden py-0.5">
-        <SidebarTitle />
+        <SidebarTitle title={title} />
         {pillLabel ? (
           <div className="ml-1 flex h-7 items-center">
             <Badge data-environment-identification="pill" size="sm" variant="secondary">
@@ -97,21 +100,41 @@ export function SidebarBrandWidthProbe({
   );
 }
 
-// The header titles the Settings and Usage pages; elsewhere it stays empty and the rail
-// shows the mode.
-function useSidebarTitle(): string | null {
-  const pathname = useLocation({ select: (location) => location.pathname });
-  if (pathname === "/settings" || pathname.startsWith("/settings/")) return "Settings";
-  if (pathname === "/usage" || pathname.startsWith("/usage/")) return "Usage";
-  return null;
+interface SidebarTitleState {
+  readonly label: string;
+  /** A mode title, shown only beside the rail; the mobile sheet's switcher names the mode. */
+  readonly mode: boolean;
 }
 
-function SidebarTitle() {
-  const title = useSidebarTitle();
-  if (!title) return null;
+// The header titles the Settings and Usage pages, and beside the rail the
+// list's mode (Chats, Work, Agents, Projects).
+function useSidebarTitle(): SidebarTitleState {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
+  if (pathname === "/settings" || pathname.startsWith("/settings/")) {
+    return { label: "Settings", mode: false };
+  }
+  if (pathname === "/usage" || pathname.startsWith("/usage/")) {
+    return { label: "Usage", mode: false };
+  }
+  return { label: SIDEBAR_MODE_LABELS[sidebarMode], mode: true };
+}
+
+function SidebarTitle({ title }: { title: SidebarTitleState }) {
   return (
-    <div className="relative z-10 ml-[max(var(--sidebar-content-inset),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden text-foreground md:flex">
-      <SidebarTitleText label={title} />
+    <div
+      className={cn(
+        "relative z-10 ml-[max(var(--sidebar-content-inset),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden text-foreground",
+        title.mode ? "md:[[data-nav-rail]_&]:flex" : "md:flex",
+      )}
+    >
+      {/* Keyed by its label, so a new title fades in as the mode changes. */}
+      <span
+        key={title.label}
+        className="flex min-w-0 motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-standard motion-safe:starting:opacity-0"
+      >
+        <SidebarTitleText label={title.label} />
+      </span>
     </div>
   );
 }

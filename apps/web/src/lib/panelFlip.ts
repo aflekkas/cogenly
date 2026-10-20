@@ -15,9 +15,13 @@ import { observeResize } from "./observeResize";
 export type PanelFlipAnchor = "start" | "center" | "end";
 
 /** Matches ease-standard in index.css; panel slides ride the same curve. */
-export const PANEL_MOTION_EASING = "cubic-bezier(0.2, 0, 0, 1)";
+export const PANEL_MOTION_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
+
+/** A panel leaving moves quicker than one arriving (Sidebar mirrors it in CSS: 0.7x). */
+export const PANEL_EXIT_DURATION_SCALE = 0.7;
 
 const PANEL_FLIP_SELECTOR = "[data-panel-flip]";
+const PANEL_FLIP_COLUMN_SELECTOR = "[data-panel-flip-column]";
 const PANEL_FLIP_ANIMATION_ID = "panel-flip";
 
 interface HorizontalBounds {
@@ -46,11 +50,38 @@ function anchorX(bounds: HorizontalBounds, anchor: PanelFlipAnchor): number {
   return (bounds.left + bounds.right) / 2;
 }
 
+export interface PanelFlipOptions {
+  /**
+   * Keep each element inside the span it covered before and after, and over
+   * the part both share. A column that widens or narrows with the pane then
+   * never starts past the window edge or pulls away from the edge that stays
+   * put; content of a fixed width still glides by its anchor.
+   */
+  readonly contain?: boolean;
+}
+
+function containOffset(entry: PanelFlipMeasurement, offset: number): number {
+  const { before, after } = entry;
+  // Within the union of both spans: never drawn where it was not, before or after.
+  const unionLow = Math.min(before.left, after.left) - after.left;
+  const unionHigh = Math.max(before.right, after.right) - after.right;
+  // Over the shared span: no gap opens where it was drawn in both layouts.
+  const low = Math.max(unionLow, Math.min(before.right, after.right) - after.right);
+  const high = Math.min(unionHigh, Math.max(before.left, after.left) - after.left);
+  return low <= high
+    ? Math.min(Math.max(offset, low), high)
+    : Math.min(Math.max(offset, unionLow), unionHigh);
+}
+
 /** The starting translateX for each element; 0 means it does not move. */
-export function resolvePanelFlipOffsets(measurements: readonly PanelFlipMeasurement[]): number[] {
-  const deltas = measurements.map(
-    (entry) => anchorX(entry.before, entry.anchor) - anchorX(entry.after, entry.anchor),
-  );
+export function resolvePanelFlipOffsets(
+  measurements: readonly PanelFlipMeasurement[],
+  options: PanelFlipOptions = {},
+): number[] {
+  const deltas = measurements.map((entry) => {
+    const delta = anchorX(entry.before, entry.anchor) - anchorX(entry.after, entry.anchor);
+    return options.contain ? containOffset(entry, delta) : delta;
+  });
   return measurements.map((entry, index) => {
     const offset = deltas[index]! - (entry.parent === null ? 0 : deltas[entry.parent]!);
     return Math.abs(offset) < 0.5 ? 0 : offset;
@@ -62,9 +93,22 @@ function readAnchor(element: HTMLElement): PanelFlipAnchor {
   return anchor === "start" || anchor === "end" ? anchor : "center";
 }
 
+/**
+ * Where marked content is drawn. A full-width pane that centres a capped
+ * column marks a probe of the column's width with `data-panel-flip-column`;
+ * its bounds are then the centred column, so containment glides a capped
+ * column by its center and holds a column that fills the pane.
+ */
 function readBounds(element: HTMLElement): HorizontalBounds | null {
   const rect = element.getBoundingClientRect();
-  return rect.width === 0 && rect.height === 0 ? null : { left: rect.left, right: rect.right };
+  if (rect.width === 0 && rect.height === 0) return null;
+  const column = element.querySelector<HTMLElement>(PANEL_FLIP_COLUMN_SELECTOR);
+  if (!column || column.parentElement?.closest(PANEL_FLIP_SELECTOR) !== element) {
+    return { left: rect.left, right: rect.right };
+  }
+  const halfWidth = Math.min(rect.width, column.offsetWidth) / 2;
+  const center = (rect.left + rect.right) / 2;
+  return { left: center - halfWidth, right: center + halfWidth };
 }
 
 /** Records where marked content inside root sits now. Call before the layout changes. */
@@ -88,8 +132,12 @@ export function capturePanelFlip(root: ParentNode | null): PanelFlipSnapshot | n
  * resize step, so content is measured again there and retargeted, keeping
  * the time the glide has run.
  */
-export function playPanelFlip(snapshot: PanelFlipSnapshot, durationMs: number): void {
-  flipPanelContent(snapshot, durationMs, false);
+export function playPanelFlip(
+  snapshot: PanelFlipSnapshot,
+  durationMs: number,
+  options: PanelFlipOptions = {},
+): void {
+  flipPanelContent(snapshot, durationMs, false, options);
   notifyPanelMotion(durationMs);
   let retargeted = false;
   const stopObserving = observeResize(document.documentElement, () => {
@@ -98,12 +146,17 @@ export function playPanelFlip(snapshot: PanelFlipSnapshot, durationMs: number): 
     // Resize callbacks share one flushSync; the microtask runs after it commits.
     queueMicrotask(() => {
       stopObserving();
-      flipPanelContent(snapshot, durationMs, true);
+      flipPanelContent(snapshot, durationMs, true, options);
     });
   });
 }
 
-function flipPanelContent(snapshot: PanelFlipSnapshot, durationMs: number, resume: boolean): void {
+function flipPanelContent(
+  snapshot: PanelFlipSnapshot,
+  durationMs: number,
+  resume: boolean,
+  options: PanelFlipOptions,
+): void {
   // Settle a running flip and read where layout puts content now. The snapshot
   // holds where it was drawn, so an interrupted flip starts over from there;
   // a retarget of this same flip resumes at the time it had reached.
@@ -134,7 +187,7 @@ function flipPanelContent(snapshot: PanelFlipSnapshot, durationMs: number, resum
     const ancestor = elements[index]!.parentElement?.closest<HTMLElement>(PANEL_FLIP_SELECTOR);
     return { ...measurement, parent: (ancestor && indexByElement.get(ancestor)) ?? null };
   });
-  resolvePanelFlipOffsets(resolved).forEach((offset, index) => {
+  resolvePanelFlipOffsets(resolved, options).forEach((offset, index) => {
     if (offset === 0) return;
     const element = elements[index]!;
     const animation = element.animate(

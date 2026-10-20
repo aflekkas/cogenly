@@ -4,7 +4,12 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { PanelLeft, PanelLeftClose } from "lucide";
 import * as React from "react";
 import { cn } from "~/lib/utils";
-import { capturePanelFlip, playPanelFlip, type PanelFlipSnapshot } from "~/lib/panelFlip";
+import {
+  capturePanelFlip,
+  PANEL_EXIT_DURATION_SCALE,
+  playPanelFlip,
+  type PanelFlipSnapshot,
+} from "~/lib/panelFlip";
 import { Button } from "~/components/ui/button";
 import { Input, type InputProps } from "~/components/ui/input";
 import { MorphIcon } from "~/components/MorphIcon";
@@ -147,9 +152,13 @@ function SidebarProvider({
     [setOpenProp, open, isMobile],
   );
 
-  // The gap snaps to its new width in one layout. The panel slides on
-  // translate (Sidebar) and marked main-pane content glides from where it was
-  // on the same curve, so nothing lays out per frame.
+  // The gap snaps to its new width in one layout. The panel slides on its
+  // translate transition (Sidebar) and the main pane's marked content glides
+  // from where it was; both start in the frame that paints the new layout, on
+  // the same curve and duration, so nothing lays out per frame or lags behind.
+  // Contained: a column that resizes with the pane holds its fixed edge while
+  // the panel covers or uncovers the other, instead of starting part
+  // off-screen. Closing is quicker than opening.
   React.useLayoutEffect(() => {
     const snapshot = flipSnapshotRef.current;
     flipSnapshotRef.current = null;
@@ -158,7 +167,11 @@ function SidebarProvider({
     const duration =
       Number.parseFloat(getComputedStyle(wrapper).getPropertyValue("--panel-animation-duration")) ||
       0;
-    if (duration > 0) playPanelFlip(snapshot, duration);
+    if (duration > 0) {
+      playPanelFlip(snapshot, open ? duration : Math.round(duration * PANEL_EXIT_DURATION_SCALE), {
+        contain: true,
+      });
+    }
   }, [open]);
 
   // Helper to toggle the sidebar.
@@ -347,11 +360,16 @@ function Sidebar({
             // Offcanvas open/close is a transform only, so it runs on the
             // compositor without relayout or repainting the grain. It sits
             // above the main pane, so its edge is the pane's moving edge while
-            // the pane's content glides on the same curve (panelFlip).
-            "[[data-panel-animations=true]_&]:transition-[translate] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-standard",
+            // the pane's content glides on the same curve (panelFlip). Closing
+            // takes the quicker exit duration, matching SidebarProvider.
+            // Visibility trails the move so a closed panel leaves the tab
+            // order once it is out of sight, and shows at once when it opens.
+            "[[data-panel-animations=true]_&]:transition-[translate,visibility] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-standard",
+            "[[data-panel-animations=true]_&]:group-data-[collapsible=offcanvas]:[transition-duration:calc(var(--panel-animation-duration)*0.7)]",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:-translate-x-full"
               : "right-0 group-data-[collapsible=offcanvas]:translate-x-full",
+            "group-data-[collapsible=offcanvas]:invisible",
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
@@ -366,11 +384,9 @@ function Sidebar({
             data-sidebar="sidebar"
             data-slot="sidebar-inner"
           >
-            {/* The surface stays opaque while it slides under the rail; only
-                its contents fade, as one layer rather than per row. */}
-            <div className="flex min-h-0 w-full flex-1 flex-col group-data-[collapsible=offcanvas]:opacity-0 [[data-panel-animations=true]_&]:transition-opacity [[data-panel-animations=true]_&]:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:ease-standard">
-              {children}
-            </div>
+            {/* Surface and contents slide as one unit, at a fixed width, under
+                the rail: no fade, so nothing moves or reflows on its own. */}
+            <div className="flex min-h-0 w-full flex-1 flex-col">{children}</div>
           </div>
         </div>
       </div>
