@@ -631,6 +631,11 @@ interface ComposerDraftStoreState {
     threadRef: ComposerThreadTarget,
     interactionMode: ProviderInteractionMode | null | undefined,
   ) => void;
+  /** The access mode the next send applies to the thread; null follows the thread. */
+  setRuntimeMode: (
+    threadRef: ComposerThreadTarget,
+    runtimeMode: RuntimeMode | null | undefined,
+  ) => void;
   addImage: (threadRef: ComposerThreadTarget, image: ComposerImageAttachment) => boolean;
   /** Returns the ids the draft accepted; duplicates and over-cap attachments are left out. */
   addImages: (
@@ -3374,6 +3379,34 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const nextDraft: ComposerThreadDraftState = {
               ...base,
               interactionMode: nextInteractionMode,
+            };
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+            if (shouldRemoveDraft(nextDraft)) {
+              delete nextDraftsByThreadKey[threadKey];
+            } else {
+              nextDraftsByThreadKey[threadKey] = nextDraft;
+            }
+            return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
+        setRuntimeMode: (threadRef, runtimeMode) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return;
+          }
+          const nextRuntimeMode = isRuntimeMode(runtimeMode) ? runtimeMode : null;
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey];
+            if (!existing && nextRuntimeMode === null) {
+              return state;
+            }
+            const base = existing ?? createEmptyThreadDraft();
+            if (base.runtimeMode === nextRuntimeMode) {
+              return state;
+            }
+            const nextDraft: ComposerThreadDraftState = {
+              ...base,
+              runtimeMode: nextRuntimeMode,
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) {

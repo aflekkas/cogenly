@@ -31,8 +31,8 @@ export const RuntimeMode = Schema.Literals([
 export type RuntimeMode = typeof RuntimeMode.Type;
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 /**
- * Cogenly runs every agent with full access. The other modes stay decodable so
- * stored threads, tasks and settings still load, but nothing runs in them.
+ * Scheduled tasks run unattended, so they always get full access whatever mode
+ * they stored. Threads run in their own mode (see the composer access picker).
  */
 export function enforceRuntimeMode(_requested?: RuntimeMode): RuntimeMode {
   return DEFAULT_RUNTIME_MODE;

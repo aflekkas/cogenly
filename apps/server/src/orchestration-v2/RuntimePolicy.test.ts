@@ -136,7 +136,7 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
     }),
   );
 
-  it.effect("runs every thread with full access, whatever mode it stored", () =>
+  it.effect("runs each thread in the access mode it stored", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicy.RuntimePolicyV2;
       const now = yield* DateTime.now;
@@ -154,9 +154,11 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
         "auto",
         "full-access",
       ] as const) {
-        assert.equal(yield* modeFor(grokInstanceId, runtimeMode), "full-access");
-        assert.equal(yield* modeFor(providerInstanceId, runtimeMode), "full-access");
+        assert.equal(yield* modeFor(providerInstanceId, runtimeMode), runtimeMode);
       }
+      // A mode the provider does not offer runs Supervised.
+      assert.equal(yield* modeFor(grokInstanceId, "auto-accept-edits"), "approval-required");
+      assert.equal(yield* modeFor(grokInstanceId, "full-access"), "full-access");
       // A provider without Full access still runs Supervised rather than T3 imitating it.
       assert.equal(yield* modeFor(supervisedOnlyInstanceId, "full-access"), "approval-required");
     }),

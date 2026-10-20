@@ -1,4 +1,4 @@
-import { ProviderInteractionMode } from "@t3tools/contracts";
+import type { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
 import { EllipsisIcon } from "lucide-react";
 import {
@@ -9,6 +9,7 @@ import {
   MenuSeparator as MenuDivider,
   MenuTrigger,
 } from "../ui/menu";
+import { ComposerAccessModeMenuContent } from "./ComposerAccessModePicker";
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
 import { useComposerMenuState } from "./useComposerMenuState";
@@ -17,6 +18,14 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   interactionMode: ProviderInteractionMode;
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
+  /** Set while the access picker is folded into this menu. */
+  accessMode?:
+    | {
+        runtimeMode: RuntimeMode;
+        runtimeModes: ReadonlyArray<RuntimeMode>;
+        onRuntimeModeChange: (mode: RuntimeMode) => void;
+      }
+    | undefined;
   size?: "sm" | "xs";
   /**
    * The resting strip keeps this menu mounted out of flow while every block
@@ -48,7 +57,11 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
       </MenuTrigger>
       <MenuPopup align="start" {...composerFloatingLayerProps}>
         {props.traitsMenuContent}
-        {props.traitsMenuContent && props.showInteractionModeToggle ? <MenuDivider /> : null}
+        {props.traitsMenuContent && props.accessMode ? <MenuDivider /> : null}
+        {props.accessMode ? <ComposerAccessModeMenuContent {...props.accessMode} /> : null}
+        {(props.traitsMenuContent || props.accessMode) && props.showInteractionModeToggle ? (
+          <MenuDivider />
+        ) : null}
         {props.showInteractionModeToggle ? (
           <>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>

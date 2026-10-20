@@ -1,5 +1,4 @@
 import {
-  enforceRuntimeMode,
   ModelSelection,
   OrchestrationV2AppThread,
   ProjectId,
@@ -127,11 +126,7 @@ export const layerFromProjectStore: Layer.Layer<
             ),
           ));
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-          // Cogenly: every run gets full access, whatever mode the thread stored.
-          runtimeMode: providerRuntimeMode(
-            enforceRuntimeMode(input.thread.runtimeMode),
-            supportedRuntimeModes,
-          ),
+          runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
         });

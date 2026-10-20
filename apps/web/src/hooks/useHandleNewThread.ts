@@ -4,12 +4,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import {
-  DEFAULT_RUNTIME_MODE,
-  DEFAULT_SERVER_SETTINGS,
-  type ScopedProjectRef,
-  type ThreadId,
-} from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -299,7 +294,9 @@ export function useNewThreadHandler() {
           if (workspaceContext) {
             setDraftThreadContext(emptyStoredDraftThread.draftId, {
               ...workspaceContext,
-              ...(!isDraftAlreadyOpen ? { runtimeMode: DEFAULT_RUNTIME_MODE } : {}),
+              ...(!isDraftAlreadyOpen
+                ? { runtimeMode: projectSettings.settings.defaultRuntimeMode }
+                : {}),
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             });
           }
@@ -336,7 +333,9 @@ export function useNewThreadHandler() {
             {
               threadId: emptyStoredDraftThread.threadId,
               ...workspaceContext,
-              ...(!isDraftAlreadyOpen ? { runtimeMode: DEFAULT_RUNTIME_MODE } : {}),
+              ...(!isDraftAlreadyOpen
+                ? { runtimeMode: projectSettings.settings.defaultRuntimeMode }
+                : {}),
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             },
           );
@@ -449,7 +448,7 @@ export function useNewThreadHandler() {
               envMode: initialEnvMode,
               newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
             }),
-          runtimeMode: DEFAULT_RUNTIME_MODE,
+          runtimeMode: projectSettings.settings.defaultRuntimeMode,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
         });
         applyStickyState(draftId);
