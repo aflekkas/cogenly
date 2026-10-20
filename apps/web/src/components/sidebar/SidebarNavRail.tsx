@@ -22,9 +22,10 @@ import { primaryServerKeybindingsAtom } from "../../state/server";
 import { useUiStateStore } from "../../uiStateStore";
 import { useSidebar, useSidebarVisibility } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
+import { isSidebarUtilityPage } from "./mainAppLocation";
 import { SIDEBAR_MODE_ICONS } from "./modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./modes/sidebarModes.logic";
+import { useSelectSidebarMode } from "./modes/useSelectSidebarMode";
 import { resolveVerticalTabIndex } from "./navRail.logic";
 import { useNavRailBadgeStore } from "./navRailState";
 import { decisionsWaitingLabel } from "../../agents/agentWorkspace.logic";
@@ -48,12 +49,11 @@ function RailTooltip(props: { label: string; children: ReactElement }) {
 export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boolean }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const mode = useUiStateStore((store) => store.sidebarMode);
-  const setMode = useUiStateStore((store) => store.setSidebarMode);
+  const selectSidebarMode = useSelectSidebarMode();
   const decisionsWaiting = useNavRailBadgeStore((store) => store.decisionsWaiting);
   const { open, setOpen, toggleSidebar } = useSidebar();
   const sidebarVisible = useSidebarVisibility();
   const navigate = useNavigate();
-  const navigateToMainApp = useNavigateToMainApp();
   const pathname = useLocation({ select: (location) => location.pathname });
   const onUtilityPage = isSidebarUtilityPage(pathname);
   const onSettings = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -65,11 +65,10 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const selectMode = (next: SidebarMode) => {
-    setMode(next);
-    // A collapsed list opens on the mode picked, and a utility page hands
-    // the column back to the thread list.
+    // A utility page hands the column back to the thread list.
+    selectSidebarMode(next, { leaveUtilityPage: true });
+    // A collapsed list opens on the mode picked.
     if (!open) setOpen(true);
-    if (onUtilityPage) void navigateToMainApp();
   };
 
   const handleTabsKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -77,7 +76,7 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
     const nextIndex = resolveVerticalTabIndex(event.key, index, SIDEBAR_MODES.length);
     if (nextIndex === null) return;
     event.preventDefault();
-    setMode(SIDEBAR_MODES[nextIndex]!);
+    selectSidebarMode(SIDEBAR_MODES[nextIndex]!);
     tabRefs.current[nextIndex]?.focus();
   };
 

@@ -84,7 +84,7 @@ import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { requestStartWork } from "./work/StartWorkDialog";
 import { agentStatusLabel } from "../agents/agents.logic";
 import { useAgents } from "../agents/agentsClient";
-import { isSidebarUtilityPage, useNavigateToMainApp } from "./sidebar/mainAppLocation";
+import { useSelectSidebarMode } from "./sidebar/modes/useSelectSidebarMode";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES } from "./sidebar/modes/sidebarModes.logic";
 import {
@@ -660,8 +660,7 @@ function OpenCommandPaletteDialog(props: {
     }
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const setSidebarMode = useUiStateStore((store) => store.setSidebarMode);
-  const navigateToMainApp = useNavigateToMainApp();
+  const selectSidebarMode = useSelectSidebarMode();
   const agents = useAgents().agents;
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -1914,9 +1913,8 @@ function OpenCommandPaletteDialog(props: {
       icon: <ModeIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: `sidebar.mode.${mode}`,
       run: async () => {
-        setSidebarMode(mode);
         // As from the rail: a utility page hands the column back to the list.
-        if (isSidebarUtilityPage(pathname)) await navigateToMainApp();
+        selectSidebarMode(mode, { leaveUtilityPage: true });
       },
     });
   }

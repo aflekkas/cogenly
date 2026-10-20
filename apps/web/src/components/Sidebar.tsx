@@ -4467,7 +4467,7 @@ export default function Sidebar() {
               <SidebarModeSwitcher
                 className="mb-1.5"
                 mode={sidebarMode}
-                onModeChange={sidebarModes.setMode}
+                onModeChange={sidebarModes.selectMode}
                 decisionsWaiting={sidebarModes.decisionsWaiting}
                 keybindings={keybindings}
               />

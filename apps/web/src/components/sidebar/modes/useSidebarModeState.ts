@@ -9,6 +9,7 @@ import type { EnvironmentId, ResolvedKeybindingsConfig, ScopedThreadRef } from "
 import { useEffect, useMemo } from "react";
 
 import { resolveShortcutCommand } from "../../../keybindings";
+import { useSelectSidebarMode } from "./useSelectSidebarMode";
 import { useUiStateStore } from "../../../uiStateStore";
 import {
   filterThreadsForSidebarMode,
@@ -67,7 +68,10 @@ export function useSidebarModeClassifier(input: {
 
 export interface SidebarModeState {
   readonly mode: SidebarMode;
+  /** Sets the mode and keeps the main panel, for following a thread into its mode. */
   readonly setMode: (mode: SidebarMode) => void;
+  /** Picks a mode by hand, replacing a main panel of another kind. */
+  readonly selectMode: (mode: SidebarMode) => void;
   /** The threads the current mode lists; feed these to the sidebar's partition. */
   readonly modeThreads: ReadonlyArray<EnvironmentThreadShell>;
   /** Project keys whose new-thread drafts belong in the current mode; null for all. */
@@ -99,6 +103,7 @@ export function useSidebarModeState(input: {
     input;
   const mode = useUiStateStore((store) => store.sidebarMode);
   const setMode = useUiStateStore((store) => store.setSidebarMode);
+  const selectMode = useSelectSidebarMode();
 
   const { agents } = useAgents();
   const { classifier, scratchProjectKeys } = useSidebarModeClassifier({
@@ -159,15 +164,16 @@ export function useSidebarModeState(input: {
       if (!next) return;
       event.preventDefault();
       event.stopPropagation();
-      setMode(next);
+      selectMode(next);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, setMode]);
+  }, [keybindings, selectMode]);
 
   return {
     mode,
     setMode,
+    selectMode,
     modeThreads,
     draftProjectKeys,
     decisionsWaiting,

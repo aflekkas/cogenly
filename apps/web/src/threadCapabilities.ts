@@ -149,3 +149,8 @@ export function classifyThreadKind(input: {
   if (input.agentRole === "conversation" || input.isAgentConversation) return "agentConversation";
   return input.isScratch ? "chat" : "work";
 }
+
+/** The sidebar mode that lists threads of a kind. */
+export function sidebarModeForThreadKind(kind: ThreadKind): SidebarThreadMode {
+  return kind === "chat" ? "chats" : kind === "agentConversation" ? "agents" : "tasks";
+}
