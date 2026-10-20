@@ -1453,6 +1453,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --surface-raised: #141414;
     /* Blended at the glass opacity over the canvas, this lands on #101010. */
     --composer-surface: #121212;
+    /* The changed-files card sits nine levels over the canvas, as in the reference. */
+    --changed-files-surface: #131313;
     --surface-raised-sheen-top: rgb(255 255 255 / 3%);
     --surface-raised-sheen-bottom: rgb(255 255 255 / 1%);
     /* Floating cards (details card, popovers) get a soft edge about nine

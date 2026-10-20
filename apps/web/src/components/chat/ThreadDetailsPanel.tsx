@@ -14,7 +14,9 @@ import ProjectScriptsControl, {
   type NewProjectScriptInput,
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
+import { TagIcon } from "lucide-react";
 import { memo, type ComponentProps } from "react";
+import { ThreadProjectTags } from "~/projectLabels/ThreadProjectTags";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
@@ -27,6 +29,8 @@ export interface ThreadDetailsPanelProps extends Pick<
   "anchor" | "handle" | "onPresentationChange"
 > {
   forceNewWorktree?: boolean;
+  /** Shows the project tag picker; drafts have no thread to tag until the first send. */
+  showProjectTags?: boolean;
   environmentId: EnvironmentId;
   threadId: ThreadId;
   draftId?: DraftId;
@@ -125,6 +129,16 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   onUpdateScript={props.onUpdateProjectScript}
                   onDeleteScript={props.onDeleteProjectScript}
                 />
+              ) : null}
+
+              {props.showProjectTags ? (
+                <div className="flex min-h-8 items-center gap-2.5 px-2.5 py-1 text-sm">
+                  <TagIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                  <ThreadProjectTags
+                    environmentId={props.environmentId}
+                    threadId={props.threadId}
+                  />
+                </div>
               ) : null}
             </div>
           </ThreadDetailsSection>

@@ -2305,7 +2305,7 @@ function UserVideoAttachment({ file }: { readonly file: ChatFileAttachment }) {
 }
 
 // Screen readers skim a transcript by heading, so every message announces its
-// author as one. The thread title in ChatHeader is an <h2>; headings written
+// author as one. The thread title in the chat header is a visually hidden <h2>; headings written
 // inside a message are exposed below this level. Visually hidden and excluded
 // from selection so sighted users and copied text are unaffected.
 const MESSAGE_HEADING_LEVEL = 3;

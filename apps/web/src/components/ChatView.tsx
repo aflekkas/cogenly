@@ -435,7 +435,6 @@ import {
   resolveComposerTimelineInset,
   resolveScrollToEndClearance,
 } from "./composerFooterLayout";
-import { ChatHeader } from "./chat/ChatHeader";
 import {
   PanelLayoutControls,
   type PanelLayoutControlsProps,
@@ -1979,20 +1978,7 @@ export default function ChatView(props: ChatViewProps) {
   const handleNewThreadInActiveProject = () => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   };
-  const handleNewThreadInActiveProjectStable = useStableCallback(handleNewThreadInActiveProject);
   const projectGroupingSettings = selectProjectGroupingSettings(settings);
-  const activeDraftLogicalProjectKey =
-    !isServerThread && activeProject
-      ? deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings)
-      : undefined;
-  const handleOpenDraftProjectSettings = () => {
-    if (!activeDraftLogicalProjectKey) return;
-    void navigate({
-      to: "/projects/$projectKey",
-      params: { projectKey: activeDraftLogicalProjectKey },
-    });
-  };
-  const handleOpenDraftProjectSettingsStable = useStableCallback(handleOpenDraftProjectSettings);
   const activeEnvironmentShell = useEnvironmentQuery(
     activeThread ? environmentShell.stateAtom(activeThread.environmentId) : null,
   );
@@ -9411,6 +9397,7 @@ export default function ChatView(props: ChatViewProps) {
     handle: threadPanelPopoverHandle,
     onPresentationChange: setThreadPanelPresentation,
     forceNewWorktree: multipleModelSelections !== null,
+    showProjectTags: isServerThread && activeThreadCapabilities.projectTags,
     environmentId: activeThread.environmentId,
     threadId: activeThread.id,
     ...(draftId ? { draftId } : {}),
@@ -9586,21 +9573,10 @@ export default function ChatView(props: ChatViewProps) {
           ) : null}
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
-          <ChatHeader
-            activeThreadEnvironmentId={activeThread.environmentId}
-            activeThreadId={activeThread.id}
-            isServerThread={isServerThread}
-            activeThreadTitle={activeThread.title}
-            activeProject={activeProject ?? null}
-            parentThreadLink={parentThreadLink}
-            onOpenThread={onOpenRelatedThreadStable}
-            rightPanelOpen={inlineRightPanelOwnsTitleBar}
-            onNewThreadInProject={handleNewThreadInActiveProjectStable}
-            capabilities={activeThreadCapabilities}
-            {...(activeDraftLogicalProjectKey && activeThreadCapabilities.repositorySettings
-              ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
-              : {})}
-          />
+          {/* No breadcrumb or visible title, as in the reference: the sidebar names
+              the thread, its right-click menu renames it, and the details card holds
+              its project tags. The title stays as the transcript's heading. */}
+          <h2 className="sr-only">{activeThread.title}</h2>
         </header>
 
         {/* Main content area with optional plan sidebar. Its centered lane
