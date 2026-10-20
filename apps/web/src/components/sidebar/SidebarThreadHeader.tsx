@@ -75,7 +75,7 @@ export function SidebarThreadHeader({
     : newItemLabel;
 
   return (
-    <div className="flex h-10 items-center gap-1 rounded-[10px] border border-white/[0.06] bg-(--sidebar-card) pr-1 pl-2.5">
+    <div className="flex h-12 items-center gap-1 rounded-[10px] border border-white/[0.06] bg-(--sidebar-card) pr-1 pl-2.5">
       <div className="flex h-8 min-w-0 flex-1 items-center gap-2 text-sm font-medium text-sidebar-muted-foreground">
         <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
         <SidebarInput

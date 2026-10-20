@@ -215,6 +215,8 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
+import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { ChatsProjectFilter } from "../projectLabels/ChatsProjectFilter";
 import {
   projectLabelKey,
@@ -1657,7 +1659,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       <span
         aria-hidden
         className={cn(
-          "min-w-0 flex-1 text-sm transition-[color,opacity] duration-(--motion-duration-base) motion-reduce:transition-none",
+          "min-w-0 flex-1 transition-[color,opacity] duration-(--motion-duration-base) motion-reduce:transition-none",
+          variant === "card" ? "text-[15px]" : "text-sm",
           shouldRecede ? "font-normal" : "font-medium",
           variant === "card"
             ? cn(
@@ -1919,7 +1922,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           {accessibleTitle}
           <div
             className={cn(
-              "relative z-10 h-14 px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
+              "relative z-10 h-[66px] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
             )}
           >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
@@ -2976,6 +2979,22 @@ export default function Sidebar() {
   const toggleWorkingShelf = useCallback(
     () => setWorkingShelfExpanded((value) => !value),
     [setWorkingShelfExpanded],
+  );
+  // The count bar shows one shelf at a time; opening one closes the others.
+  const openShelf: SidebarShelf | null = workingShelfExpanded
+    ? "working"
+    : snoozedShelfExpanded
+      ? "snoozed"
+      : settledShelfExpanded
+        ? "settled"
+        : null;
+  const openSidebarShelf = useCallback(
+    (shelf: SidebarShelf | null) => {
+      setWorkingShelfExpanded(shelf === "working");
+      setSnoozedShelfExpanded(shelf === "snoozed");
+      setSettledShelfExpanded(shelf === "settled");
+    },
+    [setSettledShelfExpanded, setSnoozedShelfExpanded, setWorkingShelfExpanded],
   );
   const visibleWorkingThreads = useMemo(() => {
     if (workingShelfExpanded) return workingThreads;
@@ -4472,7 +4491,21 @@ export default function Sidebar() {
           // up from the bottom toward them.
           // Lifted above the stage backdrop, whose fade would otherwise paint
           // across the search field's outline.
-          <SidebarGroup className="z-[1]">{threadHeader}</SidebarGroup>
+          <SidebarGroup className="z-[1]">
+            {sidebarMode === "tasks" ? (
+              <SidebarShelfBar
+                activeIcon={SIDEBAR_MODE_ICONS.tasks}
+                activeLabel="Work"
+                activeCount={activeThreads.length}
+                workingCount={workingThreads.length}
+                snoozedCount={snoozedThreads.length}
+                settledCount={settledThreads.length}
+                openShelf={openShelf}
+                onOpenShelf={openSidebarShelf}
+              />
+            ) : null}
+            {threadHeader}
+          </SidebarGroup>
         }
       >
         <SidebarGroup ref={sidebarModeListRef} className="flex-1 justify-end" role="presentation">
@@ -4581,7 +4614,9 @@ export default function Sidebar() {
                 // presentational while preserving every descendant control.
                 role="presentation"
                 className={cn(
-                  "relative flex flex-col gap-1",
+                  "relative flex flex-col",
+                  // Row padding (4px each side) plus this gap spaces Work cards 10px apart.
+                  sidebarMode === "tasks" ? "gap-0.5" : "gap-1",
                   // The list stacks up from the bottom, against the search dock.
                   sidebarListItems.length > 0 && "flex-1 justify-end",
                   // An action sweep owns the pointer: rows it passes over
@@ -4744,6 +4779,8 @@ export default function Sidebar() {
                     }
                     switch (item.marker) {
                       case "working-header":
+                        // In Work the count bar stands in for a closed shelf's header.
+                        if (sidebarMode === "tasks" && !workingShelfExpanded) break;
                         items.push(
                           <SidebarSectionHeader
                             key="working-shelf-header"
@@ -4761,6 +4798,8 @@ export default function Sidebar() {
                         );
                         break;
                       case "snoozed-header":
+                        // In Work the count bar stands in for a closed shelf's header.
+                        if (sidebarMode === "tasks" && !snoozedShelfExpanded) break;
                         items.push(
                           <SidebarSectionHeader
                             key="snoozed-shelf-header"
@@ -4778,6 +4817,8 @@ export default function Sidebar() {
                         );
                         break;
                       case "settled-header":
+                        // In Work the count bar stands in for a closed shelf's header.
+                        if (sidebarMode === "tasks" && !settledShelfExpanded) break;
                         items.push(
                           <SidebarSectionHeader
                             key="settled-shelf-header"

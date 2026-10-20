@@ -1,5 +1,18 @@
 export const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_DEFAULT_WIDTH = 16 * 16;
+const THREAD_SIDEBAR_MAX_DEFAULT_WIDTH = 440;
+// The list column takes about a fifth of the window, as in the reference layout.
+const THREAD_SIDEBAR_VIEWPORT_SHARE = 0.216;
+
+function proportionalThreadSidebarWidth(viewportWidth: number): number {
+  return Math.min(
+    THREAD_SIDEBAR_MAX_DEFAULT_WIDTH,
+    Math.max(
+      THREAD_SIDEBAR_DEFAULT_WIDTH,
+      Math.round(viewportWidth * THREAD_SIDEBAR_VIEWPORT_SHARE),
+    ),
+  );
+}
 export const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 export const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 
@@ -29,7 +42,7 @@ export function resolveInitialThreadSidebarWidth(
 ): number {
   const preferredWidth =
     storedWidth === null
-      ? THREAD_SIDEBAR_DEFAULT_WIDTH
+      ? proportionalThreadSidebarWidth(viewportWidth)
       : Math.max(THREAD_SIDEBAR_MIN_WIDTH, storedWidth);
   return Math.min(preferredWidth, resolveThreadSidebarMaximumWidth(viewportWidth));
 }

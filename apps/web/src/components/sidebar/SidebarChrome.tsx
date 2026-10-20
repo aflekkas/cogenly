@@ -24,8 +24,6 @@ import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { observeResize } from "~/lib/observeResize";
-import { useUiStateStore } from "../../uiStateStore";
-import { SIDEBAR_MODE_LABELS } from "./modes/sidebarModes.logic";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -93,7 +91,7 @@ export function SidebarBrandWidthProbe({
       className="pointer-events-none invisible fixed top-0 left-0 flex w-max border-r border-transparent pr-3"
       ref={observeWidth}
     >
-      <div className="ml-[max(calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset)),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] flex">
+      <div className="ml-[max(var(--sidebar-content-inset),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] flex">
         {/* The longest title the header can show, so the minimum width doesn't jump between modes. */}
         <SidebarBrandMark label="Settings" />
       </div>
@@ -101,13 +99,12 @@ export function SidebarBrandWidthProbe({
   );
 }
 
-// The header names where you are (Chats, Work, Agents, Settings or Usage) rather than the app.
+// The header names the app, or Settings / Usage on those pages; the rail shows the mode.
 function useSidebarTitle(): string {
-  const mode = useUiStateStore((store) => store.sidebarMode);
   const pathname = useLocation({ select: (location) => location.pathname });
   if (pathname === "/settings" || pathname.startsWith("/settings/")) return "Settings";
   if (pathname === "/usage" || pathname.startsWith("/usage/")) return "Usage";
-  return SIDEBAR_MODE_LABELS[mode];
+  return "Cogenly";
 }
 
 function SidebarBrand() {
@@ -115,7 +112,7 @@ function SidebarBrand() {
   return (
     <Link
       aria-label="Go to threads"
-      className="relative z-10 ml-[max(calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset)),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md text-foreground outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex"
+      className="relative z-10 ml-[max(var(--sidebar-content-inset),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md text-foreground outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex"
       to="/"
     >
       <SidebarBrandMark label={title} />

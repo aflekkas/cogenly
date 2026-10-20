@@ -105,14 +105,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    * tooltip, and toolbar controls cannot quietly drift apart.
    */
   --control-radius: 0.5rem;
-  --sidebar-content-inset: 0.5rem;
+  /* 12px rhythm: window edge to rail icons, icons to cards, cards to dock. */
+  --sidebar-content-inset: 0.75rem;
   --sidebar-control-gap: 0.5rem;
   --sidebar-icon-color: color-mix(
     in srgb,
     var(--contrast-sidebar-muted-foreground) 60%,
     var(--sidebar)
   );
-  --sidebar-row-content-inset: 0.625rem;
+  --sidebar-row-content-inset: 0.875rem;
   --command-shell-inset: 0.5rem;
   --command-content-inset: 1rem;
   --floating-content-inset: 0.75rem;
@@ -1510,6 +1511,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* The icon rail sits a step below the list so the two read as separate columns. */
   --nav-rail: var(--color-zinc-100);
   --nav-rail-muted: var(--sidebar-muted-foreground);
+  --sidebar-shelf-bar: var(--color-zinc-100);
+  --sidebar-shelf-selected: var(--color-white);
   --nav-rail-selected: var(--sidebar-row-active);
   /* Light navigation selects with a white raised pill on the zinc-50 list. */
   --state-hover-fill: var(--sidebar-row-hover);
@@ -1538,6 +1541,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     /* The rail's active button is quieter than a selected card. */
     --nav-rail-muted: #88898e;
     --nav-rail-selected: #141519;
+    /* The count bar is a track a shade below the canvas. */
+    --sidebar-shelf-bar: #0a0b0d;
+    --sidebar-shelf-selected: #1e1f23;
     --sidebar-foreground: var(--foreground);
     --sidebar-muted-foreground: var(--muted-foreground);
     --sidebar-control-surface: rgb(255 255 255 / 3.5%);

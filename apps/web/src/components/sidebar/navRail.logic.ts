@@ -1,5 +1,5 @@
 /** Rail width in px. Under the macOS traffic lights it widens to hold them (see workspaceTitlebar). */
-export const NAV_RAIL_WIDTH_PX = 54;
+export const NAV_RAIL_WIDTH_PX = 57;
 
 /**
  * Roving focus for a vertical tablist: the index the key moves to, or null
