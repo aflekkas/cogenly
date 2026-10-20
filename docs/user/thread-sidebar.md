@@ -100,10 +100,18 @@ if that project exists there. Otherwise it selects an environment that has it.
 The **Chats** tab lists threads without a project, newest first under **Today**,
 **Yesterday**, **Previous 7 days** and **Older**. **New chat** beside search, `mod+n`
 while Chats is open, and **New chat** in the command palette all start one without a
-project; they never open a repository. A small dot marks a chat that is still running
-or waiting on you. Rename, archive, delete and **Start Work…** are in each chat's
-right-click menu. Older chats load as you scroll, and search covers all of them. Add
+project; they never open a repository. Opening **Chats** shows your most recent chat,
+or a new one when you have none. A small dot marks a chat that is still running
+or waiting on you. Older chats load as you scroll, and search covers all of them. Add
 repositories from **Work** or the command palette.
+
+A chat is a conversation; Work is a coding session in a repository. So a chat's
+menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
+which always asks first, while settling, snoozing, archiving, repository settings
+and the branch, worktree, diff, terminal and files controls belong to Work. When a
+chat turns into code, **Start Work…** hands it to a new Work session. An agent's
+conversation belongs to the agent: rename it or remove it from the agent's
+**Responsibilities**.
 
 ### Start without a project
 
