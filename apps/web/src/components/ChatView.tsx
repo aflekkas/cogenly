@@ -8989,6 +8989,19 @@ export default function ChatView(props: ChatViewProps) {
   // Pinned at the window's top-right, open or closed, beside maximize. Open,
   // that corner is the panel's tab strip, whose "+" chooses what to show.
   const panelToggleControls = <PanelLayoutControls {...panelToggleControlProps} />;
+  // Thread details sits just left of the right-panel toggle. While the titlebar
+  // cluster floats over this header it joins the cluster; once the toggle moves
+  // over an open panel, it stays at the chat header's right edge instead.
+  const threadDetailsControl =
+    isServerThread && activeThreadRef ? (
+      <ThreadDetailsMenu
+        environmentId={activeThreadRef.environmentId}
+        threadId={activeThreadRef.threadId}
+      />
+    ) : null;
+  const threadDetailsInTitlebarCluster =
+    (rightPanelControlsAtRoot && !rightPanelOpen) ||
+    (!rightPanelControlsAtRoot && !rightPanelControlsInPanel && rightPanelSupported);
   const panelLayoutControls = (
     <div
       className={cn(
@@ -9018,6 +9031,11 @@ export default function ChatView(props: ChatViewProps) {
             maximized={rightPanelMaximized}
             onToggle={toggleRightPanelMaximizedStable}
           />
+        </span>
+      ) : null}
+      {threadDetailsControl && threadDetailsInTitlebarCluster ? (
+        <span key="cluster" className="swap-motion pointer-events-auto flex h-full items-center">
+          {threadDetailsControl}
         </span>
       ) : null}
       <div className="pointer-events-auto flex h-full items-center">{panelToggleControls}</div>
@@ -9101,11 +9119,10 @@ export default function ChatView(props: ChatViewProps) {
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel && rightPanelSupported
             ? panelLayoutControls
             : null}
-          {isServerThread && activeThreadRef ? (
-            <ThreadDetailsMenu
-              environmentId={activeThreadRef.environmentId}
-              threadId={activeThreadRef.threadId}
-            />
+          {threadDetailsControl && !threadDetailsInTitlebarCluster ? (
+            <span key="header" className="swap-motion ms-auto flex h-full shrink-0 items-center">
+              {threadDetailsControl}
+            </span>
           ) : null}
           {/* No breadcrumb or visible title, as in the reference: the sidebar names
               the thread, its right-click menu renames it, and the details card holds

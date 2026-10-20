@@ -176,7 +176,7 @@ export function ThreadDetailsMenu(props: {
         </TooltipTrigger>
         <TooltipPopup side="bottom">{label}</TooltipPopup>
       </Tooltip>
-      <PopoverPopup align="start" width="md" padding="none">
+      <PopoverPopup side="bottom" align="end" collisionPadding={8} width="md" padding="none">
         {shell ? (
           <ThreadDetailsMenuContent
             environmentId={props.environmentId}

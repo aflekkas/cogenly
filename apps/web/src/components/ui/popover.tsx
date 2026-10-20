@@ -45,6 +45,7 @@ function PopoverPopup({
   sideOffset = 4,
   alignOffset = 0,
   collisionAvoidance,
+  collisionPadding,
   tooltipStyle = false,
   bubble = false,
   keepMounted = false,
@@ -58,6 +59,8 @@ function PopoverPopup({
   sideOffset?: PopoverPrimitive.Positioner.Props["sideOffset"];
   alignOffset?: PopoverPrimitive.Positioner.Props["alignOffset"];
   collisionAvoidance?: PopoverPrimitive.Positioner.Props["collisionAvoidance"];
+  /** Space kept between the popup and the viewport edge; panels default to 0. */
+  collisionPadding?: PopoverPrimitive.Positioner.Props["collisionPadding"];
   tooltipStyle?: boolean;
   /**
    * A calmer, rounder entrance for small previews such as a quoted source: grows from 0.94 at the
@@ -79,7 +82,7 @@ function PopoverPopup({
         anchor={anchor}
         collisionAvoidance={collisionAvoidance}
         // A panel's card already sits inside its own padding, so the panel can reach the edge.
-        collisionPadding={variant === "panel" ? 0 : undefined}
+        collisionPadding={collisionPadding ?? (variant === "panel" ? 0 : undefined)}
         className={cn(
           "h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-transform data-instant:transition-none",
           variant === "panel"
