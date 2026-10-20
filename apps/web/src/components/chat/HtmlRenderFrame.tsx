@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import {
   HTML_RENDER_COLUMN_WIDTH,
@@ -166,14 +167,16 @@ export function HtmlRenderFrame(props: {
               <TooltipPopup side="left">Open full screen</TooltipPopup>
             </Tooltip>
           </div>
-          {expandedSrc !== null ? (
-            <HtmlRenderDialog
-              src={expandedSrc}
-              title={title}
-              threadRef={props.threadRef}
-              onClose={() => setExpandedSrc(null)}
-            />
-          ) : null}
+          <OverlayPresence when={expandedSrc}>
+            {(expandedSrc) => (
+              <HtmlRenderDialog
+                src={expandedSrc}
+                title={title}
+                threadRef={props.threadRef}
+                onClose={() => setExpandedSrc(null)}
+              />
+            )}
+          </OverlayPresence>
         </>
       ) : failed ? (
         <p className="flex size-full items-center justify-center text-muted-foreground text-xs">

@@ -3,13 +3,30 @@
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 
 import { cn } from "~/lib/utils";
+import { OverlayPresenceBoundary, useOverlayPresenceRoot } from "~/components/ui/overlay-presence";
 import {
   DIALOG_BACKDROP_CLASS,
   DIALOG_MOBILE_SHEET_CLASS,
   DIALOG_POPUP_CLASS,
 } from "~/components/ui/dialog-styles";
 
-const AlertDialog = AlertDialogPrimitive.Root;
+/** Closes with its exit motion when an OverlayPresence around it empties. */
+function AlertDialog<Payload>({
+  open,
+  onOpenChangeComplete,
+  ...props
+}: AlertDialogPrimitive.Root.Props<Payload>) {
+  const presence = useOverlayPresenceRoot(open, onOpenChangeComplete);
+  return (
+    <OverlayPresenceBoundary>
+      <AlertDialogPrimitive.Root
+        {...props}
+        open={presence.open}
+        onOpenChangeComplete={presence.onOpenChangeComplete}
+      />
+    </OverlayPresenceBoundary>
+  );
+}
 
 const AlertDialogPortal = AlertDialogPrimitive.Portal;
 

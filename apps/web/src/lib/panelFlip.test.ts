@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
-import { resolvePanelFlipOffsets } from "./panelFlip";
+import { playPanelFlip, resolvePanelFlipOffsets, type PanelFlipSnapshot } from "./panelFlip";
 
 const bounds = (left: number, right: number) => ({ left, right });
 
@@ -41,5 +41,108 @@ describe("resolvePanelFlipOffsets", () => {
         { anchor: "start", before: bounds(10.3, 20), after: bounds(10, 20), parent: null },
       ]),
     ).toEqual([0]);
+  });
+});
+
+interface FakeAnimation {
+  id: string;
+  currentTime: number | null;
+  cancelled: boolean;
+  readonly from: string;
+  cancel(): void;
+}
+
+/** A start-anchored element whose layout left the test moves, as React would. */
+function fakeElement(left: number) {
+  const animations: FakeAnimation[] = [];
+  const fake = {
+    left,
+    isConnected: true,
+    dataset: { panelFlip: "start" },
+    matches: () => true,
+    parentElement: null,
+    getBoundingClientRect: () => ({
+      left: fake.left,
+      right: fake.left + 100,
+      width: 100,
+      height: 20,
+    }),
+    getAnimations: () => animations.filter((animation) => !animation.cancelled),
+    animate: (keyframes: ReadonlyArray<{ transform: string }>) => {
+      const animation: FakeAnimation = {
+        id: "",
+        currentTime: 0,
+        cancelled: false,
+        from: keyframes[0]!.transform,
+        cancel() {
+          this.cancelled = true;
+        },
+      };
+      animations.push(animation);
+      return animation;
+    },
+  };
+  return fake;
+}
+
+describe("playPanelFlip", () => {
+  const documentElement = {};
+  const resizeCallbacks: Array<(entries: unknown[]) => void> = [];
+
+  beforeAll(() => {
+    vi.stubGlobal("document", { documentElement });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: (entries: unknown[]) => void) {
+          resizeCallbacks.push(callback);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+  });
+  afterAll(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Runs the frame's resize step and the flip's follow-up microtask. */
+  async function runResizeStep() {
+    const entry = { target: documentElement, contentRect: { width: 1440, height: 900 } };
+    for (const callback of resizeCallbacks) callback([entry]);
+    await Promise.resolve();
+  }
+
+  const snapshotOf = (
+    element: ReturnType<typeof fakeElement>,
+    left: number,
+  ): PanelFlipSnapshot => ({
+    entries: [{ element: element as unknown as HTMLElement, bounds: { left, right: left + 100 } }],
+  });
+
+  it("inverts in the committing task, so the first painted frame draws content where it was", async () => {
+    const element = fakeElement(56);
+    playPanelFlip(snapshotOf(element, 336), 250);
+    // Nothing waits for a later callback: the glide already starts at the old place.
+    expect(element.getAnimations().map((animation) => animation.from)).toEqual([
+      "translateX(280px)",
+    ]);
+    await runResizeStep();
+    expect(element.getAnimations().map((animation) => animation.from)).toEqual([
+      "translateX(280px)",
+    ]);
+  });
+
+  it("retargets content that size-derived state moves in the resize step", async () => {
+    const element = fakeElement(56);
+    playPanelFlip(snapshotOf(element, 336), 250);
+    element.getAnimations()[0]!.currentTime = 16;
+    // The resize step re-renders a measured position (the mini player).
+    element.left = 100;
+    await runResizeStep();
+    const [animation] = element.getAnimations();
+    expect(animation?.from).toBe("translateX(236px)");
+    expect(animation?.currentTime).toBe(16);
   });
 });

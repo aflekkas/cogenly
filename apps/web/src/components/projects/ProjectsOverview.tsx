@@ -17,6 +17,7 @@ import { serverEnvironment } from "../../state/server";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
+import { OverlayPresence } from "../ui/overlay-presence";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { openableRowProps } from "./ProjectView";
@@ -153,9 +154,11 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
           </p>
         </SettingsPageContainer>
       </div>
-      {creating && createEnvironmentId !== null ? (
-        <NewProjectDialog environmentId={createEnvironmentId} onClose={() => setCreating(false)} />
-      ) : null}
+      <OverlayPresence when={creating && createEnvironmentId}>
+        {(environmentId) => (
+          <NewProjectDialog environmentId={environmentId} onClose={() => setCreating(false)} />
+        )}
+      </OverlayPresence>
     </SidebarInset>
   );
 }

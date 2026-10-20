@@ -27,6 +27,7 @@ import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
+import { OverlayPresence } from "../ui/overlay-presence";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 
@@ -283,15 +284,17 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
           </SettingsPageContainer>
         )}
       </div>
-      {editing && label ? (
-        <ProjectLabelEditorDialog
-          environmentId={environmentId}
-          label={label}
-          repositories={repositories}
-          onClose={() => setEditing(false)}
-          onDeleted={() => void navigate({ to: "/project" })}
-        />
-      ) : null}
+      <OverlayPresence when={editing && label}>
+        {(label) => (
+          <ProjectLabelEditorDialog
+            environmentId={environmentId}
+            label={label}
+            repositories={repositories}
+            onClose={() => setEditing(false)}
+            onDeleted={() => void navigate({ to: "/project" })}
+          />
+        )}
+      </OverlayPresence>
     </SidebarInset>
   );
 }

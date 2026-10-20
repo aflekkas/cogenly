@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -83,7 +84,11 @@ function closeStartWork() {
 export function StartWorkDialogHost() {
   const request = useRequest((state) => state.request);
   useEffect(() => closeStartWork, []);
-  return request ? <StartWorkDialog key={request.key} threadRef={request.threadRef} /> : null;
+  return (
+    <OverlayPresence when={request}>
+      {(request) => <StartWorkDialog key={request.key} threadRef={request.threadRef} />}
+    </OverlayPresence>
+  );
 }
 
 type ProposalState =

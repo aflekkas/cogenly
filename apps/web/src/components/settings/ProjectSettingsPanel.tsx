@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useComposerMenuState } from "../chat/useComposerMenuState";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
@@ -640,29 +641,36 @@ function ProjectDetail({
         </SettingsSection>
       </SettingsPageContainer>
 
-      <ProjectFaviconPickerDialog
-        key={`${representative.environmentId}:${representative.workspaceRoot}:${faviconPickerOpen}`}
-        cwd={representative.workspaceRoot}
-        environmentId={representative.environmentId}
-        onOpenChange={setFaviconPickerOpen}
-        {...(pickProjectFavicon
-          ? { onPickExternal: () => pickProjectFavicon(representative.workspaceRoot) }
-          : {})}
-        onSelect={(path) => void setProjectIcon({ faviconPath: path, projectIcon: null })}
-        open={faviconPickerOpen && canEditGroup}
-        projectName={group.displayName}
-      />
-      {iconPickerOpen && canEditGroup ? (
-        <Suspense fallback={null}>
-          <ProjectIconPickerDialog
-            current={projectIcon}
-            projectName={representative.title}
+      {/* Each open mounts a fresh picker; closing keeps it for the exit motion. */}
+      <OverlayPresence when={faviconPickerOpen && canEditGroup}>
+        {() => (
+          <ProjectFaviconPickerDialog
+            key={`${representative.environmentId}:${representative.workspaceRoot}`}
+            cwd={representative.workspaceRoot}
+            environmentId={representative.environmentId}
+            onOpenChange={setFaviconPickerOpen}
+            {...(pickProjectFavicon
+              ? { onPickExternal: () => pickProjectFavicon(representative.workspaceRoot) }
+              : {})}
+            onSelect={(path) => void setProjectIcon({ faviconPath: path, projectIcon: null })}
             open
-            onOpenChange={setIconPickerOpen}
-            onSelect={(icon) => void setProjectIcon({ faviconPath: null, projectIcon: icon })}
+            projectName={group.displayName}
           />
-        </Suspense>
-      ) : null}
+        )}
+      </OverlayPresence>
+      <OverlayPresence when={iconPickerOpen && canEditGroup}>
+        {() => (
+          <Suspense fallback={null}>
+            <ProjectIconPickerDialog
+              current={projectIcon}
+              projectName={representative.title}
+              open
+              onOpenChange={setIconPickerOpen}
+              onSelect={(icon) => void setProjectIcon({ faviconPath: null, projectIcon: icon })}
+            />
+          </Suspense>
+        )}
+      </OverlayPresence>
     </>
   );
 }

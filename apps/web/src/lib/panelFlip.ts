@@ -80,36 +80,49 @@ export function capturePanelFlip(root: ParentNode | null): PanelFlipSnapshot | n
 
 /**
  * Glides captured content from its old place to the committed layout. Call it
- * from a layout effect. It plays in this frame's resize step, once
- * observeResize has re-rendered size-derived positions (the mini player, the
- * canvas lanes), so it reads final places and still starts before paint.
+ * from a layout effect: it inverts there, in the task that committed the new
+ * layout, so the first frame that paints it already draws marked content where
+ * it was. An animation started later in the frame (a ResizeObserver callback)
+ * lands a frame late, and that frame flashes the final place. Size-derived
+ * positions (the mini player, the canvas lanes) re-render in this frame's
+ * resize step, so content is measured again there and retargeted, keeping
+ * the time the glide has run.
  */
 export function playPanelFlip(snapshot: PanelFlipSnapshot, durationMs: number): void {
-  let played = false;
+  flipPanelContent(snapshot, durationMs, false);
+  notifyPanelMotion(durationMs);
+  let retargeted = false;
   const stopObserving = observeResize(document.documentElement, () => {
-    if (played) return;
-    played = true;
+    if (retargeted) return;
+    retargeted = true;
     // Resize callbacks share one flushSync; the microtask runs after it commits.
     queueMicrotask(() => {
       stopObserving();
-      playMeasuredPanelFlip(snapshot, durationMs);
+      flipPanelContent(snapshot, durationMs, true);
     });
   });
 }
 
-function playMeasuredPanelFlip(snapshot: PanelFlipSnapshot, durationMs: number): void {
-  // Retarget an interrupted flip: the snapshot holds where content was drawn,
-  // so settle the running transform and read where layout puts it now.
+function flipPanelContent(snapshot: PanelFlipSnapshot, durationMs: number, resume: boolean): void {
+  // Settle a running flip and read where layout puts content now. The snapshot
+  // holds where it was drawn, so an interrupted flip starts over from there;
+  // a retarget of this same flip resumes at the time it had reached.
+  const elapsedByElement = new Map<HTMLElement, number>();
   for (const { element } of snapshot.entries) {
     for (const animation of element.getAnimations()) {
-      if (animation.id === PANEL_FLIP_ANIMATION_ID) animation.cancel();
+      if (animation.id !== PANEL_FLIP_ANIMATION_ID) continue;
+      if (resume && typeof animation.currentTime === "number") {
+        elapsedByElement.set(element, animation.currentTime);
+      }
+      animation.cancel();
     }
   }
   const elements: HTMLElement[] = [];
   const measurements: PanelFlipMeasurement[] = [];
   const indexByElement = new Map<HTMLElement, number>();
   for (const { element, bounds } of snapshot.entries) {
-    if (!element.isConnected) continue;
+    // Content that stopped being marked (a panel leaving maximized) snaps.
+    if (!element.isConnected || !element.matches(PANEL_FLIP_SELECTOR)) continue;
     const after = readBounds(element);
     if (!after) continue;
     indexByElement.set(element, elements.length);
@@ -123,13 +136,15 @@ function playMeasuredPanelFlip(snapshot: PanelFlipSnapshot, durationMs: number):
   });
   resolvePanelFlipOffsets(resolved).forEach((offset, index) => {
     if (offset === 0) return;
-    const animation = elements[index]!.animate(
+    const element = elements[index]!;
+    const animation = element.animate(
       [{ transform: `translateX(${offset}px)` }, { transform: "translateX(0)" }],
       { duration: durationMs, easing: PANEL_MOTION_EASING },
     );
     animation.id = PANEL_FLIP_ANIMATION_ID;
+    const elapsed = elapsedByElement.get(element);
+    if (elapsed !== undefined) animation.currentTime = elapsed;
   });
-  notifyPanelMotion(durationMs);
 }
 
 const motionListeners = new Set<() => void>();

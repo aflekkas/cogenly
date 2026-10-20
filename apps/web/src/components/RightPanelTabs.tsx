@@ -1014,6 +1014,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           scrollFade
           className="min-w-0 flex-1"
           data-right-panel-tab-list
+          // Maximized, the tabs lead the pane like a chat title and ride its
+          // edge when the sidebar toggles.
+          data-panel-flip={props.maximized ? "start" : undefined}
         >
           <div className="flex h-full w-max min-w-full items-center gap-1">
             <SortableTabList surfaces={props.surfaces} onMove={props.onMoveSurface}>

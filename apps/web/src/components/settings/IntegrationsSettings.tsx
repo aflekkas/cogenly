@@ -1,3 +1,4 @@
+import { OverlayPresence, useLastPresent } from "~/components/ui/overlay-presence";
 import { DeviceHostUpdates } from "../device/DeviceHostUpdates";
 import { DeviceToolVersions } from "../device/DeviceToolVersions";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
@@ -956,6 +957,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   } | null>(null);
   const [profilePendingRemoval, setProfilePendingRemoval] = useState<BrowserProfile | null>(null);
   const [profilePendingClear, setProfilePendingClear] = useState<BrowserProfile | null>(null);
+  // The confirmations keep their profile's name while they close.
+  const shownPendingRemoval = useLastPresent(profilePendingRemoval);
+  const shownPendingClear = useLastPresent(profilePendingClear);
   const [profileRemovalError, setProfileRemovalError] = useState<string | null>(null);
   const [profileRemovalInFlight, setProfileRemovalInFlight] = useState(false);
   const serverConfigs = useServerConfigs();
@@ -1415,7 +1419,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
       >
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove “{profilePendingRemoval?.name}”?</AlertDialogTitle>
+            <AlertDialogTitle>Remove “{shownPendingRemoval?.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
               Its cookies and logins are deleted. Desktop tabs already open in this profile stay
               open until you close them; server browser tabs close now.
@@ -1461,7 +1465,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         <AlertDialogPopup>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Clear “{profilePendingClear?.name}”’s cookies and cache?
+              Clear “{shownPendingClear?.name}”’s cookies and cache?
             </AlertDialogTitle>
             <AlertDialogDescription>
               You are signed out of its sites. Server browser tabs open in this profile close now.
@@ -1482,37 +1486,42 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-      {importSession ? (
-        <BrowserImportWizard
-          source={importSession.source}
-          destinationEnvironmentName={importSession.environmentName}
-          targetProfiles={listedProfiles.map((profile) => ({ id: profile.id, name: profile.name }))}
-          canCreateProfile={settingsHydrated && !atProfileLimit}
-          onImport={(input) =>
-            runWizardImport(importSession.source, importSession.environmentId, input)
-          }
-          onRefreshSource={() => refreshImportSource(importSession.source.id)}
-          onCheckFullDiskAccess={
-            window.desktopBridge?.checkSystemPermission
-              ? () => window.desktopBridge!.checkSystemPermission!("full-disk-access")
-              : undefined
-          }
-          onOpenFullDiskAccessSettings={async () => {
-            // Rejects outside the desktop shell (and on shells that predate the
-            // method), so the one toast covers every way the link can fail.
-            await readLocalApi()
-              ?.shell.openSystemSettings("full-disk-access")
-              .catch(() => {
-                toastManager.add({
-                  type: "error",
-                  title: "Could not open System Settings",
-                  description: "Open Privacy & Security → Full Disk Access manually.",
+      <OverlayPresence when={importSession}>
+        {(importSession) => (
+          <BrowserImportWizard
+            source={importSession.source}
+            destinationEnvironmentName={importSession.environmentName}
+            targetProfiles={listedProfiles.map((profile) => ({
+              id: profile.id,
+              name: profile.name,
+            }))}
+            canCreateProfile={settingsHydrated && !atProfileLimit}
+            onImport={(input) =>
+              runWizardImport(importSession.source, importSession.environmentId, input)
+            }
+            onRefreshSource={() => refreshImportSource(importSession.source.id)}
+            onCheckFullDiskAccess={
+              window.desktopBridge?.checkSystemPermission
+                ? () => window.desktopBridge!.checkSystemPermission!("full-disk-access")
+                : undefined
+            }
+            onOpenFullDiskAccessSettings={async () => {
+              // Rejects outside the desktop shell (and on shells that predate the
+              // method), so the one toast covers every way the link can fail.
+              await readLocalApi()
+                ?.shell.openSystemSettings("full-disk-access")
+                .catch(() => {
+                  toastManager.add({
+                    type: "error",
+                    title: "Could not open System Settings",
+                    description: "Open Privacy & Security → Full Disk Access manually.",
+                  });
                 });
-              });
-          }}
-          onClose={() => setImportSession(null)}
-        />
-      ) : null}
+            }}
+            onClose={() => setImportSession(null)}
+          />
+        )}
+      </OverlayPresence>
     </SettingsRow>
   );
 }

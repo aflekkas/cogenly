@@ -68,76 +68,73 @@ export function ProjectFaviconPickerDialog(props: {
 
   return (
     <CommandDialog open={props.open} onOpenChange={props.onOpenChange}>
-      {props.open ? (
-        <CommandDialogPopup
+      <CommandDialogPopup
+        aria-label="Choose repository icon"
+        className="overflow-hidden"
+        onBackdropPointerDown={() => props.onOpenChange(false)}
+      >
+        <CommandPaletteContent
           aria-label="Choose repository icon"
-          className="overflow-hidden"
-          onBackdropPointerDown={() => props.onOpenChange(false)}
+          autoHighlight="always"
+          escapeLabel="Close"
+          footerActionLabel="Select icon"
+          footerTrailing={
+            pickExternal ? (
+              <CommandFooterAction
+                disabled={isPickingExternal}
+                onClick={() => {
+                  setIsPickingExternal(true);
+                  void pickExternal()
+                    .then((path) => {
+                      if (!path) return;
+                      props.onOpenChange(false);
+                      props.onSelect(path);
+                    })
+                    .catch((error: unknown) => {
+                      toastManager.add({
+                        type: "error",
+                        title: "Could not open image picker",
+                        description: error instanceof Error ? error.message : "An error occurred.",
+                      });
+                    })
+                    .finally(() => setIsPickingExternal(false));
+                }}
+              >
+                {`Open in ${fileManagerName}`}
+              </CommandFooterAction>
+            ) : null
+          }
+          inputProps={{ placeholder: "Search image files…" }}
+          mode="none"
+          onItemHighlighted={(value) => {
+            setHighlightedItemValue(typeof value === "string" ? value : null);
+          }}
+          onValueChange={(value) => {
+            setHighlightedItemValue(null);
+            setQuery(value);
+          }}
+          panelSize="tall-list"
+          testId="project-favicon-picker"
+          value={query}
         >
-          <CommandPaletteContent
-            aria-label="Choose repository icon"
-            autoHighlight="always"
-            escapeLabel="Close"
-            footerActionLabel="Select icon"
-            footerTrailing={
-              pickExternal ? (
-                <CommandFooterAction
-                  disabled={isPickingExternal}
-                  onClick={() => {
-                    setIsPickingExternal(true);
-                    void pickExternal()
-                      .then((path) => {
-                        if (!path) return;
-                        props.onOpenChange(false);
-                        props.onSelect(path);
-                      })
-                      .catch((error: unknown) => {
-                        toastManager.add({
-                          type: "error",
-                          title: "Could not open image picker",
-                          description:
-                            error instanceof Error ? error.message : "An error occurred.",
-                        });
-                      })
-                      .finally(() => setIsPickingExternal(false));
-                  }}
-                >
-                  {`Open in ${fileManagerName}`}
-                </CommandFooterAction>
-              ) : null
+          <CommandPaletteResults
+            groups={
+              items.length > 0
+                ? [{ value: "project-favicon-files", label: props.projectName, items }]
+                : []
             }
-            inputProps={{ placeholder: "Search image files…" }}
-            mode="none"
-            onItemHighlighted={(value) => {
-              setHighlightedItemValue(typeof value === "string" ? value : null);
+            highlightedItemValue={highlightedItemValue}
+            isActionsOnly={false}
+            keybindings={keybindings}
+            onExecuteItem={(item) => {
+              if (item.kind !== "action") return;
+              props.onOpenChange(false);
+              void item.run();
             }}
-            onValueChange={(value) => {
-              setHighlightedItemValue(null);
-              setQuery(value);
-            }}
-            panelSize="tall-list"
-            testId="project-favicon-picker"
-            value={query}
-          >
-            <CommandPaletteResults
-              groups={
-                items.length > 0
-                  ? [{ value: "project-favicon-files", label: props.projectName, items }]
-                  : []
-              }
-              highlightedItemValue={highlightedItemValue}
-              isActionsOnly={false}
-              keybindings={keybindings}
-              onExecuteItem={(item) => {
-                if (item.kind !== "action") return;
-                props.onOpenChange(false);
-                void item.run();
-              }}
-              emptyStateMessage={emptyMessage(query, result.error, result.isPending)}
-            />
-          </CommandPaletteContent>
-        </CommandDialogPopup>
-      ) : null}
+            emptyStateMessage={emptyMessage(query, result.error, result.isPending)}
+          />
+        </CommandPaletteContent>
+      </CommandDialogPopup>
     </CommandDialog>
   );
 }

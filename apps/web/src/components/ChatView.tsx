@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -9522,7 +9523,10 @@ export default function ChatView(props: ChatViewProps) {
   const content = (
     <div
       ref={setWorkspaceLayoutElement}
-      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      // Clips vertically only: content gliding in from where it was drawn
+      // (panelFlip) may cross the pane's new left edge while the sidebar opens.
+      // The sidebar wrapper clips at the window's edges.
+      className="relative flex min-h-0 min-w-0 flex-1 overflow-y-clip bg-background"
     >
       <Dialog
         open={
@@ -10321,13 +10325,15 @@ export default function ChatView(props: ChatViewProps) {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-      {expandedImage && (
-        <ExpandedImageDialog
-          key={expandedImageKey(expandedImage)}
-          preview={expandedImage}
-          onClose={closeExpandedImageStable}
-        />
-      )}
+      <OverlayPresence when={expandedImage}>
+        {(expandedImage) => (
+          <ExpandedImageDialog
+            key={expandedImageKey(expandedImage)}
+            preview={expandedImage}
+            onClose={closeExpandedImageStable}
+          />
+        )}
+      </OverlayPresence>
     </div>
   );
   return (

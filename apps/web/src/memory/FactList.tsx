@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type {
   EnvironmentId,
   Fact,
@@ -239,20 +240,22 @@ function FactRow({ fact, context }: { fact: Fact; context: FactListContext }) {
         />
       </div>
       {showHistory ? <FactHistory fact={fact} context={context} /> : null}
-      {editing ? (
-        <FactEditorDialog
-          title="Correct this fact"
-          description="Saving keeps the old wording in history and uses the correction from now on."
-          labels={context.labels}
-          initial={fact}
-          saveLabel="Save correction"
-          onClose={() => setEditing(false)}
-          onSave={async (edit) => {
-            const saved = await actions.correct(fact.id, correctedFact(fact, edit));
-            if (saved) setEditing(false);
-          }}
-        />
-      ) : null}
+      <OverlayPresence when={editing}>
+        {() => (
+          <FactEditorDialog
+            title="Correct this fact"
+            description="Saving keeps the old wording in history and uses the correction from now on."
+            labels={context.labels}
+            initial={fact}
+            saveLabel="Save correction"
+            onClose={() => setEditing(false)}
+            onSave={async (edit) => {
+              const saved = await actions.correct(fact.id, correctedFact(fact, edit));
+              if (saved) setEditing(false);
+            }}
+          />
+        )}
+      </OverlayPresence>
     </li>
   );
 }
