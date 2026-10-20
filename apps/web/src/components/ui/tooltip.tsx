@@ -17,6 +17,10 @@ const COLLISION_PADDING = 5;
 
 const TooltipProvider = TooltipPrimitive.Provider;
 
+/** One tooltip shared by many triggers: it glides between them instead of re-opening. */
+const createTooltipHandle = TooltipPrimitive.createHandle;
+type TooltipHandle<Payload> = TooltipPrimitive.Handle<Payload>;
+
 type TooltipActionsRef = RefObject<TooltipPrimitive.Root.Actions | null>;
 const TooltipHoverContext = createContext<TooltipActionsRef | null>(null);
 const TooltipScrollContext = createContext<RefObject<{
@@ -205,4 +209,12 @@ function TooltipPopup({
   );
 }
 
-export { TooltipProvider, Tooltip, TooltipTrigger, TooltipPopup, TooltipScrollDismissArea };
+export {
+  TooltipProvider,
+  Tooltip,
+  TooltipTrigger,
+  TooltipPopup,
+  TooltipScrollDismissArea,
+  createTooltipHandle,
+};
+export type { TooltipHandle };

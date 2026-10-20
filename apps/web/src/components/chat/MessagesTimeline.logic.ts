@@ -12,6 +12,7 @@ import { renderCodexDirectivesForCopy } from "@t3tools/shared/codexMarkdownDirec
 import { reasoningPlainText } from "@t3tools/client-runtime/work-log/reasoning-text";
 import {
   resolveWorkLogNotice,
+  readToolRecord,
   resolveWorkLogTool,
   workLogToolGroupLabel,
   type WorkLogToolCallInput,
@@ -47,6 +48,7 @@ import {
   type MessageId,
   type WorktreeSetupSnapshot,
   type OrchestrationV2ProjectedTurnItem,
+  type OrchestrationV2TurnItem,
   type RunAttemptId,
   RunId,
   type ThreadId,
@@ -853,30 +855,12 @@ function deriveUnsettledRunId(
  */
 function liveSubagentCardEntryIds(entries: ReadonlyArray<TimelineEntry>): ReadonlySet<string> {
   const visible = new Set<string>();
-  let batch: Array<Extract<TimelineEntry, { kind: "event" }>> = [];
-  const flush = () => {
-    if (batch.length === 0) return;
-    if (batch.some((entry) => isLiveSubagentTurnItem(entry.projectedItem.item))) {
-      for (const entry of batch) visible.add(entry.id);
-    }
-    batch = [];
-  };
   for (const entry of entries) {
-    if (entry.kind !== "event" || entry.projectedItem.item.type !== "subagent") {
-      flush();
-      continue;
+    if (entry.kind !== "event" || entry.projectedItem.item.type !== "subagent") continue;
+    if (subagentEntryMembers(entry).some(({ item }) => isLiveSubagentTurnItem(item))) {
+      visible.add(entry.id);
     }
-    const item = entry.projectedItem.item;
-    const previous = batch.at(-1)?.projectedItem.item;
-    if (
-      previous !== undefined &&
-      (previous.runId !== item.runId || previous.providerTurnId !== item.providerTurnId)
-    ) {
-      flush();
-    }
-    batch.push(entry);
   }
-  flush();
   return visible;
 }
 
@@ -1281,18 +1265,23 @@ function attachTrailingToolGroupsToAssistant(
   return result;
 }
 
-// Delegation already has a durable child card. Remove its tool row only after
-// the returned task ID identifies that child; pending calls can share a prompt.
+// Delegation already has a durable child card, which is the delegation's one
+// row. Remove its tool row once the returned task ID identifies that child or,
+// while a waiting call is still running and has no ID yet, once a child of the
+// same run carries its task brief. Each child claims one call, so two pending
+// calls with the same brief keep a row until each has its own child.
 function withoutSubagentDelegationRows(entries: ReadonlyArray<TimelineEntry>) {
-  const childrenByRun = new Map<RunId, Set<string>>();
+  type Child = { readonly id: string; readonly prompt: string; readonly title: string | null };
+  const childrenByRun = new Map<RunId, Child[]>();
   for (const entry of entries) {
     if (entry.kind !== "event" || entry.projectedItem.item.type !== "subagent") continue;
     const item = entry.projectedItem.item;
     if (item.origin !== "app_owned" || item.runId === null) continue;
-    const children = childrenByRun.get(item.runId) ?? new Set<string>();
-    children.add(item.subagentId);
+    const children = childrenByRun.get(item.runId) ?? [];
+    children.push({ id: item.subagentId, prompt: item.prompt.trim(), title: item.title ?? null });
     childrenByRun.set(item.runId, children);
   }
+  const claimed = new Set<string>();
   return entries.filter((entry) => {
     if (entry.kind !== "work" || workEntryDisplayIndicatesToolFailure(entry.entry)) return true;
     const item = entry.entry.projectedItem?.item ?? entry.entry.structuredPayload;
@@ -1305,11 +1294,67 @@ function withoutSubagentDelegationRows(entries: ReadonlyArray<TimelineEntry>) {
       return true;
     const output = compactDynamicToolOutput(item.output);
     if (output?.isError) return true;
+    const children = childrenByRun.get(item.runId) ?? [];
     if (output?.taskId !== undefined) {
-      return !childrenByRun.get(item.runId)?.has(output.taskId);
+      const child = children.find(({ id }) => id === output.taskId);
+      if (child) claimed.add(child.id);
+      return child === undefined;
     }
-    return true;
+    const input = readToolRecord(item.input);
+    const task = typeof input.task === "string" ? input.task.trim() : "";
+    const title = typeof input.title === "string" ? input.title.trim() : "";
+    const child = children.find(
+      (candidate) =>
+        !claimed.has(candidate.id) &&
+        ((task !== "" && (candidate.prompt === task || candidate.prompt.endsWith(`\n\n${task}`))) ||
+          (title !== "" && candidate.title === title)),
+    );
+    if (child === undefined) return true;
+    claimed.add(child.id);
+    return false;
   });
+}
+
+/**
+ * Every subagent a turn launched, keyed by its first card. Later cards of the
+ * same run leave the entry stream, so a turn's spawns, native or delegated,
+ * read as one grouped row where the first was launched, and the work around
+ * them stays one run of rows.
+ */
+const subagentBatchMembers = new WeakMap<TimelineEntry, OrchestrationV2ProjectedTurnItem[]>();
+
+function subagentBatchKey(item: OrchestrationV2TurnItem): string | null {
+  if (item.runId !== null) return `run:${item.runId}`;
+  return item.providerTurnId ? `turn:${item.providerTurnId}` : null;
+}
+
+function withTurnSubagentsGrouped(entries: ReadonlyArray<TimelineEntry>): TimelineEntry[] {
+  const firstByKey = new Map<string, TimelineEntry>();
+  const result: TimelineEntry[] = [];
+  for (const entry of entries) {
+    if (entry.kind !== "event" || entry.projectedItem.item.type !== "subagent") {
+      result.push(entry);
+      continue;
+    }
+    const key = subagentBatchKey(entry.projectedItem.item);
+    const first = key === null ? undefined : firstByKey.get(key);
+    if (first !== undefined) {
+      subagentBatchMembers.get(first)?.push(entry.projectedItem);
+      continue;
+    }
+    if (key !== null) firstByKey.set(key, entry);
+    subagentBatchMembers.set(entry, [entry.projectedItem]);
+    result.push(entry);
+  }
+  return result;
+}
+
+/** The cards a subagent entry stands for: itself, or its whole turn's batch. */
+function subagentEntryMembers(
+  entry: TimelineEntry,
+): ReadonlyArray<OrchestrationV2ProjectedTurnItem> {
+  if (entry.kind !== "event") return [];
+  return subagentBatchMembers.get(entry) ?? [entry.projectedItem];
 }
 
 const supersededReasoningEntries = new WeakMap<TimelineEntry, TimelineEntry>();
@@ -1335,7 +1380,9 @@ function settleSupersededReasoning(entries: ReadonlyArray<TimelineEntry>) {
 }
 
 function timelineRowEntries(entries: ReadonlyArray<TimelineEntry>) {
-  return withoutSubagentDelegationRows(settleSupersededReasoning(entries));
+  return withTurnSubagentsGrouped(
+    withoutSubagentDelegationRows(settleSupersededReasoning(entries)),
+  );
 }
 
 /** The turn folds the timeline would draw, before applying expansion state. */
@@ -1826,22 +1873,15 @@ export function deriveMessagesTimelineRows(input: {
     }
 
     if (timelineEntry.kind === "event") {
-      const previous = nextRows.at(-1);
-      if (
-        timelineEntry.projectedItem.item.type === "subagent" &&
-        previous?.kind === "event" &&
-        previous.projectedItem.item.type === "subagent" &&
-        previous.projectedItem.item.runId === timelineEntry.projectedItem.item.runId &&
-        previous.projectedItem.item.providerTurnId ===
-          timelineEntry.projectedItem.item.providerTurnId
-      ) {
-        nextRows[nextRows.length - 1] = {
-          ...previous,
-          subagents: [
-            ...(previous.subagents ?? [previous.projectedItem]),
-            timelineEntry.projectedItem,
-          ],
-        };
+      const members = subagentEntryMembers(timelineEntry);
+      if (timelineEntry.projectedItem.item.type === "subagent" && members.length > 1) {
+        nextRows.push({
+          kind: "event",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          projectedItem: timelineEntry.projectedItem,
+          subagents: [...members],
+        });
         continue;
       }
       nextRows.push({

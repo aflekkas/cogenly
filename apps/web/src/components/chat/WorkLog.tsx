@@ -54,9 +54,16 @@ type RowContent = {
   label: ReactNode;
   trailing?: ReactNode;
   wrapLabel?: boolean;
+  /**
+   * Open state of an expandable row. The chevron sits right after the label,
+   * so it rotates in one spot instead of riding the row's far edge. Omit it
+   * for rows with nothing to expand: they show no chevron at all.
+   */
+  disclosure?: boolean | undefined;
 };
 
-function WorkLogLine({ icon, label, trailing, wrapLabel }: RowContent) {
+function WorkLogLine({ icon, label, trailing, wrapLabel, disclosure }: RowContent) {
+  const expandable = disclosure !== undefined;
   return (
     <div
       className={cn(
@@ -76,12 +83,21 @@ function WorkLogLine({ icon, label, trailing, wrapLabel }: RowContent) {
         ) : null}
         <div
           className={cn(
-            "min-w-0 flex-1 text-secondary-label",
+            "min-w-0 text-secondary-label",
+            !expandable && "flex-1",
             !wrapLabel && "truncate [&_*]:whitespace-nowrap",
           )}
         >
           {label}
         </div>
+        {expandable ? (
+          <>
+            <span className="flex size-4 shrink-0 items-center justify-center self-center">
+              <WorkLogChevron open={disclosure} reveal />
+            </span>
+            <span className="min-w-0 flex-1" />
+          </>
+        ) : null}
       </div>
       {trailing}
     </div>
@@ -106,12 +122,19 @@ export function WorkLogButton({
   label,
   trailing,
   wrapLabel = false,
+  disclosure,
   ...buttonProps
 }: RowContent & Omit<ComponentProps<"button">, "className" | "style" | "children">) {
   const className = useRowClassName(true);
   return (
     <button {...buttonProps} type="button" className={className}>
-      <WorkLogLine icon={icon} label={label} trailing={trailing} wrapLabel={wrapLabel} />
+      <WorkLogLine
+        icon={icon}
+        label={label}
+        trailing={trailing}
+        wrapLabel={wrapLabel}
+        disclosure={disclosure}
+      />
     </button>
   );
 }
@@ -122,13 +145,20 @@ export function WorkLogRow({
   label,
   trailing,
   wrapLabel = false,
+  disclosure,
   children,
   ...rowProps
 }: RowContent & Omit<ComponentProps<"div">, "className" | "style">) {
   const className = useRowClassName(rowProps.onClick !== undefined);
   return (
     <div {...rowProps} className={className}>
-      <WorkLogLine icon={icon} label={label} trailing={trailing} wrapLabel={wrapLabel} />
+      <WorkLogLine
+        icon={icon}
+        label={label}
+        trailing={trailing}
+        wrapLabel={wrapLabel}
+        disclosure={disclosure}
+      />
       {children}
     </div>
   );
@@ -147,14 +177,20 @@ function disclosureDuration(open: boolean) {
   };
 }
 
-/** A disclosure chevron that rotates in step with the content it opens. */
-export function WorkLogChevron({ open }: { open: boolean }) {
+/**
+ * A disclosure chevron that rotates in step with the content it opens.
+ * `reveal` keeps a closed chevron hidden until its row is hovered or focused.
+ */
+export function WorkLogChevron({ open, reveal = false }: { open: boolean; reveal?: boolean }) {
   return (
     <ChevronRightIcon
       aria-hidden
       className={cn(
-        "size-3 shrink-0 text-icon-muted opacity-70 transition-transform ease-standard motion-reduce:transition-none",
+        "size-3 shrink-0 text-icon-muted transition-[rotate,opacity] ease-standard motion-reduce:transition-none",
         open && "rotate-90",
+        reveal && !open
+          ? "opacity-0 group-hover/timeline-row:opacity-70 group-focus-visible/timeline-row:opacity-70 group-hover/disclosure:opacity-70 group-focus-visible/disclosure:opacity-70"
+          : "opacity-70",
       )}
       style={disclosureDuration(open)}
     />
@@ -302,6 +338,132 @@ export function WorkLogDetails({
       onPointerDown={(event) => event.stopPropagation()}
     >
       {children}
+    </div>
+  );
+}
+
+/**
+ * A quiet nested disclosure inside an expanded row (the Raw call): a muted
+ * label with the row chevron, opening and closing with the row's motion.
+ * `onToggle` lets the timeline hold its scroll anchor while it resizes.
+ */
+export function WorkLogDisclosure({
+  label,
+  defaultOpen = false,
+  onToggle,
+  children,
+}: {
+  label: string;
+  defaultOpen?: boolean;
+  onToggle?: ((collapsed: boolean) => void) | undefined;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="flex min-w-0 flex-col">
+      <button
+        type="button"
+        aria-expanded={open}
+        className="group/disclosure flex w-fit items-center gap-1 rounded-sm text-xs text-muted-foreground transition-colors select-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle?.(open);
+          setOpen(!open);
+        }}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        {label}
+        <WorkLogChevron open={open} reveal />
+      </button>
+      <WorkLogCollapse open={open}>
+        <div className="pt-1">{children}</div>
+      </WorkLogCollapse>
+    </div>
+  );
+}
+
+/** One titled part of an expanded row. */
+function WorkLogSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="flex min-w-0 flex-col gap-0.5" aria-label={title}>
+      <h4 className="text-2xs font-medium text-muted-foreground">{title}</h4>
+      {children}
+    </section>
+  );
+}
+
+export type WorkLogArg = { readonly label: string; readonly value: ReactNode };
+
+/**
+ * The one layout every expanded work-log row uses, in this order: the call's
+ * arguments as key/values (or the full command), the result as a summary
+ * line over an output preview, and the raw call last behind a quiet
+ * disclosure. Empty parts are left out; a row with no parts is not
+ * expandable at all.
+ */
+export function WorkLogExpansion({
+  args,
+  command,
+  resultSummary,
+  output,
+  raw,
+  failed = false,
+  onToggle,
+}: {
+  args?: ReadonlyArray<WorkLogArg> | undefined;
+  command?: ReactNode;
+  resultSummary?: string | null | undefined;
+  output?: ReactNode;
+  raw?: ReactNode;
+  failed?: boolean;
+  onToggle?: ((collapsed: boolean) => void) | undefined;
+}) {
+  const hasArgs = (args?.length ?? 0) > 0 || Boolean(command);
+  const hasResult = Boolean(resultSummary) || Boolean(output);
+  return (
+    <div
+      className="ms-7 flex min-w-0 flex-col gap-2.5 pt-0.5 pb-2 text-xs"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      {hasArgs ? (
+        <WorkLogSection title="Arguments">
+          {command}
+          {args && args.length > 0 ? (
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-secondary-label select-text">
+              {args.map((row) => (
+                <div key={row.label} className="contents">
+                  <dt className="text-muted-foreground">{row.label}</dt>
+                  <dd className="line-clamp-4 min-w-0 break-words whitespace-pre-wrap">
+                    {row.value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+        </WorkLogSection>
+      ) : null}
+      {hasResult ? (
+        <WorkLogSection title="Result">
+          {resultSummary ? (
+            <p
+              className={cn(
+                "min-w-0 break-words select-text",
+                failed ? "text-destructive" : "text-secondary-label",
+              )}
+            >
+              {resultSummary}
+            </p>
+          ) : null}
+          {output ? <div className="min-w-0 cursor-auto select-text">{output}</div> : null}
+        </WorkLogSection>
+      ) : null}
+      {raw ? (
+        <WorkLogDisclosure label="Raw" onToggle={onToggle}>
+          {raw}
+        </WorkLogDisclosure>
+      ) : null}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
 import { memo, type ReactNode, Suspense, use, useMemo } from "react";
+import type { WorkLogToolPresentation } from "@t3tools/client-runtime/work-log/tool-registry";
 
 import { useTheme } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";
@@ -26,6 +27,7 @@ import { CommandOutputPanel, useCommandOutputStreaming } from "./CommandOutputPa
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ShellCommandBlock } from "./ShellCommandBlock";
+import { WorkLogExpansion, type WorkLogArg } from "./WorkLog";
 
 interface V2ItemInspectorProps {
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
@@ -448,5 +450,266 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
         </div>
       ) : null}
     </div>
+  );
+});
+
+/** The item as stored, for the Raw disclosure. Built only once Raw opens. */
+function RawItem({ item }: { readonly item: OrchestrationV2ProjectedTurnItem["item"] }) {
+  const raw =
+    item.type === "dynamic_tool"
+      ? { tool: item.toolName, input: item.input, output: item.output }
+      : item.type === "command_execution"
+        ? { command: item.input, exitCode: item.exitCode, output: item.output }
+        : item;
+  return <StructuredValue value={raw} highlightJson />;
+}
+
+function argRows(
+  rows: ReadonlyArray<readonly [string, string]>,
+  toolName: string | null,
+): WorkLogArg[] {
+  return rows.map(([label, value]) => ({
+    label,
+    value:
+      label === "code" && isJavaScriptReplTool(toolName) ? (
+        <StructuredValue value={value} language="typescript" />
+      ) : (
+        value
+      ),
+  }));
+}
+
+/**
+ * A projected row's expanded body in the shared work-log layout: arguments,
+ * result (summary over an output preview), then the raw item. Registry tools
+ * with readable detail rows show those as their arguments, so ids stay in Raw.
+ */
+export const V2ItemExpansion = memo(function V2ItemExpansion(props: {
+  readonly projectedItem: OrchestrationV2ProjectedTurnItem;
+  readonly environmentId: EnvironmentId;
+  readonly tool: WorkLogToolPresentation | null;
+  readonly workspaceRoot?: string | undefined;
+  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onRollbackCheckpoint?: V2ItemInspectorProps["onRollbackCheckpoint"];
+  readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
+  readonly onToggle?: ((collapsed: boolean) => void) | undefined;
+}) {
+  const streamsOutput =
+    useCommandOutputStreaming(props.environmentId) &&
+    props.projectedItem.item.type === "command_execution";
+  const fetched = useFetchedTurnItem(props.projectedItem, props.environmentId, streamsOutput);
+  const support = useV2ItemSupport({
+    environmentId: props.environmentId,
+    sourceThreadId: props.projectedItem.sourceThreadId,
+    sourceItemId: props.projectedItem.sourceItemId,
+  });
+  const item = fetched.item;
+  const output = fetched.output;
+  const tool = props.tool;
+  const failed = item.status === "failed";
+  const registryArgs: WorkLogArg[] | undefined =
+    tool?.raw === "collapsed" && tool.detail.length > 0 ? [...tool.detail] : undefined;
+  const toolOutput = <ToolOutput {...output} onImageExpand={props.onImageExpand} />;
+  const hasToolOutput =
+    output.output !== null ||
+    output.images.length > 0 ||
+    output.pending ||
+    output.error !== null ||
+    output.empty;
+  const mono = (children: ReactNode) => (
+    <div className={cn("space-y-1.5 text-muted-foreground", monoClassName)}>{children}</div>
+  );
+  let args: WorkLogArg[] | undefined = registryArgs;
+  let command: ReactNode = null;
+  let resultSummary: string | null = tool?.result ?? null;
+  let body: ReactNode = null;
+  switch (item.type) {
+    case "command_execution": {
+      const call = toolCallLines({ command: item.input });
+      command = call.command ? <ShellCommandBlock command={call.command} /> : null;
+      if (item.exitCode !== undefined && item.exitCode !== 0) {
+        resultSummary = `Exited with code ${item.exitCode}`;
+      }
+      body = streamsOutput ? (
+        <CommandOutputPanel
+          environmentId={props.environmentId}
+          threadId={props.projectedItem.sourceThreadId}
+          itemId={props.projectedItem.sourceItemId}
+        />
+      ) : hasToolOutput ? (
+        mono(toolOutput)
+      ) : null;
+      break;
+    }
+    case "dynamic_tool": {
+      if (!args) {
+        const call = toolCallLines({ args: item.input });
+        args = call.args ? argRows(call.args, item.toolName) : undefined;
+        command = call.argsText ? <StructuredValue value={call.argsText} highlightJson /> : null;
+      }
+      if (!resultSummary && failed) resultSummary = "Failed";
+      body = hasToolOutput ? mono(toolOutput) : null;
+      break;
+    }
+    case "file_change":
+      args ??= [
+        {
+          label: "file",
+          value: formatWorkspaceRelativePath(item.fileName, props.workspaceRoot),
+        },
+      ];
+      if (item.additions !== undefined || item.deletions !== undefined) {
+        resultSummary = `+${formatDiffCount(item.additions ?? 0)} −${formatDiffCount(item.deletions ?? 0)}`;
+      }
+      body =
+        (item.status === "failed" && item.diffStr?.trim()) || item.changes?.length ? (
+          <div className="space-y-1.5">
+            {item.status === "failed" && item.diffStr?.trim() ? (
+              <StructuredValue value={item.diffStr} />
+            ) : null}
+            {item.changes?.length ? (
+              <ul className="space-y-1 font-mono text-muted-foreground">
+                {item.changes.map((change, index) => (
+                  <li key={`${change.operation}:${change.path}:${index}`}>
+                    {change.operation} {change.oldPath ? `${change.oldPath} → ` : ""}
+                    {formatWorkspaceRelativePath(change.path, props.workspaceRoot)}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null;
+      break;
+    case "file_search":
+      args ??= item.pattern?.trim() ? [{ label: "pattern", value: item.pattern }] : undefined;
+      body = item.results?.length ? (
+        <ul className="max-h-64 space-y-1 overflow-auto">
+          {item.results.map((result) => (
+            <li key={JSON.stringify(result)}>
+              <span className="font-mono text-foreground/80">
+                {formatWorkspaceRelativePath(result.fileName, props.workspaceRoot)}
+                {result.line === undefined ? "" : `:${result.line}`}
+              </span>
+              {result.preview ? (
+                <p className="mt-0.5 line-clamp-2 text-muted-foreground">{result.preview}</p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null;
+      break;
+    case "web_search": {
+      const queries = webSearchQueries(item.patterns);
+      args ??= queries.map((query, index) => ({
+        label: queries.length > 1 ? `query ${index + 1}` : "query",
+        value: query,
+      }));
+      body = item.results?.length ? (
+        <ul className="max-h-64 space-y-1.5 overflow-auto">
+          {item.results.map((result) => {
+            const safeHref = resolveExternalWebLinkHref(result.url);
+            return (
+              <li key={JSON.stringify(result)}>
+                {safeHref ? (
+                  <a
+                    href={safeHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="link inline-flex items-center gap-1 font-medium"
+                  >
+                    {result.title ?? result.url}
+                    <ExternalLinkIcon className="size-3" />
+                  </a>
+                ) : (
+                  <p className="font-medium text-foreground">
+                    {result.title ?? result.url ?? "Search result"}
+                  </p>
+                )}
+                {result.snippet ? (
+                  <p className="line-clamp-2 text-muted-foreground">{result.snippet}</p>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null;
+      break;
+    }
+    case "approval_request":
+      body = <StructuredValue value={item.prompt} />;
+      break;
+    case "user_input_request":
+      body = (
+        <StructuredValue value={item.questions.map((question) => question.question).join("\n\n")} />
+      );
+      break;
+    case "notification":
+      body = <StructuredValue value={item.detail} />;
+      break;
+    case "system_notice":
+      body = <StructuredValue value={item.message} />;
+      break;
+    case "error":
+      resultSummary = item.failure.message;
+      break;
+    case "proposed_plan":
+      body = <StructuredValue value={item.markdown} />;
+      break;
+    case "todo_list":
+      body = (
+        <StructuredValue
+          value={item.steps
+            .map((step) => `${step.status === "completed" ? "✓" : "○"} ${step.text}`)
+            .join("\n")}
+        />
+      );
+      break;
+    case "checkpoint":
+      resultSummary = `${support.checkpoint?.status ?? item.status} · ${item.files.length} files`;
+      body =
+        props.onRollbackCheckpoint && support.checkpoint?.status === "ready" ? (
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() =>
+              props.onRollbackCheckpoint?.({
+                checkpointId: item.checkpointId,
+                scopeId: item.scopeId,
+              })
+            }
+          >
+            <RotateCcwIcon className="size-3" />
+            Roll back
+          </Button>
+        ) : null;
+      break;
+    case "fork":
+      body = (
+        <Button size="xs" variant="outline" onClick={() => props.onOpenThread(item.targetThreadId)}>
+          <GitBranchIcon className="size-3" />
+          Open fork
+        </Button>
+      );
+      break;
+    case "subagent":
+      args ??= item.prompt.trim() ? [{ label: "task", value: item.prompt }] : undefined;
+      resultSummary = item.result?.trim() || resultSummary;
+      break;
+    case "handoff":
+      resultSummary = `${item.fromProviderInstanceIds.join(", ")} → ${item.toProviderInstanceId} · ${support.contextHandoff?.status ?? item.status}`;
+      break;
+    default:
+      break;
+  }
+  return (
+    <WorkLogExpansion
+      args={args}
+      command={command}
+      resultSummary={resultSummary}
+      output={body}
+      failed={failed}
+      raw={<RawItem item={item} />}
+      onToggle={props.onToggle}
+    />
   );
 });

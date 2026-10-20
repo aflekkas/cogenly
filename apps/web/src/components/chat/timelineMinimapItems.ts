@@ -1,3 +1,4 @@
+import { markdownPreviewText } from "@t3tools/client-runtime/work-log/reasoning-text";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
 
 export interface TimelineMinimapItem {
@@ -48,8 +49,9 @@ function resolveFinalAssistantTextForTurn(
   return finalAssistantText;
 }
 
+/** Previews read as plain text: no literal `**`, `#` or `[link](url)` markup. */
 function compactMinimapPreview(text: string | null | undefined) {
-  const compact = text?.replace(/\s+/g, " ").trim() ?? "";
+  const compact = text ? markdownPreviewText(text) : "";
   return compact.length > 0 ? compact : null;
 }
 

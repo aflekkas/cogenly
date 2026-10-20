@@ -11,6 +11,7 @@ import {
   WorkLogList,
   WorkLogRow,
   WorkLogChevron,
+  WorkLogExpansion,
 } from "./WorkLog";
 import { PullRequestGlyph } from "../changeRequestIcons";
 import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
@@ -71,10 +72,7 @@ import {
   type WorkLogToolTarget,
 } from "@t3tools/client-runtime/work-log/tool-registry";
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
-import {
-  turnItemHasDetail,
-  turnItemNeedsDetailFetch,
-} from "@t3tools/client-runtime/work-log/item-detail";
+import { turnItemHasDetail } from "@t3tools/client-runtime/work-log/item-detail";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import {
   subagentGroupSummary,
@@ -93,7 +91,6 @@ import { claudeSkillInvocation } from "@t3tools/shared/toolActivity";
 import { observeVisibleAnimation } from "../../lib/visibleAnimation";
 import {
   createContext,
-  Fragment,
   memo,
   use,
   useCallback,
@@ -308,14 +305,16 @@ import {
   formatDayAwareTimestamp,
   formatUpcomingTimestamp,
 } from "../../timestampFormat";
-import { FetchedToolOutput, V2ItemInspector } from "./V2ItemInspector";
+import { V2ItemExpansion, V2ItemInspector } from "./V2ItemInspector";
+import { useLastPresent } from "../ui/overlay-presence";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
-import { Collapsible, CollapsibleTrigger, CollapsiblePanel } from "../ui/collapsible";
 import {
   isV2LifecycleItem,
   SubagentAvatar,
   SubagentElapsed,
   SubagentNotificationLink,
+  SubagentHoverCardGroup,
+  type SubagentRowDisclosure,
   V2LifecycleRow,
   type HandoffTimelineRun,
 } from "./V2LifecycleRow";
@@ -1012,6 +1011,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     worktreeSetup,
   ]);
   const rows = useStableRows(rawRows, listIdentityKey);
+  const justSentMessageIds = useJustSentMessageIds(rows, listIdentityKey);
   // Run status/timestamps churn on every stream event; the shared row context
   // must not change with them or every timeline row re-renders per event.
   const runs = useStableHandoffRuns(runsProp);
@@ -1730,82 +1730,84 @@ const ConversationTimeline = memo(function ConversationTimeline({
   return (
     <MarkdownFindContext value={findActive}>
       <TimelineRowCtx value={sharedState}>
-        <TimelineRowActivityCtx value={activityState}>
-          <TooltipScrollDismissArea
-            ref={setTimelineViewportElement}
-            className="relative h-full min-h-0"
-            style={holdingFirstLayout ? FIRST_LAYOUT_HOLD_STYLE : undefined}
-            data-assistant-citation-viewport="true"
-            data-timeline-hold={holdingFirstLayout ? "true" : undefined}
-          >
-            {onCiteAssistantText && citationThreadRef ? (
-              <AssistantSelectionToolbar
-                viewport={timelineViewportElement}
-                threadRef={citationThreadRef}
-                onCite={onCiteAssistantText}
+        <JustSentMessagesCtx value={justSentMessageIds}>
+          <TimelineRowActivityCtx value={activityState}>
+            <TooltipScrollDismissArea
+              ref={setTimelineViewportElement}
+              className="relative h-full min-h-0"
+              style={holdingFirstLayout ? FIRST_LAYOUT_HOLD_STYLE : undefined}
+              data-assistant-citation-viewport="true"
+              data-timeline-hold={holdingFirstLayout ? "true" : undefined}
+            >
+              {onCiteAssistantText && citationThreadRef ? (
+                <AssistantSelectionToolbar
+                  viewport={timelineViewportElement}
+                  threadRef={citationThreadRef}
+                  onCite={onCiteAssistantText}
+                />
+              ) : null}
+              <LegendList<MessagesTimelineRow>
+                ref={setTimelineList}
+                data={rows}
+                extraData={`${listIdentityKey}:${rows.length}`}
+                keyExtractor={keyExtractor}
+                getItemType={getItemType}
+                renderItem={renderItem}
+                estimatedItemSize={90}
+                initialScrollAtEnd={
+                  !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
+                }
+                // Legend needs a data refresh to mount new pins without a scroll event.
+                dataVersion={readyCitationRequest?.key ?? listIdentityKey}
+                {...(alwaysRender ? { alwaysRender } : {})}
+                onLoad={handleListLoad}
+                {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+                contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
+                maintainScrollAtEnd={
+                  citationPositioning ||
+                  (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
+                  anchoredEndSpace ||
+                  !liveFollowEnabled ||
+                  fullscreenAppRowId !== null ||
+                  disclosureToggleSettling
+                    ? false
+                    : TIMELINE_MAINTAIN_SCROLL_AT_END
+                }
+                maintainVisibleContentPosition={
+                  findActive ||
+                  citationPositioning ||
+                  (restoringThreadPosition && rememberedPosition?.atEnd === false)
+                    ? false
+                    : maintainVisibleContentPosition
+                }
+                maintainScrollAtEndThreshold={1}
+                onScroll={handleScroll}
+                onItemSizeChanged={handleItemSizeChanged}
+                className={cn(
+                  "messages-timeline-scroll scroll-fade-y scrollbar-gutter-both min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+                )}
+                ListHeaderComponent={listHeader}
+                ListFooterComponent={timelineListFooter}
               />
-            ) : null}
-            <LegendList<MessagesTimelineRow>
-              ref={setTimelineList}
-              data={rows}
-              extraData={`${listIdentityKey}:${rows.length}`}
-              keyExtractor={keyExtractor}
-              getItemType={getItemType}
-              renderItem={renderItem}
-              estimatedItemSize={90}
-              initialScrollAtEnd={
-                !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
-              }
-              // Legend needs a data refresh to mount new pins without a scroll event.
-              dataVersion={readyCitationRequest?.key ?? listIdentityKey}
-              {...(alwaysRender ? { alwaysRender } : {})}
-              onLoad={handleListLoad}
-              {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-              contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
-              maintainScrollAtEnd={
-                citationPositioning ||
-                (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
-                anchoredEndSpace ||
-                !liveFollowEnabled ||
-                fullscreenAppRowId !== null ||
-                disclosureToggleSettling
-                  ? false
-                  : TIMELINE_MAINTAIN_SCROLL_AT_END
-              }
-              maintainVisibleContentPosition={
-                findActive ||
-                citationPositioning ||
-                (restoringThreadPosition && rememberedPosition?.atEnd === false)
-                  ? false
-                  : maintainVisibleContentPosition
-              }
-              maintainScrollAtEndThreshold={1}
-              onScroll={handleScroll}
-              onItemSizeChanged={handleItemSizeChanged}
-              className={cn(
-                "messages-timeline-scroll scroll-fade-y scrollbar-gutter-both min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
-              )}
-              ListHeaderComponent={listHeader}
-              ListFooterComponent={timelineListFooter}
-            />
-            <TimelineMinimap
-              items={minimapItems}
-              hasPersistentGutter={minimapHasPersistentGutter}
-              hitStripWidth={minimapHitStripWidth}
-              currentIndex={minimapCurrentIndex}
-              stripMap={minimapStripMap}
-              onWheel={forwardMinimapWheel}
-              onSelect={(item) => {
-                onManualNavigation();
-                void listRef.current?.scrollToIndex({
-                  index: item.rowIndex,
-                  animated: true,
-                  viewOffset: 24 + timelineHeaderInset(listRef.current?.getScrollableNode()),
-                });
-              }}
-            />
-          </TooltipScrollDismissArea>
-        </TimelineRowActivityCtx>
+              <TimelineMinimap
+                items={minimapItems}
+                hasPersistentGutter={minimapHasPersistentGutter}
+                hitStripWidth={minimapHitStripWidth}
+                currentIndex={minimapCurrentIndex}
+                stripMap={minimapStripMap}
+                onWheel={forwardMinimapWheel}
+                onSelect={(item) => {
+                  onManualNavigation();
+                  void listRef.current?.scrollToIndex({
+                    index: item.rowIndex,
+                    animated: true,
+                    viewOffset: 24 + timelineHeaderInset(listRef.current?.getScrollableNode()),
+                  });
+                }}
+              />
+            </TooltipScrollDismissArea>
+          </TimelineRowActivityCtx>
+        </JustSentMessagesCtx>
       </TimelineRowCtx>
     </MarkdownFindContext>
   );
@@ -1937,16 +1939,28 @@ function TimelineMinimap({
   );
   const navigationInteractive =
     resolveTimelineMinimapNavigationInteractive(hitStripWidth) && !passThrough;
+  // The preview stays mounted with its last content so it fades out in place,
+  // and glides between lines while open instead of re-popping at each one.
+  const previewOpen = activeItem !== null;
+  const shownPreview = useLastPresent(activeItem);
+  const shownIndex = useLastPresent(resolvedActiveIndex);
+  const [previewGlides, setPreviewGlides] = useState(false);
+  // Opening places the preview at once and fades it in; only later moves glide.
+  useEffect(() => {
+    setPreviewGlides(previewOpen);
+  }, [previewOpen]);
+  const previewIndex =
+    shownIndex !== null && shownIndex !== undefined && shownIndex < items.length
+      ? shownIndex
+      : null;
   const activeTopPercent =
-    resolvedActiveIndex === null
-      ? 0
-      : resolveTimelineMinimapTopPercent(resolvedActiveIndex, items.length);
+    previewIndex === null ? 0 : resolveTimelineMinimapTopPercent(previewIndex, items.length);
   const activeTooltipTranslate =
-    resolvedActiveIndex === null
+    previewIndex === null
       ? "-50%"
-      : resolvedActiveIndex === 0
+      : previewIndex === 0
         ? "0%"
-        : resolvedActiveIndex === items.length - 1
+        : previewIndex === items.length - 1
           ? "-100%"
           : "-50%";
   const resolvedCurrentIndex =
@@ -2098,8 +2112,7 @@ function TimelineMinimap({
                 <span
                   aria-hidden="true"
                   className={cn(
-                    "group/strip pointer-events-none absolute right-0 h-0.5 w-6 origin-right -translate-y-1/2 rounded-full transition-transform duration-150",
-                    activeDistance === 0 ? "bg-muted-foreground/75" : "bg-muted-foreground/35",
+                    "group/strip pointer-events-none absolute right-0 h-0.5 w-6 origin-right -translate-y-1/2 rounded-full bg-muted-foreground/35 transition-transform duration-200 ease-out motion-reduce:transition-none",
                     activeDistance === 0
                       ? "scale-x-100"
                       : activeDistance === 1
@@ -2120,25 +2133,41 @@ function TimelineMinimap({
                   }}
                   style={{ top }}
                 >
-                  <span className="absolute inset-0 rounded-full bg-foreground/90 opacity-0 transition-opacity duration-150 group-data-[in-view=true]/strip:opacity-100" />
+                  {/* The hovered line brightens by fading an overlay, never by repainting its fill. */}
+                  <span
+                    className={cn(
+                      "absolute inset-0 rounded-full bg-muted-foreground/60 transition-opacity duration-200 ease-out",
+                      activeDistance === 0 ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <span className="absolute inset-0 rounded-full bg-foreground/90 opacity-0 transition-opacity duration-200 ease-out group-data-[in-view=true]/strip:opacity-100" />
                 </span>
               );
             })}
-            {activeItem ? (
+            {shownPreview ? (
               <span
-                className="pointer-events-auto absolute right-8 w-80 cursor-text select-text"
+                aria-hidden={!previewOpen}
+                className={cn(
+                  "absolute right-8 w-80 origin-right cursor-text select-text duration-200 ease-out motion-reduce:transition-opacity",
+                  previewGlides
+                    ? "transition-[top,translate,opacity,scale]"
+                    : "transition-[opacity,scale]",
+                  previewOpen
+                    ? "pointer-events-auto scale-100 opacity-100"
+                    : "pointer-events-none scale-95 opacity-0 motion-reduce:scale-100",
+                )}
                 data-minimap-preview
                 onMouseMove={(event) => event.stopPropagation()}
                 style={{
                   top: `${activeTopPercent}%`,
-                  transform: `translateY(${activeTooltipTranslate})`,
+                  translate: `0 ${activeTooltipTranslate}`,
                 }}
               >
                 <span className="dropdown-glass surface-raised surface-raised-floating block rounded-xl p-3 text-left text-popover-foreground">
                   <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium leading-5">
-                    {activeItem.userText ?? "User message"}
+                    {shownPreview.userText ?? "User message"}
                   </span>
-                  {activeItem.assistantText ? (
+                  {shownPreview.assistantText ? (
                     <span
                       className="mt-1 max-h-[3.75rem] overflow-hidden text-muted-foreground text-sm leading-5"
                       style={{
@@ -2147,7 +2176,7 @@ function TimelineMinimap({
                         WebkitLineClamp: 3,
                       }}
                     >
-                      {activeItem.assistantText}
+                      {shownPreview.assistantText}
                     </span>
                   ) : null}
                 </span>
@@ -2465,6 +2494,11 @@ function MessageAuthorHeading({ children }: { children: string }) {
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const { onImageExpand, onFileOpen } = ctx;
+  const justSent = use(JustSentMessagesCtx);
+  // Read once per mount: a remount after the send has played stays still.
+  const [entering] = useState(() => justSent.has(row.message.id));
+  // A send the server has not confirmed yet has no run or projected item.
+  const unconfirmed = entering && row.message.runId === null && row.projectedItem === undefined;
   const senderThreadId = row.message.senderThreadId;
   const resources = useMemo(
     () => selectMessageImageResources(row.message.attachments),
@@ -2644,7 +2678,15 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   }
 
   return (
-    <div className="group flex flex-col items-end gap-1 pe-(--chat-content-inset)">
+    <div
+      className={cn(
+        "group flex flex-col items-end gap-1 pe-(--chat-content-inset)",
+        entering && "animate-message-send",
+      )}
+      onAnimationEnd={(event) => {
+        if (event.target === event.currentTarget) justSent.delete(row.message.id);
+      }}
+    >
       {userMessage.attribution === "automation" ? (
         <p
           className="me-1 text-2xs text-muted-foreground/70"
@@ -2685,9 +2727,15 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         </p>
       ) : null}
       {row.message.inputIntent && row.message.inputIntent !== "turn_start" ? (
-        <UserMessageIntentMarker intent={row.message.inputIntent} />
+        <UserMessageIntentMarker intent={row.message.inputIntent} entering={entering} />
       ) : null}
-      <div className="corner-glow relative max-w-[80%] rounded-2xl [--corner-glow:4%] border border-(--surface-edge,rgb(255_255_255/4%)) bg-message shadow-(--surface-halo,none) px-4.5 py-3.5 text-message-foreground">
+      <div
+        className={cn(
+          "corner-glow relative max-w-[80%] rounded-2xl [--corner-glow:4%] border border-(--surface-edge,rgb(255_255_255/4%)) bg-message shadow-(--surface-halo,none) px-4.5 py-3.5 text-message-foreground transition-opacity duration-200 ease-out",
+          unconfirmed && "opacity-80",
+        )}
+        data-message-pending={unconfirmed ? "true" : undefined}
+      >
         <MessageAuthorHeading>You</MessageAuthorHeading>
         {(regularImages.length > 0 || userVideos.length > 0) && (
           <div className="mb-2 grid max-w-[210px] grid-cols-2 gap-2">
@@ -2849,8 +2897,11 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
 function UserMessageIntentMarker({
   intent,
+  entering = false,
 }: {
   readonly intent: NonNullable<ChatMessage["inputIntent"]>;
+  /** Fades in just after a message that was just sent. */
+  readonly entering?: boolean;
 }) {
   const presentation =
     intent === "queued_turn"
@@ -2873,7 +2924,10 @@ function UserMessageIntentMarker({
       <TooltipTrigger
         render={
           <div
-            className="me-1 flex items-center justify-end gap-1 text-xs leading-none text-muted-foreground"
+            className={cn(
+              "me-1 flex items-center justify-end gap-1 text-xs leading-none text-muted-foreground",
+              entering && "animate-message-send-label",
+            )}
             data-user-message-intent={intent}
           />
         }
@@ -3448,6 +3502,9 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
       />
     );
   }
+  if (item.type === "subagent") {
+    return <V2SubagentRow row={row} />;
+  }
   if (isV2LifecycleItem(item)) {
     return (
       <V2LifecycleRow
@@ -3622,6 +3679,24 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
   );
 }
 
+/** A turn's only subagent: its own row, open state kept by the timeline. */
+function V2SubagentRow({ row }: { row: Extract<TimelineRow, { kind: "event" }> }) {
+  const ctx = use(TimelineRowCtx);
+  const disclosure = useSubagentRowDisclosure(row.id);
+  return (
+    <V2LifecycleRow
+      environmentId={ctx.activeThreadEnvironmentId}
+      item={row.projectedItem.item}
+      createdAt={row.createdAt}
+      timestampFormat={ctx.timestampFormat}
+      providerStatuses={ctx.providerStatuses}
+      runs={ctx.runs}
+      onOpenThread={ctx.onOpenThread}
+      disclosure={disclosure}
+    />
+  );
+}
+
 /**
  * One elapsed span for the whole group: first launch to last settle, ticking
  * while any member works. A settled member without a completion time leaves
@@ -3659,6 +3734,33 @@ function subagentGroupTiming(
   };
 }
 
+/** Subagent rows keep their open state in the timeline's view state and hold its scroll anchor. */
+function useSubagentRowDisclosure(anchorKey: string): SubagentRowDisclosure {
+  const { workGroupViewState, onToggleWorkEntry } = use(TimelineRowCtx);
+  return useMemo(
+    () => ({
+      isOpen: (subagentId) => workGroupViewState.expandedEntries.has(`subagent:${subagentId}`),
+      onToggle: (subagentId, collapsed) => {
+        onToggleWorkEntry(anchorKey, collapsed);
+        if (collapsed) workGroupViewState.expandedEntries.delete(`subagent:${subagentId}`);
+        else workGroupViewState.expandedEntries.add(`subagent:${subagentId}`);
+      },
+    }),
+    [anchorKey, onToggleWorkEntry, workGroupViewState],
+  );
+}
+
+/** Ids rendered before now; only later ones animate in, never a remount's first paint. */
+function useArrivals(ids: ReadonlyArray<string>): ReadonlySet<string> {
+  const [seen] = useState(() => new Set(ids));
+  return useMemo(() => new Set(ids.filter((id) => !seen.has(id))), [ids, seen]);
+}
+
+/**
+ * Every subagent one turn launched, native or delegated, as one row: stacked
+ * provider avatars, "N subagents", live working/done/failed counts and the
+ * span from first launch to last settle. It opens smoothly to each agent's row.
+ */
 const V2SubagentGroup = memo(function V2SubagentGroup({
   row,
 }: {
@@ -3669,6 +3771,7 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
   const [expanded, setExpanded] = useState(() =>
     ctx.workGroupViewState.expandedEntries.has(groupId),
   );
+  const disclosure = useSubagentRowDisclosure(row.id);
   const members = (row.subagents ?? [row.projectedItem]).flatMap(({ item }) =>
     item.type === "subagent" ? [item] : [],
   );
@@ -3687,26 +3790,28 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
       completedAt: live?.completedAt ?? item.completedAt,
     };
   });
+  const arrivals = useArrivals(agents.map(({ item }) => item.id));
   const summary = subagentGroupSummary(agents);
   const label = `${members.length} ${members.length === 1 ? "subagent" : "subagents"}`;
   const statusSummary = summarizeSubagentStatuses(agents.map(({ status }) => status));
-  const toggleExpanded = (open: boolean) => {
+  const toggle = () => {
     ctx.onToggleWorkEntry(row.id, expanded);
-    if (open) ctx.workGroupViewState.expandedEntries.add(groupId);
-    else ctx.workGroupViewState.expandedEntries.delete(groupId);
-    setExpanded(open);
+    if (expanded) ctx.workGroupViewState.expandedEntries.delete(groupId);
+    else ctx.workGroupViewState.expandedEntries.add(groupId);
+    setExpanded(!expanded);
   };
   return (
     <WorkLogBlock continues={row.continuesWorkLog}>
-      <Collapsible open={expanded} onOpenChange={toggleExpanded} data-subagent-group>
-        <CollapsibleTrigger
+      <div data-subagent-group className="group/timeline-row flex min-w-0 flex-col">
+        <button
+          type="button"
           aria-label={label}
           aria-description={statusSummary}
+          aria-expanded={expanded}
+          onClick={toggle}
           className={cn(
-            "flex w-full min-w-0 items-center gap-3 py-2 text-left transition-opacity hover:opacity-100",
-            expanded || summary.active
-              ? "text-foreground opacity-100"
-              : "text-muted-foreground opacity-55",
+            "flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-1.5 py-1.5 text-left state-hover state-fade focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+            expanded || summary.active ? "text-foreground" : "text-secondary-label",
           )}
         >
           <span className="flex shrink-0 items-center -space-x-1.5" aria-hidden>
@@ -3718,20 +3823,36 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
                   (provider) => provider.instanceId === item.providerInstanceId,
                 )}
                 status={agents.length === 1 ? status : undefined}
+                className={arrivals.has(item.id) ? "swap-motion" : undefined}
               />
             ))}
             {agents.length > 3 ? (
-              <span className="inline-flex size-6 items-center justify-center rounded-full bg-muted text-3xs font-medium text-muted-foreground ring-2 ring-background">
+              <span
+                key={agents.length}
+                className="inline-flex size-6 items-center justify-center rounded-full bg-muted text-3xs font-medium text-muted-foreground ring-2 ring-background swap-motion"
+              >
                 +{agents.length - 3}
               </span>
             ) : null}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-xs font-semibold">{label}</span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span key={label} className="truncate text-xs font-semibold swap-motion">
+                {label}
+              </span>
+              <span className="flex size-4 shrink-0 items-center justify-center">
+                <WorkLogChevron open={expanded} reveal />
+              </span>
+            </span>
             <span
+              key={statusSummary}
               className={cn(
-                "block truncate text-3xs text-muted-foreground",
-                summary.active ? "text-info" : summary.failed && "text-destructive",
+                "block truncate text-3xs swap-motion",
+                summary.active
+                  ? "text-info"
+                  : summary.failed
+                    ? "text-destructive"
+                    : "text-muted-foreground",
               )}
             >
               {statusSummary}
@@ -3740,18 +3861,11 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
           <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
             <SubagentElapsed agent={subagentGroupTiming(agents)} />
           </span>
-          <ChevronDownIcon
-            aria-hidden
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform",
-              expanded && "rotate-180",
-            )}
-          />
-        </CollapsibleTrigger>
-        {/* Virtualized rows must settle before disclosure scroll anchoring resumes. */}
-        <CollapsiblePanel animate={false}>
-          {expanded ? (
-            <div className="mt-1 mb-1 rounded-lg border border-border/60 bg-card/30 p-1">
+        </button>
+        <WorkLogCollapse open={expanded}>
+          {/* Indented under the stack, so each agent reads as a child of the turn's spawn. */}
+          <div className="ms-4 flex min-w-0 flex-col border-s border-border/60 ps-2 pt-0.5 pb-1">
+            <SubagentHoverCardGroup>
               {members.map((item) => (
                 <V2LifecycleRow
                   environmentId={ctx.activeThreadEnvironmentId}
@@ -3762,12 +3876,13 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
                   providerStatuses={ctx.providerStatuses}
                   runs={ctx.runs}
                   onOpenThread={ctx.onOpenThread}
+                  disclosure={disclosure}
                 />
               ))}
-            </div>
-          ) : null}
-        </CollapsiblePanel>
-      </Collapsible>
+            </SubagentHoverCardGroup>
+          </div>
+        </WorkLogCollapse>
+      </div>
     </WorkLogBlock>
   );
 });
@@ -4110,11 +4225,7 @@ function WorkEntryRunRow({
           ) : null}
         </span>
       }
-      trailing={
-        <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
-          <WorkLogChevron open={expanded} />
-        </span>
-      }
+      disclosure={expanded}
     >
       <WorkLogCollapse open={expanded}>
         <div className="ms-7" onClick={stopRowToggle} onKeyDown={stopRowToggle}>
@@ -4614,6 +4725,7 @@ function WorkGroupHeader(props: {
       ref={props.active && !props.failed ? observeVisibleAnimation : undefined}
       aria-label={props.failed ? `${props.label}, tool call failed` : props.label}
       aria-expanded={props.expanded}
+      disclosure={props.expanded}
       onClick={props.onToggle}
       icon={
         <ToolActivityIconView
@@ -5486,6 +5598,47 @@ function useStableHandoffRuns(
 
 /** Returns a structurally-shared copy of `rows`: for each row whose content
  *  hasn't changed since last call, the previous object reference is reused. */
+/** How recent a user message must be to count as just sent when it first shows up. */
+const JUST_SENT_WINDOW_MS = 15_000;
+/** A thread's first rows only animate a message this fresh: the send that opened it. */
+const FIRST_SEND_WINDOW_MS = 3_000;
+
+/** Ids of user messages that arrived while this thread was open, for the send motion. */
+const JustSentMessagesCtx = createContext<Set<string>>(new Set());
+
+/**
+ * Records user messages that appear after the thread's rows first load (a
+ * send or a steer), so only those play the send motion. History, paginated
+ * older messages and virtualized remounts never do.
+ */
+function useJustSentMessageIds(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  identity: string,
+): Set<string> {
+  const stateRef = useRef<{
+    identity: string;
+    primed: boolean;
+    known: Set<string>;
+    justSent: Set<string>;
+  } | null>(null);
+  if (stateRef.current?.identity !== identity) {
+    stateRef.current = { identity, primed: false, known: new Set(), justSent: new Set() };
+  }
+  const state = stateRef.current;
+  const now = Date.now();
+  for (const row of rows) {
+    if (row.kind !== "message" || row.message.role !== "user") continue;
+    if (state.known.has(row.message.id)) continue;
+    state.known.add(row.message.id);
+    const age = now - Date.parse(row.message.createdAt);
+    if (age < (state.primed ? JUST_SENT_WINDOW_MS : FIRST_SEND_WINDOW_MS)) {
+      state.justSent.add(row.message.id);
+    }
+  }
+  if (rows.length > 0) state.primed = true;
+  return state.justSent;
+}
+
 function useStableRows(rows: MessagesTimelineRow[], identity: string): MessagesTimelineRow[] {
   const prevState = useRef<StableMessagesTimelineRowsState>({
     byId: new Map<string, MessagesTimelineRow>(),
@@ -6084,25 +6237,24 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
             viewedImage ? viewedImagePath : null,
           )
       : null;
-  // Projected rows expand to the item inspector, so only offer a disclosure
-  // when it has something to show, even if that output still has to load.
-  // Reads and skills still fetch the output the timeline withheld.
-  const plainOutputFetches =
-    plainOutput !== undefined &&
-    workEntry.projectedItem !== undefined &&
-    turnItemNeedsDetailFetch(workEntry.projectedItem.item);
+  // Projected rows expand to the shared layout, so only offer a disclosure
+  // when the item has something to show, even if that output still has to load.
   const canExpandProjectedItem =
-    plainOutput !== undefined
-      ? Boolean(plainOutput || viewedImage || workEntry.questionAnswer || plainOutputFetches)
-      : workEntry.projectedItem === undefined
-        ? canExpand
-        : isReasoning
-          ? Boolean(workEntry.detail?.trim())
-          : Boolean(
-              viewedImage ||
-              workEntry.questionAnswer ||
-              turnItemHasDetail(workEntry.projectedItem.item),
-            );
+    workEntry.projectedItem === undefined
+      ? plainOutput !== undefined
+        ? Boolean(plainOutput || viewedImage || workEntry.questionAnswer)
+        : canExpand
+      : isReasoning
+        ? Boolean(workEntry.detail?.trim())
+        : Boolean(
+            viewedImage ||
+            workEntry.questionAnswer ||
+            turnItemHasDetail(workEntry.projectedItem.item),
+          );
+  const notifyNestedToggle = (collapsed: boolean) => {
+    if (groupView) groupView.onToggleEntry(collapsed);
+    else props.onToggleEntry?.(collapsed);
+  };
   // Reserve destructive row styling for severe failures, not routine tool errors.
   const iconWrapperClass = cn(
     "flex size-4 items-center justify-center",
@@ -6263,17 +6415,9 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           !toolIconAcceptsTint(entryToolIcon) ? (
             <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
           ) : null}
-          <span
-            className={cn(
-              "flex size-4 shrink-0 items-center justify-center",
-              !canExpandProjectedItem && "invisible",
-            )}
-            aria-hidden
-          >
-            <WorkLogChevron open={expanded} />
-          </span>
         </>
       }
+      disclosure={canExpandProjectedItem ? expanded : undefined}
     >
       <WorkLogCollapse open={expanded}>
         {expanded && viewedImage && threadRef ? (
@@ -6293,78 +6437,26 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           <QuestionAnswerHistory answer={workEntry.questionAnswer} />
         ) : null}
         {expanded && isReasoning ? <ReasoningTraceContent entries={[workEntry]} /> : null}
-        {expanded &&
-        !isReasoning &&
-        !workEntry.questionAnswer &&
-        canExpandProjectedItem &&
-        (expandedBody ||
-          plainOutputFetches ||
-          (workEntry.projectedItem && plainOutput === undefined)) ? (
-          <WorkLogDetails kind="panel">
-            {workEntry.projectedItem && plainOutput === undefined ? (
-              <RegistryToolDetail tool={tool}>
-                <V2ItemInspector
-                  projectedItem={workEntry.projectedItem}
-                  environmentId={ctx.activeThreadEnvironmentId}
-                  cwd={ctx.markdownCwd}
-                  workspaceRoot={workspaceRoot}
-                  onOpenThread={ctx.onOpenThread}
-                  onRollbackCheckpoint={ctx.onRollbackCheckpoint}
-                  onImageExpand={ctx.onImageExpand}
-                />
-              </RegistryToolDetail>
-            ) : (
-              <>
-                {expandedBody ? (
-                  <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
-                ) : null}
-                {plainOutputFetches && workEntry.projectedItem ? (
-                  <FetchedToolOutput
-                    projectedItem={workEntry.projectedItem}
-                    environmentId={ctx.activeThreadEnvironmentId}
-                    onImageExpand={onImageExpand}
-                  />
-                ) : null}
-              </>
-            )}
-          </WorkLogDetails>
+        {expanded && !isReasoning && !workEntry.questionAnswer && canExpandProjectedItem ? (
+          workEntry.projectedItem ? (
+            <V2ItemExpansion
+              projectedItem={workEntry.projectedItem}
+              environmentId={ctx.activeThreadEnvironmentId}
+              tool={tool}
+              workspaceRoot={workspaceRoot}
+              onOpenThread={ctx.onOpenThread}
+              onRollbackCheckpoint={ctx.onRollbackCheckpoint}
+              onImageExpand={ctx.onImageExpand}
+              onToggle={notifyNestedToggle}
+            />
+          ) : expandedBody ? (
+            <WorkLogExpansion
+              command={<pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>}
+            />
+          ) : null
         ) : null}
       </WorkLogCollapse>
     </WorkLogRow>
-  );
-}
-
-/**
- * Registry tools open to their readable detail rows; the raw call, with its
- * ids, stays one click further down. Other tools show the raw inspector directly.
- */
-function RegistryToolDetail({
-  tool,
-  children,
-}: {
-  tool: WorkLogToolPresentation | null;
-  children: ReactNode;
-}) {
-  if (tool?.raw !== "collapsed") return children;
-  return (
-    <div className="ms-7 flex flex-col gap-1.5 text-sm">
-      {tool.detail.length > 0 ? (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-secondary-label select-text">
-          {tool.detail.map((row) => (
-            <Fragment key={row.label}>
-              <dt className="text-muted-foreground">{row.label}</dt>
-              <dd className="min-w-0 break-words">{row.value}</dd>
-            </Fragment>
-          ))}
-        </dl>
-      ) : null}
-      <details className="group/raw">
-        <summary className="w-fit cursor-pointer text-muted-foreground text-xs select-none hover:text-foreground">
-          Raw call
-        </summary>
-        <div className="mt-1">{children}</div>
-      </details>
-    </div>
   );
 }
 

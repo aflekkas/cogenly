@@ -1,4 +1,15 @@
-import { MessageId, RunId } from "@t3tools/contracts";
+import {
+  MessageId,
+  NodeId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  RunId,
+  ThreadId,
+  TurnItemId,
+  type OrchestrationV2ProjectedTurnItem,
+  type OrchestrationV2TurnItem,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { TimelineEntry, WorkLogEntry } from "../../session-logic";
@@ -190,5 +201,100 @@ describe("collapseWorkEntryRuns", () => {
       "x1",
     ]);
     expect(runs[0]).toMatchObject({ kind: "run", id: "run:s1", icon: "search" });
+  });
+});
+
+describe("a turn's delegations read as one subagent row", () => {
+  const at = (second: number) => DateTime.makeUnsafe(Date.UTC(2026, 0, 1, 0, 0, second));
+  const base = (id: string, second: number) => ({
+    id: TurnItemId.make(id),
+    threadId: ThreadId.make("thread-parent"),
+    runId,
+    nodeId: null,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    parentItemId: null,
+    ordinal: second,
+    title: null,
+    startedAt: at(second),
+    completedAt: null,
+    updatedAt: at(second),
+  });
+  const projected = (item: OrchestrationV2TurnItem): OrchestrationV2ProjectedTurnItem => ({
+    position: item.ordinal,
+    visibility: "local",
+    sourceThreadId: item.threadId,
+    sourceItemId: item.id,
+    item,
+  });
+  const delegation = (id: string, second: number, task: string): TimelineEntry => {
+    const item: OrchestrationV2TurnItem = {
+      ...base(id, second),
+      type: "dynamic_tool",
+      status: "running",
+      toolName: "mcp__cogenly__delegate_task",
+      input: { task, mode: "wait" },
+    };
+    const createdAt = DateTime.formatIso(at(second));
+    return {
+      id,
+      kind: "work",
+      createdAt,
+      entry: {
+        id,
+        createdAt,
+        label: "Delegating a child task",
+        tone: "tool",
+        itemType: "dynamic_tool",
+        runId,
+        toolLifecycleStatus: "inProgress",
+        projectedItem: projected(item),
+        structuredPayload: item,
+      },
+    };
+  };
+  const child = (id: string, second: number, prompt: string): TimelineEntry => ({
+    id,
+    kind: "event",
+    createdAt: DateTime.formatIso(at(second)),
+    projectedItem: projected({
+      ...base(id, second),
+      type: "subagent",
+      status: "running",
+      subagentId: NodeId.make(`node-${id}`),
+      origin: "app_owned",
+      driver: ProviderDriverKind.make("claudeAgent"),
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      childThreadId: ThreadId.make(`thread-${id}`),
+      prompt,
+      result: null,
+    }),
+  });
+
+  it("hides running delegate rows that a child carries and groups the children", () => {
+    const rows = rowsFor(
+      [
+        messageEntry("user-1", "user", { at: 0 }),
+        delegation("d1", 1, "Render the bell"),
+        child("c1", 2, "Render the bell"),
+        delegation("d2", 3, "Find a cheaper tee"),
+        child("c2", 4, "Act as the research sub-agent for this task.\n\nFind a cheaper tee"),
+      ],
+      true,
+    );
+    const events = rows.filter((row) => row.kind === "event");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.kind === "event" && events[0].subagents?.map(({ item }) => item.id)).toEqual([
+      "c1",
+      "c2",
+    ]);
+    expect(
+      rows.some(
+        (row) =>
+          (row.kind === "work" || row.kind === "work-live") &&
+          row.groupedEntries.some((entry) => entry.id === "d1" || entry.id === "d2"),
+      ),
+    ).toBe(false);
   });
 });

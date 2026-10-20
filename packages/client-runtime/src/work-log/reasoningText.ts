@@ -46,3 +46,48 @@ export function reasoningPlainText(markdown: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+const HTML_ENTITIES: Readonly<Record<string, string>> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+/**
+ * One line of plain text from markdown or HTML-bearing agent output, for
+ * previews (subagent results, the minimap). Drops headings, emphasis, list
+ * markers, quotes, tables, code ticks and fences, HTML tags and link targets,
+ * keeping the words and emoji.
+ */
+export function markdownPreviewText(markdown: string): string {
+  return markdown
+    .replace(/^\s{0,3}(`{3,}|~{3,})[^\n]*$/gm, "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(https?:\/\/[^>\s]+)>/g, "$1")
+    .replace(/<\/?[A-Za-z][^<>]*>/g, " ")
+    .replace(/&(#\d+|[a-z]+);/gi, (entity, name: string) =>
+      name.startsWith("#")
+        ? String.fromCodePoint(Number(name.slice(1)))
+        : (HTML_ENTITIES[name.toLowerCase()] ?? entity),
+    )
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
+    .replace(/^\s{0,3}\[[^\]]+\]:\s+\S+.*$/gm, "")
+    .replace(/^\s{0,3}#{1,6}[ \t]+(.*?)[ \t]*#*[ \t]*$/gm, "$1")
+    .replace(/^\s{0,3}(?:=+|-{2,}|(?:[*_][ \t]*){3,})\s*$/gm, "")
+    .replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*(?::?-{3,}:?)?\s*$/gm, "")
+    .replace(/^\s*\|(.*)\|\s*$/gm, (_line, cells: string) => cells.split("|").join(" "))
+    .replace(/^\s{0,3}(?:>\s?)+/gm, "")
+    .replace(/^\s*(?:[-*+]|\d{1,9}[.)])\s+(?:\[[ xX]\]\s+)?/gm, "")
+    .replace(/(\*\*|__)(?=\S)([\s\S]+?)(?<=\S)\1/g, "$2")
+    .replace(/(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])/g, "$1")
+    .replace(/(?<![\w_])_(?=\S)([^_\n]+?)(?<=\S)_(?![\w_])/g, "$1")
+    .replace(/~~(?=\S)([\s\S]+?)(?<=\S)~~/g, "$1")
+    .replace(/`+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
