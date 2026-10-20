@@ -15,6 +15,7 @@ import { resolveT3McpToolId } from "./t3McpToolPresentation.ts";
 const MAX_PARSED_BYTES = 16_384;
 const MAX_METADATA_BYTES = 8_192;
 const MAX_ID_LENGTH = 256;
+const MAX_TITLE_LENGTH = 200;
 const MAX_THREADS = 100;
 const MAX_CONTENT_BLOCKS = 32;
 const MAX_ENVELOPE_DEPTH = 4;
@@ -41,8 +42,10 @@ interface CompactToolOutput {
   status?: "rolled_back";
   htmlRender?: HtmlRenderReference;
   [MCP_APP_OUTPUT_KEY]?: McpAppReference;
-  thread?: { threadId: string };
+  thread?: { threadId: string; title?: string };
   threads?: Array<{ threadId?: string; status?: "rolled_back" }>;
+  /** Hit count of a search-shaped result (`results` or `matches`), for work-log labels. */
+  resultCount?: number;
 }
 
 function readResult(value: unknown, budget: ResultReadBudget, depth = 0): ResultEnvelope {
@@ -108,7 +111,13 @@ function boundedId(value: unknown): string | undefined {
   return Array.from(value).join("");
 }
 
-/** Keeps only IDs and failure metadata used by T3's grouped tool summaries. */
+function boundedTitle(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const title = value.trim();
+  return title === "" || title.length > MAX_TITLE_LENGTH ? undefined : title;
+}
+
+/** Keeps only IDs, titles, counts and failure metadata used by work-log rows and summaries. */
 export function compactDynamicToolOutput(value: unknown): CompactToolOutput | undefined {
   const budget: ResultReadBudget = {
     remainingBytes: MAX_PARSED_BYTES,
@@ -132,7 +141,12 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
     const nestedThreadId = Predicate.isObject(data.thread)
       ? boundedId(data.thread.threadId)
       : undefined;
-    if (nestedThreadId !== undefined) output.thread = { threadId: nestedThreadId };
+    if (nestedThreadId !== undefined) {
+      const title = Predicate.isObject(data.thread) ? boundedTitle(data.thread.title) : undefined;
+      output.thread = { threadId: nestedThreadId, ...(title === undefined ? {} : { title }) };
+    }
+    const hits = Array.isArray(data.results) ? data.results : data.matches;
+    if (Array.isArray(hits)) output.resultCount = hits.length;
 
     if (Array.isArray(data.threads)) {
       let complete = data.threads.length <= MAX_THREADS;

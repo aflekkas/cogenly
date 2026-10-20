@@ -50,11 +50,20 @@ import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thr
 import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import {
+  liveActivityToolStatus,
   liveThoughtLine,
   resolveWorkEntryToolPresentation,
+  workEntryToolCall,
   resolveViewedImageAsset,
   workEntryViewedImagePath,
 } from "@t3tools/client-runtime/work-log/presentation";
+import { quietReasoningMarkdown } from "@t3tools/client-runtime/work-log/reasoning-text";
+import {
+  resolveWorkLogTool,
+  WORK_LOG_THOUGHT,
+  type WorkLogToolPresentation,
+  type WorkLogToolTarget,
+} from "@t3tools/client-runtime/work-log/tool-registry";
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
 import {
   turnItemHasDetail,
@@ -78,6 +87,7 @@ import { claudeSkillInvocation, isJavaScriptReplTool } from "@t3tools/shared/too
 import { observeVisibleAnimation } from "../../lib/visibleAnimation";
 import {
   createContext,
+  Fragment,
   memo,
   use,
   useCallback,
@@ -130,6 +140,7 @@ import type { Root, RootContent } from "mdast";
 import { AppMark } from "../AppMark";
 import { ThreadContextChip } from "../ThreadContextChip";
 import {
+  BookOpenIcon,
   BotIcon,
   BrainIcon,
   CheckIcon,
@@ -220,9 +231,8 @@ import {
   shouldCollapseUserMessage,
   shouldFollowWorkGroupAppend,
   timelineTurnFoldRunIdsByEntryId,
-  threadReadLabelPrefix,
-  threadReadTargetId,
-  threadReadTargetTitle,
+  collapseWorkEntryRuns,
+  threadTargetTitle,
   toolGroupAction,
   workEntryDisplayLabel,
   workEntryReadOutput,
@@ -3790,10 +3800,10 @@ const WorkGroupSection = memo(function WorkGroupSection({
 
   return (
     <section aria-label="Activity">
-      {nonEmptyEntries.map((workEntry) => (
-        <SimpleWorkEntryRow
-          key={workEntry.id}
-          workEntry={workEntry}
+      {collapseWorkEntryRuns(nonEmptyEntries).map((run) => (
+        <WorkEntryRunRow
+          key={run.id}
+          run={run}
           workspaceRoot={workspaceRoot}
           displayLabel={displayLabel}
           onToggleEntry={onToggleStandaloneEntry}
@@ -3859,22 +3869,24 @@ function ExpandedWorkGroupEntries({
   workspaceRoot: string | undefined;
 }) {
   const { workGroupViewState: viewState, onToggleWorkEntry } = use(TimelineRowCtx);
+  // Consecutive calls of one Cogenly tool read as a single `Searched chats ×3` row.
+  const rows = useMemo(() => collapseWorkEntryRuns(entries), [entries]);
   const [initialScrollIndex] = useState(() =>
-    resolveWorkGroupScrollIndex(entries, viewState.scrollPositions.get(anchorKey)),
+    resolveWorkGroupScrollIndex(rows, viewState.scrollPositions.get(anchorKey)),
   );
   const [restoringPosition, setRestoringPosition] = useState(initialScrollIndex !== undefined);
   const listRef = useRef<LegendListRef>(null);
   const [expandedContentHeight, setExpandedContentHeight] = useState(0);
   const [fades, setFades] = useState({ top: false, bottom: false, viewportHeight: 0 });
-  const [appendState, setAppendState] = useState({ entries, follow: false });
+  const [appendState, setAppendState] = useState({ rows, follow: false });
   // Capture the pre-change edge once per incoming array, before new layout
   // metrics arrive. Edge/viewport changes never turn a status update into a follow.
-  if (appendState.entries !== entries) {
+  if (appendState.rows !== rows) {
     setAppendState({
-      entries,
+      rows,
       follow:
         fades.viewportHeight > 0 &&
-        shouldFollowWorkGroupAppend(appendState.entries, entries, fades.bottom ? Infinity : 0),
+        shouldFollowWorkGroupAppend(appendState.rows, rows, fades.bottom ? Infinity : 0),
     });
   }
 
@@ -3939,8 +3951,8 @@ function ExpandedWorkGroupEntries({
   }, [updateScrollFades]);
 
   const renderEntry = useCallback(
-    ({ item }: { item: TimelineWorkEntry }) => (
-      <SimpleWorkEntryRow key={item.id} workEntry={item} workspaceRoot={workspaceRoot} />
+    ({ item }: { item: TimelineWorkEntryRun }) => (
+      <WorkEntryRunRow key={item.id} run={item} workspaceRoot={workspaceRoot} />
     ),
     [workspaceRoot],
   );
@@ -3959,14 +3971,14 @@ function ExpandedWorkGroupEntries({
     setExpandedContentHeight(height);
   }, [viewState]);
 
-  useLayoutEffect(updateExpandedContentHeight, [entries, updateExpandedContentHeight]);
+  useLayoutEffect(updateExpandedContentHeight, [rows, updateExpandedContentHeight]);
 
   return (
     <WorkGroupViewCtx value={groupView}>
       <WorkLogList>
         <LegendList
           ref={listRef}
-          data={entries}
+          data={rows}
           extraData={workspaceRoot}
           keyExtractor={workEntryKey}
           renderItem={renderEntry}
@@ -4002,7 +4014,90 @@ function ExpandedWorkGroupEntries({
   );
 }
 
-const workEntryKey = (entry: TimelineWorkEntry) => entry.id;
+const workEntryKey = (row: TimelineWorkEntryRun) => row.id;
+
+type TimelineWorkEntryRun = ReturnType<typeof collapseWorkEntryRuns>[number];
+
+/** One entry, or a collapsed run of the same tool that expands to its calls. */
+function WorkEntryRunRow({
+  run,
+  workspaceRoot,
+  displayLabel,
+  onToggleEntry,
+}: {
+  run: TimelineWorkEntryRun;
+  workspaceRoot: string | undefined;
+  displayLabel?: string | undefined;
+  onToggleEntry?: ((collapsed: boolean) => void) | undefined;
+}) {
+  const groupView = use(WorkGroupViewCtx);
+  const [expanded, setExpanded] = useState(
+    () => groupView?.state.expandedEntries.has(run.id) ?? false,
+  );
+  if (run.kind === "entry") {
+    return (
+      <SimpleWorkEntryRow
+        workEntry={run.entry}
+        workspaceRoot={workspaceRoot}
+        displayLabel={displayLabel}
+        onToggleEntry={onToggleEntry}
+      />
+    );
+  }
+  const toggle = () => {
+    const next = !expanded;
+    if (groupView) {
+      groupView.onToggleEntry(!next);
+      if (next) groupView.state.expandedEntries.add(run.id);
+      else groupView.state.expandedEntries.delete(run.id);
+    } else {
+      onToggleEntry?.(!next);
+    }
+    setExpanded(next);
+  };
+  return (
+    <WorkLogRow
+      role="button"
+      tabIndex={0}
+      aria-label={run.label}
+      aria-expanded={expanded}
+      onClick={toggle}
+      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          toggle();
+        }
+      }}
+      icon={
+        <span className="flex size-4 items-center justify-center text-icon-muted">
+          <ToolActivityIconView
+            icon={undefined}
+            fallbackName={run.icon}
+            className="block size-4 shrink-0 stroke-2"
+            muted
+          />
+        </span>
+      }
+      label={<span className="block truncate">{run.label}</span>}
+      trailing={
+        <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
+          <WorkLogChevron open={expanded} />
+        </span>
+      }
+    >
+      <WorkLogCollapse open={expanded}>
+        <div className="ms-7" onClick={stopRowToggle} onKeyDown={stopRowToggle}>
+          <WorkLogList>
+            {run.entries.map((entry) => (
+              <SimpleWorkEntryRow key={entry.id} workEntry={entry} workspaceRoot={workspaceRoot} />
+            ))}
+          </WorkLogList>
+        </div>
+      </WorkLogCollapse>
+    </WorkLogRow>
+  );
+}
 
 function ActivityShimmerOverlay({ children }: { children: ReactNode }) {
   return (
@@ -4234,59 +4329,98 @@ function LiveActivityContent({
   );
 }
 
-/** The thread a `t3_thread_read` call targets, titled from live shell state so renames show. */
-function useThreadReadTarget(entry: TimelineWorkEntry, environmentId: EnvironmentId) {
-  const rawThreadId = threadReadTargetId(entry);
-  const threadId = rawThreadId === null ? null : ThreadId.make(rawThreadId);
-  const shell = useThreadShell(threadId ? scopeThreadRef(environmentId, threadId) : null);
-  const title = threadReadTargetTitle(shell);
-  return threadId && title ? { threadId, title } : null;
+/**
+ * The registry row for a Cogenly tool call. A thread target takes its title
+ * from live shell state so renames show, falling back to the title the tool returned.
+ */
+function useWorkEntryTool(
+  entry: TimelineWorkEntry,
+  environmentId: EnvironmentId,
+): WorkLogToolPresentation | null {
+  const call = workEntryToolCall(entry);
+  const tool = call ? resolveWorkLogTool(call) : null;
+  const target = tool?.target?.kind === "thread" ? tool.target : null;
+  const shell = useThreadShell(
+    target ? scopeThreadRef(environmentId, ThreadId.make(target.id)) : null,
+  );
+  const liveTitle = threadTargetTitle(shell);
+  if (!call || !tool || tool.source === "generic") return null;
+  return liveTitle && liveTitle !== target?.title
+    ? resolveWorkLogTool({ ...call, targetTitle: liveTitle })
+    : tool;
 }
 
-function threadReadLabel(label: string, target: ReturnType<typeof useThreadReadTarget>) {
-  const prefix = target && threadReadLabelPrefix(label);
-  return prefix ? { ...target, prefix, text: `${prefix} “${target.title}”` } : null;
-}
-
-/** Only settled rows link the title; the live row is itself a button. */
-function ThreadReadLabel({
-  label,
+function ToolTargetLink({
+  target,
   environmentId,
   linked,
 }: {
-  label: NonNullable<ReturnType<typeof threadReadLabel>>;
+  target: WorkLogToolTarget & { readonly title: string };
   environmentId: EnvironmentId;
   linked: boolean;
 }) {
+  // Threads are the only target with an in-app route today.
+  if (!linked || target.kind !== "thread") {
+    return <span className="min-w-0 truncate text-foreground/90">{target.title}</span>;
+  }
   return (
-    <span className="flex min-w-0">
-      <span className="shrink-0">{label.prefix} “</span>
-      {linked ? (
-        <Link
-          to="/$environmentId/$threadId"
-          params={{ environmentId, threadId: label.threadId }}
-          className="min-w-0 truncate rounded-sm text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-          onClick={stopRowToggle}
-          onKeyDown={stopRowToggle}
-        >
-          {label.title}
-        </Link>
-      ) : (
-        <span className="min-w-0 truncate">{label.title}</span>
-      )}
-      <span className="shrink-0">”</span>
+    <Link
+      to="/$environmentId/$threadId"
+      params={{ environmentId, threadId: ThreadId.make(target.id) }}
+      className="link min-w-0 truncate rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+      onClick={stopRowToggle}
+      onKeyDown={stopRowToggle}
+    >
+      {target.title}
+    </Link>
+  );
+}
+
+/**
+ * Renders a registry row's label: the verb phrase, the linked target title and
+ * the result count. Only settled rows link the title; the live row is itself a button.
+ */
+function WorkLogToolLabel({
+  tool,
+  environmentId,
+  linked,
+}: {
+  tool: WorkLogToolPresentation;
+  environmentId: EnvironmentId;
+  linked: boolean;
+}) {
+  const target = tool.target?.title ? { ...tool.target, title: tool.target.title } : null;
+  return (
+    <span className="flex min-w-0 items-baseline">
+      <span className={cn(target ? "shrink-0" : "min-w-0 truncate")}>{tool.labelPrefix}</span>
+      {target ? (
+        <>
+          <span className="shrink-0">&nbsp;“</span>
+          <ToolTargetLink target={target} environmentId={environmentId} linked={linked} />
+          <span className="shrink-0">”</span>
+        </>
+      ) : null}
+      {tool.result ? (
+        <span className="shrink-0 text-muted-foreground">&nbsp;· {tool.result}</span>
+      ) : null}
     </span>
   );
 }
 
 function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "work-live" }> }) {
   const ctx = use(TimelineRowCtx);
-  const threadTarget = useThreadReadTarget(row.entry, ctx.activeThreadEnvironmentId);
+  const liveTool = useWorkEntryTool(
+    {
+      ...row.entry,
+      toolLifecycleStatus: liveActivityToolStatus(row.entry.toolLifecycleStatus, row.active),
+    },
+    ctx.activeThreadEnvironmentId,
+  );
   const questionHeading = row.entry.questionAnswer
     ? getQuestionTextPreview(row.entry.questionAnswer)
     : "";
   const label = questionHeading || liveWorkEntryLabel(row.entry, ctx.workspaceRoot, row.active);
-  const threadLabel = threadReadLabel(label, threadTarget);
+  const tool = questionHeading ? null : liveTool;
 
   const failed = workEntryDisplayIndicatesToolFailure(row.entry);
   // The expanded group already lists the thought, so the preview steps aside.
@@ -4304,7 +4438,7 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
       )}
       aria-label={
         failed
-          ? `${thoughtLine ? `${thoughtLine} ` : ""}${threadLabel?.text ?? label}, tool call failed`
+          ? `${thoughtLine ? `${thoughtLine} ` : ""}${tool?.label ?? label}, tool call failed`
           : undefined
       }
       aria-expanded={row.expanded}
@@ -4352,9 +4486,9 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
             >
               {row.entry.detail ?? label}
             </ReactMarkdown>
-          ) : threadLabel ? (
-            <ThreadReadLabel
-              label={threadLabel}
+          ) : tool ? (
+            <WorkLogToolLabel
+              tool={tool}
               environmentId={ctx.activeThreadEnvironmentId}
               linked={false}
             />
@@ -5173,6 +5307,7 @@ function useStableRows(rows: MessagesTimelineRow[], identity: string): MessagesT
 // ---------------------------------------------------------------------------
 
 type WorkEntryIconName =
+  | "book-open"
   | "bot"
   | "brain"
   | "browser"
@@ -5371,6 +5506,8 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
   switch (name) {
     case "pull-request":
       return <PullRequestGlyph.pullRequest className={className} aria-hidden />;
+    case "book-open":
+      return <BookOpenIcon className={className} aria-hidden />;
     case "bot":
       return <BotIcon className={className} aria-hidden />;
     case "brain":
@@ -5532,6 +5669,7 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
   if (workEntry.itemType === "user_input_request" || workEntry.itemType === "approval_request") {
     return "message-circle";
   }
+  if (workEntry.itemType === "reasoning") return WORK_LOG_THOUGHT.icon;
   if (workEntry.toolSurface) return workEntry.toolSurface;
   if (
     workEntry.structuredPayload?.type === "dynamic_tool" &&
@@ -5587,8 +5725,8 @@ function ReasoningTraceContent({ entries }: { entries: ReadonlyArray<TimelineWor
       {entries.map((entry) => (
         <ChatMarkdown
           key={entry.id}
-          className="text-foreground"
-          text={entry.detail ?? ""}
+          className="text-secondary-label"
+          text={quietReasoningMarkdown(entry.detail ?? "")}
           cwd={ctx.markdownCwd}
           threadRef={ctx.threadRef ?? undefined}
           skills={ctx.skills}
@@ -5637,7 +5775,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
   const ctx = use(TimelineRowCtx);
   const { threadRef, onImageExpand, timestampFormat } = ctx;
   const { retryableWorkspacePreparationRunIds, onRetryWorkspacePreparation } = ctx;
-  const threadTarget = useThreadReadTarget(workEntry, ctx.activeThreadEnvironmentId);
+  const registryTool = useWorkEntryTool(workEntry, ctx.activeThreadEnvironmentId);
   const createdThread =
     workEntry.projectedItem?.item.type === "thread_created"
       ? workEntry.projectedItem.item
@@ -5833,10 +5971,9 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       : workLogEntryIsToolLike(workEntry)
         ? "text-secondary-label"
         : "text-foreground/80";
-  const threadLabel = isReasoning ? null : threadReadLabel(previewText, threadTarget);
-  const accessiblePreview = [threadLabel?.text ?? previewText, answerPreview]
-    .filter(Boolean)
-    .join(": ");
+  // A question names its row; every Cogenly tool call reads from the registry.
+  const tool = isReasoning || questionHeading ? null : registryTool;
+  const accessiblePreview = [tool?.label ?? previewText, answerPreview].filter(Boolean).join(": ");
   const accessibleDisplayText = showFailedIndicator
     ? `${accessiblePreview}, tool call failed`
     : accessiblePreview;
@@ -5893,9 +6030,9 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
                 >
                   {workEntry.detail ?? previewText}
                 </ReactMarkdown>
-              ) : threadLabel ? (
-                <ThreadReadLabel
-                  label={threadLabel}
+              ) : tool ? (
+                <WorkLogToolLabel
+                  tool={tool}
                   environmentId={ctx.activeThreadEnvironmentId}
                   linked
                 />
@@ -5953,7 +6090,6 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           !toolIconAcceptsTint(entryToolIcon) ? (
             <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
           ) : null}
-          <TimelineRowTimestamp createdAt={workEntry.createdAt} timestampFormat={timestampFormat} />
           <span
             className={cn(
               "flex size-4 shrink-0 items-center justify-center",
@@ -5993,15 +6129,17 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           (workEntry.projectedItem && plainOutput === undefined)) ? (
           <WorkLogDetails kind="panel">
             {workEntry.projectedItem && plainOutput === undefined ? (
-              <V2ItemInspector
-                projectedItem={workEntry.projectedItem}
-                environmentId={ctx.activeThreadEnvironmentId}
-                cwd={ctx.markdownCwd}
-                workspaceRoot={workspaceRoot}
-                onOpenThread={ctx.onOpenThread}
-                onRollbackCheckpoint={ctx.onRollbackCheckpoint}
-                onImageExpand={ctx.onImageExpand}
-              />
+              <RegistryToolDetail tool={tool}>
+                <V2ItemInspector
+                  projectedItem={workEntry.projectedItem}
+                  environmentId={ctx.activeThreadEnvironmentId}
+                  cwd={ctx.markdownCwd}
+                  workspaceRoot={workspaceRoot}
+                  onOpenThread={ctx.onOpenThread}
+                  onRollbackCheckpoint={ctx.onRollbackCheckpoint}
+                  onImageExpand={ctx.onImageExpand}
+                />
+              </RegistryToolDetail>
             ) : (
               <>
                 {expandedBody ? (
@@ -6020,6 +6158,40 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
         ) : null}
       </WorkLogCollapse>
     </WorkLogRow>
+  );
+}
+
+/**
+ * Registry tools open to their readable detail rows; the raw call, with its
+ * ids, stays one click further down. Other tools show the raw inspector directly.
+ */
+function RegistryToolDetail({
+  tool,
+  children,
+}: {
+  tool: WorkLogToolPresentation | null;
+  children: ReactNode;
+}) {
+  if (tool?.source !== "registry") return children;
+  return (
+    <div className="ms-7 flex flex-col gap-1.5 text-sm">
+      {tool.detail.length > 0 ? (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-secondary-label select-text">
+          {tool.detail.map((row) => (
+            <Fragment key={row.label}>
+              <dt className="text-muted-foreground">{row.label}</dt>
+              <dd className="min-w-0 break-words">{row.value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      ) : null}
+      <details className="group/raw">
+        <summary className="w-fit cursor-pointer text-muted-foreground text-xs select-none hover:text-foreground">
+          Raw call
+        </summary>
+        <div className="mt-1">{children}</div>
+      </details>
+    </div>
   );
 }
 

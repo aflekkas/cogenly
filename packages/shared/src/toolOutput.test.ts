@@ -39,6 +39,20 @@ describe("compactDynamicToolOutput", () => {
     expect(output.thread.messages).toEqual(["Private message"]);
   });
 
+  it("keeps a read thread's title and a search's hit count for work-log labels", () => {
+    expect(
+      compactDynamicToolOutput({
+        thread: { threadId: "thread-1", title: "  Weekly checks  ", messages: ["Private"] },
+      }),
+    ).toEqual({ thread: { threadId: "thread-1", title: "Weekly checks" } });
+    expect(
+      compactDynamicToolOutput(
+        JSON.stringify({ results: [{ title: "a", snippet: "private" }, { title: "b" }] }),
+      ),
+    ).toEqual({ resultCount: 2 });
+    expect(compactDynamicToolOutput({ matches: [] })).toEqual({ resultCount: 0 });
+  });
+
   it("keeps explicit envelope failure while dropping error text and arbitrary output", () => {
     for (const failure of [
       { isError: true },

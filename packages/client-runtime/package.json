@@ -347,6 +347,14 @@
       "types": "./src/work-log/toolPresentation.ts",
       "default": "./src/work-log/toolPresentation.ts"
     },
+    "./work-log/tool-registry": {
+      "types": "./src/work-log/toolRegistry.ts",
+      "default": "./src/work-log/toolRegistry.ts"
+    },
+    "./work-log/reasoning-text": {
+      "types": "./src/work-log/reasoningText.ts",
+      "default": "./src/work-log/reasoningText.ts"
+    },
     "./work-log/command-label": {
       "types": "./src/work-log/commandLabel.ts",
       "default": "./src/work-log/commandLabel.ts"

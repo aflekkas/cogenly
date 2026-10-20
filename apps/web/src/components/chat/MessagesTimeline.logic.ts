@@ -13,8 +13,16 @@ import {
   commandDisplayText,
   commandProgramName,
 } from "@t3tools/client-runtime/work-log/command-label";
+import { reasoningPlainText } from "@t3tools/client-runtime/work-log/reasoning-text";
+import {
+  resolveWorkLogTool,
+  workLogToolGroupLabel,
+  type WorkLogToolCallInput,
+  type WorkLogToolIcon,
+} from "@t3tools/client-runtime/work-log/tool-registry";
 import {
   liveActivityToolStatus,
+  workEntryToolCall,
   normalizeCompactToolLabel,
   resolveWorkEntryToolPresentation,
   summarizeToolGroup,
@@ -93,7 +101,7 @@ function workEntryIsActiveTurnActivity(entry: WorkLogEntry): boolean {
 }
 
 function singleToolCallLabel(entry: WorkLogEntry): string {
-  if (entry.itemType === "reasoning") return entry.detail?.trim().replace(/\s+/g, " ") || "Thought";
+  if (entry.itemType === "reasoning") return reasoningPlainText(entry.detail ?? "") || "Thought";
   const toolPresentation = resolveWorkEntryToolPresentation(entry, "completed");
   if (toolPresentation) return toolPresentation.displayName;
   const item = entry.structuredPayload;
@@ -133,8 +141,7 @@ function workEntryReadPaths(entry: WorkLogEntry, workspaceRoot: string | undefin
 export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string | undefined) {
   if (entry.itemType === "system_notice") return entry.label;
   if (entry.itemType === "reasoning" || entry.tone === "thinking") {
-    const thought = entry.detail?.trim().replace(/\s+/g, " ");
-    return thought || entry.label;
+    return reasoningPlainText(entry.detail ?? "") || entry.label;
   }
   const toolPresentation = resolveWorkEntryToolPresentation(entry);
   if (toolPresentation) return toolPresentation.displayName;
@@ -181,35 +188,81 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
   return `${heading.charAt(0).toUpperCase()}${heading.slice(1)}`;
 }
 
-/** The trimmed thread id a `t3_thread_read` call targets, or null for any other entry. */
-export function threadReadTargetId(entry: Pick<WorkLogEntry, "structuredPayload">) {
-  const item = entry.structuredPayload;
-  if (item?.type !== "dynamic_tool") return null;
-  if (resolveT3McpToolDefinition(item.toolName)?.summaryAction !== "thread-read") return null;
-  const input = item.input;
-  const threadId =
-    input !== null && typeof input === "object" && "threadId" in input ? input.threadId : null;
-  return typeof threadId === "string" && threadId.trim().length > 0 ? threadId.trim() : null;
-}
-
-// The display name comes from @t3tools/shared (upstream wording "a T3 thread");
-// accept the rebranded wording too so the label survives either.
-const THREAD_READ_OBJECT = / a (?:T3|Cogenly) thread$/;
-
-export function threadReadTargetTitle(
+/** A linked thread's live title, or null once it is archived or deleted. */
+export function threadTargetTitle(
   shell: Pick<ThreadShell, "title" | "archivedAt" | "deletedAt"> | null,
 ) {
   if (!shell || shell.archivedAt !== null || shell.deletedAt !== null) return null;
   return shell.title.trim() || null;
 }
 
+/** The registry icon every tool call in a group shares, so the header matches its rows. */
+function sharedToolIcon(entries: ReadonlyArray<WorkLogEntry>): WorkLogToolIcon | undefined {
+  const tools = entries.filter((entry) => entry.itemType !== "reasoning");
+  const icons = new Set(
+    tools.map((entry) => resolveWorkEntryToolPresentation(entry, "completed")?.icon ?? null),
+  );
+  const [icon] = icons;
+  return tools.length > 0 && icons.size === 1 && icon ? icon : undefined;
+}
+
+export type WorkEntryRun =
+  | { readonly kind: "entry"; readonly id: string; readonly entry: WorkLogEntry }
+  | {
+      readonly kind: "run";
+      readonly id: string;
+      readonly label: string;
+      readonly icon: WorkLogToolIcon;
+      readonly entries: ReadonlyArray<WorkLogEntry>;
+    };
+
 /**
- * Names the read thread in place of the generic object ("Read a T3 thread" becomes
- * `Read thread “Title”`), keeping the label's tense. Null keeps the generic label.
+ * Collapses consecutive calls of the same registry tool group into one
+ * expandable `Searched chats ×3` row, like reasoning groups read `Thought (×2)`.
  */
-export function threadReadLabelPrefix(label: string) {
-  const match = THREAD_READ_OBJECT.exec(label);
-  return match ? `${label.slice(0, match.index)} thread` : null;
+export function collapseWorkEntryRuns(entries: ReadonlyArray<WorkLogEntry>): WorkEntryRun[] {
+  type Pending = {
+    key: string;
+    icon: WorkLogToolIcon;
+    calls: WorkLogToolCallInput[];
+    entries: WorkLogEntry[];
+  };
+  const runs: WorkEntryRun[] = [];
+  const flush = (pending: Pending | null) => {
+    if (!pending) return;
+    const [first] = pending.entries;
+    if (!first) return;
+    runs.push(
+      pending.entries.length === 1
+        ? { kind: "entry", id: first.id, entry: first }
+        : {
+            kind: "run",
+            id: `run:${first.id}`,
+            label: workLogToolGroupLabel(pending.key, pending.calls) ?? first.label,
+            icon: pending.icon,
+            entries: pending.entries,
+          },
+    );
+  };
+  let pending: Pending | null = null;
+  for (const entry of entries) {
+    const call = entry.itemType === "reasoning" ? null : workEntryToolCall(entry, "completed");
+    const tool = call ? resolveWorkLogTool(call) : null;
+    if (!call || !tool || tool.source === "generic") {
+      flush(pending);
+      pending = null;
+      runs.push({ kind: "entry", id: entry.id, entry });
+      continue;
+    }
+    if (pending === null || pending.key !== tool.groupKey) {
+      flush(pending);
+      pending = { key: tool.groupKey, icon: tool.icon, calls: [], entries: [] };
+    }
+    pending.calls.push(call);
+    pending.entries.push(entry);
+  }
+  flush(pending);
+  return runs;
 }
 
 /** Inspectable read-file output is the path when we have one, otherwise nothing. */
@@ -249,8 +302,7 @@ export function liveWorkEntryLabel(
   const status = liveActivityToolStatus(entry.toolLifecycleStatus, active);
   if (entry.itemType === "reasoning") {
     return (
-      entry.detail?.trim().replace(/\s+/g, " ") ||
-      (status === "inProgress" ? "Thinking" : "Thought")
+      reasoningPlainText(entry.detail ?? "") || (status === "inProgress" ? "Thinking" : "Thought")
     );
   }
   const toolPresentation = resolveWorkEntryToolPresentation({
@@ -580,7 +632,7 @@ type MessagesTimelineRowContent =
       summaryKind: ToolGroupSummaryKind;
       toolSurface?: WorkLogEntry["toolSurface"];
       toolIcon?: WorkLogEntry["toolIcon"];
-      summaryToolIcon?: "browser" | "device" | "t3-code" | "pull-request";
+      summaryToolIcon?: WorkLogToolIcon;
       hasFailure: boolean;
     }
   | {
@@ -1822,7 +1874,7 @@ export function deriveMessagesTimelineRows(input: {
             toolGroupAction(singleEntry) !== "edit";
           const summaryToolIcon = usesSingleToolCallLabel
             ? resolveWorkEntryToolPresentation(singleEntry, "completed")?.icon
-            : undefined;
+            : sharedToolIcon(visibleGroupedEntries);
           nextRows.push({
             kind: "work-toggle",
             id: `work-toggle:${timelineEntry.id}`,

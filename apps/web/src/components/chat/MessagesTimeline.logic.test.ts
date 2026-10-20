@@ -1,9 +1,13 @@
 import { MessageId, RunId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { TimelineEntry } from "../../session-logic";
+import type { TimelineEntry, WorkLogEntry } from "../../session-logic";
 import type { ChatMessage } from "../../types";
-import { deriveMessagesTimelineRows, type TimelineLatestRun } from "./MessagesTimeline.logic";
+import {
+  collapseWorkEntryRuns,
+  deriveMessagesTimelineRows,
+  type TimelineLatestRun,
+} from "./MessagesTimeline.logic";
 
 const runId = RunId.make("run-reply");
 
@@ -148,5 +152,43 @@ describe("a collapsing tool group keeps its details until they animate out", () 
       ["work-toggle", undefined],
       ["work", undefined],
     ]);
+  });
+});
+
+describe("collapseWorkEntryRuns", () => {
+  const toolEntry = (id: string, toolName: string, input: unknown): WorkLogEntry => ({
+    id,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    label: toolName,
+    tone: "tool",
+    itemType: "dynamic_tool",
+    toolLifecycleStatus: "completed",
+    toolData: { toolName, input },
+  });
+  const thought: WorkLogEntry = {
+    id: "thought",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    label: "Reasoning",
+    detail: "**Preparing a read**",
+    tone: "thinking",
+    itemType: "reasoning",
+  };
+
+  it("collapses consecutive searches and keeps other rows in place", () => {
+    const runs = collapseWorkEntryRuns([
+      toolEntry("s1", "cogenly.search", { query: "a" }),
+      toolEntry("s2", "mcp__cogenly__search", { query: "b" }),
+      toolEntry("s3", "cogenly.t3_thread_search", { query: "c" }),
+      thought,
+      toolEntry("r1", "cogenly.t3_thread_read", { threadId: "t-1" }),
+      toolEntry("x1", "Bash", { command: "ls" }),
+    ]);
+    expect(runs.map((run) => (run.kind === "run" ? run.label : run.id))).toEqual([
+      "Searched chats ×3",
+      "thought",
+      "r1",
+      "x1",
+    ]);
+    expect(runs[0]).toMatchObject({ kind: "run", id: "run:s1", icon: "search" });
   });
 });

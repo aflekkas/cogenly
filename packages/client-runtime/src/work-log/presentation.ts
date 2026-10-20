@@ -22,6 +22,13 @@ import { classifyToolActivity } from "@t3tools/shared/toolActivity";
 import { toolOutputIndicatesFailure } from "@t3tools/shared/toolOutput";
 
 import {
+  resolveWorkLogTool,
+  workLogToolGroupLabel,
+  type WorkLogToolCallInput,
+  type WorkLogToolPresentation,
+  type WorkLogToolStatus,
+} from "./toolRegistry.ts";
+import {
   summarizeT3ToolCalls,
   t3ToolResultIndicatesFailure,
   type T3ToolSummaryCall,
@@ -138,51 +145,105 @@ function workEntryToolOutput(
     : (data?.output ?? data?.result ?? data?.rawOutput ?? data?.content);
 }
 
-function resolveT3McpToolPresentation(
-  definition: T3McpToolDefinition | null,
-  status: string | undefined,
-  data?: unknown,
-) {
-  if (!definition) return null;
-  const [action, running, completed, detail] = definition.labels;
-  const verb =
-    status === "inProgress"
-      ? running
-      : status === "completed"
-        ? completed
-        : status === "failed"
-          ? `Failed to ${action.toLowerCase()}`
-          : status === "declined"
-            ? `Declined to ${action.toLowerCase()}`
-            : status === "stopped"
-              ? `Stopped ${running.toLowerCase()}`
-              : running;
+function workEntryToolInput(
+  entry: Pick<WorkLogPresentationEntry, "toolData" | "structuredPayload">,
+): unknown {
+  const item = entry.structuredPayload;
+  const data = asRecord(entry.toolData);
+  return item?.type === "dynamic_tool"
+    ? item.input
+    : (data?.arguments ?? data?.input ?? data?.rawInput);
+}
 
-  const actionKind =
-    definition.summaryAction === "link-pr" ||
-    definition.summaryAction === "unlink-pr" ||
-    definition.summaryAction === "list-prs" ||
-    definition.summaryAction === "watch-pr" ||
-    definition.summaryAction === "unwatch-pr"
-      ? definition.summaryAction
-      : undefined;
+function registryStatus(status: string | undefined): WorkLogToolStatus {
+  return status === "completed" ||
+    status === "failed" ||
+    status === "declined" ||
+    status === "stopped"
+    ? status
+    : "inProgress";
+}
+
+const PULL_REQUEST_ACTIONS = new Set<string>([
+  "link-pr",
+  "unlink-pr",
+  "list-prs",
+  "watch-pr",
+  "unwatch-pr",
+]);
+
+/** The PR number a pull-request tool targets, so its row can say `Linked PR #12`. */
+function pullRequestTarget(definition: T3McpToolDefinition, data: unknown): string | null {
+  if (definition.summaryAction === "list-prs") return null;
   const payload = asRecord(data);
   const input =
     asRecord(payload?.arguments) ?? asRecord(payload?.input) ?? asRecord(payload?.rawInput);
   const urlTarget = typeof input?.url === "string" ? parseChangeRequestUrl(input.url) : null;
   const number = urlTarget?.number ?? input?.number;
-  const target =
-    actionKind !== undefined &&
-    actionKind !== "list-prs" &&
-    typeof number === "number" &&
-    Number.isSafeInteger(number) &&
-    number > 0
-      ? `PR #${number}`
-      : detail;
+  return typeof number === "number" && Number.isSafeInteger(number) && number > 0
+    ? `PR #${number}`
+    : null;
+}
+
+export interface WorkEntryToolPresentation {
+  readonly displayName: string;
+  readonly icon: WorkLogToolPresentation["icon"];
+  readonly action?: Extract<
+    ToolGroupAction,
+    "link-pr" | "unlink-pr" | "list-prs" | "watch-pr" | "unwatch-pr"
+  >;
+  /** The registry row this presentation came from. */
+  readonly tool: WorkLogToolPresentation;
+}
+
+/** The registry call for a work entry, or null when it is not a Cogenly tool. */
+export function workEntryToolCall(
+  entry: Pick<
+    WorkLogPresentationEntry,
+    "label" | "toolTitle" | "toolData" | "toolLifecycleStatus" | "structuredPayload"
+  >,
+  fallbackStatus?: "inProgress" | "completed",
+): WorkLogToolCallInput | null {
+  const toolName = workEntryToolName(entry);
+  if (!toolName) return null;
+  const output = workEntryToolOutput(entry);
+  const status = entry.toolLifecycleStatus ?? fallbackStatus;
   return {
-    displayName: `${verb} ${target}`,
-    icon: definition.icon,
-    ...(actionKind === undefined ? {} : { action: actionKind }),
+    toolName,
+    input: workEntryToolInput(entry),
+    output,
+    status: registryStatus(
+      resolveT3McpToolDefinition(toolName) && t3ToolResultIndicatesFailure(output)
+        ? "failed"
+        : status,
+    ),
+  };
+}
+
+/** Resolves tool identity before choosing labels or icons in either client. */
+export function resolveWorkEntryToolPresentation(
+  entry: Pick<
+    WorkLogPresentationEntry,
+    "label" | "toolTitle" | "toolData" | "toolLifecycleStatus" | "structuredPayload"
+  >,
+  fallbackStatus?: "inProgress" | "completed",
+): WorkEntryToolPresentation | null {
+  const call = workEntryToolCall(entry, fallbackStatus);
+  const tool = call ? resolveWorkLogTool(call) : null;
+  if (!call || !tool || tool.source === "generic") return null;
+  const definition = resolveT3McpToolDefinition(call.toolName);
+  const action =
+    definition && PULL_REQUEST_ACTIONS.has(definition.summaryAction)
+      ? (definition.summaryAction as WorkEntryToolPresentation["action"])
+      : undefined;
+  const prTarget = definition && action ? pullRequestTarget(definition, entry.toolData) : null;
+  return {
+    displayName: prTarget
+      ? `${tool.labelPrefix.replace(/ an? pull request$/, "")} ${prTarget}`
+      : tool.label,
+    icon: tool.icon,
+    ...(action === undefined ? {} : { action }),
+    tool,
   };
 }
 
@@ -193,23 +254,6 @@ export function liveActivityToolStatus(status: string | undefined, presentTense:
   }
   if (presentTense || status === "inProgress") return "inProgress";
   return "completed";
-}
-
-/** Resolves tool identity before choosing labels or icons in either client. */
-export function resolveWorkEntryToolPresentation(
-  entry: Pick<
-    WorkLogPresentationEntry,
-    "label" | "toolTitle" | "toolData" | "toolLifecycleStatus" | "structuredPayload"
-  >,
-  fallbackStatus?: "inProgress" | "completed",
-) {
-  const definition = resolveT3McpToolDefinition(workEntryToolName(entry));
-  const status = entry.toolLifecycleStatus ?? fallbackStatus;
-  return resolveT3McpToolPresentation(
-    definition,
-    definition && t3ToolResultIndicatesFailure(workEntryToolOutput(entry)) ? "failed" : status,
-    entry.toolData,
-  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -431,6 +475,8 @@ export function toolGroupAction(entry: WorkLogPresentationEntry): ToolGroupActio
   if (presentation?.action !== undefined) return presentation.action;
   if (presentation?.icon === "browser") return "browser";
   if (presentation?.icon === "device") return "device";
+  // Cogenly's own tools are described by the registry, not by name heuristics.
+  if (presentation) return "other";
   if (entry.requestKind === "file-read" || entry.viewedImagePath !== undefined) return "read";
   // Approvals and questions describe requested work, not work that ran.
   if (entry.itemType === "approval_request" || entry.itemType === "user_input_request") {
@@ -656,39 +702,67 @@ export function summarizeToolGroup(entries: ReadonlyArray<WorkLogPresentationEnt
   }
   entries = toolEntries;
   const groups = new Map<
-    ToolGroupAction | T3McpToolSummaryAction,
+    string,
     {
       action: ToolGroupAction;
       t3Action: T3McpToolSummaryAction | null;
+      registryCalls: WorkLogToolCallInput[] | null;
       entries: WorkLogPresentationEntry[];
     }
   >();
   const sources = new Map<string, ToolActivitySource>();
+  let sourcedCount = 0;
   for (const entry of entries) {
+    const call = workEntryToolCall(entry, "completed");
+    const tool = call ? resolveWorkLogTool(call) : null;
+    if (call && tool?.source === "registry") {
+      const key = `registry:${tool.groupKey}`;
+      const group = groups.get(key);
+      if (group) {
+        group.entries.push(entry);
+        group.registryCalls?.push(call);
+      } else {
+        groups.set(key, {
+          action: "other",
+          t3Action: null,
+          registryCalls: [call],
+          entries: [entry],
+        });
+      }
+      continue;
+    }
     const t3Action = resolveT3McpToolDefinition(workEntryToolName(entry))?.summaryAction ?? null;
     if (entry.toolSource && t3Action === null) {
       sources.set(entry.toolSource.key, entry.toolSource);
+      sourcedCount += 1;
       continue;
     }
     const action = toolGroupAction(entry);
     const key = t3Action ?? action;
     const group = groups.get(key);
     if (group) group.entries.push(entry);
-    else groups.set(key, { action, t3Action, entries: [entry] });
+    else groups.set(key, { action, t3Action, registryCalls: null, entries: [entry] });
   }
-  const summaries = [...groups].map(([action, group], index) => ({
+  const summaries = [...groups].map(([key, group], index) => ({
     index,
     count: group.entries.length,
-    priority: summaryActionPriority(action),
-    ...(group.t3Action
-      ? summarizeT3ToolCalls(group.t3Action, group.entries.map(t3ToolSummaryCall))
-      : {
-          label: toolGroupActionLabel(
-            group.action,
-            toolGroupActionCount(group.action, group.entries),
-          ),
+    priority: group.registryCalls ? 1 : summaryActionPriority(group.t3Action ?? group.action),
+    ...(group.registryCalls
+      ? {
+          label:
+            workLogToolGroupLabel(key, group.registryCalls) ??
+            toolGroupActionLabel("other", group.entries.length),
           failedCount: group.entries.filter(workEntryDisplayIndicatesToolFailure).length,
-        }),
+        }
+      : group.t3Action
+        ? summarizeT3ToolCalls(group.t3Action, group.entries.map(t3ToolSummaryCall))
+        : {
+            label: toolGroupActionLabel(
+              group.action,
+              toolGroupActionCount(group.action, group.entries),
+            ),
+            failedCount: group.entries.filter(workEntryDisplayIndicatesToolFailure).length,
+          }),
   }));
   const selected = [...summaries]
     .sort((a, b) => a.priority - b.priority || a.index - b.index)
@@ -709,11 +783,6 @@ export function summarizeToolGroup(entries: ReadonlyArray<WorkLogPresentationEnt
       `Used ${formattedNames}${allIntegrations ? ` ${sourceNames.length === 1 ? "integration" : "integrations"}` : ""}`,
     );
   }
-  const sourcedCount = entries.filter(
-    (entry) =>
-      entry.toolSource !== undefined &&
-      resolveT3McpToolDefinition(workEntryToolName(entry)) === null,
-  ).length;
   const remainingCount =
     entries.length - sourcedCount - selected.reduce((count, group) => count + group.count, 0);
   if (remainingCount > 0) {
