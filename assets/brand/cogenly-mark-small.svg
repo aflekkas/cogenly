@@ -1,0 +1,11 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="cogenly-ember-small" x1="64" y1="0" x2="64" y2="128" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF8A4C"/>
+      <stop offset="1" stop-color="#F0472D"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="26" fill="url(#cogenly-ember-small)"/>
+  <path d="M76.71 44.08A26 26 0 1 0 76.71 83.92" stroke="#0D0D0F" stroke-width="20" stroke-linecap="round"/>
+  <circle cx="94" cy="64" r="10" fill="#0D0D0F"/>
+</svg>

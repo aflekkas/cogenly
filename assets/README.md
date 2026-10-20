@@ -1,10 +1,12 @@
 # Brand icons
 
-## Placeholder Cogenly mark (current)
+## Cogenly mark (current)
 
-Until a real logo is designed, every tracked icon is rendered from `brand/cogenly-mark.svg`: a dark rounded square with a lowercase "c". Run `vp run icons:mark` from the repository root to re-render the web favicons, apple-touch icons, Linux/universal PNGs, Windows ICOs, and macOS PNGs (with the 100px pre-Tahoe safe area) for all three channels, plus the `apps/web/public` copies. It rasterizes with headless Chromium through the server's `playwright-core`; pass `--chromium <path>` to pick the binary.
+Every tracked icon is rendered from `brand/cogenly-mark.svg`: an ember-gradient rounded tile with an ink lowercase "c" and a dot in its mouth. Sizes up to 32px (16/32px favicons and the small ICO entries) use `brand/cogenly-mark-small.svg`, a heavier cut with a larger dot that stays legible on the pixel grid; the sidebar's `CogenlyMark` component and the DMG backgrounds embed that same small cut. `brand/cogenly-glyph.svg` is the bare "c" and dot. All three channels currently share the same artwork.
 
-The Icon Composer projects below now use `brand/cogenly-glyph.svg` as their `text.svg`, but their backgrounds are still the old artwork, so `icons:export` and `icons:check` do not describe the shipped icons. Replace or redesign those projects along with the real logo.
+Run `vp run icons:mark` from the repository root to re-render the web favicons, apple-touch icons, Linux/universal PNGs, Windows ICOs, and macOS PNGs (with the 100px pre-Tahoe safe area) for all three channels, plus the `apps/web/public` copies. It rasterizes with headless Chromium through the server's `playwright-core`; pass `--chromium <path>` to pick the binary. The desktop build turns the macOS PNG into `icon.icns` with `iconutil`, so no `.icns` is tracked.
+
+The Icon Composer projects below still carry the old T3 artwork, so `icons:export` and `icons:check` do not describe the shipped icons. Replace or redesign those projects before using that pipeline again.
 
 ## Icon Composer pipeline
 

@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
-// Renders the placeholder Cogenly mark (assets/brand/cogenly-mark.svg) into
-// every tracked web and desktop icon, keeping the existing file names so the
-// desktop launcher, DesktopAssets, and apply-web-brand-assets need no changes.
+// Renders the Cogenly mark (assets/brand/cogenly-mark.svg) into every tracked
+// web and desktop icon, keeping the existing file names so the desktop
+// launcher, DesktopAssets, and apply-web-brand-assets need no changes.
+// Sizes up to 32px use cogenly-mark-small.svg, a heavier cut that stays legible
+// on the favicon pixel grid.
 //
-// This stands in for `icons:export` until a real logo exists: that pipeline
-// needs Icon Composer, and its .icon projects still carry the old artwork.
+// This replaces `icons:export`: that pipeline needs Icon Composer, and its
+// .icon projects still carry the old T3 artwork.
 
 import * as NodeModule from "node:module";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -21,6 +23,8 @@ import { BRAND_ASSET_PATHS, DEVELOPMENT_PUBLIC_ICON_OVERRIDES } from "./lib/bran
 import { encodePngIco, WINDOWS_ICON_SIZES } from "./lib/icon-export.ts";
 
 const MARK_SOURCE = "assets/brand/cogenly-mark.svg";
+const SMALL_MARK_SOURCE = "assets/brand/cogenly-mark-small.svg";
+const SMALL_MARK_MAX_SIZE = 32;
 const PUBLIC_MARK = "apps/web/public/cogenly-mark.svg";
 
 // The classic macOS safe area: an 824px body inset 100px on a 1024px canvas.
@@ -51,6 +55,7 @@ export const renderCogenlyMark = Effect.fn("renderCogenlyMark")(function* (
   const path = yield* Path.Path;
   const repoRoot = yield* path.fromFileUrl(new URL("..", import.meta.url));
   const svg = yield* fs.readFileString(path.join(repoRoot, MARK_SOURCE));
+  const smallSvg = yield* fs.readFileString(path.join(repoRoot, SMALL_MARK_SOURCE));
 
   // playwright-core is a server dependency; borrow it rather than adding a root one.
   const { chromium } = NodeModule.createRequire(path.join(repoRoot, "apps/server/package.json"))(
@@ -65,9 +70,10 @@ export const renderCogenlyMark = Effect.fn("renderCogenlyMark")(function* (
   const render = (canvas: number, inset = 0) =>
     Effect.promise(async () => {
       const body = canvas - inset * 2;
+      const source = body <= SMALL_MARK_MAX_SIZE ? smallSvg : svg;
       await page.setViewportSize({ width: canvas, height: canvas });
       await page.setContent(
-        `<body style="margin:0;background:transparent"><div style="padding:${inset}px;line-height:0">${svg.replace(
+        `<body style="margin:0;background:transparent"><div style="padding:${inset}px;line-height:0">${source.replace(
           'width="128" height="128"',
           `width="${body}" height="${body}"`,
         )}</div></body>`,
@@ -138,7 +144,7 @@ export const renderCogenlyMarkCommand = Command.make(
     ),
   },
   ({ chromium }) => renderCogenlyMark(Option.getOrUndefined(chromium)),
-).pipe(Command.withDescription("Render the placeholder Cogenly mark into every tracked icon."));
+).pipe(Command.withDescription("Render the Cogenly mark into every tracked icon."));
 
 if (import.meta.main) {
   Command.run(renderCogenlyMarkCommand, { version: "0.0.0" }).pipe(

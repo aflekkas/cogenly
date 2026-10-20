@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
+import { CogenlyMark } from "../CogenlyMark";
 import {
   resolveEnvironmentIdentificationPillLabel,
   useEnvironmentStageLabel,
@@ -104,7 +105,8 @@ function useSidebarTitle(): string {
   const pathname = useLocation({ select: (location) => location.pathname });
   if (pathname === "/settings" || pathname.startsWith("/settings/")) return "Settings";
   if (pathname === "/usage" || pathname.startsWith("/usage/")) return "Usage";
-  return "Cogenly";
+  // The wordmark is lowercase, matching the mark's "c"; prose still says "Cogenly".
+  return "cogenly";
 }
 
 function SidebarBrand() {
@@ -122,9 +124,10 @@ function SidebarBrand() {
 
 function SidebarBrandMark({ label }: { label: string }) {
   return (
-    // Center the visible capitals, without the font's ascender/descender space.
+    // Center the visible capitals on the mark, without the font's ascender/descender space.
     // Padding keeps ascenders and round-letter overshoot inside the truncation clip.
-    <span className="inline-flex min-w-0 items-baseline text-sm font-medium tracking-tight">
+    <span className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold tracking-brand">
+      <CogenlyMark />
       <span className="truncate [text-box:trim-both_cap_alphabetic] supports-[text-box:trim-both_cap_alphabetic]:py-1">
         {label}
       </span>

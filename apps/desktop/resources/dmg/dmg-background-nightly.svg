@@ -7,12 +7,19 @@
     </linearGradient>
   </defs>
   <rect width="640" height="432" fill="url(#bg)"/>
-  <!-- Cogenly mark (assets/brand/cogenly-mark.svg) -->
+  <!-- Cogenly mark (assets/brand/cogenly-mark-small.svg) -->
   <svg x="32" y="24" width="22" height="22" viewBox="0 0 128 128">
-    <rect width="128" height="128" rx="28" fill="#161616"/>
-    <path d="M82.38 45.62A26 26 0 1 0 82.38 82.38" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round" fill="none"/>
+    <defs>
+      <linearGradient id="ember" x1="64" y1="0" x2="64" y2="128" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#FF8A4C"/>
+        <stop offset="1" stop-color="#F0472D"/>
+      </linearGradient>
+    </defs>
+    <rect width="128" height="128" rx="26" fill="url(#ember)"/>
+    <path d="M76.71 44.08A26 26 0 1 0 76.71 83.92" stroke="#0D0D0F" stroke-width="20" stroke-linecap="round" fill="none"/>
+    <circle cx="94" cy="64" r="10" fill="#0D0D0F"/>
   </svg>
-  <text x="62" y="40" fill="#161616" font-family="Helvetica" font-size="14" font-weight="700">Cogenly</text>
+  <text x="62" y="40" fill="#161616" font-family="Helvetica" font-size="15" font-weight="700" letter-spacing="-0.3">cogenly</text>
   <rect x="556" y="24" width="52" height="20" rx="10" fill="#161616" fill-opacity="0.06" stroke="#161616" stroke-opacity="0.14"/>
   <text x="582" y="38" fill="#3F3F46" font-family="Helvetica" font-size="10.5" font-weight="600" text-anchor="middle">Staging</text>
   <text x="320" y="104" fill="#1C1C1F" font-family="Helvetica" font-size="22" font-weight="700" text-anchor="middle">Drag Cogenly into Applications</text>

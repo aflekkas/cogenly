@@ -1,4 +1,16 @@
 <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="128" height="128" rx="28" fill="#161616"/>
-  <path d="M82.38 45.62A26 26 0 1 0 82.38 82.38" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="cogenly-ember" x1="64" y1="0" x2="64" y2="128" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF8A4C"/>
+      <stop offset="1" stop-color="#F0472D"/>
+    </linearGradient>
+    <linearGradient id="cogenly-rim" x1="64" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#cogenly-ember)"/>
+  <rect x="1.75" y="1.75" width="124.5" height="124.5" rx="26.25" stroke="url(#cogenly-rim)" stroke-width="1.5"/>
+  <path d="M79.85 41.64A28 28 0 1 0 79.85 86.36" stroke="#0D0D0F" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="91" cy="64" r="9" fill="#0D0D0F"/>
 </svg>
