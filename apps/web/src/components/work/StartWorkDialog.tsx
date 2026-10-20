@@ -8,6 +8,7 @@ import {
 import {
   CommandId,
   type EnvironmentId,
+  type MessageId,
   type ModelSelection,
   type ProjectId,
   type ScopedThreadRef,
@@ -15,11 +16,16 @@ import {
   WorkHandoffError,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
+import { FolderPlusIcon, HammerIcon, MessageSquareDashedIcon } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { useEffect, useId, useMemo, useState } from "react";
 import { create } from "zustand";
 
+import { openCommandPalette } from "~/commandPaletteBus";
+import { useScratchProject } from "~/hooks/useScratchProject";
 import { useEnvironmentSettings } from "~/hooks/useSettings";
+import { useThreadKind } from "~/hooks/useThreadKind";
+import { threadCapabilities } from "~/threadCapabilities";
 import { randomUUID } from "~/lib/utils";
 import { getCustomModelOptionsByInstance } from "~/modelSelection";
 import {
@@ -32,6 +38,7 @@ import {
   useProjects,
   useServerConfigs,
   useThreadShell,
+  useThreadShells,
   waitForThreadShell,
 } from "~/state/entities";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "~/state/server";
@@ -39,7 +46,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { buildThreadRouteParams } from "~/threadRoutes";
 import { useUiStateStore } from "~/uiStateStore";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { ProjectFavicon } from "../ProjectFavicon";
+import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
 import { Button, InlineButton } from "../ui/button";
 import {
   Dialog,
@@ -52,33 +59,82 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Select,
+  SelectGroup,
+  SelectGroupLabel,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { Textarea } from "../ui/textarea";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import {
   describeWorkStartFailure,
+  groupWorkRepositories,
   listWorkRepositories,
+  NO_REPOSITORY,
   openWorkWhenArrived,
   resolveStartWorkFields,
   resolveStartWorkSubmission,
+  startWorkExcerpt,
   type StartWorkEdits,
+  type WorkRepositoryChoice,
   type WorkWorkspace,
 } from "./work.logic";
 
 const isWorkHandoffError = Schema.is(WorkHandoffError);
 
-const useRequest = create<{ request: { readonly threadRef: ScopedThreadRef; key: string } | null }>(
-  () => ({ request: null }),
-);
+/** Where in the chat the Work starts from; absent means the whole chat. */
+export interface StartWorkFrom {
+  readonly messageId: MessageId;
+  /** A line of the chosen message, so the dialog can say where the handoff stops. */
+  readonly excerpt: string;
+}
 
-/** Opens the Start Work dialog for a chat. Any surface may call it: menu, palette, keybinding. */
-export function requestStartWork(threadRef: ScopedThreadRef) {
-  useRequest.setState({ request: { threadRef, key: randomUUID() } });
+interface StartWorkRequest {
+  readonly threadRef: ScopedThreadRef;
+  readonly from: StartWorkFrom | null;
+  readonly key: string;
+}
+
+const useRequest = create<{ request: StartWorkRequest | null }>(() => ({ request: null }));
+
+/**
+ * Opens the Start Work dialog for a chat. Any surface may call it: menu,
+ * palette, keybinding, or a message's own action with `from`.
+ */
+export function requestStartWork(threadRef: ScopedThreadRef, from?: StartWorkFrom) {
+  useRequest.setState({ request: { threadRef, from: from ?? null, key: randomUUID() } });
 }
 
 function closeStartWork() {
   useRequest.setState({ request: null });
+}
+
+/**
+ * A message's "Start Work from here", or null where it does not apply: only a
+ * chat hands off to Work, and only on a connection allowed to start it.
+ */
+export function useStartWorkFromMessage(
+  threadRef: ScopedThreadRef | null,
+): ((message: { readonly id: MessageId; readonly text: string }) => void) | null {
+  const thread = useThreadShell(threadRef);
+  const kind = useThreadKind(thread);
+  const canStart = useAtomValue(
+    serverEnvironment.startWork.permissionAtom(threadRef?.environmentId ?? null),
+  );
+  return useMemo(() => {
+    if (threadRef === null || kind === null || !canStart) return null;
+    if (!threadCapabilities(kind).startWork) return null;
+    return (message) =>
+      requestStartWork(threadRef, {
+        messageId: message.id,
+        excerpt: startWorkExcerpt(message.text) || "this message",
+      });
+  }, [canStart, kind, threadRef]);
 }
 
 export function StartWorkDialogHost() {
@@ -86,7 +142,9 @@ export function StartWorkDialogHost() {
   useEffect(() => closeStartWork, []);
   return (
     <OverlayPresence when={request}>
-      {(request) => <StartWorkDialog key={request.key} threadRef={request.threadRef} />}
+      {(request) => (
+        <StartWorkDialog key={request.key} threadRef={request.threadRef} from={request.from} />
+      )}
     </OverlayPresence>
   );
 }
@@ -97,7 +155,13 @@ type ProposalState =
   | { readonly status: "failed" }
   | { readonly status: "unavailable" };
 
-function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
+function StartWorkDialog({
+  threadRef,
+  from,
+}: {
+  readonly threadRef: ScopedThreadRef;
+  readonly from: StartWorkFrom | null;
+}) {
   const id = useId();
   const navigate = useNavigate();
   const { environmentId } = threadRef;
@@ -108,6 +172,20 @@ function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef })
     () => listWorkRepositories(projects, environmentId, scratchWorkspaceRoot),
     [environmentId, projects, scratchWorkspaceRoot],
   );
+  const threads = useThreadShells();
+  const repositoryGroups = useMemo(() => {
+    const activity = new Map<ProjectId, string>();
+    for (const shell of threads) {
+      if (shell.environmentId !== environmentId) continue;
+      const latest = activity.get(shell.projectId);
+      if (latest === undefined || shell.updatedAt > latest) {
+        activity.set(shell.projectId, shell.updatedAt);
+      }
+    }
+    return groupWorkRepositories(repositories, activity);
+  }, [environmentId, repositories, threads]);
+  const { openScratchProject } = useScratchProject();
+  const canRunWithoutRepository = scratchWorkspaceRoot != null;
   const canStart = useAtomValue(serverEnvironment.startWork.permissionAtom(environmentId));
   const canPropose = useAtomValue(
     serverEnvironment.proposeWorkHandoff.permissionAtom(environmentId),
@@ -126,24 +204,27 @@ function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef })
   const [modelSelection, setModelSelection] = useState<ModelSelection | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const throughMessageId = from?.messageId;
 
   useEffect(() => {
     if (!canPropose) return;
     let cancelled = false;
-    void proposeHandoff({ environmentId, input: { sourceThreadId: threadRef.threadId } }).then(
-      (result) => {
-        if (cancelled) return;
-        setProposal(
-          result._tag === "Success"
-            ? { status: "ready", draft: result.value }
-            : { status: "failed" },
-        );
+    void proposeHandoff({
+      environmentId,
+      input: {
+        sourceThreadId: threadRef.threadId,
+        ...(throughMessageId === undefined ? {} : { throughMessageId }),
       },
-    );
+    }).then((result) => {
+      if (cancelled) return;
+      setProposal(
+        result._tag === "Success" ? { status: "ready", draft: result.value } : { status: "failed" },
+      );
+    });
     return () => {
       cancelled = true;
     };
-  }, [canPropose, environmentId, proposeHandoff, threadRef.threadId]);
+  }, [canPropose, environmentId, proposeHandoff, threadRef.threadId, throughMessageId]);
 
   const fields = resolveStartWorkFields({
     edits,
@@ -153,15 +234,29 @@ function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef })
   });
   const submission = resolveStartWorkSubmission({ fields, workspace, modelSelection });
   const selectedRepository = repositories.find((project) => project.id === fields.projectId);
+  const noRepository = fields.projectId === NO_REPOSITORY;
   const drafting = proposal.status === "loading";
 
   const submit = async () => {
     if (!submission.ok || !canStart || submitting) return;
     setSubmitting(true);
     setError(null);
+    // "No repository" is the environment's scratch project, created on first use.
+    const targetProjectId =
+      submission.input.targetProjectId ?? (await openScratchProject(environmentId))?.id ?? null;
+    if (targetProjectId === null) {
+      setSubmitting(false);
+      return;
+    }
     const result = await startWork({
       environmentId,
-      input: { commandId, sourceThreadId: threadRef.threadId, ...submission.input },
+      input: {
+        commandId,
+        sourceThreadId: threadRef.threadId,
+        ...submission.input,
+        targetProjectId,
+        ...(throughMessageId === undefined ? {} : { throughMessageId }),
+      },
     });
     if (result._tag === "Failure") {
       setSubmitting(false);
@@ -210,10 +305,20 @@ function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef })
           }}
         >
           <DialogHeader>
-            <DialogTitle>Start Work</DialogTitle>
+            <div className="flex items-center gap-2">
+              <HammerIcon aria-hidden className="size-4 shrink-0" />
+              <DialogTitle>Start Work</DialogTitle>
+            </div>
             <DialogDescription>
-              Hand this chat to a coding session in a repository. The session gets the scope below
-              and a link back to this chat.
+              {from ? (
+                <>
+                  Hand this chat, up to <span className="text-foreground">“{from.excerpt}”</span>,
+                  to a coding session. Later messages stay out of it.
+                </>
+              ) : (
+                "Hand this chat to a coding session."
+              )}{" "}
+              The session gets the scope below and a link back to this chat.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
@@ -255,45 +360,23 @@ function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef })
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="flex min-w-0 flex-col gap-1.5">
                   <Label htmlFor={`${id}-repository`}>Repository</Label>
-                  <Select
+                  <WorkRepositorySelect
+                    id={`${id}-repository`}
                     value={fields.projectId}
-                    items={repositories.map((project) => ({
-                      value: project.id,
-                      label: project.title,
-                    }))}
-                    disabled={submitting || repositories.length === 0}
-                    onValueChange={(value) => {
-                      if (value !== null) {
-                        setEdits((current) => ({ ...current, projectId: value as ProjectId }));
-                      }
-                    }}
-                  >
-                    <SelectTrigger id={`${id}-repository`} className="min-w-0">
-                      {selectedRepository ? (
-                        <ProjectFavicon project={selectedRepository} className="size-3.5" />
-                      ) : null}
-                      <SelectValue
-                        placeholder={
-                          repositories.length === 0 ? "No repositories" : "Choose a repository"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectPopup>
-                      {repositories.map((project) => (
-                        <SelectItem key={project.id} value={project.id}>
-                          {project.title}
-                        </SelectItem>
-                      ))}
-                    </SelectPopup>
-                  </Select>
+                    recent={repositoryGroups.recent}
+                    others={repositoryGroups.others}
+                    canRunWithoutRepository={canRunWithoutRepository}
+                    disabled={submitting}
+                    onChange={(projectId) => setEdits((current) => ({ ...current, projectId }))}
+                  />
                 </div>
                 <div className="flex min-w-0 flex-col gap-1.5">
                   <Label id={`${id}-workspace`}>Workspace</Label>
                   <ToggleGroup
                     aria-labelledby={`${id}-workspace`}
                     className="w-full *:flex-1"
-                    value={[workspace]}
-                    disabled={submitting}
+                    value={[noRepository ? "local" : workspace]}
+                    disabled={submitting || noRepository}
                     onValueChange={(next) => {
                       const value = next[0];
                       if (value === "worktree" || value === "local") setWorkspace(value);
@@ -310,7 +393,7 @@ function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef })
                   <div className="flex min-w-0 items-center gap-2">
                     <StartWorkModelPicker
                       environmentId={environmentId}
-                      projectId={fields.projectId}
+                      projectId={selectedRepository?.id ?? null}
                       selection={modelSelection ?? thread.modelSelection}
                       disabled={submitting}
                       onChange={setModelSelection}
@@ -331,9 +414,9 @@ function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef })
                   </div>
                 </div>
               ) : null}
-              {repositories.length === 0 ? (
+              {noRepository ? (
                 <p className="text-muted-foreground text-xs">
-                  Work runs in a repository. Add one on this machine first.
+                  Without a repository, the session runs in a folder of its own.
                 </p>
               ) : null}
               {!canStart ? (
@@ -341,7 +424,7 @@ function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef })
                   This connection cannot start Work on this machine.
                 </p>
               ) : null}
-              {!submission.ok && !drafting && repositories.length > 0 ? (
+              {!submission.ok && !drafting ? (
                 <p className="text-muted-foreground text-xs">{submission.reason}</p>
               ) : null}
               {error ? (
@@ -363,6 +446,91 @@ function StartWorkDialog({ threadRef }: { readonly threadRef: ScopedThreadRef })
         </form>
       </DialogPopup>
     </Dialog>
+  );
+}
+
+const ADD_REPOSITORY = "add-repository";
+
+/**
+ * The start screen's repository look in a field: badge and name, recently
+ * active repositories first, then "No repository" and "Add repository".
+ */
+function WorkRepositorySelect(props: {
+  readonly id: string;
+  readonly value: WorkRepositoryChoice | null;
+  readonly recent: ReadonlyArray<{ readonly id: ProjectId; readonly title: string }>;
+  readonly others: ReadonlyArray<{ readonly id: ProjectId; readonly title: string }>;
+  readonly canRunWithoutRepository: boolean;
+  readonly disabled: boolean;
+  readonly onChange: (choice: WorkRepositoryChoice) => void;
+}) {
+  const repositories = [...props.recent, ...props.others];
+  const selected = repositories.find((repository) => repository.id === props.value);
+  const items: Array<{ readonly value: string; readonly label: string }> = [
+    ...repositories.map((repository) => ({ value: repository.id, label: repository.title })),
+    ...(props.canRunWithoutRepository ? [{ value: NO_REPOSITORY, label: "No repository" }] : []),
+    { value: ADD_REPOSITORY, label: "Add repository" },
+  ];
+  const renderGroup = (
+    label: string,
+    group: ReadonlyArray<{ readonly id: ProjectId; readonly title: string }>,
+  ) =>
+    group.length > 0 ? (
+      <SelectGroup>
+        <SelectGroupLabel>{label}</SelectGroupLabel>
+        {group.map((repository) => (
+          <SelectItem key={repository.id} value={repository.id}>
+            <span className="flex min-w-0 items-center gap-2">
+              <RepositoryBadge name={repository.title} />
+              <span className="min-w-0 truncate">{repository.title}</span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectGroup>
+    ) : null;
+  return (
+    <Select<string>
+      value={props.value}
+      items={items}
+      disabled={props.disabled}
+      onValueChange={(value) => {
+        if (value === null) return;
+        // An action, not a choice: the new repository shows up in this list once added.
+        if (value === ADD_REPOSITORY) {
+          openCommandPalette({ open: "add-project" });
+          return;
+        }
+        props.onChange(value as WorkRepositoryChoice);
+      }}
+    >
+      <SelectTrigger id={props.id} className="min-w-0">
+        {selected ? <RepositoryBadge name={selected.title} /> : null}
+        {props.value === NO_REPOSITORY ? (
+          <MessageSquareDashedIcon aria-hidden className="size-3.5" />
+        ) : null}
+        <SelectValue placeholder="Choose a repository" />
+      </SelectTrigger>
+      <SelectPopup>
+        {renderGroup("Recent", props.recent)}
+        {renderGroup(props.recent.length > 0 ? "Other repositories" : "Repositories", props.others)}
+        <SelectGroup>
+          {props.canRunWithoutRepository ? (
+            <SelectItem value={NO_REPOSITORY}>
+              <span className="flex min-w-0 items-center gap-2">
+                <MessageSquareDashedIcon aria-hidden className="size-3.5" />
+                No repository
+              </span>
+            </SelectItem>
+          ) : null}
+          <SelectItem value={ADD_REPOSITORY}>
+            <span className="flex min-w-0 items-center gap-2">
+              <FolderPlusIcon aria-hidden className="size-3.5" />
+              Add repository…
+            </span>
+          </SelectItem>
+        </SelectGroup>
+      </SelectPopup>
+    </Select>
   );
 }
 

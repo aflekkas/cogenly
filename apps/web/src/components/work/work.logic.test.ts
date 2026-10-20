@@ -5,10 +5,13 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   describeWorkStartFailure,
   deriveWorkRowStatus,
+  groupWorkRepositories,
+  NO_REPOSITORY,
   listWorkRepositories,
   openWorkWhenArrived,
   resolveStartWorkFields,
   resolveStartWorkSubmission,
+  startWorkExcerpt,
   type StartWorkFields,
   workPrefersNewWorktree,
   workStatusPresentation,
@@ -50,6 +53,33 @@ describe("listWorkRepositories", () => {
       "/home/me/.scratch",
     );
     expect(repositories.map((repository) => repository.id)).toEqual(["booking", "web"]);
+  });
+});
+
+describe("startWorkExcerpt", () => {
+  it("quotes the first real line without Markdown, cut to length", () => {
+    expect(startWorkExcerpt("\n\n## **Plan** for `audit`\nMore")).toBe("Plan for audit");
+    expect(startWorkExcerpt("- first bullet")).toBe("first bullet");
+    expect(startWorkExcerpt("x".repeat(100), 10)).toBe("xxxxxxxxx…");
+    expect(startWorkExcerpt("   ")).toBe("");
+  });
+});
+
+describe("groupWorkRepositories", () => {
+  it("puts the most recently active repositories first, then the rest by title", () => {
+    const repositories = ["api", "booking", "docs", "web", "zeta"].map((id) =>
+      project(envA, id, id),
+    );
+    const activity = new Map([
+      [ProjectId.make("web"), "2026-10-03T00:00:00.000Z"],
+      [ProjectId.make("zeta"), "2026-10-05T00:00:00.000Z"],
+      [ProjectId.make("docs"), "2026-10-04T00:00:00.000Z"],
+      [ProjectId.make("api"), "2026-10-01T00:00:00.000Z"],
+    ]);
+    const groups = groupWorkRepositories(repositories, activity);
+    expect(groups.recent.map((repository) => repository.id)).toEqual(["zeta", "docs", "web"]);
+    expect(groups.others.map((repository) => repository.id)).toEqual(["api", "booking"]);
+    expect(groupWorkRepositories(repositories, new Map()).recent).toEqual([]);
   });
 });
 
@@ -100,6 +130,17 @@ describe("resolveStartWorkFields", () => {
     expect(fields.projectId).toBeNull();
   });
 
+  it("keeps a No repository pick, which no suggestion replaces", () => {
+    expect(
+      resolveStartWorkFields({
+        edits: { projectId: NO_REPOSITORY },
+        proposal,
+        repositories,
+        sourceThread,
+      }).projectId,
+    ).toBe(NO_REPOSITORY);
+  });
+
   it("falls back to the thread's own repository, then the only repository", () => {
     expect(
       resolveStartWorkFields({
@@ -142,6 +183,18 @@ describe("resolveStartWorkSubmission", () => {
     const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6" };
     const submission = resolveStartWorkSubmission({ fields, workspace: "local", modelSelection });
     expect(submission.ok && submission.input.modelSelection).toEqual(modelSelection);
+  });
+
+  it("runs Work without a repository locally, for the caller to place in scratch", () => {
+    const submission = resolveStartWorkSubmission({
+      fields: { ...fields, projectId: NO_REPOSITORY },
+      workspace: "worktree",
+      modelSelection: null,
+    });
+    expect(submission.ok && submission.input).toMatchObject({
+      targetProjectId: null,
+      workspace: "local",
+    });
   });
 
   it("explains what is missing", () => {

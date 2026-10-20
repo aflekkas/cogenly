@@ -18,6 +18,34 @@ export const WORK_SCOPE_MAX_LENGTH = 16000;
 
 export type WorkWorkspace = "worktree" | "local";
 
+/** The picker's "No repository" choice: Work runs in the environment's scratch project. */
+export const NO_REPOSITORY = "no-repository";
+export type WorkRepositoryChoice = ProjectId | typeof NO_REPOSITORY;
+
+/**
+ * The picker's repository groups: up to `recentLimit` repositories with the
+ * newest thread activity first, then the rest by title. `activity` holds each
+ * repository's latest thread `updatedAt`; repositories without threads are
+ * never recent.
+ */
+export function groupWorkRepositories<T extends Pick<EnvironmentProject, "id" | "title">>(
+  repositories: ReadonlyArray<T>,
+  activity: ReadonlyMap<ProjectId, string>,
+  recentLimit = 3,
+): { readonly recent: T[]; readonly others: T[] } {
+  const recent = repositories
+    .filter((repository) => activity.has(repository.id))
+    .toSorted((left, right) => activity.get(right.id)!.localeCompare(activity.get(left.id)!))
+    .slice(0, recentLimit);
+  const recentIds = new Set(recent.map((repository) => repository.id));
+  return {
+    recent,
+    others: repositories
+      .filter((repository) => !recentIds.has(repository.id))
+      .toSorted((left, right) => left.title.localeCompare(right.title)),
+  };
+}
+
 /**
  * Repositories a chat can hand Work to: the source thread's environment runs
  * the session, so only its projects qualify, and never the scratch ("No
@@ -58,17 +86,35 @@ export function workPrefersNewWorktree(input: {
   );
 }
 
+/**
+ * The line the Start Work dialog quotes for a message it starts from: its first
+ * non-empty line, without Markdown markers, cut to `maxLength` characters.
+ */
+export function startWorkExcerpt(text: string, maxLength = 80): string {
+  const line =
+    text
+      .split("\n")
+      .map((candidate) =>
+        candidate
+          .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*|\d+[.)]\s+)/u, "")
+          .replace(/[*_`]/gu, "")
+          .trim(),
+      )
+      .find(Boolean) ?? "";
+  return line.length > maxLength ? `${line.slice(0, maxLength - 1).trimEnd()}…` : line;
+}
+
 /** Fields the user changed in the dialog; absent means "still the suggestion". */
 export interface StartWorkEdits {
   readonly title?: string;
   readonly scopeSummary?: string;
-  readonly projectId?: ProjectId;
+  readonly projectId?: WorkRepositoryChoice;
 }
 
 export interface StartWorkFields {
   readonly title: string;
   readonly scopeSummary: string;
-  readonly projectId: ProjectId | null;
+  readonly projectId: WorkRepositoryChoice | null;
 }
 
 /**
@@ -76,6 +122,7 @@ export interface StartWorkFields {
  * fills only the fields the user has not touched yet. The repository falls
  * back from the user's pick to the suggestion, the chat's own repository, and
  * finally the only repository there is; anything outside the list is ignored.
+ * "No repository" is only ever the user's pick, never a guess.
  */
 export function resolveStartWorkFields(input: {
   readonly edits: StartWorkEdits;
@@ -86,9 +133,10 @@ export function resolveStartWorkFields(input: {
   const { edits, proposal, repositories, sourceThread } = input;
   const listed = (id: ProjectId | null | undefined): id is ProjectId =>
     id != null && repositories.some((repository) => repository.id === id);
-  const projectId = [edits.projectId, proposal?.suggestedProjectId, sourceThread?.projectId].find(
-    listed,
-  );
+  const projectId =
+    edits.projectId === NO_REPOSITORY
+      ? NO_REPOSITORY
+      : [edits.projectId, proposal?.suggestedProjectId, sourceThread?.projectId].find(listed);
   return {
     title: edits.title ?? proposal?.title ?? sourceThread?.title ?? "",
     scopeSummary: edits.scopeSummary ?? proposal?.scopeSummary ?? "",
@@ -100,7 +148,8 @@ export type StartWorkSubmission =
   | {
       readonly ok: true;
       readonly input: {
-        readonly targetProjectId: ProjectId;
+        /** Null is "No repository": the caller resolves the scratch project. */
+        readonly targetProjectId: ProjectId | null;
         readonly title: string;
         readonly scopeSummary: string;
         readonly workspace: WorkWorkspace;
@@ -109,7 +158,10 @@ export type StartWorkSubmission =
     }
   | { readonly ok: false; readonly reason: string };
 
-/** Validates the dialog against the wire limits. A null model keeps the chat's. */
+/**
+ * Validates the dialog against the wire limits. A null model keeps the chat's.
+ * Work without a repository runs locally: there is no git to make a worktree from.
+ */
 export function resolveStartWorkSubmission(input: {
   readonly fields: StartWorkFields;
   readonly workspace: WorkWorkspace;
@@ -126,13 +178,14 @@ export function resolveStartWorkSubmission(input: {
   if (scopeSummary.length > WORK_SCOPE_MAX_LENGTH) {
     return { ok: false, reason: "The scope is too long. Trim it and reference the chat instead." };
   }
+  const noRepository = input.fields.projectId === NO_REPOSITORY;
   return {
     ok: true,
     input: {
-      targetProjectId: input.fields.projectId,
+      targetProjectId: noRepository ? null : input.fields.projectId,
       title,
       scopeSummary,
-      workspace: input.workspace,
+      workspace: noRepository ? "local" : input.workspace,
       ...(input.modelSelection === null ? {} : { modelSelection: input.modelSelection }),
     },
   };
