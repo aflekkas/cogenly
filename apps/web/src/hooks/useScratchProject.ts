@@ -5,7 +5,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadSurface } from "@t3tools/contracts";
 import { useCallback } from "react";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -77,13 +77,21 @@ export function useScratchProject() {
     [openScratch],
   );
 
-  /** `replace` swaps the current history entry, for landings that pick the chat themselves. */
+  /**
+   * `replace` swaps the current history entry, for landings that pick the chat themselves.
+   * The scratch folder hosts both kinds: `surface` says whether this is a chat or Work
+   * without a repository, and defaults to the surface the user is on.
+   */
   const startScratchThread = useCallback(
-    async (environmentId: EnvironmentId, options?: { readonly replace?: boolean }) => {
+    async (
+      environmentId: EnvironmentId,
+      options?: { readonly replace?: boolean; readonly surface?: ThreadSurface },
+    ) => {
       const project = await openScratchProject(environmentId);
       if (project) {
         await handleNewThread(scopeProjectRef(project.environmentId, project.id), {
           replace: options?.replace ?? false,
+          ...(options?.surface ? { surface: options.surface } : {}),
         }).catch((error: unknown) =>
           reportScratchFailure("Could not start without a repository", error),
         );
@@ -109,7 +117,7 @@ export function useScratchProject() {
         );
         return;
       }
-      void startScratchThread(environmentId);
+      void startScratchThread(environmentId, { surface: "chat" });
     },
     [scratchEnvironmentId, startScratchThread],
   );

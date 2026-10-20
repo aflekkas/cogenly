@@ -24,6 +24,7 @@ import {
   type ScopedThreadRef,
   ThreadId,
   SnapShotSource,
+  type ThreadSurface,
 } from "@t3tools/contracts";
 import {
   parseScopedProjectKey,
@@ -324,6 +325,7 @@ const PersistedDraftThreadState = Schema.Struct({
   projectId: ProjectId,
   logicalProjectKey: Schema.optionalKey(Schema.String),
   environmentSelection: Schema.optionalKey(Schema.Literals(["auto", "manual"])),
+  surface: Schema.optionalKey(Schema.Literals(["chat", "work"])),
   loadBalancedEnvironmentId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
@@ -456,6 +458,8 @@ export interface DraftSessionState {
   projectId: ProjectId;
   logicalProjectKey: string;
   environmentSelection?: "auto" | "manual";
+  /** Chats or Work, fixed when the draft is made; sent when it becomes a thread. */
+  surface?: ThreadSurface;
   loadBalancedEnvironmentId?: EnvironmentId | null;
   createdAt: string;
   runtimeMode: RuntimeMode;
@@ -545,6 +549,7 @@ interface ComposerDraftStoreState {
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
+      surface?: ThreadSurface;
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
   ) => void;
@@ -562,6 +567,7 @@ interface ComposerDraftStoreState {
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
+      surface?: ThreadSurface;
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
   ) => void;
@@ -578,6 +584,7 @@ interface ComposerDraftStoreState {
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
+      surface?: ThreadSurface;
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
   ) => void;
@@ -1592,6 +1599,7 @@ function createDraftThreadState(
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
     environmentSelection?: "auto" | "manual";
+    surface?: ThreadSurface;
     loadBalancedEnvironmentId?: EnvironmentId | null;
   },
 ): DraftThreadState {
@@ -1621,12 +1629,15 @@ function createDraftThreadState(
       : options.startFromOrigin;
   const environmentSelection =
     options?.environmentSelection ?? existingThread?.environmentSelection;
+  // Switching a draft's project never changes the surface it was started from.
+  const surface = options?.surface ?? existingThread?.surface;
   return {
     threadId,
     environmentId: projectRef.environmentId,
     projectId: projectRef.projectId,
     logicalProjectKey,
     ...(environmentSelection ? { environmentSelection } : {}),
+    ...(surface ? { surface } : {}),
     ...(options?.loadBalancedEnvironmentId !== undefined
       ? { loadBalancedEnvironmentId: options.loadBalancedEnvironmentId }
       : existingThread?.loadBalancedEnvironmentId !== undefined
@@ -1671,6 +1682,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.projectId === right.projectId &&
     left.logicalProjectKey === right.logicalProjectKey &&
     left.environmentSelection === right.environmentSelection &&
+    left.surface === right.surface &&
     left.loadBalancedEnvironmentId === right.loadBalancedEnvironmentId &&
     left.createdAt === right.createdAt &&
     left.runtimeMode === right.runtimeMode &&
@@ -1827,6 +1839,9 @@ function normalizePersistedDraftThreads(
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
         startFromOrigin,
+        ...(candidateDraftThread.surface === "chat" || candidateDraftThread.surface === "work"
+          ? { surface: candidateDraftThread.surface }
+          : {}),
         ...(candidateDraftThread.environmentSelection === "manual" ||
         candidateDraftThread.environmentSelection === "auto"
           ? { environmentSelection: candidateDraftThread.environmentSelection }
@@ -2593,6 +2608,7 @@ function toHydratedDraftThreadState(
     ...(persistedDraftThread.environmentSelection
       ? { environmentSelection: persistedDraftThread.environmentSelection }
       : {}),
+    ...(persistedDraftThread.surface ? { surface: persistedDraftThread.surface } : {}),
     ...(persistedDraftThread.loadBalancedEnvironmentId !== undefined
       ? {
           loadBalancedEnvironmentId:
@@ -2878,6 +2894,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               projectId: nextProjectRef.projectId,
               logicalProjectKey: existing.logicalProjectKey,
               ...(environmentSelection ? { environmentSelection } : {}),
+              ...((options.surface ?? existing.surface)
+                ? { surface: options.surface ?? existing.surface }
+                : {}),
               loadBalancedEnvironmentId:
                 options.loadBalancedEnvironmentId === undefined
                   ? projectChanged
@@ -2902,6 +2921,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.projectId === existing.projectId &&
               nextDraftThread.logicalProjectKey === existing.logicalProjectKey &&
               nextDraftThread.environmentSelection === existing.environmentSelection &&
+              nextDraftThread.surface === existing.surface &&
               nextDraftThread.loadBalancedEnvironmentId === existing.loadBalancedEnvironmentId &&
               nextDraftThread.createdAt === existing.createdAt &&
               nextDraftThread.runtimeMode === existing.runtimeMode &&

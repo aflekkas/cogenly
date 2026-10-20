@@ -5,19 +5,31 @@ import type {
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import type { EnvironmentId, ResolvedKeybindingsConfig, ScopedThreadRef } from "@t3tools/contracts";
-import { useEffect, useMemo } from "react";
+import type {
+  EnvironmentId,
+  ResolvedKeybindingsConfig,
+  ScopedThreadRef,
+  ThreadSurface,
+} from "@t3tools/contracts";
+import { useCallback, useEffect, useMemo } from "react";
 
 import { resolveShortcutCommand } from "../../../keybindings";
 import { useSelectSidebarMode } from "./useSelectSidebarMode";
 import { useUiStateStore } from "../../../uiStateStore";
 import {
+  classifySidebarThreadMode,
   filterThreadsForSidebarMode,
   sidebarModeForThread,
   sidebarModeThreadKey,
   type SidebarMode,
   type SidebarModeThreadClassifier,
 } from "./sidebarModes.logic";
+
+interface DraftModeShape {
+  readonly environmentId: string;
+  readonly projectId: string;
+  readonly surface?: ThreadSurface | undefined;
+}
 
 const MODE_BY_COMMAND: Record<string, SidebarMode> = {
   "sidebar.mode.chats": "chats",
@@ -74,8 +86,8 @@ export interface SidebarModeState {
   readonly selectMode: (mode: SidebarMode) => void;
   /** The threads the current mode lists; feed these to the sidebar's partition. */
   readonly modeThreads: ReadonlyArray<EnvironmentThreadShell>;
-  /** Project keys whose new-thread drafts belong in the current mode; null for all. */
-  readonly draftProjectKeys: ReadonlySet<string> | null;
+  /** Whether a new-thread draft belongs in the current mode, by the surface it was started from. */
+  readonly draftInMode: (draft: DraftModeShape) => boolean;
   /** Approvals and run questions waiting on you across agents; never unread messages. */
   readonly decisionsWaiting: number;
   /** Agent names by `environmentId:agentId`, for marking the Work an agent started. */
@@ -117,16 +129,20 @@ export function useSidebarModeState(input: {
     [classifier, mode, threads],
   );
 
-  const draftProjectKeys = useMemo((): ReadonlySet<string> | null => {
-    if (mode === "agents" || mode === "projects") return new Set();
-    const keys = projects
-      .map((project) => `${project.environmentId}:${project.id}`)
-      .filter((key) => (mode === "chats") === scratchProjectKeys.has(key))
-      .filter(
-        (key) => mode === "chats" || scopedProjectKeys === null || scopedProjectKeys.has(key),
-      );
-    return new Set(keys);
-  }, [mode, projects, scopedProjectKeys, scratchProjectKeys]);
+  const draftInMode = useCallback(
+    (draft: DraftModeShape): boolean => {
+      if (mode === "agents" || mode === "projects") return false;
+      const projectKey = `${draft.environmentId}:${draft.projectId}`;
+      const draftMode = classifySidebarThreadMode({
+        isAgent: false,
+        isScratch: scratchProjectKeys.has(projectKey),
+        surface: draft.surface,
+      });
+      if (draftMode !== mode) return false;
+      return mode === "chats" || scopedProjectKeys === null || scopedProjectKeys.has(projectKey);
+    },
+    [mode, scopedProjectKeys, scratchProjectKeys],
+  );
 
   const agentNameByKey = useMemo(
     () => new Map(agents.map((agent) => [`${agent.environmentId}:${agent.id}`, agent.name])),
@@ -175,7 +191,7 @@ export function useSidebarModeState(input: {
     setMode,
     selectMode,
     modeThreads,
-    draftProjectKeys,
+    draftInMode,
     decisionsWaiting,
     agentNameByKey,
     classifier,

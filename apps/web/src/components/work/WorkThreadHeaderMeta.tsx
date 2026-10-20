@@ -42,6 +42,7 @@ export function WorkThreadHeaderMeta(props: {
     classifySidebarThreadMode({
       isAgentWork: agentRole === "work",
       isAgent: agentRole !== undefined,
+      surface: thread.source.surface,
       isScratch:
         project !== undefined &&
         (project.isScratch === true || isScratchProject(project, scratchWorkspaceRoot)),

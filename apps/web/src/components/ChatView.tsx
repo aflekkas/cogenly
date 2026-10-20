@@ -2123,12 +2123,13 @@ export default function ChatView(props: ChatViewProps) {
     );
   // What this thread's kind offers: a chat has no repository controls, an
   // agent's conversation leaves its lifecycle to the agent.
-  const activeThreadCapabilities = threadCapabilities(
-    classifyThreadKind({
-      agentRole: activeThreadShell?.source.agent?.role ?? null,
-      isScratch: activeProjectIsScratch,
-    }),
-  );
+  const activeThreadSurface = activeThreadShell?.source.surface ?? draftThread?.surface;
+  const activeThreadKind = classifyThreadKind({
+    agentRole: activeThreadShell?.source.agent?.role ?? null,
+    surface: activeThreadSurface,
+    isScratch: activeProjectIsScratch,
+  });
+  const activeThreadCapabilities = threadCapabilities(activeThreadKind);
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const envs: EnvironmentOption[] = [];
@@ -7896,6 +7897,7 @@ export default function ChatView(props: ChatViewProps) {
                   interactionMode: target.interactionMode,
                   bootstrap: {
                     createThread: {
+                      ...(activeThreadSurface ? { surface: activeThreadSurface } : {}),
                       projectId: activeProject.id,
                       title,
                       modelSelection: target.selection,
@@ -8236,6 +8238,7 @@ export default function ChatView(props: ChatViewProps) {
               ...(isLocalDraftThread
                 ? {
                     createThread: {
+                      ...(activeThreadSurface ? { surface: activeThreadSurface } : {}),
                       projectId: activeProject.id,
                       title,
                       modelSelection: threadCreateModelSelection,
@@ -8901,6 +8904,8 @@ export default function ChatView(props: ChatViewProps) {
     const createResult = await createThread({
       environmentId,
       input: {
+        // The implementation thread belongs where the plan was made.
+        ...(activeThreadSurface ? { surface: activeThreadSurface } : {}),
         threadId: nextThreadId,
         projectId: activeProject.id,
         title: nextThreadTitle,
@@ -9841,6 +9846,7 @@ export default function ChatView(props: ChatViewProps) {
                           draftId={draftId}
                           activeProjectRef={activeProjectRef}
                           activeProjectTitle={activeProject?.title ?? null}
+                          surface={activeThreadSurface}
                         />
                       </div>
                     </div>
@@ -9885,6 +9891,7 @@ export default function ChatView(props: ChatViewProps) {
                           {!composerMounted ? null : (
                             <ChatComposer
                               canOperateThread={canOperateThread}
+                              isChat={activeThreadKind === "chat"}
                               reportedModelSelection={reportedModelSelection}
                               multipleModelSelections={multipleModelSelections}
                               supportsMultipleModels={

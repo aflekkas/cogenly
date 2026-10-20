@@ -2,9 +2,9 @@
  * The sidebar lists one of three kinds of work at a time, or the projects
  * that tie them together:
  *
- * - Chats: threads in an environment's scratch ("No project") project.
- * - Work: coding threads in real projects, plus every thread an agent started
- *   to do work, wherever it runs. Shown as "Work"; the id stays `tasks`
+ * - Chats: threads started from Chats.
+ * - Work: threads started from Work, with or without a project, plus every
+ *   thread an agent started to do work, wherever it runs. Shown as "Work"; the id stays `tasks`
  *   because persisted settings and keybindings store it.
  * - Agents: persistent agent conversations.
  * - Projects: the user's project tags. Lists no threads itself; a project
@@ -14,7 +14,7 @@
  * opening one from anywhere (search, a notification, a link) can switch the
  * sidebar to the mode that lists it.
  */
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId, ThreadSurface } from "@t3tools/contracts";
 
 export type SidebarMode = "chats" | "tasks" | "agents" | "projects";
 
@@ -42,15 +42,19 @@ export function sidebarModeThreadKey(
 
 /**
  * Agent work wins over everything: an agent's coding run is Work, even in a
- * scratch project. Agent conversations win over chats.
+ * scratch project. Agent conversations win over chats. Past that, the surface
+ * the thread was created from decides; only threads that predate the field
+ * (no `surface`) fall back to the old guess that a scratch project means chat.
  */
 export function classifySidebarThreadMode(input: {
   readonly isAgent: boolean;
   readonly isScratch: boolean;
   readonly isAgentWork?: boolean;
+  readonly surface?: ThreadSurface | undefined;
 }): SidebarThreadMode {
   if (input.isAgentWork) return "tasks";
   if (input.isAgent) return "agents";
+  if (input.surface !== undefined) return input.surface === "chat" ? "chats" : "tasks";
   return input.isScratch ? "chats" : "tasks";
 }
 
@@ -69,7 +73,10 @@ export function sidebarModeForThread(
     readonly environmentId: EnvironmentId | string;
     readonly id: ThreadId | string;
     readonly projectId: string;
-    readonly source?: { readonly agent?: { readonly role: "conversation" | "work" } | undefined };
+    readonly source?: {
+      readonly agent?: { readonly role: "conversation" | "work" } | undefined;
+      readonly surface?: ThreadSurface | undefined;
+    };
   },
   classifier: SidebarModeThreadClassifier,
 ): SidebarThreadMode {
@@ -79,6 +86,7 @@ export function sidebarModeForThread(
       thread.source?.agent !== undefined ||
       classifier.agentThreadKeys.has(sidebarModeThreadKey(thread.environmentId, thread.id)),
     isScratch: classifier.scratchProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
+    surface: thread.source?.surface,
   });
 }
 
@@ -87,7 +95,10 @@ export function filterThreadsForSidebarMode<
     readonly environmentId: EnvironmentId | string;
     readonly id: ThreadId | string;
     readonly projectId: string;
-    readonly source?: { readonly agent?: { readonly role: "conversation" | "work" } | undefined };
+    readonly source?: {
+      readonly agent?: { readonly role: "conversation" | "work" } | undefined;
+      readonly surface?: ThreadSurface | undefined;
+    };
   },
 >(threads: ReadonlyArray<T>, mode: SidebarMode, classifier: SidebarModeThreadClassifier): T[] {
   return threads.filter((thread) => sidebarModeForThread(thread, classifier) === mode);

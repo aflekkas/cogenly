@@ -4,7 +4,13 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  type ScopedProjectRef,
+  type ThreadId,
+  type ThreadSurface,
+} from "@t3tools/contracts";
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -80,6 +86,12 @@ export function useNewThreadHandler() {
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
         replace?: boolean;
+        /**
+         * Chats or Work. Defaults to the surface the user is on, so every entry point
+         * (button, shortcut, palette, links) classifies the same way; Chats entry points
+         * pass "chat" explicitly. A project never decides this.
+         */
+        surface?: ThreadSurface;
       },
       // Which draft the thread ended up in, so a caller that has something to put in it — a
       // prepared checkout, a task to write — addresses that one rather than looking the project
@@ -136,6 +148,18 @@ export function useNewThreadHandler() {
           candidate.id === projectRef.projectId &&
           candidate.environmentId === projectRef.environmentId,
       );
+      // Picking a repository is starting Work. Only the no-repository folder is
+      // ambiguous, and there the surface the user is on decides.
+      const startsInScratch =
+        project?.isScratch === true ||
+        (project !== undefined &&
+          isScratchProject(
+            project,
+            environmentServerConfigs.get(projectRef.environmentId)?.scratchWorkspaceRoot,
+          ));
+      const surface: ThreadSurface =
+        options?.surface ??
+        (startsInScratch && useUiStateStore.getState().sidebarMode === "chats" ? "chat" : "work");
       // Removal can land while the project file is read; a draft opened
       // after that belongs to a project that no longer exists.
       const abandonedSinceRequest = () =>
@@ -147,6 +171,9 @@ export function useNewThreadHandler() {
         project?.id ?? null,
         project,
       );
+      // A chat is a quick conversation: it starts supervised whatever the project defaults say.
+      const defaultRuntimeMode =
+        surface === "chat" ? "approval-required" : projectSettings.settings.defaultRuntimeMode;
       const projectDefaultModelSelection = projectSettings.settings.defaultModelSelection;
       const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
         resolveNewThreadModelSelectionOverride({
@@ -293,10 +320,9 @@ export function useNewThreadHandler() {
           }
           if (workspaceContext) {
             setDraftThreadContext(emptyStoredDraftThread.draftId, {
+              surface,
               ...workspaceContext,
-              ...(!isDraftAlreadyOpen
-                ? { runtimeMode: projectSettings.settings.defaultRuntimeMode }
-                : {}),
+              ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             });
           }
@@ -332,10 +358,9 @@ export function useNewThreadHandler() {
             emptyStoredDraftThread.draftId,
             {
               threadId: emptyStoredDraftThread.threadId,
+              surface,
               ...workspaceContext,
-              ...(!isDraftAlreadyOpen
-                ? { runtimeMode: projectSettings.settings.defaultRuntimeMode }
-                : {}),
+              ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             },
           );
@@ -381,6 +406,7 @@ export function useNewThreadHandler() {
         }
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, currentRouteTarget.draftId, {
           threadId: latestActiveDraftThread.threadId,
+          surface,
           createdAt: latestActiveDraftThread.createdAt,
           runtimeMode: latestActiveDraftThread.runtimeMode,
           interactionMode: latestActiveDraftThread.interactionMode,
@@ -424,6 +450,7 @@ export function useNewThreadHandler() {
           // contradictory envMode.
           setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, racedDraft.draftId, {
             threadId: racedDraft.threadId,
+            surface,
             createdAt: racedDraft.createdAt,
             runtimeMode: racedDraft.runtimeMode,
             interactionMode: racedDraft.interactionMode,
@@ -438,6 +465,7 @@ export function useNewThreadHandler() {
         }
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
           threadId,
+          surface,
           createdAt,
           branch: options?.branch ?? null,
           worktreePath: options?.worktreePath ?? null,
@@ -448,7 +476,7 @@ export function useNewThreadHandler() {
               envMode: initialEnvMode,
               newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
             }),
-          runtimeMode: projectSettings.settings.defaultRuntimeMode,
+          runtimeMode: defaultRuntimeMode,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
         });
         applyStickyState(draftId);

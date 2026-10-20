@@ -45,6 +45,48 @@ describe("classifySidebarThreadMode", () => {
   });
 });
 
+describe("surface classification", () => {
+  it("lists Work started without a repository under Work, and a chat in a repository under Chats", () => {
+    expect(classifySidebarThreadMode({ isAgent: false, isScratch: true, surface: "work" })).toBe(
+      "tasks",
+    );
+    expect(classifySidebarThreadMode({ isAgent: false, isScratch: false, surface: "chat" })).toBe(
+      "chats",
+    );
+  });
+
+  it("lets agents win over the surface", () => {
+    expect(classifySidebarThreadMode({ isAgent: true, isScratch: true, surface: "chat" })).toBe(
+      "agents",
+    );
+    expect(
+      classifySidebarThreadMode({
+        isAgent: true,
+        isScratch: true,
+        isAgentWork: true,
+        surface: "chat",
+      }),
+    ).toBe("tasks");
+  });
+
+  it("filters threads by surface, not project", () => {
+    const thread = (id: string, surface?: "chat" | "work") => ({
+      environmentId: "env-a",
+      id,
+      projectId: "scratch",
+      source: { surface },
+    });
+    const threads = [thread("work-no-repo", "work"), thread("chat", "chat"), thread("legacy")];
+    expect(filterThreadsForSidebarMode(threads, "tasks", classifier).map((t) => t.id)).toEqual([
+      "work-no-repo",
+    ]);
+    expect(filterThreadsForSidebarMode(threads, "chats", classifier).map((t) => t.id)).toEqual([
+      "chat",
+      "legacy",
+    ]);
+  });
+});
+
 describe("sidebarModeForThread", () => {
   it("classifies by environment, not by bare ids", () => {
     // Same thread id and project id on another machine is a different thread.

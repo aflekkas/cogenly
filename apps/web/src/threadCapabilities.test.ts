@@ -99,6 +99,11 @@ describe("classifyThreadKind", () => {
     expect(classifyThreadKind({ agentRole: null, isScratch: false })).toBe("work");
   });
 
+  it("trusts the recorded surface over the folder", () => {
+    expect(classifyThreadKind({ agentRole: null, isScratch: true, surface: "work" })).toBe("work");
+    expect(classifyThreadKind({ agentRole: null, isScratch: false, surface: "chat" })).toBe("chat");
+  });
+
   it("matches the sidebar mode that lists the thread", () => {
     expect(threadKindForSidebarMode("chats")).toBe("chat");
     expect(threadKindForSidebarMode("tasks")).toBe("work");

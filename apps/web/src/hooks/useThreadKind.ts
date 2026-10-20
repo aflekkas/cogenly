@@ -1,5 +1,5 @@
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadSurface } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 
@@ -15,7 +15,12 @@ interface ThreadKindInput {
   /** Absent for a draft, which no agent owns yet. */
   readonly id?: string;
   readonly projectId: string;
-  readonly source?: { readonly agent?: { readonly role: "conversation" | "work" } | undefined };
+  readonly source?: {
+    readonly agent?: { readonly role: "conversation" | "work" } | undefined;
+    readonly surface?: ThreadSurface | undefined;
+  };
+  /** A draft carries its surface itself; a thread carries it on `source`. */
+  readonly surface?: ThreadSurface | undefined;
 }
 
 /**
@@ -44,6 +49,7 @@ export function useThreadKindResolver(): (thread: ThreadKindInput) => ThreadKind
               agent.environmentId === thread.environmentId &&
               agent.conversationThreadId === thread.id,
           ),
+        surface: thread.source?.surface ?? thread.surface,
         isScratch:
           project !== undefined &&
           (project.isScratch === true || isScratchProject(project, scratchRoot ?? null)),

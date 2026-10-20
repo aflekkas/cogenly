@@ -1639,6 +1639,8 @@ export interface ChatComposerProps {
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
+  /** A chat has no access picker (it always runs supervised) and a conversational placeholder. */
+  isChat: boolean;
   /** The thread's access mode as the next send applies it. */
   runtimeMode: RuntimeMode;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
@@ -1748,6 +1750,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     getModelDisabledReason,
     toggleInteractionMode,
     handleInteractionModeChange,
+    isChat,
     runtimeMode,
     handleRuntimeModeChange,
     focusComposer,
@@ -5240,7 +5243,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ...providerTraitsPickerInput,
     size: composerControlsCollapsed ? "xs" : "sm",
     // Traits is the first block, so it hides once every block after it has.
-    hidden: composerControlsHidden || restingHiddenBlockCount > (planModeUiEnabled ? 2 : 1),
+    hidden:
+      composerControlsHidden ||
+      restingHiddenBlockCount > (isChat ? 0 : 1) + (planModeUiEnabled ? 1 : 0),
   });
   const runtimeModes = availableRuntimeModes(selectedProviderStatus?.supportedRuntimeModes);
   const restingBlockDefs = [
@@ -5257,21 +5262,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ]
       : []),
-    {
-      id: "access",
-      content: (
-        <>
-          <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
-          <ComposerAccessModePicker
-            runtimeMode={runtimeMode}
-            runtimeModes={runtimeModes}
-            size={composerControlsCollapsed ? "xs" : "sm"}
-            hidden={composerControlsHidden || restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0)}
-            onRuntimeModeChange={handleRuntimeModeChange}
-          />
-        </>
-      ),
-    },
+    // A chat always runs supervised, so it offers no access choice.
+    ...(isChat
+      ? []
+      : [
+          {
+            id: "access",
+            content: (
+              <>
+                <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
+                <ComposerAccessModePicker
+                  runtimeMode={runtimeMode}
+                  runtimeModes={runtimeModes}
+                  size={composerControlsCollapsed ? "xs" : "sm"}
+                  hidden={
+                    composerControlsHidden || restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0)
+                  }
+                  onRuntimeModeChange={handleRuntimeModeChange}
+                />
+              </>
+            ),
+          },
+        ]),
     ...(planModeUiEnabled
       ? [
           {
@@ -7401,7 +7413,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 ? "Enable a provider in Settings to send a message"
                                 : phase === "disconnected"
                                   ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                  : isChat
+                                    ? "Message"
+                                    : "Ask anything, @tag files/folders, $use skills, or / for commands"
                     }
                     disabled={
                       isConnecting ||

@@ -1,6 +1,10 @@
 import type { DraftId } from "~/composerDraftStore";
 import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
-import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
+import {
+  resolveEnvironmentMachineKind,
+  type ScopedProjectRef,
+  type ThreadSurface,
+} from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { FolderPlusIcon } from "lucide-react";
@@ -55,12 +59,15 @@ interface DraftHeroHeadlineProps {
   readonly draftId: DraftId | null;
   readonly activeProjectRef: ScopedProjectRef | null;
   readonly activeProjectTitle: string | null;
+  /** What the draft was started as; absent on drafts from before it was recorded. */
+  readonly surface: ThreadSurface | undefined;
 }
 
 export function DraftHeroHeadline({
   draftId,
   activeProjectRef,
   activeProjectTitle,
+  surface,
 }: DraftHeroHeadlineProps) {
   const projects = useProjects();
   const threads = useThreadShells();
@@ -177,6 +184,10 @@ export function DraftHeroHeadline({
   const scratchWorkspaceRoot = scratchWorkspaceRootFor(scratchTargetEnvironmentId);
   const isScratchDraft =
     activeProject !== null && isScratchProject(activeProject, scratchWorkspaceRoot);
+  // A chat is a quick conversation: no repository choice at all. Work may run
+  // without a repository, and says so in the picker. Drafts from before the
+  // surface was recorded keep the old guess.
+  const isChatDraft = surface === undefined ? isScratchDraft : surface === "chat";
 
   // {value, label} items let Base UI drive the combobox selection while the
   // popup search filters the same collection. "Add project" is an action, not
@@ -224,7 +235,9 @@ export function DraftHeroHeadline({
     };
     const currentDraft = getComposerDraft(draftId);
     if (!composerDraftHasUserContent(currentDraft)) {
-      void openProjectDraft(scopeProjectRef(project.environmentId, project.id));
+      void openProjectDraft(scopeProjectRef(project.environmentId, project.id), {
+        ...(surface ? { surface } : {}),
+      });
       return;
     }
     setLogicalProjectDraftThreadId(
@@ -367,14 +380,15 @@ export function DraftHeroHeadline({
   // a complete sentence too. The project picker is a control rendered inline
   // in the h1; without an explicit label its widget state bleeds into the
   // announced phrase.
-  // A chat without a repository is a plain conversation, not Work.
-  const headingLabel = isScratchDraft
+  const headingLabel = isChatDraft
     ? "What’s on your mind?"
-    : hasResolvedProject
-      ? `What should we build in ${activeProjectDisplayName}?`
-      : canChooseProject
-        ? `${activeProjectDisplayName ?? "Choose a repository"} to start`
-        : "Add a repository to start";
+    : isScratchDraft
+      ? "What should we build?"
+      : hasResolvedProject
+        ? `What should we build in ${activeProjectDisplayName}?`
+        : canChooseProject
+          ? `${activeProjectDisplayName ?? "Choose a repository"} to start`
+          : "Add a repository to start";
 
   // One click out of the project, phrased as the alternative to the question
   // above it. Focus moves to the project picker once this line has gone.
@@ -409,8 +423,10 @@ export function DraftHeroHeadline({
         aria-label={headingLabel}
         className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
       >
-        {isScratchDraft ? (
+        {isChatDraft ? (
           <>What’s on your mind?</>
+        ) : isScratchDraft ? (
+          <>What should we build?</>
         ) : hasResolvedProject ? (
           <>What should we build in {projectSelector}?</>
         ) : canChooseProject ? (
@@ -421,7 +437,7 @@ export function DraftHeroHeadline({
       </h1>
       {/* Reserved whenever threads can skip a project, so the heading does not
           move. Without a project, the picker moves here to choose one. */}
-      {scratchWorkspaceRoot === null ? null : (
+      {isChatDraft || scratchWorkspaceRoot === null ? null : (
         <p className="mt-2 flex h-6 items-center text-sm">
           {isScratchDraft ? projectSelector : orStartWithoutProject}
         </p>

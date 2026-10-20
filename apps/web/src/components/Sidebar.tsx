@@ -244,7 +244,10 @@ import {
   useSidebarModeState,
   windowChatList,
 } from "./sidebar/modes";
-import { sidebarModeForThread } from "./sidebar/modes/sidebarModes.logic";
+import {
+  classifySidebarThreadMode,
+  sidebarModeForThread,
+} from "./sidebar/modes/sidebarModes.logic";
 import {
   threadCapabilities,
   threadKindForSidebarMode,
@@ -822,7 +825,7 @@ interface SidebarDraftRowData {
 const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   projectByKey: ReadonlyMap<string, EnvironmentProject>;
   projectDisplayNameByKey: ReadonlyMap<string, string>;
-  scopedProjectKeys: ReadonlySet<string> | null;
+  draftInMode: (draft: DraftSessionState) => boolean;
   routeDraftId: string | null;
   slim: boolean;
   onNavigateToDraft: (draftId: DraftId) => void;
@@ -863,10 +866,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
       if (session.promotedTo != null) {
         continue;
       }
-      if (
-        props.scopedProjectKeys !== null &&
-        !props.scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)
-      ) {
+      if (!props.draftInMode(session)) {
         continue;
       }
       if (draftKey === props.routeDraftId) {
@@ -891,7 +891,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     draftsByThreadKey,
     frozenActive,
     props.routeDraftId,
-    props.scopedProjectKeys,
+    props.draftInMode,
   ]);
   if (drafts.length === 0) {
     return null;
@@ -2674,10 +2674,7 @@ export default function Sidebar() {
       if (!composerDraftHasUserContent(store.draftsByThreadKey[draftKey])) {
         continue;
       }
-      if (
-        sidebarModes.draftProjectKeys !== null &&
-        !sidebarModes.draftProjectKeys.has(`${session.environmentId}:${session.projectId}`)
-      ) {
+      if (!sidebarModes.draftInMode(session)) {
         continue;
       }
       count += 1;
@@ -3985,11 +3982,15 @@ export default function Sidebar() {
           projectByKey.get(`${session.environmentId}:${session.projectId}`)?.workspaceRoot;
         // A chat draft has no repository to copy from or configure.
         const draftCapabilities = threadCapabilities(
-          sidebarModes.classifier.scratchProjectKeys.has(
-            `${session.environmentId}:${session.projectId}`,
-          )
-            ? "chat"
-            : "work",
+          threadKindForSidebarMode(
+            classifySidebarThreadMode({
+              isAgent: false,
+              isScratch: sidebarModes.classifier.scratchProjectKeys.has(
+                `${session.environmentId}:${session.projectId}`,
+              ),
+              surface: session.surface,
+            }),
+          ),
         );
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
@@ -4764,7 +4765,7 @@ export default function Sidebar() {
                         key="draft-sessions"
                         projectByKey={projectByKey}
                         projectDisplayNameByKey={projectDisplayNameByKey}
-                        scopedProjectKeys={sidebarModes.draftProjectKeys}
+                        draftInMode={sidebarModes.draftInMode}
                         routeDraftId={routeDraftIdForRows}
                         slim={sidebarMode === "chats"}
                         onNavigateToDraft={navigateToDraft}

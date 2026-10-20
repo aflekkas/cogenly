@@ -337,6 +337,7 @@ describe("V2 environment commands", () => {
         titleSeed: "Continue here",
         bootstrap: {
           createThread: {
+            surface: "work",
             projectId: ProjectId.make("project-1"),
             title: "Thread",
             modelSelection: v2Projection.thread.modelSelection,
@@ -352,6 +353,7 @@ describe("V2 environment commands", () => {
       expect(launches[0]).toMatchObject({
         threadId: v2ThreadId,
         title: "Continue here",
+        surface: "work",
         generateTitle: true,
         workspaceStrategy: {
           type: "existing_worktree",

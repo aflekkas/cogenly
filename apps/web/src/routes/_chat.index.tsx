@@ -143,7 +143,7 @@ function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
         return;
       case "new-chat":
         startingRef.current = true;
-        void startScratchThread(landing.environmentId, { replace: true });
+        void startScratchThread(landing.environmentId, { replace: true, surface: "chat" });
         return;
       case "repository-draft": {
         // A repository removed since this render is gone from the store; the

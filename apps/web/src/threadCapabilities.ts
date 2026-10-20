@@ -1,10 +1,12 @@
+import type { ThreadSurface } from "@t3tools/contracts";
+
 import type { SidebarThreadMode } from "./components/sidebar/modes/sidebarModes.logic";
 
 /**
  * The three kinds of thread a user works with:
  *
- * - `chat`: a plain conversation in an environment's scratch folder. No repository.
- * - `work`: a coding session bound to a repository, including Work an agent started.
+ * - `chat`: a conversation started from Chats, usually in an environment's scratch folder.
+ * - `work`: a session started from Work, with or without a repository, including Work an agent started.
  * - `agentConversation`: an agent's own conversation. The agent owns its name and lifetime.
  */
 export type ThreadKind = "chat" | "work" | "agentConversation";
@@ -143,10 +145,13 @@ export function classifyThreadKind(input: {
   readonly agentRole: "conversation" | "work" | null;
   /** Listed as some agent's conversation, for agents whose thread carries no source. */
   readonly isAgentConversation?: boolean;
+  /** The surface the thread was created from; absent on threads from before it was recorded. */
+  readonly surface?: ThreadSurface | undefined;
   readonly isScratch: boolean;
 }): ThreadKind {
   if (input.agentRole === "work") return "work";
   if (input.agentRole === "conversation" || input.isAgentConversation) return "agentConversation";
+  if (input.surface !== undefined) return input.surface;
   return input.isScratch ? "chat" : "work";
 }
 
