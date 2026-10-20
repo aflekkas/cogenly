@@ -145,7 +145,7 @@ export function HtmlRenderFrame(props: {
                   <Button
                     aria-label="Open full screen"
                     size="icon-xs"
-                    variant="glass"
+                    variant="outline"
                     onClick={async () => {
                       const url =
                         srcExpiresAt.current - Date.now() > MIN_URL_LIFE_MS

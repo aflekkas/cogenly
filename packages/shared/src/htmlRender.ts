@@ -337,6 +337,7 @@ export const HTML_RENDER_THEME_GUIDE = [
   "--success, --success-foreground, --info, --info-foreground, --code-background, --code-foreground,",
   "--chart-1 … --chart-6 (categorical series for charts), --radius, --font-sans, --font-mono.",
   "The base stylesheet sets html background/color/font from these, body margin to 0, and hides the page's scrollbar; your own CSS overrides it.",
+  "Take every color from these variables (color-mix() them for tints) rather than hardcoding hex values, and never set your own page background: a hardcoded dark page shows as a box in light mode and against other themes.",
 ].join(" ");
 
 /** Agent-facing layout rules for a page that sits inside a reply. */
