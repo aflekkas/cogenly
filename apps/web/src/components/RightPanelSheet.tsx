@@ -17,12 +17,14 @@ export function RightPanelSheet(props: {
         }
       }}
     >
+      {/* Never narrower than 24rem where the viewport allows, so the width
+          only grows with the window. */}
       <SheetPopup
         transitionDurationMs={props.animationDurationMs}
         side="right"
         showCloseButton={false}
         keepMounted
-        className="w-[min(42vw,28rem)] min-w-80 max-w-[28rem] max-[760px]:w-[min(88vw,24rem)] max-[760px]:min-w-0 wco:mt-(--workspace-topbar-height) wco:h-[calc(100%-var(--workspace-topbar-height))] wco:max-h-[calc(100%-var(--workspace-topbar-height))]"
+        className="w-[min(88vw,max(24rem,42vw),28rem)] wco:mt-(--workspace-topbar-height) wco:h-[calc(100%-var(--workspace-topbar-height))] wco:max-h-[calc(100%-var(--workspace-topbar-height))]"
       >
         {props.children}
       </SheetPopup>
