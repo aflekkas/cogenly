@@ -1559,12 +1559,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --popover: #16181b;
     --popover-foreground: #f2f4f7;
     /* Dark: the brand orange itself (hue 20). It reads at 7.5:1 as text on
-       the canvas; white on it is only 2.6:1, so text on an orange fill is
-       near-black (7.6:1), as the glyph sits on the app icon. */
+       the canvas. Text and icons on an orange fill are white, matching the
+       glyph on the app icon. */
     --accent-fill: #ff7b3a;
     --accent-fill-hover: #ff8a4c;
     --accent-fill-deep: #e63e22;
-    --accent-fill-foreground: #140a06;
+    --accent-fill-foreground: var(--color-white);
     --accent-tint: color-mix(in srgb, var(--accent-fill) 14%, transparent);
     --accent-selection: color-mix(in srgb, var(--accent-fill) 32%, transparent);
     --secondary: --alpha(var(--color-white) / 3%);
