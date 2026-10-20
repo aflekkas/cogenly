@@ -579,22 +579,6 @@ describe("ClientSettings recording input overlays", () => {
   });
 });
 
-describe("ClientSettings glass opacity", () => {
-  it("defaults to a readable translucent surface", () => {
-    expect(decodeClientSettings({}).glassOpacity).toBe(80);
-  });
-
-  it.each([39, 101, 72.5])("rejects an invalid glass opacity: %s", (value) => {
-    expect(() => decodeClientSettings({ glassOpacity: value })).toThrow();
-    expect(() => decodeClientSettingsPatch({ glassOpacity: value })).toThrow();
-  });
-
-  it.each([40, 75, 100])("accepts a glass opacity within the supported range: %s", (value) => {
-    expect(decodeClientSettings({ glassOpacity: value }).glassOpacity).toBe(value);
-    expect(decodeClientSettingsPatch({ glassOpacity: value }).glassOpacity).toBe(value);
-  });
-});
-
 describe("ClientSettings panel animations", () => {
   it("defaults to instant changes", () => {
     expect(decodeClientSettings({}).panelAnimationDurationMs).toBe(0);

@@ -3496,12 +3496,12 @@ export default function ChatView(props: ChatViewProps) {
   const mountComposerModelStrip =
     routeKind === "server" && !mountComposerContextStrip && !showProviderSubagentBar;
   const showComposerModelStrip = mountComposerModelStrip && restingComposerControlsVisible;
-
-  const needsLoadBalancing = automaticEnvironment && !draftThread?.loadBalancedEnvironmentId;
   // The shell's silhouette follows the strip while it grows and collapses.
   const composerStripVisible = showComposerContextStrip || showComposerModelStrip;
   const [composerStripLingering, setComposerStripLingering] = useState(false);
   const composerStripExtended = useExtendedAfterFrame(composerStripVisible);
+
+  const needsLoadBalancing = automaticEnvironment && !draftThread?.loadBalancedEnvironmentId;
   const loadBalancingCandidates = useMemo(
     () =>
       needsLoadBalancing

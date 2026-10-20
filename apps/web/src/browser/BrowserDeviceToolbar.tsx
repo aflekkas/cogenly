@@ -154,7 +154,7 @@ export function BrowserDeviceToolbar({
 
   return (
     <div
-      className="sticky left-0 top-0 z-50 flex items-center gap-0.5 overflow-x-auto border-b border-border/70 bg-background/95 px-1.5 shadow-xs backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="sticky left-0 top-0 z-50 flex items-center gap-0.5 overflow-x-auto border-b border-border/70 bg-background px-1.5 shadow-xs [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       style={{ width, height: BROWSER_DEVICE_TOOLBAR_HEIGHT }}
       role="toolbar"
       aria-label="Browser device toolbar"
@@ -309,7 +309,7 @@ export function BrowserDeviceToolbar({
         <ScreenRotationIcon />
       </Button>
       {/* Sticky backing so scrolled controls do not show through the close action. */}
-      <span className="sticky right-0 ml-auto flex bg-background/95">
+      <span className="sticky right-0 ml-auto flex bg-background">
         <Button
           variant="ghost"
           size="icon-xs"

@@ -187,8 +187,6 @@ function RootRouteView() {
           <DocumentTitleSync />
           <ContrastAppearanceSync />
 
-          <GlassAppearanceSync />
-
           <ProviderAuthCallbackCoordinator />
           <CustomSnoozeDialogHost />
           <CommandPalette>
@@ -227,8 +225,6 @@ function RootRouteView() {
       <AnchoredToastProvider>
         <DocumentTitleSync />
         <ContrastAppearanceSync />
-
-        <GlassAppearanceSync />
 
         <ProviderAuthCallbackCoordinator />
         <ChatGptWelcomeCoordinator />
@@ -284,22 +280,6 @@ function ContrastAppearanceSync() {
   useEffect(() => {
     document.documentElement.dataset.chatWidth = chatWidth;
   }, [chatWidth]);
-
-  return null;
-}
-
-function GlassAppearanceSync() {
-  const glassOpacity = useClientSettings((settings) => settings.glassOpacity);
-
-  useEffect(() => {
-    const style = document.documentElement.style;
-    style.setProperty("--glass-opacity", `${glassOpacity}%`);
-    if (glassOpacity === 100) {
-      style.setProperty("--glass-blur", "0px");
-    } else {
-      style.removeProperty("--glass-blur");
-    }
-  }, [glassOpacity]);
 
   return null;
 }

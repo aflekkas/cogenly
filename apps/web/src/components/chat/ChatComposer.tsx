@@ -5160,9 +5160,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }
         open={isComposerModelPickerOpen}
         instanceIndicatorBackground={
-          composerControlsCollapsed
-            ? "color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent)"
-            : "var(--contrast-input)"
+          composerControlsCollapsed ? "var(--chat-composer-glass-surface)" : "var(--contrast-input)"
         }
         {...(composerProviderState.modelPickerIconClassName || composerControlsCollapsed
           ? {
