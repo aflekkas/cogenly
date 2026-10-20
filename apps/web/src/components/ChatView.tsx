@@ -409,11 +409,7 @@ import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/M
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
-import {
-  overlayComposerIsResting,
-  resolveComposerTimelineInset,
-  resolveScrollToEndClearance,
-} from "./composerFooterLayout";
+import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import {
   PanelLayoutControls,
   type PanelLayoutControlsProps,
@@ -1373,15 +1369,12 @@ export default function ChatView(props: ChatViewProps) {
     setPendingServerThreadStartFromOriginByThreadId,
   ] = useState<Record<string, boolean>>({});
   const legendListRef = useRef<LegendListRef | null>(null);
-  const getTimelineScrollableNode = () => legendListRef.current?.getScrollableNode() ?? null;
-  const getTimelineScrollableNodeStable = useStableCallback(getTimelineScrollableNode);
   const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
   // Space the timeline keeps clear above its end. Tracks the overlay while the
   // composer is expanded and holds that height while it rests, so the resting
   // composer never exposes rows that its expansion will cover.
   const [composerTimelineInset, setComposerTimelineInset] = useState(0);
   const composerTimelineInsetRef = useRef(0);
-  const composerRestingRef = useRef(false);
   // False while a status bar stands in for the composer (a native subagent).
   const composerMountedRef = useRef(true);
   const [scrollToEndClearance, setScrollToEndClearance] = useState(0);
@@ -1391,7 +1384,6 @@ export default function ChatView(props: ChatViewProps) {
   const isTimelineAtLogicalEndStable = useStableCallback(isTimelineAtLogicalEnd);
   // Whether the timeline's rows extend past the viewport above the composer.
   // The composer only rests when there is reading space to give back.
-  const [timelineOverflows, setTimelineOverflows] = useState(false);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const fanoutStateAtom = draftFanoutStateAtom(routeThreadKey);
@@ -4602,7 +4594,6 @@ export default function ChatView(props: ChatViewProps) {
   );
   const handlePageScrollStart = useEffectEvent((key: PageScrollKey) => {
     timelineScrollIntentRef.current = key === "PageUp" ? "away-from-end" : "toward-end";
-    composerRef.current?.collapseForTimelineScrollKey(key);
     if (
       (key === "PageUp" && timelineRealContentOverflowsViewportStable()) ||
       !isTimelineAtLogicalEndStable()
@@ -4695,9 +4686,6 @@ export default function ChatView(props: ChatViewProps) {
             return;
           if (event.deltaY > 0) {
             timelineScrollIntentRef.current = "toward-end";
-            if (isAtEndRef.current) {
-              composerRef.current?.restoreAfterTimelineReachedEnd();
-            }
           } else if (event.deltaY < 0) {
             timelineScrollIntentRef.current = "away-from-end";
           }
@@ -4766,7 +4754,6 @@ export default function ChatView(props: ChatViewProps) {
               timelineScrollIntentRef.current = "away-from-end";
               if (contentScrollsUp()) {
                 handleManualNavigation();
-                composerRef.current?.collapseForTimelineScrollKey(event.key);
               }
               break;
             case "PageDown":
@@ -4775,10 +4762,6 @@ export default function ChatView(props: ChatViewProps) {
               timelineScrollIntentRef.current = "toward-end";
               if (viewportIsAwayFromEnd()) {
                 handleManualNavigation();
-              }
-              composerRef.current?.collapseForTimelineScrollKey(event.key);
-              if (isTimelineAtLogicalEndStable()) {
-                composerRef.current?.restoreAfterTimelineReachedEnd();
               }
               break;
             default:
@@ -4907,11 +4890,6 @@ export default function ChatView(props: ChatViewProps) {
   };
   const onTimelineAnchorSizeChangedStable = useStableCallback(onTimelineAnchorSizeChanged);
 
-  const onToolOutputCollapsedAtEnd = () => {
-    composerRef.current?.restoreAfterTimelineReachedEnd();
-  };
-  const onToolOutputCollapsedAtEndStable = useStableCallback(onToolOutputCollapsedAtEnd);
-
   const onIsAtEndChange = (isAtEnd: boolean) => {
     if (
       !isAtEnd &&
@@ -4924,9 +4902,6 @@ export default function ChatView(props: ChatViewProps) {
     if (isAtEndRef.current === isAtEnd) return;
     isAtEndRef.current = isAtEnd;
     if (isAtEnd) {
-      if (timelineScrollIntentRef.current === "toward-end") {
-        composerRef.current?.restoreAfterTimelineReachedEnd();
-      }
       timelineScrollModeRef.current = "following-end";
       liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
       setTimelineLiveFollowEnabled(true);
@@ -5121,28 +5096,7 @@ export default function ChatView(props: ChatViewProps) {
   const publishComposerOverlayHeight = (height: number) => {
     const nextHeight = Math.ceil(height);
     if (nextHeight <= 0) return;
-    const isResting = overlayComposerIsResting({
-      composerMounted: composerMountedRef.current,
-      composerReportedResting: composerRestingRef.current,
-    });
-    const modelStrip = composerOverlayElement?.querySelector<HTMLElement>(
-      '[data-composer-model-strip="true"]',
-    );
-    // The model-only strip disappears on expansion; counting it again would
-    // add 32px of timeline padding as soon as the empty composer collapses.
-    const restingOnlyHeight =
-      modelStrip && isResting
-        ? Math.max(
-            0,
-            modelStrip.offsetHeight + Number.parseFloat(getComputedStyle(modelStrip).marginTop),
-          )
-        : 0;
-    const nextInset = resolveComposerTimelineInset({
-      currentInset: composerTimelineInsetRef.current,
-      overlayHeight: nextHeight,
-      isResting,
-      restingOnlyHeight,
-    });
+    const nextInset = nextHeight;
     if (composerTimelineInsetRef.current !== nextInset) {
       composerTimelineInsetRef.current = nextInset;
       setComposerTimelineInset(nextInset);
@@ -5170,16 +5124,6 @@ export default function ChatView(props: ChatViewProps) {
     setScrollToEndClearance(clearance);
   };
   const publishComposerOverlayHeightStable = useStableCallback(publishComposerOverlayHeight);
-  // The composer reports its resting flag from a layout effect, which runs
-  // before this component's own layout effects and before any resize
-  // observation, so every measurement below sees the flag for its layout.
-  // Only the flag is stored here: the stored height still belongs to the
-  // previous layout, and the composer publishes the new layout's height
-  // itself once it has measured it.
-  const onComposerRestingChange = (resting: boolean) => {
-    composerRestingRef.current = resting;
-  };
-  const onComposerRestingChangeStable = useStableCallback(onComposerRestingChange);
   // A held reservation belongs to the previous thread's draft. Rebuild it from
   // this thread's overlay so a tall draft elsewhere does not pad this one.
   useLayoutEffect(() => {
@@ -9349,8 +9293,6 @@ export default function ChatView(props: ChatViewProps) {
                 contentInsetEndAdjustment={composerTimelineInset}
                 liveFollowEnabled={!paintOnlyDisplayedTimeline && timelineLiveFollowEnabled}
                 onIsAtEndChange={onIsAtEndChangeStable}
-                onContentOverflowChange={setTimelineOverflows}
-                onToolOutputCollapsedAtEnd={onToolOutputCollapsedAtEndStable}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigationStable}
                 cancelPositionRestoreRef={cancelPositionRestoreRef}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
@@ -9370,7 +9312,6 @@ export default function ChatView(props: ChatViewProps) {
                     aria-label="Scroll to end"
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={() => {
-                      composerRef.current?.restoreAfterTimelineReachedEnd();
                       scrollToEnd(true);
                     }}
                     className="pointer-events-auto"
@@ -9586,11 +9527,7 @@ export default function ChatView(props: ChatViewProps) {
                                 (isGitRepo || showComposerEnvironmentIndicator)
                               }
                               onRestingControlsVisibilityChange={setRestingComposerControlsVisible}
-                              getTimelineScrollableNode={getTimelineScrollableNodeStable}
-                              isTimelineAtLogicalEnd={isTimelineAtLogicalEndStable}
-                              timelineOverflows={timelineOverflows}
                               onComposerOverlayHeightChange={publishComposerOverlayHeightStable}
-                              onRestingChange={onComposerRestingChangeStable}
                               promptRef={promptRef}
                               composerImagesRef={composerImagesRef}
                               composerFilesRef={composerFilesRef}
