@@ -64,6 +64,16 @@ const ICON_PATHS: Record<string, ReadonlyArray<{ tag: string; attrs: Record<stri
     { tag: "circle", attrs: { cx: "6", cy: "18", r: "3" } },
     { tag: "path", attrs: { d: "M18 9a9 9 0 0 1-9 9" } },
   ],
+  hammer: [
+    { tag: "path", attrs: { d: "m15 12-9.373 9.373a1 1 0 0 1-3.001-3L12 9" } },
+    { tag: "path", attrs: { d: "m18 15 4-4" } },
+    {
+      tag: "path",
+      attrs: {
+        d: "m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172v-.344a2 2 0 0 0-.586-1.414l-1.657-1.657A6 6 0 0 0 12.516 3H9l1.243 1.243A6 6 0 0 1 12 8.485V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14.5",
+      },
+    },
+  ],
   hash: [
     { tag: "line", attrs: { x1: "4", x2: "20", y1: "9", y2: "9" } },
     { tag: "line", attrs: { x1: "4", x2: "20", y1: "15", y2: "15" } },
@@ -186,6 +196,57 @@ function createIconElement(name: string, tone: "neutral" | "destructive"): SVGSV
   return svg;
 }
 
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+const MENU_EXIT_MS = 90;
+
+// The same open and close motion as the app's dropdown menus and popovers: a small scale and a
+// fade from the point the menu grew out of, quick to leave. Reduced motion fades only.
+function openMotionMs(): number {
+  const ms = Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue("--motion-duration-fast"),
+  );
+  return Number.isFinite(ms) ? ms : 150;
+}
+
+function animateMenuIn(menu: HTMLElement) {
+  if (typeof menu.animate !== "function") return;
+  const reduced = window.matchMedia(REDUCED_MOTION).matches;
+  menu.animate(
+    reduced
+      ? [{ opacity: 0 }, { opacity: 1 }]
+      : [
+          { opacity: 0, transform: "scale(0.97)" },
+          { opacity: 1, transform: "scale(1)" },
+        ],
+    { duration: openMotionMs(), easing: "cubic-bezier(0.2, 0, 0, 1)", fill: "backwards" },
+  );
+}
+
+function removeMenuAnimated(menu: HTMLElement) {
+  if (!menu.isConnected) return;
+  // It no longer takes part in the menu stack; keep it from catching the pointer while it leaves.
+  menu.style.pointerEvents = "none";
+  menu.inert = true;
+  if (typeof menu.animate !== "function") {
+    menu.remove();
+    return;
+  }
+  const reduced = window.matchMedia(REDUCED_MOTION).matches;
+  const leave = menu.animate(
+    reduced
+      ? [{ opacity: 1 }, { opacity: 0 }]
+      : [
+          { opacity: 1, transform: "scale(1)" },
+          { opacity: 0, transform: "scale(0.97)" },
+        ],
+    { duration: MENU_EXIT_MS, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" },
+  );
+  void leave.finished.then(
+    () => menu.remove(),
+    () => menu.remove(),
+  );
+}
+
 function clampMenuPosition(menu: HTMLDivElement, preferredLeft: number, preferredTop: number) {
   const rect = menu.getBoundingClientRect();
   const left = Math.min(
@@ -268,7 +329,7 @@ export function showContextMenuFallback<T extends string>(
       document.removeEventListener("contextmenu", onContextMenu, true);
       const shouldRestoreFocus = isNodeWithinMenuStack(document.activeElement, menuStack);
       for (const menu of menuStack) {
-        menu.remove();
+        removeMenuAnimated(menu);
       }
       if (shouldRestoreFocus && previouslyFocusedElement?.isConnected) {
         previouslyFocusedElement.focus({ preventScroll: true });
@@ -301,7 +362,8 @@ export function showContextMenuFallback<T extends string>(
     const closeMenusFromLevel = (level: number) => {
       while (menuStack.length > level) {
         submenuTriggerStack.pop()?.setAttribute("aria-expanded", "false");
-        menuStack.pop()?.remove();
+        const closing = menuStack.pop();
+        if (closing) removeMenuAnimated(closing);
       }
     };
 
@@ -311,6 +373,8 @@ export function showContextMenuFallback<T extends string>(
       preferredTop: number,
       level: number,
       parentTrigger?: HTMLButtonElement,
+      /** Where the menu grows from: the cursor for a right-click, the trigger for a submenu. */
+      anchor: { x: number; y: number } = { x: preferredLeft, y: preferredTop },
     ) => {
       closeMenusFromLevel(level);
 
@@ -457,7 +521,10 @@ export function showContextMenuFallback<T extends string>(
               const rect = button.getBoundingClientRect();
               const nextLeft = rect.right + 4;
               const nextTop = rect.top;
-              openMenu(item.children!, nextLeft, nextTop, level + 1, button);
+              openMenu(item.children!, nextLeft, nextTop, level + 1, button, {
+                x: rect.right,
+                y: rect.top + rect.height / 2,
+              });
               button.setAttribute("aria-expanded", "true");
 
               const childMenu = menuStack[level + 1];
@@ -504,8 +571,13 @@ export function showContextMenuFallback<T extends string>(
       menuStack[level] = menu;
       submenuTriggerStack[level] = parentTrigger;
 
+      animateMenuIn(menu);
       requestAnimationFrame(() => {
         clampMenuPosition(menu, preferredLeft, preferredTop);
+        const placed = menu.getBoundingClientRect();
+        const originX = Math.min(Math.max(anchor.x - placed.left, 0), placed.width);
+        const originY = Math.min(Math.max(anchor.y - placed.top, 0), placed.height);
+        menu.style.transformOrigin = `${originX}px ${originY}px`;
       });
     };
 

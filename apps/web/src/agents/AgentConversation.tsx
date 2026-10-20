@@ -3,13 +3,14 @@ import {
   ChevronLeftIcon,
   LoaderCircleIcon,
   ArrowUpRightIcon,
-  PlayIcon,
+  HammerIcon,
   SettingsIcon,
 } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
+import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
 import { useMessageMotion } from "./useMessageMotion";
 import {
   agentStatusLabel,
@@ -119,8 +120,7 @@ function AgentView({
           onClick={() => setTab("responsibilities")}
         >
           <AgentFace
-            seed={agent.avatar.seed}
-            {...(agent.avatar.color ? { color: agent.avatar.color } : {})}
+            {...avatarFaceProps(agent.avatar)}
             state={agent.requests.length ? "blocked" : agent.state}
             size={56}
           />
@@ -134,7 +134,7 @@ function AgentView({
             disabled={!canWrite}
             onClick={() => setStartingWork(true)}
           >
-            <PlayIcon />
+            <HammerIcon />
             Start Work
           </Button>
           <Button

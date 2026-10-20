@@ -1,5 +1,5 @@
 import type { ThreadId, WorkHandoffLink } from "@t3tools/contracts";
-import { CodeIcon } from "lucide-react";
+import { HammerIcon } from "lucide-react";
 
 import { ThreadStatusLine } from "../chat/ThreadStatusLine";
 
@@ -16,7 +16,7 @@ export function WorkHandoffLines(props: {
       {props.links.map((link) => (
         <ThreadStatusLine
           key={link.threadId}
-          icon={<CodeIcon />}
+          icon={<HammerIcon />}
           label={`Work started: ${link.title}`}
           actionLabel="Open"
           onAction={() => props.onOpenThread(link.threadId)}

@@ -58,12 +58,12 @@ import {
   ChartNoAxesColumnIcon,
   CheckIcon,
   ChevronRightIcon,
-  CodeIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
+  HammerIcon,
   MessageSquareDashedIcon,
   LinkIcon,
   ListTodoIcon,
@@ -1231,7 +1231,7 @@ function OpenCommandPaletteDialog(props: {
         value: `agent-start-work:${agent.environmentId}:${agent.id}`,
         searchTerms: [agent.name, "agent", "start work", "coding session", "repository"],
         title: `Start Work with ${agent.name}…`,
-        icon: <CodeIcon className={ITEM_ICON_CLASS} />,
+        icon: <HammerIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
           requestAgentView(agentViewKey(agent), "start-work");
           await openAgent(agent);
@@ -2081,7 +2081,7 @@ function OpenCommandPaletteDialog(props: {
       value: "action:start-work",
       searchTerms: ["start work", "hand off", "handoff", "coding session", "repository", "repo"],
       title: "Start Work from this thread",
-      icon: <CodeIcon className={ITEM_ICON_CLASS} />,
+      icon: <HammerIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.startWork",
       run: async () => {
         requestStartWork(threadRef);

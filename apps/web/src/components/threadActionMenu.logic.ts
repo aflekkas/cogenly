@@ -193,7 +193,7 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
           },
         ]
       : []),
-    ...(can.startWork ? [{ id: "start-work" as const, label: "Start Work…", icon: "code" }] : []),
+    ...(can.startWork ? [{ id: "start-work" as const, label: "Start Work…", icon: "hammer" }] : []),
     ...(can.settle && state.supports.settlement
       ? [
           state.isSettled
