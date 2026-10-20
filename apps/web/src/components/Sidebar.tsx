@@ -2582,10 +2582,18 @@ export default function Sidebar() {
   const modeListsThreads = sidebarMode === "chats" || sidebarMode === "tasks";
   // Opening a project view (a row's menu, search, a link) shows the Projects
   // list beside it, as opening a thread follows it into its mode.
+  // Follows a change of folder route only, never the folder the list mounted on:
+  // beside the rail the list is not mounted on Projects pages, and it can mount
+  // while a navigation away from a folder still reports that folder, which would
+  // undo a switch to another mode made from there.
   const setSidebarMode = sidebarModes.setMode;
+  const followProjectRoute = useStableCallback(() => setSidebarMode("projects"));
+  const followedProjectKeyRef = useRef(routeProjectKey);
   useEffect(() => {
-    if (routeProjectKey !== null) setSidebarMode("projects");
-  }, [routeProjectKey, setSidebarMode]);
+    if (routeProjectKey === followedProjectKeyRef.current) return;
+    followedProjectKeyRef.current = routeProjectKey;
+    if (routeProjectKey !== null) followProjectRoute();
+  }, [followProjectRoute, routeProjectKey]);
   // Rows name their folder in the hover card. One object per folder, so
   // memoized rows keep the same prop while the directory holds.
   const folderFor = useMemo(() => {
