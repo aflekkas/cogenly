@@ -214,6 +214,8 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { PanOnHoverText } from "./sidebar/PanOnHoverText";
+import { Spinner } from "./ui/spinner";
 import { SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { RepositoryGroupHeading } from "./sidebar/modes/RepositoryGroupHeading";
@@ -980,9 +982,60 @@ function ChatListRevealSentinel(props: { onReveal: () => void }) {
   return <li ref={setSentinel} aria-hidden className="h-px list-none" />;
 }
 
+const CHAT_STATUS_SPINNER_EXIT_MS = 220;
+const chatStatusLayerClassName =
+  "absolute inset-0 flex items-center justify-center transition-[opacity,scale] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none";
+
 /**
- * A Chats row: the title on one line, nothing else. A chat that is running or
- * waiting on you carries a small static dot; an unread reply makes the title
+ * The fixed-size slot at the end of a Chats row. The spinner and the dot sit
+ * in the same box and crossfade, so a turn starting or finishing never moves
+ * the title. The spinner stays mounted just long enough to fade out.
+ */
+function SidebarChatStatusSlot(props: { isRunning: boolean; dot: "info" | "warning" | null }) {
+  const [spinnerLingers, setSpinnerLingers] = useState(props.isRunning);
+  useEffect(() => {
+    if (props.isRunning) {
+      setSpinnerLingers(true);
+      return;
+    }
+    const timer = setTimeout(() => setSpinnerLingers(false), CHAT_STATUS_SPINNER_EXIT_MS);
+    return () => clearTimeout(timer);
+  }, [props.isRunning]);
+  const showDot = !props.isRunning && props.dot !== null;
+  return (
+    <span aria-hidden className="relative size-3 shrink-0">
+      {spinnerLingers || props.isRunning ? (
+        <span
+          className={cn(
+            chatStatusLayerClassName,
+            "swap-motion",
+            props.isRunning ? "scale-100 opacity-100" : "scale-50 opacity-0",
+          )}
+        >
+          <Spinner size="xs" tone="muted" />
+        </span>
+      ) : null}
+      <span
+        className={cn(
+          chatStatusLayerClassName,
+          showDot ? "scale-100 opacity-100" : "scale-50 opacity-0",
+        )}
+      >
+        <span
+          className={cn(
+            "size-1.5 rounded-full transition-colors duration-(--motion-duration-base)",
+            props.dot === "warning" ? "bg-warning" : "bg-info",
+          )}
+        />
+      </span>
+    </span>
+  );
+}
+
+/**
+ * A Chats row: the title on one line and a status slot at its end. A running
+ * turn shows a small spinner, a reply you have not seen shows a blue dot, a
+ * chat waiting on you an amber one; an unread reply also makes the title
  * heavier. Everything else (rename, archive, Start Work) lives in the context
  * menu.
  */
@@ -1155,8 +1208,7 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
             className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm text-card-foreground outline-none focus:border-foreground"
           />
         ) : (
-          <span
-            aria-hidden
+          <PanOnHoverText
             className={cn(
               "min-w-0 flex-1 fade-truncate text-sm",
               isUnread || needsYou ? "font-medium text-foreground" : "font-normal",
@@ -1164,18 +1216,13 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
               thread.titleRegeneration != null && "opacity-55",
             )}
           >
-            {thread.title}
-          </span>
+            <span aria-hidden>{thread.title}</span>
+          </PanOnHoverText>
         )}
-        {isRunning || needsYou ? (
-          <span
-            aria-hidden
-            className={cn(
-              "size-1.5 shrink-0 rounded-full",
-              needsYou ? "bg-warning" : "bg-sidebar-muted-foreground/60",
-            )}
-          />
-        ) : null}
+        <SidebarChatStatusSlot
+          isRunning={isRunning}
+          dot={needsYou ? "warning" : isUnread ? "info" : null}
+        />
         {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
       </div>
     </li>
@@ -1661,16 +1708,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm font-medium text-card-foreground outline-none focus:border-foreground"
       />
     ) : (
-      <span
-        aria-hidden
+      <PanOnHoverText
         className={cn(
-          "min-w-0 flex-1 transition-[color,opacity] duration-(--motion-duration-base) motion-reduce:transition-none",
+          "min-w-0 flex-1 fade-truncate transition-[color,opacity] duration-(--motion-duration-base) motion-reduce:transition-none",
           variant === "card" ? "text-card" : "text-sm",
           shouldRecede ? "font-normal" : "font-medium",
           variant === "card"
             ? cn(
                 // Cards rest in grey and brighten when selected or asking for you.
-                "fade-truncate",
                 shouldRecede
                   ? "text-secondary-label"
                   : props.isActive || isUnread || isWoke || status === "input"
@@ -1678,7 +1723,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     : "text-muted-foreground group-hover/sidebar-row:text-foreground",
               )
             : cn(
-                "truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
+                "group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
                 shouldRecede
                   ? "text-secondary-label/70"
                   : props.isActive || isWoke || status === "input"
@@ -1690,8 +1735,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           isRegeneratingTitle && "opacity-55",
         )}
       >
-        {thread.title}
-      </span>
+        <span aria-hidden>{thread.title}</span>
+      </PanOnHoverText>
     );
   const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
   const terminalStatusIcon = (
@@ -2296,7 +2341,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
           ) : null}
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="flex min-w-0 items-center gap-2.5">
-              <span
+              <PanOnHoverText
                 className={cn(
                   "min-w-0 flex-1 fade-truncate",
                   props.isSettled
@@ -2307,7 +2352,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
                 )}
               >
                 {thread.title}
-              </span>
+              </PanOnHoverText>
               <span id={`${props.resultId}-pr`} className="contents"></span>
               <span className="w-8 shrink-0 text-right text-xs text-muted-foreground/55 tabular-nums">
                 {threadTimeLabel(thread)}
