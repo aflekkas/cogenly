@@ -205,6 +205,12 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
+  // The settings nav and the thread sidebar cross-fade when one replaces the
+  // other, never on the first paint.
+  const [sidebarView, setSidebarView] = useState({ settings: isOnSettings, swapped: false });
+  if (sidebarView.settings !== isOnSettings) {
+    setSidebarView({ settings: isOnSettings, swapped: true });
+  }
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   // Subscribed rather than read once: the fixed width still clamps to the live
   // window size.
@@ -303,16 +309,25 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
           style={windowControlsInsetStyle}
         >
-          {isOnSettings ? (
-            <>
-              <SidebarChromeHeader isElectron={isElectron} />
-              <SettingsSidebarNav pathname={pathname} />
-            </>
-          ) : legacySidebarEnabled ? (
-            <LegacyThreadSidebar />
-          ) : (
-            <ThreadSidebar />
-          )}
+          <div
+            key={isOnSettings ? "settings" : "threads"}
+            className={cn(
+              "flex min-h-0 w-full flex-1 flex-col",
+              sidebarView.swapped &&
+                "motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-standard motion-safe:starting:opacity-0",
+            )}
+          >
+            {isOnSettings ? (
+              <>
+                <SidebarChromeHeader isElectron={isElectron} />
+                <SettingsSidebarNav pathname={pathname} />
+              </>
+            ) : legacySidebarEnabled ? (
+              <LegacyThreadSidebar />
+            ) : (
+              <ThreadSidebar />
+            )}
+          </div>
         </Sidebar>
         {children}
         <SidebarControl showButton={!sidebarToggleInRail} />

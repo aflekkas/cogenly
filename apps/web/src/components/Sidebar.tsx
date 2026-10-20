@@ -3579,9 +3579,10 @@ export default function Sidebar() {
     listMotionModeRef.current = sidebarMode;
     listMotionRef.current?.update(sidebarListHasRows && !modeChanged);
     if (modeChanged && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      // --motion-duration-fast on ease-standard.
       sidebarModeListRef.current?.animate([{ opacity: 0.4 }, { opacity: 1 }], {
-        duration: 120,
-        easing: "ease-out",
+        duration: 150,
+        easing: "cubic-bezier(0.2, 0, 0, 1)",
       });
     }
   }, [
