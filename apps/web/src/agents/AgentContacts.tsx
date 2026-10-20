@@ -1,4 +1,5 @@
 import { AgentFace } from "~/components/agents/face";
+import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
 import { agentContactKey, agentStatusLabel } from "./agents.logic";
 import { agentAttentionCount } from "./agentWorkspace.logic";
 import { useAgentUnread, useAgents } from "./agentsClient";
@@ -63,12 +64,7 @@ function Contact({
         aria-current={active ? "page" : undefined}
         onClick={() => onOpen(agent)}
       >
-        <AgentFace
-          seed={agent.avatar.seed}
-          {...(agent.avatar.color ? { color: agent.avatar.color } : {})}
-          state={agent.state}
-          size={28}
-        />
+        <AgentFace {...avatarFaceProps(agent.avatar)} state={agent.state} size={28} />
         <span className="agent-contact-copy">
           <span className="agent-contact-name">
             <span>{agent.name}</span>

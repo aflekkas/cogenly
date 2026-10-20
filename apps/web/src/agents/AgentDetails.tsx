@@ -1,5 +1,5 @@
 import { cn, randomUUID } from "~/lib/utils";
-import { ChevronDownIcon, GaugeIcon, RefreshCwIcon, type LucideIcon } from "lucide-react";
+import { ChevronDownIcon, GaugeIcon, SmileIcon, type LucideIcon } from "lucide-react";
 import { useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
 import {
   defaultAgentPermissions,
@@ -8,7 +8,7 @@ import {
   type ProjectLabelWithRepositories,
 } from "@t3tools/contracts";
 import { eventFilterChoices, triggerErrorMessage } from "./agentWorkspace.logic";
-import { AgentFace } from "~/components/agents/face";
+import { AgentAvatarPicker, AgentAvatarTrigger } from "./AgentAvatarPicker";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
@@ -265,19 +265,15 @@ export function AgentForm({
       }}
     >
       <div className="agent-face-picker">
-        <AgentFace
-          seed={draft.avatar.seed}
-          {...(draft.avatar.color ? { color: draft.avatar.color } : {})}
-          size={48}
-        />
-        <button
-          type="button"
-          className="agent-text-button"
-          onClick={() => setDraft({ ...draft, avatar: { seed: randomUUID() } })}
+        <AgentAvatarPicker
+          avatar={draft.avatar}
+          onChange={(avatar) => setDraft((current) => ({ ...current, avatar }))}
         >
-          <RefreshCwIcon size={13} />
-          New face
-        </button>
+          <AgentAvatarTrigger avatar={draft.avatar} size={48}>
+            <SmileIcon size={13} />
+            Choose face
+          </AgentAvatarTrigger>
+        </AgentAvatarPicker>
       </div>
       <label>
         Name

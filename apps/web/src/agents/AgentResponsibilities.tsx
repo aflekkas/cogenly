@@ -1,4 +1,4 @@
-import { cn, randomUUID } from "~/lib/utils";
+import { cn } from "~/lib/utils";
 import {
   BellIcon,
   BookmarkIcon,
@@ -6,17 +6,17 @@ import {
   FolderGit2Icon,
   PlayIcon,
   PlusIcon,
-  RefreshCwIcon,
   ScrollTextIcon,
   ShieldAlertIcon,
+  SmileIcon,
   Trash2Icon,
   UserRoundIcon,
   XIcon,
   ZapIcon,
 } from "lucide-react";
-import { useState } from "react";
-import type { AgentPermissions } from "@t3tools/contracts";
-import { AgentFace } from "~/components/agents/face";
+import { useEffect, useRef, useState } from "react";
+import type { AgentAvatar, AgentPermissions } from "@t3tools/contracts";
+import { PopoverTrigger } from "~/components/ui/popover";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import { ThreadDetailsSection } from "~/components/chat/ThreadDetailsSection";
 import { THREAD_DETAILS_PANEL_ICON_CLASS } from "~/components/chat/threadDetailsPanelStyles";
@@ -29,6 +29,7 @@ import {
 } from "~/components/ui/select";
 import { Switch } from "~/components/ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
+import { AgentAvatarPicker, AgentAvatarTrigger } from "./AgentAvatarPicker";
 import { useAgentsClient } from "./agentsClient";
 import { agentDraft, agentStatusLabel, formatMessageTime } from "./agents.logic";
 import {
@@ -91,6 +92,45 @@ export function AgentResponsibilities({
   }
   const saveProfile = (patch: ProfilePatch) =>
     mutate(() => client.save(agent.environmentId, { ...agentDraft(agent), ...patch }));
+  // Picks show at once; one save runs at a time and the latest pick waiting goes
+  // next. A saved pick shows until the agent's own avatar next changes, so the
+  // face doesn't flick back while the update is on its way.
+  const [avatarDraft, setAvatarDraft] = useState<{
+    avatar: AgentAvatar;
+    until: AgentAvatar | null;
+  } | null>(null);
+  const queuedAvatar = useRef<AgentAvatar | null>(null);
+  const savingAvatar = useRef(false);
+  const storedAvatar = useRef(agent.avatar);
+  useEffect(() => {
+    storedAvatar.current = agent.avatar;
+  }, [agent.avatar]);
+  const avatar =
+    avatarDraft && (avatarDraft.until === null || avatarDraft.until === agent.avatar)
+      ? avatarDraft.avatar
+      : agent.avatar;
+  const saveAvatar = async (next: AgentAvatar) => {
+    setAvatarDraft({ avatar: next, until: null });
+    queuedAvatar.current = next;
+    if (savingAvatar.current) return;
+    savingAvatar.current = true;
+    let saved = true;
+    while (queuedAvatar.current) {
+      const pick = queuedAvatar.current;
+      queuedAvatar.current = null;
+      saved = await client.save(agent.environmentId, { ...agentDraft(agent), avatar: pick }).then(
+        () => true,
+        (cause: unknown) => {
+          setError(triggerErrorMessage(cause, "Could not save changes."));
+          return false;
+        },
+      );
+    }
+    savingAvatar.current = false;
+    setAvatarDraft((draft) =>
+      saved && draft ? { avatar: draft.avatar, until: storedAvatar.current } : null,
+    );
+  };
   const close = () => setEditing(null);
   const isEditing = (kind: string, id?: string) =>
     editing?.kind === kind && (id === undefined || ("id" in editing && editing.id === id));
@@ -124,27 +164,28 @@ export function AgentResponsibilities({
         separated={false}
         showHeading={false}
       >
-        <div className="flex items-center gap-3 px-2.5 pt-1.5 pb-2">
-          <AgentFace
-            seed={agent.avatar.seed}
-            {...(agent.avatar.color ? { color: agent.avatar.color } : {})}
-            size={40}
-            state={agent.state}
-          />
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="truncate text-sm font-medium text-foreground">{agent.name}</span>
-            <span className="line-clamp-2 text-xs text-muted-foreground">{status}</span>
-          </span>
-          <ThreadDetailsControl
-            part="icon"
-            aria-label="New face"
-            title="New face"
-            disabled={disabled}
-            onClick={() => void saveProfile({ avatar: { seed: randomUUID() } })}
-          >
-            <RefreshCwIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-          </ThreadDetailsControl>
-        </div>
+        <AgentAvatarPicker avatar={avatar} onChange={(next) => void saveAvatar(next)}>
+          <div className="flex items-center gap-3 px-2.5 pt-1.5 pb-2">
+            <AgentAvatarTrigger
+              avatar={avatar}
+              size={40}
+              state={agent.state}
+              disabled={!canWrite}
+            />
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="truncate text-sm font-medium text-foreground">{agent.name}</span>
+              <span className="line-clamp-2 text-xs text-muted-foreground">{status}</span>
+            </span>
+            <PopoverTrigger
+              disabled={!canWrite}
+              render={
+                <ThreadDetailsControl part="icon" aria-label="Choose face" title="Choose face" />
+              }
+            >
+              <SmileIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+            </PopoverTrigger>
+          </div>
+        </AgentAvatarPicker>
         {isEditing("name") ? (
           <InlineEditor
             label="Name"

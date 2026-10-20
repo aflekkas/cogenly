@@ -15,10 +15,17 @@ import { RuntimeMode } from "./providerPolicy.ts";
 
 export const AgentId = TrimmedNonEmptyString.pipe(Schema.brand("AgentId"));
 export type AgentId = typeof AgentId.Type;
+/**
+ * The seed derives a face; `shape`, `color` and `expression` pin a part of it the
+ * owner picked. Clients ignore ids they don't know and fall back to the seed.
+ */
 export const AgentAvatar = Schema.Struct({
   seed: TrimmedNonEmptyString,
   color: Schema.optional(TrimmedNonEmptyString),
+  shape: Schema.optional(TrimmedNonEmptyString),
+  expression: Schema.optional(TrimmedNonEmptyString),
 });
+export type AgentAvatar = typeof AgentAvatar.Type;
 export const AgentPermissions = Schema.Struct({
   read: Schema.Boolean,
   draft: Schema.Boolean,
