@@ -203,7 +203,7 @@ import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { PanOnHoverText } from "./sidebar/PanOnHoverText";
-import { useSidebarRowPointer } from "./sidebar/useSidebarRowPointer";
+import { useSidebarRowActionsOverlap } from "./sidebar/useSidebarRowActionsOverlap";
 import { Spinner } from "./ui/spinner";
 import { SIDEBAR_SHELF_ICONS, SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
@@ -1164,7 +1164,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   useEffect(() => {
     if (!canOperateThread && isRenaming) onCancelRename();
   }, [canOperateThread, isRenaming, onCancelRename]);
-  const setRowElement = useSidebarRowPointer();
+  const setRowElement = useSidebarRowActionsOverlap();
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const localLastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const lastVisitedAt = resolveThreadLastVisitedAt(thread.lastVisitedAt, localLastVisitedAt);
@@ -1459,11 +1459,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // a useful hierarchy nor a reliable hover cue. Status now lives in the row
   // content; surface is reserved for interaction (hover, multi-select, route).
   const rowSurfaceClassName = cn(
-    // Only the selected card is lit: a hairline rim plus a soft wash from the
-    // top-left corner that fades out about halfway across, as in the reference.
-    // sidebar-row-motion fades both in and out and lets the wash follow the
-    // pointer on the selected card (useSidebarRowPointer).
-    "group/sidebar-row corner-glow sidebar-row-motion relative w-full cursor-pointer overflow-hidden rounded-rail text-left outline-none select-none [--corner-glow-border:0px] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+    // The selected card is the same plain lighter surface as a selected chat
+    // row. sidebar-row-motion fades the state change and fades the title out
+    // under the hover actions (useSidebarRowActionsOverlap).
+    "group/sidebar-row sidebar-row-motion relative w-full cursor-pointer overflow-hidden rounded-rail text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     props.isActive || isSelected || props.sweepAction !== null
       ? "state-selected"

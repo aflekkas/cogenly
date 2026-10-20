@@ -629,7 +629,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
   /* A selected surface also gets a soft wash from the top-left corner that
      fades out about halfway across (--corner-wash sets its strength, and
-     --corner-wash-tint its colour: the brand ember). Tripled
+     --corner-wash-tint its colour, white by default). Tripled
      to outrank state-selected's own background-image. */
   &&&.state-selected {
     background-image: radial-gradient(
@@ -805,71 +805,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
-/* Sidebar rows (Work cards and slim rows) on top of corner-glow and the state
-   utilities. The selected card's rim and wash fade in and out instead of
-   snapping, and the wash lives on ::before so it can follow the pointer:
-   useSidebarRowPointer writes --sidebar-row-glow-x/-y while the selected card
-   is hovered and clears them on leave, and the registered position eases back
-   to the top-left corner. The hover actions overlay the status slot rather
-   than taking its width; --sidebar-row-actions-overlap (also measured by the
-   hook) is how far they reach over the title, which PanOnHoverText's mask
-   fades out under them. */
-@property --sidebar-row-glow-at-x {
-  syntax: "<percentage>";
-  inherits: false;
-  initial-value: 0%;
-}
-@property --sidebar-row-glow-at-y {
-  syntax: "<percentage>";
-  inherits: false;
-  initial-value: 0%;
-}
-
+/* Sidebar rows (Work cards and slim rows). The hover actions overlay the
+   status slot rather than taking its width; --sidebar-row-actions-overlap
+   (measured by useSidebarRowActionsOverlap) is how far they reach over the
+   title, which PanOnHoverText's mask fades out under them. */
 @utility sidebar-row-motion {
-  isolation: isolate;
-
-  &::before {
-    content: "";
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    border-radius: inherit;
-    --sidebar-row-glow-at-x: var(--sidebar-row-glow-x, 0%);
-    --sidebar-row-glow-at-y: var(--sidebar-row-glow-y, 0%);
-    background-image: radial-gradient(
-      130% 160% at var(--sidebar-row-glow-at-x) var(--sidebar-row-glow-at-y),
-      color-mix(in srgb, var(--corner-wash-tint, white) var(--corner-wash, 0%), transparent),
-      transparent 55%
-    );
-    opacity: 0;
-    transition-property: opacity, --sidebar-row-glow-at-x, --sidebar-row-glow-at-y;
-    transition-duration:
-      var(--motion-duration-fast), var(--motion-duration-slow), var(--motion-duration-slow);
-    transition-timing-function: --theme(--ease-standard);
-  }
-  &[data-glow-tracking]::before {
-    transition-duration:
-      var(--motion-duration-fast), var(--motion-duration-fast), var(--motion-duration-fast);
-  }
-  &.state-selected::before {
-    opacity: 1;
-  }
-  /* corner-glow's own wash is a static background-image; ::before replaces it. */
-  &&&&.state-selected {
-    background-image: linear-gradient(
-      to bottom,
-      var(--state-selected-sheen-top),
-      var(--state-selected-sheen-bottom)
-    );
-  }
-  &::after {
-    transition: opacity var(--motion-duration-fast) --theme(--ease-standard);
-  }
-  &:not(.state-selected)::after {
-    opacity: 0;
-  }
-
   &:has(:focus-visible),
   &[data-actions-pinned] {
     --pan-end-inset-target: var(--sidebar-row-actions-overlap, 0px);
@@ -877,13 +817,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   @media (any-hover: hover) {
     &:hover {
       --pan-end-inset-target: var(--sidebar-row-actions-overlap, 0px);
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    &::before,
-    &::after {
-      transition-duration: 0s;
     }
   }
 }
@@ -1842,8 +1775,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --corner-glow: 7%;
     --corner-glow-top: 2.8%;
     --corner-wash: 8%;
-    /* Cogenly's ember, not the reference's cool blue. */
-    --corner-wash-tint: var(--brand-accent-fill);
     /* Every in-page surface in the reference also drops a one-to-two pixel
        shade onto the canvas below it. */
     --surface-halo: 0 1px 2px rgb(0 0 0 / 30%);
