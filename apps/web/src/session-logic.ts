@@ -16,12 +16,6 @@ import {
   type TurnItemId,
 } from "@t3tools/contracts";
 import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
-import {
-  classifyToolActivity,
-  collectToolFilePaths,
-  formatReadToolLabel,
-  formatSearchToolLabel,
-} from "@t3tools/shared/toolActivity";
 import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import {
   turnItemDetailRevision,
@@ -489,7 +483,7 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
     case "file_search":
       return {
         ...common,
-        label: title ?? formatSearchToolLabel(item) ?? "Searched files",
+        label: title ?? "Searched files",
         ...(item.pattern ? { detail: item.pattern } : {}),
         toolTitle: title ?? "File search",
         toolData: item,
@@ -531,20 +525,10 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
       };
     }
     case "dynamic_tool": {
-      const classified = classifyToolActivity({
-        itemType: "dynamic_tool_call",
-        data: { toolName: item.toolName ?? undefined, input: item.input },
-      });
-      const [readPath] = collectToolFilePaths({ input: item.input });
+      // Rows read their label from the work-log registry; this is the stored fallback.
       return {
         ...common,
-        label:
-          title ??
-          (classified === "read"
-            ? formatReadToolLabel(readPath ?? "")
-            : classified === "search"
-              ? (formatSearchToolLabel({ input: item.input }) ?? item.toolName ?? "Tool call")
-              : (item.toolName ?? "Tool call")),
+        label: title ?? item.toolName ?? "Tool call",
         toolTitle: title ?? item.toolName ?? "Tool",
         toolData: { input: item.input, output: item.output },
       };

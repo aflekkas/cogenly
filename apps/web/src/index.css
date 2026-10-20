@@ -965,7 +965,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --shimmer-ease: cubic-bezier(0.4, 0.15, 0.6, 0.85);
 }
 
-:where(.live-activity-focus, .live-tool-shine) {
+:where(.live-activity-focus) {
   --shimmer-gradient: linear-gradient(
     to right,
     transparent 0%,
@@ -980,38 +980,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     color-mix(in srgb, var(--shimmer-ink) 4%, transparent) 90%,
     transparent 100%
   );
-}
-
-@keyframes live-tool-shine {
-  from {
-    background-position:
-      calc(-1 * var(--shimmer-band)) 0,
-      0 0;
-  }
-  to {
-    background-position:
-      calc(100% + var(--shimmer-band)) 0,
-      0 0;
-  }
-}
-
-/* Single-element fallback for rows that cannot render the overlay. It paints,
-   so it advances in steps to cap repaints; prefer live-activity-focus. */
-@utility live-tool-shine {
-  @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
-    --shimmer-ink: var(--contrast-foreground);
-    color: transparent;
-    background-image:
-      var(--shimmer-gradient),
-      linear-gradient(var(--contrast-secondary-label), var(--contrast-secondary-label));
-    background-size:
-      var(--shimmer-band) 100%,
-      100% 100%;
-    background-repeat: no-repeat;
-    background-clip: text;
-    animation: live-tool-shine var(--shimmer-duration) steps(30) infinite;
-    animation-play-state: var(--visible-animation-state, paused);
-  }
 }
 
 @utility visible-animate-spin {

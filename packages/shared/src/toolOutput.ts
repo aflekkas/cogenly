@@ -117,6 +117,53 @@ function boundedTitle(value: unknown): string | undefined {
   return title === "" || title.length > MAX_TITLE_LENGTH ? undefined : title;
 }
 
+const THREAD_IDENTITY_PREFIX_CHARS = 4_096;
+const THREAD_IDENTITY =
+  /"thread"\s*:\s*\{[^{}]*?"threadId"\s*:\s*"([^"\\]{1,256})"[^{}]*?"title"\s*:\s*("(?:[^"\\]|\\.){0,800}")/;
+
+/**
+ * The `thread` id and title at the head of an oversized result, read from the
+ * object itself or from the first few KB of its JSON text without parsing the rest.
+ */
+function oversizedThreadIdentity(
+  value: unknown,
+  depth = 0,
+): { threadId: string; title?: string } | undefined {
+  if (depth > MAX_ENVELOPE_DEPTH) return undefined;
+  if (typeof value === "string") {
+    const match = THREAD_IDENTITY.exec(value.slice(0, THREAD_IDENTITY_PREFIX_CHARS));
+    const threadId = boundedId(match?.[1]);
+    if (threadId === undefined) return undefined;
+    let title: string | undefined;
+    try {
+      title = boundedTitle(JSON.parse(match![2]!));
+    } catch {
+      title = undefined;
+    }
+    return { threadId, ...(title === undefined ? {} : { title }) };
+  }
+  if (Array.isArray(value)) {
+    for (const block of value.slice(0, MAX_CONTENT_BLOCKS)) {
+      const text = Predicate.isObject(block) ? block.text : undefined;
+      const found = oversizedThreadIdentity(
+        Predicate.isObject(text) ? (text.text ?? text) : text,
+        depth + 1,
+      );
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (!Predicate.isObject(value)) return undefined;
+  if (Predicate.isObject(value.thread)) {
+    const threadId = boundedId(value.thread.threadId);
+    if (threadId === undefined) return undefined;
+    const title = boundedTitle(value.thread.title);
+    return { threadId, ...(title === undefined ? {} : { title }) };
+  }
+  const content = value.structuredContent ?? value.content;
+  return content === undefined ? undefined : oversizedThreadIdentity(content, depth + 1);
+}
+
 /** Keeps only IDs, titles, counts and failure metadata used by work-log rows and summaries. */
 export function compactDynamicToolOutput(value: unknown): CompactToolOutput | undefined {
   const budget: ResultReadBudget = {
@@ -127,6 +174,12 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
   const result = readResult(value, budget);
   const output: CompactToolOutput = result.failed ? { isError: true } : {};
   const data = budget.exceeded ? undefined : result.data;
+  if (data === undefined) {
+    // A thread read returns the whole transcript, which is over the parse budget;
+    // its identity still names the row.
+    const thread = oversizedThreadIdentity(value);
+    if (thread !== undefined) output.thread = thread;
+  }
   if (data !== undefined) {
     for (const key of ["threadId", "messageId", "taskId", "scheduledTaskId"] as const) {
       const id = boundedId(data[key]);

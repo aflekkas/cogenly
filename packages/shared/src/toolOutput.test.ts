@@ -53,6 +53,17 @@ describe("compactDynamicToolOutput", () => {
     expect(compactDynamicToolOutput({ matches: [] })).toEqual({ resultCount: 0 });
   });
 
+  it("keeps a read thread's identity when its transcript is over the parse budget", () => {
+    const thread = { threadId: "thread-1", title: "Weekly “checks”", projectId: "p" };
+    const messages = Array.from({ length: 40 }, () => "x".repeat(1_000));
+    const expected = { thread: { threadId: "thread-1", title: "Weekly “checks”" } };
+    expect(compactDynamicToolOutput({ thread, messages })).toEqual(expected);
+    expect(compactDynamicToolOutput(JSON.stringify({ thread, messages }))).toEqual(expected);
+    expect(
+      compactDynamicToolOutput([{ type: "text", text: JSON.stringify({ thread, messages }) }]),
+    ).toEqual(expected);
+  });
+
   it("keeps explicit envelope failure while dropping error text and arbitrary output", () => {
     for (const failure of [
       { isError: true },

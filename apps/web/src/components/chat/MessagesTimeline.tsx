@@ -16,6 +16,7 @@ import { PullRequestGlyph } from "../changeRequestIcons";
 import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
+import { useOpenLink } from "~/browser/useOpenLink";
 import {
   getQuestionAnswerPreview,
   getQuestionAnswerText,
@@ -53,15 +54,18 @@ import { replaceComposerContextReferences } from "@t3tools/shared/composerContex
 import {
   liveActivityToolStatus,
   liveThoughtLine,
-  resolveWorkEntryToolPresentation,
+  resolveWorkEntryTool,
   workEntryToolCall,
   resolveViewedImageAsset,
   workEntryViewedImagePath,
 } from "@t3tools/client-runtime/work-log/presentation";
 import { quietReasoningMarkdown } from "@t3tools/client-runtime/work-log/reasoning-text";
 import {
+  resolveWorkLogNotice,
   resolveWorkLogTool,
+  workLogCallFromItem,
   WORK_LOG_THOUGHT,
+  type WorkLogToolIcon,
   type WorkLogToolPresentation,
   type WorkLogToolTarget,
 } from "@t3tools/client-runtime/work-log/tool-registry";
@@ -84,7 +88,7 @@ import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { getProjectFaviconCacheKey } from "@t3tools/shared/projectFavicon";
-import { claudeSkillInvocation, isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
+import { claudeSkillInvocation } from "@t3tools/shared/toolActivity";
 import { observeVisibleAnimation } from "../../lib/visibleAnimation";
 import {
   createContext,
@@ -138,11 +142,23 @@ import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Root, RootContent } from "mdast";
-import { AppMark } from "../AppMark";
 import { ThreadContextChip } from "../ThreadContextChip";
 import {
+  BellIcon,
   BookOpenIcon,
   BotIcon,
+  ClockIcon,
+  FilePlusIcon,
+  FolderIcon,
+  GitBranchIcon,
+  ImageIcon,
+  InfoIcon,
+  KeyRoundIcon,
+  ListTodoIcon,
+  PaperclipIcon,
+  SettingsIcon,
+  SquareStopIcon,
+  Trash2Icon,
   BrainIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -156,7 +172,6 @@ import {
   MessageCircleIcon,
   MousePointerClickIcon,
   PaintbrushIcon,
-  MinusIcon,
   Redo2Icon,
   Minimize2Icon,
   SearchIcon,
@@ -234,8 +249,7 @@ import {
   timelineTurnFoldRunIdsByEntryId,
   collapseWorkEntryRuns,
   threadTargetTitle,
-  toolGroupAction,
-  workEntryDisplayLabel,
+  workEntryLabel,
   workEntryReadOutput,
   workEntryIsVisibleInGroup,
   worktreeSetupAgentStarted,
@@ -3048,7 +3062,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         {row.showLiveActivity ? (
           // Same box as the metadata row (xs buttons), which replaces it in place.
           <div className="mt-1.5 flex h-7 items-center sm:h-6">
-            <LiveActivityRow label="Thinking" iconName="brain" active shimmer />
+            <LiveActivityRow label="Thinking" iconName="brain" active />
           </div>
         ) : row.showAssistantMeta ? (
           <AssistantMessageMeta
@@ -3340,11 +3354,18 @@ function McpAppTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mcp-app
 
 type V2EventTone = "muted" | "warning" | "danger" | "success";
 
+/** Event rows take their icon from the registry, like every other row. */
+function v2EventIconName(item: OrchestrationV2TurnItem): WorkEntryIconName {
+  const notice = resolveWorkLogNotice(item);
+  if (notice) return notice.icon;
+  const call = workLogCallFromItem(item);
+  return (call ? resolveWorkLogTool(call)?.icon : undefined) ?? "info";
+}
+
 function v2EventPresentation(item: OrchestrationV2TurnItem): {
   readonly label: string;
   readonly detail: string | null;
   readonly tone: V2EventTone;
-  readonly icon: LucideIcon;
 } {
   switch (item.type) {
     case "error": {
@@ -3357,7 +3378,6 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
             : item.status === "running" || item.failure.class === "usage_limit"
               ? "warning"
               : "danger",
-        icon: CircleAlertIcon,
       };
     }
     case "run_interrupt_request":
@@ -3365,14 +3385,12 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
         label: "Interrupt requested",
         detail: item.message,
         tone: "warning",
-        icon: CircleAlertIcon,
       };
     case "run_interrupt_result":
       return {
         label: "Run interrupted",
         detail: item.message,
         tone: "danger",
-        icon: XIcon,
       };
     case "handoff":
       return {
@@ -3381,14 +3399,12 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
           item.summary ??
           `${item.fromProviderInstanceIds.join(", ")} → ${item.toProviderInstanceId}`,
         tone: item.status === "failed" ? "danger" : "muted",
-        icon: ZapIcon,
       };
     case "fork":
       return {
         label: "Conversation fork",
         detail: `Continues in ${item.targetThreadId}`,
         tone: "muted",
-        icon: GitForkIcon,
       };
     case "compaction": {
       const tokenSummary =
@@ -3399,7 +3415,6 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
         label: "Context compacted",
         detail: item.summary ?? tokenSummary,
         tone: item.status === "failed" ? "danger" : "muted",
-        icon: MinusIcon,
       };
     }
     case "todo_list": {
@@ -3408,7 +3423,6 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
         label: "Plan updated",
         detail: [item.explanation, steps].filter(Boolean).join("\n\n") || null,
         tone: item.status === "failed" ? "danger" : "success",
-        icon: CheckIcon,
       };
     }
     default:
@@ -3416,7 +3430,6 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
         label: item.title?.trim() || item.type.replaceAll("_", " "),
         detail: null,
         tone: item.status === "failed" ? "danger" : "muted",
-        icon: WrenchIcon,
       };
   }
 }
@@ -3451,7 +3464,10 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
     );
   }
   const presentation = v2EventPresentation(item);
-  const Icon = presentation.icon;
+  const iconName = v2EventIconName(item);
+  const Icon = ({ className }: { className: string }) => (
+    <WorkEntryIcon name={iconName} className={className} />
+  );
   if (item.type === "error") {
     return (
       <details
@@ -4048,6 +4064,7 @@ function WorkEntryRunRow({
       />
     );
   }
+  const running = run.entries.some((entry) => entry.toolLifecycleStatus === "inProgress");
   const toggle = () => {
     const next = !expanded;
     if (groupView) {
@@ -4083,7 +4100,17 @@ function WorkEntryRunRow({
           />
         </span>
       }
-      label={<span className="block truncate">{run.label}</span>}
+      ref={running ? observeVisibleAnimation : undefined}
+      label={
+        <span className="relative block min-w-0 overflow-hidden">
+          <span className="block truncate">{run.label}</span>
+          {running ? (
+            <ActivityShimmerOverlay>
+              <span className="block truncate">{run.label}</span>
+            </ActivityShimmerOverlay>
+          ) : null}
+        </span>
+      }
       trailing={
         <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
           <WorkLogChevron open={expanded} />
@@ -4214,7 +4241,7 @@ function ThinkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "think
   const { isCompacting, isPreparingWorktree } = use(TimelineRowActivityCtx);
   // Reserve the activity row during setup so the handoff keeps the same height.
   if (isPreparingWorktree || isCompacting) return <WorkLogRow label="" />;
-  const activity = <LiveActivityRow label="Thinking" iconName="brain" active shimmer />;
+  const activity = <LiveActivityRow label="Thinking" iconName="brain" active />;
   const { groupId } = row;
   if (groupId === undefined) return activity;
   return (
@@ -4235,17 +4262,16 @@ function LiveActivityRow({
   toolIcon,
   failed = false,
   active = false,
-  shimmer = false,
 }: {
   label: ReactNode;
   iconName?: WorkEntryIconName;
   toolIcon?: ToolActivityIcon | undefined;
   failed?: boolean;
   active?: boolean;
-  shimmer?: boolean;
 }) {
+  // Every live row shimmers with the compositor overlay, which pauses offscreen
+  // and holds still under reduced motion.
   const animated = active && !failed;
-  const showShimmer = animated && shimmer;
   return (
     <div
       ref={animated ? observeVisibleAnimation : undefined}
@@ -4257,9 +4283,8 @@ function LiveActivityRow({
         toolIcon={toolIcon}
         failed={failed}
         announceFailure={failed}
-        active={animated && !shimmer}
       />
-      {showShimmer ? (
+      {animated ? (
         <ActivityShimmerOverlay>
           <LiveActivityContent label={label} iconName={iconName} toolIcon={toolIcon} highlighted />
         </ActivityShimmerOverlay>
@@ -4274,7 +4299,6 @@ function LiveActivityContent({
   toolIcon,
   failed = false,
   announceFailure = false,
-  active = false,
   highlighted = false,
 }: {
   label: ReactNode;
@@ -4282,7 +4306,6 @@ function LiveActivityContent({
   toolIcon?: ToolActivityIcon | undefined;
   failed?: boolean;
   announceFailure?: boolean;
-  active?: boolean;
   highlighted?: boolean;
 }) {
   const showTrailingFailureMark =
@@ -4314,15 +4337,7 @@ function LiveActivityContent({
         ) : null
       }
       label={
-        <span
-          className={cn(
-            "block truncate",
-            highlighted && "text-foreground",
-            active && "live-tool-shine",
-          )}
-        >
-          {label}
-        </span>
+        <span className={cn("block truncate", highlighted && "text-foreground")}>{label}</span>
       }
       trailing={
         showTrailingFailureMark ? (
@@ -4341,19 +4356,36 @@ function useWorkEntryTool(
   entry: TimelineWorkEntry,
   environmentId: EnvironmentId,
 ): WorkLogToolPresentation | null {
-  const call = workEntryToolCall(entry);
+  const call = entry.itemType === "reasoning" ? null : workEntryToolCall(entry);
   const tool = call ? resolveWorkLogTool(call) : null;
   const target = tool?.target?.kind === "thread" ? tool.target : null;
   const shell = useThreadShell(
     target ? scopeThreadRef(environmentId, ThreadId.make(target.id)) : null,
   );
   const liveTitle = threadTargetTitle(shell);
-  if (!call || !tool || tool.source === "generic") return null;
+  if (!call || !tool) return null;
   return liveTitle && liveTitle !== target?.title
     ? resolveWorkLogTool({ ...call, targetTitle: liveTitle })
     : tool;
 }
 
+/** A tool's file path relative to the workspace, or null when the file sits outside it. */
+function workspaceFilePath(path: string, workspaceRoot: string | undefined): string | null {
+  const normalized = path.replaceAll("\\", "/");
+  if (!normalized.startsWith("/") && !/^[A-Za-z]:\//.test(normalized)) {
+    return normalized.replace(/^\.\//, "");
+  }
+  const root = workspaceRoot?.replaceAll("\\", "/").replace(/\/+$/, "");
+  return root && normalized.startsWith(`${root}/`) ? normalized.slice(root.length + 1) : null;
+}
+
+const targetLinkClassName =
+  "link min-w-0 truncate rounded-sm text-left focus-visible:outline-2 focus-visible:outline-ring";
+
+/**
+ * A registry target: a thread opens in the app, a workspace file opens in the
+ * file panel, and a URL opens wherever the user's link setting sends links.
+ */
 function ToolTargetLink({
   target,
   environmentId,
@@ -4363,26 +4395,64 @@ function ToolTargetLink({
   environmentId: EnvironmentId;
   linked: boolean;
 }) {
-  // Threads are the only target with an in-app route today.
-  if (!linked || target.kind !== "thread") {
-    return <span className="min-w-0 truncate text-foreground/90">{target.title}</span>;
+  const ctx = use(TimelineRowCtx);
+  const openLink = useOpenLink(ctx.threadRef);
+  const filePath = target.kind === "file" ? workspaceFilePath(target.id, ctx.workspaceRoot) : null;
+  const plain = <span className="min-w-0 truncate text-foreground/90">{target.title}</span>;
+  if (!linked) return plain;
+  if (target.kind === "thread") {
+    return (
+      <Link
+        to="/$environmentId/$threadId"
+        params={{ environmentId, threadId: ThreadId.make(target.id) }}
+        className={targetLinkClassName}
+        onClick={stopRowToggle}
+        onKeyDown={stopRowToggle}
+      >
+        {target.title}
+      </Link>
+    );
   }
+  if (target.kind === "url") {
+    return (
+      <a
+        href={target.id}
+        target="_blank"
+        rel="noreferrer"
+
+        className={targetLinkClassName}
+        onKeyDown={stopRowToggle}
+        onClick={(event) => {
+          event.stopPropagation();
+          event.preventDefault();
+          void openLink(target.id, { event });
+        }}
+      >
+        {target.title}
+      </a>
+    );
+  }
+  const threadRef = ctx.threadRef;
+  if (filePath === null || threadRef === null) return plain;
   return (
-    <Link
-      to="/$environmentId/$threadId"
-      params={{ environmentId, threadId: ThreadId.make(target.id) }}
-      className="link min-w-0 truncate rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
-      onClick={stopRowToggle}
+    <button
+      type="button"
+
+      className={targetLinkClassName}
       onKeyDown={stopRowToggle}
+      onClick={(event) => {
+        event.stopPropagation();
+        useRightPanelStore.getState().openFile(threadRef, filePath);
+      }}
     >
       {target.title}
-    </Link>
+    </button>
   );
 }
 
 /**
- * Renders a registry row's label: the verb phrase, the linked target title and
- * the result count. Only settled rows link the title; the live row is itself a button.
+ * Renders a registry row's label: the verb phrase, the linked target and the
+ * result. Only settled rows link the target; the live row is itself a button.
  */
 function WorkLogToolLabel({
   tool,
@@ -4399,9 +4469,9 @@ function WorkLogToolLabel({
       <span className={cn(target ? "shrink-0" : "min-w-0 truncate")}>{tool.labelPrefix}</span>
       {target ? (
         <>
-          <span className="shrink-0">&nbsp;“</span>
+          <span className="shrink-0">&nbsp;{target.quoted ? "“" : ""}</span>
           <ToolTargetLink target={target} environmentId={environmentId} linked={linked} />
-          <span className="shrink-0">”</span>
+          {target.quoted ? <span className="shrink-0">”</span> : null}
         </>
       ) : null}
       {tool.result ? (
@@ -4423,7 +4493,7 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
   const questionHeading = row.entry.questionAnswer
     ? getQuestionTextPreview(row.entry.questionAnswer)
     : "";
-  const label = questionHeading || liveWorkEntryLabel(row.entry, ctx.workspaceRoot, row.active);
+  const label = questionHeading || liveWorkEntryLabel(row.entry, row.active);
   const tool = questionHeading ? null : liveTool;
 
   const failed = workEntryDisplayIndicatesToolFailure(row.entry);
@@ -4509,49 +4579,6 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
   );
 }
 
-function toolGroupSummaryIconName(
-  kind: Extract<TimelineRow, { kind: "work-toggle" }>["summaryKind"],
-): WorkEntryIconName {
-  switch (kind) {
-    case "pull-request":
-    case "link-pr":
-    case "unlink-pr":
-    case "list-prs":
-    case "watch-pr":
-    case "unwatch-pr":
-      return "pull-request";
-    case "read":
-      return "eye";
-    case "edit":
-      return "square-pen";
-    case "command":
-      return "terminal";
-    case "thread-create":
-      return "t3-code";
-    case "browser":
-      return "browser";
-    case "device":
-      return "device";
-    case "search":
-      return "globe";
-    case "code-search":
-      return "search";
-    case "other":
-      return "wrench";
-    case "dynamic-tool":
-      return "hammer";
-    case "reasoning":
-      return "brain";
-    case "agent-tool":
-      return "bot";
-    case "tone-tool":
-      return "zap";
-    case "update":
-    case "mixed":
-      return "hammer";
-  }
-}
-
 function WorkGroupToggleTimelineRow({
   row,
 }: {
@@ -4561,7 +4588,7 @@ function WorkGroupToggleTimelineRow({
   return (
     <WorkGroupHeader
       label={row.summary}
-      iconName={row.summaryToolIcon ?? row.toolSurface ?? toolGroupSummaryIconName(row.summaryKind)}
+      iconName={row.summaryIcon}
       toolIcon={row.toolIcon}
       failed={row.hasFailure}
       expanded={row.expanded}
@@ -4598,8 +4625,13 @@ function WorkGroupHeader(props: {
         />
       }
       label={
-        <span className={cn("block truncate", props.active && !props.failed && "live-tool-shine")}>
-          {props.label}
+        <span className="relative block min-w-0 overflow-hidden">
+          <span className="block truncate">{props.label}</span>
+          {props.active && !props.failed ? (
+            <ActivityShimmerOverlay>
+              <span className="block truncate">{props.label}</span>
+            </ActivityShimmerOverlay>
+          ) : null}
         </span>
       }
       trailing={
@@ -5478,28 +5510,8 @@ function useStableRows(rows: MessagesTimelineRow[], identity: string): MessagesT
 // Pure helpers
 // ---------------------------------------------------------------------------
 
-type WorkEntryIconName =
-  | "book-open"
-  | "bot"
-  | "brain"
-  | "browser"
-  | "check"
-  | "circle-alert"
-  | "computer"
-  | "code"
-  | "device"
-  | "eye"
-  | "globe"
-  | "hammer"
-  | "message-circle"
-  | "search"
-  | "square-pen"
-  | "terminal"
-  | "pull-request"
-  | "t3-code"
-  | "wrench"
-  | "x"
-  | "zap";
+/** Registry icons plus the row-state marks (`check`, `x`) the work log adds itself. */
+type WorkEntryIconName = WorkLogToolIcon | "check" | "x";
 
 function BrowserAppIcon({ className }: { className: string }) {
   return (
@@ -5674,50 +5686,51 @@ function ToolActivityImageIcon(props: {
   );
 }
 
+const WORK_ENTRY_ICONS: Record<
+  Exclude<WorkEntryIconName, "browser" | "computer" | "pull-request">,
+  LucideIcon
+> = {
+  bell: BellIcon,
+  "book-open": BookOpenIcon,
+  bot: BotIcon,
+  brain: BrainIcon,
+  check: CheckIcon,
+  "circle-alert": CircleAlertIcon,
+  clock: ClockIcon,
+  code: Code2Icon,
+  device: SmartphoneIcon,
+  eye: EyeIcon,
+  "file-plus": FilePlusIcon,
+  folder: FolderIcon,
+  "git-branch": GitBranchIcon,
+  "git-fork": GitForkIcon,
+  globe: GlobeIcon,
+  image: ImageIcon,
+  info: InfoIcon,
+  key: KeyRoundIcon,
+  "list-todo": ListTodoIcon,
+  "message-circle": MessageCircleIcon,
+  paperclip: PaperclipIcon,
+  "rotate-ccw": RotateCcwIcon,
+  search: SearchIcon,
+  settings: SettingsIcon,
+  shrink: Minimize2Icon,
+  "square-pen": SquarePenIcon,
+  "square-stop": SquareStopIcon,
+  terminal: TerminalIcon,
+  trash: Trash2Icon,
+  wrench: WrenchIcon,
+  x: XIcon,
+  zap: ZapIcon,
+};
+
 function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className: string }) {
-  switch (name) {
-    case "pull-request":
-      return <PullRequestGlyph.pullRequest className={className} aria-hidden />;
-    case "book-open":
-      return <BookOpenIcon className={className} aria-hidden />;
-    case "bot":
-      return <BotIcon className={className} aria-hidden />;
-    case "brain":
-      return <BrainIcon className={className} aria-hidden />;
-    case "browser":
-    case "computer":
-      return <BrowserAppIcon className={className} />;
-    case "code":
-      return <Code2Icon className={className} aria-hidden />;
-    case "device":
-      return <SmartphoneIcon className={className} aria-hidden />;
-    case "t3-code":
-      return <AppMark className={className} aria-hidden />;
-    case "check":
-      return <CheckIcon className={className} aria-hidden />;
-    case "circle-alert":
-      return <CircleAlertIcon className={className} aria-hidden />;
-    case "eye":
-      return <EyeIcon className={className} aria-hidden />;
-    case "globe":
-      return <GlobeIcon className={className} aria-hidden />;
-    case "hammer":
-      return <HammerIcon className={className} aria-hidden />;
-    case "search":
-      return <SearchIcon className={className} aria-hidden />;
-    case "message-circle":
-      return <MessageCircleIcon className={className} aria-hidden />;
-    case "square-pen":
-      return <SquarePenIcon className={className} aria-hidden />;
-    case "terminal":
-      return <TerminalIcon className={className} aria-hidden />;
-    case "wrench":
-      return <WrenchIcon className={className} aria-hidden />;
-    case "x":
-      return <XIcon className={className} aria-hidden />;
-    case "zap":
-      return <ZapIcon className={className} aria-hidden />;
+  if (name === "pull-request") {
+    return <PullRequestGlyph.pullRequest className={className} aria-hidden />;
   }
+  if (name === "browser" || name === "computer") return <BrowserAppIcon className={className} />;
+  const Icon = WORK_ENTRY_ICONS[name];
+  return <Icon className={className} aria-hidden />;
 }
 
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {
@@ -5817,49 +5830,17 @@ function buildToolCallExpandedBody(
 const toolCallExpandedBodyClassName =
   "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-(length:--font-size-code,var(--text-2xs)) leading-relaxed select-text";
 
+/** Every row's icon comes from the registry: its tool, its notice, or the thought icon. */
 function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
-  if (workEntry.structuredPayload?.type === "notification") {
-    if (workEntry.structuredPayload.outcome === "failed") return "circle-alert";
-    const source = workEntry.structuredPayload.source;
-    switch (source.kind) {
-      case "subagent":
-      case "delegated_task":
-        return "bot";
-      case "command":
-        return "terminal";
-      case "monitor":
-        return "eye";
-      case "background_task":
-        return "zap";
-      case "system":
-        return "t3-code";
-      default:
-        source satisfies never;
-        return "zap";
-    }
-  }
+  if (workEntry.itemType === "reasoning") return WORK_LOG_THOUGHT.icon;
+  const item = workEntry.structuredPayload;
+  const notice = item ? resolveWorkLogNotice(item) : null;
+  if (notice) return notice.icon;
   if (workEntry.itemType === "user_input_request" || workEntry.itemType === "approval_request") {
     return "message-circle";
   }
-  if (workEntry.itemType === "reasoning") return WORK_LOG_THOUGHT.icon;
-  if (workEntry.toolSurface) return workEntry.toolSurface;
-  if (
-    workEntry.structuredPayload?.type === "dynamic_tool" &&
-    isJavaScriptReplTool(workEntry.structuredPayload.toolName)
-  )
-    return "code";
-  const toolPresentation = resolveWorkEntryToolPresentation(workEntry);
-  if (toolPresentation) return toolPresentation.icon;
-  const action = toolGroupAction(workEntry);
-  if (action !== "other") return toolGroupSummaryIconName(action);
-
-  switch (workEntry.itemType) {
-    case "dynamic_tool":
-      return "wrench";
-    case "subagent":
-      return "bot";
-  }
-
+  const tool = resolveWorkEntryTool(workEntry);
+  if (tool) return tool.icon;
   return workToneIcon(workEntry.tone).iconName;
 }
 
@@ -6057,7 +6038,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       ? workEntry.toolLifecycleStatus === "inProgress"
         ? "Thinking"
         : "Thought"
-      : questionHeading || (displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot));
+      : questionHeading || (displayLabel ?? workEntryLabel(workEntry));
   const answerPreview =
     workEntry.questionAnswer && hasQuestionAnswer(workEntry.questionAnswer)
       ? getQuestionAnswerPreview(workEntry.questionAnswer)
@@ -6071,7 +6052,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
   // Reads and skills expand to plain text instead of the item inspector. A
   // skill's heading already names it, so only its arguments are left to show.
   const plainOutput =
-    toolGroupAction(workEntry) === "read"
+    registryTool?.key === "read"
       ? workEntryReadOutput(workEntry, workspaceRoot)
       : skill
         ? (skill.args ?? null)
@@ -6136,16 +6117,24 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
             ? "text-icon-muted"
             : iconConfig.className,
   );
+  // System and lifecycle notes read as quiet, slightly smaller single lines.
+  const notice = payload ? resolveWorkLogNotice(payload) : null;
+  const quietNotice = notice?.tone === "quiet" && !showWarningIndicator;
   const headingClass = showWarningIndicator
     ? "font-medium text-warning"
     : showDestructiveRowStyle
       ? "font-medium text-destructive"
-      : workLogEntryIsToolLike(workEntry)
-        ? "text-secondary-label"
-        : "text-foreground/80";
+      : quietNotice
+        ? "text-muted-foreground"
+        : workLogEntryIsToolLike(workEntry)
+          ? "text-secondary-label"
+          : "text-foreground/80";
   // A question names its row; every Cogenly tool call reads from the registry.
   const tool = isReasoning || questionHeading ? null : registryTool;
   const accessiblePreview = [tool?.label ?? previewText, answerPreview].filter(Boolean).join(": ");
+  // A call still running in an open group shimmers like the live row above it.
+  const shimmering =
+    !isReasoning && !showFailedIndicator && workEntry.toolLifecycleStatus === "inProgress";
   const accessibleDisplayText = showFailedIndicator
     ? `${accessiblePreview}, tool call failed`
     : accessiblePreview;
@@ -6169,6 +6158,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     <WorkLogRow
       data-v2-item-type={workEntry.projectedItem?.item.type}
       data-v2-item-visibility={workEntry.projectedItem?.visibility}
+      ref={shimmering ? observeVisibleAnimation : undefined}
       {...rowToggleProps}
       icon={
         <span
@@ -6179,14 +6169,26 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           <ToolActivityIconView
             icon={entryToolIcon}
             fallbackName={entryIconName}
-            className="block size-4 shrink-0 stroke-2"
+            className={cn("block shrink-0 stroke-2", quietNotice ? "size-3.5" : "size-4")}
             muted
           />
         </span>
       }
       label={
-        <div className="min-w-0 flex-1 overflow-hidden">
-          <p className="flex min-w-0 w-full items-baseline gap-1.5 text-sm leading-relaxed">
+        <div className="relative min-w-0 flex-1 overflow-hidden">
+          {shimmering ? (
+            <ActivityShimmerOverlay>
+              <span className={cn("block truncate", quietNotice ? "text-xs" : "text-sm")}>
+                {accessiblePreview}
+              </span>
+            </ActivityShimmerOverlay>
+          ) : null}
+          <p
+            className={cn(
+              "flex min-w-0 w-full items-baseline gap-1.5 leading-relaxed",
+              quietNotice ? "text-xs" : "text-sm",
+            )}
+          >
             <span
               className={cn(answerPreview ? "min-w-0" : "min-w-0 flex-1", "truncate", headingClass)}
             >
@@ -6344,7 +6346,7 @@ function RegistryToolDetail({
   tool: WorkLogToolPresentation | null;
   children: ReactNode;
 }) {
-  if (tool?.source !== "registry") return children;
+  if (tool?.raw !== "collapsed") return children;
   return (
     <div className="ms-7 flex flex-col gap-1.5 text-sm">
       {tool.detail.length > 0 ? (

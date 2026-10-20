@@ -9,12 +9,9 @@ import {
 } from "@t3tools/shared/assistantCitations";
 import { shallow } from "zustand/vanilla/shallow";
 import { renderCodexDirectivesForCopy } from "@t3tools/shared/codexMarkdownDirectives";
-import {
-  commandDisplayText,
-  commandProgramName,
-} from "@t3tools/client-runtime/work-log/command-label";
 import { reasoningPlainText } from "@t3tools/client-runtime/work-log/reasoning-text";
 import {
+  resolveWorkLogNotice,
   resolveWorkLogTool,
   workLogToolGroupLabel,
   type WorkLogToolCallInput,
@@ -22,17 +19,10 @@ import {
 } from "@t3tools/client-runtime/work-log/tool-registry";
 import {
   liveActivityToolStatus,
+  resolveWorkEntryTool,
+  toolGroupIcon,
   workEntryToolCall,
-  normalizeCompactToolLabel,
-  resolveWorkEntryToolPresentation,
   summarizeToolGroup,
-  toolGroupAction,
-  toolGroupSummaryKind,
-  type ToolGroupSummaryKind,
-} from "@t3tools/client-runtime/work-log/presentation";
-export {
-  normalizeCompactToolLabel,
-  toolGroupAction,
 } from "@t3tools/client-runtime/work-log/presentation";
 import {
   deriveRevertTurnCountByUserMessageId,
@@ -71,13 +61,7 @@ import {
 import { compactDynamicToolOutput } from "@t3tools/shared/toolOutput";
 import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import { mcpAppReferencesEqual, type McpAppReference } from "@t3tools/shared/mcpApp";
-import { dynamicToolTitle } from "@t3tools/shared/toolActivity";
-import { formatWorkspaceRelativePath } from "../../filePathDisplay";
-import {
-  collectToolFilePaths,
-  formatReadToolLabel,
-  formatSearchToolLabel,
-} from "@t3tools/shared/toolActivity";
+import { collectToolFilePaths } from "@t3tools/shared/toolActivity";
 import { isWindowsAbsolutePath } from "@t3tools/shared/path";
 
 function timelineEntryRunId(entry: TimelineEntry): RunId | null {
@@ -100,92 +84,23 @@ function workEntryIsActiveTurnActivity(entry: WorkLogEntry): boolean {
   );
 }
 
-function singleToolCallLabel(entry: WorkLogEntry): string {
-  if (entry.itemType === "reasoning") return reasoningPlainText(entry.detail ?? "") || "Thought";
-  const toolPresentation = resolveWorkEntryToolPresentation(entry, "completed");
-  if (toolPresentation) return toolPresentation.displayName;
-  const item = entry.structuredPayload;
-  const title =
-    item?.type === "dynamic_tool" ? dynamicToolTitle(item.toolName, item.input, item.title) : null;
-  if (title) return title;
-  // A lone web search keeps its heading; the query stays in its detail.
-  if (entry.itemType === "web_search") return entry.toolTitle ?? "Web search";
-  return workEntryDisplayLabel(entry, undefined);
-}
-
-function workEntryToolDataRecord(entry: WorkLogEntry): Record<string, unknown> | undefined {
-  return entry.toolData !== null &&
-    typeof entry.toolData === "object" &&
-    !Array.isArray(entry.toolData)
-    ? (entry.toolData as Record<string, unknown>)
-    : undefined;
-}
-
-function workEntryReadRawPaths(entry: WorkLogEntry): readonly string[] {
-  const fromChanged = entry.changedFiles ?? [];
-  if (fromChanged.length > 0) return fromChanged;
-  const structured = entry.structuredPayload;
-  if (structured?.type === "dynamic_tool") {
-    const structuredPaths = collectToolFilePaths({ input: structured.input });
-    if (structuredPaths.length > 0) return structuredPaths;
-  }
-  return collectToolFilePaths(workEntryToolDataRecord(entry));
-}
-
-function workEntryReadPaths(entry: WorkLogEntry, workspaceRoot: string | undefined): string[] {
-  return workEntryReadRawPaths(entry).map((filePath) =>
-    formatWorkspaceRelativePath(filePath, workspaceRoot),
-  );
-}
-
-export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string | undefined) {
-  if (entry.itemType === "system_notice") return entry.label;
+/**
+ * A work row's label, from the registry for every tool call and notice. Reasoning
+ * reads as its plain text; anything else keeps the label it was projected with.
+ */
+export function workEntryLabel(
+  entry: WorkLogEntry,
+  fallbackStatus?: "inProgress" | "completed",
+): string {
   if (entry.itemType === "reasoning" || entry.tone === "thinking") {
     return reasoningPlainText(entry.detail ?? "") || entry.label;
   }
-  const toolPresentation = resolveWorkEntryToolPresentation(entry);
-  if (toolPresentation) return toolPresentation.displayName;
-  if (entry.command?.trim()) return commandDisplayText(entry.command);
-  const action = toolGroupAction(entry);
-  if (action === "code-search" || action === "search") {
-    // Adapters title file searches with their target; the item keeps only the pattern.
-    const searchLabel =
-      entry.itemType === "file_search"
-        ? entry.label
-        : formatSearchToolLabel(workEntryToolDataRecord(entry));
-    if (searchLabel) return searchLabel;
-  }
-  const readPaths = action === "read" ? workEntryReadPaths(entry, workspaceRoot) : [];
-  if (action === "read" && readPaths[0]) {
-    return formatReadToolLabel(readPaths[0], readPaths.length - 1);
-  }
-  // Retrying providers keep their progress label; other diagnostics expose
-  // the retained message instead of a generic error heading. File bodies
-  // are never a compact read label.
-  const providerRetry =
-    entry.projectedItem?.item.type === "error" && entry.projectedItem.item.retry !== undefined;
+  const tool = resolveWorkEntryTool(entry, fallbackStatus);
+  if (tool) return tool.label;
+  // Provider errors keep their own wording, which explains retries and limits.
   const item = entry.structuredPayload;
-  const title =
-    item?.type === "dynamic_tool" ? dynamicToolTitle(item.toolName, item.input, item.title) : null;
-  if (title) return title;
-  const compactDetail = entry.detail?.trim();
-  const detailIsSearchOutput =
-    (action === "code-search" || action === "search") && /[\r\n]/.test(compactDetail ?? "");
-  if (compactDetail && !providerRetry && action !== "read" && !detailIsSearchOutput) {
-    return compactDetail;
-  }
-  const [firstPath] = entry.changedFiles ?? [];
-  if (firstPath) {
-    const path = formatWorkspaceRelativePath(firstPath, workspaceRoot);
-    return entry.changedFiles!.length === 1
-      ? path
-      : `${path} +${entry.changedFiles!.length - 1} more`;
-  }
-  if (action === "read" && !entry.viewedImagePath) {
-    return "Read file";
-  }
-  const heading = normalizeCompactToolLabel(entry.toolTitle || entry.label);
-  return `${heading.charAt(0).toUpperCase()}${heading.slice(1)}`;
+  const notice = item && item.type !== "error" ? resolveWorkLogNotice(item) : null;
+  return notice?.label ?? entry.label;
 }
 
 /** A linked thread's live title, or null once it is archived or deleted. */
@@ -194,16 +109,6 @@ export function threadTargetTitle(
 ) {
   if (!shell || shell.archivedAt !== null || shell.deletedAt !== null) return null;
   return shell.title.trim() || null;
-}
-
-/** The registry icon every tool call in a group shares, so the header matches its rows. */
-function sharedToolIcon(entries: ReadonlyArray<WorkLogEntry>): WorkLogToolIcon | undefined {
-  const tools = entries.filter((entry) => entry.itemType !== "reasoning");
-  const icons = new Set(
-    tools.map((entry) => resolveWorkEntryToolPresentation(entry, "completed")?.icon ?? null),
-  );
-  const [icon] = icons;
-  return tools.length > 0 && icons.size === 1 && icon ? icon : undefined;
 }
 
 export type WorkEntryRun =
@@ -238,7 +143,7 @@ export function collapseWorkEntryRuns(entries: ReadonlyArray<WorkLogEntry>): Wor
         : {
             kind: "run",
             id: `run:${first.id}`,
-            label: workLogToolGroupLabel(pending.key, pending.calls) ?? first.label,
+            label: workLogToolGroupLabel(pending.calls) ?? first.label,
             icon: pending.icon,
             entries: pending.entries,
           },
@@ -263,6 +168,20 @@ export function collapseWorkEntryRuns(entries: ReadonlyArray<WorkLogEntry>): Wor
   }
   flush(pending);
   return runs;
+}
+
+function workEntryReadRawPaths(entry: WorkLogEntry): readonly string[] {
+  const fromChanged = entry.changedFiles ?? [];
+  if (fromChanged.length > 0) return fromChanged;
+  const structured = entry.structuredPayload;
+  if (structured?.type === "dynamic_tool") {
+    const structuredPaths = collectToolFilePaths({ input: structured.input });
+    if (structuredPaths.length > 0) return structuredPaths;
+  }
+  const data = entry.toolData;
+  return collectToolFilePaths(
+    data !== null && typeof data === "object" && !Array.isArray(data) ? data : undefined,
+  );
 }
 
 /** Inspectable read-file output is the path when we have one, otherwise nothing. */
@@ -294,37 +213,15 @@ export function workEntryReadOutput(
   return null;
 }
 
-export function liveWorkEntryLabel(
-  entry: WorkLogEntry,
-  workspaceRoot: string | undefined,
-  active: boolean,
-) {
+/** The live row's label: the same registry label, in the present tense while the group works. */
+export function liveWorkEntryLabel(entry: WorkLogEntry, active: boolean) {
   const status = liveActivityToolStatus(entry.toolLifecycleStatus, active);
   if (entry.itemType === "reasoning") {
     return (
       reasoningPlainText(entry.detail ?? "") || (status === "inProgress" ? "Thinking" : "Thought")
     );
   }
-  const toolPresentation = resolveWorkEntryToolPresentation({
-    ...entry,
-    toolLifecycleStatus: status,
-  });
-  if (toolPresentation) return toolPresentation.displayName;
-  const command = entry.command?.trim();
-  if (command) {
-    const verb =
-      status === "inProgress"
-        ? "Running"
-        : status === "failed"
-          ? "Failed"
-          : status === "declined"
-            ? "Declined"
-            : status === "stopped"
-              ? "Stopped"
-              : "Ran";
-    return `${verb} ${commandProgramName(command) ?? "command"}`;
-  }
-  return workEntryDisplayLabel(entry, workspaceRoot);
+  return workEntryLabel({ ...entry, toolLifecycleStatus: status });
 }
 
 export function workEntryIsVisibleInGroup(
@@ -629,10 +526,10 @@ type MessagesTimelineRowContent =
       expanded: boolean;
       closing?: boolean;
       summary: string;
-      summaryKind: ToolGroupSummaryKind;
-      toolSurface?: WorkLogEntry["toolSurface"];
+      /** The registry icon most of the group's calls share. */
+      summaryIcon: WorkLogToolIcon | "brain";
+      /** A provider-supplied image icon, such as an integration's logo. */
       toolIcon?: WorkLogEntry["toolIcon"];
-      summaryToolIcon?: WorkLogToolIcon;
       hasFailure: boolean;
     }
   | {
@@ -1840,15 +1737,11 @@ export function deriveMessagesTimelineRows(input: {
             createdAt: timelineEntry.createdAt,
             groupedEntries: visibleGroupedEntries,
             isExpandedToolGroup: false,
-            displayLabel:
-              toolGroupAction(singleEntry) === "edit"
-                ? summarizeToolGroup(visibleGroupedEntries).summary
-                : singleToolCallLabel(singleEntry),
+            displayLabel: workEntryLabel(singleEntry, "completed"),
           });
         } else {
           const groupId = workGroupId(timelineEntry.id);
           const disclosure = workGroupDisclosure(groupId);
-          const summaryKind = toolGroupSummaryKind(visibleGroupedEntries);
           const primarySourceEntry = visibleGroupedEntries.find(
             (entry) => entry.toolSource !== undefined,
           );
@@ -1859,22 +1752,12 @@ export function deriveMessagesTimelineRows(input: {
                   entry.toolSource?.key === primarySourceKey && entry.toolIcon !== undefined,
               )?.toolIcon ?? primarySourceEntry?.toolSource?.icon)
             : undefined;
-          const groupToolSurface =
-            primarySourceEntry?.toolSurface ??
-            visibleGroupedEntries.findLast((entry) => entry.toolSurface !== undefined)?.toolSurface;
           const groupToolIcon =
             primarySourceIcon ??
             visibleGroupedEntries.findLast((entry) => entry.toolIcon !== undefined)?.toolIcon;
           const latestToolEntry = visibleGroupedEntries.findLast(workLogEntryIsToolLike);
           const singleEntry =
             visibleGroupedEntries.length === 1 ? (visibleGroupedEntries[0] ?? null) : null;
-          const usesSingleToolCallLabel =
-            singleEntry !== null &&
-            workLogEntryIsToolLike(singleEntry) &&
-            toolGroupAction(singleEntry) !== "edit";
-          const summaryToolIcon = usesSingleToolCallLabel
-            ? resolveWorkEntryToolPresentation(singleEntry, "completed")?.icon
-            : sharedToolIcon(visibleGroupedEntries);
           nextRows.push({
             kind: "work-toggle",
             id: `work-toggle:${timelineEntry.id}`,
@@ -1883,15 +1766,12 @@ export function deriveMessagesTimelineRows(input: {
             groupId,
             hiddenCount: visibleGroupedEntries.length,
             ...disclosure,
-            summary: usesSingleToolCallLabel
-              ? singleToolCallLabel(singleEntry)
-              : singleEntry !== null && !workLogEntryIsToolLike(singleEntry)
-                ? singleEntry.label
+            summary:
+              singleEntry !== null
+                ? workEntryLabel(singleEntry, "completed")
                 : summarizeToolGroup(visibleGroupedEntries).summary,
-            summaryKind,
-            ...(groupToolSurface ? { toolSurface: groupToolSurface } : {}),
+            summaryIcon: toolGroupIcon(visibleGroupedEntries) ?? "wrench",
             ...(groupToolIcon ? { toolIcon: groupToolIcon } : {}),
-            ...(summaryToolIcon ? { summaryToolIcon } : {}),
             hasFailure:
               latestToolEntry !== undefined &&
               workEntryDisplayIndicatesToolFailure(latestToolEntry),
@@ -2458,8 +2338,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.expanded === bw.expanded &&
         a.closing === bw.closing &&
         a.summary === bw.summary &&
-        a.summaryKind === bw.summaryKind &&
-        a.toolSurface === bw.toolSurface &&
+        a.summaryIcon === bw.summaryIcon &&
         Equal.equals(a.toolIcon, bw.toolIcon) &&
         a.hasFailure === bw.hasFailure
       );

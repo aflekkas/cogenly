@@ -20,6 +20,7 @@ import {
 import type { ThreadRuntimeSummary } from "@t3tools/client-runtime/state/shell";
 import { deriveMessagesTimelineRows } from "./components/chat/MessagesTimeline.logic";
 import * as DateTime from "effect/DateTime";
+import { workEntryLabel } from "./components/chat/MessagesTimeline.logic";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -1137,7 +1138,8 @@ describe("native provider presentation in the v2 timeline", () => {
       visibleTurnItems: [visible(item)],
       optimisticMessages: [],
     });
-    expect(entry).toMatchObject({ kind: "work", entry: { label: "Read README" } });
+    expect(entry?.kind).toBe("work");
+    expect(entry?.kind === "work" ? workEntryLabel(entry.entry) : null).toBe("Read README");
   });
 
   it("keeps browser identity and its source on a completed tool row", () => {
