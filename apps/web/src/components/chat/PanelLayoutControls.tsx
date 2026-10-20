@@ -35,8 +35,6 @@ const SURFACE_BUTTON_PRESENTATION = {
 } as const;
 
 export interface PanelLayoutControlsProps {
-  /** The thread's own header controls; off where the panel's tab bar hosts the layout toggle. */
-  showThreadControls?: boolean;
   showRightPanelControl?: boolean;
   agentSettingsShortcutLabel: string | null;
   /** Browser, Terminal and Device, then Files while a file is open, for threads that offer them. */
@@ -51,7 +49,6 @@ export interface PanelLayoutControlsProps {
 }
 
 export const PanelLayoutControls = memo(function PanelLayoutControls({
-  showThreadControls = true,
   showRightPanelControl = true,
   agentSettingsShortcutLabel,
   surfaceButtons,
@@ -67,7 +64,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
       className="flex h-full shrink-0 items-center gap-1 [-webkit-app-region:no-drag]"
       data-panel-layout-controls
     >
-      {showThreadControls && onOpenAgentSettings ? (
+      {onOpenAgentSettings ? (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -88,9 +85,9 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
           </TooltipPopup>
         </Tooltip>
       ) : null}
-      {showThreadControls
-        ? surfaceButtons?.map((button) => <SurfaceButton key={button.id} {...button} />)
-        : null}
+      {surfaceButtons?.map((button) => (
+        <SurfaceButton key={button.id} {...button} />
+      ))}
       {showRightPanelControl ? (
         <Tooltip>
           <TooltipTrigger render={<span className="flex shrink-0" />}>

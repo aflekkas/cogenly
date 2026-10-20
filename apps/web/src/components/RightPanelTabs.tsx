@@ -15,7 +15,7 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Files, Globe2, PanelRight, Plus, Smartphone, TerminalSquare } from "lucide-react";
+import { Files, Globe2, PanelRight, Plus, Smartphone, TerminalSquare, X } from "lucide-react";
 import { Volume2, VolumeOff } from "lucide";
 import {
   type ComponentProps,
@@ -44,7 +44,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { Menu, MenuItem, MenuPopup } from "~/components/ui/menu";
 import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { ScrollArea } from "~/components/ui/scroll-area";
-import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { useTheme } from "~/hooks/useTheme";
 import { useDeviceState } from "~/state/device";
@@ -75,6 +74,12 @@ interface RightPanelTabsProps {
   defaultWidth?: number;
   inlineSize?: PreviewPanelInlineSize;
   layoutControls?: ReactNode;
+  /**
+   * How many titlebar controls the window pins over the inline tab bar's
+   * right end (surface switchers, maximize, panel toggle). The strip keeps
+   * that much clear; without `layoutControls` it has no other way to know.
+   */
+  trailingControlCount?: number;
   surfaces: readonly RightPanelSurface[];
   /** Fallback environment for surfaces that do not carry their own. */
   environmentId: EnvironmentId | null;
@@ -330,14 +335,20 @@ function SortableTab({
 /** Shown only when an open panel has nothing in it; the header is the way in. */
 function RightPanelEmptyState() {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 pb-(--workspace-topbar-height) text-center">
-      <PanelRight className="size-4 text-muted-foreground" />
-      <p className="text-sm text-foreground">Nothing open</p>
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-6 pb-(--workspace-topbar-height) text-center">
+      <PanelRight className="mb-1 size-4 text-muted-foreground" />
+      <p className="text-sm font-medium text-foreground">Nothing open</p>
       <p className="text-xs text-muted-foreground">
         Open Browser, Terminal or Device from the header.
       </p>
     </div>
   );
+}
+
+/** Pinned controls are 1.75rem wide with 0.25rem between them, inset by the window's control offset. */
+function trailingControlsInset(count: number): string {
+  const gaps = Math.max(count - 1, 0);
+  return `calc(var(--workspace-controls-right) + 1px + ${count} * var(--workspace-titlebar-control-size) + ${gaps} * 0.25rem + 0.5rem)`;
 }
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
@@ -609,7 +620,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           <Button
             ref={newTabRef}
             aria-label="New browser tab"
-            className={cn("shrink-0", ownsDesktopTitleBar && "[-webkit-app-region:no-drag]")}
+            // Sits in the tab lane, after the last tab, like a browser's "+".
+            className={cn(
+              "mb-1 ml-0.5 shrink-0 self-end",
+              ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
+            )}
             size="icon-xs"
             variant="ghost-muted"
             onClick={props.onAddBrowser}
@@ -645,17 +660,27 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     >
       <div
         className={cn(
-          "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-1 pl-2",
+          // A tab strip in the titlebar's row: tinted, with a hairline along
+          // its bottom edge that the selected tab covers, so that tab reads as
+          // joined to the surface beneath it. The hairline is drawn behind the
+          // strip's content (isolate + negative z) rather than as a border,
+          // because the tabs scroll inside a clipped viewport and could not
+          // overhang a border by a pixel without scrolling it.
+          "relative isolate flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-stretch gap-1 bg-muted/40 pl-2 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:-z-10 after:h-px after:bg-border/60",
           // The sheet overlays from the viewport top, so its tab bar keeps
           // the titlebar's height: a compact row re-centers the layout
           // controls a few pixels higher and the cluster jumps on open.
-          // Inline, the maximize and panel toggles are fixed at the window's
-          // top-right; the row leaves them their room.
-          props.mode === "inline" && !props.layoutControls ? "pr-20" : "pr-3",
+          // Inline, the window pins the layout controls at its top-right;
+          // the strip leaves them their room (see trailingControlsInset).
+          (props.mode !== "inline" || props.layoutControls) && "pr-3",
           ownsDesktopTitleBar && "drag-region",
-          ownsDesktopTitleBar && "wco:pr-(--workspace-native-controls-inset)",
           props.mode === "inline" && props.maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
+        style={
+          props.mode === "inline" && !props.layoutControls
+            ? { paddingRight: trailingControlsInset(props.trailingControlCount ?? 2) }
+            : undefined
+        }
         data-right-panel-tabbar
       >
         <ScrollArea
@@ -679,7 +704,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               role="tablist"
               aria-label="Panel tabs"
               aria-orientation="horizontal"
-              className="flex h-full w-full items-center gap-1"
+              className="flex h-full w-full items-end gap-0.5"
               onKeyDown={handleTabListKeyDown}
             >
               {groupSurfaces.map((surface, index) => {
@@ -723,22 +748,20 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     onAuxClick={(event) => handleTabAuxClick(event, surface)}
                     onContextMenu={(event) => handleTabContextMenu(event, surface)}
                     className={cn(
-                      // Equal shares of the row up to a comfortable width; the
+                      // Sized to its title up to a cap, like an editor tab; the
                       // label folds away before a tab gets narrower than its
-                      // icon. The selected tab keeps its name.
-                      "group/tab @container/tab h-6 shrink basis-40 cursor-pointer rounded-md text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                      // icon. The selected tab keeps its name, stands on the
+                      // strip's bottom edge in the panel's own background, and
+                      // is the only one with an outline.
+                      "group/tab @container/tab h-8 max-w-44 shrink basis-auto cursor-pointer rounded-t-md border border-b-0 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
                       active
-                        ? "min-w-28 state-selected"
-                        : "min-w-9 state-hover text-muted-foreground",
+                        ? "min-w-28 border-border/60 bg-background text-foreground"
+                        : "min-w-9 border-transparent text-muted-foreground state-hover",
                       ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
                     )}
                   >
-                    <div className="flex h-full items-center gap-1.5 pr-2 pl-1.5 @max-[4.5rem]/tab:justify-center @max-[4.5rem]/tab:px-0">
-                      <PanelTabCloseButton
-                        label={`Close ${title}`}
-                        focusable={false}
-                        onClick={() => props.onCloseSurface(surface)}
-                      >
+                    <div className="flex h-full items-center gap-1.5 pr-1 pl-2.5 @max-[4.5rem]/tab:justify-center @max-[4.5rem]/tab:px-0">
+                      <span className="relative flex size-3 shrink-0 items-center justify-center">
                         <SurfaceIcon
                           surface={surface}
                           sessions={props.previewSessions}
@@ -751,7 +774,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                             aria-hidden
                           />
                         ) : null}
-                      </PanelTabCloseButton>
+                      </span>
                       {renamingDevice === surface.id ? (
                         <input
                           aria-label="Device tab name"
@@ -823,6 +846,20 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           </TooltipPopup>
                         </Tooltip>
                       )}
+                      {/* Shown on the selected tab and on hover, as in a browser;
+                          not a tab stop, since Delete closes the focused tab. */}
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        aria-label={`Close ${title}`}
+                        onClick={() => props.onCloseSurface(surface)}
+                        className={cn(
+                          "flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:opacity-100 @max-[4.5rem]/tab:hidden",
+                          !active && "opacity-0 group-hover/tab:opacity-100",
+                        )}
+                      >
+                        <X className="size-3" />
+                      </button>
                     </div>
                   </SortableTab>
                 );

@@ -9125,22 +9125,15 @@ export default function ChatView(props: ChatViewProps) {
     onOpenAgentSettings: agentConversationViewKey ? openAgentSettingsStable : undefined,
     surfaceButtons: rightPanelSupported ? workSurfaceButtons : undefined,
   } satisfies PanelLayoutControlsProps;
-  const panelToggleControls = (
-    <PanelLayoutControls
-      {...panelToggleControlProps}
-      showThreadControls={!inlineRightPanelOwnsTitleBar}
-    />
-  );
-  const threadPanelHeaderControl = (
-    <div
-      // Inset from the chat header's edge, not the window's: --workspace-controls-right also
-      // clears the native window buttons, which sit over the right panel, not this header.
-      className="absolute top-[var(--workspace-controls-top)] right-[calc(env(safe-area-inset-right)+0.75rem)] z-50 flex h-[var(--workspace-topbar-height)] items-center [-webkit-app-region:no-drag]"
-      data-workspace-titlebar-controls
-    >
-      <PanelLayoutControls {...panelToggleControlProps} showRightPanelControl={false} />
-    </div>
-  );
+  // One cluster at the window's top-right, open or closed: the surface
+  // switchers, then maximize and the panel toggle. Open, that corner is the
+  // panel's tab strip, so the controls sit with the panel they switch.
+  const panelToggleControls = <PanelLayoutControls {...panelToggleControlProps} />;
+  const rightPanelTitlebarControlCount =
+    (panelToggleControlProps.onOpenAgentSettings ? 1 : 0) +
+    (panelToggleControlProps.surfaceButtons?.length ?? 0) +
+    (shouldUsePlanSidebarSheet ? 0 : 1) +
+    1;
   const panelLayoutControls = (
     <div
       className={cn(
@@ -9249,7 +9242,6 @@ export default function ChatView(props: ChatViewProps) {
           (rightPanelSupported || agentConversationViewKey)
             ? panelLayoutControls
             : null}
-          {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
           {/* No breadcrumb or visible title, as in the reference: the sidebar names
               the thread, its right-click menu renames it, and the details card holds
               its project tags. The title stays as the transcript's heading. */}
@@ -9852,6 +9844,7 @@ export default function ChatView(props: ChatViewProps) {
           getShortcutContext={getShortcutContextStable}
           maximized={rightPanelMaximized}
           inlineSize={previewPanelInlineSize}
+          trailingControlCount={rightPanelTitlebarControlCount}
           surfaces={renderedRightPanelSurfaces}
           environmentId={activeThreadRef.environmentId}
           activeSurfaceId={renderedRightPanelSurface?.id ?? null}

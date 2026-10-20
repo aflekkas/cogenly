@@ -1,8 +1,7 @@
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
-import { Globe, History, RadioTower } from "lucide-react";
+import { Globe } from "lucide-react";
 
 import type { BrowserHistoryEntry } from "~/browserHistoryStore";
-import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
 import { DiscoveryList } from "../ui/discovery-list";
 
 import { PreviewLocalServerCard } from "./PreviewLocalServerCard";
@@ -18,6 +17,11 @@ interface Props {
   onOpenUrl: (url: string) => void;
 }
 
+/**
+ * A fresh browser tab. With nothing to offer it is one quiet line, in the
+ * same voice as the panel's own "Nothing open" state; with local servers or
+ * history it lists them as rows to open.
+ */
 export function PreviewEmptyState({
   threadRef,
   environmentId,
@@ -34,27 +38,37 @@ export function PreviewEmptyState({
 
   if (servers.length === 0 && recents.length === 0) {
     return (
-      <Empty>
-        <EmptyMedia variant="icon">
-          <Globe className="size-4.5 text-muted-foreground" />
-        </EmptyMedia>
-        <EmptyTitle>No preview yet</EmptyTitle>
-        <EmptyDescription>
-          Enter a URL above, or start a dev server and it will be listed here.
-        </EmptyDescription>
-      </Empty>
+      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-1.5 px-6 pb-(--workspace-topbar-height) text-center">
+        <Globe className="mb-1 size-4 text-muted-foreground" />
+        <p className="text-sm font-medium text-foreground">No preview yet</p>
+        <p className="text-xs text-muted-foreground">
+          Enter a URL, or start a dev server and it will appear here.
+        </p>
+      </div>
     );
   }
 
   return (
-    <div className="scroll-fade-y scrollbar-gutter-both flex h-full min-h-0 overflow-y-auto px-5 py-8">
-      <div className="mx-auto flex w-full max-w-xl flex-col gap-6">
+    <div className="scroll-fade-y scrollbar-gutter-both flex h-full min-h-0 overflow-y-auto px-4 py-5">
+      <div className="mx-auto flex w-full max-w-md flex-col gap-5">
+        {servers.length > 0 ? (
+          <section className="flex flex-col gap-2">
+            <h2 className="px-1 text-xs font-medium text-muted-foreground">Local servers</h2>
+            <DiscoveryList>
+              {servers.map((server) => (
+                <PreviewLocalServerCard
+                  key={`${server.host}:${server.port}`}
+                  threadRef={threadRef}
+                  server={server}
+                  onOpen={() => onOpenUrl(server.requestedUrl)}
+                />
+              ))}
+            </DiscoveryList>
+          </section>
+        ) : null}
         {recents.length > 0 ? (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <History className="size-4 shrink-0" />
-              <h2 className="font-medium">Recently used</h2>
-            </div>
+          <section className="flex flex-col gap-2">
+            <h2 className="px-1 text-xs font-medium text-muted-foreground">Recent</h2>
             <DiscoveryList>
               {recents.map((entry) => (
                 <PreviewRecentUrlCard
@@ -66,28 +80,7 @@ export function PreviewEmptyState({
                 />
               ))}
             </DiscoveryList>
-          </div>
-        ) : null}
-        {servers.length > 0 ? (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <RadioTower className="size-4 shrink-0" />
-              <h2 className="font-medium">Local servers</h2>
-            </div>
-            <DiscoveryList>
-              {servers.map((server) => (
-                <PreviewLocalServerCard
-                  key={`${server.host}:${server.port}`}
-                  threadRef={threadRef}
-                  server={server}
-                  onOpen={() => onOpenUrl(server.requestedUrl)}
-                />
-              ))}
-            </DiscoveryList>
-            <p className="px-1 text-xs text-muted-foreground">
-              Select a live local server to open it in this browser tab.
-            </p>
-          </div>
+          </section>
         ) : null}
       </div>
     </div>

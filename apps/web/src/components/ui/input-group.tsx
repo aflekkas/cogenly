@@ -26,6 +26,10 @@ const inputGroupVariants = cva(
           "dropdown-glass rounded-2xl has-[input:focus-visible,textarea:focus-visible]:ring-0 has-[input:focus-visible,textarea:focus-visible]:border-[color-mix(in_srgb,var(--contrast-foreground)_18%,transparent)]",
         ghost:
           "border-transparent bg-transparent shadow-none hover:bg-muted/40 has-[input:focus-visible,textarea:focus-visible]:bg-background",
+        // A quiet tinted field for toolbars (an address bar): no hairline at
+        // rest, and the plain bordered field once it is being edited.
+        filled:
+          "border-transparent bg-muted/50 shadow-none hover:bg-muted/70 has-[input:focus-visible,textarea:focus-visible]:bg-background",
       },
     },
   },
