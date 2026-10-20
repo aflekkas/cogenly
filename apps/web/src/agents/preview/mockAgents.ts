@@ -69,6 +69,7 @@ export function createMockAgentsClient(): AgentsClient {
     createdAt: ago(5000),
     updatedAt: ago(5000),
     repositoryIds: [ProjectId.make("preview-repo")],
+    threadCount: 0,
   };
   const repositories = [{ id: ProjectId.make("preview-repo"), title: "preview-repo" }];
   let commitments: Commitment[] = [
