@@ -1737,6 +1737,7 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadRef,
     !shouldUsePlanSidebarSheet,
     rightPanelOpen,
+    rightPanelState.maximized === true,
   );
   const rightPanelControlsInPanel =
     shouldUsePlanSidebarSheet && rightPanelPresent && rightPanelOpen;
