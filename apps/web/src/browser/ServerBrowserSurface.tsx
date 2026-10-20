@@ -814,7 +814,7 @@ export function ServerBrowserSurface(props: {
         />
         {fileChooser && control?.controller === "you" ? (
           <div
-            className="absolute inset-x-2 top-2 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 shadow-lg"
+            className="reveal-motion absolute inset-x-2 top-2 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 shadow-lg"
             role="dialog"
             aria-label="Choose files for the page"
           >
@@ -845,7 +845,7 @@ export function ServerBrowserSurface(props: {
         ) : null}
         {control?.dialog ? (
           <div
-            className="absolute inset-x-2 top-2 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 shadow-lg"
+            className="reveal-motion absolute inset-x-2 top-2 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 shadow-lg"
             role="dialog"
             aria-label="Browser dialog"
           >
