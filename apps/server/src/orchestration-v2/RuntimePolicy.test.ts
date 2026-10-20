@@ -184,4 +184,26 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
       assert.equal(yield* modeFor("work"), "full-access");
     }),
   );
+
+  it.effect("marks only chat-surface threads for conversation mode", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const conversationFor = (surface?: "chat" | "work") =>
+        policy
+          .resolve({
+            thread: makeThread({
+              now,
+              worktreePath: null,
+              ...(surface === undefined ? {} : { surface }),
+            }),
+            modelSelection,
+          })
+          .pipe(Effect.map((resolved) => resolved.conversationMode));
+
+      assert.isTrue(yield* conversationFor("chat"));
+      assert.isUndefined(yield* conversationFor("work"));
+      assert.isUndefined(yield* conversationFor(undefined));
+    }),
+  );
 });

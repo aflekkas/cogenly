@@ -52,6 +52,12 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   approvalPolicy: Schema.optional(Schema.Unknown),
   sandboxPolicy: Schema.optional(Schema.Unknown),
   reasoningEffort: Schema.optional(Schema.String),
+  /**
+   * True for chat-surface threads: the adapter must offer conversation tools
+   * only (no file writes, no shell) plus a conversational system prompt.
+   * Absent or false keeps the full work toolset.
+   */
+  conversationMode: Schema.optional(Schema.Boolean),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 

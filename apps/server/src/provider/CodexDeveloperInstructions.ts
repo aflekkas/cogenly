@@ -1,6 +1,9 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
 import type { V2TurnStartParams__AdditionalContextEntry } from "effect-codex-app-server/schema";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  CONVERSATION_MODE_INSTRUCTIONS,
+  buildRuntimeInstructions,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 
 import {
   T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
@@ -192,10 +195,17 @@ export interface CodexRuntimeInfo {
 }
 
 /** Mode prompt for `turn/start.collaborationMode.settings.developer_instructions`. */
-export function buildCodexDeveloperInstructions(interactionMode: ProviderInteractionMode): string {
-  return interactionMode === "plan"
-    ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-    : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
+export function buildCodexDeveloperInstructions(
+  interactionMode: ProviderInteractionMode,
+  options?: { readonly conversationMode?: boolean },
+): string {
+  const base =
+    interactionMode === "plan"
+      ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
+      : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
+  // Chat-surface turns stay conversational on top of either mode: answer
+  // directly, and hand code changes to a Work session via Start Work.
+  return options?.conversationMode === true ? `${base}\n\n${CONVERSATION_MODE_INSTRUCTIONS}` : base;
 }
 
 /**

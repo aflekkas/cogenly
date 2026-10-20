@@ -26,3 +26,11 @@ export function buildRuntimeInstructions(runtime: {
 function toSingleLine(value: string): string {
   return value.replaceAll(/\s+/g, " ").trim();
 }
+
+/**
+ * System prompt for chat-surface turns. The thread is a conversation, not a
+ * coding session: the adapter pairs this with conversation-only tools (no
+ * file writes, no shell), so the text points code changes at Start Work
+ * instead of restating the tool rules.
+ */
+export const CONVERSATION_MODE_INSTRUCTIONS = `<conversation_mode>You are in a conversation, not a coding session, so answer directly instead of changing anything. Code snippets in replies are fine. If the user asks for code changes in a repository, explain briefly what you would change and suggest using Start Work (the hammer on a message) to hand the conversation to a coding session, or draft that handoff with the work_propose_handoff tool when it is available.</conversation_mode>`;

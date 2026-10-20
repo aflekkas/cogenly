@@ -143,7 +143,10 @@ import {
 import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  CONVERSATION_MODE_INSTRUCTIONS,
+  buildRuntimeInstructions,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,
   normalizeMcpText,
@@ -375,6 +378,21 @@ export interface ClaudeAgentSdkQueryPresetTools {
 export type ClaudeAgentSdkQueryTools = ClaudeAgentSdkQueryToolList | ClaudeAgentSdkQueryPresetTools;
 
 export const CLAUDE_READ_ONLY_ALLOWED_TOOLS = ["Read", "Glob", "Grep"] as const;
+
+/**
+ * Built-in tools a chat-surface turn never gets: file writes plus the shell
+ * and its background-output companions. Reading files, web search/fetch and
+ * the conversation MCP tools stay available.
+ */
+export const CLAUDE_CONVERSATION_DISALLOWED_TOOLS: ReadonlyArray<string> = [
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+  "Bash",
+  "BashOutput",
+  "KillShell",
+];
 
 function claudeAgentSdkQueryToolsForSdk(
   tools: ClaudeAgentSdkQueryTools,
@@ -1102,6 +1120,8 @@ export function makeClaudeQueryOptions(input: {
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
   readonly disallowedTools?: ReadonlyArray<string>;
+  /** Chat-surface turns: appends the conversation-mode instructions. */
+  readonly conversationMode?: boolean;
   readonly permissionMode?: PermissionMode;
   readonly canUseTool?: CanUseTool;
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
@@ -1185,10 +1205,13 @@ export function makeClaudeQueryOptions(input: {
       preset: "claude_code" as const,
       append:
         buildRuntimeInstructions({ harness: "Claude Code" }) +
+        (input.conversationMode === true ? `\n${CONVERSATION_MODE_INSTRUCTIONS}` : "") +
         (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS) +
-        (input.disallowedTools?.includes("Bash")
-          ? "\nUse mcp__cogenly__terminal_run for every shell command so the owner sees it live. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. Terminals and their children are killed when this thread settles."
-          : ""),
+        // Conversation turns have no shell at all, so they never route
+        // commands through the terminal tools.
+        (input.conversationMode === true || !input.disallowedTools?.includes("Bash")
+          ? ""
+          : "\nUse mcp__cogenly__terminal_run for every shell command so the owner sees it live. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. Terminals and their children are killed when this thread settles."),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -1229,6 +1252,16 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__html_render",
 ];
 
+// Chat-surface turns get the read-only tools plus the handoff draft and the
+// read-only memory tools, so a conversation can propose Work and recall facts
+// without touching the workspace. Everything that mutates stays out.
+export const CLAUDE_CONVERSATION_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
+  ...CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+  "mcp__cogenly__work_propose_handoff",
+  "mcp__cogenly__memory_read",
+  "mcp__cogenly__fact_search",
+];
+
 // Claude Code aborts an HTTP MCP call after 60 s ("The operation timed out.")
 // unless the server config sets `timeout`. T3's wait tools (t3_thread_wait,
 // delegate_task mode=wait) legitimately block for up to an hour
@@ -1250,6 +1283,8 @@ export function claudeMcpQueryOverrides(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly readOnlySandbox: boolean;
   readonly allowedTools?: ReadonlyArray<string>;
+  /** Chat-surface turns: read-only tools plus the handoff draft and memory reads. */
+  readonly conversationMode?: boolean;
 }): {
   readonly allowedTools?: ReadonlyArray<string>;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
@@ -1259,9 +1294,12 @@ export function claudeMcpQueryOverrides(input: {
   if (session === undefined) {
     return input.allowedTools === undefined ? {} : { allowedTools: input.allowedTools };
   }
-  const mcpAllowedTools = input.readOnlySandbox
-    ? CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS
-    : [CLAUDE_T3_MCP_TOOL_WILDCARD];
+  const mcpAllowedTools =
+    input.conversationMode === true
+      ? CLAUDE_CONVERSATION_T3_MCP_ALLOWED_TOOLS
+      : input.readOnlySandbox
+        ? CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS
+        : [CLAUDE_T3_MCP_TOOL_WILDCARD];
   return {
     ...(session.terminalToolsAvailable === false
       ? {}
@@ -1771,15 +1809,18 @@ export interface ClaudeRuntimeQueryPolicy {
   readonly allowedTools?: ReadonlyArray<string>;
   readonly allowDangerouslySkipPermissions?: true;
   readonly installPermissionCallback: boolean;
+  /** Chat-surface threads: conversation tools only, plus a conversational prompt. */
+  readonly conversationMode: boolean;
 }
 
 export function claudeRuntimeQueryPolicyForRuntimePolicy(
-  _runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+  runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
 ): ClaudeRuntimeQueryPolicy {
   return {
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     installPermissionCallback: false,
+    conversationMode: runtimePolicy.conversationMode === true,
   };
 }
 
@@ -1790,6 +1831,7 @@ function claudeRuntimeQueryPolicyKey(policy: ClaudeRuntimeQueryPolicy): string {
     allowedTools: policy.allowedTools,
     allowDangerouslySkipPermissions: policy.allowDangerouslySkipPermissions,
     installPermissionCallback: policy.installPermissionCallback,
+    conversationMode: policy.conversationMode,
   });
 }
 
@@ -8318,13 +8360,23 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           nativeThreadId: string,
         ) {
           const queryPolicy = claudeRuntimeQueryPolicyForRuntimePolicy(turnInput.runtimePolicy);
+          const conversationMode = queryPolicy.conversationMode;
           const mcpOverrides = claudeMcpQueryOverrides({
             mcpSession: yield* mcpSessions.read(turnInput.threadId),
-            readOnlySandbox: false,
+            readOnlySandbox: conversationMode,
+            ...(conversationMode ? { conversationMode } : {}),
             ...(queryPolicy.allowedTools === undefined
               ? {}
               : { allowedTools: queryPolicy.allowedTools }),
           });
+          // Chat-surface turns lose file writes and the shell on top of the
+          // MCP read-only set, whatever the terminal attachment grants.
+          const disallowedTools = Array.from(
+            new Set([
+              ...(mcpOverrides.disallowedTools ?? []),
+              ...(conversationMode ? CLAUDE_CONVERSATION_DISALLOWED_TOOLS : []),
+            ]),
+          );
           const queryPolicyKey = claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides);
           const compiledSelection = compileClaudeModelSelection(turnInput.modelSelection);
           const resumeSessionAt = yield* getNativeConversationHeadId(turnInput.providerThread);
@@ -8429,15 +8481,14 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             settings: adapterOptions.settings,
             environment: adapterOptions.environment,
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
+            ...(conversationMode ? { conversationMode } : {}),
             ...(mcpOverrides.allowedTools === undefined
               ? {}
               : { allowedTools: mcpOverrides.allowedTools }),
             ...(mcpOverrides.mcpServers === undefined
               ? {}
               : { mcpServers: mcpOverrides.mcpServers }),
-            ...(mcpOverrides.disallowedTools === undefined
-              ? {}
-              : { disallowedTools: mcpOverrides.disallowedTools }),
+            ...(disallowedTools.length === 0 ? {} : { disallowedTools }),
             permissionMode: queryPolicy.permissionMode,
             ...(queryPolicy.allowDangerouslySkipPermissions === undefined
               ? {}

@@ -536,6 +536,84 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
+  it.effect("runs chat-surface turns in a read-only sandbox with conversation instructions", () =>
+    Effect.gen(function* () {
+      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-chat-conversation",
+        codexInput: [{ type: "text", text: "explain this idea" }],
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: null,
+          conversationMode: true,
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        hasT3Mcp: true,
+      });
+
+      assert.equal(params.approvalPolicy, "never");
+      assert.equal(params.sandboxPolicy?.type, "readOnly");
+      assert.include(
+        params.collaborationMode?.settings.developer_instructions ?? "",
+        "<conversation_mode>",
+      );
+      assert.include(params.additionalContext?.cogenly_conversation?.value ?? "", "Start Work");
+      assert.notInclude(params.additionalContext?.cogenly_tools?.value ?? "", "terminal_run");
+    }),
+  );
+
+  it.effect("keeps conversation instructions without the T3 MCP server", () =>
+    Effect.gen(function* () {
+      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-chat-no-mcp",
+        codexInput: [{ type: "text", text: "explain this idea" }],
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: null,
+          conversationMode: true,
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        hasT3Mcp: false,
+      });
+
+      assert.equal(params.sandboxPolicy?.type, "readOnly");
+      assert.include(params.additionalContext?.cogenly_conversation?.value ?? "", "Start Work");
+    }),
+  );
+
+  it.effect("keeps work-surface turns on full access without conversation instructions", () =>
+    Effect.gen(function* () {
+      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-work-full",
+        codexInput: [{ type: "text", text: "implement this task" }],
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: null,
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        hasT3Mcp: true,
+      });
+
+      assert.equal(params.sandboxPolicy?.type, "dangerFullAccess");
+      assert.notProperty(params.additionalContext ?? {}, "cogenly_conversation");
+      assert.notInclude(
+        params.collaborationMode?.settings.developer_instructions ?? "",
+        "<conversation_mode>",
+      );
+    }),
+  );
+
   it.effect("compiles per-turn Codex model options and cwd from their owning inputs", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({

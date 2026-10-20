@@ -106,7 +106,9 @@ or a new one when you have none. A small dot marks a chat that is still running
 or waiting on you. Older chats load as you scroll, and search covers all of them. Add
 repositories from **Work** or the command palette.
 
-A chat is a conversation; Work is a coding session in a repository. So a chat's
+A chat is a conversation; Work is a coding session in a repository. Chats run in
+conversation mode: the agent answers directly and can't edit files or run shell
+commands. So a chat's
 menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
 which always asks first, while settling, snoozing, archiving, repository settings
 and the branch and worktree controls, the right panel, and its browser, terminal and device

@@ -44,7 +44,10 @@ import * as Stream from "effect/Stream";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  CONVERSATION_MODE_INSTRUCTIONS,
+  buildRuntimeInstructions,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 import { museModelCapabilities, resolveMuseReasoningEffort } from "./modelCatalog.ts";
 import {
   MuseApproval,
@@ -1695,6 +1698,9 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               cwd,
               environment,
               runtimeMode: input.runtimePolicy.runtimeMode,
+              // Chat-surface threads run on a read-only host: no shell,
+              // no filesystem writes, no workspace trust, no session MCP.
+              readOnly: input.runtimePolicy.conversationMode === true,
               disableShell: mcpSession !== undefined && mcpSession.terminalToolsAvailable !== false,
             },
             options.createHost,
@@ -2058,6 +2064,12 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                         model: session.model ?? undefined,
                         reasoningEffort: effort,
                       }) +
+                      // Chat-surface turns have no shell or writes (read-only
+                      // host), so they answer directly and hand code changes
+                      // to a Work session via Start Work.
+                      (turnInput.runtimePolicy.conversationMode === true
+                        ? `\n${CONVERSATION_MODE_INSTRUCTIONS}`
+                        : "") +
                       (yield* mcpSessions
                         .read(turnInput.threadId)
                         .pipe(
@@ -2065,7 +2077,8 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                             mcp
                               ? "\n" +
                                 COGENLY_ORCHESTRATION_INSTRUCTIONS.replaceAll("T3", "Cogenly") +
-                                (mcp.terminalToolsAvailable === false
+                                (mcp.terminalToolsAvailable === false ||
+                                turnInput.runtimePolicy.conversationMode === true
                                   ? ""
                                   : "\nUse the cogenly MCP terminal_run tool for every shell command. Native shell is disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. Terminals and their children stop when this thread settles.")
                               : "",

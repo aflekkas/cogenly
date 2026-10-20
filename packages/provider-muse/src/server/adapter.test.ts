@@ -436,6 +436,64 @@ describe("MuseAdapterV2", () => {
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
+  it.effect("runs chat-surface turns on a read-only host with conversation instructions", () =>
+    Effect.gen(function* () {
+      const seen: Array<{ readonly readOnly?: boolean }> = [];
+      const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        ...runtimePolicy,
+        conversationMode: true,
+      });
+      const fake = yield* makeFakeMuse();
+      const harness = yield* makeHarness(
+        fake,
+        INSTANCE_ID,
+        undefined,
+        undefined,
+        undefined,
+        policy,
+        {
+          createHost: async (options) => {
+            seen.push(options.readOnly === true ? { readOnly: true } : {});
+            return fake.host;
+          },
+        },
+      );
+      assert.isTrue(seen.some((options) => options.readOnly === true));
+      yield* harness.runtime.startTurn(yield* turnInput(harness.providerThread, 1, policy));
+      const call = yield* fake.takeCall("turn/start");
+      const text = JSON.stringify(call.params.input);
+      assert.include(text, "<conversation_mode>");
+      assert.include(text, "Start Work");
+      yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
+  it.effect("keeps work-surface turns on a full host without conversation instructions", () =>
+    Effect.gen(function* () {
+      const seen: Array<{ readonly readOnly?: boolean }> = [];
+      const fake = yield* makeFakeMuse();
+      const harness = yield* makeHarness(
+        fake,
+        INSTANCE_ID,
+        undefined,
+        undefined,
+        undefined,
+        runtimePolicy,
+        {
+          createHost: async (options) => {
+            seen.push(options.readOnly === true ? { readOnly: true } : {});
+            return fake.host;
+          },
+        },
+      );
+      assert.isFalse(seen.some((options) => options.readOnly === true));
+      yield* harness.runtime.startTurn(yield* turnInput(harness.providerThread, 1, runtimePolicy));
+      const call = yield* fake.takeCall("turn/start");
+      assert.notInclude(JSON.stringify(call.params.input), "<conversation_mode>");
+      yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
   it.effect("rejects a host without session MCP support before opening a native session", () =>
     Effect.gen(function* () {
       yield* (yield* McpProviderSessions.McpProviderSessions).set({

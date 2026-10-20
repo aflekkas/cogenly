@@ -99,6 +99,7 @@ import {
   buildCodexAdditionalContext,
   buildCodexDeveloperInstructions,
 } from "../../provider/CodexDeveloperInstructions.ts";
+import { CONVERSATION_MODE_INSTRUCTIONS } from "@t3tools/provider-core/server/runtimeInstructions";
 import { toMcpElicitationResponse } from "../../provider/CodexMcpElicitation.ts";
 import {
   materializeCodexShadowHome,
@@ -600,7 +601,12 @@ function compactStrings(values: ReadonlyArray<string | null | undefined>): Reado
   });
 }
 
+/** The item and its action both carry the query, so each pattern is kept once. */
 function webSearchPatterns(item: CodexWebSearchItem): ReadonlyArray<string> {
+  return [...new Set(webSearchPatternCandidates(item))];
+}
+
+function webSearchPatternCandidates(item: CodexWebSearchItem): ReadonlyArray<string> {
   if (item.action === null || item.action === undefined) {
     return compactStrings([item.query]);
   }
@@ -638,11 +644,23 @@ const isProviderAdapterRuntimeRequestResponseError = Schema.is(
   ProviderAdapter.ProviderAdapterRuntimeRequestResponseError,
 );
 
-function codexRuntimeModeTurnDefaults(_runtimeMode: RuntimeMode): {
+function codexRuntimeModeTurnDefaults(
+  _runtimeMode: RuntimeMode,
+  conversationMode = false,
+): {
   readonly approvalPolicy: CodexSchema.V2TurnStartParams__AskForApproval;
   readonly approvalsReviewer: CodexSchema.V2TurnStartParams__ApprovalsReviewer;
   readonly sandboxPolicy: CodexSchema.V2TurnStartParams__SandboxPolicy;
 } {
+  // Chat-surface turns run in Codex's read-only sandbox: no workspace writes
+  // and no exec of mutating commands. Approvals stay off; the sandbox denies.
+  if (conversationMode) {
+    return {
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      sandboxPolicy: { type: "readOnly" },
+    };
+  }
   return {
     approvalPolicy: "never",
     approvalsReviewer: "user",
@@ -665,7 +683,11 @@ export function buildCodexTurnStartParams(input: {
   readonly appContext?: ProviderAdapter.ProviderAdapterV2TurnInput["appContext"];
 }) {
   return Effect.gen(function* () {
-    const runtimeModeDefaults = codexRuntimeModeTurnDefaults(input.runtimePolicy.runtimeMode);
+    const conversationMode = input.runtimePolicy.conversationMode === true;
+    const runtimeModeDefaults = codexRuntimeModeTurnDefaults(
+      input.runtimePolicy.runtimeMode,
+      conversationMode,
+    );
     const approvalPolicy = runtimeModeDefaults.approvalPolicy;
     const sandboxPolicy = runtimeModeDefaults.sandboxPolicy;
     const selectedEffort = getModelSelectionStringOptionValue(
@@ -679,9 +701,12 @@ export function buildCodexTurnStartParams(input: {
         ? undefined
         : getCodexServiceTierOptionValue(input.modelSelection);
     const developerInstructions =
-      input.hasT3Mcp !== true
+      input.hasT3Mcp !== true && !conversationMode
         ? undefined
-        : buildCodexDeveloperInstructions(input.runtimePolicy.interactionMode);
+        : buildCodexDeveloperInstructions(
+            input.runtimePolicy.interactionMode,
+            conversationMode ? { conversationMode } : undefined,
+          );
     // An app's context is text an MCP server wrote, so it goes in as untrusted
     // context: Codex renders it as quoted user-side input, never as developer
     // instructions. Codex resends it only when it changes.
@@ -698,14 +723,30 @@ export function buildCodexTurnStartParams(input: {
             {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
-              terminal: input.terminalToolsAvailable ?? false,
+              // Conversation turns have no shell, so they never route
+              // commands through the terminal tools.
+              terminal: conversationMode ? false : (input.terminalToolsAvailable ?? false),
             },
           )
         : undefined;
-    const additionalContext =
-      t3Context === undefined && Object.keys(appContext).length === 0
+    // The conversation instructions ride along as application context, which
+    // survives even when Codex drops client developer instructions for a
+    // catalog-shipped mode, and even when no MCP session is attached.
+    const conversationContext =
+      conversationMode !== true
         ? undefined
-        : { ...t3Context, ...appContext };
+        : {
+            cogenly_conversation: {
+              kind: "application" as const,
+              value: CONVERSATION_MODE_INSTRUCTIONS,
+            },
+          };
+    const additionalContext =
+      t3Context === undefined &&
+      Object.keys(appContext).length === 0 &&
+      conversationContext === undefined
+        ? undefined
+        : { ...t3Context, ...appContext, ...conversationContext };
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
       input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
         ? undefined

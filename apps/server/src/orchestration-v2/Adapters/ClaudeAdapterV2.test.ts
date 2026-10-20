@@ -193,10 +193,80 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
           installPermissionCallback: false,
+          conversationMode: false,
         });
       }
     },
   );
+
+  it.each([
+    [undefined, false],
+    [false, false],
+    [true, true],
+  ] as const)("maps conversationMode %s to %s", (conversationMode, expected) => {
+    const policy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
+      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: "/workspace",
+        ...(conversationMode === undefined ? {} : { conversationMode }),
+      }),
+    );
+    assert.equal(policy.conversationMode, expected);
+  });
+
+  it("keys live-query reuse on conversation mode", () => {
+    const forMode = (conversationMode?: boolean) =>
+      ClaudeAdapterV2.claudeEffectiveQueryPolicyKey(
+        ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
+          ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            cwd: "/workspace",
+            ...(conversationMode === undefined ? {} : { conversationMode }),
+          }),
+        ),
+        {},
+      );
+    assert.notEqual(forMode(true), forMode(undefined));
+    assert.equal(forMode(false), forMode(undefined));
+  });
+
+  it.each([undefined, false])(
+    "omits the conversation instructions for work mode %s",
+    (conversationMode) => {
+      const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        nativeThreadId: "work-thread",
+        resume: false,
+        cwd: "/workspace",
+        ...(conversationMode === undefined ? {} : { conversationMode }),
+      });
+      const append =
+        typeof options.systemPrompt === "object" && "append" in options.systemPrompt
+          ? String(options.systemPrompt.append ?? "")
+          : "";
+      assert.notInclude(append, "<conversation_mode>");
+    },
+  );
+
+  it("appends conversation instructions and drops the terminal routing for chat mode", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "chat-thread",
+      resume: false,
+      cwd: "/workspace",
+      conversationMode: true,
+      disallowedTools: [...ClaudeAdapterV2.CLAUDE_CONVERSATION_DISALLOWED_TOOLS],
+    });
+    const append =
+      typeof options.systemPrompt === "object" && "append" in options.systemPrompt
+        ? String(options.systemPrompt.append ?? "")
+        : "";
+    assert.include(append, "<conversation_mode>");
+    assert.include(append, "Start Work");
+    assert.notInclude(append, "terminal_run");
+  });
 });
 
 describe("ClaudeAdapterV2 MCP query overrides", () => {
@@ -305,6 +375,39 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     assert.deepEqual(overrides.allowedTools, [
       ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
     ]);
+  });
+
+  it("adds the handoff draft and memory reads to conversation-mode tools", () => {
+    const threadId = ThreadId.make("thread-claude-mcp-conversation");
+    const mcpSession = mcpSessionFor(threadId);
+    const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
+      mcpSession,
+      readOnlySandbox: true,
+      conversationMode: true,
+    });
+
+    assert.deepEqual(overrides.allowedTools, [
+      ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+      "mcp__cogenly__work_propose_handoff",
+      "mcp__cogenly__memory_read",
+      "mcp__cogenly__fact_search",
+    ]);
+    assert.isFalse(overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD));
+    for (const mutating of [
+      "mcp__cogenly__terminal_run",
+      "mcp__cogenly__terminal_write",
+      "mcp__cogenly__work_start",
+      "mcp__cogenly__t3_thread_launch",
+      "mcp__cogenly__t3_worktree_handoff",
+    ]) {
+      assert.isFalse(overrides.allowedTools?.includes(mutating), mutating);
+    }
+  });
+
+  it("disallows file writes and the shell for conversation turns", () => {
+    for (const tool of ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"]) {
+      assert.include(ClaudeAdapterV2.CLAUDE_CONVERSATION_DISALLOWED_TOOLS, tool);
+    }
   });
 
   it("keys live-query reuse on the MCP-derived pre-approvals", () => {
