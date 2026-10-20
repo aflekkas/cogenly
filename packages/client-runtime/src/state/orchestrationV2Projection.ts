@@ -329,5 +329,19 @@ export function applyOrchestrationV2ProjectionEvent(
     case "context-transfer.created":
     case "context-transfer.updated":
       return { ...base, contextTransfers: upsertEntity(base.contextTransfers, event.payload) };
+    case "visual-state.updated": {
+      const known = base.visualStates.findIndex(
+        (candidate) => candidate.renderId === event.payload.renderId,
+      );
+      return {
+        ...base,
+        visualStates:
+          known === -1
+            ? [...base.visualStates, event.payload]
+            : base.visualStates.map((candidate, index) =>
+                index === known ? event.payload : candidate,
+              ),
+      };
+    }
   }
 }

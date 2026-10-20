@@ -101,6 +101,7 @@ const emptyProjection = {
   checkpoints: [],
   contextHandoffs: [],
   contextTransfers: [],
+  visualStates: [],
   visibleTurnItems: [],
   updatedAt: now,
 } as OrchestrationV2ThreadProjection;

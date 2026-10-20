@@ -125,6 +125,30 @@ describe("command permissions", () => {
     ),
   );
 
+  it.effect("guards visual state reads with the destination read grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const permission = createCommandPermissions(runtime, WS_METHODS.visualStateGet);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(permission.permissionAtom(env))).toBe(false);
+        expect((yield* permission.authorize(registry, env).pipe(Effect.flip)).requiredScope).toBe(
+          AuthOrchestrationReadScope,
+        );
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthOrchestrationReadScope],
+            permissions: [AuthOrchestrationReadScope],
+          }),
+        );
+        expect(registry.get(permission.permissionAtom(env))).toBe(true);
+        yield* permission.authorize(registry, env);
+      }),
+    ),
+  );
+
   it.effect("guards search with the destination read grant without requiring operate access", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -198,6 +222,8 @@ describe("command permissions", () => {
     WS_METHODS.agentsMarkRead,
     WS_METHODS.agentsMemoryWrite,
     WS_METHODS.agentsMemoryForget,
+    WS_METHODS.visualStateSet,
+    WS_METHODS.visualStateSubmit,
   ])("requires the destination operate grant for %s", (method) =>
     Effect.scoped(
       Effect.gen(function* () {

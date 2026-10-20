@@ -472,9 +472,132 @@ export function htmlRenderShortcutsMessage(
   return { jsonrpc: "2.0", method: SHORTCUTS_METHOD, params: { shortcuts, blocked } } as const;
 }
 
-/** The empty result a client sends back for a render's request. */
-export function htmlRenderResult(id: string | number) {
-  return { jsonrpc: "2.0", id, result: {} } as const;
+/** The result a client sends back for a render's request. */
+export function htmlRenderResult(id: string | number, result: unknown = {}) {
+  return { jsonrpc: "2.0", id, result } as const;
+}
+
+/** A render's request the client could not satisfy. `reason` names the failure for the page. */
+export function htmlRenderVisualError(
+  id: string | number,
+  reason: "version_conflict" | "locked" | "too_large" | "unavailable",
+  message: string,
+  data?: Record<string, unknown>,
+) {
+  return {
+    jsonrpc: "2.0",
+    id,
+    error: { code: -32000, message, data: { reason, ...data } },
+  } as const;
+}
+
+// The bridge between an interactive render and its client. A page never
+// learns its render id: the client pairs each request with the frame that
+// sent it (`event.source`), so params carry no ids. Requests are JSON-RPC
+// with an id; the host answers with a result or a `htmlRenderVisualError`.
+// State changes reach every viewer of the thread through the thread
+// projection; the host also pushes them into each mounted frame.
+const VISUAL_STATE_GET_METHOD = "t3/visual-state.get";
+const VISUAL_STATE_SET_METHOD = "t3/visual-state.set";
+const VISUAL_SUBMIT_METHOD = "t3/visual.submit";
+const VISUAL_STATE_CHANGED_METHOD = "t3/visual-state.changed";
+
+/** What `window.cogenly.state.get()` resolves with, and what changed pushes carry. */
+export interface HtmlRenderVisualSnapshot {
+  /** The page's document, or null before the first set. */
+  readonly state: unknown;
+  /** Starts at 0; a set must pass the version it read. */
+  readonly version: number;
+  /** A locked visual rejects further sets and submits. */
+  readonly locked: boolean;
+}
+
+function readVisualRequest(
+  data: unknown,
+  method: string,
+): { readonly id: string | number; readonly params: Record<string, unknown> } | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const { jsonrpc, id, method: actual, params } = data as Record<string, unknown>;
+  if (jsonrpc !== "2.0" || actual !== method) return undefined;
+  if (typeof id !== "string" && typeof id !== "number") return undefined;
+  if (typeof params !== "object" || params === null) return undefined;
+  return { id, params: params as Record<string, unknown> };
+}
+
+/** A framed render's `t3/visual-state.get` request. */
+export function readHtmlRenderVisualStateGet(data: unknown) {
+  const request = readVisualRequest(data, VISUAL_STATE_GET_METHOD);
+  return request === undefined ? undefined : { id: request.id };
+}
+
+/** A framed render's `t3/visual-state.set` request, if its version is a number. */
+export function readHtmlRenderVisualStateSet(
+  data: unknown,
+):
+  | { readonly id: string | number; readonly state: unknown; readonly expectedVersion: number }
+  | undefined {
+  const request = readVisualRequest(data, VISUAL_STATE_SET_METHOD);
+  if (request === undefined || typeof request.params["expectedVersion"] !== "number") {
+    return undefined;
+  }
+  return {
+    id: request.id,
+    state: request.params["state"],
+    expectedVersion: Math.max(0, Math.floor(request.params["expectedVersion"])),
+  };
+}
+
+/** A framed render's `t3/visual.submit` request. */
+export function readHtmlRenderVisualSubmit(
+  data: unknown,
+): { readonly id: string | number; readonly payload: unknown; readonly lock: boolean } | undefined {
+  const request = readVisualRequest(data, VISUAL_SUBMIT_METHOD);
+  if (request === undefined) return undefined;
+  return {
+    id: request.id,
+    payload: request.params["payload"],
+    lock: request.params["lock"] === true,
+  };
+}
+
+/**
+ * The user-turn text a visual submit lands as. The bracketed first line is
+ * the timeline's chip marker; clients render a message that opens with it
+ * compactly instead of showing the JSON wall. The agent parses the fence.
+ */
+export function formatVisualSubmitMessage(title: string, payloadJson: string): string {
+  const label =
+    title.trim() === ""
+      ? "Visual"
+      : `Visual "${title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH)}"`;
+  return `[${label} submitted]\n\`\`\`json\n${payloadJson}\n\`\`\``;
+}
+
+/** UTF-8 bytes of a JSON value's encoding, or null when it cannot be encoded. */
+export function visualStateJsonBytes(value: unknown): number | null {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value) ?? "null").length;
+  } catch {
+    return null;
+  }
+}
+
+/** A visual submit payload as indented JSON, or null when it cannot be encoded. */
+export function visualPayloadJson(payload: unknown): string | null {
+  try {
+    return JSON.stringify(payload, null, 2) ?? "null";
+  } catch {
+    return null;
+  }
+}
+
+/** The `t3/visual-state.changed` notification a client posts into a mounted render. */
+export function htmlRenderVisualStateChangedMessage(snapshot: HtmlRenderVisualSnapshot) {
+  return {
+    jsonrpc: "2.0",
+    method: VISUAL_STATE_CHANGED_METHOD,
+    params: { state: snapshot.state ?? null, version: snapshot.version, locked: snapshot.locked },
+  } as const;
 }
 
 const THEME_FRAGMENT_KEY = "t3-theme";
@@ -527,6 +650,23 @@ function rootRule(theme: HtmlRenderTheme): string {
 // match as resolveEventKeys reads them, so the client accepts what it claims.
 const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("t3-theme"),n=0;if(!s)return;var b=${JSON.stringify(BASE_CSS)};function a(t){if(!t||typeof t!=="object"||!t.variables||typeof t.variables!=="object")return;var c=":root{color-scheme:"+(t.appearance==="light"?"light":"dark")+";";for(var k in t.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.variables[k]).replace(/[;{}<>]/g,"")+";";}s.textContent=c+"}"+b;}try{var m=/[#&]${THEME_FRAGMENT_KEY}=([^&]*)/.exec(location.hash);if(m){a(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,"",location.pathname+location.search);}}catch(e){}window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(d&&d.jsonrpc==="2.0"&&d.method===${JSON.stringify(HOST_CONTEXT_CHANGED_METHOD)}&&p&&p.styles)a({appearance:p.theme,variables:p.styles.variables});});document.addEventListener("click",function(e){var l=e.isTrusted?e.composedPath().find(function(t){return t&&t.matches&&t.matches("a[href]");}):null,u;if(!l)return;try{u=new URL(l.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol)||u.href.split("#")[0]===location.href.split("#")[0])return;if(window.parent!==window){e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",id:"t3-link-"+(++n),method:${JSON.stringify(OPEN_LINK_METHOD)},params:{url:u.href,metaKey:e.metaKey,ctrlKey:e.ctrlKey}},"*");}else{l.setAttribute("target","_blank");l.setAttribute("rel","noopener");}},true);if(window.parent!==window){var h,o,z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h)return;h=v;window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(SIZE_CHANGED_METHOD)},params:{height:v}},"*");};if(window.ResizeObserver){o=new ResizeObserver(z);o.observe(document.documentElement);}document.addEventListener("DOMContentLoaded",function(){if(o&&document.body)o.observe(document.body);z();});window.addEventListener("load",z);window.addEventListener("click",function(e){var t=e.composedPath()[0],u;if(!e.isTrusted||e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||!t||t.tagName!=="IMG"||t.closest("a[href],button"))return;u=t.currentSrc||t.src;if(u)setTimeout(function(){if(!e.defaultPrevented)window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(OPEN_IMAGE_METHOD)},params:{src:u,name:t.alt||t.title||""}},"*");});});var K=[],B=[],C=${JSON.stringify(EVENT_CODE_SHORTCUT_KEYS)};window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(e.source===window.parent&&d&&d.jsonrpc==="2.0"&&d.method===${JSON.stringify(SHORTCUTS_METHOD)}&&p&&Array.isArray(p.shortcuts)&&Array.isArray(p.blocked)){K=p.shortcuts;B=p.blocked;}});window.addEventListener("keydown",function(e){var t=e.composedPath()[0],c=e.code||"",l=e.key.toLowerCase(),x=/^[a-z]$/.test(l)?[l]:[l,/^Key[A-Z]$/.test(c)?c.slice(3).toLowerCase():"",C.hasOwnProperty(c)?C[c]:""],f,m=function(s){return s&&s.metaKey===e.metaKey&&s.ctrlKey===e.ctrlKey&&s.shiftKey===e.shiftKey&&s.altKey===e.altKey&&x.indexOf(s.key)>-1;};if(!e.isTrusted||e.isComposing||e.getModifierState("AltGraph")&&!/^[a-z0-9]$/i.test(e.key)||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName))||!K.some(m)||B.some(m))return;f=function(v){window.removeEventListener("keydown",f);if(v!==e||e.defaultPrevented)return;e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(KEY_DOWN_METHOD)},params:{key:e.key,code:e.code,metaKey:e.metaKey,ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,repeat:e.repeat}},"*");};window.addEventListener("keydown",f);setTimeout(function(){window.removeEventListener("keydown",f);});},true);}})();`;
 
+// The page side of the interactive bridge. It exposes `window.cogenly` with
+// the state document the thread stores for this render: `state.get()` reads
+// it, `state.set(json)` writes it with the version the page last saw (pass an
+// explicit version after merging a conflict), `state.subscribe(cb)` hears
+// every change, and `submit(payload, { lock })` delivers a result to the
+// agent as a new user turn. Requests that no client answers (an old app
+// showing the page) reject after ten seconds rather than hanging.
+const VISUAL_BRIDGE_SCRIPT = `(function(){if(window.cogenly&&window.cogenly.state)return;var n=0,p={},subs=[],latest={state:null,version:0,locked:false};function call(m,params){return new Promise(function(ok,no){if(window.parent===window){no(new Error("Interactive visuals need the Cogenly client."));return;}var id="cogenly-"+(++n);var t=setTimeout(function(){if(!p[id])return;delete p[id];no(new Error("The Cogenly client did not answer "+m+"; update the app to use interactive visuals."));},10000);p[id]={ok:ok,no:no,t:t};window.parent.postMessage({jsonrpc:"2.0",id:id,method:m,params:params},"*");});}window.addEventListener("message",function(e){if(e.source!==window.parent)return;var d=e.data;if(!d||d.jsonrpc!=="2.0")return;if(d.id!==undefined&&p[d.id]){var q=p[d.id];delete p[d.id];clearTimeout(q.t);if(d.error)q.no(new Error((d.error&&d.error.message)||"The visual request failed."));else q.ok(d.result||{});return;}if(d.method===${JSON.stringify(VISUAL_STATE_CHANGED_METHOD)}&&d.params){var s={state:d.params.state===undefined?null:d.params.state,version:d.params.version|0,locked:d.params.locked===true};latest=s;subs.slice().forEach(function(cb){try{cb(s);}catch(x){}});}});window.cogenly={state:{get:function(){return call(${JSON.stringify(VISUAL_STATE_GET_METHOD)},{ }).then(function(r){var s={state:r.state===undefined?null:r.state,version:r.version|0,locked:r.locked===true};latest=s;return s;});},set:function(state,expectedVersion){var v=expectedVersion===undefined?latest.version:expectedVersion;return call(${JSON.stringify(VISUAL_STATE_SET_METHOD)},{state:state,expectedVersion:v}).then(function(r){var s={state:state,version:r.version===undefined?v+1:r.version,locked:latest.locked};latest=s;return s.version;});},subscribe:function(cb){subs.push(cb);return function(){var i=subs.indexOf(cb);if(i>-1)subs.splice(i,1);};}},submit:function(payload,options){return call(${JSON.stringify(VISUAL_SUBMIT_METHOD)},{payload:payload,lock:!!(options&&options.lock)}).then(function(){return undefined;});}};})();`;
+
+/** Agent-facing reference for building an interactive page against `window.cogenly`. */
+export const HTML_RENDER_STATE_GUIDE = [
+  "An interactive page keeps a small JSON document (at most 64KB) with the thread, readable when the page re-mounts and synced to every client. The page never learns its render id: `window.cogenly` pairs each call with its frame, and the server pairs the frame with the render.",
+  "`await window.cogenly.state.get()` returns `{ state, version, locked }`. `await window.cogenly.state.set(json)` writes the document with the version the page last saw and resolves with the new version; a write that lost a race rejects, so read again, merge, and retry. `window.cogenly.state.subscribe(cb)` hears every change and returns an unsubscribe function.",
+  "`await window.cogenly.submit(payload, { lock: true })` delivers a result to the agent as a new user turn in the same thread, even while a turn is running (it queues behind it). Pass `lock: true` for a quiz that cannot be taken twice; further writes and submits then fail.",
+  'Quiz example: `const { state } = await window.cogenly.state.get();` render from `state`; on each answer `await window.cogenly.state.set({ answers })`; on Finish `await window.cogenly.submit({ kind: "quiz-result", score, answers }, { lock: true })` and show a submitted note.',
+].join(" ");
+
 function bootstrapMarkup(markup: string): string {
   const dark = htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark");
   const light = htmlRenderTheme(T3_CODE_LIGHT_THEME_COLORS, "light");
@@ -540,6 +680,7 @@ function bootstrapMarkup(markup: string): string {
       : '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<style id="t3-theme">${defaultCss}</style>`,
     `<script>${BOOTSTRAP_SCRIPT}</script>`,
+    `<script>${VISUAL_BRIDGE_SCRIPT}</script>`,
   ].join("");
 }
 
