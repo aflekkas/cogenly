@@ -38,7 +38,12 @@ export function PreviewEmptyState({
 
   if (servers.length === 0 && recents.length === 0) {
     return (
-      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-1.5 px-6 pb-(--workspace-topbar-height) text-center">
+      <div
+        // Fills the surface body outright: it sits beside an absolutely placed
+        // page surface, so it takes the same box rather than a percentage height.
+        className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 pb-(--workspace-topbar-height) text-center"
+        data-preview-empty-state
+      >
         <Globe className="mb-1 size-4 text-muted-foreground" />
         <p className="text-sm font-medium text-foreground">No preview yet</p>
         <p className="text-xs text-muted-foreground">
@@ -49,7 +54,10 @@ export function PreviewEmptyState({
   }
 
   return (
-    <div className="scroll-fade-y scrollbar-gutter-both flex h-full min-h-0 overflow-y-auto px-4 py-5">
+    <div
+      className="scroll-fade-y scrollbar-gutter-both absolute inset-0 flex overflow-y-auto px-4 py-5"
+      data-preview-empty-state
+    >
       <div className="mx-auto flex w-full max-w-md flex-col gap-5">
         {servers.length > 0 ? (
           <section className="flex flex-col gap-2">

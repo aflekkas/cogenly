@@ -198,7 +198,6 @@ export function ChatCanvas({
         {...props}
         ref={elementRef}
         data-chat-canvas
-        data-preview-overlaps-chat={layout.overlapsChat || undefined}
         className="relative flex min-h-0 min-w-0 flex-1 flex-col"
         style={
           {

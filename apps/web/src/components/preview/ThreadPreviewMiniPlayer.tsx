@@ -130,12 +130,40 @@ function layoutOrigin(element: HTMLElement): { x: number; y: number } {
 const sameBounds = (a: PreviewMiniPlayerBounds | null, b: PreviewMiniPlayerBounds) =>
   a?.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;
 
-/** Covers a frame that has nothing to show yet, in the panel's own colors. */
-function MiniPlayerPlaceholder({ label }: { readonly label: string }) {
+// The placeholder's fade, --motion-duration-base; it unmounts once that has run.
+const PLACEHOLDER_FADE_MS = 220;
+
+/**
+ * Covers a frame that has nothing to show yet, in the panel's own colors.
+ * Once the page is there it fades out over it (a crossfade) and only then
+ * leaves, so its spinner never runs under a page.
+ */
+function MiniPlayerPlaceholder({
+  label,
+  visible,
+}: {
+  readonly label: string;
+  readonly visible: boolean;
+}) {
+  const [mounted, setMounted] = useState(visible);
+  const [seenVisible, setSeenVisible] = useState(visible);
+  if (visible !== seenVisible) {
+    setSeenVisible(visible);
+    if (visible) setMounted(true);
+  }
+  useEffect(() => {
+    if (visible) return;
+    const timer = window.setTimeout(() => setMounted(false), PLACEHOLDER_FADE_MS);
+    return () => window.clearTimeout(timer);
+  }, [visible]);
+  if (!mounted) return null;
   return (
     // The webview's band: over the shell's backdrop, under its pill and handles.
     <div
-      className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 rounded-[inherit] bg-background text-xs text-muted-foreground"
+      className={cn(
+        "pointer-events-none absolute inset-0 flex items-center justify-center gap-2 rounded-[inherit] bg-background text-xs text-muted-foreground transition-opacity duration-(--motion-duration-base) ease-out",
+        !visible && "opacity-0",
+      )}
       style={{ zIndex: PREVIEW_MINI_PLAYER_WEBVIEW_Z_INDEX }}
     >
       <Spinner size="sm" tone="muted" />
@@ -287,9 +315,7 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
               onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId, "floating")}
               className="size-full"
             />
-            {!streamPainted || pageBlank ? (
-              <MiniPlayerPlaceholder label="Loading preview…" />
-            ) : null}
+            <MiniPlayerPlaceholder label="Loading preview…" visible={!streamPainted || pageBlank} />
           </div>
         ) : (
           <>
@@ -303,11 +329,10 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
               layoutVersion={`${frame.x}:${frame.y}`}
               className="absolute inset-0"
             />
-            {!desktopOverlay?.hasWebContents ? (
-              <MiniPlayerPlaceholder label="Reconnecting preview…" />
-            ) : pageBlank ? (
-              <MiniPlayerPlaceholder label="Loading preview…" />
-            ) : null}
+            <MiniPlayerPlaceholder
+              label={desktopOverlay?.hasWebContents ? "Loading preview…" : "Reconnecting preview…"}
+              visible={!desktopOverlay?.hasWebContents || pageBlank}
+            />
           </>
         )
       }
@@ -585,7 +610,7 @@ function MiniPlayerShell({
               role={recording ? "status" : undefined}
               aria-label={recording ? "Recording preview" : undefined}
               aria-hidden={!recording}
-              className="absolute right-0 top-0 size-2 transition-opacity motion-reduce:transition-none group-hover:opacity-0 group-focus-within:opacity-0 group-data-pill-open:opacity-0 pointer-coarse:right-2.5 pointer-coarse:top-2.5"
+              className="absolute right-0 top-0 size-2 transition-opacity duration-(--motion-duration-fast) ease-out group-hover:opacity-0 group-focus-within:opacity-0 group-data-pill-open:opacity-0 pointer-coarse:right-2.5 pointer-coarse:top-2.5"
             >
               <span
                 className={cn(
@@ -596,7 +621,9 @@ function MiniPlayerShell({
                 )}
               />
             </div>
-            <div className="pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover p-0.5 opacity-0 shadow-lg/20 transition-opacity motion-reduce:transition-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-data-pill-open:pointer-events-auto group-data-pill-open:opacity-100 active:cursor-grabbing pointer-coarse:right-2.5 pointer-coarse:top-2.5">
+            {/* Fades and slides in a touch on the fast token as the pointer arrives;
+                reduced motion keeps the fade alone. */}
+            <div className="pointer-events-none absolute right-0 top-0 flex h-8 -translate-y-1 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover p-0.5 opacity-0 shadow-lg/20 transition-[opacity,translate] duration-(--motion-duration-fast) ease-out motion-reduce:translate-y-0 motion-reduce:transition-opacity group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100 group-data-pill-open:pointer-events-auto group-data-pill-open:translate-y-0 group-data-pill-open:opacity-100 active:cursor-grabbing pointer-coarse:right-2.5 pointer-coarse:top-2.5">
               {recording ? (
                 <span aria-hidden className="flex size-6 shrink-0 items-center justify-center">
                   <span className="size-2 rounded-full bg-destructive motion-safe:animate-status-pulse" />

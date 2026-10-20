@@ -2,10 +2,11 @@ import { RefreshIcon } from "~/components/ui/refresh-icon";
 import {
   ArrowLeft,
   ArrowRight,
-  Bot,
   Camera,
   ExternalLink,
   Eye,
+  Globe,
+  Lock,
   MousePointer2,
   MousePointerClick,
   PictureInPicture2,
@@ -25,7 +26,7 @@ import { Toggle } from "~/components/ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
 
-/** Who drives a streamed (server) tab; the chrome shows it as one compact toggle. */
+/** Who drives a streamed (server) tab; the chrome shows it as one quiet toggle. */
 export interface PreviewControlState {
   readonly controller: "agent" | "you" | "another-viewer" | "unclaimed";
   readonly canOperate: boolean;
@@ -33,18 +34,19 @@ export interface PreviewControlState {
 }
 
 const CONTROL_PRESENTATION = {
-  you: { label: "You", Icon: MousePointer2, hint: "You have control · click to hand it back" },
-  agent: { label: "Agent", Icon: Bot, hint: "The agent has control · click to take over" },
-  "another-viewer": { label: "Viewer", Icon: Eye, hint: "Another viewer has control" },
-  unclaimed: { label: "Watching", Icon: Eye, hint: "Nobody has control · click to take it" },
+  you: { Icon: MousePointer2, hint: "You have control · click to hand it back" },
+  agent: { Icon: MousePointer2, hint: "Agent has control · click to take over" },
+  "another-viewer": { Icon: Eye, hint: "Another viewer has control" },
+  unclaimed: { Icon: Eye, hint: "Nobody has control · click to take it" },
 } as const;
 
 /**
- * The control toggle sits in the chrome row next to the actions, so the row
- * stays one line: pressed means this viewer drives the page.
+ * The cursor alone says who drives the page: pressed while this viewer does,
+ * with a small accent dot while the agent does. The words live in the tooltip
+ * and the accessible name.
  */
 function PreviewControlToggle({ control }: { control: PreviewControlState }) {
-  const { label, Icon, hint } = CONTROL_PRESENTATION[control.controller];
+  const { Icon, hint } = CONTROL_PRESENTATION[control.controller];
   if (!control.canOperate) {
     return (
       <span role="status" className="shrink-0 px-1 text-xs text-muted-foreground">
@@ -56,7 +58,7 @@ function PreviewControlToggle({ control }: { control: PreviewControlState }) {
     <Tooltip>
       <TooltipTrigger render={<span className="flex shrink-0" />}>
         <Toggle
-          size="xs"
+          size="sm"
           variant="ghost"
           pressed={control.controller === "you"}
           onPressedChange={control.onToggle}
@@ -65,12 +67,26 @@ function PreviewControlToggle({ control }: { control: PreviewControlState }) {
           data-preview-control={control.controller}
         >
           <Icon />
-          <span className="text-xs">{label}</span>
+          {control.controller === "agent" ? (
+            <span
+              aria-hidden
+              className="absolute top-1 right-1 size-1.5 rounded-full bg-primary ring-2 ring-background"
+            />
+          ) : null}
         </Toggle>
       </TooltipTrigger>
       <TooltipPopup>{hint}</TooltipPopup>
     </Tooltip>
   );
+}
+
+/** The resting address: a lock or globe, the host bright, the rest of the URL muted. */
+function parseAddress(url: string): { secure: boolean; host: string; rest: string } | null {
+  if (!URL.canParse(url)) return null;
+  const parsed = new URL(url);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  const rest = `${parsed.pathname === "/" ? "" : parsed.pathname}${parsed.search}${parsed.hash}`;
+  return { secure: parsed.protocol === "https:", host: parsed.host, rest };
 }
 
 interface Props {
@@ -120,6 +136,46 @@ interface Props {
 
 const NOOP = () => {};
 
+/** One ghost icon button of the toolbar's size, with its tooltip. */
+function ToolbarButton(props: {
+  label: string;
+  tooltip?: ReactNode;
+  onClick: () => void;
+  disabled?: boolean | undefined;
+  pressed?: boolean | undefined;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant={props.pressed ? "secondary" : "ghost"}
+            size="icon-sm"
+            onClick={props.disabled ? NOOP : props.onClick}
+            disabled={props.disabled}
+            aria-label={props.label}
+            aria-pressed={
+              props.pressed === undefined ? undefined : props.pressed ? "true" : "false"
+            }
+            type="button"
+          />
+        }
+      >
+        {props.children}
+      </TooltipTrigger>
+      <TooltipPopup>{props.tooltip ?? props.label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/**
+ * The browser's toolbar under the tab strip: a tight nav group, the address,
+ * then the page actions, all 28px ghost controls with 8px between the groups.
+ * At rest the address reads as text (host bright, path muted); it becomes a
+ * field with the full URL on focus and shows its placeholder only on an
+ * empty tab.
+ */
 export function PreviewChromeRow({
   url,
   loading,
@@ -150,6 +206,10 @@ export function PreviewChromeRow({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState(url);
   const [inputFocused, setInputFocused] = useState(false);
+  const address = url.length > 0 ? parseAddress(url) : null;
+  // At rest the field holds nothing and the display beside it shows the URL;
+  // the input's own text appears when it is being edited.
+  const resting = !inputFocused && url.length > 0;
 
   useEffect(() => {
     if (focusUrlNonce == null) return;
@@ -168,106 +228,84 @@ export function PreviewChromeRow({
 
   return (
     <div className="relative">
-      {/* The browser's toolbar, directly under the tab strip: the same
-          bordered row every surface puts under the tabs (surface-subheader). */}
       <form
         onSubmit={submit}
-        className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2"
+        className="flex h-10 min-h-10 shrink-0 items-center gap-2 border-b border-border/60 bg-background px-2"
         data-surface-subheader
       >
-        <div className="flex items-center gap-0.5" role="group" aria-label="Navigation">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={canGoBack ? onBack : NOOP}
-                  disabled={!canGoBack}
-                  aria-label="Back"
-                  type="button"
-                />
-              }
-            >
-              <ArrowLeft />
-            </TooltipTrigger>
-            <TooltipPopup>Back</TooltipPopup>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={canGoForward ? onForward : NOOP}
-                  disabled={!canGoForward}
-                  aria-label="Forward"
-                  type="button"
-                />
-              }
-            >
-              <ArrowRight />
-            </TooltipTrigger>
-            <TooltipPopup>Forward</TooltipPopup>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={refreshDisabled ? NOOP : onRefresh}
-                  disabled={refreshDisabled}
-                  aria-label={loading ? "Stop" : "Refresh"}
-                  type="button"
-                />
-              }
-            >
-              <RefreshIcon refreshing={loading} />
-            </TooltipTrigger>
-            <TooltipPopup>{loading ? "Loading…" : "Refresh"}</TooltipPopup>
-          </Tooltip>
+        <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Navigation">
+          <ToolbarButton label="Back" onClick={onBack} disabled={!canGoBack}>
+            <ArrowLeft />
+          </ToolbarButton>
+          <ToolbarButton label="Forward" onClick={onForward} disabled={!canGoForward}>
+            <ArrowRight />
+          </ToolbarButton>
+          <ToolbarButton
+            label={loading ? "Stop" : "Refresh"}
+            tooltip={loading ? "Loading…" : "Refresh"}
+            onClick={onRefresh}
+            disabled={refreshDisabled}
+          >
+            <RefreshIcon refreshing={loading} />
+          </ToolbarButton>
         </div>
 
         {leadingActions}
 
-        <InputGroup variant="filled" className="group/address mx-1 h-7 flex-1">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <InputGroupInput
-                  ref={inputRef}
-                  value={inputFocused ? draft : url}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onFocus={() => {
-                    setDraft(url);
-                    setInputFocused(true);
-                    queueMicrotask(() => inputRef.current?.select());
-                  }}
-                  onBlur={() => {
-                    setInputFocused(false);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") submit(event);
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      setDraft(url);
-                      inputRef.current?.blur();
-                    }
-                  }}
-                  placeholder="Search or enter URL"
-                  spellCheck={false}
-                  disabled={inputDisabled}
-                  data-preview-url-input
-                  size="sm"
-                />
+        <InputGroup variant="ghost" className="group/address relative h-7 min-w-0 flex-1">
+          <InputGroupInput
+            ref={inputRef}
+            value={resting ? "" : inputFocused ? draft : url}
+            onChange={(event) => setDraft(event.target.value)}
+            onFocus={() => {
+              setDraft(url);
+              setInputFocused(true);
+              queueMicrotask(() => inputRef.current?.select());
+            }}
+            onBlur={() => {
+              setInputFocused(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") submit(event);
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setDraft(url);
+                inputRef.current?.blur();
               }
-            />
-          </Tooltip>
+            }}
+            placeholder={url.length > 0 ? "" : "Search or enter URL"}
+            aria-label={url.length > 0 ? `Address: ${url}` : "Address"}
+            spellCheck={false}
+            disabled={inputDisabled}
+            data-preview-url-input
+            size="sm"
+          />
+          {resting ? (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 left-0 right-0 flex items-center gap-1.5 px-2 text-sm"
+            >
+              {address ? (
+                <>
+                  {address.secure ? (
+                    <Lock className="size-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="min-w-0 truncate">
+                    <span className="text-foreground">{address.host}</span>
+                    <span className="text-muted-foreground">{address.rest}</span>
+                  </span>
+                </>
+              ) : (
+                <span className="min-w-0 truncate text-foreground">{url}</span>
+              )}
+            </div>
+          ) : null}
           {onOpenInBrowser && !inputFocused ? (
             <InputGroupAddon align="inline-end">
               {/* Revealed on hover so a resting address bar reads as plain text. */}
-              <span className="pointer-events-none flex opacity-0 transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/address:pointer-events-auto group-hover/address:opacity-100">
+              <span className="pointer-events-none flex opacity-0 transition-opacity duration-(--motion-duration-fast) ease-out focus-within:pointer-events-auto focus-within:opacity-100 group-hover/address:pointer-events-auto group-hover/address:opacity-100">
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -294,30 +332,21 @@ export function PreviewChromeRow({
         <div className="flex shrink-0 items-center gap-0.5">
           {control ? <PreviewControlToggle control={control} /> : null}
           {onPickElement ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant={pickActive ? "secondary" : "ghost"}
-                    size="icon-xs"
-                    onClick={onPickElement}
-                    disabled={pickDisabled}
-                    aria-label={pickActive ? "Cancel annotation" : "Annotate preview"}
-                    aria-pressed={pickActive ? "true" : "false"}
-                    type="button"
-                  />
-                }
-              >
-                <MousePointerClick className={cn(pickActive && "text-primary")} />
-              </TooltipTrigger>
-              <TooltipPopup>
-                {pickDisabled && pickDisabledReason
+            <ToolbarButton
+              label={pickActive ? "Cancel annotation" : "Annotate preview"}
+              tooltip={
+                pickDisabled && pickDisabledReason
                   ? pickDisabledReason
                   : pickActive
                     ? "Cancel annotation (Esc)"
-                    : "Annotate elements, regions, and drawings"}
-              </TooltipPopup>
-            </Tooltip>
+                    : "Annotate elements, regions, and drawings"
+              }
+              onClick={onPickElement}
+              disabled={pickDisabled}
+              pressed={pickActive ?? false}
+            >
+              <MousePointerClick className={cn(pickActive && "text-primary")} />
+            </ToolbarButton>
           ) : null}
           {onCapture ? (
             <Tooltip>
@@ -325,18 +354,17 @@ export function PreviewChromeRow({
                 render={
                   <Button
                     variant={recording ? "secondary" : "ghost"}
-                    size="icon-xs"
+                    size="icon-sm"
                     onClick={(event) => onCapture(event.shiftKey)}
                     aria-label={recording ? "Stop recording" : "Capture screenshot"}
                     type="button"
-                    className="relative"
                     disabled={captureDisabled}
                   />
                 }
               >
                 <Camera className={cn(recording && "text-destructive")} />
                 {recording ? (
-                  <span className="absolute right-0.5 top-0.5 size-1.5 animate-status-pulse rounded-full bg-destructive" />
+                  <span className="absolute top-1 right-1 size-1.5 animate-status-pulse rounded-full bg-destructive" />
                 ) : null}
               </TooltipTrigger>
               <TooltipPopup>
@@ -345,28 +373,14 @@ export function PreviewChromeRow({
             </Tooltip>
           ) : null}
           {onPictureInPicture ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant={pictureInPicture ? "secondary" : "ghost"}
-                    size="icon-xs"
-                    onClick={onPictureInPicture}
-                    aria-label={
-                      pictureInPicture ? "Close floating preview" : "Float preview over chat"
-                    }
-                    aria-pressed={pictureInPicture ? "true" : "false"}
-                    type="button"
-                    disabled={pictureInPictureDisabled}
-                  />
-                }
-              >
-                <PictureInPicture2 className={cn(pictureInPicture && "text-primary")} />
-              </TooltipTrigger>
-              <TooltipPopup>
-                {pictureInPicture ? "Close floating preview" : "Float preview over chat"}
-              </TooltipPopup>
-            </Tooltip>
+            <ToolbarButton
+              label={pictureInPicture ? "Close floating preview" : "Float preview over chat"}
+              onClick={onPictureInPicture}
+              disabled={pictureInPictureDisabled}
+              pressed={pictureInPicture ?? false}
+            >
+              <PictureInPicture2 className={cn(pictureInPicture && "text-primary")} />
+            </ToolbarButton>
           ) : null}
           {trailingActions}
         </div>
