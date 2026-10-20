@@ -157,7 +157,7 @@ function ChatRouteGlobalShortcuts() {
       }
 
       if (command === "preview.toggle") {
-        // A chat has no browser, so the chord keeps whatever else it means there.
+        // A thread without a browser keeps whatever else the chord means there.
         const kind = readRouteThreadKind();
         if (kind !== null && !threadCapabilities(kind).browser) return;
         event.preventDefault();

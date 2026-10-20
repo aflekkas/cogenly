@@ -74,9 +74,11 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     copyWorkspace: false,
     repositorySettings: false,
     git: false,
+    // A chat has no workspace of its own, so Terminal and Files stay Work-only.
+    // The browser needs none: the right panel opens on it for research and
+    // renders, with the same toggle and width as Work.
     terminal: false,
-    // Chats stay a plain conversation: no right panel surfaces at all.
-    browser: false,
+    browser: true,
     device: false,
     files: false,
     agentSettings: false,

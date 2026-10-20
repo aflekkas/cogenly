@@ -17,6 +17,7 @@ import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useOpenLink } from "~/browser/useOpenLink";
+import { timelineHeaderInset } from "~/workspaceTitlebar";
 import {
   getQuestionAnswerPreview,
   getQuestionAnswerText,
@@ -1581,6 +1582,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       );
     return (
       <>
+        {/* Room for the chat header, which floats over the scroller's top. */}
+        <div aria-hidden className="h-(--chat-header-overlap)" />
         {parentThreadLink === null ? leadingContent : null}
         {historyControls ? <TimelineHistoryControl {...historyControls} /> : null}
         {parentThreadLink !== null ? leadingContent : null}
@@ -1780,7 +1783,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               onScroll={handleScroll}
               onItemSizeChanged={handleItemSizeChanged}
               className={cn(
-                "messages-timeline-scroll scroll-fade-y scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+                "messages-timeline-scroll scroll-fade-y scrollbar-gutter-both min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
               )}
               ListHeaderComponent={listHeader}
               ListFooterComponent={timelineListFooter}
@@ -1797,7 +1800,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 void listRef.current?.scrollToIndex({
                   index: item.rowIndex,
                   animated: true,
-                  viewOffset: 24,
+                  viewOffset: 24 + timelineHeaderInset(listRef.current?.getScrollableNode()),
                 });
               }}
             />

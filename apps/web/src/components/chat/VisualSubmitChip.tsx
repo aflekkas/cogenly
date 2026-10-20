@@ -8,6 +8,7 @@ import { useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { environmentThreadDetails } from "~/state/threads";
+import { timelineHeaderInset } from "~/workspaceTitlebar";
 
 import ChatMarkdown from "../ChatMarkdown";
 import { findVisualRowIndex, submittedVisualRenderId } from "./visualSubmitChip.logic";
@@ -43,7 +44,11 @@ export function VisualSubmitChip(props: {
     const renderId = submittedVisualRenderId(visualStates, title, props.createdAt);
     const index = findVisualRowIndex(list?.getState().data ?? [], renderId, title);
     if (list === null || index === -1) return false;
-    void list.scrollToIndex({ index, animated: true, viewOffset: 24 });
+    void list.scrollToIndex({
+      index,
+      animated: true,
+      viewOffset: 24 + timelineHeaderInset(list.getScrollableNode()),
+    });
     return true;
   };
 

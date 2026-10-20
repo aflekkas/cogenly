@@ -81,3 +81,15 @@ export function resolveWorkspaceTitlebarLayout(input: {
     windowControlsStyle,
   };
 }
+
+/**
+ * How far the chat header floats over the top of a timeline scroller: the
+ * scroller's scroll-padding-top (index.css, .messages-timeline-scroll). Code
+ * that scrolls a row to the top of the viewport adds it so the row lands
+ * below the header instead of under its fade.
+ */
+export function timelineHeaderInset(scroller: Element | null | undefined): number {
+  if (!scroller) return 0;
+  const inset = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop);
+  return Number.isFinite(inset) ? inset : 0;
+}

@@ -25,7 +25,7 @@ describe("threadCapabilities", () => {
       repositorySettings: false,
       git: false,
       terminal: false,
-      browser: false,
+      browser: true,
       device: false,
       files: false,
       agentSettings: false,
@@ -113,8 +113,8 @@ describe("classifyThreadKind", () => {
 });
 
 describe("hasRightPanel", () => {
-  it("leaves a chat without a right panel and keeps it for Work and agents", () => {
-    expect(hasRightPanel(threadCapabilities("chat"))).toBe(false);
+  it("gives every kind of thread a right panel", () => {
+    expect(hasRightPanel(threadCapabilities("chat"))).toBe(true);
     expect(hasRightPanel(threadCapabilities("work"))).toBe(true);
     expect(hasRightPanel(threadCapabilities("agentConversation"))).toBe(true);
   });

@@ -2,6 +2,7 @@ import type { LegendListRef } from "@legendapp/list/react";
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import type { ThreadFindMatch } from "./threadFind";
 import { useThreadFindHighlights } from "./threadFindHighlights";
+import { timelineHeaderInset } from "~/workspaceTitlebar";
 
 const FIND_MATCH_VIEW_MARGIN = 96;
 
@@ -167,7 +168,7 @@ export function useThreadFindNavigation({
           .scrollToIndex({
             index: rowIndex,
             animated: false,
-            viewOffset: FIND_MATCH_VIEW_MARGIN,
+            viewOffset: FIND_MATCH_VIEW_MARGIN + timelineHeaderInset(container),
           })
           .then(() => {
             if (positioningRef.current !== request || currentMatchKeyRef.current !== matchKey)
@@ -194,12 +195,14 @@ export function useThreadFindNavigation({
       const rect = range.getBoundingClientRect();
       const viewport = container?.getBoundingClientRect();
       if (!viewport || rect.height === 0) return;
+      // The chat header floats over the scroller's top; matches land below it.
+      const headerInset = timelineHeaderInset(container);
       // Shrink the margin when the band above the composer is short, so the match stays inside it.
       const margin = Math.min(
         FIND_MATCH_VIEW_MARGIN,
-        Math.max(0, (viewport.height - contentInsetEndAdjustment - rect.height) / 2),
+        Math.max(0, (viewport.height - headerInset - contentInsetEndAdjustment - rect.height) / 2),
       );
-      const top = viewport.top + margin;
+      const top = viewport.top + headerInset + margin;
       const bottom = viewport.bottom - margin - contentInsetEndAdjustment;
       const delta =
         rect.top < top ? rect.top - top : rect.bottom > bottom ? rect.bottom - bottom : 0;
