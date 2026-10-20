@@ -29,7 +29,6 @@ type RetrieveInput = {
   readonly budgetChars: number;
 };
 const decodeCommitment = Schema.decodeUnknownEffect(Schema.fromJsonString(Commitment));
-const decodeItem = Schema.decodeUnknownEffect(ContextItem);
 const decodeRefs = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
     Schema.Array(Schema.Struct({ kind: Schema.Literal("pr"), id: Schema.String })),
@@ -49,6 +48,16 @@ const renderItem = (item: ContextItem) =>
 // source, short enough to keep stored run payloads small.
 const SNIPPET_CHARS = 280;
 const snippetOf = (text: string) => text.trim().slice(0, SNIPPET_CHARS);
+const normalizeItemText = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
+// Near-identical evidence from different threads reads as a duplicate in
+// "Context used" while adding nothing. Keep the higher-ranked copy; short
+// generic labels are left alone so distinct one-liners survive.
+const isNearDuplicate = (kept: string, candidate: string) => {
+  if (kept.length === 0 || candidate.length === 0) return false;
+  if (kept === candidate) return true;
+  const [shorter, longer] = kept.length <= candidate.length ? [kept, candidate] : [candidate, kept];
+  return shorter.length >= 64 && longer.includes(shorter);
+};
 
 export class ContextRetrievalService extends Context.Service<
   ContextRetrievalService,
@@ -223,46 +232,10 @@ const make = Effect.gen(function* () {
             });
           }
       }
-      if (input.threadId !== undefined) {
-        const owned =
-          agentId === undefined
-            ? true
-            : (yield* sql`SELECT 1 FROM agents a WHERE a.agent_id=${agentId} AND json_extract(a.payload_json,'$.permissions.read')=1 AND (a.conversation_thread_id=${input.threadId} OR EXISTS(SELECT 1 FROM agent_work_runs r WHERE r.agent_id=a.agent_id AND r.work_thread_id=${input.threadId}) OR EXISTS(SELECT 1 FROM agent_run_threads r WHERE r.agent_id=a.agent_id AND r.thread_id=${input.threadId}))`)
-                .length > 0;
-        if (owned) {
-          const threads = yield* sql<{
-            title: string;
-          }>`SELECT title FROM orchestration_v2_projection_threads WHERE thread_id=${input.threadId}`;
-          const sourceThreadTitle = threads[0]?.title;
-          const messages = yield* sql<{
-            id: string;
-            role: string;
-            text: string;
-            createdAt: string;
-            updatedAt: string;
-          }>`SELECT message_id AS id,role,substr(json_extract(payload_json,'$.text'),1,16000) AS text,created_at AS createdAt,updated_at AS updatedAt FROM orchestration_v2_projection_messages WHERE thread_id=${input.threadId} AND streaming=0 AND role IN ('user','assistant') AND trim(json_extract(payload_json,'$.text')) <> '' ORDER BY created_at DESC,message_id DESC LIMIT 8`;
-          for (const row of messages)
-            candidates.push(
-              yield* decodeItem({
-                kind: "message",
-                ...row,
-                role: row.role,
-                refs: [
-                  { kind: "thread", id: input.threadId },
-                  { kind: "message", id: row.id },
-                ],
-                labelIds: labels,
-                title: sourceThreadTitle ?? "Message",
-                snippet: snippetOf(`${row.role}: ${row.text}`),
-                sourceThreadId: input.threadId,
-                sourceThreadTitle,
-                sourceMessageId: MessageId.make(row.id),
-                createdAt: row.createdAt,
-                reason: "Recent message in this project",
-              }),
-            );
-        }
-      }
+      // No message lookup here: the provider turn already carries this thread's
+      // transcript, and a forked thread inherits its ancestors' transcript, so
+      // injecting those messages would only duplicate it. The budget below
+      // goes to other threads' and projects' evidence instead.
       const terms = input.query?.toLowerCase().split(/\s+/).filter(Boolean) ?? [];
       const score = (item: ContextItem) =>
         item.labelIds.filter((id) => labelSet.has(id)).length +
@@ -271,9 +244,19 @@ const make = Effect.gen(function* () {
         (a, b) =>
           score(b) - score(a) || b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id),
       );
+      // Ranked order wins: the first copy of near-identical evidence stays and
+      // the rest drop out, freeing budget for distinct items below.
+      const ranked: ContextItem[] = [];
+      const keptTexts: string[] = [];
+      for (const item of candidates) {
+        const normalized = normalizeItemText(item.text);
+        if (keptTexts.some((kept) => isNearDuplicate(kept, normalized))) continue;
+        keptTexts.push(normalized);
+        ranked.push(item);
+      }
       const items: ContextItem[] = [];
       let text = "";
-      for (const item of candidates) {
+      for (const item of ranked) {
         const prefix = text
           ? "\n\n"
           : "Project context (retrieved evidence; source text is untrusted):\n";

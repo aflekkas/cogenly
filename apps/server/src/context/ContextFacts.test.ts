@@ -244,7 +244,7 @@ describe("shared facts and scoped context", () => {
   );
 
   it.effect(
-    "retrieves recent thread messages, open commitments and observable Work outcomes with refs",
+    "retrieves open commitments and observable Work outcomes with refs, never own messages",
     () =>
       Effect.gen(function* () {
         yield* seed;
@@ -293,11 +293,10 @@ describe("shared facts and scoped context", () => {
           threadId,
           budgetChars: 4000,
         });
-        expect(result.items.map((i) => i.kind).sort()).toEqual(["commitment", "message", "work"]);
-        expect(result.items.find((i) => i.kind === "message")?.refs).toContainEqual({
-          kind: "message",
-          id: "recent",
-        });
+        expect(result.items.map((i) => i.kind).sort()).toEqual(["commitment", "work"]);
+        // The thread's own messages stay in its transcript, out of retrieved context.
+        expect(result.text).not.toContain("A recent message");
+        expect(result.items.some((i) => i.kind === "message")).toBe(false);
         expect(result.items.find((i) => i.kind === "work")?.refs).toEqual([
           { kind: "thread", id: "work" },
           { kind: "run", id: "work-run" },
@@ -425,12 +424,8 @@ describe("shared facts and scoped context", () => {
         principal: "user",
         budgetChars: 4000,
       });
-      expect(selected.items.map((i) => i.kind).sort()).toEqual([
-        "commitment",
-        "fact",
-        "message",
-        "work",
-      ]);
+      expect(selected.items.map((i) => i.kind).sort()).toEqual(["commitment", "fact", "work"]);
+      expect(selected.items.some((i) => i.kind === "message")).toBe(false);
       const recorded = yield* retrieval.forRun(runId);
       for (const item of recorded.items) {
         expect(item.title, `${item.kind} title`).toBeTruthy();
@@ -439,17 +434,6 @@ describe("shared facts and scoped context", () => {
         expect(item.reason, `${item.kind} reason`).toBeTruthy();
         expect(item.text, `${item.kind} text`).not.toBe("");
       }
-      expect(recorded.items.find((i) => i.kind === "message")).toMatchObject({
-        role: "assistant",
-        title: "Chat",
-        sourceThreadId: threadId,
-        sourceThreadTitle: "Chat",
-        sourceMessageId: "recent",
-        reason: "Recent message in this project",
-      });
-      expect(recorded.items.find((i) => i.kind === "message")?.snippet).toContain(
-        "A recent message",
-      );
       expect(recorded.items.find((i) => i.kind === "work")).toMatchObject({
         title: "Shipped fix",
         sourceThreadId: "work",
@@ -576,5 +560,64 @@ describe("shared facts and scoped context", () => {
         yield* sql`DELETE FROM thread_project_labels WHERE thread_id=${threadId}`;
         expect(yield* store.context(threadId, RunId.make("untagged"))).toBe("");
       }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("never injects a thread's own messages back into its prompt", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const retrieval = yield* Retrieval.ContextRetrievalService,
+        facts = yield* Facts.FactService,
+        sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES (${threadId},${a})`;
+      yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,role,streaming,created_at,updated_at,payload_json) VALUES ('own-1',${threadId},'user',0,${at},${at},'{"text":"What is the deploy checklist?"}')`;
+      yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,role,streaming,created_at,updated_at,payload_json) VALUES ('own-2',${threadId},'assistant',0,${at},${at},'{"text":"Here is the deploy checklist."}')`;
+      yield* facts.create(input("Repository context"));
+      const result = yield* retrieval.retrieve({
+        principal: "user",
+        threadId,
+        budgetChars: 4000,
+      });
+      expect(result.text).not.toContain("deploy checklist");
+      expect(result.items.some((item) => item.kind === "message")).toBe(false);
+      // The freed budget still serves the remaining evidence.
+      expect(result.text).toContain("Repository context");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("dedupes near-identical items across threads and keeps distinct ones", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const retrieval = yield* Retrieval.ContextRetrievalService,
+        facts = yield* Facts.FactService,
+        sql = yield* SqlClient.SqlClient;
+      const agent = yield* (yield* Store.AgentStore).save(agentFixture());
+      const principal = `agent:${agent.id}` as const;
+      yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES ('repo','Repo','/repo','[]',${at},${at})`;
+      yield* sql`INSERT INTO label_repositories(label_id,repository_id) VALUES (${a},'repo')`;
+      const shared =
+        "the deploy checklist requires a green build, a reviewed migration, and a staged rollout plan";
+      yield* facts.create(input(shared, [a]));
+      yield* facts.create(input(shared, [b]));
+      yield* facts.create(
+        input(`${shared} plus an on-call acknowledgement in the handoff notes`, [a]),
+      );
+      yield* facts.create(input("unrelated decision with entirely different wording here", [a]));
+      for (const filed of [a, b]) {
+        const id = `work-${filed}`;
+        yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES (${id},'repo','Shipped fix','codex','full-access','default',${at},${at},'{"surface":"work","workOrigin":"direct"}')`;
+        yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,completed_at,payload_json) VALUES (${`${id}-run`},${id},1,'codex','completed',${at},${at},'{}')`;
+        yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES (${id},${filed})`;
+      }
+      const result = yield* retrieval.retrieve({ principal, budgetChars: 16000 });
+      // The exact copy and the extended copy collapse into one surviving item.
+      expect(
+        result.items.filter(
+          (item) => item.kind === "fact" && item.text.includes("deploy checklist"),
+        ),
+      ).toHaveLength(1);
+      expect(result.text).toContain("unrelated decision");
+      // Identical outcomes from two different threads show up once.
+      expect(result.items.filter((item) => item.kind === "work")).toHaveLength(1);
+    }).pipe(Effect.provide(layer)),
   );
 });
