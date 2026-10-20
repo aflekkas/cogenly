@@ -101,8 +101,7 @@ is unavailable or has changed, the saved quote remains readable.
 
 The chip shows your comment when it has one, or a short quote preview otherwise. Use the pencil
 button to add or change the comment. To remove the citation, place the caret beside its chip and
-delete it like other inline context. Copying, reloading, and restoring a
-[stashed prompt](#prompt-stash) keep each comment
+delete it like other inline context. Copying and reloading keep each comment
 with its quote, and sending tells the agent which words were quoted and which comment you wrote.
 The quoted text and comment count toward the message limit.
 
@@ -134,17 +133,6 @@ resending. Any unsent draft stays above the restored prompt.
 This removes the selected message and later conversation from the active thread
 and provider history. It does not undo external actions or separate provider
 memory. The action is available only when the provider supports rewind.
-
-## Prompt stash
-
-On web and desktop, press `Cmd+S` on macOS or `Ctrl+S` on Windows and Linux to save
-the current prompt and its attachments for later. Wait for uploads to finish first.
-With an empty composer, the same shortcut restores a single stash or opens the
-stash menu when there are several.
-
-Stashes containing uploaded files must be restored in their original environment.
-Those files are retained for 24 hours. After an upload expires, restore the prompt
-and use **Attach again** or remove the missing file before sending.
 
 ## Voice input on iPhone
 
@@ -266,8 +254,7 @@ context is no longer available shows the same dashed outline; hover it for what 
 
 Copying a message with the copy button, or copying text out of it, gives other apps readable
 Markdown with a link in place of each chip. Older messages that were sent before chips still
-show their context. Stashing a prompt keeps its chips and what they point to; restoring brings
-them back.
+show their context.
 
 ## Attached files
 

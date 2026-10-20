@@ -188,7 +188,7 @@ URL from the source environment, downloads the bytes, and attaches them here. Th
 server-side clone; if the source is unreachable or the attachment is gone, a toast says so and
 the chip stays unresolved.
 
-## Ids, persistence, and the stash
+## Ids and persistence
 
 Producers keep their own id grammars; `toComposerContextId` folds anything outside
 `[a-z0-9_-]` into a slug plus a hash, deterministically, at the reference and record boundary.
@@ -197,9 +197,7 @@ screenshot image, whose attachment id is the annotation id; the record links the
 `screenshotContextId`.
 
 `projection_thread_messages.context_json` persists records, so a restart or projection reload
-keeps chips resolvable. Prompt stash entries carry `records` for terminal excerpts, review
-comments, and preview annotations; stashing moves them out of the draft and restoring imports
-them back through the same importer the paste path uses.
+keeps chips resolvable.
 
 Context produced by other panels reaches the caret through `setContextInsertionHandler`: a
 mounted composer registers an inserter for its draft and the store falls back to appending.

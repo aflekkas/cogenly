@@ -95,7 +95,6 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "usage.open",
   "settings.open",
   "appearance.cycle",
-  "composer.stash",
   "composer.sendAlternate",
   "composer.sendBackground",
   "composer.sendAndNewThread",

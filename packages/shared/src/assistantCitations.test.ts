@@ -283,7 +283,7 @@ describe("assistant citation references", () => {
     expect(assistantCitationsToPlainText(prompt)).toBe(`Before\n${selected.text}\tAfter`);
   });
 
-  it("includes bound comments in plain-text titles and stash previews without escaping", () => {
+  it("includes bound comments in plain-text titles without escaping", () => {
     const commented = { ...citation, comment: 'Why "this"?\nKeep <tags> & `code` $& $1 $$.' };
     const marker = serializeAssistantCitation(commented);
     const prompt = `Before ${marker}\n${marker} After`;

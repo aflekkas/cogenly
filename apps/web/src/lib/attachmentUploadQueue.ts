@@ -10,7 +10,6 @@ import {
   deletePendingAttachmentUpload,
   runAttachmentUploadCycle,
   verifyPersistedAttachmentUpload,
-  type PersistedAttachmentVerification,
 } from "@t3tools/client-runtime/state/attachments";
 import { create } from "zustand";
 import * as Option from "effect/Option";
@@ -589,23 +588,6 @@ export function retryAttachmentUpload(input: {
     clearUploadState(input.image.id);
   }
   startAttachmentUpload(input);
-}
-
-/**
- * Checks that a stashed upload still exists on the server. Pending uploads
- * are swept after 24 hours, so a stash restore asks first instead of handing
- * the composer a dead reference.
- */
-export function verifyStashedAttachmentUpload(input: {
-  readonly environmentId: EnvironmentId;
-  readonly attachmentId: string;
-}): Promise<PersistedAttachmentVerification> {
-  return verifyPersistedAttachmentUpload({
-    registry: appAtomRegistry,
-    createAssetUrl: assetEnvironment.createUrl,
-    environmentId: input.environmentId,
-    attachmentId: input.attachmentId,
-  });
 }
 
 export async function awaitAttachmentUploads(imageIds: ReadonlyArray<string>): Promise<void> {

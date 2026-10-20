@@ -147,7 +147,6 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+u", command: "usage.open", when: "!terminalFocus" },
   { key: "mod+,", command: "settings.open" },
   { key: "mod+alt+shift+a", command: "appearance.cycle", when: "!terminalFocus" },
-  { key: "mod+s", command: "composer.stash", when: "!terminalFocus" },
   { key: "mod+shift+enter", command: "thread.steerQueuedMessage", when: "!terminalFocus" },
   { key: "alt+arrowup", command: "thread.editQueuedMessage", when: "composerFocus" },
   { key: "mod+enter", command: "composer.sendAlternate", when: "composerFocus && turnRunning" },

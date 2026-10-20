@@ -129,6 +129,17 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   },
 ];
 
+// Commands the client no longer has. Earlier startups wrote their defaults into
+// existing configs, so entries for them are dropped quietly instead of being
+// reported as invalid (which would also block the startup default sync).
+const RETIRED_KEYBINDING_COMMANDS: ReadonlySet<string> = new Set(["composer.stash"]);
+
+const isRetiredKeybindingEntry = (entry: unknown) =>
+  Predicate.isObject(entry) &&
+  "command" in entry &&
+  typeof entry.command === "string" &&
+  RETIRED_KEYBINDING_COMMANDS.has(entry.command);
+
 function keybindingShortcutContext(rule: KeybindingRule): string | null {
   const parsed = parseKeybindingShortcut(rule.key);
   if (!parsed) return null;
@@ -346,6 +357,7 @@ const make = Effect.gen(function* () {
 
     return yield* Effect.forEach(rawConfig, (entry) =>
       Effect.gen(function* () {
+        if (isRetiredKeybindingEntry(entry)) return null;
         const decodedRule = decodeKeybindingRuleExit(entry);
         if (decodedRule._tag === "Failure") {
           yield* Effect.logWarning("ignoring invalid keybinding entry", {
@@ -393,6 +405,7 @@ const make = Effect.gen(function* () {
     const keybindings: KeybindingRule[] = [];
     const issues: ServerConfigIssue[] = [];
     for (const [index, entry] of decodedEntries.value.entries()) {
+      if (isRetiredKeybindingEntry(entry)) continue;
       const decodedRule = decodeKeybindingRuleExit(entry);
       if (decodedRule._tag === "Failure") {
         const detail = Cause.pretty(decodedRule.cause);

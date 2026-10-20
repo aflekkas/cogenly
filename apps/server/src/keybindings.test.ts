@@ -250,6 +250,31 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  it.effect("drops entries for retired commands without reporting issues", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      yield* fs.writeFileString(
+        keybindingsConfigPath,
+        JSON.stringify([
+          { key: "mod+j", command: "terminal.toggle" },
+          { key: "mod+s", command: "composer.stash", when: "!terminalFocus" },
+        ]),
+      );
+
+      const configState = yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings.Keybindings;
+        return yield* keybindings.loadConfigState;
+      });
+
+      assert.isTrue(configState.keybindings.some((entry) => entry.command === "terminal.toggle"));
+      assert.isFalse(
+        configState.keybindings.some((entry) => String(entry.command) === "composer.stash"),
+      );
+      assert.deepEqual(configState.issues, []);
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect(
     "upserts missing default keybindings on startup without overriding existing command rules",
     () =>

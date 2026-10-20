@@ -1,7 +1,7 @@
 # Assistant citations
 
 Citations carry the selected excerpt and source identity in ordinary message text.
-Drafts, clipboard copies, stashes, and sent messages keep that representation
+Drafts, clipboard copies, and sent messages keep that representation
 without a separate citation store. The saved quote remains usable when its source
 disappears or changes. The [shared format](../../packages/shared/src/assistantCitations.ts) uses
 stable environment IDs without a browser origin, so moving between local, remote,
