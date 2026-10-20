@@ -139,7 +139,10 @@ export function SidebarNavRail({
       >
         {SIDEBAR_MODES.map((segment, segmentIndex) => {
           // A utility page owns the column, so no mode reads as current there.
-          const selected = segment === mode && !onUtilityPage;
+          // The Projects pages have no list, so the route, not the list's mode, says where you are.
+          const onProjectsPage = pathname === "/project" || pathname.startsWith("/project/");
+          const selected =
+            (onProjectsPage ? segment === "projects" : segment === mode) && !onUtilityPage;
           const label = SIDEBAR_MODE_LABELS[segment];
           const Icon = SIDEBAR_MODE_ICONS[segment];
           const shortcut = shortcutLabelForCommand(keybindings, `sidebar.mode.${segment}`);

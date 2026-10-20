@@ -9,7 +9,7 @@ import type {
   ProjectLabelWithRepositories,
 } from "@t3tools/contracts";
 import type * as Cause from "effect/Cause";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "../components/ui/button";
 import {
@@ -59,6 +59,36 @@ export function useEnvironmentRepositories(environmentId: EnvironmentId | null) 
 }
 
 /**
+ * Deletes a folder after the confirmation that says its contents are only
+ * unfiled. Resolves true once it is gone.
+ */
+export function useDeleteProjectFolder() {
+  const deleteLabel = useAtomCommand(serverEnvironment.deleteProjectLabel, {
+    label: "delete project",
+    reportFailure: false,
+  });
+  return useCallback(
+    async (
+      environmentId: EnvironmentId,
+      label: { readonly id: ProjectLabelId; readonly name: string },
+    ): Promise<boolean> => {
+      const message = `Delete ${label.name}?\nIts chats, Work and repositories are kept, just no longer in a folder.`;
+      const confirmed =
+        (await requestConfirmDialog(message, { variant: "destructive" })) ??
+        window.confirm(message);
+      if (!confirmed) return false;
+      const result = await deleteLabel({ environmentId, input: { id: label.id } });
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) reportFailure("Could not delete project", result);
+        return false;
+      }
+      return true;
+    },
+    [deleteLabel],
+  );
+}
+
+/**
  * Create or edit one project folder: name, color, description, and delete.
  * Repositories are added and removed from the folder's view.
  */
@@ -78,7 +108,7 @@ export function ProjectLabelEditorDialog(props: {
   const [saving, setSaving] = useState(false);
   const createLabel = useAtomCommand(serverEnvironment.createProjectLabel, "create project");
   const updateLabel = useAtomCommand(serverEnvironment.updateProjectLabel, "update project");
-  const deleteLabel = useAtomCommand(serverEnvironment.deleteProjectLabel, "delete project");
+  const deleteFolder = useDeleteProjectFolder();
   const trimmedName = name.trim();
 
   const save = async () => {
@@ -134,17 +164,10 @@ export function ProjectLabelEditorDialog(props: {
 
   const remove = async () => {
     if (label === null || saving) return;
-    const message = `Delete ${label.name}?\nIts chats, Work and repositories are kept, just no longer in a folder.`;
-    const confirmed =
-      (await requestConfirmDialog(message, { variant: "destructive" })) ?? window.confirm(message);
-    if (!confirmed) return;
     setSaving(true);
-    const result = await deleteLabel({ environmentId, input: { id: label.id } });
+    const deleted = await deleteFolder(environmentId, label);
     setSaving(false);
-    if (result._tag === "Failure") {
-      if (!isAtomCommandInterrupted(result)) reportFailure("Could not delete project", result);
-      return;
-    }
+    if (!deleted) return;
     onClose();
     props.onDeleted?.();
   };

@@ -29,7 +29,9 @@ import {
 import { OverlayPresence } from "../ui/overlay-presence";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
-import { openableRowProps, ProjectFoldersContextNote } from "./ProjectView";
+import type { EnvironmentProjectLabel } from "../../projectLabels/projectLabels.logic";
+import { ProjectFolderGrid } from "./ProjectFolderGrid";
+import { ProjectFoldersContextNote } from "./ProjectView";
 
 export interface ProjectsOverviewSearch {
   readonly create?: true | undefined;
@@ -67,9 +69,8 @@ function NewProjectDialog(props: {
 }
 
 /**
- * Every project across connected machines, and where new ones start. The
- * Projects sidebar lists the same projects; this page is what links to
- * "manage projects" land on.
+ * Every project folder across connected machines as a grid of cards, and
+ * where new ones start. Opening a card shows the folder full width.
  */
 export function ProjectsOverview(props: ProjectsOverviewSearch) {
   const navigate = useNavigate();
@@ -81,6 +82,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
     serverEnvironment.createProjectLabel.permissionAtom(createEnvironmentId),
   );
   const [creating, setCreating] = useState(false);
+  const [renaming, setRenaming] = useState<EnvironmentProjectLabel | null>(null);
   const openedCreate = useRef(false);
   useEffect(() => {
     if (!props.create || openedCreate.current || !canCreate || createEnvironmentId === null) return;
@@ -109,73 +111,60 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
             New project
           </Button>
         </WorkspacePageHeader>
-        <SettingsPageContainer>
-          {directory.labels.length === 0 ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <FolderIcon />
-                </EmptyMedia>
-                <EmptyTitle>No projects yet</EmptyTitle>
-                <EmptyDescription>
-                  A project is a folder for related chats, Work and repositories.
-                </EmptyDescription>
-              </EmptyHeader>
-              <EmptyContent>
-                <Button
-                  size="sm"
-                  disabled={createEnvironmentId === null || !canCreate}
-                  onClick={() => setCreating(true)}
-                >
-                  <FolderPlusIcon />
-                  New project
-                </Button>
-              </EmptyContent>
-            </Empty>
-          ) : (
-            <SettingsSection title="Projects" hideTitle>
-              {directory.labels.map((entry) => {
-                const summary = projectFolderSummary(
-                  entry.label.repositoryIds.length,
-                  entry.label.threadCount,
-                );
-                return (
-                  <SettingsRow
-                    key={entry.key}
-                    {...openableRowProps(
-                      () =>
-                        void navigate({
-                          to: "/project/$environmentId/$labelId",
-                          params: { environmentId: entry.environmentId, labelId: entry.label.id },
-                        }),
-                    )}
-                    title={
-                      <span className="flex min-w-0 items-center gap-2">
-                        <ProjectColorDot color={entry.label.color} />
-                        <span className="truncate">{entry.label.name}</span>
-                      </span>
-                    }
-                    description={
-                      [
-                        entry.label.description,
-                        showEnvironments ? environmentLabelById.get(entry.environmentId) : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ") || undefined
-                    }
-                    control={
-                      <span className="text-xs tabular-nums text-muted-foreground">
-                        {summary ?? "Empty"}
-                      </span>
-                    }
-                  />
-                );
-              })}
-            </SettingsSection>
-          )}
-          <ProjectFoldersContextNote />
-        </SettingsPageContainer>
+        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6">
+            {directory.labels.length === 0 ? (
+              <Empty>
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <FolderIcon />
+                  </EmptyMedia>
+                  <EmptyTitle>No projects yet</EmptyTitle>
+                  <EmptyDescription>
+                    A project is a folder for related chats, Work and repositories.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button
+                    size="sm"
+                    disabled={createEnvironmentId === null || !canCreate}
+                    onClick={() => setCreating(true)}
+                  >
+                    <FolderPlusIcon />
+                    New project
+                  </Button>
+                </EmptyContent>
+              </Empty>
+            ) : (
+              <ProjectFolderGrid
+                folders={directory.labels}
+                environmentLabel={(entry) =>
+                  showEnvironments ? (environmentLabelById.get(entry.environmentId) ?? null) : null
+                }
+                canCreate={createEnvironmentId !== null && canCreate}
+                onOpen={(entry) =>
+                  void navigate({
+                    to: "/project/$environmentId/$labelId",
+                    params: { environmentId: entry.environmentId, labelId: entry.label.id },
+                  })
+                }
+                onRename={setRenaming}
+                onCreate={() => setCreating(true)}
+              />
+            )}
+            <ProjectFoldersContextNote />
+          </div>
+        </div>
       </div>
+      <OverlayPresence when={renaming}>
+        {(entry) => (
+          <ProjectLabelEditorDialog
+            environmentId={entry.environmentId}
+            label={entry.label}
+            onClose={() => setRenaming(null)}
+          />
+        )}
+      </OverlayPresence>
       <OverlayPresence when={creating && createEnvironmentId}>
         {(environmentId) => (
           <NewProjectDialog

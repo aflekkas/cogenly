@@ -5,6 +5,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import type { EnvironmentId, ProjectId, ProjectLabelId, ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  ArrowLeftIcon,
   FolderGit2Icon,
   FolderIcon,
   FolderMinusIcon,
@@ -191,6 +192,18 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
   const header = (
     <WorkspacePageHeader electron={isElectron} className="border-b border-border">
       <div className="flex min-w-0 flex-1 items-center gap-2" data-panel-flip="start">
+        <Button
+          size="xs"
+          variant="ghost-muted"
+          aria-label="Back to Projects"
+          onClick={() => void navigate({ to: "/project" })}
+        >
+          <ArrowLeftIcon className="size-3" />
+          Projects
+        </Button>
+        <span aria-hidden className="text-muted-foreground">
+          /
+        </span>
         {label ? <ProjectColorDot color={label.color} className="size-2.5" /> : null}
         <h1 className="min-w-0 truncate text-sm font-medium">{label?.name ?? "Project"}</h1>
       </div>
