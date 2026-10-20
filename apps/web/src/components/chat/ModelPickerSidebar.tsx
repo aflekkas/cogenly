@@ -1,7 +1,7 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { SparklesIcon, StarIcon } from "lucide-react";
+import { SparklesIcon } from "lucide-react";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -41,9 +41,10 @@ const PICKER_TOOLTIP_SIDE = "left" as const;
 const PICKER_TOOLTIP_SIDE_OFFSET = 8;
 
 export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
-  selectedInstanceId: ProviderInstanceId | "favorites";
-  onSelectInstance: (instanceId: ProviderInstanceId | "favorites") => void;
-  onFocusSearch: () => void;
+  selectedInstanceId: ProviderInstanceId;
+  onSelectInstance: (instanceId: ProviderInstanceId) => void;
+  /** Move focus from the rail into the model list. */
+  onFocusList: () => void;
   /**
    * Instance entries to render as rail buttons. Each entry becomes one icon
    * keyed by `instanceId`, so the default built-in Codex and a user-authored
@@ -51,8 +52,6 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
    * their own model list.
    */
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
-  /** Render the favorites rail entry. Hidden for locked-provider instance switching. */
-  showFavorites?: boolean;
   /** Instance ids shown in the rail but unavailable for the current picker context. */
   disabledInstanceIds?: ReadonlySet<ProviderInstanceId>;
   /** Non-ready instances whose selected unavailable model remains reachable. */
@@ -65,10 +64,9 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
    */
   newBadgeInstanceIds?: ReadonlySet<ProviderInstanceId>;
 }) {
-  const handleSelect = (instanceId: ProviderInstanceId | "favorites") => {
+  const handleSelect = (instanceId: ProviderInstanceId) => {
     props.onSelectInstance(instanceId);
   };
-  const showFavorites = props.showFavorites ?? true;
   const [hoveredInstanceId, setHoveredInstanceId] = useState<ProviderInstanceId | null>(null);
   const sidebarContentRef = useRef<HTMLDivElement>(null);
   const [selectedIndicatorTop, setSelectedIndicatorTop] = useState<number | null>(null);
@@ -85,7 +83,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
       return;
     }
     setSelectedIndicatorTop(selectedItem.offsetTop + selectedItem.offsetHeight / 2 - 10);
-  }, [props.instanceEntries, props.selectedInstanceId, showFavorites]);
+  }, [props.instanceEntries, props.selectedInstanceId]);
 
   return (
     <Toolbar.Root
@@ -97,7 +95,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
         if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
         if (event.key === "ArrowRight") {
           event.preventDefault();
-          props.onFocusSearch();
+          props.onFocusList();
           return;
         }
       }}
@@ -114,39 +112,6 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               style={{ "--indicator-y": `${selectedIndicatorTop}px` } as CSSProperties}
             />
           ) : null}
-          {/* Favorites section */}
-          {showFavorites ? (
-            <>
-              <div className="relative w-full" data-model-picker-provider="favorites">
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Toolbar.Button
-                        className={cn(
-                          "relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors state-hover focus-visible:bg-state-hover focus-visible:outline-none aria-pressed:state-selected",
-                        )}
-                        onClick={() => handleSelect("favorites")}
-                        type="button"
-                        aria-label="Favorites"
-                        aria-pressed={props.selectedInstanceId === "favorites"}
-                      >
-                        <StarIcon className="size-5 fill-current shrink-0" aria-hidden />
-                      </Toolbar.Button>
-                    }
-                  />
-                  <TooltipPopup
-                    side={PICKER_TOOLTIP_SIDE}
-                    sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
-                    align="center"
-                  >
-                    Favorites
-                  </TooltipPopup>
-                </Tooltip>
-              </div>
-              <div className="border-b border-border/70" aria-hidden="true" />
-            </>
-          ) : null}
-
           {/* Instance buttons (one per configured instance — built-in + custom) */}
           {props.instanceEntries.map((entry) => {
             const isUnavailable = !isProviderInstancePickerReady(entry);

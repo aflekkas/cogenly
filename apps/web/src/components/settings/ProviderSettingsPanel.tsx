@@ -31,9 +31,7 @@ import {
   getBackgroundActivityPresetSettings,
   resolveServerBackgroundActivitySettings,
 } from "@t3tools/shared/backgroundActivitySettings";
-import * as Arr from "effect/Array";
 import * as Duration from "effect/Duration";
-import * as Result from "effect/Result";
 import { PlusIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -43,7 +41,6 @@ import {
   usePersistEnvironmentProviderInstanceMutation,
   useUpdateEnvironmentSettings,
   useUpdateEnvironmentModelPreferences,
-  useToggleEnvironmentModelFavorite,
 } from "../../hooks/useSettings";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { cn } from "../../lib/utils";
@@ -125,12 +122,13 @@ import {
   resolveSelectedProviderEnvironmentId,
 } from "./ProviderSettingsPanel.logic";
 
+/** Models whose membership differs between two lists. */
 function modelListChanges(current: ReadonlyArray<string>, next: ReadonlyArray<string>) {
   const currentSet = new Set(current);
   const nextSet = new Set(next.map((model) => model.trim()).filter(Boolean));
-  return [...new Set([...currentSet, ...nextSet])]
-    .filter((model) => currentSet.has(model) !== nextSet.has(model))
-    .map((model) => ({ model, selected: nextSet.has(model) }));
+  return [...new Set([...currentSet, ...nextSet])].filter(
+    (model) => currentSet.has(model) !== nextSet.has(model),
+  );
 }
 
 const PROVIDER_SETTINGS = providerClients.definitions.map((definition) => ({
@@ -548,7 +546,6 @@ export function EnvironmentProviderSettings({
   const canRefreshProviders = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const updateModelPreferences = useUpdateEnvironmentModelPreferences(environmentId);
-  const toggleModelFavorite = useToggleEnvironmentModelFavorite(environmentId);
   const persistProviderInstance = usePersistEnvironmentProviderInstanceMutation(environmentId);
   const serverProviders =
     useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
@@ -828,9 +825,6 @@ export function EnvironmentProviderSettings({
       hiddenModels: [],
       modelOrder: [],
     };
-    const favoriteModels = Arr.filterMap(settings.favorites ?? [], (favorite) =>
-      favorite.provider === row.instanceId ? Result.succeed(favorite.model) : Result.failVoid,
-    );
     const resetLabel = driverOption?.label ?? String(row.driver);
     const representativeProjectId = projectIds[0];
     const writeProjectOverride = (next: boolean | undefined) => {
@@ -954,29 +948,16 @@ export function EnvironmentProviderSettings({
           ) : null
         }
         hiddenModels={modelPreferences.hiddenModels}
-        favoriteModels={favoriteModels}
         modelOrder={modelPreferences.modelOrder}
         onHiddenModelsChange={(next, affectedModels) => {
           const hidden = new Set(next);
-          const models =
-            affectedModels ??
-            modelListChanges(modelPreferences.hiddenModels, next).map((change) => change.model);
+          const models = affectedModels ?? modelListChanges(modelPreferences.hiddenModels, next);
           void updateModelPreferences({
             setModelsHidden: models.map((model) => ({
               provider: row.instanceId,
               model,
               hidden: hidden.has(model),
             })),
-          });
-        }}
-        onToggleFavorite={(model) => {
-          void toggleModelFavorite(row.instanceId, model);
-        }}
-        onFavoriteModelsChange={(next) => {
-          void updateModelPreferences({
-            setModelFavorites: modelListChanges(favoriteModels, next).map(
-              ({ model, selected }) => ({ provider: row.instanceId, model, favorite: selected }),
-            ),
           });
         }}
         onModelOrderChange={(modelOrder) => {

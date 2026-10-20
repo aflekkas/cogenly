@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownIcon, ArrowUpIcon, PencilIcon, PlusIcon, StarIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, PencilIcon, PlusIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ProviderDriverKind,
@@ -65,8 +65,8 @@ function describeModelCapabilities(model: ServerProviderModel): string[] {
 }
 
 /**
- * Display order for the models list: favorites first (in user order), then
- * visible models, then hidden ones. Hidden models sink so the list reads
+ * Display order for the models list: visible models in user order, then
+ * hidden ones. Hidden models sink so the list reads
  * top-down as "what the picker shows"; moves only swap rows within the same
  * group, and the resulting display order is what gets persisted as
  * `modelOrder`.
@@ -76,21 +76,15 @@ export function groupModelsForDisplay<
 >(
   models: ReadonlyArray<T>,
   options: {
-    readonly favoriteModels: ReadonlySet<string>;
     readonly hiddenModels: ReadonlySet<string>;
     readonly modelOrder: ReadonlyArray<string>;
   },
 ): T[] {
-  const ordered = sortModelsForProviderInstance(models, {
-    favoriteModels: options.favoriteModels,
-    groupFavorites: true,
-    modelOrder: options.modelOrder,
-  });
+  const ordered = sortModelsForProviderInstance(models, { modelOrder: options.modelOrder });
   const isHidden = (model: T) => !model.isCustom && options.hiddenModels.has(model.slug);
   return [
-    ...ordered.filter((model) => options.favoriteModels.has(model.slug)),
-    ...ordered.filter((model) => !options.favoriteModels.has(model.slug) && !isHidden(model)),
-    ...ordered.filter((model) => !options.favoriteModels.has(model.slug) && isHidden(model)),
+    ...ordered.filter((model) => !isHidden(model)),
+    ...ordered.filter((model) => isHidden(model)),
   ];
 }
 
@@ -132,8 +126,6 @@ interface ProviderModelsSectionProps {
   readonly canWritePreferences?: boolean;
   /** Server-returned model slugs hidden from the model picker. */
   readonly hiddenModels: ReadonlyArray<string>;
-  /** Model slugs favorited for this provider instance. */
-  readonly favoriteModels: ReadonlyArray<string>;
   /** Explicit user-authored model ordering for this provider instance. */
   readonly modelOrder: ReadonlyArray<string>;
   /**
@@ -146,8 +138,6 @@ interface ProviderModelsSectionProps {
     next: ReadonlyArray<string>,
     affectedModels?: ReadonlyArray<string>,
   ) => void;
-  readonly onFavoriteModelsChange: (next: ReadonlyArray<string>) => void;
-  readonly onToggleFavorite: (model: string) => void;
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void;
 }
 
@@ -170,12 +160,9 @@ export function ProviderModelsSection({
   canManageCustomModels,
   canWritePreferences = true,
   hiddenModels,
-  favoriteModels,
   modelOrder,
   onChange,
   onHiddenModelsChange,
-  onFavoriteModelsChange,
-  onToggleFavorite,
   onModelOrderChange,
 }: ProviderModelsSectionProps) {
   const [input, setInput] = useState("");
@@ -188,17 +175,14 @@ export function ProviderModelsSection({
   // Slug of a just-added custom model, scrolled into view once its row exists.
   const scrollToSlugRef = useRef<string | null>(null);
   const hiddenModelSet = useMemo(() => new Set(hiddenModels), [hiddenModels]);
-  const favoriteModelSet = useMemo(() => new Set(favoriteModels), [favoriteModels]);
   const displayModels = useMemo(
     () =>
       groupModelsForDisplay(models, {
-        favoriteModels: favoriteModelSet,
         hiddenModels: hiddenModelSet,
         modelOrder,
       }),
-    [favoriteModelSet, hiddenModelSet, modelOrder, models],
+    [hiddenModelSet, modelOrder, models],
   );
-  const favoriteCount = displayModels.filter((model) => favoriteModelSet.has(model.slug)).length;
   const hiddenCount = displayModels.filter(
     (model) => !model.isCustom && hiddenModelSet.has(model.slug),
   ).length;
@@ -270,7 +254,6 @@ export function ProviderModelsSection({
     if (editingSlug === slug) setEditingSlug(null);
     onChange(customModels.filter((entry) => entry.slug !== slug));
     onModelOrderChange(modelOrder.filter((model) => model !== slug));
-    onFavoriteModelsChange(favoriteModels.filter((model) => model !== slug));
     setError(null);
   };
 
@@ -288,19 +271,10 @@ export function ProviderModelsSection({
     );
   };
 
-  const handleToggleFavorite = (slug: string) => {
-    if (!canWritePreferences) return;
-    onToggleFavorite(slug);
-  };
-
-  // Rows only trade places with a neighbour in the same group (favorites,
-  // visible, hidden), and the display order is persisted as the new order.
+  // Rows only trade places with a neighbour in the same group (visible,
+  // hidden), and the display order is persisted as the new order.
   const groupOf = (model: (typeof displayModels)[number]) =>
-    favoriteModelSet.has(model.slug)
-      ? "favorite"
-      : !model.isCustom && hiddenModelSet.has(model.slug)
-        ? "hidden"
-        : "visible";
+    !model.isCustom && hiddenModelSet.has(model.slug) ? "hidden" : "visible";
   const handleMove = (slug: string, direction: -1 | 1) => {
     if (!canWritePreferences) return;
     const index = displayModels.findIndex((model) => model.slug === slug);
@@ -313,29 +287,6 @@ export function ProviderModelsSection({
   };
 
   type DisplayModel = (typeof displayModels)[number];
-
-  const starButton = (model: DisplayModel, isFavorite: boolean) => (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            size="icon-micro"
-            variant="ghost-muted"
-            disabled={!canWritePreferences}
-            onClick={() => handleToggleFavorite(model.slug)}
-            aria-label={`${isFavorite ? "Remove" : "Add"} ${model.name} ${
-              isFavorite ? "from" : "to"
-            } favorites`}
-          />
-        }
-      >
-        <StarIcon className={cn("size-3", isFavorite && "fill-current text-warning")} />
-      </TooltipTrigger>
-      <TooltipPopup side="top">
-        {isFavorite ? "Remove from favorites" : "Add to favorites"}
-      </TooltipPopup>
-    </Tooltip>
-  );
 
   // Reorder and remove stay in the row at all times (dimmed when unavailable)
   // so ordering is discoverable without hovering.
@@ -453,10 +404,7 @@ export function ProviderModelsSection({
   const renderRow = (model: DisplayModel) => {
     const capLabels = describeModelCapabilities(model);
     const group = groupOf(model);
-    // Hidden is read from the preference itself: a favorited model can still be
-    // hidden, and its switch must say so even though it sits in the favorites group.
-    const isHidden = !model.isCustom && hiddenModelSet.has(model.slug);
-    const isFavorite = group === "favorite";
+    const isHidden = group === "hidden";
     const index = displayModels.indexOf(model);
     const previousModel = displayModels[index - 1];
     const nextModel = displayModels[index + 1];
@@ -474,11 +422,10 @@ export function ProviderModelsSection({
         className={cn(
           // Actions column is at least wide enough for the four custom-row
           // buttons so capability labels line up across built-in and custom rows.
-          "grid h-7 grid-cols-[1.5rem_minmax(0,1fr)_auto_minmax(5.5rem,auto)_auto] items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted/30",
+          "grid h-7 grid-cols-[minmax(0,1fr)_auto_minmax(5.5rem,auto)_auto] items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted/30",
           isHidden && "opacity-50",
         )}
       >
-        {starButton(model, isFavorite)}
         <span className="flex min-w-0 items-baseline gap-2">
           <span className={cn(nameClassName, "truncate")}>{model.name}</span>
           {model.name !== model.slug ? (
@@ -543,9 +490,6 @@ export function ProviderModelsSection({
           ) : null}
           <span className="text-xs text-muted-foreground">
             {models.length} model{models.length === 1 ? "" : "s"}
-            {favoriteCount > 0
-              ? ` · ${favoriteCount} favorite${favoriteCount === 1 ? "" : "s"}`
-              : ""}
             {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ""}
           </span>
         </div>
@@ -581,12 +525,6 @@ export function ProviderModelsSection({
               : undefined;
           return (
             <div key={`${instanceId}:${model.slug}:group`}>
-              {startsGroup && favoriteCount > 0 && group === "favorite"
-                ? groupLabel("Favorites", index === 0)
-                : null}
-              {startsGroup && favoriteCount > 0 && group === "visible"
-                ? groupLabel("All", index === 0)
-                : null}
               {startsGroup && group === "hidden"
                 ? groupLabel("Hidden from picker", index === 0)
                 : null}

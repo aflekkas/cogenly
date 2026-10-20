@@ -610,14 +610,11 @@ interface ProviderInstanceCardProps {
   readonly setup?: ReactNode;
   readonly runtime?: ReactNode;
   readonly hiddenModels: ReadonlyArray<string>;
-  readonly favoriteModels: ReadonlyArray<string>;
   readonly modelOrder: ReadonlyArray<string>;
   readonly onHiddenModelsChange: (
     next: ReadonlyArray<string>,
     affectedModels?: ReadonlyArray<string>,
   ) => void;
-  readonly onFavoriteModelsChange: (next: ReadonlyArray<string>) => void;
-  readonly onToggleFavorite: (model: string) => void;
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void;
   readonly onRunUpdate?: (() => void) | undefined;
   readonly onInstallRecommended?: (() => void) | undefined;
@@ -665,11 +662,8 @@ export function ProviderInstanceCard({
   setup,
   runtime,
   hiddenModels,
-  favoriteModels,
   modelOrder,
   onHiddenModelsChange,
-  onFavoriteModelsChange,
-  onToggleFavorite,
   onModelOrderChange,
   onRunUpdate,
   onInstallRecommended,
@@ -1266,12 +1260,9 @@ export function ProviderInstanceCard({
               models={modelsForDisplay}
               customModels={customModels}
               hiddenModels={hiddenModels}
-              favoriteModels={favoriteModels}
               modelOrder={modelOrder}
               onChange={updateCustomModels}
               onHiddenModelsChange={onHiddenModelsChange}
-              onFavoriteModelsChange={onFavoriteModelsChange}
-              onToggleFavorite={onToggleFavorite}
               onModelOrderChange={onModelOrderChange}
             />
           </div>
