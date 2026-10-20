@@ -60,7 +60,7 @@ const buttonVariants = cva(
           "[--control-icon-color:currentColor] border-transparent text-muted-foreground [--state-hover-foreground:var(--color-destructive)] [--state-selected-foreground:var(--color-destructive)] state-hover data-pressed:state-selected",
         glass:
           "surface-glass [--control-icon-color:var(--contrast-muted-foreground)] rounded-full border-border/60 text-foreground shadow-sm before:rounded-full [:hover,[data-pressed]]:border-border",
-        link: "border-transparent underline-offset-4 [:hover,[data-pressed]]:underline",
+        link: "border-transparent link",
         "media-close":
           "[--control-icon-color:currentColor] border-transparent bg-black/65 text-white shadow-sm ring-1 ring-white/20 [:hover,[data-pressed]]:bg-black/80 focus-visible:ring-white",
         "media-navigation":
@@ -116,9 +116,9 @@ const inlineButtonVariants = cva(
         default: "text-foreground",
         muted: "text-muted-foreground hover:text-foreground",
         destructive: "text-destructive/80 hover:text-destructive",
-        /** Opens a menu from inside a sentence; the dotted underline marks it as a choice. */
+        /** Opens a menu from inside a sentence; the quiet underline marks it as a choice. */
         picker:
-          "gap-1.5 text-foreground underline decoration-foreground/30 decoration-dotted decoration-from-font underline-offset-4 hover:decoration-foreground hover:decoration-solid data-popup-open:decoration-foreground data-popup-open:decoration-solid",
+          "gap-1.5 text-foreground underline decoration-foreground/30 decoration-from-font underline-offset-4 hover:decoration-foreground data-popup-open:decoration-foreground",
       },
     },
   },

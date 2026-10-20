@@ -188,7 +188,7 @@ const make = Effect.gen(function* () {
           createdBy: origin === "agent" ? "agent" : "user",
           creationSource: origin === "agent" ? "mcp" : "web",
           initialMessage: {
-            text: `${scopeSummary}\n\nSource conversation: [${source.thread.title}](t3-thread://v1/${input.sourceThreadId})\nSource thread ID: ${input.sourceThreadId}${cutOff}\n${input.scopeSummary === undefined ? "These are the chat's own words; read the source conversation for the rest of its context before making changes." : "Use this approved scope; follow the source reference if more context is needed."}`,
+            text: `${scopeSummary}\n\nSource conversation: [${source.thread.title}](cogenly-thread://v1/${input.sourceThreadId})\nSource thread ID: ${input.sourceThreadId}${cutOff}\n${input.scopeSummary === undefined ? "These are the chat's own words; read the source conversation for the rest of its context before making changes." : "Use this approved scope; follow the source reference if more context is needed."}`,
             senderThreadId: input.sourceThreadId,
             attachments: [],
           },

@@ -178,8 +178,7 @@
   border-radius: 4px;
 }
 .agent-markdown a {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  @apply link;
 }
 .agent-markdown blockquote {
   border-left: 2px solid var(--border);

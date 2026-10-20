@@ -275,9 +275,11 @@ and `creationSource: "mcp"`; provider output uses `creationSource: "provider"`.
 Actor and ingress are separate so agent-authored user-role messages remain
 distinguishable from human-authored messages.
 
-Agents mention another thread as `[title](t3-thread://v1/<threadId>)`. The
-link carries only the id, which resolves in the environment of the message that
-holds it. Clients show the thread's current title rather than the label, so a
+Agents mention another thread as `[title](cogenly-thread://v1/<threadId>)`,
+which list, read, and search results provide ready-made as `link`. The link
+carries only the id, which resolves in the environment of the message that
+holds it. Clients also accept the legacy `t3-thread://` scheme and plain URLs
+of the app's own `/<environmentId>/<threadId>` pages. Clients show the thread's current title rather than the label, so a
 rename never leaves a stale link.
 
 List and read results report `snoozed` and `snoozedUntil`, and

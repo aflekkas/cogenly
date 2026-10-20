@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
+import { formatThreadLink } from "@t3tools/shared/threadLinks";
 
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
@@ -107,10 +108,12 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       const threadSearch = yield* ThreadSearch.ThreadSearch;
       const result = yield* threadSearch.search(query).pipe(Effect.mapError(unavailable));
       return {
-        matches:
-          projectId === undefined
-            ? result.matches
-            : result.matches.filter((match) => match.projectId === projectId),
+        matches: result.matches
+          .filter((match) => projectId === undefined || match.projectId === projectId)
+          .map((match) => ({
+            ...match,
+            link: formatThreadLink(match.threadId, match.title ?? match.threadId),
+          })),
       };
     }),
   ),

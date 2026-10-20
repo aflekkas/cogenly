@@ -2628,7 +2628,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 environmentId: ctx.activeThreadEnvironmentId,
                 taskId: userMessage.scheduledTaskId,
               }}
-              className="rounded-sm hover:text-muted-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+              className="link rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
             >
               Sent by automation
             </Link>
@@ -5925,7 +5925,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           {createdThread ? (
             <button
               type="button"
-              className="shrink-0 rounded-sm text-sm text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              className="link shrink-0 rounded-sm text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               aria-label={`Open ${createdThread.title ?? "created thread"}`}
               onClick={(event) => {
                 event.stopPropagation();

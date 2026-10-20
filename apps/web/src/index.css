@@ -407,6 +407,22 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   background: var(--background);
 }
 
+/* The one hyperlink look, for every inline link in the app: link-blue text with a solid
+   underline on hover and keyboard focus. Button's `link` variant and chat markdown use it. */
+@utility link {
+  color: var(--info-foreground);
+  text-decoration-line: none;
+  text-decoration-style: solid;
+  text-decoration-thickness: from-font;
+  text-underline-offset: 3px;
+  transition-property: color, text-decoration-color;
+  transition-duration: 150ms;
+  &:hover,
+  &:focus-visible {
+    text-decoration-line: underline;
+  }
+}
+
 @utility alert-glass {
   --alert-glass-tint: transparent;
   background:
@@ -2460,21 +2476,14 @@ code {
   text-decoration: none;
 }
 
-/* File links are Chips and own their color and focus ring. Links are
-   neutral: foreground text with a quiet underline marks them. */
+/* File links are Chips and own their color and focus ring. Every other link uses the app's
+   one link style. */
 .chat-markdown a:not(.chat-markdown-file-link) {
-  color: var(--foreground);
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, currentcolor 40%, transparent);
-  text-underline-offset: 0.15em;
+  @apply link;
 }
 
-.chat-markdown a:not(.chat-markdown-file-link, [data-markdown-image-link]):hover,
-.chat-markdown a:not(.chat-markdown-file-link, [data-markdown-image-link]):focus-visible {
-  background-image: radial-gradient(circle, currentcolor 0.75px, transparent 1px);
-  background-position: left bottom;
-  background-repeat: repeat-x;
-  background-size: 4px 2px;
+.chat-markdown a[data-markdown-image-link] {
+  text-decoration-line: none;
 }
 
 :is(.chat-markdown, .composer-tiptap) blockquote {

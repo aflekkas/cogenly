@@ -167,7 +167,21 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
-  Layer.mock(ThreadSearch.ThreadSearch)({}),
+  Layer.mock(ThreadSearch.ThreadSearch)({
+    search: () =>
+      Effect.succeed({
+        matches: [
+          {
+            threadId: ThreadId.make("thread-found"),
+            projectId: shell.projectId,
+            title: "Likelihood of [AI] Weekly Checks",
+            source: "assistant",
+            snippet: "weekly checks",
+            messageCreatedAt: null,
+          },
+        ],
+      }),
+  }),
 );
 
 const ToolsListPayload = Schema.fromJsonString(
@@ -483,6 +497,21 @@ const smokeCases = [
     expected: {
       threadId: "thread-scratch",
       runtimeMode: "full-access",
+    },
+  },
+  {
+    // Search results carry a ready-made Markdown link the agent can paste.
+    toolkit: "thread",
+    names: [],
+    tool: "t3_thread_search",
+    args: { query: "weekly checks" },
+    expected: {
+      matches: [
+        {
+          threadId: "thread-found",
+          link: "[Likelihood of AI Weekly Checks](cogenly-thread://v1/thread-found)",
+        },
+      ],
     },
   },
   {

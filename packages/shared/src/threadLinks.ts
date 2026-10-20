@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -8,17 +8,85 @@ import * as Schema from "effect/Schema";
  * clients show the thread's current title; the label only stands in for a thread they cannot see.
  */
 export const THREAD_LINK_PROTOCOL = "cogenly-thread";
+/** Older tool descriptions taught agents `t3-thread://v1/<id>`; messages written with it still resolve. */
+export const LEGACY_THREAD_LINK_PROTOCOL = "t3-thread";
 const THREAD_LINK_HREF_PREFIX = `${THREAD_LINK_PROTOCOL}://v1/`;
+const THREAD_LINK_HREF_PREFIXES = [THREAD_LINK_HREF_PREFIX, `${LEGACY_THREAD_LINK_PROTOCOL}://v1/`];
 // Code comes first in the alternation so a link written inside a code span or fence is skipped.
 const THREAD_LINK_OUTSIDE_CODE =
-  /(?<fence>(`{3,}|~{3,})[\s\S]*?(?:\2|$))|(?<span>(`+)[^\n]*?\4)|\[[^\]\n]*\]\((?<href>cogenly-thread:\/\/v1\/[^\s)]+)\)/g;
+  /(?<fence>(`{3,}|~{3,})[\s\S]*?(?:\2|$))|(?<span>(`+)[^\n]*?\4)|\[[^\]\n]*\]\((?<href>(?:cogenly|t3)-thread:\/\/v1\/[^\s)]+)\)/g;
 
 const decodeThreadId = Schema.decodeUnknownOption(ThreadId);
+const decodeEnvironmentId = Schema.decodeUnknownOption(EnvironmentId);
 
 /** The id as written. Thread ids can hold percent escapes of their own, so it is not decoded. */
 export function parseThreadLinkHref(href: string): ThreadId | null {
-  if (!href.startsWith(THREAD_LINK_HREF_PREFIX)) return null;
-  return Option.getOrNull(decodeThreadId(href.slice(THREAD_LINK_HREF_PREFIX.length)));
+  const prefix = THREAD_LINK_HREF_PREFIXES.find((candidate) => href.startsWith(candidate));
+  if (prefix === undefined) return null;
+  return Option.getOrNull(decodeThreadId(href.slice(prefix.length)));
+}
+
+// First path segments of app routes that are not `/<environmentId>/<threadId>`.
+const NON_THREAD_ROUTE_SEGMENTS = new Set([
+  "api",
+  "connect",
+  "connect-agent",
+  "draft",
+  "new",
+  "oauth",
+  "pair",
+  "project",
+  "projects",
+  "settings",
+  "usage",
+  "welcome",
+]);
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function originKey(url: URL): string {
+  // `url.origin` is "null" for custom schemes such as the desktop renderer's `cogenly://app`.
+  return `${url.protocol}//${url.host}`;
+}
+
+/**
+ * A plain URL of one of the app's own thread pages, `<origin>/<environmentId>/<threadId>`, on the
+ * page's own origin or a loopback dev server. The caller still checks that the thread exists,
+ * since another local app can serve the same path shape.
+ */
+export function parseAppThreadUrl(
+  href: string,
+  currentUrl: string | null,
+): { readonly environmentId: EnvironmentId; readonly threadId: ThreadId } | null {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  const sameOrigin = (() => {
+    if (currentUrl === null) return false;
+    try {
+      return originKey(new URL(currentUrl)) === originKey(url);
+    } catch {
+      return false;
+    }
+  })();
+  const loopback =
+    (url.protocol === "http:" || url.protocol === "https:") && LOOPBACK_HOSTNAMES.has(url.hostname);
+  if (!sameOrigin && !loopback) return null;
+  const segments = url.pathname.split("/").filter((segment) => segment !== "");
+  if (segments.length !== 2) return null;
+  const [rawEnvironmentId = "", rawThreadId = ""] = segments;
+  if (NON_THREAD_ROUTE_SEGMENTS.has(rawEnvironmentId)) return null;
+  try {
+    const environmentId = Option.getOrNull(
+      decodeEnvironmentId(decodeURIComponent(rawEnvironmentId)),
+    );
+    const threadId = Option.getOrNull(decodeThreadId(decodeURIComponent(rawThreadId)));
+    return environmentId === null || threadId === null ? null : { environmentId, threadId };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -44,7 +112,7 @@ export function formatThreadLink(threadId: string, label: string): string {
 }
 
 export function hasThreadLinks(markdown: string): boolean {
-  return markdown.includes(`](${THREAD_LINK_HREF_PREFIX}`);
+  return THREAD_LINK_HREF_PREFIXES.some((prefix) => markdown.includes(`](${prefix}`));
 }
 
 /**

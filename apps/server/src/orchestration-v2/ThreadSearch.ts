@@ -31,6 +31,7 @@ const SearchRequest = Schema.Struct({ pattern: Schema.String, limit: Schema.Int 
 const SearchRow = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
+  title: Schema.String,
   source: OrchestrationThreadSearchSource,
   matchText: Schema.String,
   messageCreatedAt: Schema.NullOr(IsoDateTime),
@@ -89,6 +90,7 @@ export const make = Effect.gen(function* () {
         SELECT
           threads.thread_id,
           threads.project_id,
+          threads.title AS thread_title,
           messages.role,
           json_extract(messages.payload_json, '$.text') AS match_text,
           messages.created_at AS message_created_at,
@@ -110,6 +112,7 @@ export const make = Effect.gen(function* () {
         SELECT
           thread_id,
           project_id,
+          thread_title,
           role AS source,
           match_text,
           message_created_at,
@@ -127,6 +130,7 @@ export const make = Effect.gen(function* () {
       SELECT
         thread_id AS "threadId",
         project_id AS "projectId",
+        thread_title AS "title",
         source,
         match_text AS "matchText",
         message_created_at AS "messageCreatedAt"
@@ -162,6 +166,7 @@ export const make = Effect.gen(function* () {
         matches: rows.map((row) => ({
           threadId: row.threadId,
           projectId: row.projectId,
+          title: row.title,
           source: row.source,
           snippet: buildSearchSnippet(row.matchText, input.query),
           messageCreatedAt: row.messageCreatedAt,

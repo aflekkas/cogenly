@@ -96,6 +96,7 @@ import {
   type McpThreadInvocationScope,
   requireThreadScope,
 } from "./McpInvocationContext.ts";
+import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import * as Metrics from "../observability/Metrics.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 
@@ -682,6 +683,7 @@ function listItemFromShell(
   return {
     threadId: shell.id,
     title: shell.title,
+    link: formatThreadLink(shell.id, shell.title),
     createdBy: shell.createdBy,
     creationSource: shell.creationSource,
     status: shell.activityRunStatus ?? shell.status,
@@ -713,6 +715,7 @@ function threadDetail(
     threadId: projection.thread.id,
     projectId: projection.thread.projectId,
     title: projection.thread.title,
+    link: formatThreadLink(projection.thread.id, projection.thread.title),
     createdBy: projection.thread.createdBy,
     creationSource: projection.thread.creationSource,
     status: active?.status ?? latest?.status ?? "idle",

@@ -22,6 +22,8 @@ export type OrchestrationSearchThreadsInput = typeof OrchestrationSearchThreadsI
 export const OrchestrationThreadSearchMatch = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
+  /** The thread's title. Optional so older servers still decode. */
+  title: Schema.optionalKey(Schema.String),
   source: OrchestrationThreadSearchSource,
   snippet: Schema.String.check(Schema.isMaxLength(240)),
   messageCreatedAt: Schema.NullOr(IsoDateTime),

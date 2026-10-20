@@ -103,7 +103,7 @@ import { createIncrementalMarkdownPlugin } from "../markdown-incremental";
 import { defaultUrlTransform } from "react-markdown";
 import { parseAssistantCitationHref } from "@t3tools/shared/assistantCitations";
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
-import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
+import { parseAppThreadUrl, parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import {
@@ -2964,15 +2964,29 @@ const CHAT_MARKDOWN_COMPONENTS = {
           )}
         </a>
       );
-      if (!faviconHost || !href) {
-        return link;
+      const webLink =
+        !faviconHost || !href ? (
+          link
+        ) : (
+          <Tooltip>
+            <TooltipTrigger render={link} />
+            <TooltipPopup side="top">{href}</TooltipPopup>
+          </Tooltip>
+        );
+      // A plain URL of one of this app's thread pages opens in the app like a thread link. It stays
+      // a web link when no such thread exists, since another local app can serve the same path.
+      const appThread = href ? parseAppThreadUrl(href, window.location.href) : null;
+      if (appThread) {
+        return (
+          <MarkdownThreadLink
+            environmentId={appThread.environmentId}
+            threadId={appThread.threadId}
+            label={hastPlainTextDeep(node) || href || ""}
+            fallback={webLink}
+          />
+        );
       }
-      return (
-        <Tooltip>
-          <TooltipTrigger render={link} />
-          <TooltipPopup side="top">{href}</TooltipPopup>
-        </Tooltip>
-      );
+      return webLink;
     }
 
     const label = nodeToPlainText(children);

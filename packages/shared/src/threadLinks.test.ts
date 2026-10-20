@@ -1,12 +1,24 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { formatThreadLink, parseThreadLinkHref, relabelThreadLinks } from "./threadLinks.ts";
+import {
+  formatThreadLink,
+  parseAppThreadUrl,
+  parseThreadLinkHref,
+  relabelThreadLinks,
+} from "./threadLinks.ts";
 
 describe("thread links", () => {
   it("takes the thread id verbatim, percent escapes included", () => {
     expect(parseThreadLinkHref("cogenly-thread://v1/mcp:1234")).toBe("mcp:1234");
     expect(parseThreadLinkHref("cogenly-thread://v1/thread:delegated-task:mcp%3A1")).toBe(
       "thread:delegated-task:mcp%3A1",
+    );
+  });
+
+  it("still reads the legacy t3-thread scheme", () => {
+    expect(parseThreadLinkHref("t3-thread://v1/5609dcde-b1fa")).toBe("5609dcde-b1fa");
+    expect(relabelThreadLinks("[Old](t3-thread://v1/t1)", () => "New")).toBe(
+      "[New](cogenly-thread://v1/t1)",
     );
   });
 
@@ -75,5 +87,36 @@ describe("thread links", () => {
     ).toBe(
       "See [Fix the build now](cogenly-thread://v1/renamed) and [Gone](cogenly-thread://v1/deleted).",
     );
+  });
+
+  describe("app thread URLs", () => {
+    const current = "http://localhost:9734/env-1/current";
+
+    it("reads a thread page on the current origin or a loopback dev server", () => {
+      expect(parseAppThreadUrl("http://localhost:9734/env-1/thread-1", current)).toEqual({
+        environmentId: "env-1",
+        threadId: "thread-1",
+      });
+      expect(parseAppThreadUrl("http://127.0.0.1:5733/env-1/thread%3A1?x=1#y", null)).toEqual({
+        environmentId: "env-1",
+        threadId: "thread:1",
+      });
+      expect(
+        parseAppThreadUrl("https://box.tail.ts.net/env-1/thread-1", "https://box.tail.ts.net/"),
+      ).toEqual({ environmentId: "env-1", threadId: "thread-1" });
+      expect(parseAppThreadUrl("cogenly://app/env-1/thread-1", "cogenly://app/env-1/t")).toEqual({
+        environmentId: "env-1",
+        threadId: "thread-1",
+      });
+    });
+
+    it("ignores other sites, other routes, and other path shapes", () => {
+      expect(parseAppThreadUrl("https://github.com/owner/repo", current)).toBeNull();
+      expect(parseAppThreadUrl("http://localhost:9734/settings/general", current)).toBeNull();
+      expect(parseAppThreadUrl("http://localhost:9734/draft/abc", current)).toBeNull();
+      expect(parseAppThreadUrl("http://localhost:9734/env-1", current)).toBeNull();
+      expect(parseAppThreadUrl("http://localhost:9734/a/b/c", current)).toBeNull();
+      expect(parseAppThreadUrl("not a url", current)).toBeNull();
+    });
   });
 });

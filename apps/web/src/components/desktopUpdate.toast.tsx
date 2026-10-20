@@ -30,7 +30,7 @@ function ReleaseNotesLink({
 }) {
   return (
     <button
-      className="ml-2 inline cursor-pointer text-muted-foreground underline decoration-dotted underline-offset-4 transition-colors hover:text-foreground"
+      className="link ml-2 inline cursor-pointer"
       onClick={() => {
         void openDesktopUpdateReleaseNotes(shell, releaseUrl);
       }}

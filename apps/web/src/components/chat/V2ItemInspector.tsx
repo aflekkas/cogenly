@@ -353,7 +353,7 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
                     href={safeHref}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
+                    className="link inline-flex items-center gap-1 font-medium"
                   >
                     {result.title ?? result.url}
                     <ExternalLinkIcon className="size-3" />

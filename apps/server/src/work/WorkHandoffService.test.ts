@@ -284,7 +284,7 @@ it.effect(
         expect(projection.thread.sourceThreadId).toBe(sourceId);
         expect(projection.runs[0]?.workspacePreparation?.type).toBe("worktree");
         expect(projection.messages[0]?.text).toContain(input.scopeSummary);
-        expect(projection.messages[0]?.text).toContain(`t3-thread://v1/${sourceId}`);
+        expect(projection.messages[0]?.text).toContain(`cogenly-thread://v1/${sourceId}`);
         expect(projection.contextHandoffs[0]?.sourceThreadId).toBe(sourceId);
         expect(projection.contextHandoffs[0]?.summaryText).toBe(input.scopeSummary);
         expect(
@@ -795,7 +795,7 @@ it.effect("hands the chat over as is when no title or scope is given, and titles
       expect(text).toContain("1. Add booking-audit validation.");
       expect(text).toContain("Plan: validate dates first, then totals.");
       expect(text).not.toContain("marketing page");
-      expect(text).toContain(`t3-thread://v1/${sourceId}`);
+      expect(text).toContain(`cogenly-thread://v1/${sourceId}`);
       expect(projection.contextHandoffs[0]?.summaryText).toContain("Add booking-audit validation.");
       // A git repository with no workspace choice gets its own worktree.
       expect(projection.runs[0]?.workspacePreparation?.type).toBe("worktree");

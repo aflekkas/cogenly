@@ -1424,7 +1424,7 @@ function NetworkAccessDescription({
       {hiddenEndpointCount > 0 ? (
         <button
           type="button"
-          className="inline-flex min-w-0 max-w-full items-baseline gap-2 border-b border-dotted border-muted-foreground/60 text-left text-muted-foreground underline-offset-4 hover:border-foreground hover:text-foreground"
+          className="inline-flex min-w-0 max-w-full items-baseline gap-2 text-left text-muted-foreground underline decoration-muted-foreground/60 underline-offset-4 hover:text-foreground hover:decoration-foreground"
           onClick={onToggleExpanded}
           aria-expanded={expanded}
         >

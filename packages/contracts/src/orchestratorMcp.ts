@@ -321,6 +321,8 @@ export type OrchestratorMcpThreadListInput = typeof OrchestratorMcpThreadListInp
 export const OrchestratorMcpThreadListItem = Schema.Struct({
   threadId: ThreadId,
   title: Schema.String,
+  /** Markdown link to this thread, `[title](cogenly-thread://v1/<threadId>)`, to paste when mentioning it. */
+  link: Schema.String,
   createdBy: OrchestrationV2Actor,
   creationSource: OrchestrationV2CreationSource,
   status: OrchestratorMcpThreadStatus,
@@ -369,6 +371,8 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   title: Schema.String,
+  /** Markdown link to this thread, `[title](cogenly-thread://v1/<threadId>)`, to paste when mentioning it. */
+  link: Schema.String,
   createdBy: OrchestrationV2Actor,
   creationSource: OrchestrationV2CreationSource,
   status: OrchestratorMcpThreadStatus,
