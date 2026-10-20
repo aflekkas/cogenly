@@ -1,6 +1,7 @@
 import type { DraftId } from "~/composerDraftStore";
 import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
 import {
+  type EnvironmentId,
   resolveEnvironmentMachineKind,
   type ScopedProjectRef,
   type ThreadSurface,
@@ -162,15 +163,24 @@ export function DraftHeroHeadline({
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = projectPickerEntries.length > 0;
   const shouldShowProjectMenu = canChooseProject;
+  // Whether a project is its machine's no-project home. Read from the
+  // machine's config even while it reconnects: scratchWorkspaceRootFor is
+  // null then, and the home would read as a project named "No project".
+  const isNoProjectHome = useCallback(
+    (project: { readonly environmentId: EnvironmentId; readonly workspaceRoot: string }) =>
+      isScratchProject(
+        project,
+        scratchWorkspaceRootFor(project.environmentId) ??
+          environments.find((environment) => environment.environmentId === project.environmentId)
+            ?.serverConfig?.scratchWorkspaceRoot,
+      ),
+    [environments, scratchWorkspaceRootFor],
+  );
   // The project that hosts threads without a project is not a row: the line
   // under the headline is the way into it.
   const menuEntries = useMemo(
-    () =>
-      projectPickerEntries.filter(
-        ({ targetProject }) =>
-          !isScratchProject(targetProject, scratchWorkspaceRootFor(targetProject.environmentId)),
-      ),
-    [projectPickerEntries, scratchWorkspaceRootFor],
+    () => projectPickerEntries.filter(({ targetProject }) => !isNoProjectHome(targetProject)),
+    [isNoProjectHome, projectPickerEntries],
   );
   const activeProject =
     activeProjectRef === null
@@ -184,8 +194,7 @@ export function DraftHeroHeadline({
     activeProjectRef?.environmentId ?? primaryEnvironmentId,
   );
   const scratchWorkspaceRoot = scratchWorkspaceRootFor(scratchTargetEnvironmentId);
-  const isScratchDraft =
-    activeProject !== null && isScratchProject(activeProject, scratchWorkspaceRoot);
+  const isScratchDraft = activeProject !== null && isNoProjectHome(activeProject);
   // A chat is a quick conversation: no repository choice at all. Work may run
   // without a repository, and says so in the picker. Drafts from before the
   // surface was recorded keep the old guess.
@@ -317,7 +326,7 @@ export function DraftHeroHeadline({
             // aria-label here would replace the title with an action phrase
             // mid-sentence and baffle screen-reader users.
             <ComboboxTrigger
-              render={<InlineButton tone="picker" />}
+              render={<InlineButton tone={isScratchDraft ? "muted" : "picker"} />}
               data-draft-project-trigger=""
               className="pointer-events-auto max-w-64 align-baseline"
             />
@@ -329,7 +338,9 @@ export function DraftHeroHeadline({
             {!isScratchDraft && activeProjectDisplayName ? (
               <RepositoryBadge name={activeProjectDisplayName} size="inline" />
             ) : null}
-            {isScratchDraft ? "No repository" : (activeProjectDisplayName ?? "Choose a repository")}
+            {isScratchDraft
+              ? "in a repository…"
+              : (activeProjectDisplayName ?? "Choose a repository")}
           </span>
         </TooltipTrigger>
         {activeProjectDisplayName && !isScratchDraft ? (
@@ -457,7 +468,7 @@ export function DraftHeroHeadline({
       </h1>
       {/* Reserved whenever threads can skip a project, so the heading does not
           move. Without a project, the picker moves here to choose one. */}
-      {isChatDraft || scratchWorkspaceRoot === null ? null : (
+      {isChatDraft || (scratchWorkspaceRoot === null && !isScratchDraft) ? null : (
         <p className="mt-2 flex h-6 items-center text-sm">
           <FadeSwap group="draft-subline" swapKey={isScratchDraft ? "picker" : "start-without"}>
             {isScratchDraft ? projectSelector : orStartWithoutProject}
