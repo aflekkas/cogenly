@@ -35,3 +35,12 @@ export function ComposerContextLabel({
     </span>
   );
 }
+
+// Tooltips on the composer's context strip open below, away from the composer
+// card above them, and flip against the viewport alone: the strip clips
+// horizontal overflow, which would otherwise count as the tooltip's room and
+// bounce it back over the card.
+export const COMPOSER_CONTEXT_TOOLTIP = {
+  side: "bottom",
+  collisionBoundary: [] as Element[],
+} as const;

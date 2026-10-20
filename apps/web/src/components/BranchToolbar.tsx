@@ -1,7 +1,7 @@
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { ComposerContextLabel } from "./ComposerContextLabel";
+import { COMPOSER_CONTEXT_TOOLTIP, ComposerContextLabel } from "./ComposerContextLabel";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
@@ -218,7 +218,7 @@ const RunContextSelector = memo(function RunContextSelector({
           }
         />
       </TooltipTrigger>
-      <TooltipPopup>
+      <TooltipPopup {...(isPanel ? {} : COMPOSER_CONTEXT_TOOLTIP)}>
         {isPanel
           ? forceNewWorktree
             ? "Each model starts in its own worktree."
@@ -245,7 +245,9 @@ const RunContextSelector = memo(function RunContextSelector({
             />
           )}
         </TooltipTrigger>
-        <TooltipPopup>{autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}</TooltipPopup>
+        <TooltipPopup {...(isPanel ? {} : COMPOSER_CONTEXT_TOOLTIP)}>
+          {autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}
+        </TooltipPopup>
       </Tooltip>
       {workspaceIcon}
     </span>

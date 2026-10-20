@@ -1,5 +1,5 @@
 import { ComposerSelectControl } from "./chat/ComposerControl";
-import { ComposerContextLabel } from "./ComposerContextLabel";
+import { COMPOSER_CONTEXT_TOOLTIP, ComposerContextLabel } from "./ComposerContextLabel";
 import { FolderGit2Icon, FolderGitIcon, FolderIcon } from "lucide-react";
 import { memo, useMemo, type MouseEvent as ReactMouseEvent } from "react";
 
@@ -90,7 +90,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
     return (
       <Tooltip>
         <TooltipTrigger render={lockedRow} />
-        <TooltipPopup>
+        <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>
           {forceNewWorktree
             ? "Each model starts in its own worktree."
             : resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode)}
@@ -136,7 +136,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
             <SelectValue />
           </ComposerContextLabel>
         </TooltipTrigger>
-        <TooltipPopup>
+        <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>
           {effectiveEnvMode === "worktree"
             ? resolveEnvModeLabel("worktree")
             : resolveCurrentWorkspaceLabel(activeWorktreePath)}

@@ -150,6 +150,7 @@ function TooltipPopup({
   side = "top",
   variant = "default",
   anchor,
+  collisionBoundary,
   children,
   ...props
 }: TooltipPrimitive.Popup.Props & {
@@ -159,11 +160,23 @@ function TooltipPopup({
   /** `code` renders monospace content that breaks anywhere, for paths and commands. */
   variant?: "default" | "glass" | "code";
   anchor?: TooltipPrimitive.Positioner.Props["anchor"];
+  /**
+   * What the tooltip must fit inside before it flips. Defaults to the trigger's
+   * clipping ancestors; pass `[]` to flip against the viewport alone when the
+   * trigger sits in an overflow-clip box that never scrolls.
+   */
+  collisionBoundary?: TooltipPrimitive.Positioner.Props["collisionBoundary"];
 }) {
   const popupRef = usePopWhenCopied(plainLabel(children));
   return (
     <TooltipPrimitive.Portal>
-      <TooltipPositioner align={align} anchor={anchor} side={side} sideOffset={sideOffset}>
+      <TooltipPositioner
+        align={align}
+        anchor={anchor}
+        side={side}
+        sideOffset={sideOffset}
+        {...(collisionBoundary !== undefined ? { collisionBoundary } : {})}
+      >
         <TooltipPrimitive.Popup
           ref={popupRef}
           className={cn(

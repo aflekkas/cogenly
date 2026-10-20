@@ -228,15 +228,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --shadow-composer-dark: 0 14px 32px -18px rgb(0 0 0 / 75%);
   /* Dark-mode shade where an attached surface meets the composer: 10px of
      shadow fading away from the seam. Inline, so the offsets resolve on the
-     element. below: the context strip under the composer (1rem seam, faint
-     white fill). above: an attached banner over it (its tint on top). */
+     element. below: the tray under the composer, whose box starts at the
+     card's bottom edge (faint white fill). above: an attached banner over it
+     (its tint on top). */
   --background-image-composer-seam-below:
-    linear-gradient(
-      to bottom,
-      transparent 0 1rem,
-      rgb(0 0 0 / 18%) 1rem,
-      transparent calc(1rem + 10px)
-    ),
+    linear-gradient(to bottom, rgb(0 0 0 / 18%), transparent 10px),
     linear-gradient(rgb(255 255 255 / 1%), rgb(255 255 255 / 1%));
   --background-image-composer-seam-above:
     linear-gradient(var(--chat-composer-attached-tint), var(--chat-composer-attached-tint)),

@@ -1,5 +1,5 @@
 import { ComposerSelectControl } from "./chat/ComposerControl";
-import { ComposerContextLabel } from "./ComposerContextLabel";
+import { COMPOSER_CONTEXT_TOOLTIP, ComposerContextLabel } from "./ComposerContextLabel";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { ScaleIcon } from "lucide-react";
@@ -73,7 +73,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     return (
       <Tooltip>
         <TooltipTrigger render={lockedRow} />
-        <TooltipPopup>{activeEnvironment?.label ?? "Run on"}</TooltipPopup>
+        <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>
+          {activeEnvironment?.label ?? "Run on"}
+        </TooltipPopup>
       </Tooltip>
     );
   }
@@ -111,7 +113,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             <SelectValue />
           </ComposerContextLabel>
         </TooltipTrigger>
-        <TooltipPopup>{autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}</TooltipPopup>
+        <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>
+          {autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}
+        </TooltipPopup>
       </Tooltip>
       <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
         <SelectGroup>
