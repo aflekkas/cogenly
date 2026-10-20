@@ -131,6 +131,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --workspace-titlebar-control-size: 1.75rem;
   --workspace-titlebar-control-gap: 0.75rem;
   --workspace-titlebar-scroll-fade-height: 1.5rem;
+  /* Top-anchored toasts sit this far below the window's top edge. */
+  --toast-top-offset: 0.75rem;
   /* Motion durations, tuned toward Apple's feel. fast: hover, press and color
      feedback. base: selection, status swaps, popovers and toasts. slow: panels,
      sheets and other large spatial moves (panels leave at 0.7x, see panelFlip).
@@ -168,6 +170,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --app-scrollbar-thumb: rgb(255 255 255 / 8%);
     --app-scrollbar-thumb-hover: rgb(255 255 255 / 12%);
   }
+}
+
+/* The desktop app paints window controls into the top strip: the macOS
+   traffic lights, centred in the 52px topbar, end 33px down; Windows and Linux
+   draw a 40px caption strip. Toasts sit just under them. */
+.electron {
+  --toast-top-offset: 2.5rem;
 }
 
 .wco {
@@ -975,7 +984,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    on by default; native scrollers add scroll-fade-y, scroll-fade-x or
    scroll-fade. A native vertical scrollbar sits inside the mask, so
    scroll-fade-y keeps its lane opaque with --scroll-fade-lane (the app's
-   scrollbar width; set 0px where the scrollbar is hidden). */
+   scrollbar width; set 0px where the scrollbar is hidden), and its top fade
+   can run longer than the bottom with --scroll-fade-start-size, for a header
+   floating over the scroller. */
 @property --scroll-fade-start-y {
   syntax: "<length>";
   inherits: false;
@@ -1009,7 +1020,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --scroll-fade-start-y: 0px;
   }
   to {
-    --scroll-fade-start-y: var(--scroll-fade-size);
+    --scroll-fade-start-y: var(--scroll-fade-start-size, var(--scroll-fade-size));
   }
 }
 @keyframes scroll-fade-end-y {
@@ -1045,7 +1056,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       scroll-fade-end-y linear both;
     animation-timeline: scroll(self block), scroll(self block);
     animation-range:
-      0 var(--scroll-fade-size),
+      0 var(--scroll-fade-start-size, var(--scroll-fade-size)),
       calc(100% - var(--scroll-fade-size)) 100%;
     -webkit-mask-image:
       linear-gradient(
@@ -1895,9 +1906,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --state-selected-edge: rgb(255 255 255 / 6%);
     --state-selected-shadow: 0 0 #0000;
     /* Reference text tones: titles and bubbles (242,244,247), muted labels,
-       timestamps and composer controls (125,127,132); the composer
-       placeholder samples at (106,108,111) through its thin strokes, which
-       this token reproduces. */
+       timestamps and composer controls (125,127,132). Muted sits at the AA
+       floor: 4.85:1 on the canvas, 4.58:1 on the composer, 4.44:1 on cards,
+       so it cannot go darker without failing on card surfaces. */
     --foreground: #f2f4f7;
     --card: #16181b;
     --card-foreground: #f2f4f7;
@@ -1928,7 +1939,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 3%);
     --muted-foreground: #7d7f84;
-    --placeholder: #85888c;
+    /* Placeholders match muted rather than sitting a step above it, so hint
+       text reads clearly as secondary to what the user typed. Still 4.85:1 on
+       the canvas; the composer draws it at 75% for a quieter hint. */
+    --placeholder: var(--muted-foreground);
     /* Inline code chips in the transcript sit on a (30,32,35) fill. */
     --inline-code-surface: #1e2023;
     --accent: --alpha(var(--color-white) / 4%);
@@ -2201,8 +2215,9 @@ html[data-theme-token-probe] *::after {
 /* Workspace actions use a small, separate chrome hierarchy. Keeping these
    roles explicit prevents the thread toolbar from falling back to the default
    dark-mode whites while preserving the same theme file across clients. */
+/* No fill on the chat header: it floats over the transcript, and a toolbar
+   tint there read as a darker dead band above the chat. */
 html[data-theme-id] [data-chat-header] {
-  background-color: var(--toolbar-background);
   color: var(--contrast-toolbar-foreground);
 }
 
@@ -3113,8 +3128,20 @@ code {
       env(safe-area-inset-right) + 0.75rem + var(--chat-lane-inset-end, 0px)
     );
   }
+  /* The chat header floats over the transcript instead of reserving a band:
+     the scroller reaches up under it (--chat-header-overlap, set where the
+     header overlays it), its first row starts below the header, and content
+     scrolled up fades out across the header's height, so the controls stay
+     legible over a band that matches the canvas. */
+  [data-chat-header-overlap] {
+    --chat-header-overlap: var(--workspace-topbar-height);
+  }
   .messages-timeline-scroll {
     --scroll-fade-end-inset: var(--chat-composer-cover, 0px);
+    --scroll-fade-start-size: calc(var(--chat-header-overlap, 0px) + var(--scroll-fade-size));
+    height: calc(100% + var(--chat-header-overlap, 0px));
+    margin-top: calc(-1 * var(--chat-header-overlap, 0px));
+    scroll-padding-top: var(--chat-header-overlap, 0px);
   }
   [data-chat-canvas] .messages-timeline-scroll {
     padding-inline-start: calc(

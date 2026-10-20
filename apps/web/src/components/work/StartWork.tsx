@@ -36,6 +36,7 @@ import {
   Combobox,
   ComboboxEmpty,
   ComboboxItem,
+  ComboboxItemIcon,
   ComboboxList,
   ComboboxPopup,
   ComboboxSearchInput,
@@ -265,7 +266,7 @@ export function StartWorkPicker(props: {
         </TooltipTrigger>
         <TooltipPopup side="top">{pending ? "Starting Work…" : props.tooltip}</TooltipPopup>
       </Tooltip>
-      <ComboboxPopup align="start" className="w-72 overflow-hidden">
+      <ComboboxPopup align="start" className="w-72">
         <ComboboxSearchInput
           aria-label="Search repositories"
           placeholder="Start Work in…"
@@ -275,8 +276,16 @@ export function StartWorkPicker(props: {
         <ComboboxEmpty>No matching repositories.</ComboboxEmpty>
         <ComboboxList>
           {(item: WorkPickerChoice) => (
-            <ComboboxItem key={item.value} hideIndicator value={item}>
-              <WorkPickerChoiceIcon choice={item} />
+            <ComboboxItem
+              key={item.value}
+              hideIndicator
+              value={item}
+              tone={item.value === ADD_REPOSITORY ? "action" : "default"}
+              divider={item.value === ADD_REPOSITORY}
+            >
+              <ComboboxItemIcon>
+                <WorkPickerChoiceIcon choice={item} />
+              </ComboboxItemIcon>
               <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
             </ComboboxItem>
           )}

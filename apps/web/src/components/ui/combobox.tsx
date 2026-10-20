@@ -107,14 +107,20 @@ function ComboboxInput({
   );
 }
 
-/** The search row at the top of a combobox popup: the shared search field around the combobox input. */
+/**
+ * The search row at the top of a combobox popup. Like the command palette's
+ * header it is borderless and flush with the popup, with a hairline under it,
+ * so there is no second radius to clash with the popup's. Its inset matches
+ * the list's (list padding plus row padding), so the search icon sits in the
+ * same column as every row's leading icon.
+ */
 function ComboboxSearchInput({
   className,
   ...props
 }: Omit<ComboboxPrimitive.Input.Props, "size" | "className"> & { className?: string }) {
   return (
-    <div className="min-w-0 shrink-0 px-2 pt-2">
-      <SearchField size="sm">
+    <div className="min-w-0 shrink-0 border-b border-border px-3.5" data-slot="combobox-search">
+      <SearchField size="sm" variant="bare" className="h-9">
         <ComboboxPrimitive.Input
           data-slot="combobox-input"
           className={cn(searchFieldInputClassName, className)}
@@ -140,6 +146,9 @@ function ComboboxPopup({
   sideOffset = 4,
   alignOffset,
   align = "start",
+  // Keeps the popup clear of the viewport edge, so it never sits chopped
+  // against a window side when its trigger is near one.
+  collisionPadding = 12,
   anchor: anchorProp,
   ...props
 }: ComboboxPrimitive.Popup.Props & {
@@ -147,6 +156,7 @@ function ComboboxPopup({
   sideOffset?: ComboboxPrimitive.Positioner.Props["sideOffset"];
   alignOffset?: ComboboxPrimitive.Positioner.Props["alignOffset"];
   side?: ComboboxPrimitive.Positioner.Props["side"];
+  collisionPadding?: ComboboxPrimitive.Positioner.Props["collisionPadding"];
   anchor?: ComboboxPrimitive.Positioner.Props["anchor"];
 }) {
   const { chipsRef, multiple } = React.use(ComboboxContext);
@@ -159,6 +169,7 @@ function ComboboxPopup({
         alignOffset={alignOffset}
         anchor={anchor}
         className="z-[130] select-none"
+        collisionPadding={collisionPadding}
         data-slot="combobox-positioner"
         side={side}
         sideOffset={sideOffset}
@@ -185,14 +196,24 @@ function ComboboxItem({
   className,
   children,
   hideIndicator: _hideIndicator = false,
+  tone = "default",
+  divider = false,
   ...props
 }: ComboboxPrimitive.Item.Props & {
   hideIndicator?: boolean;
+  /** `action` is for a row that does something other than pick a value, such as "Add repository": muted until hovered. */
+  tone?: "default" | "action";
+  /** Draws a hairline above the row, setting an action row apart from the values. */
+  divider?: boolean;
 }) {
   return (
     <ComboboxPrimitive.Item
       className={cn(
         "flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base outline-none state-hover data-selected:state-selected data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        tone === "action" && "text-muted-foreground",
+        // The hairline spans the popup, not just the row, and sits centered in the gap above the row.
+        divider &&
+          "relative mt-2 before:absolute before:-inset-x-1.5 before:-top-1 before:h-px before:bg-border",
         className,
       )}
       data-slot="combobox-item"
@@ -209,11 +230,25 @@ function ComboboxItem({
   );
 }
 
+/**
+ * A fixed leading column for a row's icon or badge, so a 14px repository
+ * badge and a 16px icon put their labels on the same line.
+ */
+function ComboboxItemIcon({ className, ...props }: React.ComponentProps<"span">) {
+  return (
+    <span
+      className={cn("flex size-4 shrink-0 items-center justify-center", className)}
+      data-slot="combobox-item-icon"
+      {...props}
+    />
+  );
+}
+
 function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
   return (
     <ComboboxPrimitive.Empty
       className={cn(
-        "not-empty:p-2 text-center text-base text-muted-foreground sm:text-sm",
+        "not-empty:px-3.5 not-empty:py-3 text-center text-base text-muted-foreground sm:text-sm",
         className,
       )}
       data-slot="combobox-empty"
@@ -222,11 +257,13 @@ function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
   );
 }
 
+// The list pads 6px and rows pad 8px, so a highlighted row's fill sits 6px in
+// from the popup edge and its icon 14px in, the same inset as the search row.
 function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
   return (
     <ScrollArea scrollbarGutter scrollFade>
       <ComboboxPrimitive.List
-        className={cn("not-empty:scroll-py-1 not-empty:px-1 not-empty:py-1", className)}
+        className={cn("not-empty:scroll-py-1.5 not-empty:p-1.5", className)}
         data-slot="combobox-list"
         {...props}
       />
@@ -242,7 +279,7 @@ function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
 function ComboboxListVirtualized({ className, ...props }: ComboboxPrimitive.List.Props) {
   return (
     <ComboboxPrimitive.List
-      className={cn("size-full min-w-0 outline-none not-empty:px-1 not-empty:py-1", className)}
+      className={cn("size-full min-w-0 outline-none not-empty:p-1.5", className)}
       data-slot="combobox-list"
       {...props}
     />
@@ -275,6 +312,7 @@ export {
   ComboboxTrigger,
   ComboboxPopup,
   ComboboxItem,
+  ComboboxItemIcon,
   ComboboxEmpty,
   ComboboxList,
   ComboboxListVirtualized,

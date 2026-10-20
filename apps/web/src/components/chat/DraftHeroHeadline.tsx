@@ -39,6 +39,7 @@ import {
   Combobox,
   ComboboxEmpty,
   ComboboxItem,
+  ComboboxItemIcon,
   ComboboxList,
   ComboboxPopup,
   ComboboxSearchInput,
@@ -347,10 +348,11 @@ export function DraftHeroHeadline({
           <TooltipPopup side="top">{activeProjectDisplayName}</TooltipPopup>
         ) : null}
       </Tooltip>
-      <ComboboxPopup align="center" className="w-72 overflow-hidden">
+      {/* Clear of the heading's underline, so the popup starts under the sentence rather than on it. */}
+      <ComboboxPopup align="center" sideOffset={8} className="w-72">
         <ComboboxSearchInput
           aria-label="Search repositories"
-          placeholder="Search repositories..."
+          placeholder="Search repositories…"
           value={pickerQuery}
           onChange={(event) => setPickerQuery(event.target.value)}
         />
@@ -358,13 +360,22 @@ export function DraftHeroHeadline({
         <ComboboxList>
           {(item: PickerItem) => {
             const entry = projectEntryByKey.get(item.value);
+            const isAddProject = item.value === ADD_PROJECT_VALUE;
             return (
-              <ComboboxItem key={item.value} hideIndicator value={item}>
-                {item.value === ADD_PROJECT_VALUE ? (
-                  <FolderPlusIcon className="size-4 shrink-0" />
-                ) : entry ? (
-                  <RepositoryBadge name={item.label} />
-                ) : null}
+              <ComboboxItem
+                key={item.value}
+                hideIndicator
+                value={item}
+                tone={isAddProject ? "action" : "default"}
+                divider={isAddProject && menuEntries.length > 0}
+              >
+                <ComboboxItemIcon>
+                  {isAddProject ? (
+                    <FolderPlusIcon className="size-4" />
+                  ) : entry ? (
+                    <RepositoryBadge name={item.label} />
+                  ) : null}
+                </ComboboxItemIcon>
                 <Tooltip>
                   <TooltipTrigger render={<span className="min-w-0 flex-1 truncate text-sm" />}>
                     {item.label}

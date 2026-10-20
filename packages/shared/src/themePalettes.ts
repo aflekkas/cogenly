@@ -174,7 +174,7 @@ export const T3_CODE_DARK_THEME_COLORS: ThemeColors = {
   secondaryForeground: "#f5f5f5",
   muted: "#141416",
   mutedForeground: "#7d7f84",
-  placeholder: "#85888c",
+  placeholder: "#7d7f84",
   secondaryLabel: "#7d7f84",
   iconMuted: "#7d7f84",
   error: "#fb414a",
