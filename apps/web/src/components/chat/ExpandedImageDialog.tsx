@@ -115,7 +115,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || isContextMenuOpen() || event.target instanceof HTMLVideoElement)
       return;
-    if (zoomableImageRef.current?.pan(event.key)) {
+    if (zoomableImageRef.current?.handleKey(event)) {
       event.preventDefault();
       event.stopPropagation();
       return;
