@@ -51,6 +51,25 @@ glides from where it was drawn on the same curve. See
   that isn't a `WorkspaceBreadcrumb` with `data-panel-flip="start"`. Unmarked content snaps.
 - Don't animate panel widths or header padding. Every frame would rerun the chat's
   `observeResize` callbacks, each a synchronous React render.
+- Start a flip in the layout effect that commits the change. An animation started from a
+  ResizeObserver callback lands a frame late, and that frame shows content at its final place.
+- Don't clip a pane's left edge horizontally. Content gliding in from where it was drawn crosses
+  the pane's new edge while the sidebar opens. The sidebar wrapper clips at the window's edges.
+- A maximized right panel's tabs ride the edge, but its body snaps. The body fills the pane, so a
+  translate would push its right-anchored content off-screen.
+
+## Dialog motion
+
+Dialogs, alert dialogs and sheets fade and scale in from 97% and leave faster on
+`ease-popup-exit`. Base UI only animates a root whose `open` changes while it stays mounted.
+
+- A dialog its parent mounts conditionally (`{x ? <EditorDialog/> : null}`, `open` hard-coded)
+  renders through [`OverlayPresence`](../../apps/web/src/components/ui/overlay-presence.tsx).
+  It keeps the dialog mounted for its exit. Its enter comes from `@starting-style` on the popup.
+- A dialog that stays mounted and reads a value its close clears reads `useLastPresent(value)`,
+  so its copy holds while it animates out.
+- Don't switch between dialog roots, or between a dialog and other content, with an early return
+  or a `key` that changes on open. Render both and close one as the other opens.
 
 ## Handlers in large components
 
