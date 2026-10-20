@@ -62,6 +62,7 @@ export function makeThreadProjectionFixture(): OrchestrationV2ThreadProjection {
     runtimeRequests: [],
     messages: [],
     plans: [],
+    visualStates: [],
     turnItems: [],
     checkpointScopes: [],
     checkpoints: [],
