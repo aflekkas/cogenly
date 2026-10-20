@@ -9522,7 +9522,10 @@ export default function ChatView(props: ChatViewProps) {
   const content = (
     <div
       ref={setWorkspaceLayoutElement}
-      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      // Clips vertically only: content gliding in from where it was drawn
+      // (panelFlip) may cross the pane's new left edge while the sidebar opens.
+      // The sidebar wrapper clips at the window's edges.
+      className="relative flex min-h-0 min-w-0 flex-1 overflow-y-clip bg-background"
     >
       <Dialog
         open={

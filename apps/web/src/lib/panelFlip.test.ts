@@ -59,6 +59,7 @@ function fakeElement(left: number) {
     left,
     isConnected: true,
     dataset: { panelFlip: "start" },
+    matches: () => true,
     parentElement: null,
     getBoundingClientRect: () => ({
       left: fake.left,

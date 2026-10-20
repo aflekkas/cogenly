@@ -76,7 +76,10 @@ function PreviewPanelShellFrame(
         "relative flex h-full min-h-0 min-w-0 max-w-full flex-col self-stretch bg-background",
         isInline
           ? maximized
-            ? "flex-1 border-l border-border"
+            ? // Maximized, the panel meets the sidebar, rail or window edge,
+              // which draw their own. A border here would jump on Cmd+B while
+              // the sidebar's own edge slides.
+              "flex-1"
             : "shrink-0 border-l border-border"
           : "w-full",
         // Open and close slide on translate, on the compositor. The row lays

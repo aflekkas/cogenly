@@ -121,7 +121,8 @@ function flipPanelContent(snapshot: PanelFlipSnapshot, durationMs: number, resum
   const measurements: PanelFlipMeasurement[] = [];
   const indexByElement = new Map<HTMLElement, number>();
   for (const { element, bounds } of snapshot.entries) {
-    if (!element.isConnected) continue;
+    // Content that stopped being marked (a panel leaving maximized) snaps.
+    if (!element.isConnected || !element.matches(PANEL_FLIP_SELECTOR)) continue;
     const after = readBounds(element);
     if (!after) continue;
     indexByElement.set(element, elements.length);
