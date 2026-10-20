@@ -145,7 +145,10 @@ function SelectPopup({
           </SelectPrimitive.ScrollUpArrow>
           <div className={cn("relative h-full", matchTriggerWidth && "min-w-(--anchor-width)")}>
             <SelectPrimitive.List
-              className={cn("max-h-(--available-height) overflow-y-auto p-1", className)}
+              className={cn(
+                "scroll-fade-y max-h-(--available-height) overflow-y-auto p-1",
+                className,
+              )}
               data-slot="select-list"
             >
               {children}

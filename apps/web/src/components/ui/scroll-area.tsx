@@ -4,27 +4,10 @@ import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area";
 
 import { cn } from "~/lib/utils";
 
-function getVirtualizedScrollFadeClassName({ top, bottom }: { top: boolean; bottom: boolean }) {
-  if (!top && !bottom) return undefined;
-
-  return cn(
-    "virtualized-scroll-fade [--fade-size:1.5rem]",
-    top &&
-      bottom &&
-      "[--virtualized-scroll-fade-mask:linear-gradient(to_bottom,transparent,black_var(--fade-size),black_calc(100%-var(--fade-size)),transparent)]",
-    top &&
-      !bottom &&
-      "[--virtualized-scroll-fade-mask:linear-gradient(to_bottom,transparent,black_var(--fade-size))]",
-    !top &&
-      bottom &&
-      "[--virtualized-scroll-fade-mask:linear-gradient(to_bottom,black_calc(100%-var(--fade-size)),transparent)]",
-  );
-}
-
 function ScrollArea({
   className,
   children,
-  scrollFade = false,
+  scrollFade = true,
   scrollFadePadding = true,
   scrollbarGutter = false,
   hideScrollbars = false,
@@ -33,6 +16,8 @@ function ScrollArea({
   viewportTabIndex,
   ...props
 }: ScrollAreaPrimitive.Root.Props & {
+  /** Edge fades where there is more to scroll (see scroll-fade in index.css). Off for
+   * a viewport whose edges must stay crisp, like a canvas. */
   scrollFade?: boolean;
   /** Keep focused and highlighted items clear of the fade. Off for lists
    * whose rows take focus on click, where the scroll would nudge the list. */
@@ -59,9 +44,8 @@ function ScrollArea({
         className={cn(
           "h-full max-h-[inherit] overflow-auto overscroll-contain rounded-[inherit] outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background data-has-overflow-x:overscroll-x-contain",
           chainVerticalScroll && "overscroll-y-auto",
-          scrollFade &&
-            "mask-t-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-y-start)))] mask-b-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-y-end)))] mask-l-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-x-start)))] mask-r-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-x-end)))] focus-visible:mask-none [--fade-size:1.5rem]",
-          scrollFade && scrollFadePadding && "scroll-p-[var(--fade-size)]",
+          scrollFade && "scroll-fade focus-visible:mask-none",
+          scrollFade && scrollFadePadding && "scroll-p-(--scroll-fade-size)",
           scrollFade && !scrollFadePadding && "has-focus-visible:mask-none",
           scrollbarGutter && "scrollbar-gutter-stable",
           hideScrollbars &&
@@ -105,4 +89,4 @@ function ScrollBar({
   );
 }
 
-export { getVirtualizedScrollFadeClassName, ScrollArea, ScrollBar };
+export { ScrollArea, ScrollBar };

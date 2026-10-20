@@ -1,8 +1,7 @@
 import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronRightIcon } from "lucide-react";
-import { type RefObject, useCallback, useState } from "react";
-import { cn } from "~/lib/utils";
+import { type RefObject } from "react";
 import { shortcutLabelForCommand } from "../keybindings";
 import {
   type CommandPaletteActionItem,
@@ -20,7 +19,6 @@ import {
   CommandListVirtualized,
   CommandShortcut,
 } from "./ui/command";
-import { getVirtualizedScrollFadeClassName } from "./ui/scroll-area";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 
 interface CommandPaletteResultsProps {
@@ -100,17 +98,6 @@ interface CommandPaletteVirtualizedResultsProps extends Omit<CommandPaletteResul
  */
 export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualizedResultsProps) {
   const { listRef } = props;
-  const [scrollFade, setScrollFade] = useState({ top: false, bottom: false });
-  const updateScrollFade = useCallback(() => {
-    const scrollElement = listRef.current?.getScrollableNode?.();
-    if (!(scrollElement instanceof HTMLElement)) return;
-    const top = scrollElement.scrollTop > 1;
-    const bottom =
-      scrollElement.scrollHeight - scrollElement.clientHeight - scrollElement.scrollTop > 1;
-    setScrollFade((current) =>
-      current.top === top && current.bottom === bottom ? current : { top, bottom },
-    );
-  }, [listRef]);
 
   if (props.rows.length === 0) {
     return <CommandPaletteEmptyState {...props} />;
@@ -143,13 +130,8 @@ export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualize
         }
         estimatedItemSize={40}
         drawDistance={400}
-        onLayout={updateScrollFade}
-        onScroll={updateScrollFade}
         contentContainerClassName="px-2"
-        className={cn(
-          "min-h-0 scroll-py-6 overflow-x-hidden overscroll-y-contain py-2 [&::-webkit-scrollbar-track]:my-2",
-          getVirtualizedScrollFadeClassName(scrollFade),
-        )}
+        className="scroll-fade-y min-h-0 scroll-py-6 overflow-x-hidden overscroll-y-contain py-2 [&::-webkit-scrollbar-track]:my-2"
       />
     </CommandListVirtualized>
   );

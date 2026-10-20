@@ -1,22 +1,11 @@
 import type { VcsRef } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useId, useRef, type ComponentProps, type ReactNode } from "react";
 
 import { MiddleTruncate } from "./ui/middle-truncate";
-import { cn } from "../lib/utils";
 import { shouldLoadNextBranchPageAfterScroll } from "../state/paginatedBranches";
 import { RefreshIcon } from "./ui/refresh-icon";
 import { Switch } from "./ui/switch";
-import { getVirtualizedScrollFadeClassName } from "./ui/scroll-area";
 import {
   Combobox,
   ComboboxEmpty,
@@ -80,8 +69,6 @@ export function BranchPicker({
     },
     [onOpenChange],
   );
-  const [showTopBranchScrollFade, setShowTopBranchScrollFade] = useState(false);
-  const [showBottomBranchScrollFade, setShowBottomBranchScrollFade] = useState(false);
   const fetchNextBranchPage = useCallback(() => {
     if (!hasNextPage || isFetchingNextPage) {
       return;
@@ -115,32 +102,10 @@ export function BranchPicker({
   }, [fetchNextBranchPage, hasNextPage, open, isFetchingNextPage]);
 
   const branchListRef = useRef<LegendListRef | null>(null);
-  const updateBranchListScrollFades = useCallback(() => {
+  const trackBranchListScrollElement = useCallback(() => {
     const scrollElement = branchListRef.current?.getScrollableNode?.();
-    if (!(scrollElement instanceof HTMLElement)) {
-      return;
-    }
-    branchListScrollElementRef.current = scrollElement;
-    const maxScrollOffset = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
-    setShowTopBranchScrollFade(scrollElement.scrollTop > 1);
-    setShowBottomBranchScrollFade(maxScrollOffset - scrollElement.scrollTop > 1);
+    if (scrollElement instanceof HTMLElement) branchListScrollElementRef.current = scrollElement;
   }, []);
-
-  useLayoutEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    let nestedFrame = 0;
-    const frame = requestAnimationFrame(() => {
-      updateBranchListScrollFades();
-      nestedFrame = requestAnimationFrame(updateBranchListScrollFades);
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-      cancelAnimationFrame(nestedFrame);
-    };
-  }, [open, updateBranchListScrollFades]);
 
   const previousResultsQuery = useRef<string | null>(null);
   useEffect(() => {
@@ -206,21 +171,15 @@ export function BranchPicker({
                 estimatedItemSize={28}
                 drawDistance={336}
                 onLayout={() => {
-                  updateBranchListScrollFades();
+                  trackBranchListScrollElement();
                   previousBranchListScrollTopRef.current =
                     branchListScrollElementRef.current?.scrollTop ?? null;
                 }}
                 onScroll={() => {
-                  updateBranchListScrollFades();
+                  trackBranchListScrollElement();
                   maybeFetchNextBranchPage();
                 }}
-                className={cn(
-                  "max-h-56 scrollbar-gutter-stable overflow-x-hidden overscroll-y-contain ps-1 pe-0 pt-2 pb-1",
-                  getVirtualizedScrollFadeClassName({
-                    top: showTopBranchScrollFade,
-                    bottom: showBottomBranchScrollFade,
-                  }),
-                )}
+                className="scroll-fade-y max-h-56 scrollbar-gutter-stable overflow-x-hidden overscroll-y-contain ps-1 pe-0 pt-2 pb-1"
               />
             </ComboboxListVirtualized>
           </div>

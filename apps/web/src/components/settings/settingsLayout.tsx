@@ -572,7 +572,7 @@ export function SettingsPageContainer({
     >
       <div
         // overflow-x-hidden: the page frame glides sideways when a panel toggles.
-        className="topbar-scroll-fade scrollbar-gutter-both flex-1 overflow-x-hidden overflow-y-auto"
+        className="scroll-fade-y scrollbar-gutter-both flex-1 overflow-x-hidden overflow-y-auto"
         data-settings-page-scroll
       >
         <WorkspacePageContainer width={width} className={cn("gap-8", className)}>

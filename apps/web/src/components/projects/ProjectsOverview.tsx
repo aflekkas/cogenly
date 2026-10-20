@@ -111,7 +111,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
             New project
           </Button>
         </WorkspacePageHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
+        <div className="scroll-fade-y min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6">
             {directory.labels.length === 0 ? (
               <Empty>

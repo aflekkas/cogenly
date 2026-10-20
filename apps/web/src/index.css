@@ -94,6 +94,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --font-size-code: 13px;
   --diffs-font-size: 13px;
   --app-scrollbar-width: 6px;
+  /* Length of a scroll container's edge fade (scroll-fade utilities). */
+  --scroll-fade-size: 2rem;
   --appearance-contrast-base: 100%;
   --appearance-contrast-boost: 0%;
   --appearance-contrast-border-boost: 0%;
@@ -726,43 +728,186 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
-@utility topbar-scroll-fade {
-  -webkit-mask-image:
-    linear-gradient(
-      to bottom,
-      transparent 0%,
-      rgb(0 0 0 / 10%) 10%,
-      rgb(0 0 0 / 30%) 24%,
-      rgb(0 0 0 / 58%) 42%,
-      rgb(0 0 0 / 82%) 62%,
-      rgb(0 0 0 / 96%) 82%,
-      black 100%
-    ),
-    linear-gradient(black, black), linear-gradient(black, black);
-  -webkit-mask-position: top, bottom, right;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-size:
-    100% calc(var(--workspace-titlebar-scroll-fade-height) + 1px),
-    100% calc(100% - var(--workspace-titlebar-scroll-fade-height)),
-    var(--app-scrollbar-width) 100%;
-  mask-image:
-    linear-gradient(
-      to bottom,
-      transparent 0%,
-      rgb(0 0 0 / 10%) 10%,
-      rgb(0 0 0 / 30%) 24%,
-      rgb(0 0 0 / 58%) 42%,
-      rgb(0 0 0 / 82%) 62%,
-      rgb(0 0 0 / 96%) 82%,
-      black 100%
-    ),
-    linear-gradient(black, black), linear-gradient(black, black);
-  mask-position: top, bottom, right;
-  mask-repeat: no-repeat;
-  mask-size:
-    100% calc(var(--workspace-titlebar-scroll-fade-height) + 1px),
-    100% calc(100% - var(--workspace-titlebar-scroll-fade-height)),
-    var(--app-scrollbar-width) 100%;
+/* Scroll-edge fades. A scroll container fades out along an edge only while
+   there is more content past it: the mask stops are custom properties driven
+   by scroll-driven animations over the first and last --scroll-fade-size of
+   travel, so a container that does not overflow (inactive timeline) keeps its
+   initial 0px stops and shows no fade, and nothing runs on scroll events.
+   Browsers without scroll timelines get no fade at all. ScrollArea turns this
+   on by default; native scrollers add scroll-fade-y, scroll-fade-x or
+   scroll-fade. A native vertical scrollbar sits inside the mask, so
+   scroll-fade-y keeps its lane opaque with --scroll-fade-lane (the app's
+   scrollbar width; set 0px where the scrollbar is hidden). */
+@property --scroll-fade-start-y {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --scroll-fade-end-y {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --scroll-fade-start-x {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --scroll-fade-end-x {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes scroll-fade-start-y {
+  from {
+    --scroll-fade-start-y: 0px;
+  }
+  to {
+    --scroll-fade-start-y: var(--scroll-fade-size);
+  }
+}
+@keyframes scroll-fade-end-y {
+  from {
+    --scroll-fade-end-y: var(--scroll-fade-size);
+  }
+  to {
+    --scroll-fade-end-y: 0px;
+  }
+}
+@keyframes scroll-fade-start-x {
+  from {
+    --scroll-fade-start-x: 0px;
+  }
+  to {
+    --scroll-fade-start-x: var(--scroll-fade-size);
+  }
+}
+@keyframes scroll-fade-end-x {
+  from {
+    --scroll-fade-end-x: var(--scroll-fade-size);
+  }
+  to {
+    --scroll-fade-end-x: 0px;
+  }
+}
+
+@utility scroll-fade-y {
+  @supports (animation-timeline: scroll()) {
+    --scroll-fade-lane: var(--app-scrollbar-width);
+    animation:
+      scroll-fade-start-y linear both,
+      scroll-fade-end-y linear both;
+    animation-timeline: scroll(self block), scroll(self block);
+    animation-range:
+      0 var(--scroll-fade-size),
+      calc(100% - var(--scroll-fade-size)) 100%;
+    -webkit-mask-image:
+      linear-gradient(
+        to bottom,
+        transparent,
+        black var(--scroll-fade-start-y),
+        black calc(100% - var(--scroll-fade-end-y)),
+        transparent
+      ),
+      linear-gradient(black, black);
+    mask-image:
+      linear-gradient(
+        to bottom,
+        transparent,
+        black var(--scroll-fade-start-y),
+        black calc(100% - var(--scroll-fade-end-y)),
+        transparent
+      ),
+      linear-gradient(black, black);
+    -webkit-mask-position: left, right;
+    mask-position: left, right;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size:
+      calc(100% - var(--scroll-fade-lane)) 100%,
+      var(--scroll-fade-lane) 100%;
+    mask-size:
+      calc(100% - var(--scroll-fade-lane)) 100%,
+      var(--scroll-fade-lane) 100%;
+  }
+}
+
+@utility scroll-fade-x {
+  @supports (animation-timeline: scroll()) {
+    animation:
+      scroll-fade-start-x linear both,
+      scroll-fade-end-x linear both;
+    animation-timeline: scroll(self inline), scroll(self inline);
+    animation-range:
+      0 var(--scroll-fade-size),
+      calc(100% - var(--scroll-fade-size)) 100%;
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent,
+      black var(--scroll-fade-start-x),
+      black calc(100% - var(--scroll-fade-end-x)),
+      transparent
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      black var(--scroll-fade-start-x),
+      black calc(100% - var(--scroll-fade-end-x)),
+      transparent
+    );
+  }
+}
+
+/* Both axes, for overlay-scrollbar viewports (ScrollArea): the two gradients
+   intersect, so no scrollbar lane is reserved. */
+@utility scroll-fade {
+  @supports (animation-timeline: scroll()) {
+    animation:
+      scroll-fade-start-y linear both,
+      scroll-fade-end-y linear both,
+      scroll-fade-start-x linear both,
+      scroll-fade-end-x linear both;
+    animation-timeline:
+      scroll(self block), scroll(self block), scroll(self inline), scroll(self inline);
+    animation-range:
+      0 var(--scroll-fade-size),
+      calc(100% - var(--scroll-fade-size)) 100%,
+      0 var(--scroll-fade-size),
+      calc(100% - var(--scroll-fade-size)) 100%;
+    -webkit-mask-image:
+      linear-gradient(
+        to bottom,
+        transparent,
+        black var(--scroll-fade-start-y),
+        black calc(100% - var(--scroll-fade-end-y)),
+        transparent
+      ),
+      linear-gradient(
+        to right,
+        transparent,
+        black var(--scroll-fade-start-x),
+        black calc(100% - var(--scroll-fade-end-x)),
+        transparent
+      );
+    mask-image:
+      linear-gradient(
+        to bottom,
+        transparent,
+        black var(--scroll-fade-start-y),
+        black calc(100% - var(--scroll-fade-end-y)),
+        transparent
+      ),
+      linear-gradient(
+        to right,
+        transparent,
+        black var(--scroll-fade-start-x),
+        black calc(100% - var(--scroll-fade-end-x)),
+        transparent
+      );
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+  }
 }
 
 /* Virtualizers own their native scroll element, so they cannot use ScrollArea's
@@ -2384,6 +2529,7 @@ code {
 }
 
 .chat-markdown pre {
+  @apply scroll-fade-x;
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--contrast-border);

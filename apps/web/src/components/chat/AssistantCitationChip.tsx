@@ -6,7 +6,6 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowUpRightIcon, PencilIcon, QuoteIcon } from "lucide-react";
 import {
-  useCallback,
   useEffect,
   useEffectEvent,
   useRef,
@@ -21,17 +20,14 @@ import {
   assistantCitationHash,
   assistantCitationNavigation,
 } from "../../lib/assistantCitationNavigation";
-import { cn } from "~/lib/utils";
 import { ContextChip, ContextChipAction, ContextChipLabel } from "../ContextChip";
 import { ContextChipPopover } from "../contextChipParts";
 import { Button } from "../ui/button";
 import { Popover, PopoverClose, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { AssistantCitationCommentEditor } from "./AssistantCitationCommentEditor";
 import { resolveAssistantCitationCommentDismissal } from "./assistantCitationCommentDismissal";
 import { observeAssistantCitationCommentSource } from "./AssistantCitationSource";
 import { composerFloatingLayerProps } from "./composerEventScope";
-import { observeResize } from "~/lib/observeResize";
 
 export function AssistantCitationChip({
   citation,
@@ -246,29 +242,8 @@ export function AssistantCitationChip({
 }
 
 function AssistantCitationQuote({ citation }: { citation: AssistantCitation }) {
-  const [fade, setFade] = useState({ top: false, bottom: false });
-  const updateFade = useCallback((element: HTMLElement) => {
-    const top = element.scrollTop > 1;
-    const bottom = element.scrollHeight - element.clientHeight - element.scrollTop > 1;
-    setFade((current) =>
-      current.top === top && current.bottom === bottom ? current : { top, bottom },
-    );
-  }, []);
-  // Stable so a fade update during resize delivery does not resubscribe the element.
-  const observeFade = useCallback(
-    (element: HTMLDivElement | null) =>
-      element ? observeResize(element, () => updateFade(element)) : undefined,
-    [updateFade],
-  );
   return (
-    <div
-      ref={observeFade}
-      onScroll={(event) => updateFade(event.currentTarget)}
-      className={cn(
-        "max-h-64 min-h-0 space-y-3 self-stretch overflow-y-auto whitespace-pre-wrap wrap-break-word",
-        getVirtualizedScrollFadeClassName(fade),
-      )}
-    >
+    <div className="scroll-fade-y max-h-64 min-h-0 space-y-3 self-stretch overflow-y-auto whitespace-pre-wrap wrap-break-word">
       <blockquote className="border-l-2 border-border pl-3 text-muted-foreground">
         {citation.text}
       </blockquote>

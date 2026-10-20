@@ -40,7 +40,6 @@ import {
   shortcutLabelForCommand,
 } from "../../keybindings";
 import { cn } from "~/lib/utils";
-import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { TooltipProvider } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
 import {
@@ -218,8 +217,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     onInstanceModelChange,
     onToggleModel,
   } = props;
-  const [showTopScrollFade, setShowTopScrollFade] = useState(false);
-  const [showBottomScrollFade, setShowBottomScrollFade] = useState(false);
   const modelListElementRef = useRef<HTMLDivElement>(null);
   const modelListFrameRef = useRef<HTMLDivElement>(null);
   const modelListRef = useRef<LegendListRef | null>(null);
@@ -613,15 +610,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       : legacyResize
         ? `min(${modelListContentHeight}, ${legacyResize.maxHeight}px)`
         : modelListContentHeight;
-  const updateModelListScrollFades = useCallback(() => {
-    const scrollElement = modelListRef.current?.getScrollableNode();
-    if (!(scrollElement instanceof HTMLElement)) {
-      return;
-    }
-    const maxScrollOffset = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
-    setShowTopScrollFade(scrollElement.scrollTop > 1);
-    setShowBottomScrollFade(maxScrollOffset - scrollElement.scrollTop > 1);
-  }, []);
   const modelJumpShortcutContext = useMemo(
     () =>
       ({
@@ -755,20 +743,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     selectedInstanceId,
     sidebarInstanceEntries,
   ]);
-
-  useLayoutEffect(() => {
-    setShowTopScrollFade(false);
-    setShowBottomScrollFade(filteredItemKeys.length > 5);
-    let nestedFrame = 0;
-    const frame = window.requestAnimationFrame(() => {
-      updateModelListScrollFades();
-      nestedFrame = window.requestAnimationFrame(updateModelListScrollFades);
-    });
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.cancelAnimationFrame(nestedFrame);
-    };
-  }, [filteredItemKeys, updateModelListScrollFades]);
 
   return (
     <TooltipProvider delay={0}>
@@ -930,20 +904,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   recycleItems
                   contentContainerClassName="pl-2 pr-px"
                   ItemSeparatorComponent={ModelListSeparator}
-                  onLayout={updateModelListScrollFades}
-                  onScroll={updateModelListScrollFades}
-                  className={cn(
-                    "scrollbar-gutter-stable h-full overflow-x-hidden overscroll-y-contain py-1.5 [&::-webkit-scrollbar-track]:my-2",
-                    getVirtualizedScrollFadeClassName({
-                      top: showTopScrollFade,
-                      bottom: showBottomScrollFade,
-                    }),
-                  )}
+                  className="scroll-fade-y scrollbar-gutter-stable h-full overflow-x-hidden overscroll-y-contain py-1.5 [&::-webkit-scrollbar-track]:my-2"
                 />
               </ComboboxListVirtualized>
             </div>
             {providerSetupEntries.length > 0 ? (
-              <div className="max-h-44 shrink-0 overflow-y-auto border-t border-border/70 p-2">
+              <div className="scroll-fade-y max-h-44 shrink-0 overflow-y-auto border-t border-border/70 p-2">
                 {providerSetupEntries.map((entry) => (
                   <div key={entry.instanceId} className="px-1 py-1.5 text-xs leading-snug">
                     <p className="line-clamp-3 text-muted-foreground">
