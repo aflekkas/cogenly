@@ -8,7 +8,7 @@ import * as Ref from "effect/Ref";
 
 import * as Electron from "electron";
 
-import { type DesktopSnapShotEvent, DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -21,7 +21,6 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import {
   MENU_ACTION_CHANNEL,
   QUIT_SHORTCUT_CHANNEL,
-  SNAP_SHOT_EVENT_CHANNEL,
   TRACKPAD_SCROLL_END_CHANNEL,
   WINDOW_FULLSCREEN_STATE_CHANNEL,
 } from "../ipc/channels.ts";
@@ -123,17 +122,9 @@ export class DesktopWindow extends Context.Service<
     // produce a stranded window pointing at nothing.
     readonly handleBackendNotReady: Effect.Effect<void>;
     readonly flushMainWindowBounds: Effect.Effect<void>;
-    readonly prepareCaptureReveal: Effect.Effect<void>;
     readonly dispatchMenuAction: (
       action: string,
       options?: { readonly reveal?: boolean },
-    ) => Effect.Effect<void, DesktopWindowError>;
-    /**
-     * Push a capture lifecycle event to the renderer. Only `started` reveals the
-     * window; the rest must not interrupt the app the user has switched to.
-     */
-    readonly dispatchSnapShotEvent: (
-      event: DesktopSnapShotEvent,
     ) => Effect.Effect<void, DesktopWindowError>;
     // Zooms the main window's own webContents. The Electron `zoomIn`/`zoomOut`
     // menu roles act on whichever webContents has keyboard focus, so with an
@@ -983,12 +974,6 @@ export const make = Effect.gen(function* () {
     createMain,
     ensureMain,
     revealOrCreateMain,
-    prepareCaptureReveal: Effect.gen(function* () {
-      const existingWindow = yield* currentMainWindow;
-      if (Option.isSome(existingWindow)) {
-        yield* electronWindow.prepareReveal(existingWindow.value);
-      }
-    }),
     activate: Effect.gen(function* () {
       const existingWindow = yield* currentMainWindow;
       if (Option.isSome(existingWindow)) {
@@ -1026,15 +1011,6 @@ export const make = Effect.gen(function* () {
     dispatchMenuAction: Effect.fn("desktop.window.dispatchMenuAction")(function* (action, options) {
       yield* Effect.annotateCurrentSpan({ action });
       yield* dispatchRendererEvent(MENU_ACTION_CHANNEL, action, options);
-    }),
-    dispatchSnapShotEvent: Effect.fn("desktop.window.dispatchSnapShotEvent")(function* (event) {
-      yield* Effect.annotateCurrentSpan({
-        event: event.type,
-        captureId: "id" in event ? (event.id ?? null) : null,
-      });
-      yield* dispatchRendererEvent(SNAP_SHOT_EVENT_CHANNEL, event, {
-        reveal: event.type === "started",
-      });
     }),
     zoomMain: Effect.fn("desktop.window.zoomMain")(function* (direction) {
       yield* Effect.annotateCurrentSpan({ direction });

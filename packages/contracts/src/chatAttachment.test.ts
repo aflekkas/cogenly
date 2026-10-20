@@ -7,11 +7,9 @@ import {
   ChatAttachment,
   isProviderSendTurnSupportedImageMimeType,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
-  SnapShotAccessibility,
 } from "./chatAttachment.ts";
 
 const decodeAttachment = Schema.decodeUnknownEffect(ChatAttachment);
-const decodeSnapShotAccessibility = Schema.decodeUnknownEffect(SnapShotAccessibility);
 
 // Attachments ride on persisted events and thread streams with no client
 // version negotiation. A type this build does not know must decode instead of
@@ -47,31 +45,6 @@ it.effect("rejects malformed known attachment types instead of tolerating them",
       decodeAttachment({ ...base, type: "image", mimeType: "application/pdf", sizeBytes: 12 }),
     );
     assert.strictEqual(Exit.isFailure(badMimeImage), true);
-  }),
-);
-
-it.effect("rejects accessibility trees above the serialized payload limit", () =>
-  Effect.gen(function* () {
-    const result = yield* Effect.exit(
-      decodeSnapShotAccessibility({
-        format: "element-tree",
-        coordinateSpace: "captured-image",
-        imageSize: { width: 800, height: 600 },
-        truncated: false,
-        root: {
-          role: "window",
-          bounds: { x: 0, y: 0, width: 800, height: 600 },
-          children: Array.from({ length: 10 }, () => ({
-            role: "text",
-            value: "x".repeat(8_000),
-            bounds: null,
-            children: [],
-          })),
-        },
-      }),
-    );
-
-    assert.strictEqual(Exit.isFailure(result), true);
   }),
 );
 
