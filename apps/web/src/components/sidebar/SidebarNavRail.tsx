@@ -31,12 +31,14 @@ import { useNavRailBadgeStore } from "./navRailState";
 import { decisionsWaitingLabel } from "../../agents/agentWorkspace.logic";
 
 const RAIL_BUTTON_CLASS =
-  "relative flex size-[42px] shrink-0 cursor-pointer items-center justify-center rounded-rail outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:size-4.5 [&_svg]:shrink-0";
+  "relative flex size-[42px] shrink-0 cursor-pointer items-center justify-center rounded-tile outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:size-4.5 [&_svg]:shrink-0";
 
 function railButtonTone(active: boolean) {
-  // The selected button carries the same top-left glow as the selected card.
+  // The selected button carries a quieter version of the selected card's
+  // top-left light: in the reference its rim is a few levels and it has no
+  // blue wash.
   return active
-    ? "state-selected corner-glow [--corner-glow-border:0px]"
+    ? "state-selected corner-glow [--corner-glow-border:0px] [--corner-glow:2%] [--corner-glow-top:1.5%] [--corner-wash:0%]"
     : "text-sidebar-muted-foreground state-hover";
 }
 

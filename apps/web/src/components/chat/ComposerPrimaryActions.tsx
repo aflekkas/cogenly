@@ -132,7 +132,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           <button
             type="button"
             className={cn(
-              "flex shrink-0 cursor-pointer items-center justify-center rounded-rail bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none [&_svg]:pointer-events-none",
+              "flex shrink-0 cursor-pointer items-center justify-center rounded-tile bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none [&_svg]:pointer-events-none",
               insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
             )}
             {...pointerFocusProps}
@@ -305,9 +305,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     <button
       type={showResume ? "button" : "submit"}
       className={cn(
-        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-rail shadow-xs transition-[color,background-color,box-shadow,opacity,scale,filter] duration-(--motion-duration-fast) enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
-        // A plain standard blue, in every build and channel.
-        "bg-send text-white enabled:shadow-black/24 hover:bg-send-hover",
+        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-tile shadow-xs transition-[color,background-color,box-shadow,opacity,scale,filter] duration-(--motion-duration-fast) enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
+        // The reference's navy tile, lit from the bottom right; a flat grey
+        // tile with a dark arrow while there is nothing to send.
+        "bg-linear-to-br from-send-top to-send-bottom text-send-foreground enabled:shadow-black/24 hover:from-send-top-hover hover:to-send-bottom-hover",
+        "disabled:from-send-idle disabled:to-send-idle disabled:text-send-idle-foreground",
       )}
       {...pointerFocusProps}
       onClick={showResume ? onResume : onSubmitMessage}

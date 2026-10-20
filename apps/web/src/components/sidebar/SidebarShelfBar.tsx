@@ -57,7 +57,7 @@ export function SidebarShelfBar({
       {/* One highlight slides between the equal-width segments. */}
       <span
         aria-hidden
-        className="corner-glow absolute inset-y-0.5 left-0.5 -z-10 rounded-lg border border-(--surface-edge,transparent) bg-(--sidebar-shelf-selected) shadow-(--surface-halo,none) transition-transform duration-(--motion-duration-slow) ease-standard motion-reduce:transition-none"
+        className="corner-glow absolute inset-y-0.5 left-0.5 -z-10 rounded-lg [--corner-glow:0%] [--corner-glow-top:0.8%] [--surface-edge:rgb(255_255_255/1.2%)] border border-(--surface-edge,transparent) bg-(--sidebar-shelf-selected) shadow-(--surface-halo,none) transition-transform duration-(--motion-duration-slow) ease-standard motion-reduce:transition-none"
         style={{
           width: `calc((100% - 0.25rem) / ${segments.length})`,
           transform: `translateX(${selectedIndex * 100}%)`,
@@ -78,7 +78,7 @@ export function SidebarShelfBar({
               "flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg text-xs tabular-nums outline-none transition-colors duration-(--motion-duration-base) focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-3.5 [&_svg]:shrink-0",
               selected
                 ? "text-sidebar-foreground"
-                : "text-(--nav-rail-muted) hover:text-sidebar-foreground",
+                : "text-(--sidebar-shelf-muted,var(--nav-rail-muted)) hover:text-sidebar-foreground",
             )}
           >
             <Icon aria-hidden />
