@@ -207,15 +207,18 @@ export function resolveInitialMainWindowBounds(
   return DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE;
 }
 
+// The Cogenly mark (assets/brand/cogenly-mark.svg) with the web boot splash's loading loop
+// (apps/web/index.html): the dot circles the "c" and docks. Transform-only CSS.
+const LOADING_MARK_SVG = `<svg class="mark" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="e" x1="64" y1="0" x2="64" y2="128" gradientUnits="userSpaceOnUse"><stop stop-color="#FF7B3A"/><stop offset="1" stop-color="#E63E22"/></linearGradient><linearGradient id="r" x1="64" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse"><stop stop-color="#FFFFFF" stop-opacity="0.3"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient></defs><rect width="128" height="128" rx="28" fill="url(#e)"/><rect x="1.75" y="1.75" width="124.5" height="124.5" rx="26.25" stroke="url(#r)" stroke-width="1.5"/><path class="c" d="M79.85 41.64A28 28 0 1 0 79.85 86.36" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round"/><g class="arm"><circle class="dot" cx="91" cy="64" r="9" fill="#FFFFFF"/></g></svg>`;
+const LOADING_MARK_CSS = `.mark{width:56px;height:56px}.mark *{transform-box:view-box}.mark .c{transform-origin:63px 64px;animation:catch 1.6s ease-out infinite}.mark .arm{transform-origin:63px 64px;animation:orbit 1.6s cubic-bezier(.65,0,.35,1) infinite}.mark .dot{animation:reach 1.6s cubic-bezier(.65,0,.35,1) infinite}@keyframes orbit{0%{transform:rotate(0)}78%,100%{transform:rotate(-360deg)}}@keyframes reach{0%{transform:translateX(0)}18%,58%{transform:translateX(18px)}78%{transform:translateX(-2px)}88%,100%{transform:translateX(0)}}@keyframes catch{0%,74%{transform:scale(1)}82%{transform:scale(.95)}94%,100%{transform:scale(1)}}@media (prefers-reduced-motion:reduce){.mark *{animation:none}}`;
+
 // A self-contained "Connecting to WSL" splash, shown immediately in wsl-only
 // mode while the WSL backend (which serves the renderer) cold-boots. Inlined as
 // a data URL so it needs no bundled asset and no backend — pure CSS, no JS.
 function buildConnectingSplashDataUrl(shouldUseDarkColors: boolean): string {
   const background = getInitialWindowBackgroundColor(shouldUseDarkColors);
   const label = shouldUseDarkColors ? "#9ca3af" : "#6b7280";
-  const accent = shouldUseDarkColors ? "#f8fafc" : "#1f2937";
-  const track = shouldUseDarkColors ? "rgba(248,250,252,0.18)" : "rgba(31,41,55,0.18)";
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>html,body{margin:0;height:100%}body{background:${background};color:${label};font-family:system-ui,-apple-system,'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;-webkit-user-select:none;user-select:none;-webkit-app-region:drag}.spinner{width:26px;height:26px;border:3px solid ${track};border-top-color:${accent};border-radius:50%;animation:spin .8s linear infinite}.label{font-size:13px}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class="spinner"></div><div class="label">Connecting to WSL…</div></body></html>`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>html,body{margin:0;height:100%}body{background:${background};color:${label};font-family:system-ui,-apple-system,'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;-webkit-user-select:none;user-select:none;-webkit-app-region:drag}.label{font-size:13px}${LOADING_MARK_CSS}</style></head><body>${LOADING_MARK_SVG}<div class="label">Connecting to WSL…</div></body></html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 

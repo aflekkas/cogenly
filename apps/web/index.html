@@ -81,7 +81,74 @@
       #boot-shell-logo {
         width: 64px;
         height: 64px;
-        object-fit: contain;
+      }
+
+      /* Loading loop for the mark (assets/brand/cogenly-mark.svg): the dot steps out of the
+         "c", circles it once and docks; the "c" gives a small catch. Transform-only, and it
+         ends when React's first commit replaces #root's contents. */
+      #boot-shell-logo * {
+        transform-box: view-box;
+      }
+
+      #boot-shell-logo .boot-mark-c {
+        transform-origin: 63px 64px;
+        animation: boot-mark-catch 1.6s ease-out infinite;
+      }
+
+      #boot-shell-logo .boot-mark-arm {
+        transform-origin: 63px 64px;
+        animation: boot-mark-orbit 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+      }
+
+      #boot-shell-logo .boot-mark-dot {
+        animation: boot-mark-reach 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+      }
+
+      @keyframes boot-mark-orbit {
+        0% {
+          transform: rotate(0deg);
+        }
+        78%,
+        100% {
+          transform: rotate(-360deg);
+        }
+      }
+
+      @keyframes boot-mark-reach {
+        0% {
+          transform: translateX(0);
+        }
+        18%,
+        58% {
+          transform: translateX(18px);
+        }
+        78% {
+          transform: translateX(-2px);
+        }
+        88%,
+        100% {
+          transform: translateX(0);
+        }
+      }
+
+      @keyframes boot-mark-catch {
+        0%,
+        74% {
+          transform: scale(1);
+        }
+        82% {
+          transform: scale(0.95);
+        }
+        94%,
+        100% {
+          transform: scale(1);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #boot-shell-logo * {
+          animation: none;
+        }
       }
 
       #boot-error {
@@ -114,7 +181,60 @@
     <div id="root">
       <div id="boot-shell">
         <div id="boot-shell-card" aria-label="Cogenly splash screen">
-          <img id="boot-shell-logo" src="/cogenly-mark.svg" alt="Cogenly" />
+          <!-- Inline copy of assets/brand/cogenly-mark.svg so it paints and animates before any fetch. -->
+          <svg
+            id="boot-shell-logo"
+            role="img"
+            aria-label="Cogenly"
+            viewBox="0 0 128 128"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <defs>
+              <linearGradient
+                id="boot-mark-ember"
+                x1="64"
+                y1="0"
+                x2="64"
+                y2="128"
+                gradientUnits="userSpaceOnUse"
+              >
+                <stop stop-color="#FF7B3A" />
+                <stop offset="1" stop-color="#E63E22" />
+              </linearGradient>
+              <linearGradient
+                id="boot-mark-rim"
+                x1="64"
+                y1="0"
+                x2="64"
+                y2="64"
+                gradientUnits="userSpaceOnUse"
+              >
+                <stop stop-color="#FFFFFF" stop-opacity="0.3" />
+                <stop offset="1" stop-color="#FFFFFF" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+            <rect width="128" height="128" rx="28" fill="url(#boot-mark-ember)" />
+            <rect
+              x="1.75"
+              y="1.75"
+              width="124.5"
+              height="124.5"
+              rx="26.25"
+              stroke="url(#boot-mark-rim)"
+              stroke-width="1.5"
+            />
+            <path
+              class="boot-mark-c"
+              d="M79.85 41.64A28 28 0 1 0 79.85 86.36"
+              stroke="#FFFFFF"
+              stroke-width="16"
+              stroke-linecap="round"
+            />
+            <g class="boot-mark-arm">
+              <circle class="boot-mark-dot" cx="91" cy="64" r="9" fill="#FFFFFF" />
+            </g>
+          </svg>
         </div>
       </div>
     </div>
