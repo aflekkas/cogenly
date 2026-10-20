@@ -56,6 +56,7 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
   environment?: NodeJS.ProcessEnv,
   cwd?: string,
   createHost: typeof createMuseSdkHost = createMuseSdkHost,
+  usageLimitsCachePath?: string,
 ) {
   if (!settings.enabled) return yield* makePendingMuseProvider(settings);
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
@@ -135,7 +136,13 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
   const models = catalog.success.value;
   // MSP has no auth signal, and model/list answers from Muse's cache even when logged out.
   // Auth failures surface on the first turn instead.
-  const usageLimits = yield* readMuseUsageLimits(settings, museEnvironment, cwd, createHost);
+  const usageLimits = yield* readMuseUsageLimits(
+    settings,
+    museEnvironment,
+    cwd,
+    createHost,
+    usageLimitsCachePath,
+  );
   return {
     ...snapshot(
       {

@@ -10,6 +10,8 @@ import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import type { MuseSdkHost } from "./sdk.ts";
 import { COMPACT_SLASH_COMMAND } from "@t3tools/provider-core/server/snapshotProbe";
 import { checkMuseProviderStatus } from "./status.ts";
+import { parseMuseUsageLimits } from "./usageLimits.ts";
+import { writeCachedMuseUsageLimits } from "./usageLimitsCache.ts";
 
 const settings = Schema.decodeSync(MuseSettings);
 const makeHost = (catalog: Record<string, unknown>) => {
@@ -158,6 +160,93 @@ it.layer(NodeServices.layer)("Muse status", (it) => {
         expect(snapshot.usageLimits?.unavailable).toBeUndefined();
         expect(host.connection.request).toHaveBeenCalledWith("usage/read", {});
         expect(host.close).toHaveBeenCalledTimes(2);
+      }),
+    ),
+  );
+
+  it.effect("serves cached limits when the fresh host has no observation", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const binaryPath = yield* fakeCli();
+        const host = makeHost(metaCatalog);
+        const cached = parseMuseUsageLimits({
+          observedAtMs: 1_792_166_400_000,
+          tier: "pro",
+          window: { usedPercent: 12, resetsAtMs: 1_792_184_400_000, windowDurationMins: 300 },
+          weekly: { usedPercent: 34, resetsAtMs: 1_792_771_200_000 },
+        })!;
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "muse-status-cache-" });
+        const cachePath = `${directory}/muse.json`;
+        yield* writeCachedMuseUsageLimits(cachePath, cached);
+        const snapshot = yield* checkMuseProviderStatus(
+          settings({ enabled: true, binaryPath }),
+          undefined,
+          undefined,
+          async () => host,
+          cachePath,
+        );
+        expect(snapshot.status).toBe("ready");
+        expect(snapshot.usageLimits).toEqual(cached);
+        expect(snapshot.usageLimits?.checkedAt).toBe(cached.checkedAt);
+      }),
+    ),
+  );
+
+  it.effect("prefers a live observation over stale cached limits", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const binaryPath = yield* fakeCli();
+        const host = makeHost(metaCatalog);
+        const live = {
+          observedAtMs: 1_792_200_000_000,
+          tier: "pro",
+          window: { usedPercent: 56, resetsAtMs: 1_792_218_000_000, windowDurationMins: 300 },
+          weekly: { usedPercent: 78, resetsAtMs: 1_792_771_200_000 },
+        };
+        vi.mocked(host.connection.request).mockImplementation(async (method) =>
+          method === "usage/read" ? { usage: live } : metaCatalog,
+        );
+        const stale = parseMuseUsageLimits({
+          observedAtMs: 1_792_166_400_000,
+          tier: "pro",
+          window: { usedPercent: 12, resetsAtMs: 1_792_184_400_000, windowDurationMins: 300 },
+          weekly: { usedPercent: 34, resetsAtMs: 1_792_771_200_000 },
+        })!;
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "muse-status-cache-" });
+        const cachePath = `${directory}/muse.json`;
+        yield* writeCachedMuseUsageLimits(cachePath, stale);
+        const snapshot = yield* checkMuseProviderStatus(
+          settings({ enabled: true, binaryPath }),
+          undefined,
+          undefined,
+          async () => host,
+          cachePath,
+        );
+        expect(snapshot.usageLimits?.windows.map((window) => window.usedPercent)).toEqual([56, 78]);
+        expect(snapshot.usageLimits?.checkedAt).not.toBe(stale.checkedAt);
+      }),
+    ),
+  );
+
+  it.effect("keeps the banner honest only when nothing was ever observed", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const binaryPath = yield* fakeCli();
+        const host = makeHost(metaCatalog);
+        const snapshot = yield* checkMuseProviderStatus(
+          settings({ enabled: true, binaryPath }),
+          undefined,
+          undefined,
+          async () => host,
+        );
+        expect(snapshot.status).toBe("ready");
+        expect(snapshot.usageLimits?.windows).toEqual([]);
+        expect(snapshot.usageLimits?.unavailable?.reason).toBe("probeFailed");
+        expect(snapshot.usageLimits?.unavailable?.message).toBe(
+          "Muse hasn't reported limits yet. They'll show up after your next Muse Code message.",
+        );
       }),
     ),
   );

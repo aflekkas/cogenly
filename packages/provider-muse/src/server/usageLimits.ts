@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 
 import type { MuseSettings } from "../settings.ts";
 import { createMuseSdkHost, createMuseSdkHostEffect } from "./sdk.ts";
+import { readCachedMuseUsageLimits } from "./usageLimitsCache.ts";
 
 const NonNegative = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 const Timestamp = Schema.Int.check(
@@ -62,6 +63,7 @@ export const readMuseUsageLimits = Effect.fn("readMuseUsageLimits")(function* (
   environment: NodeJS.ProcessEnv,
   cwd: string | undefined,
   createHost: typeof createMuseSdkHost = createMuseSdkHost,
+  usageLimitsCachePath: string | undefined = undefined,
 ) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const usage = yield* Effect.gen(function* () {
@@ -82,18 +84,24 @@ export const readMuseUsageLimits = Effect.fn("readMuseUsageLimits")(function* (
     Effect.map((result) => (result._tag === "Some" ? result.value : undefined)),
     Effect.orElseSucceed(() => undefined),
   );
-  // An empty host has no observation until Muse receives provider headers. Keep
-  // this recoverable so a later usage/changed notification can publish real bars.
-  return (
-    usage ??
-    ({
-      checkedAt,
-      windows: [],
-      unavailable: {
-        reason: "probeFailed",
-        message:
-          "Limits not reported by Muse. Usage will appear when Muse reports a subscription observation.",
-      },
-    } satisfies ServerProviderUsageLimits)
-  );
+  if (usage !== undefined) return usage;
+  // A fresh host has no observation until it receives provider headers, so
+  // `usage/read` answers `{}` here even for a subscribed account. Serve the
+  // last observation a live session cached; its checkedAt stays the
+  // observation time, marking how stale the bars are.
+  if (usageLimitsCachePath !== undefined) {
+    const cached = yield* readCachedMuseUsageLimits(usageLimitsCachePath).pipe(
+      Effect.orElseSucceed(() => undefined),
+    );
+    if (cached !== undefined) return cached;
+  }
+  return {
+    checkedAt,
+    windows: [],
+    unavailable: {
+      reason: "probeFailed",
+      message:
+        "Muse hasn't reported limits yet. They'll show up after your next Muse Code message.",
+    },
+  } satisfies ServerProviderUsageLimits;
 });

@@ -22,7 +22,8 @@ import { museUsageReader, type MuseUsageReaderEnv } from "./usage.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import { enrichMuseSnapshot, latestMuseVersion, museMaintenance } from "./maintenance.ts";
-import { makeMuseEnvironment } from "./sdk.ts";
+import { createMuseSdkHost, makeMuseEnvironment } from "./sdk.ts";
+import { resolveMuseUsageLimitsCachePath, writeCachedMuseUsageLimits } from "./usageLimitsCache.ts";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
@@ -93,6 +94,12 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv, MuseUsageRe
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
+      // Last-observed subscription limits, so the status probe can serve real
+      // bars even though a fresh host has never seen provider headers.
+      const usageLimitsCachePath = yield* resolveMuseUsageLimitsCachePath({
+        cacheDir: host.paths.providerStatusCacheDir,
+        instanceId,
+      }).pipe(Effect.provideService(Path.Path, path));
       const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
       const resolveInstallation = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(museMaintenance, {
@@ -127,7 +134,13 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv, MuseUsageRe
         haveSettingsChanged: haveProviderSnapshotSettingsChanged,
         initialSnapshot: (settings) =>
           makePendingMuseProvider(settings.provider).pipe(Effect.map(stampIdentity)),
-        checkProvider: checkMuseProviderStatus(effectiveConfig, processEnvironment, cwd).pipe(
+        checkProvider: checkMuseProviderStatus(
+          effectiveConfig,
+          processEnvironment,
+          cwd,
+          createMuseSdkHost,
+          usageLimitsCachePath,
+        ).pipe(
           Effect.map(stampIdentity),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -166,7 +179,19 @@ export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv, MuseUsageRe
         modelCatalog,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         continuationRequests,
-        onUsageLimits: (limits) => snapshot.applyUsageLimits(limits),
+        onUsageLimits: (limits) =>
+          snapshot
+            .applyUsageLimits(limits)
+            .pipe(
+              Effect.andThen(
+                writeCachedMuseUsageLimits(usageLimitsCachePath, limits).pipe(
+                  Effect.provideService(FileSystem.FileSystem, fileSystem),
+                  Effect.provideService(Path.Path, path),
+                  Effect.tapError(Effect.logError),
+                  Effect.ignore,
+                ),
+              ),
+            ),
       });
       const textGeneration = yield* makeMuseTextGeneration(effectiveConfig, {
         environment: processEnvironment,
