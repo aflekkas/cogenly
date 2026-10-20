@@ -236,6 +236,7 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { FileMetadataThreadProvider } from "../hooks/FileMetadataThreadProvider";
 import { usePreviewPanelInlineSize } from "../hooks/usePreviewPanelInlineSize";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
+import { usePublishInlineRightPanelWidth } from "./sidebar/listColumnLayoutStore";
 import {
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
@@ -1607,9 +1608,9 @@ export default function ChatView(props: ChatViewProps) {
   );
   // Electron hosts its own browser tabs; other clients need the environment to host them.
   const browserAvailable = isPreviewSupportedInRuntime() || activeEnvironmentServerBrowser;
+  // One width for every thread, so switching threads keeps the panel as resized.
   const previewPanelInlineSize = usePreviewPanelInlineSize(undefined, {
     container: workspaceLayoutElement,
-    widthStorageKey: `cogenly:preview-panel-width:${activeThreadKey}`,
   });
   const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null);
   const timelineThreadError =
@@ -1734,6 +1735,9 @@ export default function ChatView(props: ChatViewProps) {
   const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized = canMaximizeRightPanel && rightPanelState.maximized === true;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
+  usePublishInlineRightPanelWidth(
+    inlineRightPanelOwnsTitleBar ? previewPanelInlineSize.width : null,
+  );
 
   useEffect(() => {
     if (!activeThreadRef || !previewSessionsReady) return;
@@ -9303,6 +9307,10 @@ export default function ChatView(props: ChatViewProps) {
               >
                 <div
                   data-chat-composer-stack="true"
+                  // The centred hero and composer glide by their center when a
+                  // panel toggle resizes them, instead of jumping (panelFlip).
+                  data-panel-flip={isDraftHeroState ? "center" : undefined}
+                  data-panel-flip-contain={isDraftHeroState ? "window" : undefined}
                   className="group/composer-stack chat-content-lane pointer-events-auto relative z-10 px-(--chat-content-inset)"
                 >
                   {isDraftHeroState ? (

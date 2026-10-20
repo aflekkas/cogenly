@@ -1,6 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   useEffect,
+  useLayoutEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -40,6 +42,16 @@ import { routeHidesListColumn, SIDEBAR_TOGGLE_DISABLED_LABEL } from "./sidebar/l
 import { useAgentsEmpty } from "../agents/agentsClient";
 import { useUiStateStore } from "../uiStateStore";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
+import {
+  mainColumnCrampedBesidePanel,
+  useListColumnLayoutStore,
+} from "./sidebar/listColumnLayoutStore";
+import {
+  clearModeEnter,
+  modeSwitchDirection,
+  playModeEnter,
+} from "./sidebar/modes/modeSwitchMotion";
+import type { SidebarMode } from "./sidebar/modes/sidebarModes.logic";
 import { useProjects } from "../state/entities";
 import {
   clampThreadSidebarWidth,
@@ -203,6 +215,38 @@ function ProjectProjectionRetention() {
   return null;
 }
 
+/**
+ * Collapses the list column on its own while an inline right panel would leave
+ * the main column cramped, and brings it back once there is room again (the
+ * panel closes or the window grows). Both play the toggle's motion. The
+ * user's per-mode preference is untouched; reopening the column by hand beside
+ * the panel holds until the panel opens again.
+ */
+function ListColumnAutoCollapse({
+  cramped,
+  preferredOpen,
+}: {
+  cramped: boolean;
+  /** The mode's remembered state, on a page that has the list column. */
+  preferredOpen: boolean;
+}) {
+  const { setOpen, isMobile } = useSidebar();
+  const autoCollapsed = useListColumnLayoutStore((store) => store.autoCollapsed);
+  const dismissed = useListColumnLayoutStore((store) => store.autoCollapseDismissed);
+  useEffect(() => {
+    if (isMobile) return;
+    const { beginAutomaticChange } = useListColumnLayoutStore.getState();
+    if (cramped && preferredOpen && !autoCollapsed && !dismissed) {
+      beginAutomaticChange(true);
+      void setOpen(false);
+    } else if (!cramped && autoCollapsed) {
+      beginAutomaticChange(false);
+      void setOpen(preferredOpen);
+    }
+  }, [autoCollapsed, cramped, dismissed, isMobile, preferredOpen, setOpen]);
+  return null;
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
@@ -213,7 +257,21 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // Seeds server-side visited tracking from this browser's localStorage the
   useThreadVisitedMigration();
   const pathname = useLocation({ select: (location) => location.pathname });
-  const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
+  // Usage, Projects and an empty Agents list are full-width pages: with the
+  // rail there to navigate away, they have no list column. The mobile sheet
+  // stays, since it is the only way back.
+  const isMobile = useIsMobile();
+  const navRailVisible = !isMobile && !legacySidebarEnabled;
+  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
+  const agentsEmpty = useAgentsEmpty();
+  const listSidebarHidden =
+    navRailVisible &&
+    routeHidesListColumn(pathname, { agentsEmpty: sidebarMode === "agents" && agentsEmpty });
+  // A route change or a mode switch restores state instantly: the list
+  // column's remembered open state included. Only the toggle animates it.
+  const panelAnimationsSuppressed = usePanelNavigationSuppression(
+    `${pathname}|${sidebarMode}|${listSidebarHidden ? "hidden" : "shown"}`,
+  );
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   // The settings nav and the thread sidebar cross-fade when one replaces the
@@ -222,6 +280,16 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   if (sidebarView.settings !== isOnSettings) {
     setSidebarView({ settings: isOnSettings, swapped: true });
   }
+  // The cross-fade runs once: a column shown again after a full-width page
+  // (display: none) would otherwise replay its starting style.
+  useEffect(() => {
+    if (!sidebarView.swapped) return;
+    const timeout = window.setTimeout(
+      () => setSidebarView((view) => (view.swapped ? { ...view, swapped: false } : view)),
+      1000,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [sidebarView]);
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   // Subscribed rather than read once: the fixed width still clamps to the live
   // window size.
@@ -229,16 +297,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const [brandWidth, setBrandWidth] = useState(0);
   // The rail replaces the mode switcher and the Settings and Usage row. The
   // mobile sheet keeps those, and the legacy sidebar keeps its own layout.
-  const isMobile = useIsMobile();
-  const navRailVisible = !isMobile && !legacySidebarEnabled;
-  // Usage, Projects and an empty Agents list are full-width pages: with the
-  // rail there to navigate away, they have no list column. The mobile sheet
-  // stays, since it is the only way back.
-  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
-  const agentsEmpty = useAgentsEmpty();
-  const listSidebarHidden =
-    navRailVisible &&
-    routeHidesListColumn(pathname, { agentsEmpty: sidebarMode === "agents" && agentsEmpty });
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(() => {
     const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState;
     return isMacosDesktop && typeof getWindowFullscreenState === "function"
@@ -256,8 +314,44 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     sidebarMinimumWidth,
   );
   const windowControlsInsetStyle = titlebarLayout.windowControlsStyle as CSSProperties;
+  const listColumnWidth = clampThreadSidebarWidth(
+    resolveInitialThreadSidebarWidth(null, viewportWidth),
+    sidebarMinimumWidth,
+    sidebarMaximumWidth,
+  );
+  // Each mode remembers its own open or closed list column, and a page without
+  // the column leaves every mode's memory alone.
+  const preferredOpen = useListColumnLayoutStore((store) => store.openByMode[sidebarMode]);
+  const autoCollapsed = useListColumnLayoutStore((store) => store.autoCollapsed);
+  const inlineRightPanelWidth = useListColumnLayoutStore((store) => store.inlineRightPanelWidth);
+  const listColumnOpen = preferredOpen && !autoCollapsed;
+  const mainColumnCramped = mainColumnCrampedBesidePanel({
+    viewportWidth,
+    navRailWidth: titlebarLayout.navRailWidthPx,
+    listColumnWidth,
+    rightPanelWidth: inlineRightPanelWidth,
+  });
+  const onListColumnOpenChange = (open: boolean) =>
+    useListColumnLayoutStore.getState().applyOpenChange(sidebarMode, open);
+  // A mode switch fades the new list in once, from the rail's direction.
+  const listContentRef = useRef<HTMLDivElement | null>(null);
+  const listMotionModeRef = useRef<SidebarMode>(sidebarMode);
+  useLayoutEffect(() => {
+    const previous = listMotionModeRef.current;
+    listMotionModeRef.current = sidebarMode;
+    const list = listContentRef.current;
+    if (!list) return;
+    // A hidden column would replay the motion when it shows again.
+    if (listSidebarHidden) {
+      clearModeEnter(list);
+      return;
+    }
+    const direction = modeSwitchDirection(previous, sidebarMode);
+    if (direction === null || isOnSettings) return;
+    playModeEnter(list, direction);
+  }, [isOnSettings, listSidebarHidden, sidebarMode]);
   const sidebarProviderStyle = {
-    "--sidebar-width": `${clampThreadSidebarWidth(resolveInitialThreadSidebarWidth(null, viewportWidth), sidebarMinimumWidth, sidebarMaximumWidth)}px`,
+    "--sidebar-width": `${listColumnWidth}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
     ...titlebarLayout.style,
   } as CSSProperties;
@@ -307,52 +401,56 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
         data-nav-rail={navRailVisible ? "" : undefined}
         data-list-column-hidden={listSidebarHidden ? "" : undefined}
-        defaultOpen
+        open={listColumnOpen}
+        onOpenChange={onListColumnOpenChange}
         style={sidebarProviderStyle}
       >
+        <ListColumnAutoCollapse
+          cramped={mainColumnCramped && !listSidebarHidden}
+          preferredOpen={preferredOpen}
+        />
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
         <ProjectProjectionRetention />
         {navRailVisible ? (
           <SidebarNavRail showSidebarToggle={titlebarLayout.sidebarToggle === "rail-titlebar"} />
         ) : null}
-        {listSidebarHidden ? null : (
-          <Sidebar
-            side="left"
-            collapsible="offcanvas"
-            data-app-sidebar=""
-            role="navigation"
-            aria-label={isOnSettings ? "Settings" : "Threads"}
-            // The list column starts after the rail and slides under it when
-            // collapsed. When it mounts (the first agent created, a return from
-            // a full-width page) it starts off-canvas, so the Sidebar's own
-            // toggle transition slides it in.
-            className={
-              navRailVisible ? "left-(--nav-rail-width) starting:-translate-x-full" : undefined
-            }
-            // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
-            style={windowControlsInsetStyle}
+        {/* Stays mounted on full-width pages, hidden by data-list-column-hidden
+            (index.css), so a return shows the list in place, without a remount
+            or a slide. */}
+        <Sidebar
+          side="left"
+          collapsible="offcanvas"
+          data-app-sidebar=""
+          role="navigation"
+          aria-label={isOnSettings ? "Settings" : "Threads"}
+          aria-hidden={listSidebarHidden || undefined}
+          inert={listSidebarHidden || undefined}
+          // The list column starts after the rail and slides under it when collapsed.
+          className={navRailVisible ? "left-(--nav-rail-width)" : undefined}
+          // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
+          style={windowControlsInsetStyle}
+        >
+          <div
+            key={isOnSettings ? "settings" : "threads"}
+            ref={listContentRef}
+            className={cn(
+              "flex min-h-0 w-full flex-1 flex-col",
+              sidebarView.swapped &&
+                "motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-standard motion-safe:starting:opacity-0",
+            )}
           >
-            <div
-              key={isOnSettings ? "settings" : "threads"}
-              className={cn(
-                "flex min-h-0 w-full flex-1 flex-col",
-                sidebarView.swapped &&
-                  "motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-standard motion-safe:starting:opacity-0",
-              )}
-            >
-              {isOnSettings ? (
-                <>
-                  <SidebarChromeHeader isElectron={isElectron} />
-                  <SettingsSidebarNav pathname={pathname} />
-                </>
-              ) : legacySidebarEnabled ? (
-                <LegacyThreadSidebar />
-              ) : (
-                <ThreadSidebar />
-              )}
-            </div>
-          </Sidebar>
-        )}
+            {isOnSettings ? (
+              <>
+                <SidebarChromeHeader isElectron={isElectron} />
+                <SettingsSidebarNav pathname={pathname} />
+              </>
+            ) : legacySidebarEnabled ? (
+              <LegacyThreadSidebar />
+            ) : (
+              <ThreadSidebar />
+            )}
+          </div>
+        </Sidebar>
         {children}
         {/* Without the rail, or after the macOS traffic lights beside it. A page
             without the list column keeps the button in place, disabled. */}

@@ -92,8 +92,9 @@ export function SidebarNavRail({
   const selectMode = (next: SidebarMode) => {
     // A utility page hands the column back to the thread list.
     selectSidebarMode(next, { leaveUtilityPage: true });
-    // A collapsed list opens on the mode picked.
-    if (!open) setOpen(true);
+    // Another mode restores its own remembered list column (see
+    // listColumnLayoutStore); picking the current mode again opens a collapsed one.
+    if (next === mode && !open) setOpen(true);
   };
 
   const handleTabsKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {

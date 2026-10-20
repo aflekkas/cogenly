@@ -11,6 +11,11 @@ import { observeResize } from "./observeResize";
  *
  * Mark the content, never the pane: a transform makes the pane the containing
  * block of its `position: fixed` controls, and they jump with it.
+ *
+ * Contained motion holds a column that resizes with the pane at its fixed
+ * edge, which suits text that reflows anyway. Centred content that resizes (the
+ * draft hero and its composer) adds `data-panel-flip-contain="window"`: it
+ * keeps its center where it was, and only stays inside the window.
  */
 export type PanelFlipAnchor = "start" | "center" | "end";
 
@@ -22,6 +27,7 @@ export const PANEL_EXIT_DURATION_SCALE = 0.7;
 
 const PANEL_FLIP_SELECTOR = "[data-panel-flip]";
 const PANEL_FLIP_COLUMN_SELECTOR = "[data-panel-flip-column]";
+const PANEL_FLIP_WINDOW_CONTAIN = "window";
 const PANEL_FLIP_ANIMATION_ID = "panel-flip";
 
 interface HorizontalBounds {
@@ -35,6 +41,8 @@ export interface PanelFlipMeasurement {
   readonly after: HorizontalBounds;
   /** Index of the nearest marked ancestor in the same list. */
   readonly parent: number | null;
+  /** Contained, keep it inside these bounds (the window) instead of its two spans. */
+  readonly within?: HorizontalBounds;
 }
 
 export interface PanelFlipSnapshot {
@@ -61,7 +69,12 @@ export interface PanelFlipOptions {
 }
 
 function containOffset(entry: PanelFlipMeasurement, offset: number): number {
-  const { before, after } = entry;
+  const { before, after, within } = entry;
+  if (within) {
+    const low = within.left - after.left;
+    const high = within.right - after.right;
+    return low <= high ? Math.min(Math.max(offset, low), high) : 0;
+  }
   // Within the union of both spans: never drawn where it was not, before or after.
   const unionLow = Math.min(before.left, after.left) - after.left;
   const unionHigh = Math.max(before.right, after.right) - after.right;
@@ -180,7 +193,15 @@ function flipPanelContent(
     if (!after) continue;
     indexByElement.set(element, elements.length);
     elements.push(element);
-    measurements.push({ anchor: readAnchor(element), before: bounds, after, parent: null });
+    measurements.push({
+      anchor: readAnchor(element),
+      before: bounds,
+      after,
+      parent: null,
+      ...(element.dataset.panelFlipContain === PANEL_FLIP_WINDOW_CONTAIN
+        ? { within: { left: 0, right: document.documentElement.clientWidth } }
+        : {}),
+    });
   }
   // querySelectorAll returns document order, so every ancestor is indexed first.
   const resolved = measurements.map((measurement, index) => {

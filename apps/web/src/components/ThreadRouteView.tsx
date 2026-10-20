@@ -3,12 +3,13 @@ import { useAgents, useAgentConversation } from "../agents/agentsClient";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import ChatView from "./ChatView";
 import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
 import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
 import { SidebarInset } from "./ui/sidebar";
+import { playPendingMainPaneEnter } from "./sidebar/modes/modeSwitchMotion";
 import {
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThreadByRef,
@@ -38,8 +39,16 @@ import {
  *
  * Rendered by the `_chat` layout rather than by the two leaf routes, since
  * an element only survives a route swap when the same parent renders it.
+ * `retained`: the route has moved on and this view only stands in, inert,
+ * until the next route has content, so it must not redirect.
  */
-export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
+export function ThreadRouteView({
+  target,
+  retained = false,
+}: {
+  target: ThreadRouteTarget;
+  retained?: boolean;
+}) {
   const navigate = useNavigate();
   const { agents } = useAgents();
   const contact =
@@ -128,7 +137,7 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   }, [draftSession?.promotedTo, inferredThreadRef]);
 
   useEffect(() => {
-    if (!canonicalThreadRef) {
+    if (!canonicalThreadRef || retained) {
       return;
     }
     let cancelled = false;
@@ -145,17 +154,17 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     return () => {
       cancelled = true;
     };
-  }, [canonicalThreadRef, navigate]);
+  }, [canonicalThreadRef, navigate, retained]);
 
   useEffect(() => {
-    if (target.kind !== "draft" || draftSession || canonicalThreadRef) {
+    if (target.kind !== "draft" || draftSession || canonicalThreadRef || retained) {
       return;
     }
     void navigate({ to: "/", replace: true });
-  }, [canonicalThreadRef, draftSession, navigate, target.kind]);
+  }, [canonicalThreadRef, draftSession, navigate, retained, target.kind]);
 
   useEffect(() => {
-    if (target.kind !== "server" || !bootstrapComplete) {
+    if (target.kind !== "server" || !bootstrapComplete || retained) {
       return;
     }
     // Navigation already resolved onto this path, so a drop aimed here
@@ -168,7 +177,7 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
         void navigate({ to: "/", replace: true });
       }
     }
-  }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
+  }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, retained, target]);
 
   useEffect(() => {
     if (target.kind !== "server" || !serverThreadStarted || !draftThread) {
@@ -209,8 +218,22 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     );
   }
 
+  // A hand-picked sidebar mode plays its enter motion on the thread it lands on.
+  const insetRef = useRef<HTMLElement | null>(null);
+  const targetKey = target.kind === "server" ? scopedThreadKey(target.threadRef) : target.draftId;
+  useLayoutEffect(() => {
+    // Plays when the view takes another thread.
+    void targetKey;
+    if (!retained) playPendingMainPaneEnter(insetRef.current);
+  }, [retained, targetKey]);
+
   return (
-    <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh">
+    <SidebarInset
+      ref={insetRef}
+      className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh"
+      data-retained-thread-view={retained ? "" : undefined}
+      inert={retained || undefined}
+    >
       {view}
     </SidebarInset>
   );

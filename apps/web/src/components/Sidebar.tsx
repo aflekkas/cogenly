@@ -3530,7 +3530,7 @@ export default function Sidebar() {
     void sidebarListOrderKey;
     // A mode switch replaces the whole list. Fading every row out (each as a
     // deep clone) and back in cost a long frame, so the list snaps to the new
-    // mode and only fades in as one composited layer.
+    // mode; AppSidebarLayout plays the switch's one enter motion on the column.
     const modeChanged = listMotionModeRef.current !== sidebarMode;
     listMotionModeRef.current = sidebarMode;
     // Switching the Work count bar's filter swaps the list the same way, with
@@ -3539,13 +3539,7 @@ export default function Sidebar() {
     listMotionShelfRef.current = openShelf;
     listMotionRef.current?.update(sidebarListHasRows && !modeChanged && !shelfChanged);
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    if (modeChanged) {
-      // --motion-duration-fast on ease-standard.
-      sidebarModeListRef.current?.animate([{ opacity: 0.4 }, { opacity: 1 }], {
-        duration: 150,
-        easing: "cubic-bezier(0.2, 0, 0, 1)",
-      });
-    } else if (shelfChanged) {
+    if (shelfChanged && !modeChanged) {
       // --motion-duration-base on ease-standard.
       sidebarModeListRef.current?.animate(
         [

@@ -69,6 +69,40 @@ describe("resolvePanelFlipOffsets", () => {
     expect(offsets).toEqual([135, 256, 118]);
   });
 
+  it("contained to the window, glides resized centred content by its center", () => {
+    const window = bounds(0, 1000);
+    // Opening over a narrow window: the hero narrows and starts at its old center.
+    expect(
+      resolvePanelFlipOffsets(
+        [
+          {
+            anchor: "center",
+            before: bounds(105, 952),
+            after: bounds(344, 935),
+            parent: null,
+            within: window,
+          },
+        ],
+        { contain: true },
+      ),
+    ).toEqual([-111]);
+    // Closing, it widens; its old center would start it past the window edge.
+    expect(
+      resolvePanelFlipOffsets(
+        [
+          {
+            anchor: "center",
+            before: bounds(361, 952),
+            after: bounds(105, 952),
+            parent: null,
+            within: window,
+          },
+        ],
+        { contain: true },
+      ),
+    ).toEqual([48]);
+  });
+
   it("ignores subpixel shifts", () => {
     expect(
       resolvePanelFlipOffsets([

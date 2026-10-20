@@ -6,6 +6,7 @@ import { sidebarModeForThreadKind } from "../../../threadCapabilities";
 import { useUiStateStore } from "../../../uiStateStore";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "../mainAppLocation";
 import { modeSwitchReplacesMainPanel, type MainPanelContent } from "./modeLanding.logic";
+import { noteModeSwitchForMainPane } from "./modeSwitchMotion";
 import type { SidebarMode } from "./sidebarModes.logic";
 
 /**
@@ -40,12 +41,15 @@ export function useSelectSidebarMode() {
         if (!options?.leaveUtilityPage) return;
         // Back to where the user was in the same mode; a fresh landing in another,
         // since the remembered page may be a thread that mode does not list.
+        noteModeSwitchForMainPane(previous, next);
         void (next === previous ? navigateToMainApp() : router.navigate({ to: "/" }));
         return;
       }
-      if (modeSwitchReplacesMainPanel(next, readMainPanelContent())) {
-        void router.navigate({ to: "/" });
-      }
+      const content = readMainPanelContent();
+      const replacesMainPanel = modeSwitchReplacesMainPanel(next, content);
+      // The index lands again on its own (ModeIndexLanding is keyed by mode).
+      if (replacesMainPanel || content.kind === "index") noteModeSwitchForMainPane(previous, next);
+      if (replacesMainPanel) void router.navigate({ to: "/" });
     },
     [navigateToMainApp, readMainPanelContent, router, setMode],
   );

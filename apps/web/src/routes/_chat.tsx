@@ -1,12 +1,13 @@
 import { AuthPreviewOperateScope } from "@t3tools/contracts";
 import { Outlet, createFileRoute, redirect, useParams } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
-import { resolveThreadRouteTarget } from "../threadRoutes";
+import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
+import { playPendingMainPaneEnter } from "../components/sidebar/modes/modeSwitchMotion";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useProjects } from "../state/entities";
@@ -231,6 +232,15 @@ function ChatRouteGlobalShortcuts() {
   return null;
 }
 
+function threadRouteTargetKey(target: ThreadRouteTarget): string {
+  return target.kind === "server"
+    ? `server:${target.threadRef.environmentId}:${target.threadRef.threadId}`
+    : `draft:${target.draftId}`;
+}
+
+/** The longest the previous thread stands in for a route with nothing to show yet. */
+const RETAINED_THREAD_VIEW_MAX_MS = 1000;
+
 function ChatRouteLayout() {
   // Both thread routes render here, not in their own leaf components, so the
   // draft-to-thread promotion keeps one ChatView mounted across the swap.
@@ -238,13 +248,54 @@ function ChatRouteLayout() {
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
   });
+  // Leaving a thread for a route that shows nothing yet (the index while it
+  // lands on the picked mode's thread, a route chunk still loading) keeps the
+  // thread on screen, inert, instead of a blank frame. The same instance takes
+  // the next thread, and index.css hides it as soon as the outlet has content.
+  const threadTargetKey = threadTarget ? threadRouteTargetKey(threadTarget) : null;
+  const [retained, setRetained] = useState<{
+    readonly key: string;
+    readonly target: ThreadRouteTarget;
+  } | null>(null);
+  if (threadTarget && threadTargetKey !== null && retained?.key !== threadTargetKey) {
+    setRetained({ key: threadTargetKey, target: threadTarget });
+  }
+  const shownTarget = threadTarget ?? retained?.target ?? null;
+  const outletRef = useRef<HTMLDivElement | null>(null);
+  const outletRendered = threadTarget === null;
+  useLayoutEffect(() => {
+    const outlet = outletRef.current;
+    if (!outletRendered || !outlet) return;
+    const settle = () => {
+      if (outlet.firstElementChild === null) return false;
+      playPendingMainPaneEnter(outlet.firstElementChild);
+      setRetained(null);
+      return true;
+    };
+    if (settle()) return;
+    // Runs before the frame that paints the new content.
+    const observer = new MutationObserver(() => {
+      if (settle()) observer.disconnect();
+    });
+    observer.observe(outlet, { childList: true });
+    const timeout = window.setTimeout(() => setRetained(null), RETAINED_THREAD_VIEW_MAX_MS);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(timeout);
+    };
+  }, [outletRendered]);
   return (
     <>
       <ChatRouteGlobalShortcuts />
       {threadTarget?.kind === "server" ? (
         <ThreadLinkPrompt threadRef={threadTarget.threadRef} />
       ) : null}
-      {threadTarget ? <ThreadRouteView target={threadTarget} /> : <Outlet />}
+      {shownTarget ? <ThreadRouteView target={shownTarget} retained={!threadTarget} /> : null}
+      {outletRendered ? (
+        <div ref={outletRef} className="contents" data-chat-outlet="">
+          <Outlet />
+        </div>
+      ) : null}
     </>
   );
 }
