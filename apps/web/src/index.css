@@ -705,6 +705,34 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+/* Popup rows (menu, select, combobox, autocomplete and command items) show
+   hover, highlight and selection as a plain fill, without the selected edge,
+   top highlight or shadow. The highlighted row is the keyboard focus, so a
+   selected row that is also highlighted steps up to a stronger fill. */
+:is(
+  [data-slot="menu-item"],
+  [data-slot="menu-checkbox-item"],
+  [data-slot="menu-radio-item"],
+  [data-slot="menu-sub-trigger"],
+  [data-slot="select-item"],
+  [data-slot="combobox-item"],
+  [data-slot="autocomplete-item"],
+  [data-slot="command-item"]
+) {
+  --state-hover-sheen-top: transparent;
+  --state-hover-sheen-bottom: transparent;
+  --state-hover-highlight: transparent;
+  --state-selected-sheen-top: transparent;
+  --state-selected-sheen-bottom: transparent;
+  --state-selected-highlight: transparent;
+  --state-selected-edge: transparent;
+  --state-selected-shadow: 0 0 #0000;
+
+  &[data-highlighted]:is([data-selected], [data-checked]) {
+    --state-selected-fill: var(--state-selected-highlighted-fill);
+  }
+}
+
 /* Sidebar rows and rail buttons cross-fade between rest, hover and selected:
    the old highlight fades out as the new one fades in. state-fade opts other
    surfaces (tinted rows) into the same cross-fade. Layered under utilities,
@@ -1654,6 +1682,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --state-hover-highlight: transparent;
   --state-hover-foreground: var(--contrast-foreground);
   --state-selected-fill: color-mix(in srgb, var(--foreground) 6.5%, transparent);
+  /* A selected popup row under the keyboard highlight or pointer. */
+  --state-selected-highlighted-fill: color-mix(in srgb, var(--foreground) 10%, transparent);
   --state-selected-sheen-top: transparent;
   --state-selected-sheen-bottom: transparent;
   --state-selected-highlight: transparent;
@@ -1793,6 +1823,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --state-hover-sheen-bottom: transparent;
     --state-hover-highlight: transparent;
     --state-selected-fill: rgb(255 255 255 / 7%);
+    --state-selected-highlighted-fill: rgb(255 255 255 / 11%);
     --state-selected-sheen-top: transparent;
     --state-selected-sheen-bottom: transparent;
     --state-selected-highlight: transparent;
