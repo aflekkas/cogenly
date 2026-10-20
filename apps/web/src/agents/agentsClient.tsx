@@ -118,7 +118,7 @@ export interface AgentsClient {
   modelStatus?: (agent: AgentContact, model: AgentModelRef) => AgentModelStatus;
   /** Model and effort pickers from the live provider catalog; absent where there is none. */
   ModelControls?: ComponentType<AgentModelControlsProps>;
-  /** "Context used (N)" under the reply that closes a run; absent where there is no retrieval. */
+  /** The "Context used" icon under the reply that closes a run; absent where there is no retrieval. */
   MessageContext?: ComponentType<{ agent: AgentContact; runId: RunId }>;
   /** The agent's facts in Responsibilities; absent where there is no facts service. */
   MemorySection?: ComponentType<{
@@ -217,7 +217,7 @@ import { useEnvironmentQuery } from "~/state/query";
 import { randomUUID, newMessageId } from "~/lib/utils";
 import { useAgentScheduledTasks } from "~/components/sidebar/modes/useAgentScheduledTasks";
 import { AgentFactsSection } from "~/memory/AgentFacts";
-import { ContextUsed } from "~/context/ThreadContext";
+import { ContextUsedButton } from "~/context/ThreadContext";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { AgentRequest } from "./agents.types";
 
@@ -1043,22 +1043,15 @@ function LiveAgentModelControls({
   );
 }
 
-/** The same "Context used (N)" disclosure chat turns show, for one agent run. */
+/** The same "Context used" icon and dialog chat replies show, for one agent run. */
 function AgentMessageContext({ agent, runId }: { agent: AgentContact; runId: RunId }) {
   return (
-    <ContextUsed
-      threadRef={scopeThreadRef(agent.environmentId, agent.conversationThreadId)}
-      runId={runId}
-    >
-      {({ trigger, panel }) =>
-        trigger ? (
-          <div className="flex flex-col items-start pt-1">
-            {trigger}
-            {panel}
-          </div>
-        ) : null
-      }
-    </ContextUsed>
+    <div className="flex empty:hidden">
+      <ContextUsedButton
+        threadRef={scopeThreadRef(agent.environmentId, agent.conversationThreadId)}
+        runId={runId}
+      />
+    </div>
   );
 }
 

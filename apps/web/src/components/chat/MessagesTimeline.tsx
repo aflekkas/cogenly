@@ -189,7 +189,7 @@ import {
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
-import { ContextUsed } from "../../context/ThreadContext";
+import { ContextUsedButton } from "../../context/ThreadContext";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { WorkspaceEntryIcon, WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
@@ -3166,26 +3166,16 @@ function AssistantMessageMeta({
   copyStreaming: boolean;
   alwaysVisible?: boolean;
 }) {
-  const ctx = use(TimelineRowCtx);
-
   return (
-    <ContextUsed threadRef={ctx.threadRef} runId={message.streaming ? null : message.runId}>
-      {({ trigger, panel }) => (
-        <div className={className}>
-          <div className="flex items-center gap-2">
-            <AssistantMessageMetaActions
-              projectedItem={projectedItem}
-              message={message}
-              showCopyButton={showCopyButton}
-              copyStreaming={copyStreaming}
-              alwaysVisible={alwaysVisible}
-            />
-            {trigger}
-          </div>
-          {panel}
-        </div>
-      )}
-    </ContextUsed>
+    <div className={className}>
+      <AssistantMessageMetaActions
+        projectedItem={projectedItem}
+        message={message}
+        showCopyButton={showCopyButton}
+        copyStreaming={copyStreaming}
+        alwaysVisible={alwaysVisible}
+      />
+    </div>
   );
 }
 
@@ -3229,6 +3219,9 @@ function AssistantMessageMetaActions({
         ) : null}
         {!message.streaming ? <StartWorkFromMessageButton id={message.id} /> : null}
       </BranchActions>
+      {!message.streaming ? (
+        <ContextUsedButton threadRef={ctx.threadRef} runId={message.runId} />
+      ) : null}
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>

@@ -3,27 +3,44 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type {
-  ContextItem,
   EnvironmentId,
   ProjectLabelId,
   RunId,
   ScopedThreadRef,
   ThreadId,
 } from "@t3tools/contracts";
-import { ArrowUpRightIcon, ChevronDownIcon, LibraryIcon } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { ArrowUpRightIcon, LibraryIcon } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { Button } from "../components/ui/button";
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
+import { Spinner } from "../components/ui/spinner";
 import { Switch } from "../components/ui/switch";
 import { toastManager } from "../components/ui/toast";
-import { resolveFactRefs } from "../memory/facts.logic";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useFactNavigation } from "../memory/useFacts";
 import { agentWorkspaceRpc } from "../rpc/agents";
 import { useThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
+import { formatRelativeTimeLabel } from "../timestampFormat";
+import {
+  contextSourceThreadId,
+  describeContextItem,
+  groupContextItems,
+  type ContextUsedItem,
+} from "./contextUsed.logic";
 
 const NO_LABELS: ReadonlyArray<ProjectLabelId> = [];
 
@@ -97,66 +114,121 @@ export function ProjectContextToggle(props: {
   );
 }
 
-const CONTEXT_KIND_LABEL: Record<ContextItem["kind"], string> = {
-  fact: "Fact",
-  commitment: "Open item",
-  message: "Message",
-  work: "Work outcome",
-};
-
-function ContextUsedPanel(props: {
-  environmentId: EnvironmentId;
-  items: ReadonlyArray<ContextItem>;
-  onOpenThread: (threadId: ThreadId) => void;
-  onOpenExternal: (href: string) => void;
+/** Resolves the source thread's title from the client when the server sent none. */
+function ContextUsedEntryRow(props: {
+  readonly environmentId: EnvironmentId;
+  readonly item: ContextUsedItem;
+  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onOpenExternal: (href: string) => void;
 }) {
+  const sourceThreadId = contextSourceThreadId(props.item);
+  const shell = useThreadShell(
+    sourceThreadId === null ? null : scopeThreadRef(props.environmentId, sourceThreadId),
+  );
+  const entry = describeContextItem(props.item, shell?.title ?? null);
+  const time = formatRelativeTimeLabel(entry.at);
   return (
-    <ul className="reveal-motion mt-1.5 flex max-w-prose flex-col gap-1.5 border-s border-border/70 ps-3 text-xs text-muted-foreground">
-      {props.items.map((item) => {
-        const links = resolveFactRefs(item.refs).filter((ref) => ref.kind !== "text");
-        return (
-          <li key={`${item.kind}:${item.id}`} className="flex flex-col">
-            <span className="line-clamp-2">
-              <span className="text-foreground">{CONTEXT_KIND_LABEL[item.kind]}</span> · {item.text}
-            </span>
-            {links.length > 0 ? (
-              <span className="flex flex-wrap items-center gap-1">
-                {links.map((ref, index) => (
-                  <Button
-                    // oxlint-disable-next-line react/no-array-index-key -- refs are a stable snapshot
-                    key={index}
-                    size="xs"
-                    variant="link"
-                    onClick={() =>
-                      ref.kind === "thread"
-                        ? props.onOpenThread(ref.threadId)
-                        : ref.kind === "external"
-                          ? props.onOpenExternal(ref.href)
-                          : undefined
-                    }
-                  >
-                    {ref.label}
-                    {ref.kind === "external" ? <ArrowUpRightIcon /> : null}
-                  </Button>
-                ))}
-              </span>
-            ) : null}
-          </li>
-        );
-      })}
-    </ul>
+    <li className="flex flex-col gap-1 py-2.5">
+      <div className="flex min-w-0 items-baseline gap-2">
+        <span className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">
+          {entry.title}
+        </span>
+        {time ? (
+          <time dateTime={entry.at} className="shrink-0 text-muted-foreground text-xs tabular-nums">
+            {time}
+          </time>
+        ) : null}
+      </div>
+      <p className="line-clamp-3 whitespace-pre-line text-muted-foreground text-sm">
+        {entry.role ? (
+          <span className="font-medium text-foreground">
+            {entry.role === "user" ? "You" : "Assistant"}:{" "}
+          </span>
+        ) : null}
+        {entry.snippet}
+      </p>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 text-muted-foreground text-xs">
+        <span className="min-w-0 truncate">{entry.reason}</span>
+        {sourceThreadId !== null ? (
+          <Button size="xs" variant="link" onClick={() => props.onOpenThread(sourceThreadId)}>
+            Open thread
+            <ArrowUpRightIcon />
+          </Button>
+        ) : null}
+        {entry.external.map((link) => (
+          <Button
+            key={link.href}
+            size="xs"
+            variant="link"
+            onClick={() => props.onOpenExternal(link.href)}
+          >
+            {link.label}
+            <ArrowUpRightIcon />
+          </Button>
+        ))}
+      </div>
+    </li>
   );
 }
 
+function ContextUsedBody(props: {
+  readonly environmentId: EnvironmentId;
+  readonly items: ReadonlyArray<ContextUsedItem>;
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onOpenExternal: (href: string) => void;
+}) {
+  if (props.items.length === 0) {
+    return (
+      <Empty size="compact">
+        <EmptyHeader>
+          {props.loading ? <Spinner /> : null}
+          <EmptyTitle>
+            {props.loading
+              ? "Loading context"
+              : props.error
+                ? "Could not load context"
+                : "No context added"}
+          </EmptyTitle>
+          <EmptyDescription>
+            {props.loading
+              ? "Fetching what this reply was given."
+              : (props.error ?? "Cogenly added nothing from your projects to this reply.")}
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+  return groupContextItems(props.items).map((group) => (
+    <section key={group.kind} aria-label={group.label}>
+      <h3 className="font-medium text-muted-foreground text-xs">
+        {group.label} <span className="tabular-nums">{group.items.length}</span>
+      </h3>
+      <ul className="divide-y divide-border/70">
+        {group.items.map((item) => (
+          <ContextUsedEntryRow
+            key={`${item.kind}:${item.id}`}
+            environmentId={props.environmentId}
+            item={item}
+            onOpenThread={props.onOpenThread}
+            onOpenExternal={props.onOpenExternal}
+          />
+        ))}
+      </ul>
+    </section>
+  ));
+}
+
 /**
- * "Context used (N)" for one finished turn: what retrieval added to the prompt, with
- * links to where each item came from. Only threads that can receive context ask, and
- * the trigger renders nothing until the run is known to have used some.
+ * The "Context used" icon for one finished turn, in the reply's action row: what
+ * retrieval added to the prompt, opened in a dialog with links to each source. Only
+ * threads that can receive context ask, and it renders nothing until the run is known
+ * to have used some.
  */
-export function ContextUsed(props: {
+export function ContextUsedButton(props: {
   readonly threadRef: ScopedThreadRef | null;
   readonly runId: RunId | null;
-  readonly children: (parts: { trigger: ReactNode; panel: ReactNode }) => ReactNode;
 }) {
   const environmentId = props.threadRef?.environmentId ?? null;
   const threadId = props.threadRef?.threadId ?? null;
@@ -170,25 +242,50 @@ export function ContextUsed(props: {
   );
   const navigation = useFactNavigation(environmentId);
   const [open, setOpen] = useState(false);
-  const items = used.data?.items ?? [];
+  const items: ReadonlyArray<ContextUsedItem> = used.data?.items ?? [];
   const count = items.length;
-  const trigger =
-    count > 0 ? (
-      <Button
-        type="button"
-        size="xs"
-        variant="ghost-muted"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <LibraryIcon />
-        Context used ({count})
-        <ChevronDownIcon className={open ? "rotate-180" : undefined} />
-      </Button>
-    ) : null;
-  const panel =
-    open && count > 0 && environmentId !== null ? (
-      <ContextUsedPanel environmentId={environmentId} items={items} {...navigation} />
-    ) : null;
-  return props.children({ trigger, panel });
+  if ((count === 0 && !open) || environmentId === null) return null;
+  const label = `Context used · ${count} ${count === 1 ? "item" : "items"}`;
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              aria-label={label}
+              aria-haspopup="dialog"
+              onClick={() => setOpen(true)}
+            />
+          }
+        >
+          <LibraryIcon className="size-3" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{label}</TooltipPopup>
+      </Tooltip>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogPopup className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Context used</DialogTitle>
+            <DialogDescription>What Cogenly added to the prompt for this reply</DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            <ContextUsedBody
+              environmentId={environmentId}
+              items={items}
+              loading={used.isPending && used.data === null}
+              error={used.error}
+              onOpenThread={(target) => {
+                setOpen(false);
+                navigation.onOpenThread(target);
+              }}
+              onOpenExternal={navigation.onOpenExternal}
+            />
+          </DialogPanel>
+        </DialogPopup>
+      </Dialog>
+    </>
+  );
 }
