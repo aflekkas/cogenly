@@ -384,3 +384,52 @@ export function resizePreviewMiniPlayer(input: {
   );
   return { ...position, ...size };
 }
+
+/** The part of the container the window actually shows, in container coordinates. */
+export interface PreviewMiniPlayerBounds {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+/**
+ * The visible part of a container whose untransformed top-left sits at
+ * `origin` in a window of `viewport` size. A pane that overflows the window
+ * (mid layout change, or squeezed by side panels) keeps the player on screen.
+ */
+export function resolvePreviewMiniPlayerVisibleBounds(
+  origin: PreviewMiniPlayerPosition,
+  container: PreviewMiniPlayerSize,
+  viewport: PreviewMiniPlayerSize,
+): PreviewMiniPlayerBounds {
+  return {
+    left: Math.max(0, -origin.x),
+    top: Math.max(0, -origin.y),
+    right: Math.min(container.width, viewport.width - origin.x),
+    bottom: Math.min(container.height, viewport.height - origin.y),
+  };
+}
+
+/**
+ * Keeps a resolved frame fully inside the visible bounds with the edge gap,
+ * shrinking it at its aspect ratio only when the bounds are smaller than it.
+ * Returns the same frame when it already fits.
+ */
+export function fitPreviewMiniPlayerFrameToBounds(
+  frame: PreviewMiniPlayerFrame,
+  bounds: PreviewMiniPlayerBounds,
+): PreviewMiniPlayerFrame {
+  const gap = PREVIEW_MINI_PLAYER_EDGE_GAP;
+  const availableWidth = Math.max(1, bounds.right - bounds.left - gap * 2);
+  const availableHeight = Math.max(1, bounds.bottom - bounds.top - gap * 2);
+  const scale = Math.min(1, availableWidth / frame.width, availableHeight / frame.height);
+  const width = scale < 1 ? Math.max(1, Math.floor(frame.width * scale)) : frame.width;
+  const height = scale < 1 ? Math.max(1, Math.floor(frame.height * scale)) : frame.height;
+  const x = Math.max(bounds.left + gap, Math.min(frame.x, bounds.right - gap - width));
+  const y = Math.max(bounds.top + gap, Math.min(frame.y, bounds.bottom - gap - height));
+  if (x === frame.x && y === frame.y && width === frame.width && height === frame.height) {
+    return frame;
+  }
+  return { x, y, width, height };
+}

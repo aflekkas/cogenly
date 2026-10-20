@@ -86,12 +86,18 @@ export function agentControlledBrowserCloseConfirmation(
   ].join("\n");
 }
 
-/** The floating player hides only while the same source is rendered in the panel. */
+/**
+ * The floating player shows only while its source is live on this thread and
+ * the same source is not already rendered in the panel. `sourceLive` is false
+ * for a browser tab with no session on this thread (a fresh draft, a closed
+ * tab, or a list not loaded yet), so a stale entry never floats a blank frame.
+ */
 export function shouldRenderPreviewMiniPlayer(
   source: PreviewMiniPlayerSource | null,
   renderedRightPanelSurface: RightPanelSurface | null,
+  sourceLive: boolean,
 ): boolean {
-  if (source === null) return false;
+  if (source === null || !sourceLive) return false;
   if (source.kind === "browser") {
     return !(
       renderedRightPanelSurface?.kind === "preview" &&

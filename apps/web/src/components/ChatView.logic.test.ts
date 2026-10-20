@@ -774,7 +774,7 @@ describe("agent browser close confirmation", () => {
 
 describe("floating browser preview", () => {
   it("only hides the duplicate while the same browser is rendered in the panel", () => {
-    expect(shouldRenderPreviewMiniPlayer(null, null)).toBe(false);
+    expect(shouldRenderPreviewMiniPlayer(null, null, true)).toBe(false);
     expect(
       shouldRenderPreviewMiniPlayer(
         { kind: "browser", tabId: "tab-1" },
@@ -783,6 +783,7 @@ describe("floating browser preview", () => {
           kind: "preview",
           resourceId: "tab-1",
         },
+        true,
       ),
     ).toBe(false);
     expect(
@@ -793,14 +794,29 @@ describe("floating browser preview", () => {
           kind: "preview",
           resourceId: "tab-2",
         },
+        true,
       ),
     ).toBe(true);
     expect(
       shouldRenderPreviewMiniPlayer(
         { kind: "browser", tabId: "tab-1" },
         { id: "terminal", kind: "terminal" },
+        true,
       ),
     ).toBe(true);
+  });
+
+  it("stays hidden on a draft or once the source is no longer live", () => {
+    expect(shouldRenderPreviewMiniPlayer({ kind: "browser", tabId: "tab-1" }, null, false)).toBe(
+      false,
+    );
+    expect(
+      shouldRenderPreviewMiniPlayer(
+        { kind: "device", hostId: "host", deviceId: "device", platform: "ios", name: "Phone" },
+        null,
+        false,
+      ),
+    ).toBe(false);
   });
 });
 

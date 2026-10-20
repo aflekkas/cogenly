@@ -1728,9 +1728,18 @@ export default function ChatView(props: ChatViewProps) {
   const rightPanelControlsAtRoot = rightPanelPresent && !shouldUsePlanSidebarSheet;
   const renderedRightPanelSurface = rightPanelPresence.value?.activeSurface ?? null;
   const renderedRightPanelSurfaces = rightPanelPresence.value?.surfaces ?? [];
+  const activePreviewMiniPlayerSource = activePreviewMiniPlayer?.source ?? null;
+  // A floating browser needs a live session for its tab on this thread, which a
+  // fresh draft never has; until the session list loads an entry is unconfirmed.
+  // A floating device closes itself once its session ends (below).
+  const previewMiniPlayerSourceLive =
+    activePreviewMiniPlayerSource?.kind !== "browser" ||
+    (previewSessionsReady &&
+      activePreviewState.sessions[activePreviewMiniPlayerSource.tabId] !== undefined);
   const previewMiniPlayerVisible = shouldRenderPreviewMiniPlayer(
-    activePreviewMiniPlayer?.source ?? null,
+    activePreviewMiniPlayerSource,
     renderedRightPanelSurface,
+    previewMiniPlayerSourceLive,
   );
   const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized = canMaximizeRightPanel && rightPanelState.maximized === true;

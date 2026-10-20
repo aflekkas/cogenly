@@ -31,8 +31,10 @@ import {
   useServerPictureInPictureKey,
 } from "~/browser/serverPictureInPicture";
 import { Button } from "~/components/ui/button";
+import { Spinner } from "~/components/ui/spinner";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { useThreadPreviewState } from "~/previewStateStore";
 import {
@@ -52,14 +54,17 @@ import { previewBridge } from "./previewBridge";
 import { showPreviewPopup } from "./showPreviewPopup";
 import {
   clampPreviewMiniPlayerPosition,
+  fitPreviewMiniPlayerFrameToBounds,
   NO_PREVIEW_MINI_PLAYER_OBSTACLES,
   PREVIEW_MINI_PLAYER_CORNER_RADIUS,
   PREVIEW_MINI_PLAYER_WEBVIEW_Z_INDEX,
+  type PreviewMiniPlayerBounds,
   type PreviewMiniPlayerFrame,
   resizePreviewMiniPlayer,
   resolveDeviceMiniPlayerCornerRadius,
   resolveDeviceMiniPlayerSourceSize,
   resolvePreviewMiniPlayerSourceSize,
+  resolvePreviewMiniPlayerVisibleBounds,
 } from "./previewMiniPlayerLayout";
 
 interface PointerGesture {
@@ -97,6 +102,48 @@ const RESIZE_HANDLES: ReadonlyArray<{
   { direction: "southeast", className: "-bottom-2 -right-2 size-4 cursor-nwse-resize" },
 ];
 
+/**
+ * Where an element's layout box sits in the window, ignoring transforms, so a
+ * panel glide in flight never skews the measured visible area.
+ */
+function layoutOrigin(element: HTMLElement): { x: number; y: number } {
+  let x = 0;
+  let y = 0;
+  for (let node: HTMLElement | null = element; node;) {
+    x += node.offsetLeft;
+    y += node.offsetTop;
+    const parent = node.offsetParent as HTMLElement | null;
+    for (
+      let scroller: HTMLElement | null = node.parentElement;
+      scroller && scroller !== parent;
+      scroller = scroller.parentElement
+    ) {
+      x -= scroller.scrollLeft;
+      y -= scroller.scrollTop;
+    }
+    node = parent;
+  }
+  return { x, y };
+}
+
+/** Same bounds, same object, so a resize that changes nothing skips the render. */
+const sameBounds = (a: PreviewMiniPlayerBounds | null, b: PreviewMiniPlayerBounds) =>
+  a?.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;
+
+/** Covers a frame that has nothing to show yet, in the panel's own colors. */
+function MiniPlayerPlaceholder({ label }: { readonly label: string }) {
+  return (
+    // The webview's band: over the shell's backdrop, under its pill and handles.
+    <div
+      className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 rounded-[inherit] bg-background text-xs text-muted-foreground"
+      style={{ zIndex: PREVIEW_MINI_PLAYER_WEBVIEW_Z_INDEX }}
+    >
+      <Spinner size="sm" tone="muted" />
+      {label}
+    </div>
+  );
+}
+
 /** Floats the thread's browser tab or device stream over chat. */
 export function ThreadPreviewMiniPlayer({ threadRef, miniPlayer }: Props) {
   const { source } = miniPlayer;
@@ -132,6 +179,15 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
   const nativeServerTab = useRendersServerTabNatively(threadRef.environmentId, snapshot);
   const serverTab = snapshot?.runtime === "server" && !nativeServerTab;
   const [streamViewport, setStreamViewport] = useState<PreviewStreamViewport | null>(null);
+  // A server tab draws nothing until its first frame; until then, and while
+  // the page is blank, the frame shows a themed placeholder instead of white.
+  const [streamPainted, setStreamPainted] = useState(false);
+  const navStatus = snapshot?.navStatus;
+  const pageBlank =
+    !navStatus ||
+    navStatus._tag === "Idle" ||
+    navStatus.url === "about:blank" ||
+    (navStatus._tag === "Loading" && serverTab && !streamPainted);
   const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
   const serverPictureInPicture =
     useServerPictureInPictureKey() === serverPictureInPictureKey(threadRef.threadId, tabId);
@@ -227,15 +283,20 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
               followSize={false}
               controlPosition="bottom"
               onViewport={setStreamViewport}
+              onFirstFrame={() => setStreamPainted(true)}
               onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId, "floating")}
               className="size-full"
             />
+            {!streamPainted || pageBlank ? (
+              <MiniPlayerPlaceholder label="Loading preview…" />
+            ) : null}
           </div>
         ) : (
           <>
             <BrowserSurfaceSlot
               tabId={runtimeTabId}
-              visible={Boolean(desktopOverlay?.hasWebContents)}
+              // The native webview paints above the DOM, so a blank page is hidden for the placeholder.
+              visible={Boolean(desktopOverlay?.hasWebContents) && !pageBlank}
               cornerRadius={PREVIEW_MINI_PLAYER_CORNER_RADIUS}
               zIndex={PREVIEW_MINI_PLAYER_WEBVIEW_Z_INDEX}
               fitSourceContent
@@ -243,9 +304,9 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
               className="absolute inset-0"
             />
             {!desktopOverlay?.hasWebContents ? (
-              <div className="pointer-events-none absolute inset-0 z-[49] flex items-center justify-center rounded-[inherit] bg-muted text-xs text-muted-foreground">
-                Reconnecting preview…
-              </div>
+              <MiniPlayerPlaceholder label="Reconnecting preview…" />
+            ) : pageBlank ? (
+              <MiniPlayerPlaceholder label="Loading preview…" />
             ) : null}
           </>
         )
@@ -360,7 +421,41 @@ function MiniPlayerShell({
   const container = canvas?.container ?? null;
   const obstacles = NO_PREVIEW_MINI_PLAYER_OBSTACLES;
   const sourceKey = previewMiniPlayerSourceKey(miniPlayer.source);
-  const frame = canvas?.previewKey === sourceKey ? canvas.layout.frame : null;
+  // The canvas clamps to its own box, but that box can run past the window
+  // after layout changes (sidebar toggles, the right panel, mode switches).
+  // The part the window shows is measured on mount, on every resize of the
+  // canvas, and on window resize, and the frame is fitted into it.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [visibleBounds, setVisibleBounds] = useState<PreviewMiniPlayerBounds | null>(null);
+  useLayoutEffect(() => {
+    const element = rootRef.current;
+    if (!element) return;
+    const measure = () => {
+      const next = resolvePreviewMiniPlayerVisibleBounds(
+        layoutOrigin(element),
+        { width: element.clientWidth, height: element.clientHeight },
+        {
+          width: document.documentElement.clientWidth,
+          height: document.documentElement.clientHeight,
+        },
+      );
+      setVisibleBounds((current) => (sameBounds(current, next) ? current : next));
+    };
+    measure();
+    const stopObserving = observeResize(element, measure);
+    window.addEventListener("resize", measure);
+    return () => {
+      stopObserving();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  const layoutFrame = canvas?.previewKey === sourceKey ? canvas.layout.frame : null;
+  const frame =
+    layoutFrame && visibleBounds
+      ? fitPreviewMiniPlayerFrameToBounds(layoutFrame, visibleBounds)
+      : layoutFrame;
+  const fitToVisible = (next: PreviewMiniPlayerFrame) =>
+    visibleBounds ? fitPreviewMiniPlayerFrameToBounds(next, visibleBounds) : next;
   const { width: sourceWidth, height: sourceHeight } = sourceSize;
   const reportPreview = canvas?.reportPreview;
   const clearPreview = canvas?.clearPreview;
@@ -418,19 +513,17 @@ function MiniPlayerShell({
     gesture.moved = true;
     const store = usePreviewMiniPlayerStore.getState();
     if (gesture.direction === null) {
-      store.move(
-        threadRef,
-        sourceKey,
-        clampPreviewMiniPlayerPosition(
-          { x: gesture.frame.x + delta.x, y: gesture.frame.y + delta.y },
-          container,
-          gesture.frame,
-          obstacles,
-        ),
+      const position = clampPreviewMiniPlayerPosition(
+        { x: gesture.frame.x + delta.x, y: gesture.frame.y + delta.y },
+        container,
+        gesture.frame,
+        obstacles,
       );
+      const fitted = fitToVisible({ ...gesture.frame, ...position });
+      store.move(threadRef, sourceKey, { x: fitted.x, y: fitted.y });
       return;
     }
-    const next = resizePreviewMiniPlayer({
+    const resized = resizePreviewMiniPlayer({
       start: gesture.frame,
       direction: gesture.direction,
       delta,
@@ -438,6 +531,7 @@ function MiniPlayerShell({
       container,
       obstacles,
     });
+    const next = fitToVisible(resized);
     store.resize(threadRef, sourceKey, next.width, { x: next.x, y: next.y });
   };
 
@@ -456,7 +550,7 @@ function MiniPlayerShell({
   };
 
   return (
-    <div className="pointer-events-none absolute inset-0">
+    <div ref={rootRef} className="pointer-events-none absolute inset-0">
       {frame ? (
         <section
           aria-label={label}
@@ -491,7 +585,7 @@ function MiniPlayerShell({
               role={recording ? "status" : undefined}
               aria-label={recording ? "Recording preview" : undefined}
               aria-hidden={!recording}
-              className="absolute right-0 top-0 size-2 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 group-data-pill-open:opacity-0 pointer-coarse:right-2.5 pointer-coarse:top-2.5"
+              className="absolute right-0 top-0 size-2 transition-opacity motion-reduce:transition-none group-hover:opacity-0 group-focus-within:opacity-0 group-data-pill-open:opacity-0 pointer-coarse:right-2.5 pointer-coarse:top-2.5"
             >
               <span
                 className={cn(
@@ -502,7 +596,7 @@ function MiniPlayerShell({
                 )}
               />
             </div>
-            <div className="pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover p-0.5 opacity-0 shadow-lg/20 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-data-pill-open:pointer-events-auto group-data-pill-open:opacity-100 active:cursor-grabbing pointer-coarse:right-2.5 pointer-coarse:top-2.5">
+            <div className="pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover p-0.5 opacity-0 shadow-lg/20 transition-opacity motion-reduce:transition-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-data-pill-open:pointer-events-auto group-data-pill-open:opacity-100 active:cursor-grabbing pointer-coarse:right-2.5 pointer-coarse:top-2.5">
               {recording ? (
                 <span aria-hidden className="flex size-6 shrink-0 items-center justify-center">
                   <span className="size-2 rounded-full bg-destructive motion-safe:animate-status-pulse" />
