@@ -224,7 +224,6 @@ export function WelcomeWizard({
     <Dialog open disablePointerDismissal onOpenChange={(_, event) => event.cancel()}>
       <WizardPopup
         size="wide"
-        bottomStickOnMobile={false}
         showCloseButton={false}
         initialFocus={() => document.getElementById("onboarding-pairing-url") ?? true}
       >

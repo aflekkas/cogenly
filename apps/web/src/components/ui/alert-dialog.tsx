@@ -4,11 +4,7 @@ import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog
 
 import { cn } from "~/lib/utils";
 import { OverlayPresenceBoundary, useOverlayPresenceRoot } from "~/components/ui/overlay-presence";
-import {
-  DIALOG_BACKDROP_CLASS,
-  DIALOG_MOBILE_SHEET_CLASS,
-  DIALOG_POPUP_CLASS,
-} from "~/components/ui/dialog-styles";
+import { DIALOG_BACKDROP_CLASS, DIALOG_POPUP_CLASS } from "~/components/ui/dialog-styles";
 
 /** Closes with its exit motion when an OverlayPresence around it empties. */
 function AlertDialog<Payload>({
@@ -56,24 +52,19 @@ function AlertDialogViewport({ className, ...props }: AlertDialogPrimitive.Viewp
 
 function AlertDialogPopup({
   className,
-  bottomStickOnMobile = true,
   portalContainer,
   ...props
 }: AlertDialogPrimitive.Popup.Props & {
-  bottomStickOnMobile?: boolean;
   portalContainer?: AlertDialogPrimitive.Portal.Props["container"];
 }) {
   return (
     <AlertDialogPortal container={portalContainer}>
       <AlertDialogBackdrop />
-      <AlertDialogViewport
-        className={cn(bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12")}
-      >
+      <AlertDialogViewport>
         <AlertDialogPrimitive.Popup
           className={cn(
             DIALOG_POPUP_CLASS,
             "row-start-2 max-h-full max-w-lg text-popover-foreground",
-            bottomStickOnMobile && DIALOG_MOBILE_SHEET_CLASS,
             className,
           )}
           data-slot="alert-dialog-popup"

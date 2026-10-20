@@ -260,7 +260,6 @@ export function HtmlRenderDialog(props: {
       <DialogPopup
         variant="media"
         showCloseButton={false}
-        bottomStickOnMobile={false}
         className="row-start-1"
         initialFocus={scrollerRef}
       >

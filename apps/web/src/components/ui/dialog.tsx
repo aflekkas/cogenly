@@ -9,7 +9,6 @@ import {
   DIALOG_BACKDROP_CLASS,
   DIALOG_MEDIA_BACKDROP_CLASS,
   DIALOG_MEDIA_POPUP_CLASS,
-  DIALOG_MOBILE_SHEET_CLASS,
   DIALOG_POPUP_CLASS,
 } from "~/components/ui/dialog-styles";
 import { ScrollArea } from "~/components/ui/scroll-area";
@@ -77,12 +76,10 @@ function DialogPopup({
   className,
   children,
   showCloseButton = true,
-  bottomStickOnMobile = true,
   variant = "default",
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
-  bottomStickOnMobile?: boolean;
   variant?: "default" | "media";
 }) {
   return (
@@ -91,7 +88,6 @@ function DialogPopup({
       <DialogBackdrop className={variant === "media" ? "z-[60]" : undefined} variant={variant} />
       <DialogViewport
         className={cn(
-          bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12",
           variant === "media" &&
             "z-[60] grid-rows-1 place-items-center px-4 py-6 [-webkit-app-region:no-drag]",
         )}
@@ -101,7 +97,6 @@ function DialogPopup({
             variant === "media" ? DIALOG_MEDIA_POPUP_CLASS : DIALOG_POPUP_CLASS,
             "row-start-2 text-popover-foreground",
             variant === "default" && "max-h-full max-w-lg",
-            bottomStickOnMobile && DIALOG_MOBILE_SHEET_CLASS,
             className,
           )}
           data-slot="dialog-popup"
