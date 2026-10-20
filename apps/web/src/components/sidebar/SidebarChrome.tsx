@@ -246,20 +246,14 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 export const SidebarChromeFooter = memo(function SidebarChromeFooter({
   utilityMenu = true,
 }: {
-  /** False beside the navigation rail, which carries Settings and Usage itself. */
+  /** False beside the navigation rail, which carries Settings, Usage and Updates itself. */
   utilityMenu?: boolean;
 }) {
   return (
     <SidebarFooter className={cn(!utilityMenu && "empty:hidden")}>
-      <SidebarProviderUpdatePill />
+      {utilityMenu ? <SidebarProviderUpdatePill /> : null}
       <SidebarUpdateArchitectureWarning />
-      {utilityMenu ? (
-        <SidebarUtilityMenu />
-      ) : (
-        <SidebarMenu className="empty:hidden">
-          <SidebarUpdatePill />
-        </SidebarMenu>
-      )}
+      {utilityMenu ? <SidebarUtilityMenu /> : null}
     </SidebarFooter>
   );
 });

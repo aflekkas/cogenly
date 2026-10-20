@@ -113,6 +113,8 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
 
   return {
     hasUpdates: servers.length > 0 || providers.machines.length > 0,
+    /** The servers the pass updates, each behind the target version. */
+    servers,
     /** Short label for the tooltip and the confirmation title. */
     summary,
     /** One line per machine, for the confirmation. */

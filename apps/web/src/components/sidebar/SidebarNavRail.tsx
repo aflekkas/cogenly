@@ -1,7 +1,7 @@
 /**
  * The navigation rail: a narrow icon column at the window's left edge, beside
  * the thread list. Chats, Work, Agents and Projects switch the list from the top;
- * Search, Usage and Settings sit at the bottom. It stays put while the list
+ * Search, Usage, Settings and Updates sit at the bottom. It stays put while the list
  * collapses, so modes, search and settings remain one click away.
  *
  * Mobile keeps the segmented control inside the sheet instead (see
@@ -19,6 +19,7 @@ import { isElectron } from "../../env";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { cn } from "../../lib/utils";
 import { MorphIcon } from "../MorphIcon";
+import { NavRailUpdates } from "./NavRailUpdates";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { useUiStateStore } from "../../uiStateStore";
 import { useSidebar, useSidebarVisibility } from "../ui/sidebar";
@@ -249,6 +250,9 @@ export function SidebarNavRail({
             <SettingsIcon aria-hidden />
           </button>
         </RailTooltip>
+        <NavRailUpdates
+          buttonClassName={(active) => cn(RAIL_BUTTON_CLASS, railButtonTone(active))}
+        />
       </div>
     </nav>
   );

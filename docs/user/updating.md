@@ -7,17 +7,20 @@ notice.
 
 ## Update everything at once
 
-The update button at the bottom of the sidebar updates every connected machine
-in one step. It updates outdated providers, then servers that are behind, then
-the desktop app you are using. Servers move to the
+**Updates**, below Settings at the bottom left, lists the desktop app, each
+server, and each provider CLI on every connected machine with its version and
+status. A dot on it means something has an update. Update one row, or choose
+**Update all** to update every connected machine in one step: outdated
+providers, then servers that are behind, then the desktop app you are using.
+**Check for updates** checks again. On a narrow window the update button sits
+at the bottom of the sidebar instead. Servers move to the
 version your desktop app is installing, or to your web app's version. A
 background service stays on its current release channel. A remote desktop app
-installs the latest release from its own channel. Hover the button to see what
-it will update.
+installs the latest release from its own channel.
 
-While it runs, the button widens to show progress. It names a machine that is
+While it runs, the Updates list shows its progress. It names a machine that is
 taking longer than usual, and offers **Retry** for a server that failed. Click
-it to see every machine. The desktop app restarts once each server has started
+the progress to see every machine. The desktop app restarts once each server has started
 its own restart, after a short countdown. Choose **Later** to keep working and
 restart from the update button when you are ready. A server still restarting
 finishes on its own, and the button keeps showing it after the desktop app
