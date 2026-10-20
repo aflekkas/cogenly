@@ -34,7 +34,7 @@ import * as Stream from "effect/Stream";
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import type { MuseItem } from "./protocol.ts";
-import type { MuseSdkHost } from "./sdk.ts";
+import { MUSE_MIN_SESSION_MCP_VERSION, type MuseSdkHost } from "./sdk.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
@@ -139,7 +139,10 @@ const makeFakeMuse = Effect.fnUntraced(function* (idPrefix = "native") {
       onServerRequest: () => {},
       closed: closed.promise,
     },
-    initializeResult: { grantedCapabilities: [] },
+    initializeResult: {
+      grantedCapabilities: [],
+      serverInfo: { name: "muse", version: "1.4.11" },
+    },
     exited: exited.promise,
     close: async () => {
       closeCount += 1;
@@ -494,6 +497,50 @@ describe("MuseAdapterV2", () => {
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
+  it.effect("attaches the thread MCP session on a read-only conversation host", () =>
+    Effect.gen(function* () {
+      yield* (yield* McpProviderSessions.McpProviderSessions).set({
+        environmentId: EnvironmentId.make("test-environment"),
+        threadId: THREAD_ID,
+        providerSessionId: "test-session",
+        providerInstanceId: INSTANCE_ID,
+        endpoint: "http://127.0.0.1:43210/mcp",
+        authorizationHeader: "Bearer conversation-test-token",
+        browserToolsAvailable: true,
+      });
+      const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        ...runtimePolicy,
+        conversationMode: true,
+      });
+      const seen: Array<{
+        readonly readOnly: boolean | undefined;
+        readonly sessionMcp: boolean | undefined;
+      }> = [];
+      const fake = yield* makeFakeMuse();
+      fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
+      yield* makeHarness(fake, INSTANCE_ID, undefined, undefined, undefined, policy, {
+        createHost: async (options) => {
+          seen.push({ readOnly: options.readOnly, sessionMcp: options.sessionMcp });
+          return fake.host;
+        },
+      });
+      assert.isTrue(
+        seen.some((options) => options.readOnly === true && options.sessionMcp === true),
+      );
+      const call = yield* fake.takeCall("session/start");
+      assert.deepStrictEqual(call.params.config, {
+        mcpServers: {
+          cogenly: {
+            transport: "streamableHttp",
+            mode: "required",
+            url: "http://127.0.0.1:43210/mcp",
+            headers: { Authorization: "Bearer conversation-test-token" },
+          },
+        },
+      });
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
   it.effect("rejects a host without session MCP support before opening a native session", () =>
     Effect.gen(function* () {
       yield* (yield* McpProviderSessions.McpProviderSessions).set({
@@ -506,8 +553,12 @@ describe("MuseAdapterV2", () => {
         browserToolsAvailable: false,
       });
       const fake = yield* makeFakeMuse();
-      const outcome = yield* makeHarness(fake).pipe(Effect.result);
-      assert.strictEqual(outcome._tag, "Failure");
+      fake.host.initializeResult.serverInfo.version = "1.2.1";
+      const failure = yield* makeHarness(fake).pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "ProviderAdapterEnsureThreadError");
+      assert.instanceOf(failure.cause, ProviderAdapter.ProviderAdapterProtocolError);
+      assert.include(failure.cause.detail, "1.2.1");
+      assert.include(failure.cause.detail, MUSE_MIN_SESSION_MCP_VERSION);
       assert.isFalse(fake.calls.some((call) => call.method === "session/start"));
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );

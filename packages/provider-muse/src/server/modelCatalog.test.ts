@@ -21,7 +21,10 @@ const host = (catalog: Record<string, unknown>): MuseSdkHost => ({
     onProtocolError: () => {},
     closed: new Promise<void>(() => {}),
   },
-  initializeResult: { grantedCapabilities: [] },
+  initializeResult: {
+    grantedCapabilities: [],
+    serverInfo: { name: "muse", version: "1.4.11" },
+  },
   exited: new Promise(() => {}),
   close: async () => {},
 });

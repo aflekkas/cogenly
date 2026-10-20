@@ -69,7 +69,14 @@ export const readMuseUsageLimits = Effect.fn("readMuseUsageLimits")(function* (
   const usage = yield* Effect.gen(function* () {
     const host = yield* Effect.acquireRelease(
       createMuseSdkHostEffect(
-        { binaryPath: settings.binaryPath, environment, ...(cwd ? { cwd } : {}), readOnly: true },
+        {
+          binaryPath: settings.binaryPath,
+          environment,
+          ...(cwd ? { cwd } : {}),
+          readOnly: true,
+          // The probe only reads usage; it never attaches an MCP server.
+          sessionMcp: false,
+        },
         createHost,
       ),
       (host) => Effect.promise(() => host.close()),

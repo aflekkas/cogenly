@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 import { vi } from "vite-plus/test";
 
 import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
-import type { MuseSdkHost } from "./sdk.ts";
+import type { MuseSdkHost, MuseSdkHostOptions } from "./sdk.ts";
 import { COMPACT_SLASH_COMMAND } from "@t3tools/provider-core/server/snapshotProbe";
 import { checkMuseProviderStatus } from "./status.ts";
 import { parseMuseUsageLimits } from "./usageLimits.ts";
@@ -16,7 +16,10 @@ import { writeCachedMuseUsageLimits } from "./usageLimitsCache.ts";
 const settings = Schema.decodeSync(MuseSettings);
 const makeHost = (catalog: Record<string, unknown>) => {
   const host: MuseSdkHost = {
-    initializeResult: { grantedCapabilities: [] },
+    initializeResult: {
+      grantedCapabilities: [],
+      serverInfo: { name: "muse", version: "1.4.11" },
+    },
     connection: {
       request: vi.fn(async (method: string) => (method === "usage/read" ? {} : catalog)),
       command: vi.fn(async () => ({})),
@@ -149,17 +152,23 @@ it.layer(NodeServices.layer)("Muse status", (it) => {
         vi.mocked(host.connection.request).mockImplementation(async (method) =>
           method === "usage/read" ? { usage: observation } : metaCatalog,
         );
+        const seen: Array<MuseSdkHostOptions> = [];
         const snapshot = yield* checkMuseProviderStatus(
           settings({ enabled: true, binaryPath }),
           undefined,
           undefined,
-          async () => host,
+          async (options) => {
+            seen.push(options);
+            return host;
+          },
         );
         expect(snapshot.supportedRuntimeModes).toEqual(["full-access"]);
         expect(snapshot.usageLimits?.windows.map((window) => window.usedPercent)).toEqual([12, 34]);
         expect(snapshot.usageLimits?.unavailable).toBeUndefined();
         expect(host.connection.request).toHaveBeenCalledWith("usage/read", {});
         expect(host.close).toHaveBeenCalledTimes(2);
+        // The usage probe never attaches an MCP server, so it skips the capability.
+        expect(seen.some((options) => options.sessionMcp === false)).toBe(true);
       }),
     ),
   );

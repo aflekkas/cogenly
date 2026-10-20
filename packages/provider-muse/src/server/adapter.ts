@@ -69,6 +69,7 @@ import {
 } from "./protocol.ts";
 import {
   createMuseSdkHostEffect,
+  MUSE_MIN_SESSION_MCP_VERSION,
   museApprovalMode,
   musePermissionProfile,
   museWorkspaceRoot,
@@ -1698,9 +1699,11 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               cwd,
               environment,
               runtimeMode: input.runtimePolicy.runtimeMode,
-              // Chat-surface threads run on a read-only host: no shell,
-              // no filesystem writes, no workspace trust, no session MCP.
+              // Chat-surface threads run on a read-only host: no shell, no
+              // filesystem writes, no workspace trust. They still attach the
+              // Cogenly MCP server, so sessionMcp stays requested.
               readOnly: input.runtimePolicy.conversationMode === true,
+              sessionMcp: true,
               disableShell: mcpSession !== undefined && mcpSession.terminalToolsAvailable !== false,
             },
             options.createHost,
@@ -1808,7 +1811,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           const mcpSession = yield* mcpSessions.read(args.threadId);
           if (mcpSession && !host.initializeResult.grantedCapabilities.includes("sessionMcp"))
             return yield* protocolError(
-              "Update Muse Code to a version that supports session MCP servers",
+              `Muse Code ${host.initializeResult.serverInfo.version} does not support session MCP servers; update to ${MUSE_MIN_SESSION_MCP_VERSION} or newer`,
             );
           const config = mcpSession
             ? {

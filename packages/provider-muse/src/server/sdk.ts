@@ -25,7 +25,10 @@ export interface MuseSdkHost {
     | "onProtocolError"
     | "closed"
   >;
-  readonly initializeResult: Pick<SpawnedMspConnection["initializeResult"], "grantedCapabilities">;
+  readonly initializeResult: Pick<
+    SpawnedMspConnection["initializeResult"],
+    "grantedCapabilities" | "serverInfo"
+  >;
   readonly exited: Promise<ProcessExit>;
   /** The last lines Muse wrote to stderr, for explaining an unexpected exit. */
   readonly stderrTail?: () => ReadonlyArray<string>;
@@ -49,6 +52,13 @@ export interface MuseSdkHostOptions {
   readonly runtimeMode?: RuntimeMode;
   /** Disables shell and filesystem writes and workspace trust. */
   readonly readOnly?: boolean;
+  /**
+   * Request the `sessionMcp` capability so sessions can attach MCP servers.
+   * Defaults to true; only probes that never attach one pass false. This is
+   * independent of `readOnly`: conversation-mode hosts stay read-only and
+   * still attach the Cogenly MCP server.
+   */
+  readonly sessionMcp?: boolean;
   /** Route shell commands through the host MCP terminal tools. */
   readonly disableShell?: boolean;
   /** Read-only generation needs durable logging for turn/item notifications (verified through 1.1.1). */
@@ -165,11 +175,24 @@ export function museServeArgs(
   return args;
 }
 
-/** What Cogenly sends in MSP `initialize`; only full hosts ask for session MCP servers. */
-export function museInitializeParams(readOnly = false) {
+/**
+ * The oldest Muse Code that grants the `sessionMcp` capability: 1.2.x
+ * advertises session MCP configuration but never grants it, while adapters in
+ * the wild document 1.3.0 as the floor.
+ */
+export const MUSE_MIN_SESSION_MCP_VERSION = "1.3.0";
+
+/**
+ * What Cogenly sends in MSP `initialize`. Every host asks for session MCP
+ * servers unless it passes `sessionMcp: false`, including read-only ones:
+ * read-only governs tools, not whether the Cogenly MCP server attaches.
+ */
+export function museInitializeParams(options: Pick<MuseSdkHostOptions, "sessionMcp"> = {}) {
   return {
     clientInfo: { name: "cogenly", title: "Cogenly", version: "1" },
-    capabilities: { requestedCapabilities: readOnly ? [] : ["sessionMcp"] },
+    capabilities: {
+      requestedCapabilities: options.sessionMcp === false ? [] : ["sessionMcp"],
+    },
   };
 }
 
@@ -211,7 +234,7 @@ export async function createMuseSdkHost(
   timer.unref();
   try {
     const host = await Promise.race([
-      handshake.initialize(museInitializeParams(options.readOnly)),
+      handshake.initialize(museInitializeParams(options)),
       interrupted,
     ]);
     if (host.initializeResult.schema?.version !== 1) {

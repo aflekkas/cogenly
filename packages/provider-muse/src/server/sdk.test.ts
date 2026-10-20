@@ -15,6 +15,7 @@ import {
   createMuseSdkHostEffect,
   makeMuseEnvironment,
   museApprovalMode,
+  museInitializeParams,
   museLaunch,
   museServeArgs,
   museVerbatimPath,
@@ -175,6 +176,47 @@ describe("Muse SDK host", () => {
     ]);
     success.shutdown.resolve({ code: 0, signal: null });
     await host.close();
+  });
+
+  it("requests session MCP servers on every host except an opted-out probe", async () => {
+    expect(museInitializeParams()).toMatchObject({
+      capabilities: { requestedCapabilities: ["sessionMcp"] },
+    });
+    expect(museInitializeParams({ sessionMcp: false })).toMatchObject({
+      capabilities: { requestedCapabilities: [] },
+    });
+    // Read-only governs tools, not MCP: a read-only host still asks for the
+    // session capability while keeping shell and writes disabled.
+    for (const options of [{ readOnly: true }, { readOnly: true, sessionMcp: true }, {}]) {
+      const fake = mockSpawn();
+      const running = createMuseSdkHost({ binaryPath: "muse", ...options });
+      fake.startup.resolve(fake.ready);
+      const host = await running;
+      expect(fake.initialize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          capabilities: { requestedCapabilities: ["sessionMcp"] },
+        }),
+      );
+      if (options.readOnly === true) {
+        expect(vi.mocked(spawnMspConnection).mock.lastCall?.[0].args).toEqual([
+          "serve",
+          "--disable-shell",
+          "--disable-write",
+          "--no-session-log",
+        ]);
+      }
+      fake.shutdown.resolve({ code: 0, signal: null });
+      await host.close();
+    }
+    const probe = mockSpawn();
+    const probing = createMuseSdkHost({ binaryPath: "muse", readOnly: true, sessionMcp: false });
+    probe.startup.resolve(probe.ready);
+    const probeHost = await probing;
+    expect(probe.initialize).toHaveBeenCalledWith(
+      expect.objectContaining({ capabilities: { requestedCapabilities: [] } }),
+    );
+    probe.shutdown.resolve({ code: 0, signal: null });
+    await probeHost.close();
   });
 
   it.each([undefined, 2])(
