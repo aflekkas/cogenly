@@ -5,16 +5,13 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type {
   EnvironmentId,
-  ProjectId,
   ProjectLabelId,
   ProjectLabelWithRepositories,
 } from "@t3tools/contracts";
 import type * as Cause from "effect/Cause";
 import { useMemo, useState } from "react";
 
-import { ProjectFavicon } from "../components/ProjectFavicon";
 import { Button } from "../components/ui/button";
-import { Checkbox } from "../components/ui/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -62,14 +59,15 @@ export function useEnvironmentRepositories(environmentId: EnvironmentId | null) 
 }
 
 /**
- * Create or edit one project: name, color, description, linked repositories,
- * and delete. Opened from the Projects sidebar and a project's view.
+ * Create or edit one project folder: name, color, description, and delete.
+ * Repositories are added and removed from the folder's view.
  */
 export function ProjectLabelEditorDialog(props: {
   readonly environmentId: EnvironmentId;
   readonly label: ProjectLabelWithRepositories | null;
-  readonly repositories: ReturnType<typeof useEnvironmentRepositories>;
   readonly onClose: () => void;
+  /** After a create, so the caller can open the new folder. */
+  readonly onCreated?: (labelId: ProjectLabelId) => void;
   /** After a delete, so a view of the deleted project can leave. */
   readonly onDeleted?: () => void;
 }) {
@@ -77,21 +75,10 @@ export function ProjectLabelEditorDialog(props: {
   const [name, setName] = useState(label?.name ?? "");
   const [color, setColor] = useState<string | undefined>(label?.color ?? "blue");
   const [description, setDescription] = useState(label?.description ?? "");
-  const [repositoryIds, setRepositoryIds] = useState<ReadonlySet<ProjectId>>(
-    () => new Set(label?.repositoryIds ?? []),
-  );
   const [saving, setSaving] = useState(false);
   const createLabel = useAtomCommand(serverEnvironment.createProjectLabel, "create project");
   const updateLabel = useAtomCommand(serverEnvironment.updateProjectLabel, "update project");
   const deleteLabel = useAtomCommand(serverEnvironment.deleteProjectLabel, "delete project");
-  const linkRepository = useAtomCommand(
-    serverEnvironment.linkProjectLabelRepository,
-    "link project repository",
-  );
-  const unlinkRepository = useAtomCommand(
-    serverEnvironment.unlinkProjectLabelRepository,
-    "unlink project repository",
-  );
   const trimmedName = name.trim();
 
   const save = async () => {
@@ -99,7 +86,6 @@ export function ProjectLabelEditorDialog(props: {
     setSaving(true);
     try {
       let labelId: ProjectLabelId;
-      const previous = new Set(label?.repositoryIds ?? []);
       if (label === null) {
         const created = await createLabel({
           environmentId,
@@ -139,25 +125,8 @@ export function ProjectLabelEditorDialog(props: {
           }
         }
       }
-      // Links apply one by one; a failure stops there so the dialog stays open on the truth.
-      for (const repositoryId of repositoryIds) {
-        if (previous.has(repositoryId)) continue;
-        const result = await linkRepository({ environmentId, input: { labelId, repositoryId } });
-        if (result._tag === "Failure") {
-          if (!isAtomCommandInterrupted(result)) reportFailure("Could not link repository", result);
-          return;
-        }
-      }
-      for (const repositoryId of previous) {
-        if (repositoryIds.has(repositoryId)) continue;
-        const result = await unlinkRepository({ environmentId, input: { labelId, repositoryId } });
-        if (result._tag === "Failure") {
-          if (!isAtomCommandInterrupted(result))
-            reportFailure("Could not unlink repository", result);
-          return;
-        }
-      }
       onClose();
+      if (label === null) props.onCreated?.(labelId);
     } finally {
       setSaving(false);
     }
@@ -165,7 +134,7 @@ export function ProjectLabelEditorDialog(props: {
 
   const remove = async () => {
     if (label === null || saving) return;
-    const message = `Delete ${label.name}?\nChats and Work keep their history; only this tag and its repository links go away.`;
+    const message = `Delete ${label.name}?\nIts chats, Work and repositories are kept, just no longer in a folder.`;
     const confirmed =
       (await requestConfirmDialog(message, { variant: "destructive" })) ?? window.confirm(message);
     if (!confirmed) return;
@@ -191,7 +160,7 @@ export function ProjectLabelEditorDialog(props: {
         <DialogHeader>
           <DialogTitle>{label ? "Edit project" : "New project"}</DialogTitle>
           <DialogDescription>
-            Tag chats and Work with a project, and link the repositories it spans.
+            A folder for chats, Work and the repositories they touch.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
@@ -241,40 +210,9 @@ export function ProjectLabelEditorDialog(props: {
                   id="project-label-description"
                   value={description}
                   maxLength={4000}
-                  placeholder="What belongs here. Helps suggest this project for new chats."
+                  placeholder="What belongs here"
                   onChange={(event) => setDescription(event.currentTarget.value)}
                 />
-              </div>
-              <div className="space-y-1.5">
-                <div className="text-xs font-medium text-muted-foreground">Repositories</div>
-                {props.repositories.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No repositories on this environment yet.
-                  </p>
-                ) : (
-                  <div className="max-h-56 space-y-1 overflow-y-auto">
-                    {props.repositories.map((repository) => (
-                      <label
-                        key={repository.id}
-                        className="flex cursor-pointer items-center gap-2 py-1 text-sm"
-                      >
-                        <Checkbox
-                          checked={repositoryIds.has(repository.id)}
-                          onCheckedChange={(checked) =>
-                            setRepositoryIds((current) => {
-                              const next = new Set(current);
-                              if (checked) next.add(repository.id);
-                              else next.delete(repository.id);
-                              return next;
-                            })
-                          }
-                        />
-                        <ProjectFavicon project={repository} className="size-4" />
-                        <span className="min-w-0 truncate">{repository.title}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
               </div>
             </fieldset>
           </form>

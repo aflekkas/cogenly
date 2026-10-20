@@ -1,26 +1,34 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProjectLabelWithRepositories } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { PlusIcon, TagIcon } from "lucide-react";
+import { FolderIcon, FolderPlusIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { isElectron } from "../../env";
+import type { ProjectLabelId } from "@t3tools/contracts";
+import { ProjectLabelEditorDialog } from "../../projectLabels/ProjectLabelEditorDialog";
 import {
-  ProjectLabelEditorDialog,
-  useEnvironmentRepositories,
-} from "../../projectLabels/ProjectLabelEditorDialog";
-import { projectContentsCount } from "../../projectLabels/projectContents.logic";
+  projectContentsCount,
+  projectFolderSummary,
+} from "../../projectLabels/projectContents.logic";
 import { ProjectColorDot } from "../../projectLabels/ProjectTag";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../ui/empty";
 import { OverlayPresence } from "../ui/overlay-presence";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
-import { openableRowProps } from "./ProjectView";
+import { openableRowProps, ProjectFoldersContextNote } from "./ProjectView";
 
 export interface ProjectsOverviewSearch {
   readonly create?: true | undefined;
@@ -41,15 +49,18 @@ export function validateProjectsOverviewSearch(
   };
 }
 
-/** Opens the project editor for a new project on one machine. */
-function NewProjectDialog(props: { environmentId: EnvironmentId; onClose: () => void }) {
-  const repositories = useEnvironmentRepositories(props.environmentId);
+/** Opens the project editor for a new folder on one machine, then the folder. */
+function NewProjectDialog(props: {
+  environmentId: EnvironmentId;
+  onClose: () => void;
+  onCreated: (labelId: ProjectLabelId) => void;
+}) {
   return (
     <ProjectLabelEditorDialog
       environmentId={props.environmentId}
       label={null as ProjectLabelWithRepositories | null}
-      repositories={repositories}
       onClose={props.onClose}
+      onCreated={props.onCreated}
     />
   );
 }
@@ -93,7 +104,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
             disabled={createEnvironmentId === null || !canCreate}
             onClick={() => setCreating(true)}
           >
-            <PlusIcon className="size-3" />
+            <FolderPlusIcon className="size-3" />
             New project
           </Button>
         </WorkspacePageHeader>
@@ -102,18 +113,31 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
             <Empty>
               <EmptyHeader>
                 <EmptyMedia variant="icon">
-                  <TagIcon />
+                  <FolderIcon />
                 </EmptyMedia>
                 <EmptyTitle>No projects yet</EmptyTitle>
                 <EmptyDescription>
-                  Tag chats and Work with a project. A project can link several repositories.
+                  A project is a folder for related chats, Work and repositories.
                 </EmptyDescription>
               </EmptyHeader>
+              <EmptyContent>
+                <Button
+                  size="sm"
+                  disabled={createEnvironmentId === null || !canCreate}
+                  onClick={() => setCreating(true)}
+                >
+                  <FolderPlusIcon />
+                  New project
+                </Button>
+              </EmptyContent>
             </Empty>
           ) : (
             <SettingsSection title="Projects" hideTitle>
               {directory.labels.map((entry) => {
-                const count = projectContentsCount(byProject.get(entry.key));
+                const summary = projectFolderSummary(
+                  entry.label.repositoryIds.length,
+                  projectContentsCount(byProject.get(entry.key)),
+                );
                 return (
                   <SettingsRow
                     key={entry.key}
@@ -140,7 +164,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                     }
                     control={
                       <span className="text-xs tabular-nums text-muted-foreground">
-                        {count === 1 ? "1 item" : `${count} items`}
+                        {summary ?? "Empty"}
                       </span>
                     }
                   />
@@ -148,15 +172,21 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               })}
             </SettingsSection>
           )}
-          <p className="px-3 text-xs text-muted-foreground sm:px-4">
-            Projects are context only. Tagging a chat or linking a repository never changes what an
-            agent is allowed to access.
-          </p>
+          <ProjectFoldersContextNote />
         </SettingsPageContainer>
       </div>
       <OverlayPresence when={creating && createEnvironmentId}>
         {(environmentId) => (
-          <NewProjectDialog environmentId={environmentId} onClose={() => setCreating(false)} />
+          <NewProjectDialog
+            environmentId={environmentId}
+            onClose={() => setCreating(false)}
+            onCreated={(labelId) =>
+              void navigate({
+                to: "/project/$environmentId/$labelId",
+                params: { environmentId, labelId },
+              })
+            }
+          />
         )}
       </OverlayPresence>
     </SidebarInset>

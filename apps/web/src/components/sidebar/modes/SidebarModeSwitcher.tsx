@@ -5,7 +5,7 @@
  * when a badge appears. Arrow keys move between segments, as in any tablist.
  */
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { BotIcon, HammerIcon, type LucideIcon, MessageCircleIcon, TagIcon } from "lucide-react";
+import { BotIcon, FolderIcon, HammerIcon, type LucideIcon, MessageCircleIcon } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, useRef } from "react";
 
 import { cn } from "~/lib/utils";
@@ -18,7 +18,7 @@ export const SIDEBAR_MODE_ICONS: Record<SidebarMode, LucideIcon> = {
   chats: MessageCircleIcon,
   tasks: HammerIcon,
   agents: BotIcon,
-  projects: TagIcon,
+  projects: FolderIcon,
 };
 
 export function SidebarModeSwitcher(props: {

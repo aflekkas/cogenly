@@ -12,7 +12,7 @@ import {
   HammerIcon,
   MessageCircleIcon,
   SearchIcon,
-  TagIcon,
+  FolderIcon,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -56,7 +56,7 @@ const KIND_ICON: Record<SearchKind, LucideIcon> = {
   work: HammerIcon,
   agent: BotIcon,
   commitment: CircleDotIcon,
-  project: TagIcon,
+  project: FolderIcon,
   fact: BrainIcon,
   pr: PullRequestGlyph.pullRequest,
 };

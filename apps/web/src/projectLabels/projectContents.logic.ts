@@ -36,3 +36,12 @@ export function indexProjectContents<T>(input: {
 export function projectContentsCount(contents: ProjectContents<unknown> | undefined) {
   return contents ? contents.chats.length + contents.work.length : 0;
 }
+
+/** "2 repos · 5 threads", leaving out what a folder has none of; null when empty. */
+export function projectFolderSummary(repositoryCount: number, threadCount: number): string | null {
+  const parts = [
+    repositoryCount > 0 ? `${repositoryCount} ${repositoryCount === 1 ? "repo" : "repos"}` : null,
+    threadCount > 0 ? `${threadCount} ${threadCount === 1 ? "thread" : "threads"}` : null,
+  ].filter((part) => part !== null);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}

@@ -1,9 +1,18 @@
 import { useAtomValue } from "@effect/atom-react";
+import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId, ProjectId, ProjectLabelId, ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderIcon, MessageCircleIcon, PencilIcon, SettingsIcon } from "lucide-react";
+import {
+  FolderGit2Icon,
+  FolderIcon,
+  FolderMinusIcon,
+  HammerIcon,
+  MessageCircleIcon,
+  PencilIcon,
+  SettingsIcon,
+} from "lucide-react";
 import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 
 import { isElectron } from "../../env";
@@ -15,17 +24,28 @@ import {
   useEnvironmentRepositories,
 } from "../../projectLabels/ProjectLabelEditorDialog";
 import { projectLabelKey } from "../../projectLabels/projectLabels.logic";
+import { ProjectRepositoryPicker } from "../../projectLabels/ProjectRepositoryPicker";
 import { ProjectColorDot } from "../../projectLabels/ProjectTag";
+import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { getSidebarProjectSettingsKey } from "../../sidebarProjectGrouping";
 import { useProjects } from "../../state/entities";
 import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../ui/empty";
 import { OverlayPresence } from "../ui/overlay-presence";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
@@ -60,7 +80,9 @@ function ProjectThreadRow(props: {
       description={
         meta ? (
           <span className="flex min-w-0 items-center gap-1">
-            {props.repositoryName ? <FolderIcon aria-hidden className="size-3 shrink-0" /> : null}
+            {props.repositoryName ? (
+              <FolderGit2Icon aria-hidden className="size-3 shrink-0" />
+            ) : null}
             <span className="min-w-0 flex-1 fade-truncate">{meta}</span>
           </span>
         ) : undefined
@@ -78,20 +100,39 @@ function EmptyRow(props: { children: ReactNode }) {
   return <SettingsRow title={<span className="text-muted-foreground">{props.children}</span>} />;
 }
 
+/** The one line every folder surface ends on. */
+export function ProjectFoldersContextNote() {
+  return (
+    <p className="px-3 text-xs text-muted-foreground sm:px-4">
+      Projects are context only. They never change what an agent can access.
+    </p>
+  );
+}
+
 /**
- * One project in the main area: its Work, chats and agents, the repositories
- * it links, and its management (rename, color, description, delete), which
- * used to live in Settings → Projects.
+ * One project folder in the main area: its repositories (add, remove), its
+ * chats and Work, and its management (rename, color, description, delete).
  */
 export function ProjectView(props: { environmentId: EnvironmentId; labelId: ProjectLabelId }) {
   const { environmentId, labelId } = props;
   const navigate = useNavigate();
-  const { byProject } = useProjectContents();
+  const { directory, byProject } = useProjectContents();
   const { labels, isLoaded, error } = useEnvironmentProjectLabels(environmentId);
   const label = labels.find((candidate) => candidate.id === labelId) ?? null;
+  const entry = directory.byKey.get(projectLabelKey(environmentId, labelId)) ?? null;
   const contents = byProject.get(projectLabelKey(environmentId, labelId));
   const repositories = useEnvironmentRepositories(environmentId);
   const canEdit = useAtomValue(serverEnvironment.updateProjectLabel.permissionAtom(environmentId));
+  const canLink = useAtomValue(
+    serverEnvironment.linkProjectLabelRepository.permissionAtom(environmentId),
+  );
+  const canUnlink = useAtomValue(
+    serverEnvironment.unlinkProjectLabelRepository.permissionAtom(environmentId),
+  );
+  const unlink = useAtomCommand(serverEnvironment.unlinkProjectLabelRepository, {
+    label: "remove repository from project",
+    reportFailure: false,
+  });
   const [editing, setEditing] = useState(false);
   const projects = useProjects();
   const projectGroups = useSidebarProjectGroups();
@@ -135,6 +176,17 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
       },
     });
   };
+  const removeRepository = async (repositoryId: ProjectId, title: string) => {
+    const result = await unlink({ environmentId, input: { labelId, repositoryId } });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      reportProjectFolderFailure(`Could not remove ${title}`, result);
+    }
+  };
+
+  const chats = contents?.chats ?? [];
+  const work = contents?.work ?? [];
+  const isEmpty = linkedRepositories.length === 0 && chats.length === 0 && work.length === 0;
+  const noPermission = "You don't have permission to change projects here.";
 
   const header = (
     <WorkspacePageHeader electron={isElectron} className="border-b border-border">
@@ -147,15 +199,29 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
           size="xs"
           variant="ghost-muted"
           disabled={!canEdit}
-          title={canEdit ? undefined : "You don't have permission to change projects here."}
+          title={canEdit ? undefined : noPermission}
           onClick={() => setEditing(true)}
         >
           <PencilIcon className="size-3" />
-          Edit project
+          Edit
         </Button>
       ) : null}
     </WorkspacePageHeader>
   );
+
+  const threadRows = (threads: ReadonlyArray<EnvironmentThreadShell>, showRepository: boolean) =>
+    threads.map((thread) => (
+      <ProjectThreadRow
+        key={`${thread.environmentId}:${thread.id}`}
+        thread={thread}
+        repositoryName={
+          showRepository
+            ? (repositoryNameByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null)
+            : null
+        }
+        onOpen={openThread}
+      />
+    ));
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
@@ -173,7 +239,7 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
               <SettingsRow title="Loading project…" />
             </SettingsSection>
           </SettingsPageContainer>
-        ) : label === null ? (
+        ) : label === null || entry === null ? (
           <SettingsPageContainer>
             <SettingsSection title="Project">
               <SettingsRow
@@ -187,79 +253,95 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
             {label.description ? (
               <p className="px-3 text-sm text-muted-foreground sm:px-4">{label.description}</p>
             ) : null}
-            <SettingsSection title="Work" icon={<FolderIcon className="size-3.5" />}>
-              {contents && contents.work.length > 0 ? (
-                contents.work.map((thread) => (
-                  <ProjectThreadRow
-                    key={`${thread.environmentId}:${thread.id}`}
-                    thread={thread}
-                    repositoryName={
-                      repositoryNameByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
-                    }
-                    onOpen={openThread}
+            {isEmpty ? (
+              <Empty>
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <FolderIcon />
+                  </EmptyMedia>
+                  <EmptyTitle>{label.name} is empty</EmptyTitle>
+                  <EmptyDescription>
+                    Add a repository and its Work files here. To file a chat, right-click it in the
+                    sidebar and choose Move to folder.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <ProjectRepositoryPicker
+                    folder={entry}
+                    repositories={repositories}
+                    folderByRepository={directory.folderByRepository}
+                    disabled={!canLink}
                   />
-                ))
-              ) : (
-                <EmptyRow>No Work in this project yet. Link a repository or tag a thread.</EmptyRow>
-              )}
-            </SettingsSection>
-            <SettingsSection title="Chats" icon={<MessageCircleIcon className="size-3.5" />}>
-              {contents && contents.chats.length > 0 ? (
-                contents.chats.map((thread) => (
-                  <ProjectThreadRow
-                    key={`${thread.environmentId}:${thread.id}`}
-                    thread={thread}
-                    repositoryName={null}
-                    onOpen={openThread}
+                </EmptyContent>
+              </Empty>
+            ) : null}
+            {!isEmpty ? (
+              <SettingsSection
+                title="Repositories"
+                icon={<FolderGit2Icon className="size-3.5" />}
+                headerAction={
+                  <ProjectRepositoryPicker
+                    folder={entry}
+                    repositories={repositories}
+                    folderByRepository={directory.folderByRepository}
+                    disabled={!canLink}
                   />
-                ))
-              ) : (
-                <EmptyRow>No chats tagged with this project.</EmptyRow>
-              )}
-            </SettingsSection>
-            <SettingsSection
-              title="Repositories"
-              headerAction={
-                <Button
-                  size="xs"
-                  variant="ghost-muted"
-                  disabled={!canEdit}
-                  onClick={() => setEditing(true)}
-                >
-                  Link repositories
-                </Button>
-              }
-            >
-              {linkedRepositories.length > 0 ? (
-                linkedRepositories.map((repository) => (
-                  <SettingsRow
-                    key={repository.id}
-                    title={
-                      <span className="flex min-w-0 items-center gap-2">
-                        <ProjectFavicon project={repository} className="size-4 shrink-0" />
-                        <span className="truncate">{repository.title}</span>
-                      </span>
-                    }
-                    control={
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label={`Repository settings for ${repository.title}`}
-                        onClick={() => openRepositorySettings(repository.id)}
-                      >
-                        <SettingsIcon />
-                      </Button>
-                    }
-                  />
-                ))
-              ) : (
-                <EmptyRow>No linked repositories.</EmptyRow>
-              )}
-            </SettingsSection>
-            <p className="px-3 text-xs text-muted-foreground sm:px-4">
-              Projects are context only. Tagging a chat or linking a repository never changes what
-              an agent is allowed to access.
-            </p>
+                }
+              >
+                {linkedRepositories.length > 0 ? (
+                  linkedRepositories.map((repository) => (
+                    <SettingsRow
+                      key={repository.id}
+                      title={
+                        <span className="flex min-w-0 items-center gap-2">
+                          <ProjectFavicon project={repository} className="size-4 shrink-0" />
+                          <span className="truncate">{repository.title}</span>
+                        </span>
+                      }
+                      control={
+                        <span className="flex items-center gap-1">
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={`Repository settings for ${repository.title}`}
+                            onClick={() => openRepositorySettings(repository.id)}
+                          >
+                            <SettingsIcon />
+                          </Button>
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={`Remove ${repository.title} from ${label.name}`}
+                            title={canUnlink ? "Remove from project" : noPermission}
+                            disabled={!canUnlink}
+                            onClick={() => void removeRepository(repository.id, repository.title)}
+                          >
+                            <FolderMinusIcon />
+                          </Button>
+                        </span>
+                      }
+                    />
+                  ))
+                ) : (
+                  <EmptyRow>No repositories. Their Work files here once added.</EmptyRow>
+                )}
+              </SettingsSection>
+            ) : null}
+            {!isEmpty ? (
+              <SettingsSection title="Chats" icon={<MessageCircleIcon className="size-3.5" />}>
+                {chats.length > 0 ? (
+                  threadRows(chats, false)
+                ) : (
+                  <EmptyRow>No chats. Right-click a chat and choose Move to folder.</EmptyRow>
+                )}
+              </SettingsSection>
+            ) : null}
+            {!isEmpty ? (
+              <SettingsSection title="Work" icon={<HammerIcon className="size-3.5" />}>
+                {work.length > 0 ? threadRows(work, true) : <EmptyRow>No Work yet.</EmptyRow>}
+              </SettingsSection>
+            ) : null}
+            <ProjectFoldersContextNote />
           </SettingsPageContainer>
         )}
       </div>
@@ -268,7 +350,6 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
           <ProjectLabelEditorDialog
             environmentId={environmentId}
             label={label}
-            repositories={repositories}
             onClose={() => setEditing(false)}
             onDeleted={() => void navigate({ to: "/project" })}
           />

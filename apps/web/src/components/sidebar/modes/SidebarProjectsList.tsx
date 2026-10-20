@@ -1,7 +1,10 @@
-import { PlusIcon } from "lucide-react";
+import { FolderPlusIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
-import { projectContentsCount } from "../../../projectLabels/projectContents.logic";
+import {
+  projectContentsCount,
+  projectFolderSummary,
+} from "../../../projectLabels/projectContents.logic";
 import type {
   EnvironmentProjectLabel,
   ProjectLabelKey,
@@ -10,9 +13,9 @@ import { ProjectColorDot } from "../../../projectLabels/ProjectTag";
 import { useProjectContents } from "../../../projectLabels/useProjectContents";
 
 /**
- * The Projects mode list: every project across connected machines, with
- * how many Work threads, chats and agents it holds. A project opens its
- * view in the main area.
+ * The Projects mode list: every project folder across connected machines,
+ * with how many repositories and threads it holds. A folder opens its view
+ * in the main area.
  */
 export function SidebarProjectsList(props: {
   activeProjectKey: ProjectLabelKey | null;
@@ -30,7 +33,7 @@ export function SidebarProjectsList(props: {
           onClick={props.onCreateProject}
           className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
         >
-          <PlusIcon className="-mx-0.5 size-3" />
+          <FolderPlusIcon className="-mx-0.5 size-3" />
           New project
         </button>
       </div>
@@ -39,7 +42,8 @@ export function SidebarProjectsList(props: {
   return (
     <ul aria-label="Projects" className="flex flex-col gap-1">
       {directory.labels.map((entry) => {
-        const count = projectContentsCount(byProject.get(entry.key));
+        const repositoryCount = entry.label.repositoryIds.length;
+        const threadCount = projectContentsCount(byProject.get(entry.key));
         const active = entry.key === props.activeProjectKey;
         const environment = props.environmentLabel(entry);
         return (
@@ -60,12 +64,12 @@ export function SidebarProjectsList(props: {
                   {environment}
                 </span>
               ) : null}
-              {count > 0 ? (
+              {repositoryCount + threadCount > 0 ? (
                 <span
                   className="shrink-0 text-xs tabular-nums text-secondary-label"
-                  aria-label={count === 1 ? "1 item" : `${count} items`}
+                  aria-label={projectFolderSummary(repositoryCount, threadCount) ?? undefined}
                 >
-                  {count}
+                  {repositoryCount > 0 ? `${repositoryCount} · ${threadCount}` : threadCount}
                 </span>
               ) : null}
             </button>
