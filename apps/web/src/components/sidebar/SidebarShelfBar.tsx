@@ -44,12 +44,25 @@ export function SidebarShelfBar({
     { shelf: "snoozed", icon: ClockIcon, label: "Snoozed", count: snoozedCount },
     { shelf: "settled", icon: ArchiveIcon, label: "Settled", count: settledCount },
   ];
+  const selectedIndex = Math.max(
+    0,
+    segments.findIndex((segment) => segment.shelf === openShelf),
+  );
   return (
     <div
       role="tablist"
       aria-label="Sidebar lists"
-      className="mb-2.5 flex h-9 gap-0.5 rounded-[10px] bg-(--sidebar-shelf-bar) p-0.5"
+      className="relative isolate mb-2.5 flex h-9 rounded-[10px] bg-(--sidebar-shelf-bar) p-0.5"
     >
+      {/* One highlight slides between the equal-width segments. */}
+      <span
+        aria-hidden
+        className="absolute inset-y-0.5 left-0.5 -z-10 rounded-lg bg-(--sidebar-shelf-selected) transition-transform duration-(--motion-duration-slow) ease-standard motion-reduce:transition-none"
+        style={{
+          width: `calc((100% - 0.25rem) / ${segments.length})`,
+          transform: `translateX(${selectedIndex * 100}%)`,
+        }}
+      />
       {segments.map((segment) => {
         const selected = segment.shelf === openShelf;
         const Icon = segment.icon;
@@ -65,7 +78,7 @@ export function SidebarShelfBar({
             className={cn(
               "flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg text-xs tabular-nums outline-none transition-colors duration-(--motion-duration-base) focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-3.5 [&_svg]:shrink-0",
               selected
-                ? "bg-(--sidebar-shelf-selected) text-sidebar-foreground"
+                ? "text-sidebar-foreground"
                 : "text-(--nav-rail-muted) hover:text-sidebar-foreground",
             )}
           >

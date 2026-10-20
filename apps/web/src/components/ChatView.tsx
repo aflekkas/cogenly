@@ -9605,7 +9605,14 @@ export default function ChatView(props: ChatViewProps) {
 
         {/* Main content area with optional plan sidebar. Its centered lane
             glides to its new center when a panel opens or closes (panelFlip). */}
-        <div className="relative flex min-h-0 min-w-0 flex-1" data-panel-flip="center">
+        <div
+          className="@container/chat-main relative flex min-h-0 min-w-0 flex-1"
+          data-panel-flip="center"
+          // The floating details card claims the right edge; the lane steps left to clear it.
+          data-chat-lane-reserve={
+            threadPanelOpen && threadPanelPresentation === "inline" ? "" : undefined
+          }
+        >
           {/* Chat column */}
           <ThreadFindCanvas
             findOptions={{

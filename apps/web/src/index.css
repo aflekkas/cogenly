@@ -141,11 +141,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* ease-standard for inline transitions and scripts (the theme token is
      inlined into utilities, so it has no runtime variable). */
   --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --chat-content-max-width: 46rem;
+  /* The reference column: the composer lands at 853px. */
+  --chat-content-max-width: 53.8125rem;
   /* Transcript text sits this far inside the lane; the composer and user
      bubbles share the inset so the column has one left and right edge. */
   --chat-content-inset: 0.25rem;
-  --thread-details-panel-width: 17.5rem;
+  --thread-details-panel-width: 20.25rem;
   /* The prompt on phones: iOS zooms into any input under 16px on focus. */
   --font-size-prompt-touch: max(var(--font-size-prompt, 1rem), 16px);
   /* Horizontal gutter shared by the page header and the chat column, clear of
@@ -1169,6 +1170,30 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     max-width: var(--chat-content-max-width);
   }
 
+  /* With the floating details card open, every centered lane steps left by up
+     to 174px (measured against the reference at 2000px), but never so far
+     that it leaves the pane's 1.5rem gutter. */
+  [data-chat-lane-reserve] {
+    --chat-lane-shift: clamp(
+      0px,
+      calc((100cqw - var(--chat-content-max-width)) / 2 - 1.5rem),
+      10.875rem
+    );
+  }
+  .chat-content-lane,
+  .chat-lane {
+    translate: calc(-1 * var(--chat-lane-shift, 0px)) 0;
+    transition: translate var(--motion-duration-slow) var(--motion-ease-standard, ease);
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
+  }
+  /* A lane nested in another (the composer surface) moves with its parent. */
+  :is(.chat-content-lane, .chat-lane) :is(.chat-content-lane, .chat-lane) {
+    translate: none;
+  }
+
   .messages-timeline-row-frame {
     padding-inline: 0;
   }
@@ -1422,17 +1447,24 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     color-scheme: dark;
     /* Keep controls and floating surfaces close to the neutral-black canvas.
        Borders and hover states provide separation without milky gray fills. */
-    /* Sampled from the reference: one cool near-black canvas, with surfaces
-       stepping up from it in faintly blue-tinted greys. */
-    --background: #0d0d0f;
-    --surface-raised: #16171b;
-    /* Blended at the glass opacity over the canvas, this lands on #131416. */
-    --composer-surface: #141517;
+    /* Sampled from the live T3 Code window: one neutral near-black canvas,
+       with surfaces stepping up from it in plain greys. */
+    --background: #0a0a0a;
+    --surface-raised: #141414;
+    /* Blended at the glass opacity over the canvas, this lands on #101010. */
+    --composer-surface: #121212;
     --surface-raised-sheen-top: rgb(255 255 255 / 3%);
     --surface-raised-sheen-bottom: rgb(255 255 255 / 1%);
-    --surface-raised-edge-top: rgb(255 255 255 / 10%);
-    --surface-raised-edge-side: rgb(255 255 255 / 8%);
-    --surface-raised-edge-bottom: rgb(255 255 255 / 5.5%);
+    /* Floating cards (details card, popovers) get a soft edge about nine
+       levels over their fill, as in the reference. */
+    --surface-raised-edge-top: rgb(255 255 255 / 4%);
+    --surface-raised-edge-side: rgb(255 255 255 / 3.5%);
+    --surface-raised-edge-bottom: rgb(255 255 255 / 3%);
+    /* In-page surfaces (bubbles, composer, search dock) rest on a faint edge a
+       few levels over their fill, with a fainter ring outside it: a soft glow
+       rather than a drawn line. */
+    --surface-edge: rgb(255 255 255 / 1.5%);
+    --surface-halo: 0 0 0 1px rgb(255 255 255 / 1%);
     --surface-raised-highlight: rgb(255 255 255 / 3%);
     --surface-raised-shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 10px 28px -14px rgb(0 0 0 / 70%);
     --surface-raised-shadow-floating:
@@ -1450,19 +1482,19 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --state-selected-highlight: transparent;
     --state-selected-edge: rgb(255 255 255 / 6%);
     --state-selected-shadow: 0 0 #0000;
-    --foreground: #e7e8ec;
-    --card: #16171b;
-    --card-foreground: #e7e8ec;
-    --popover: #16171b;
-    --popover-foreground: #e7e8ec;
+    --foreground: #e8e8e8;
+    --card: #141414;
+    --card-foreground: #e8e8e8;
+    --popover: #141414;
+    --popover-foreground: #e8e8e8;
     --primary: oklch(0.571 0.21 264);
     --secondary: --alpha(var(--color-white) / 3%);
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 3%);
-    --muted-foreground: #7c7d81;
+    --muted-foreground: #7d7d7d;
     --accent: --alpha(var(--color-white) / 4%);
     /* User bubbles sit one step above the page, like the reference cards. */
-    --message-surface: #141519;
+    --message-surface: #161616;
     --accent-foreground: var(--color-neutral-100);
     --error: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
     --error-foreground: var(--color-red-400);
@@ -1524,36 +1556,36 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --state-selected-foreground: var(--contrast-sidebar-foreground);
 
   @variant dark {
-    --background: #0d0d0f;
-    --foreground: #e7e8ec;
-    --card: #0d0d0f;
+    --background: #0a0a0a;
+    --foreground: #e8e8e8;
+    --card: #0a0a0a;
     --card-foreground: var(--foreground);
     --accent: #191a1d;
     --accent-foreground: #f7f9ff;
-    --muted: #0a0b0d;
-    --muted-foreground: #7c7d81;
+    --muted: #080808;
+    --muted-foreground: #7d7d7d;
     --border: rgb(255 255 255 / 8%);
     --input: rgb(255 255 255 / 18%);
     /* Seamless shell: rail, list and main pane share one surface with no
        dividers. Rows are cards; selection is one fill step up plus a hairline. */
-    --sidebar: #0d0d0f;
-    --nav-rail: #0d0d0f;
+    --sidebar: #0a0a0a;
+    --nav-rail: #0a0a0a;
     /* The rail's active button is quieter than a selected card. */
-    --nav-rail-muted: #88898e;
-    --nav-rail-selected: #141519;
+    --nav-rail-muted: #898989;
+    --nav-rail-selected: #121212;
     /* The count bar is a track a shade below the canvas. */
-    --sidebar-shelf-bar: #0a0b0d;
-    --sidebar-shelf-selected: #1e1f23;
+    --sidebar-shelf-bar: #070707;
+    --sidebar-shelf-selected: #1c1c1c;
     --sidebar-foreground: var(--foreground);
     --sidebar-muted-foreground: var(--muted-foreground);
     --sidebar-control-surface: rgb(255 255 255 / 3.5%);
-    --sidebar-card: #101113;
-    --sidebar-row-hover: #151619;
-    --sidebar-row-active: #1a1b1f;
+    --sidebar-card: #0e0e0e;
+    --sidebar-row-hover: #131313;
+    --sidebar-row-active: #181818;
     --sidebar-row-selected: var(--sidebar-row-active);
     --sidebar-border: var(--border);
     --state-selected-highlight: transparent;
-    --state-selected-edge: #23252b;
+    --state-selected-edge: #1b1b1b;
     --state-selected-shadow: 0 0 #0000;
   }
 }
