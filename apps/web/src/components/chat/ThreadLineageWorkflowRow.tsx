@@ -12,6 +12,7 @@ import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadRelationshipIcon } from "./ThreadRelationshipIcon";
 import { cn } from "../../lib/utils";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
+import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
 import { CollapsibleSectionHeader, SectionHeaderStatus } from "../ui/collapsible-section-header";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -195,72 +196,79 @@ export function ThreadLineageWorkflowRow({
           />
         </ThreadDetailsControl>
       </div>
-      {expanded ? (
-        <ul className="m-0 list-none p-0 ps-6.5">
-          {phases.map((phase) => {
-            const open = phaseOpen.get(phase.index) ?? phase.state === "running";
-            const status = phaseStatusLabel(phase);
-            return (
-              <li key={phase.index}>
-                <CollapsibleSectionHeader
-                  variant="panel"
-                  tone={phase.state === "running" ? "emphasized" : "muted"}
-                  expanded={open}
-                  aria-label={`${open ? "Collapse" : "Expand"} ${phase.title} phase, ${status}`}
-                  onClick={() => setPhaseOpen((phases) => new Map(phases).set(phase.index, !open))}
-                  accessory={
-                    <>
-                      {status === "failed" ? (
-                        <SectionHeaderStatus>Failed</SectionHeaderStatus>
-                      ) : null}
-                      <span className="shrink-0 text-2xs font-normal tabular-nums">
-                        {phase.settledCount}/{phase.members.length}{" "}
-                        {phase.members.length === 1 ? "agent" : "agents"}
-                      </span>
-                      <span className="shrink-0 text-2xs font-normal tabular-nums empty:hidden">
-                        <AgentElapsed agent={phaseElapsed(phase)} />
-                      </span>
-                    </>
-                  }
-                >
-                  {phase.title}
-                </CollapsibleSectionHeader>
-                {open ? (
-                  <ul className="m-0 list-none p-0">
-                    {phase.members.map((member) => (
-                      <WorkflowMemberRow
-                        key={member.id}
-                        member={member}
-                        providerInstanceId={providerInstanceId}
-                        provider={provider}
-                        providers={providers}
-                        driver={driver}
-                        onOpen={onOpenThread}
-                        isThreadAvailable={isThreadAvailable}
-                      />
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
-            );
-          })}
-          {group.unphasedMembers.map((member) => (
-            <WorkflowMemberRow
-              key={member.id}
-              member={member}
-              providerInstanceId={providerInstanceId}
-              provider={provider}
-              providers={providers}
-              driver={driver}
-              onOpen={onOpenThread}
-              isThreadAvailable={isThreadAvailable}
-            />
-          ))}
-          {phases.length === 0 && group.unphasedMembers.length === 0 ? (
-            <li className="px-2.5 py-1.5 text-2xs text-muted-foreground/70">No agents yet</li>
-          ) : null}
-        </ul>
-      ) : null}
+      {/* Height travels on the panel's measured height; closed, it unmounts. */}
+      <Collapsible open={expanded}>
+        <CollapsiblePanel>
+          <ul className="m-0 list-none p-0 ps-6.5">
+            {phases.map((phase) => {
+              const open = phaseOpen.get(phase.index) ?? phase.state === "running";
+              const status = phaseStatusLabel(phase);
+              return (
+                <li key={phase.index}>
+                  <CollapsibleSectionHeader
+                    variant="panel"
+                    tone={phase.state === "running" ? "emphasized" : "muted"}
+                    expanded={open}
+                    aria-label={`${open ? "Collapse" : "Expand"} ${phase.title} phase, ${status}`}
+                    onClick={() =>
+                      setPhaseOpen((phases) => new Map(phases).set(phase.index, !open))
+                    }
+                    accessory={
+                      <>
+                        {status === "failed" ? (
+                          <SectionHeaderStatus>Failed</SectionHeaderStatus>
+                        ) : null}
+                        <span className="shrink-0 text-2xs font-normal tabular-nums">
+                          {phase.settledCount}/{phase.members.length}{" "}
+                          {phase.members.length === 1 ? "agent" : "agents"}
+                        </span>
+                        <span className="shrink-0 text-2xs font-normal tabular-nums empty:hidden">
+                          <AgentElapsed agent={phaseElapsed(phase)} />
+                        </span>
+                      </>
+                    }
+                  >
+                    {phase.title}
+                  </CollapsibleSectionHeader>
+                  <Collapsible open={open}>
+                    <CollapsiblePanel>
+                      <ul className="m-0 list-none p-0">
+                        {phase.members.map((member) => (
+                          <WorkflowMemberRow
+                            key={member.id}
+                            member={member}
+                            providerInstanceId={providerInstanceId}
+                            provider={provider}
+                            providers={providers}
+                            driver={driver}
+                            onOpen={onOpenThread}
+                            isThreadAvailable={isThreadAvailable}
+                          />
+                        ))}
+                      </ul>
+                    </CollapsiblePanel>
+                  </Collapsible>
+                </li>
+              );
+            })}
+            {group.unphasedMembers.map((member) => (
+              <WorkflowMemberRow
+                key={member.id}
+                member={member}
+                providerInstanceId={providerInstanceId}
+                provider={provider}
+                providers={providers}
+                driver={driver}
+                onOpen={onOpenThread}
+                isThreadAvailable={isThreadAvailable}
+              />
+            ))}
+            {phases.length === 0 && group.unphasedMembers.length === 0 ? (
+              <li className="px-2.5 py-1.5 text-2xs text-muted-foreground/70">No agents yet</li>
+            ) : null}
+          </ul>
+        </CollapsiblePanel>
+      </Collapsible>
     </li>
   );
 }
