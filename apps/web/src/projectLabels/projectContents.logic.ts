@@ -10,9 +10,9 @@ export interface ProjectContents<T, A> {
 /**
  * Every thread and agent under the projects it belongs to, in input order.
  * Work belongs to its confirmed tags and the projects linking its
- * repository; chats only to their confirmed tags; an agent to the projects
- * its scope grants. Agent conversations list under their agent, not as
- * threads. Projects with nothing in them have no entry.
+ * repository; chats only to their confirmed tags; agents only where
+ * `agentProjectKeys` files them. Agent conversations list under their agent,
+ * not as threads. Projects with nothing in them have no entry.
  */
 export function indexProjectContents<T, A>(input: {
   readonly threads: ReadonlyArray<T>;

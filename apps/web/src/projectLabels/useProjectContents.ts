@@ -11,17 +11,11 @@ import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { useProjects, useServerConfigs, useThreadShells } from "../state/entities";
 import { useConnectedEnvironmentIds } from "../state/environments";
 import { indexProjectContents } from "./projectContents.logic";
-import {
-  projectLabelKey,
-  scopedRepositoryKey,
-  scopedThreadTagKey,
-  workRowProjectTags,
-} from "./projectLabels.logic";
+import { scopedRepositoryKey, scopedThreadTagKey, workRowProjectTags } from "./projectLabels.logic";
 import { useProjectLabelDirectory } from "./useProjectLabels";
 
 /**
- * Projects with the Work, chats and agents filed under each, newest
- * activity first. Work files the same way its sidebar chips read.
+ * Projects with the Work and chats filed under each, newest activity first. Work files the same way its sidebar chips read.
  */
 export function useProjectContents() {
   const threads = useThreadShells();
@@ -55,8 +49,8 @@ export function useProjectContents() {
       chatProjectKeys: (thread) =>
         directory.confirmedByThread.get(scopedThreadTagKey(thread.environmentId, thread.id)) ?? [],
       agents,
-      agentProjectKeys: (agent) =>
-        agent.scope.map((entry) => projectLabelKey(agent.environmentId, entry.labelId)),
+      // Agents reach every project, so none is filed under one in particular.
+      agentProjectKeys: () => [],
     });
   }, [agents, classifier, directory, projectGroups, threads]);
   return { directory, byProject };
