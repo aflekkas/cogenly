@@ -26,7 +26,14 @@ import {
   ModelPickerSidebar,
   type ModelPickerRailSelection,
 } from "./ModelPickerSidebar";
-import { rankModelUsage, readModelUsage, recordModelUsage, useModelUsage } from "~/lib/modelUsage";
+import {
+  mergeModelUsage,
+  pickRecentModels,
+  recordModelUsage,
+  threadModelUses,
+  useModelUsage,
+} from "~/lib/modelUsage";
+import { useThreadShells } from "~/state/entities";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
   modelPickerLegacySectionKey,
@@ -275,10 +282,30 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   // The rail entry the user chose; until then the picker opens on Recent when
   // this device has used models, else on the current model's provider.
   const [chosenInstanceId, setChosenInstanceId] = useState<ModelPickerRailSelection | null>(null);
-  const [openedWithUsage] = useState(() => readModelUsage().length > 0);
+  // What this device recorded, plus the threads the user wrote in, so Recent
+  // also covers models used before recording began or from another device.
+  const recordedModelUsage = useModelUsage();
+  const threadShells = useThreadShells();
+  const threadUsage = useMemo(
+    () =>
+      threadModelUses(
+        threadShells.map((thread) => ({
+          modelSelection: thread.modelSelection,
+          lastUserMessageAt:
+            thread.latestUserAuthoredMessageAt === undefined
+              ? thread.latestUserMessageAt
+              : thread.latestUserAuthoredMessageAt,
+        })),
+      ),
+    [threadShells],
+  );
+  const modelUsage = useMemo(
+    () => mergeModelUsage(recordedModelUsage, threadUsage),
+    [recordedModelUsage, threadUsage],
+  );
+  const [openedWithUsage] = useState(() => modelUsage.length > 0);
   // Ranked as of opening, so the list holds still while the picker is open.
   const [openedAt] = useState(() => Date.now());
-  const modelUsage = useModelUsage();
   const [expandedLegacyInstances, setExpandedLegacyInstances] = useState(
     () =>
       new Set<ProviderInstanceId>(
@@ -438,22 +465,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   // Recent: the models this device used most and most recently, across
   // providers, that this picker can still offer.
-  const recentModels = useMemo(() => {
-    const modelByKey = new Map(
-      flatModels
-        .filter(matchesLockedProvider)
-        .map((model) => [modelPickerModelKey(model.instanceId, model.slug), model] as const),
-    );
-    const recent: ModelPickerItem[] = [];
-    for (const entry of rankModelUsage(modelUsage, openedAt)) {
-      const model = modelByKey.get(
-        modelPickerModelKey(entry.instanceId as ProviderInstanceId, entry.model),
-      );
-      if (model) recent.push(model);
-      if (recent.length === RECENT_MODEL_COUNT) break;
-    }
-    return recent;
-  }, [flatModels, matchesLockedProvider, modelUsage, openedAt]);
+  const recentModels = useMemo(
+    () =>
+      pickRecentModels(
+        flatModels.filter(matchesLockedProvider),
+        modelUsage,
+        openedAt,
+        RECENT_MODEL_COUNT,
+      ),
+    [flatModels, matchesLockedProvider, modelUsage, openedAt],
+  );
   const showRecent = recentModels.length > 0;
   const selectedInstanceId: ModelPickerRailSelection =
     chosenInstanceId === MODEL_PICKER_RECENT && !showRecent

@@ -3,7 +3,9 @@ import { useSyncExternalStore } from "react";
 /**
  * Which models this device uses, for the model picker's Recent list. Kept in
  * local storage: it is a per-device convenience, not a setting to sync.
- * Recorded when a model is picked and when a turn is sent with one.
+ * Recorded when a model is picked and when a turn is sent with one, and
+ * seeded from the threads the user has written in (see threadModelUses), so
+ * Recent is not empty on a device that has not recorded anything yet.
  */
 export interface ModelUsageEntry {
   readonly instanceId: string;
@@ -101,6 +103,77 @@ export function rankModelUsage(
         right.score - left.score || (right.entry.uses.at(-1) ?? 0) - (left.entry.uses.at(-1) ?? 0),
     )
     .map(({ entry }) => entry);
+}
+
+/**
+ * The Recent list: the offered models in usage order, at most `limit`. Usage
+ * of a model this picker cannot offer (removed, other machine) is skipped.
+ */
+export function pickRecentModels<T extends { readonly instanceId: string; readonly slug: string }>(
+  models: ReadonlyArray<T>,
+  usage: ReadonlyArray<ModelUsageEntry>,
+  now: number,
+  limit: number,
+): T[] {
+  const byKey = new Map(models.map((model) => [`${model.instanceId}\u0000${model.slug}`, model]));
+  const recent: T[] = [];
+  for (const entry of rankModelUsage(usage, now)) {
+    const model = byKey.get(`${entry.instanceId}\u0000${entry.model}`);
+    if (model) recent.push(model);
+    if (recent.length === limit) break;
+  }
+  return recent;
+}
+
+/** The model a thread runs with and when the user last wrote in it. */
+export interface ThreadModelUse {
+  readonly modelSelection: { readonly instanceId: string; readonly model: string };
+  readonly lastUserMessageAt: string | null;
+}
+
+/** Usage implied by threads: one use per thread, at its last user message. */
+export function threadModelUses(
+  threads: ReadonlyArray<ThreadModelUse>,
+): ReadonlyArray<ModelUsageEntry> {
+  let entries: ReadonlyArray<ModelUsageEntry> = [];
+  const dated = threads
+    .flatMap((thread) => {
+      const time = thread.lastUserMessageAt ? Date.parse(thread.lastUserMessageAt) : Number.NaN;
+      return Number.isFinite(time) && thread.modelSelection.model
+        ? [{ ...thread.modelSelection, time }]
+        : [];
+    })
+    .toSorted((left, right) => left.time - right.time);
+  for (const use of dated) {
+    entries = addModelUse(entries, use.instanceId, use.model, use.time);
+  }
+  return entries;
+}
+
+/** Both sources of usage as one list; a use both recorded is counted once. */
+export function mergeModelUsage(
+  recorded: ReadonlyArray<ModelUsageEntry>,
+  implied: ReadonlyArray<ModelUsageEntry>,
+): ReadonlyArray<ModelUsageEntry> {
+  if (implied.length === 0) return recorded;
+  let merged = recorded;
+  const uses = implied
+    .flatMap((entry) => entry.uses.map((time) => ({ ...entry, time })))
+    .toSorted((left, right) => left.time - right.time);
+  for (const use of uses) {
+    const existing = merged.find(
+      (entry) => entry.instanceId === use.instanceId && entry.model === use.model,
+    );
+    if (existing?.uses.some((time) => Math.abs(time - use.time) < REPEAT_WINDOW_MS)) continue;
+    const times = [...(existing?.uses ?? []), use.time]
+      .toSorted((left, right) => left - right)
+      .slice(-USES_PER_MODEL);
+    const updated: ModelUsageEntry = { instanceId: use.instanceId, model: use.model, uses: times };
+    merged = existing
+      ? merged.map((entry) => (entry === existing ? updated : entry))
+      : [...merged, updated];
+  }
+  return merged;
 }
 
 export function recordModelUsage(instanceId: string, model: string): void {
