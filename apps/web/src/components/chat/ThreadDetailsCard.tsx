@@ -12,6 +12,10 @@ import {
   resolveThreadDetailsCardLayout,
 } from "./threadDetailsCardLayout";
 import { observeResize } from "../../lib/observeResize";
+import { usePanelAnimationSettings, usePanelPresence } from "../../panelAnimations";
+
+/** Matches popup-motion's exit, so the card unmounts as its fade ends. */
+const THREAD_DETAILS_CARD_EXIT_MS = 110;
 
 /** One card owns its placement and folds content only when that content cannot fit. */
 export function ThreadDetailsCard({
@@ -53,6 +57,14 @@ export function ThreadDetailsCard({
   const popoverOpen = useRightPanelStore((state) =>
     selectThreadPanelOpen(state.threadPanelVisibilityByThreadKey, threadRef, "popover"),
   );
+  const { active: motionActive } = usePanelAnimationSettings();
+  const inlinePresent = usePanelPresence(
+    inlineOpen,
+    true,
+    motionActive,
+    `${threadRef.environmentId}:${threadRef.threadId}`,
+    THREAD_DETAILS_CARD_EXIT_MS,
+  ).present;
   const [contentElement, setContentElement] = useState<HTMLDivElement | null>(null);
   const measurementKey = `${threadRef.environmentId}:${threadRef.threadId}:${preferredPlacement?.width ?? "popup"}`;
   const [measurements, setMeasurements] = useState({
@@ -151,16 +163,26 @@ export function ThreadDetailsCard({
       }}
     >
       {placement ? (
-        inlineOpen ? (
+        inlinePresent ? (
           <aside
             aria-label="Thread details"
-            // Slides down to make room for the find bar, but returns in the same frame
-            // the bar closes: a floating preview below moves up at once and would
-            // otherwise overlap the card mid-slide.
+            aria-hidden={!inlineOpen || undefined}
+            inert={!inlineOpen}
+            // Opens and closes like an anchored popup (popup-motion): a fade from
+            // 97% scale out of the top-right corner, with a quicker exit. Slides down
+            // to make room for the find bar, but returns in the same frame the bar
+            // closes: a floating preview below moves up at once and would otherwise
+            // overlap the card mid-slide.
             className={cn(
-              "absolute z-20",
+              "absolute z-20 origin-top-right",
               topInset > 0 &&
                 "transition-[top] duration-150 ease-out motion-reduce:transition-none",
+              topInset > 0
+                ? "[[data-panel-animations=true]_&]:transition-[top,opacity,scale,translate]"
+                : "[[data-panel-animations=true]_&]:transition-[opacity,scale,translate]",
+              "[[data-panel-animations=true]_&]:duration-160 [[data-panel-animations=true]_&]:ease-drawer [[data-panel-animations=true]_&]:starting:-translate-y-1 [[data-panel-animations=true]_&]:starting:scale-97 [[data-panel-animations=true]_&]:starting:opacity-0",
+              !inlineOpen &&
+                "pointer-events-none scale-97 opacity-0 [[data-panel-animations=true]_&]:duration-110 [[data-panel-animations=true]_&]:ease-popup-exit",
             )}
             style={{
               // Anchored to the right edge like the find bar, so both follow a resizing
