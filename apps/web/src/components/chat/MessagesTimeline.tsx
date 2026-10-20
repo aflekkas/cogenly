@@ -2,7 +2,15 @@ import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
-import { WorkLogBlock, WorkLogButton, WorkLogDetails, WorkLogList, WorkLogRow } from "./WorkLog";
+import {
+  WorkLogBlock,
+  WorkLogButton,
+  WorkLogCollapse,
+  WorkLogDetails,
+  WorkLogList,
+  WorkLogRow,
+  WorkLogChevron,
+} from "./WorkLog";
 import { PullRequestGlyph } from "../changeRequestIcons";
 import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
@@ -126,7 +134,6 @@ import {
   BrainIcon,
   CheckIcon,
   ChevronDownIcon,
-  ChevronRightIcon,
   ChevronUpIcon,
   CircleAlertIcon,
   DownloadIcon,
@@ -352,6 +359,10 @@ interface TimelineRowSharedState {
   openPullRequest: (event: MouseEvent<HTMLElement>, url: string) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   onToggleWorkEntry: (anchorKey: string, collapsed: boolean) => void;
+  /** A collapsed group's details finished animating out. */
+  onWorkGroupClosed: (groupId: string) => void;
+  /** Groups opened by a toggle whose details row has not mounted yet. */
+  openingWorkGroupIds: Set<string>;
   onCancelWorktreeSetup: (() => void) | null;
   retryableWorkspacePreparationRunIds: ReadonlySet<RunId>;
   onRetryWorkspacePreparation: ((runId: RunId) => void) | null;
@@ -635,6 +646,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const [expandedAttemptIds, setExpandedAttemptIds] = useState<ReadonlySet<RunAttemptId>>(
     () => rememberedPosition?.disclosures?.attempts ?? new Set(),
   );
+  const [closingWorkGroupIds, setClosingWorkGroupIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [openingWorkGroupIds] = useState(() => new Set<string>());
   const [positionedThreadKey, setPositionedThreadKey] = useState<string | null>(() =>
     rememberedPosition?.atEnd === false ? null : listIdentityKey,
   );
@@ -654,6 +669,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     setExpandedRunIds(paintedExpandedRunIds);
     setExpandedWorkGroupIds(paintedExpandedWorkGroupIds);
     setExpandedAttemptIds(paintedExpandedAttemptIds);
+    setClosingWorkGroupIds(new Set());
+    openingWorkGroupIds.clear();
   }
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
   const openPullRequest = useOpenPrLink(citationThreadRef ?? undefined);
@@ -764,7 +781,22 @@ const ConversationTimeline = memo(function ConversationTimeline({
   );
   const onToggleWorkGroup = useCallback(
     (groupId: string, anchorKey: string) => {
-      suspendEndScrollMaintenanceForDisclosure(anchorKey, expandedWorkGroupIds.has(groupId));
+      const collapsing = expandedWorkGroupIds.has(groupId);
+      suspendEndScrollMaintenanceForDisclosure(anchorKey, collapsing);
+      // Collapsing keeps the details row until it animates out; reopening
+      // mid-close reuses that row, so only a fresh open plays the enter.
+      if (collapsing) {
+        openingWorkGroupIds.delete(groupId);
+      } else if (!closingWorkGroupIds.has(groupId)) {
+        openingWorkGroupIds.add(groupId);
+      }
+      setClosingWorkGroupIds((existing) => {
+        if (existing.has(groupId) !== collapsing) return existing;
+        const next = new Set(existing);
+        if (collapsing) next.add(groupId);
+        else next.delete(groupId);
+        return next;
+      });
       setExpandedWorkGroupIds((existing) => {
         const next = new Set(existing);
         if (next.has(groupId)) {
@@ -775,8 +807,21 @@ const ConversationTimeline = memo(function ConversationTimeline({
         return next;
       });
     },
-    [expandedWorkGroupIds, suspendEndScrollMaintenanceForDisclosure],
+    [
+      closingWorkGroupIds,
+      expandedWorkGroupIds,
+      openingWorkGroupIds,
+      suspendEndScrollMaintenanceForDisclosure,
+    ],
   );
+  const onWorkGroupClosed = useCallback((groupId: string) => {
+    setClosingWorkGroupIds((existing) => {
+      if (!existing.has(groupId)) return existing;
+      const next = new Set(existing);
+      next.delete(groupId);
+      return next;
+    });
+  }, []);
   const onToggleAttemptFold = useCallback(
     (attemptId: RunAttemptId) => {
       suspendEndScrollMaintenanceForDisclosure(`attempt-fold:${attemptId}`);
@@ -885,6 +930,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         expandedRunIds: visibleExpandedRunIds,
         expandedAttemptIds: visibleExpandedAttemptIds,
         expandedWorkGroupIds,
+        closingWorkGroupIds,
         isWorking,
         runlessWorkActive,
         activeTurnStartedAt,
@@ -908,6 +954,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     visibleExpandedRunIds,
     visibleExpandedAttemptIds,
     expandedWorkGroupIds,
+    closingWorkGroupIds,
     isWorking,
     runlessWorkActive,
     activeTurnStartedAt,
@@ -1166,6 +1213,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
     if (disclosurePinsEndRef.current) {
       queueMicrotask(pinDisclosureToEnd);
       scheduleDisclosureSettle();
+    } else if (disclosureAnchorKeyRef.current !== null) {
+      // An animating disclosure resizes every frame; the toggled row stays
+      // the scroll anchor until it stops.
+      scheduleDisclosureSettle();
     }
     reportContentOverflow();
   }, [pinDisclosureToEnd, reportContentOverflow, scheduleDisclosureSettle]);
@@ -1347,6 +1398,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onToggleAttemptFold,
       onToggleWorkGroup,
       onToggleWorkEntry: suspendEndScrollMaintenanceForDisclosure,
+      onWorkGroupClosed,
+      openingWorkGroupIds,
       onCancelWorktreeSetup: onCancelWorktreeSetup ?? null,
       retryableWorkspacePreparationRunIds,
       onRetryWorkspacePreparation: onRetryWorkspacePreparation ?? null,
@@ -1385,6 +1438,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onToggleAttemptFold,
       onToggleWorkGroup,
       suspendEndScrollMaintenanceForDisclosure,
+      onWorkGroupClosed,
+      openingWorkGroupIds,
       onCancelWorktreeSetup,
       retryableWorkspacePreparationRunIds,
       onRetryWorkspacePreparation,
@@ -2090,7 +2145,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
     row.kind === "thinking";
   const isExpandedToolGroupHeader =
     (row.kind === "work-toggle" || row.kind === "work-live" || row.kind === "thinking") &&
-    row.expanded === true;
+    (row.expanded === true || row.closing === true);
 
   return (
     <div
@@ -2124,7 +2179,19 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       }
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
-      {isWorkLogRow ? (
+      {isExpandedToolGroup && row.groupId !== undefined ? (
+        <WorkGroupDetailsReveal
+          groupId={row.groupId}
+          closing={row.closing === true}
+          continues={row.continuesWorkLog}
+        >
+          <WorkGroupSection
+            anchorKey={row.id}
+            groupedEntries={row.groupedEntries}
+            isExpandedToolGroup
+          />
+        </WorkGroupDetailsReveal>
+      ) : isWorkLogRow ? (
         <WorkLogBlock
           continues={row.continuesWorkLog}
           layout={
@@ -2165,6 +2232,38 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
     </div>
   );
 });
+
+/** An expanded group's details row: grows in when opened, animates out when closed. */
+function WorkGroupDetailsReveal({
+  groupId,
+  closing,
+  continues,
+  children,
+}: {
+  groupId: string;
+  closing: boolean;
+  continues: boolean | undefined;
+  children: ReactNode;
+}) {
+  const { openingWorkGroupIds, onWorkGroupClosed } = use(TimelineRowCtx);
+  // Consumed on mount, so a virtualized remount of an open group stays still.
+  const [appear] = useState(() => openingWorkGroupIds.delete(groupId));
+  const onExitComplete = useCallback(
+    () => onWorkGroupClosed(groupId),
+    [groupId, onWorkGroupClosed],
+  );
+  return (
+    <WorkLogCollapse
+      open={!closing}
+      appear={appear}
+      layout="group-content"
+      continues={continues}
+      onExitComplete={onExitComplete}
+    >
+      {children}
+    </WorkLogCollapse>
+  );
+}
 
 function WorktreeSetupTimelineRow({
   row,
@@ -4127,7 +4226,8 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
 
   const failed = workEntryDisplayIndicatesToolFailure(row.entry);
   // The expanded group already lists the thought, so the preview steps aside.
-  const thoughtLine = row.thought && !row.expanded ? liveThoughtLine(row.thought.detail ?? "") : "";
+  const thoughtLine =
+    row.thought && !row.expanded && !row.closing ? liveThoughtLine(row.thought.detail ?? "") : "";
   // While the thought itself streams, the status line just says Thinking.
   const thoughtIsStatus = thoughtLine !== "" && row.entry === row.thought;
 
@@ -5797,67 +5897,64 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
             )}
             aria-hidden
           >
-            <ChevronRightIcon
-              className={cn(
-                "size-3 shrink-0 text-icon-muted opacity-70 transition-transform duration-200",
-                expanded && "rotate-90",
-              )}
-            />
+            <WorkLogChevron open={expanded} />
           </span>
         </>
       }
     >
-      {expanded && viewedImage && threadRef ? (
-        <WorkLogDetails kind="media">
-          <ChatMarkdownAssetImage
-            environmentId={threadRef.environmentId}
-            resource={viewedImage.resource}
-            alt={viewedImage.alt}
-            srcFragment={viewedImage.srcFragment}
-            workspaceRoot={workspaceRoot}
-            maxHeightRem={16}
-            onImageExpand={onImageExpand}
-          />
-        </WorkLogDetails>
-      ) : null}
-      {expanded && workEntry.questionAnswer ? (
-        <QuestionAnswerHistory answer={workEntry.questionAnswer} />
-      ) : null}
-      {expanded && isReasoning ? <ReasoningTraceContent entries={[workEntry]} /> : null}
-      {expanded &&
-      !isReasoning &&
-      !workEntry.questionAnswer &&
-      canExpandProjectedItem &&
-      (expandedBody ||
-        plainOutputFetches ||
-        (workEntry.projectedItem && plainOutput === undefined)) ? (
-        <WorkLogDetails kind="panel">
-          {workEntry.projectedItem && plainOutput === undefined ? (
-            <V2ItemInspector
-              projectedItem={workEntry.projectedItem}
-              environmentId={ctx.activeThreadEnvironmentId}
-              cwd={ctx.markdownCwd}
+      <WorkLogCollapse open={expanded}>
+        {expanded && viewedImage && threadRef ? (
+          <WorkLogDetails kind="media">
+            <ChatMarkdownAssetImage
+              environmentId={threadRef.environmentId}
+              resource={viewedImage.resource}
+              alt={viewedImage.alt}
+              srcFragment={viewedImage.srcFragment}
               workspaceRoot={workspaceRoot}
-              onOpenThread={ctx.onOpenThread}
-              onRollbackCheckpoint={ctx.onRollbackCheckpoint}
-              onImageExpand={ctx.onImageExpand}
+              maxHeightRem={16}
+              onImageExpand={onImageExpand}
             />
-          ) : (
-            <>
-              {expandedBody ? (
-                <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
-              ) : null}
-              {plainOutputFetches && workEntry.projectedItem ? (
-                <FetchedToolOutput
-                  projectedItem={workEntry.projectedItem}
-                  environmentId={ctx.activeThreadEnvironmentId}
-                  onImageExpand={onImageExpand}
-                />
-              ) : null}
-            </>
-          )}
-        </WorkLogDetails>
-      ) : null}
+          </WorkLogDetails>
+        ) : null}
+        {expanded && workEntry.questionAnswer ? (
+          <QuestionAnswerHistory answer={workEntry.questionAnswer} />
+        ) : null}
+        {expanded && isReasoning ? <ReasoningTraceContent entries={[workEntry]} /> : null}
+        {expanded &&
+        !isReasoning &&
+        !workEntry.questionAnswer &&
+        canExpandProjectedItem &&
+        (expandedBody ||
+          plainOutputFetches ||
+          (workEntry.projectedItem && plainOutput === undefined)) ? (
+          <WorkLogDetails kind="panel">
+            {workEntry.projectedItem && plainOutput === undefined ? (
+              <V2ItemInspector
+                projectedItem={workEntry.projectedItem}
+                environmentId={ctx.activeThreadEnvironmentId}
+                cwd={ctx.markdownCwd}
+                workspaceRoot={workspaceRoot}
+                onOpenThread={ctx.onOpenThread}
+                onRollbackCheckpoint={ctx.onRollbackCheckpoint}
+                onImageExpand={ctx.onImageExpand}
+              />
+            ) : (
+              <>
+                {expandedBody ? (
+                  <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+                ) : null}
+                {plainOutputFetches && workEntry.projectedItem ? (
+                  <FetchedToolOutput
+                    projectedItem={workEntry.projectedItem}
+                    environmentId={ctx.activeThreadEnvironmentId}
+                    onImageExpand={onImageExpand}
+                  />
+                ) : null}
+              </>
+            )}
+          </WorkLogDetails>
+        ) : null}
+      </WorkLogCollapse>
     </WorkLogRow>
   );
 }

@@ -5,6 +5,7 @@ import {
   turnItemNeedsDetailFetch,
   turnItemOutputImages,
   turnItemOutputText,
+  webSearchQueries,
 } from "@t3tools/client-runtime/work-log/item-detail";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
@@ -318,8 +319,10 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
         <div className={cn("text-foreground/85", monoClassName)}>{item.pattern}</div>
       ) : null}
 
-      {item.type === "web_search" && item.patterns?.length ? (
-        <div className={cn("text-foreground/85", monoClassName)}>{item.patterns.join("\n")}</div>
+      {item.type === "web_search" && webSearchQueries(item.patterns).length ? (
+        <div className={cn("text-foreground/85", monoClassName)}>
+          {webSearchQueries(item.patterns).join("\n")}
+        </div>
       ) : null}
 
       {item.type === "file_search" && item.results?.length ? (

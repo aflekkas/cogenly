@@ -4,6 +4,23 @@ import * as DateTime from "effect/DateTime";
 
 const MAX_TEXT_BLOCK_DEPTH = 4;
 
+/**
+ * A web search's queries, each once. Codex reports a search's query on both
+ * the item and its action, so stored items can repeat it.
+ */
+export function webSearchQueries(patterns: ReadonlyArray<string> | undefined): string[] {
+  const seen = new Set<string>();
+  const queries: string[] = [];
+  for (const pattern of patterns ?? []) {
+    const query = pattern.trim();
+    const key = query.toLowerCase();
+    if (query === "" || seen.has(key)) continue;
+    seen.add(key);
+    queries.push(query);
+  }
+  return queries;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -247,7 +264,7 @@ export function turnItemHasDetail(item: OrchestrationV2TurnItem): boolean {
     case "file_search":
       return (item.results?.length ?? 0) > 0 || Boolean(item.pattern?.trim());
     case "web_search":
-      return (item.results?.length ?? 0) > 0 || (item.patterns?.length ?? 0) > 0;
+      return (item.results?.length ?? 0) > 0 || webSearchQueries(item.patterns).length > 0;
     case "dynamic_tool":
       return item.outputOmitted === true || toolCallHasLines(toolCallLines({ args: item.input }));
     case "approval_request":

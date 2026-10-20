@@ -91,3 +91,62 @@ describe("reply-only turns keep their layout while they settle", () => {
     expect(reply?.kind === "message" && reply.showLiveActivity).toBeUndefined();
   });
 });
+
+describe("a collapsing tool group keeps its details until they animate out", () => {
+  function searchEntry(id: string, at: number): TimelineEntry {
+    const createdAt = new Date(Date.UTC(2026, 0, 1, 0, 0, at)).toISOString();
+    return {
+      id,
+      kind: "work",
+      createdAt,
+      entry: {
+        id,
+        createdAt,
+        label: "Searched the web",
+        detail: `query ${id}`,
+        tone: "tool",
+        itemType: "web_search",
+        runId,
+        toolLifecycleStatus: "completed",
+      },
+    };
+  }
+  const entries = [
+    messageEntry("user-1", "user", { at: 0 }),
+    searchEntry("search-1", 1),
+    searchEntry("search-2", 2),
+    messageEntry("reply-1", "assistant", { at: 3 }),
+  ];
+  const groupId = "work-group:search-1";
+  const groupRows = (disclosure: {
+    expandedWorkGroupIds?: ReadonlySet<string>;
+    closingWorkGroupIds?: ReadonlySet<string>;
+  }) =>
+    deriveMessagesTimelineRows({
+      timelineEntries: entries,
+      latestRun: completedRun,
+      expandedRunIds: new Set([runId]),
+      isWorking: false,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+      ...disclosure,
+    }).filter((row) => row.kind === "work-toggle" || row.kind === "work");
+
+  it("reads collapsed in the header while the details row stays, marked closing", () => {
+    const [header, details] = groupRows({ closingWorkGroupIds: new Set([groupId]) });
+    expect(header).toMatchObject({ kind: "work-toggle", expanded: false, closing: true });
+    expect(details).toMatchObject({ kind: "work", groupId, closing: true });
+  });
+
+  it("drops the details once the close ends, and reopening clears closing", () => {
+    expect(groupRows({}).map((row) => row.kind)).toEqual(["work-toggle"]);
+    const reopened = groupRows({
+      expandedWorkGroupIds: new Set([groupId]),
+      closingWorkGroupIds: new Set([groupId]),
+    });
+    expect(reopened.map((row) => [row.kind, row.closing])).toEqual([
+      ["work-toggle", undefined],
+      ["work", undefined],
+    ]);
+  });
+});

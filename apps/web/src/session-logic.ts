@@ -23,7 +23,10 @@ import {
   formatSearchToolLabel,
 } from "@t3tools/shared/toolActivity";
 import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
-import { turnItemDetailRevision } from "@t3tools/client-runtime/work-log/item-detail";
+import {
+  turnItemDetailRevision,
+  webSearchQueries,
+} from "@t3tools/client-runtime/work-log/item-detail";
 import type { McpAppReference } from "@t3tools/shared/mcpApp";
 import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
 import {
@@ -491,14 +494,16 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
         toolTitle: title ?? "File search",
         toolData: item,
       };
-    case "web_search":
+    case "web_search": {
+      const queries = webSearchQueries(item.patterns);
       return {
         ...common,
         label: title ?? "Searched the web",
-        ...(item.patterns?.length ? { detail: item.patterns.join(", ") } : {}),
+        ...(queries.length ? { detail: queries.join(", ") } : {}),
         toolTitle: title ?? "Web search",
         toolData: item,
       };
+    }
     case "checkpoint":
       return {
         ...common,
