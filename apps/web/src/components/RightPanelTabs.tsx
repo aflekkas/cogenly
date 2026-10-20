@@ -15,7 +15,17 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Files, Globe2, PanelRight, Plus, Smartphone, TerminalSquare, X } from "lucide-react";
+import {
+  CircleUser,
+  Files,
+  Globe2,
+  PanelRight,
+  Plus,
+  Smartphone,
+  TerminalSquare,
+  VenetianMask,
+  X,
+} from "lucide-react";
 import { Volume2, VolumeOff } from "lucide";
 import {
   type ComponentProps,
@@ -716,6 +726,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           : option.onSelect()
                       }
                     >
+                      {/* Same icon column as the parent menu: the mask marks
+                          the throwaway session, a person any persistent profile. */}
+                      {profile.kind === "incognito" ? <VenetianMask /> : <CircleUser />}
                       <span className="min-w-0 truncate">{profile.name}</span>
                     </MenuItem>
                   ))}
