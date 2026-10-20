@@ -2,6 +2,7 @@ import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
+import { useMediaQuery } from "~/hooks/useMediaQuery";
 import {
   WorkLogBlock,
   WorkLogButton,
@@ -371,7 +372,8 @@ interface TimelineRowSharedState {
   onFileDownload: (attachment: ChatFileAttachment) => void;
   openPullRequest: (event: MouseEvent<HTMLElement>, url: string) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
-  onToggleWorkEntry: (anchorKey: string, collapsed: boolean) => void;
+  /** Holds the toggled row in place while it resizes; true when the toggle stays pinned to the end. */
+  onToggleWorkEntry: (anchorKey: string, collapsed: boolean) => boolean;
   /** A collapsed group's details finished animating out. */
   onWorkGroupClosed: (groupId: string) => void;
   /** Groups opened by a toggle whose details row has not mounted yet. */
@@ -786,6 +788,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       disclosurePinsEndRef.current = resolveTimelineIsAtEnd(listRef.current?.getState()) === true;
       setDisclosureToggleSettling(true);
       scheduleDisclosureSettle();
+      return disclosurePinsEndRef.current;
     },
     [listRef, scheduleDisclosureSettle],
   );
@@ -2766,6 +2769,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         ) : null}
         <div onCopyCapture={onBodyCopyCapture}>
           <CollapsibleUserMessageBody
+            disclosureAnchorKey={row.id}
             text={resolvedContext.text}
             renderContextReference={renderContextReference}
             skills={ctx.skills}
@@ -5086,40 +5090,187 @@ function UserMessageContextReferenceChip(props: {
 
 const COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM = 1.75;
 const COLLAPSED_USER_MESSAGE_FADE_MASK = `linear-gradient(to bottom, black calc(100% - ${COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM}rem), transparent)`;
+/** The clamp's height, matching `max-h-44`. */
+const COLLAPSED_USER_MESSAGE_HEIGHT_REM = 11;
+/** The fade mask at rest, and stretched past the bottom edge so the fade is gone. */
+const COLLAPSED_USER_MESSAGE_MASK_SIZE = "100% 100%";
+const EXPANDED_USER_MESSAGE_MASK_SIZE = `100% calc(100% + ${COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM}rem)`;
+/** Longest clamp motion; a transition that never ends still settles after it. */
+const USER_MESSAGE_CLAMP_MOTION_MS = 400;
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
+type UserMessageClampPhase = "collapsed" | "opening" | "open" | "closing";
+
+function scrollParent(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+  }
+  return null;
+}
+
+/**
+ * A long user message, clamped with a bottom fade until "Show full message".
+ * Toggling grows or shrinks the height between the clamp and the full text
+ * (slow token open, 0.7x close, ease-standard) while the fade stretches out of
+ * or back into view. Collapsing a message whose top is scrolled out of view
+ * keeps its footer under the pointer; a toggle at the end stays pinned. Find
+ * and reduced motion open at once.
+ */
 const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(props: {
+  /** The timeline row holding this message, kept in place while it resizes. */
+  disclosureAnchorKey: string;
   text: string;
   renderContextReference: (reference: ChatMarkdownContextReference) => ReactNode;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   markdownCwd: string | undefined;
   footer?: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const { onToggleWorkEntry } = use(TimelineRowCtx);
+  const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
+  const [phase, setPhase] = useState<UserMessageClampPhase>("collapsed");
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
+  // Where the motion starts, and the footer's viewport top to hold while closing.
+  const motionStartHeightRef = useRef(0);
+  const heldFooterTopRef = useRef<number | null>(null);
   // Find opens the body only when it selects a match in the clipped part.
-  const revealForFind = useCallback(() => setExpanded(true), []);
+  const revealForFind = useCallback(() => setPhase("open"), []);
   const findRevealRef = useFindRevealRef(revealForFind);
+  const bodyRefCallback = useCallback(
+    (element: HTMLDivElement | null) => {
+      bodyRef.current = element;
+      const cleanup = findRevealRef(element);
+      return () => {
+        bodyRef.current = null;
+        cleanup?.();
+      };
+    },
+    [findRevealRef],
+  );
   const hasVisibleBody = props.text.trim().length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
-  const isCollapsed = canCollapse && !expanded;
+  const expanded = phase === "opening" || phase === "open";
+  const isCollapsed = canCollapse && phase === "collapsed";
+  const masked = canCollapse && phase !== "open";
   const showCollapseControl = canCollapse;
+
+  const settle = useCallback(() => {
+    setPhase((current) =>
+      current === "opening" ? "open" : current === "closing" ? "collapsed" : current,
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    if (phase !== "opening" && phase !== "closing") {
+      body.style.height = "";
+      return;
+    }
+    // Scripted rather than a CSS transition: the timeline re-renders around a
+    // toggle, so a start value set in this effect is not reliably the
+    // transition's before-change style.
+    const root = getComputedStyle(document.documentElement);
+    const rem = Number.parseFloat(root.fontSize) || 16;
+    const slowMs =
+      Number.parseFloat(root.getPropertyValue("--motion-duration-slow")) ||
+      USER_MESSAGE_CLAMP_MOTION_MS;
+    const timing = {
+      duration: phase === "opening" ? slowMs : slowMs * 0.7,
+      easing: root.getPropertyValue("--motion-ease-standard").trim() || "ease-out",
+    };
+    const target =
+      phase === "opening"
+        ? body.scrollHeight
+        : Math.min(body.scrollHeight, COLLAPSED_USER_MESSAGE_HEIGHT_REM * rem);
+    const fromMaskSize =
+      phase === "opening" ? COLLAPSED_USER_MESSAGE_MASK_SIZE : EXPANDED_USER_MESSAGE_MASK_SIZE;
+    const toMaskSize =
+      phase === "opening" ? EXPANDED_USER_MESSAGE_MASK_SIZE : COLLAPSED_USER_MESSAGE_MASK_SIZE;
+    body.style.height = `${target}px`;
+    const heightMotion = body.animate(
+      [{ height: `${motionStartHeightRef.current}px` }, { height: `${target}px` }],
+      timing,
+    );
+    const fadeMotion = body.animate(
+      [
+        { maskSize: fromMaskSize, WebkitMaskSize: fromMaskSize },
+        { maskSize: toMaskSize, WebkitMaskSize: toMaskSize },
+      ],
+      timing,
+    );
+    heightMotion.finished.then(settle, () => {});
+
+    let frame: number | null = null;
+    const heldFooterTop = heldFooterTopRef.current;
+    const footer = footerRef.current;
+    const scroller = phase === "closing" && heldFooterTop !== null ? scrollParent(body) : null;
+    if (scroller && footer && heldFooterTop !== null) {
+      const holdFooter = () => {
+        const drift = footer.getBoundingClientRect().top - heldFooterTop;
+        if (Math.abs(drift) >= 0.5) scroller.scrollTop += drift;
+        frame = requestAnimationFrame(holdFooter);
+      };
+      frame = requestAnimationFrame(holdFooter);
+    }
+    // An animation that never finishes (detached, hidden) still settles.
+    const timer = setTimeout(settle, timing.duration + 100);
+    return () => {
+      clearTimeout(timer);
+      if (frame !== null) cancelAnimationFrame(frame);
+      heightMotion.cancel();
+      fadeMotion.cancel();
+    };
+  }, [phase, settle]);
+
+  const toggle = () => {
+    const collapsing = expanded;
+    const pinnedToEnd = onToggleWorkEntry(props.disclosureAnchorKey, collapsing);
+    const body = bodyRef.current;
+    if (reducedMotion || !body) {
+      setPhase(collapsing ? "collapsed" : "open");
+      return;
+    }
+    motionStartHeightRef.current = body.getBoundingClientRect().height;
+    heldFooterTopRef.current = null;
+    if (collapsing && !pinnedToEnd) {
+      // A message read past its top would otherwise shrink up and out of view.
+      const scroller = scrollParent(body);
+      const footer = footerRef.current;
+      if (
+        scroller &&
+        footer &&
+        body.getBoundingClientRect().top < scroller.getBoundingClientRect().top
+      ) {
+        heldFooterTopRef.current = footer.getBoundingClientRect().top;
+      }
+    }
+    setPhase(collapsing ? "closing" : "opening");
+  };
 
   return (
     <div>
       {hasVisibleBody ? (
         <div
-          ref={findRevealRef}
-          className={cn("relative", isCollapsed && "max-h-44 overflow-hidden")}
+          ref={bodyRefCallback}
+          className={cn("relative", isCollapsed && "max-h-44", masked && "overflow-hidden")}
           data-user-message-body="true"
           data-thread-find-text="true"
-          data-thread-find-fold={isCollapsed ? "" : undefined}
+          data-thread-find-fold={isCollapsed || phase === "closing" ? "" : undefined}
           data-user-message-collapsed={isCollapsed ? "true" : "false"}
           data-user-message-collapsible={canCollapse ? "true" : "false"}
-          data-user-message-fade={isCollapsed ? "true" : "false"}
+          data-user-message-fade={masked ? "true" : "false"}
           style={
-            isCollapsed
+            masked
               ? {
                   WebkitMaskImage: COLLAPSED_USER_MESSAGE_FADE_MASK,
                   maskImage: COLLAPSED_USER_MESSAGE_FADE_MASK,
+                  maskRepeat: "no-repeat",
+                  maskSize:
+                    phase === "opening"
+                      ? EXPANDED_USER_MESSAGE_MASK_SIZE
+                      : COLLAPSED_USER_MESSAGE_MASK_SIZE,
                 }
               : undefined
           }
@@ -5134,6 +5285,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
       ) : null}
       {showCollapseControl || props.footer ? (
         <div
+          ref={footerRef}
           className={cn(
             "mt-1.5 flex items-center gap-2",
             showCollapseControl && props.footer ? "justify-between" : "justify-end",
@@ -5147,10 +5299,30 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
               variant="ghost-muted"
               aria-expanded={expanded}
               data-scroll-anchor-ignore
-              onClick={() => setExpanded((value) => !value)}
+              onClick={toggle}
               className="-ml-1"
             >
-              {expanded ? "Show less" : "Show full message"}
+              {/* Both labels share one cell, so the button keeps its width and crossfades. */}
+              <span className="grid justify-items-end">
+                <span
+                  aria-hidden={expanded}
+                  className={cn(
+                    "col-start-1 row-start-1 transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
+                    expanded && "opacity-0",
+                  )}
+                >
+                  Show full message
+                </span>
+                <span
+                  aria-hidden={!expanded}
+                  className={cn(
+                    "col-start-1 row-start-1 transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
+                    !expanded && "opacity-0",
+                  )}
+                >
+                  Show less
+                </span>
+              </span>
             </Button>
           ) : null}
           {props.footer ? (
