@@ -281,6 +281,7 @@ import {
 } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
+import { ComposerRunningBar } from "./ComposerRunningBar";
 import { ComposerAccessModePicker, availableRuntimeModes } from "./ComposerAccessModePicker";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
@@ -6790,6 +6791,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           />
         ) : null}
       </ComposerBanner.Dock>
+      <ComposerRunningBar environmentId={environmentId} threadId={activeThreadId} />
       <div className="relative">
         <ComposerSurface.Main
           ref={composerMainSurfaceRef}

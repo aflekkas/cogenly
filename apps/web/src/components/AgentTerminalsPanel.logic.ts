@@ -216,6 +216,23 @@ export function terminalSections(entries: ReadonlyArray<AgentTerminalEntry>): Te
   };
 }
 
+/**
+ * What the composer's Running bar shows: the newest running agent command, or
+ * a count once several run. Null when no agent command is running.
+ */
+export function runningAgentCommandsSummary(
+  entries: ReadonlyArray<AgentTerminalEntry>,
+): { readonly label: string; readonly terminalIds: ReadonlyArray<string> } | null {
+  const { runs, liveRunCount } = terminalSections(entries);
+  const live = runs.slice(0, liveRunCount);
+  const newest = live[0];
+  if (newest === undefined) return null;
+  return {
+    label: live.length === 1 ? newest.label : `${live.length} running`,
+    terminalIds: live.map((entry) => entry.terminalId),
+  };
+}
+
 /** The entry with `terminalId`, else the first one. */
 export function resolveSelected<T extends { readonly terminalId: string }>(
   entries: ReadonlyArray<T>,

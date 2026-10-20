@@ -14,6 +14,7 @@ import {
   formatRunDuration,
   isAgentTerminalRunning,
   runDurationMs,
+  runningAgentCommandsSummary,
   terminalRunState,
   terminalRunStateLabel,
   terminalRunStateMessage,
@@ -169,6 +170,41 @@ describe("terminalSections", () => {
     ]);
     expect(sections.liveRunCount).toBe(1);
     expect(sections.shells.map((entry) => entry.terminalId)).toEqual(["term-2", "term-10"]);
+  });
+});
+
+describe("runningAgentCommandsSummary", () => {
+  it("names the one running agent command and ignores shells and finished runs", () => {
+    const summary = runningAgentCommandsSummary(
+      agentTerminalEntries([
+        session({ terminalId: "agent-live", label: "agent · pnpm dev", status: "running" }),
+        session({ terminalId: "agent-done", status: "exited", exitCode: 0 }),
+        session({ terminalId: "term-1", hasRunningSubprocess: true }),
+      ]),
+    );
+    expect(summary).toEqual({ label: "pnpm dev", terminalIds: ["agent-live"] });
+  });
+
+  it("counts several running commands, newest first", () => {
+    const summary = runningAgentCommandsSummary(
+      agentTerminalEntries([
+        session({ terminalId: "agent-old", startedAt: "2026-10-16T09:00:00.000Z" }),
+        session({
+          terminalId: "agent-new",
+          startedAt: "2026-10-16T10:00:00.000Z",
+          status: "starting",
+        }),
+      ]),
+    );
+    expect(summary).toEqual({ label: "2 running", terminalIds: ["agent-new", "agent-old"] });
+  });
+
+  it("is null when no agent command runs", () => {
+    expect(
+      runningAgentCommandsSummary(
+        agentTerminalEntries([session({ terminalId: "agent-x", status: "exited", exitCode: 1 })]),
+      ),
+    ).toBeNull();
   });
 });
 
