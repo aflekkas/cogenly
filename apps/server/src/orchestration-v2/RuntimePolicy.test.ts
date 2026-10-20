@@ -20,6 +20,8 @@ import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.
 import * as ProjectStore from "./ProjectStore.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 
+const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);
+
 const projectId = ProjectId.make("project:runtime-policy");
 const providerInstanceId = ProviderInstanceId.make("codex");
 const modelSelection = {
@@ -43,7 +45,7 @@ function makeThread(input: {
     title: "Runtime policy",
     providerInstanceId,
     modelSelection,
-    runtimeMode: Schema.decodeUnknownSync(RuntimeMode)(input.runtimeMode ?? "full-access"),
+    runtimeMode: decodeRuntimeMode(input.runtimeMode ?? "full-access"),
     interactionMode: "default",
     branch: null,
     worktreePath: input.worktreePath,

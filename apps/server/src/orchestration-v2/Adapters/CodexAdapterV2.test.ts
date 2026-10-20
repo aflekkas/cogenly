@@ -26,6 +26,8 @@ import { TestClock } from "effect/testing";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
 
+const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);
+
 describe("Codex context usage compatibility", () => {
   const previous: ModelSelection = {
     instanceId: ProviderInstanceId.make("codex"),
@@ -356,7 +358,7 @@ describe("CodexAdapterV2 runtime policy", () => {
           nativeThreadId: `native-${runtimeMode}`,
           codexInput: [{ type: "text", text: "test" }],
           runtimePolicy: {
-            runtimeMode: Schema.decodeUnknownSync(RuntimeMode)(runtimeMode),
+            runtimeMode: decodeRuntimeMode(runtimeMode),
             interactionMode: "default",
             cwd: null,
           },
@@ -1115,7 +1117,15 @@ describe("Codex terminal routing", () => {
   it("disables all native shell execution while the terminal MCP server is attached", () => {
     const params = CodexAdapterV2.codexThreadRuntimeParams({ mcpSession: session });
     assert.equal(params.config["features.shell_tool"], false);
-    assert.isDefined(params.config.mcp_servers);
+    assert.deepInclude(params.config.mcp_servers, {
+      cogenly: {
+        url: session.endpoint,
+        tool_timeout_sec: 65 * 60,
+        default_tools_approval_mode: "approve",
+        http_headers: { Authorization: session.authorizationHeader },
+      },
+    });
+    assert.equal(params.config["apps._default.default_tools_approval_mode"], "approve");
     assert.isUndefined(
       CodexAdapterV2.codexThreadRuntimeParams({ mcpSession: undefined }).config[
         "features.shell_tool"

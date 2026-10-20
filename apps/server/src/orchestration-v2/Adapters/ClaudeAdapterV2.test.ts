@@ -27,6 +27,8 @@ import { OrchestratorToolkit } from "../../mcp/toolkits/orchestrator/tools.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 
+const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);
+
 const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
 
 const AUTO_COMPACT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({
@@ -181,7 +183,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     (runtimeMode) => {
       for (const interactionMode of ["default", "plan"] as const) {
         const policy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy({
-          runtimeMode: Schema.decodeUnknownSync(RuntimeMode)(runtimeMode),
+          runtimeMode: decodeRuntimeMode(runtimeMode),
           interactionMode,
           cwd: "/workspace",
           approvalPolicy: "on-request",
