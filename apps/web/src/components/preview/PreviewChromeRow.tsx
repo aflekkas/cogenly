@@ -2,8 +2,11 @@ import { RefreshIcon } from "~/components/ui/refresh-icon";
 import {
   ArrowLeft,
   ArrowRight,
+  Bot,
   Camera,
   ExternalLink,
+  Eye,
+  MousePointer2,
   MousePointerClick,
   PictureInPicture2,
 } from "lucide-react";
@@ -18,8 +21,57 @@ import {
 
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "~/components/ui/input-group";
+import { Toggle } from "~/components/ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
+
+/** Who drives a streamed (server) tab; the chrome shows it as one compact toggle. */
+export interface PreviewControlState {
+  readonly controller: "agent" | "you" | "another-viewer" | "unclaimed";
+  readonly canOperate: boolean;
+  readonly onToggle: () => void;
+}
+
+const CONTROL_PRESENTATION = {
+  you: { label: "You", Icon: MousePointer2, hint: "You have control · click to hand it back" },
+  agent: { label: "Agent", Icon: Bot, hint: "The agent has control · click to take over" },
+  "another-viewer": { label: "Viewer", Icon: Eye, hint: "Another viewer has control" },
+  unclaimed: { label: "Watching", Icon: Eye, hint: "Nobody has control · click to take it" },
+} as const;
+
+/**
+ * The control toggle sits in the chrome row next to the actions, so the row
+ * stays one line: pressed means this viewer drives the page.
+ */
+function PreviewControlToggle({ control }: { control: PreviewControlState }) {
+  const { label, Icon, hint } = CONTROL_PRESENTATION[control.controller];
+  if (!control.canOperate) {
+    return (
+      <span role="status" className="shrink-0 px-1 text-xs text-muted-foreground">
+        Read-only
+      </span>
+    );
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="flex shrink-0" />}>
+        <Toggle
+          size="xs"
+          variant="outline"
+          pressed={control.controller === "you"}
+          onPressedChange={control.onToggle}
+          disabled={control.controller === "another-viewer"}
+          aria-label={hint}
+          data-preview-control={control.controller}
+        >
+          <Icon />
+          <span className="text-xs">{label}</span>
+        </Toggle>
+      </TooltipTrigger>
+      <TooltipPopup>{hint}</TooltipPopup>
+    </Tooltip>
+  );
+}
 
 interface Props {
   url: string;
@@ -52,6 +104,8 @@ interface Props {
   pickDisabled?: boolean | undefined;
   /** Optional reason string surfaced in the disabled tooltip. */
   pickDisabledReason?: string | undefined;
+  /** Present on a streamed tab once its control state is known. */
+  control?: PreviewControlState | null | undefined;
   /**
    * Trailing slot rendered after the URL input. Used by the preview view
    * to mount the three-dot menu (hard reload, devtools, zoom, clear data).
@@ -89,6 +143,7 @@ export function PreviewChromeRow({
   pickActive,
   pickDisabled,
   pickDisabledReason,
+  control,
   trailingActions,
   leadingActions,
 }: Props) {
@@ -232,6 +287,7 @@ export function PreviewChromeRow({
           ) : null}
         </InputGroup>
 
+        {control ? <PreviewControlToggle control={control} /> : null}
         {onPickElement ? (
           <Tooltip>
             <TooltipTrigger

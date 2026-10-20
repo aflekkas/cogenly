@@ -244,7 +244,9 @@ import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
+  selectGroupSurface,
   selectThreadRightPanelState,
+  surfaceGroupOf,
   type RightPanelSurface,
   useRightPanelStore,
 } from "../rightPanelStore";
@@ -4006,8 +4008,23 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadRef?.environmentId ?? null,
     AuthPreviewOperateScope,
   );
+  // A browser tab that has not gone anywhere yet is reused rather than joined
+  // by another one, so "+" and the header never stack identical empty tabs.
   const createBrowserSurface = (profileId?: string) => {
     if (!activeThreadRef || !canOperatePreview || !activeThreadCapabilities.browser) return;
+    if (profileId === undefined) {
+      const idle = rightPanelState.surfaces.find(
+        (surface) =>
+          surface.kind === "preview" &&
+          surface.resourceId !== null &&
+          activePreviewState.sessions[surface.resourceId]?.navStatus._tag === "Idle",
+      );
+      if (idle?.kind === "preview" && idle.resourceId) {
+        useRightPanelStore.getState().activateSurface(activeThreadRef, idle.id);
+        setActivePreviewTab(activeThreadRef, idle.resourceId);
+        return;
+      }
+    }
     void addBrowserSurface({
       threadRef: activeThreadRef,
       openPreview,
@@ -4040,7 +4057,6 @@ export default function ChatView(props: ChatViewProps) {
     }
     useRightPanelStore.getState().open(activeThreadRef, "device");
   };
-  const addDeviceSurfaceStable = useStableCallback(addDeviceSurface);
   // A device the agent opens floats over chat like an agent-driven browser,
   // or becomes a panel tab when floating previews are off. Sessions opened by
   // another client arrive the same way; sheet layouts get neither. The first
@@ -4184,9 +4200,10 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     if (!canOperatePreview) return;
-    const activeTabId = activePreviewState.activeTabId;
-    if (activeTabId) {
-      useRightPanelStore.getState().openBrowser(activeThreadRef, activeTabId);
+    const existing = selectGroupSurface(rightPanelState, "browser");
+    if (existing?.kind === "preview" && existing.resourceId) {
+      useRightPanelStore.getState().activateSurface(activeThreadRef, existing.id);
+      setActivePreviewTab(activeThreadRef, existing.resourceId);
     } else {
       createBrowserSurface();
     }
@@ -4198,7 +4215,6 @@ export default function ChatView(props: ChatViewProps) {
     useRightPanelStore.getState().openTerminal(activeThreadRef);
     setTerminalFocusRequestId((value) => value + 1);
   };
-  const openTerminalSurfaceStable = useStableCallback(openTerminalSurface);
   const selectPanelTerminal = (terminalId: string) => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().openTerminal(activeThreadRef, terminalId);
@@ -4228,15 +4244,40 @@ export default function ChatView(props: ChatViewProps) {
       closePreviewPanel();
       return;
     }
-    const existing = rightPanelState.surfaces.find((surface) => surface.kind === "device");
+    const existing = selectGroupSurface(rightPanelState, "device");
     if (existing) activateRightPanelSurface(existing);
     else addDeviceSurface();
   };
   const toggleDeviceSurfaceStable = useStableCallback(toggleDeviceSurface);
+  // Files has no way to create a surface from the header: the button only
+  // exists while a file or the explorer is open, and returns to it.
+  const toggleFilesSurface = () => {
+    if (!activeThreadRef) return;
+    const activeGroup = activeRightPanelSurface ? surfaceGroupOf(activeRightPanelSurface) : null;
+    if (activeGroup === "files") {
+      closePreviewPanel();
+      return;
+    }
+    const existing = selectGroupSurface(rightPanelState, "files");
+    if (existing) activateRightPanelSurface(existing);
+  };
+  const toggleFilesSurfaceStable = useStableCallback(toggleFilesSurface);
+  // The panel toggle restores whatever was showing; with nothing to restore it
+  // opens the first surface the thread offers, so it never shows an empty panel.
   const toggleRightPanel = () => {
     if (!activeThreadRef || !rightPanelSupported) return;
     if (rightPanelOpen) {
       closePreviewPanel();
+      return;
+    }
+    if (rightPanelState.surfaces.length === 0) {
+      if (activeThreadCapabilities.browser && canOperatePreview && browserAvailable) {
+        createBrowserSurface();
+      } else if (activeThreadCapabilities.terminal && activeProject !== null) {
+        openTerminalSurface();
+      } else if (activeThreadCapabilities.device) {
+        addDeviceSurface();
+      }
       return;
     }
     useRightPanelStore.getState().toggleVisibility(activeThreadRef);
@@ -8955,7 +8996,12 @@ export default function ChatView(props: ChatViewProps) {
       </Suspense>
     ) : null
   ) : null;
-  const workSurfaceButtons: ThreadSurfaceButton[] = [
+  const filesSurfaceOpen = rightPanelState.surfaces.some(
+    (surface) => surfaceGroupOf(surface) === "files",
+  );
+  // Every thread with a right panel gets the switcher for the surfaces it
+  // offers: Work has all three, an agent's conversation its browser and device.
+  const allSurfaceButtons: ThreadSurfaceButton[] = [
     {
       id: "browser",
       active: activeRightPanelKind === "preview",
@@ -8980,7 +9026,30 @@ export default function ChatView(props: ChatViewProps) {
       shortcutLabel: null,
       onToggle: toggleDeviceSurfaceStable,
     },
+    ...(filesSurfaceOpen
+      ? [
+          {
+            id: "files" as const,
+            active:
+              activeRightPanelSurface !== null &&
+              surfaceGroupOf(activeRightPanelSurface) === "files",
+            available: true,
+            unavailableLabel: "Files are only available from a repository thread.",
+            shortcutLabel: null,
+            onToggle: toggleFilesSurfaceStable,
+          },
+        ]
+      : []),
   ];
+  const workSurfaceButtons = allSurfaceButtons.filter((button) =>
+    button.id === "browser"
+      ? activeThreadCapabilities.browser
+      : button.id === "terminal"
+        ? activeThreadCapabilities.terminal
+        : button.id === "device"
+          ? activeThreadCapabilities.device
+          : activeThreadCapabilities.files,
+  );
   const panelToggleControlProps = {
     agentSettingsShortcutLabel: shortcutLabelForCommand(keybindings, "threadPanel.toggle"),
     rightPanelAvailable: activeProject !== null,
@@ -8988,7 +9057,7 @@ export default function ChatView(props: ChatViewProps) {
     rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
     onToggleRightPanel: toggleRightPanelStable,
     onOpenAgentSettings: agentConversationViewKey ? openAgentSettingsStable : undefined,
-    surfaceButtons: activeThreadKind === "work" ? workSurfaceButtons : undefined,
+    surfaceButtons: rightPanelSupported ? workSurfaceButtons : undefined,
   } satisfies PanelLayoutControlsProps;
   const panelToggleControls = (
     <PanelLayoutControls
@@ -9587,7 +9656,7 @@ export default function ChatView(props: ChatViewProps) {
                               aria-hidden={showComposerModelStrip ? undefined : true}
                               inert={showComposerModelStrip ? undefined : true}
                               className={cn(
-                                "group-data-model-strip-transition/composer-surface:before:backdrop-blur-(--glass-blur) group-data-model-strip-transition/composer-surface:before:bg-(--chat-composer-glass-surface)/(--glass-opacity)",
+                                "group-data-model-strip-transition/composer-surface:before:bg-(--chat-composer-glass-surface)",
                                 !showComposerModelStrip &&
                                   "pointer-events-none invisible absolute inset-x-0 top-full",
                               )}
@@ -9734,12 +9803,7 @@ export default function ChatView(props: ChatViewProps) {
           onCopyFilePath={copyRightPanelFilePathStable}
           onAddBrowser={() => createBrowserSurface()}
           onAddBrowserInProfile={createBrowserSurfaceStable}
-          onAddTerminal={openTerminalSurfaceStable}
-          onAddDevice={addDeviceSurfaceStable}
           browserAvailable={canOperatePreview && browserAvailable}
-          terminalAvailable={activeProject !== null && (canReadTerminal || canOperateTerminal)}
-          supportedSurfaces={activeThreadCapabilities}
-          deviceAvailable={activeThreadRef !== null}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -9785,12 +9849,7 @@ export default function ChatView(props: ChatViewProps) {
             onCopyFilePath={copyRightPanelFilePathStable}
             onAddBrowser={() => createBrowserSurface()}
             onAddBrowserInProfile={createBrowserSurfaceStable}
-            onAddTerminal={openTerminalSurfaceStable}
-            onAddDevice={addDeviceSurfaceStable}
             browserAvailable={canOperatePreview && browserAvailable}
-            terminalAvailable={activeProject !== null && (canReadTerminal || canOperateTerminal)}
-            supportedSurfaces={activeThreadCapabilities}
-            deviceAvailable={activeThreadRef !== null}
           >
             {rightPanelContent}
           </RightPanelTabs>

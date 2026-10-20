@@ -15,22 +15,12 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  Smartphone,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Files,
-  Globe2,
-  Plus,
-  TerminalSquare,
-} from "lucide-react";
+import { Files, Globe2, PanelRight, Plus, Smartphone, TerminalSquare } from "lucide-react";
 import { Volume2, VolumeOff } from "lucide";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  type ReactElement,
   type ReactNode,
   useCallback,
   useEffect,
@@ -43,7 +33,7 @@ import {
 
 import { isElectron } from "~/env";
 import type { DesktopPreviewOverlay } from "~/previewStateStore";
-import type { RightPanelSurface } from "~/rightPanelStore";
+import { surfaceGroupOf, type RightPanelSurface } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { resolveShortcutCommand, type ShortcutMatchContext } from "~/keybindings";
 import { readLocalApi } from "~/localApi";
@@ -51,17 +41,7 @@ import { Button } from "~/components/ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { AndroidIcon, AppleIcon } from "~/components/Icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { Kbd } from "~/components/ui/kbd";
-import {
-  Menu,
-  MenuItem,
-  MenuPopup,
-  MenuShortcut,
-  MenuSub,
-  MenuSubPopup,
-  MenuSubTrigger,
-  MenuTrigger,
-} from "~/components/ui/menu";
+import { Menu, MenuItem, MenuPopup } from "~/components/ui/menu";
 import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
@@ -77,6 +57,12 @@ import { previewBridge } from "./preview/previewBridge";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { observeResize } from "~/lib/observeResize";
 
+/**
+ * The right panel's frame: one row of tabs for the surfaces in the active
+ * group (browser tabs, device streams, open files), then the surface itself.
+ * Switching between groups is the Work header's job, so the row never offers
+ * other kinds; its only "new" action is another browser tab.
+ */
 interface RightPanelTabsProps {
   mode: PreviewPanelMode;
   maximized?: boolean;
@@ -118,37 +104,12 @@ interface RightPanelTabsProps {
    * accept the MouseEvent as a profile id.
    */
   onAddBrowserInProfile: (profileId: string) => void;
-  /** Shows the Terminal surface (agent runs and shells); it never starts a shell by itself. */
-  onAddTerminal: () => void;
-  onAddDevice: () => void;
   browserAvailable: boolean;
-  terminalAvailable: boolean;
-  deviceAvailable: boolean;
-  /** Surfaces the thread's kind offers at all; the rest are left out, not disabled. */
-  supportedSurfaces: SupportedRightPanelSurfaces;
   children: ReactNode;
 }
 
-export interface SupportedRightPanelSurfaces {
-  readonly browser: boolean;
-  readonly terminal: boolean;
-  readonly device: boolean;
-}
-
-export function shouldOpenDefaultBrowserProfileFromMenuClick(
-  pointerType: string | undefined,
-): boolean {
-  return pointerType !== "touch";
-}
-
-const SURFACE_DISABLED_REASONS = {
-  browser: "Browser previews are only available in the Cogenly desktop app.",
-  terminal: "Agent terminals are only available from a repository thread.",
-  device: "Devices are only available from a thread.",
-} as const;
-
-/** Overlays that must win over the launcher's letter shortcuts. */
-const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
+/** Overlays that must win over the panel's own shortcuts. */
+const SHORTCUT_BLOCKING_LAYERS = [
   '[data-slot="dialog-popup"]',
   '[data-slot="alert-dialog-popup"]',
   '[data-slot="command-dialog-popup"]',
@@ -159,13 +120,6 @@ const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
   '[data-slot="autocomplete-popup"]',
 ].join(",");
 
-/** One-line unavailability hints for the empty-state rows. */
-const SURFACE_UNAVAILABLE_HINTS = {
-  browser: "Only available in the desktop app.",
-  terminal: "Available when a repository is open.",
-  device: "Available from a thread.",
-} as const;
-
 type TabContextMenuAction =
   | "rename"
   | "copy-path"
@@ -175,15 +129,6 @@ type TabContextMenuAction =
   | "close-to-right"
   | "close-all";
 
-const TAB_SCROLL_EDGE_TOLERANCE = 1;
-
-/**
- * The narrowest the strip may get before it scrolls: every tab at its minimum
- * width (`min-w-24`) plus its gap (`gap-1`), then the new-tab button.
- */
-export function tabStripMinWidth(tabCount: number): string {
-  return `calc(${tabCount} * 6.25rem + 1.75rem)`;
-}
 const TAB_DRAG_MODIFIERS = [restrictToHorizontalAxis, restrictToFirstScrollableAncestor];
 
 function tabScrollViewport(root: HTMLDivElement | null): HTMLDivElement | null {
@@ -230,306 +175,11 @@ function tabAudioState(overlay: DesktopPreviewOverlay | null): TabAudioState {
   return overlay.audioMuted ? "muted" : "audible";
 }
 
-type SurfaceShortcutEvent = Pick<
-  KeyboardEvent,
-  "altKey" | "ctrlKey" | "defaultPrevented" | "isComposing" | "key" | "metaKey"
->;
-
-export function surfaceShortcutActionForKey<
-  const Action extends { available: boolean; shortcut: string },
->(actions: readonly Action[], event: SurfaceShortcutEvent): Action | null {
-  if (event.defaultPrevented || event.isComposing) return null;
-  if (event.metaKey || event.ctrlKey || event.altKey) return null;
-  return (
-    actions.find(
-      (action) => action.available && action.shortcut.toLowerCase() === event.key.toLowerCase(),
-    ) ?? null
-  );
-}
-
 /**
- * A focused editable is a typing context whether or not it has text yet: an
- * empty chat composer at rest is still where the user's next keystrokes are
- * meant to land, and claiming launcher letters from it would redirect prompts
- * into whatever surface opens. The `:not` clause lets `closest` see past
- * non-editable islands (`contenteditable="false"`) to an editable host around
- * them, matching ComposerPendingUserInputPanel's typing guard.
+ * A browser tab is named by its page, then its host, and "New tab" before it
+ * has gone anywhere, so a strip of fresh tabs never reads as a row of clones.
  */
-export function surfaceShortcutTargetsTypingContext(
-  target: { closest(selectors: string): unknown } | null,
-): boolean {
-  return (
-    target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !=
-    null
-  );
-}
-
-function DisabledReasonTooltip(props: { reason: string; trigger: ReactElement }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger render={props.trigger} />
-      <TooltipPopup side="top">{props.reason}</TooltipPopup>
-    </Tooltip>
-  );
-}
-
-function SurfaceMenuItem(props: {
-  available: boolean;
-  disabledReason?: string;
-  shortcut: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  const item = (
-    <MenuItem
-      className={!props.available ? "data-disabled:pointer-events-auto" : undefined}
-      onClick={props.onClick}
-      disabled={!props.available}
-      aria-keyshortcuts={props.shortcut}
-    >
-      {props.children}
-      <MenuShortcut>{props.shortcut}</MenuShortcut>
-    </MenuItem>
-  );
-  if (props.available || !props.disabledReason) return item;
-  return <DisabledReasonTooltip reason={props.disabledReason} trigger={item} />;
-}
-
-/**
- * List launcher shown when the right panel has no surfaces. Keyboard-first
- * without palette chrome: a surface's letter opens it directly from anywhere
- * outside a typing context, and arrows plus Enter work while the launcher is
- * focused. The highlight only appears on hover or arrow use. Unavailable
- * surfaces stay visible with a one-line reason.
- */
-function RightPanelEmptyState(props: {
-  onAddBrowser: () => void;
-  onAddBrowserInProfile: (profileId: string) => void;
-  browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
-  onAddTerminal: () => void;
-  onAddDevice: () => void;
-  browserAvailable: boolean;
-  terminalAvailable: boolean;
-  deviceAvailable: boolean;
-  supportedSurfaces: SupportedRightPanelSurfaces;
-}) {
-  // -1 means no highlight: it only appears on hover or arrow use.
-  const [highlight, setHighlight] = useState(-1);
-
-  const launcherActions = [
-    {
-      label: "Browser",
-      icon: Globe2,
-      shortcut: "B",
-      available: props.browserAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.browser,
-      supported: props.supportedSurfaces.browser,
-      onClick: props.onAddBrowser,
-    },
-    {
-      label: "Terminal",
-      icon: TerminalSquare,
-      shortcut: "T",
-      available: props.terminalAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
-      supported: props.supportedSurfaces.terminal,
-      onClick: props.onAddTerminal,
-    },
-    {
-      label: "Device",
-      description: "Watch an iOS Simulator or Android Emulator.",
-      icon: Smartphone,
-      shortcut: "M",
-      available: props.deviceAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
-      supported: props.supportedSurfaces.device,
-      onClick: props.onAddDevice,
-    },
-  ] as const;
-  const actions = launcherActions.filter((action) => action.supported);
-
-  type SurfaceAction = (typeof actions)[number];
-
-  const availableActions = actions.filter((action) => action.available);
-  const highlightIndex =
-    availableActions.length === 0 ? -1 : Math.min(highlight, availableActions.length - 1);
-
-  // Letter shortcuts work while the launcher is visible, not only while it
-  // is focused; focus moves around too easily (stray clicks) to carry them.
-  // Capture phase so app-level key handlers cannot swallow the event first;
-  // typing contexts and already-handled events are left alone.
-  const shortcutActionsRef = useRef(availableActions);
-  useEffect(() => {
-    shortcutActionsRef.current = availableActions;
-  });
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      const action = surfaceShortcutActionForKey(shortcutActionsRef.current, event);
-      if (!action) return;
-      if (document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return;
-      // The composed path starts at the real target, which may sit inside a shadow root.
-      const target = event.composedPath()[0] ?? event.target;
-      if (target instanceof Element && surfaceShortcutTargetsTypingContext(target)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      action.onClick();
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, []);
-
-  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-    if (availableActions.length === 0) return;
-    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
-      event.preventDefault();
-      setHighlight((highlightIndex + 1) % availableActions.length);
-      return;
-    }
-    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
-      event.preventDefault();
-      setHighlight(
-        highlightIndex === -1
-          ? availableActions.length - 1
-          : (highlightIndex - 1 + availableActions.length) % availableActions.length,
-      );
-      return;
-    }
-    if (event.key === "Enter") {
-      // Only activate the highlight when the launcher itself has focus.
-      if (event.target !== event.currentTarget) return;
-      const action = availableActions[highlightIndex];
-      if (!action) return;
-      event.preventDefault();
-      action.onClick();
-    }
-  };
-
-  // Stable identity so React only runs this callback ref on mount/unmount;
-  // an inline arrow would re-attach and re-focus on every render.
-  const focusOnMount = useCallback((node: HTMLDivElement | null) => {
-    node?.focus();
-  }, []);
-
-  const isHighlighted = (action: SurfaceAction) =>
-    highlightIndex !== -1 && availableActions[highlightIndex] === action;
-
-  const actionIcon = (action: SurfaceAction, iconClassName = "size-4") => {
-    const Icon = action.icon;
-    return (
-      <span className="relative inline-flex shrink-0">
-        <Icon className={iconClassName} />
-      </span>
-    );
-  };
-
-  return (
-    <div
-      ref={focusOnMount}
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
-      aria-label="Open a surface"
-      data-surface-launcher-keys={availableActions.map((action) => action.shortcut).join("")}
-      className={cn(
-        "scrollbar-gutter-both flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 outline-none",
-        // The panel topbar sits above this container; matching bottom padding
-        // keeps the list centered against the full panel, not the leftover.
-        "pb-(--workspace-topbar-height)",
-      )}
-    >
-      <div className="w-full max-w-xs py-6">
-        <h3 className="mb-3 text-center font-medium text-foreground text-sm">Open a surface</h3>
-        <div className="flex flex-col gap-0.5">
-          {actions.map((action) =>
-            action.available ? (
-              // The row is itself a button, so the profile chooser sits beside
-              // it in a wrapper rather than inside it. Hover lives on the
-              // wrapper: the chooser overlays the row, and a pointer moving
-              // onto it must not read as leaving the row.
-              <div
-                key={action.label}
-                className="group relative"
-                onMouseEnter={() => setHighlight(availableActions.indexOf(action))}
-                onMouseLeave={() =>
-                  setHighlight((current) =>
-                    current === availableActions.indexOf(action) ? -1 : current,
-                  )
-                }
-              >
-                <button
-                  type="button"
-                  onClick={action.onClick}
-                  data-highlighted={isHighlighted(action) || undefined}
-                  className="state-hover flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-(--control-radius) px-2.5 text-left text-sm"
-                >
-                  {actionIcon(action, "size-4")}
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate",
-                      action.label === "Browser" && props.browserProfiles.length > 1 && "pr-7",
-                    )}
-                  >
-                    {action.label}
-                  </span>
-                  <Kbd>{action.shortcut}</Kbd>
-                </button>
-                {/*
-                  Same choice the tab bar's "+" menu offers: the row opens the
-                  default profile, the chevron picks another. Only worth showing
-                  once there is something to choose between.
-                */}
-                {action.label === "Browser" && props.browserProfiles.length > 1 ? (
-                  <Menu>
-                    <MenuTrigger
-                      render={
-                        <Button
-                          aria-label="Open browser in a profile"
-                          className="absolute top-1/2 right-8 -translate-y-1/2"
-                          size="icon-xs"
-                          variant="ghost-muted"
-                        />
-                      }
-                    >
-                      <ChevronDown className="size-3.5" />
-                    </MenuTrigger>
-                    <MenuPopup align="end" side="bottom" sideOffset={6} className="max-w-56">
-                      {props.browserProfiles.map((profile) => (
-                        <MenuItem
-                          key={profile.id}
-                          onClick={() => props.onAddBrowserInProfile(profile.id)}
-                        >
-                          <span className="min-w-0 truncate">{profile.name}</span>
-                        </MenuItem>
-                      ))}
-                    </MenuPopup>
-                  </Menu>
-                ) : null}
-              </div>
-            ) : (
-              <DisabledReasonTooltip
-                key={action.label}
-                reason={action.disabledReason}
-                trigger={
-                  <div
-                    tabIndex={0}
-                    aria-disabled="true"
-                    className="flex h-8 w-full cursor-default items-center gap-2.5 rounded-(--control-radius) px-2.5 text-left text-sm opacity-50"
-                  >
-                    {actionIcon(action, "size-4")}
-                    <span className="min-w-0 flex-1 truncate">{action.label}</span>
-                    <Kbd>{action.shortcut}</Kbd>
-                  </div>
-                }
-              />
-            ),
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function surfaceTitle(
+export function surfaceTitle(
   surface: RightPanelSurface,
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
 ): string {
@@ -546,12 +196,12 @@ function surfaceTitle(
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
-      if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
+      if (!snapshot || snapshot.navStatus._tag === "Idle") return "New tab";
       if (snapshot.navStatus.title.trim().length > 0) return snapshot.navStatus.title;
       try {
-        return new URL(snapshot.navStatus.url).host || "Browser";
+        return new URL(snapshot.navStatus.url).host || "New tab";
       } catch {
-        return "Browser";
+        return "New tab";
       }
     }
   }
@@ -581,13 +231,11 @@ function SurfaceIcon({
   sessions,
   desktopByTabId,
   theme,
-  environmentId,
 }: {
   surface: RightPanelSurface;
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>;
   desktopByTabId: Readonly<Record<string, DesktopPreviewOverlay>>;
   theme: "light" | "dark";
-  environmentId: EnvironmentId | null;
 }) {
   switch (surface.kind) {
     case "preview": {
@@ -628,19 +276,21 @@ function SurfaceIcon({
  */
 function SortableTabList(props: {
   surfaces: readonly RightPanelSurface[];
+  /** The full strip, so a drop lands at the surface's index in the owner's order. */
+  allSurfaces: readonly RightPanelSurface[];
   onMove: ((surfaceId: string, toIndex: number) => void) | undefined;
   children: ReactNode;
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const surfaceIds = useMemo(() => props.surfaces.map((surface) => surface.id), [props.surfaces]);
-  const { onMove, surfaces } = props;
+  const { onMove, allSurfaces } = props;
   const handleDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
       if (!over || active.id === over.id) return;
-      const toIndex = surfaces.findIndex((surface) => surface.id === over.id);
+      const toIndex = allSurfaces.findIndex((surface) => surface.id === over.id);
       if (toIndex >= 0) onMove?.(String(active.id), toIndex);
     },
-    [onMove, surfaces],
+    [onMove, allSurfaces],
   );
   return (
     <DndContext
@@ -677,122 +327,68 @@ function SortableTab({
   );
 }
 
+/** Shown only when an open panel has nothing in it; the header is the way in. */
+function RightPanelEmptyState() {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 pb-(--workspace-topbar-height) text-center">
+      <PanelRight className="size-4 text-muted-foreground" />
+      <p className="text-sm text-foreground">Nothing open</p>
+      <p className="text-xs text-muted-foreground">
+        Open Browser, Terminal or Device from the header.
+      </p>
+    </div>
+  );
+}
+
 export function RightPanelTabs(props: RightPanelTabsProps) {
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
   const browserProfiles = useBrowserDefaults().profiles;
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
   const tabIdPrefix = useId();
-  const addSurfaceTriggerRef = useRef<HTMLButtonElement>(null);
   const [renamingDevice, setRenamingDevice] = useState<string | null>(null);
-  const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
-  const [tabScrollState, setTabScrollState] = useState({
-    hasOverflow: false,
-    canScrollLeft: false,
-    canScrollRight: false,
-  });
+  const [hasOverflow, setHasOverflow] = useState(false);
 
-  if (props.open === false && addSurfaceMenuOpen) setAddSurfaceMenuOpen(false);
+  // The row only lists the active group's surfaces: the header switches groups.
+  const activeSurface =
+    props.surfaces.find((surface) => surface.id === props.activeSurfaceId) ??
+    props.surfaces[0] ??
+    null;
+  const activeGroup = activeSurface ? surfaceGroupOf(activeSurface) : null;
+  const groupSurfaces = useMemo(
+    () =>
+      activeGroup === null
+        ? []
+        : props.surfaces.filter((surface) => surfaceGroupOf(surface) === activeGroup),
+    [activeGroup, props.surfaces],
+  );
+  const canAddBrowser = activeGroup === "browser" && props.browserAvailable;
 
-  const onNewSurfaceKeyDown = useEffectEvent((event: KeyboardEvent) => {
-    if (event.defaultPrevented || event.isComposing) return;
+  const onNewTabKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.isComposing || !canAddBrowser) return;
     if (
       resolveShortcutCommand(event, props.keybindings, {
         context: { ...props.getShortcutContext(), rightPanelOpen: true },
       }) !== "rightPanel.new"
     )
       return;
-    if (!addSurfaceMenuOpen && document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return;
+    if (document.querySelector(SHORTCUT_BLOCKING_LAYERS)) return;
     event.preventDefault();
     event.stopPropagation();
-    if (!event.repeat) {
-      addSurfaceTriggerRef.current?.focus();
-      setAddSurfaceMenuOpen(true);
-    }
+    if (!event.repeat) props.onAddBrowser();
   });
   useEffect(() => {
     if (props.open === false) return;
-    document.addEventListener("keydown", onNewSurfaceKeyDown, true);
-    return () => document.removeEventListener("keydown", onNewSurfaceKeyDown, true);
+    document.addEventListener("keydown", onNewTabKeyDown, true);
+    return () => document.removeEventListener("keydown", onNewTabKeyDown, true);
   }, [props.open]);
-
-  const updateTabScrollState = useCallback(() => {
-    const viewport = tabScrollViewport(tabListRef.current);
-    if (!viewport) return;
-
-    const hasOverflow = viewport.scrollWidth - viewport.clientWidth > TAB_SCROLL_EDGE_TOLERANCE;
-    const canScrollLeft = hasOverflow && viewport.scrollLeft > TAB_SCROLL_EDGE_TOLERANCE;
-    const canScrollRight =
-      hasOverflow &&
-      viewport.scrollLeft + viewport.clientWidth < viewport.scrollWidth - TAB_SCROLL_EDGE_TOLERANCE;
-    setTabScrollState((current) => {
-      if (
-        current.hasOverflow === hasOverflow &&
-        current.canScrollLeft === canScrollLeft &&
-        current.canScrollRight === canScrollRight
-      ) {
-        return current;
-      }
-      return { hasOverflow, canScrollLeft, canScrollRight };
-    });
-  }, []);
-
-  const scrollTabs = useCallback((direction: -1 | 1) => {
-    const viewport = tabScrollViewport(tabListRef.current);
-    if (!viewport) return;
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    viewport.scrollBy({
-      left: direction * Math.max(120, viewport.clientWidth * 0.75),
-      behavior: reduceMotion ? "auto" : "smooth",
-    });
-  }, []);
-
-  const allSurfaceActions = [
-    {
-      label: "Browser",
-      icon: Globe2,
-      shortcut: "B",
-      available: props.browserAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.browser,
-      supported: props.supportedSurfaces.browser,
-      onClick: props.onAddBrowser,
-    },
-    {
-      label: "Terminal",
-      icon: TerminalSquare,
-      shortcut: "T",
-      available: props.terminalAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.terminal,
-      supported: props.supportedSurfaces.terminal,
-      onClick: props.onAddTerminal,
-    },
-    {
-      label: "Device",
-      icon: Smartphone,
-      shortcut: "M",
-      available: props.deviceAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.device,
-      supported: props.supportedSurfaces.device,
-      onClick: props.onAddDevice,
-    },
-  ] as const;
-  const addSurfaceActions = allSurfaceActions.filter((action) => action.supported);
-
-  const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const action = surfaceShortcutActionForKey(addSurfaceActions, event.nativeEvent);
-    if (!action) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setAddSurfaceMenuOpen(false);
-    action.onClick();
-  };
 
   const openTabContextMenu = useCallback(
     async (position: { x: number; y: number }, surface: RightPanelSurface) => {
       const api = readLocalApi();
       if (!api) return;
 
-      const surfaceIndex = props.surfaces.findIndex((entry) => entry.id === surface.id);
+      const surfaceIndex = groupSurfaces.findIndex((entry) => entry.id === surface.id);
       if (surfaceIndex < 0) return;
 
       const items: ContextMenuItem<TabContextMenuAction>[] = [];
@@ -825,12 +421,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         {
           id: "close-others",
           label: "Close others",
-          disabled: props.surfaces.length <= 1,
+          disabled: groupSurfaces.length <= 1,
         },
         {
           id: "close-to-right",
           label: "Close to the right",
-          disabled: surfaceIndex >= props.surfaces.length - 1,
+          disabled: surfaceIndex >= groupSurfaces.length - 1,
         },
         {
           id: "close-all",
@@ -877,7 +473,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           break;
       }
     },
-    [props],
+    [groupSurfaces, props],
   );
   const handleTabContextMenu = useCallback(
     (event: ReactMouseEvent, surface: RightPanelSurface) => {
@@ -921,7 +517,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     if (!(tab instanceof HTMLElement) || tab.getAttribute("role") !== "tab") return;
     const tabs = tabElements();
     const index = tabs.indexOf(tab);
-    const surface = props.surfaces.find((entry) => entry.id === tab.dataset.surfaceId);
+    const surface = groupSurfaces.find((entry) => entry.id === tab.dataset.surfaceId);
     if (index < 0 || !surface) return;
     const focusTab = (next: number) => {
       event.preventDefault();
@@ -967,32 +563,20 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   };
 
   useEffect(() => {
-    if (!props.activeSurfaceId || !tabScrollState.hasOverflow) return;
+    if (!props.activeSurfaceId || !hasOverflow) return;
     const activeTab = tabListRef.current?.querySelector<HTMLElement>("[data-active-tab='true']");
     activeTab?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [props.activeSurfaceId, tabScrollState.hasOverflow]);
+  }, [props.activeSurfaceId, hasOverflow]);
 
+  // Tabs shrink to an icon before the row scrolls; past that, the wheel scrolls
+  // it sideways and the fade on each edge says there is more.
   useEffect(() => {
     const viewport = tabScrollViewport(tabListRef.current);
     if (!viewport) return;
-
+    const update = () => setHasOverflow(viewport.scrollWidth - viewport.clientWidth > 1);
     const content = viewport.firstElementChild;
-    const stopObserving = observeResize(
-      content ? [viewport, content] : viewport,
-      updateTabScrollState,
-    );
-    viewport.addEventListener("scroll", updateTabScrollState, { passive: true });
-    updateTabScrollState();
-
-    return () => {
-      stopObserving();
-      viewport.removeEventListener("scroll", updateTabScrollState);
-    };
-  }, [updateTabScrollState]);
-
-  useEffect(() => {
-    const viewport = tabScrollViewport(tabListRef.current);
-    if (!viewport) return;
+    const stopObserving = observeResize(content ? [viewport, content] : viewport, update);
+    update();
 
     const handleWheel = (event: WheelEvent) => {
       if (event.ctrlKey) return;
@@ -1000,17 +584,55 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 16;
       if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= viewport.clientWidth;
       if (delta === 0) return;
-
       const previousScrollLeft = viewport.scrollLeft;
       viewport.scrollLeft += delta;
       if (viewport.scrollLeft === previousScrollLeft) return;
       event.preventDefault();
-      updateTabScrollState();
     };
-
     viewport.addEventListener("wheel", handleWheel, { passive: false });
-    return () => viewport.removeEventListener("wheel", handleWheel);
-  }, [updateTabScrollState]);
+    return () => {
+      stopObserving();
+      viewport.removeEventListener("wheel", handleWheel);
+    };
+  }, []);
+
+  // "+" opens a tab in the default profile in one click; with more profiles
+  // to choose from, a right-click (or the ContextMenu key) offers them.
+  const newTabRef = useRef<HTMLButtonElement>(null);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const hasProfileChoice = browserProfiles.length > 1;
+  if (!canAddBrowser && profileMenuOpen) setProfileMenuOpen(false);
+  const newTabButton = (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            ref={newTabRef}
+            aria-label="New browser tab"
+            className={cn("shrink-0", ownsDesktopTitleBar && "[-webkit-app-region:no-drag]")}
+            size="icon-xs"
+            variant="ghost-muted"
+            onClick={props.onAddBrowser}
+            onContextMenu={(event) => {
+              if (!hasProfileChoice) return;
+              event.preventDefault();
+              setProfileMenuOpen(true);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "ContextMenu" || !hasProfileChoice) return;
+              event.preventDefault();
+              setProfileMenuOpen(true);
+            }}
+          />
+        }
+      >
+        <Plus className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipPopup>
+        {hasProfileChoice ? "New tab · right-click for a profile" : "New tab"}
+      </TooltipPopup>
+    </Tooltip>
+  );
 
   return (
     <PreviewPanelShell
@@ -1027,7 +649,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           // The sheet overlays from the viewport top, so its tab bar keeps
           // the titlebar's height: a compact row re-centers the layout
           // controls a few pixels higher and the cluster jumps on open.
-          props.mode === "inline" && !props.layoutControls ? "pr-28" : "pr-3",
+          // Inline, the maximize and panel toggles are fixed at the window's
+          // top-right; the row leaves them their room.
+          props.mode === "inline" && !props.layoutControls ? "pr-20" : "pr-3",
           ownsDesktopTitleBar && "drag-region",
           ownsDesktopTitleBar && "wco:pr-(--workspace-native-controls-inset)",
           props.mode === "inline" && props.maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
@@ -1039,72 +663,77 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           ref={tabListRef}
           hideScrollbars
           scrollFade
+          scrollFadePadding={false}
           className="min-w-0 flex-1"
           data-right-panel-tab-list
           // Maximized, the tabs lead the pane like a chat title and ride its
           // edge when the sidebar toggles.
           data-panel-flip={props.maximized ? "start" : undefined}
         >
-          <div
-            className="flex h-full w-full items-center gap-1"
-            // Tabs shrink to their minimum width before the strip scrolls.
-            style={{ minWidth: tabStripMinWidth(props.surfaces.length) }}
+          <SortableTabList
+            surfaces={groupSurfaces}
+            allSurfaces={props.surfaces}
+            onMove={props.onMoveSurface}
           >
-            <SortableTabList surfaces={props.surfaces} onMove={props.onMoveSurface}>
-              <div
-                role="tablist"
-                aria-label="Panel tabs"
-                aria-orientation="horizontal"
-                className="flex min-w-0 items-center gap-1"
-                onKeyDown={handleTabListKeyDown}
-              >
-                {props.surfaces.map((surface, index) => {
-                  const active = surface.id === props.activeSurfaceId;
-                  const pending = props.pendingSurfaceIds.has(surface.id);
-                  const title = surfaceTitle(surface, props.previewSessions);
-                  const previewTabId = previewTabIdOf(surface, props.previewSessions);
-                  // Desktop state is keyed by the session id, but desktop actions
-                  // must be addressed with the runtime id.
-                  const audio = tabAudioState(
-                    previewTabId ? (props.desktopByTabId[previewTabId] ?? null) : null,
-                  );
-                  const audioRuntimeTabId = previewTabId
-                    ? (props.previewRuntimeTabId?.(previewTabId) ?? null)
-                    : null;
-                  // One tab stop for the whole strip: the selected tab, or the
-                  // first one while nothing is selected.
-                  const tabStop = active || (props.activeSurfaceId === null && index === 0);
-                  return (
-                    <SortableTab
-                      key={surface.id}
-                      surfaceId={surface.id}
-                      disabled={!props.onMoveSurface || renamingDevice === surface.id}
-                      role="tab"
-                      id={`${tabIdPrefix}-tab-${index}`}
-                      aria-selected={active}
-                      aria-controls={active ? `${tabIdPrefix}-panel` : undefined}
-                      tabIndex={tabStop ? 0 : -1}
-                      data-surface-id={surface.id}
-                      data-active-tab={active}
-                      onClick={(event) => {
-                        // The close and mute buttons inside the tab act on their own.
-                        if (event.target instanceof Element && event.target.closest("button"))
-                          return;
-                        props.onActivate(surface);
-                      }}
-                      onDoubleClick={() => {
-                        if (surface.kind === "device" && props.onRenameDevice)
-                          setRenamingDevice(surface.id);
-                      }}
-                      onMouseDown={handleTabMouseDown}
-                      onAuxClick={(event) => handleTabAuxClick(event, surface)}
-                      onContextMenu={(event) => handleTabContextMenu(event, surface)}
-                      className={cn(
-                        "group/tab flex h-6 w-40 min-w-24 cursor-pointer items-center gap-1 rounded-md pr-2 pl-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                        ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
-                        active ? "state-selected" : "state-hover text-muted-foreground",
-                      )}
-                    >
+            <div
+              role="tablist"
+              aria-label="Panel tabs"
+              aria-orientation="horizontal"
+              className="flex h-full w-full items-center gap-1"
+              onKeyDown={handleTabListKeyDown}
+            >
+              {groupSurfaces.map((surface, index) => {
+                const active = surface.id === props.activeSurfaceId;
+                const pending = props.pendingSurfaceIds.has(surface.id);
+                const title = surfaceTitle(surface, props.previewSessions);
+                const previewTabId = previewTabIdOf(surface, props.previewSessions);
+                // Desktop state is keyed by the session id, but desktop actions
+                // must be addressed with the runtime id.
+                const audio = tabAudioState(
+                  previewTabId ? (props.desktopByTabId[previewTabId] ?? null) : null,
+                );
+                const audioRuntimeTabId = previewTabId
+                  ? (props.previewRuntimeTabId?.(previewTabId) ?? null)
+                  : null;
+                // One tab stop for the whole strip: the selected tab, or the
+                // first one while nothing is selected.
+                const tabStop = active || (props.activeSurfaceId === null && index === 0);
+                return (
+                  <SortableTab
+                    key={surface.id}
+                    surfaceId={surface.id}
+                    disabled={!props.onMoveSurface || renamingDevice === surface.id}
+                    role="tab"
+                    id={`${tabIdPrefix}-tab-${index}`}
+                    aria-selected={active}
+                    aria-controls={active ? `${tabIdPrefix}-panel` : undefined}
+                    tabIndex={tabStop ? 0 : -1}
+                    data-surface-id={surface.id}
+                    data-active-tab={active}
+                    onClick={(event) => {
+                      // The close and mute buttons inside the tab act on their own.
+                      if (event.target instanceof Element && event.target.closest("button")) return;
+                      props.onActivate(surface);
+                    }}
+                    onDoubleClick={() => {
+                      if (surface.kind === "device" && props.onRenameDevice)
+                        setRenamingDevice(surface.id);
+                    }}
+                    onMouseDown={handleTabMouseDown}
+                    onAuxClick={(event) => handleTabAuxClick(event, surface)}
+                    onContextMenu={(event) => handleTabContextMenu(event, surface)}
+                    className={cn(
+                      // Equal shares of the row up to a comfortable width; the
+                      // label folds away before a tab gets narrower than its
+                      // icon. The selected tab keeps its name.
+                      "group/tab @container/tab h-6 shrink basis-40 cursor-pointer rounded-md text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                      active
+                        ? "min-w-28 state-selected"
+                        : "min-w-9 state-hover text-muted-foreground",
+                      ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
+                    )}
+                  >
+                    <div className="flex h-full items-center gap-1.5 pr-2 pl-1.5 @max-[4.5rem]/tab:justify-center @max-[4.5rem]/tab:px-0">
                       <PanelTabCloseButton
                         label={`Close ${title}`}
                         focusable={false}
@@ -1115,7 +744,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           sessions={props.previewSessions}
                           desktopByTabId={props.desktopByTabId}
                           theme={resolvedTheme}
-                          environmentId={props.environmentId}
                         />
                         {pending ? (
                           <span
@@ -1149,7 +777,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       ) : (
                         <Tooltip>
                           <TooltipTrigger
-                            render={<span className="min-w-0 flex-1 truncate text-left" />}
+                            render={
+                              <span className="min-w-0 flex-1 truncate text-left @max-[4.5rem]/tab:hidden" />
+                            }
                           >
                             {title}
                           </TooltipTrigger>
@@ -1173,7 +803,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                               <button
                                 type="button"
                                 tabIndex={-1}
-                                className="cursor-pointer flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
+                                className="flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-muted @max-[4.5rem]/tab:hidden"
                                 aria-label={audio === "muted" ? `Unmute ${title}` : `Mute ${title}`}
                                 onClick={() => {
                                   void previewBridge
@@ -1193,145 +823,38 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           </TooltipPopup>
                         </Tooltip>
                       )}
-                    </SortableTab>
-                  );
-                })}
-              </div>
-            </SortableTabList>
-            {props.open !== false ? (
-              <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
-                <MenuTrigger
-                  ref={addSurfaceTriggerRef}
-                  render={
-                    <Button
-                      aria-label="New tab"
-                      className="shrink-0"
-                      size="icon-xs"
-                      variant="ghost-muted"
-                    />
-                  }
-                >
-                  <Plus className="size-3.5" />
-                </MenuTrigger>
-                <MenuPopup
-                  align="start"
-                  side="bottom"
-                  sideOffset={6}
-                  onKeyDownCapture={handleAddSurfaceMenuKeyDown}
-                >
-                  {addSurfaceActions.map((action) => {
-                    const Icon = action.icon;
-                    // Browser collapses into one row: clicking the trigger opens
-                    // the default profile (the common case stays one click),
-                    // while hover or arrow reveals the profiles. The choice
-                    // lives at open time because a tab's profile is fixed then —
-                    // Electron only honours a partition before attach.
-                    if (action.label === "Browser" && action.available) {
-                      return (
-                        <MenuSub key={action.label}>
-                          <MenuSubTrigger
-                            className="[&>svg:last-child]:ms-0"
-                            aria-keyshortcuts={action.shortcut}
-                            onClick={(event) => {
-                              const pointerType =
-                                "pointerType" in event.nativeEvent &&
-                                typeof event.nativeEvent.pointerType === "string"
-                                  ? event.nativeEvent.pointerType
-                                  : undefined;
-                              // Touch has no hover path to the profile choices:
-                              // its first tap opens the submenu, then a profile
-                              // is selected there. Mouse click keeps the common
-                              // default-profile action at one click.
-                              if (!shouldOpenDefaultBrowserProfileFromMenuClick(pointerType))
-                                return;
-                              setAddSurfaceMenuOpen(false);
-                              action.onClick();
-                            }}
-                          >
-                            <Icon />
-                            {action.label}
-                            <MenuShortcut>{action.shortcut}</MenuShortcut>
-                          </MenuSubTrigger>
-                          {/*
-                            Capped and truncated: profile names are user-supplied
-                            and run to 48 characters, which would otherwise widen
-                            the popup to fit-content and wrap.
-                          */}
-                          <MenuSubPopup className="max-w-56">
-                            {browserProfiles.map((profile) => (
-                              <MenuItem
-                                key={profile.id}
-                                onClick={() => props.onAddBrowserInProfile(profile.id)}
-                              >
-                                <span className="min-w-0 truncate">{profile.name}</span>
-                              </MenuItem>
-                            ))}
-                          </MenuSubPopup>
-                        </MenuSub>
-                      );
-                    }
-                    return (
-                      <SurfaceMenuItem
-                        key={action.label}
-                        available={action.available}
-                        disabledReason={action.disabledReason}
-                        shortcut={action.shortcut}
-                        onClick={action.onClick}
+                    </div>
+                  </SortableTab>
+                );
+              })}
+              {canAddBrowser && props.open !== false ? (
+                <>
+                  {newTabButton}
+                  {hasProfileChoice ? (
+                    <Menu open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
+                      <MenuPopup
+                        anchor={newTabRef}
+                        align="start"
+                        side="bottom"
+                        sideOffset={6}
+                        className="max-w-56"
                       >
-                        <Icon />
-                        {action.label}
-                      </SurfaceMenuItem>
-                    );
-                  })}
-                </MenuPopup>
-              </Menu>
-            ) : null}
-          </div>
+                        {browserProfiles.map((profile) => (
+                          <MenuItem
+                            key={profile.id}
+                            onClick={() => props.onAddBrowserInProfile(profile.id)}
+                          >
+                            <span className="min-w-0 truncate">{profile.name}</span>
+                          </MenuItem>
+                        ))}
+                      </MenuPopup>
+                    </Menu>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+          </SortableTabList>
         </ScrollArea>
-        {tabScrollState.hasOverflow ? (
-          <div
-            className="flex shrink-0 items-center gap-0.5 [-webkit-app-region:no-drag]"
-            role="group"
-            aria-label="Scroll panel tabs"
-          >
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="inline-flex">
-                    <Button
-                      aria-label="Scroll tabs left"
-                      disabled={!tabScrollState.canScrollLeft}
-                      onClick={() => scrollTabs(-1)}
-                      size="icon-xs"
-                      variant="ghost"
-                    >
-                      <ChevronLeft />
-                    </Button>
-                  </span>
-                }
-              />
-              <TooltipPopup>Scroll tabs left</TooltipPopup>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="inline-flex">
-                    <Button
-                      aria-label="Scroll tabs right"
-                      disabled={!tabScrollState.canScrollRight}
-                      onClick={() => scrollTabs(1)}
-                      size="icon-xs"
-                      variant="ghost"
-                    >
-                      <ChevronRight />
-                    </Button>
-                  </span>
-                }
-              />
-              <TooltipPopup>Scroll tabs right</TooltipPopup>
-            </Tooltip>
-          </div>
-        ) : null}
         {props.layoutControls}
         {ownsDesktopTitleBar && !props.layoutControls ? (
           // Keeps the tabs clear of the window controls when the layout toggles live elsewhere.
@@ -1347,30 +870,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       <div
         className="flex min-h-0 flex-1 flex-col"
         data-right-panel-surface-content
-        {...(props.surfaces.length > 0
+        {...(groupSurfaces.length > 0
           ? {
               role: "tabpanel",
               id: `${tabIdPrefix}-panel`,
-              "aria-labelledby": activeTabDomId(tabIdPrefix, props),
+              "aria-labelledby": activeTabDomId(tabIdPrefix, groupSurfaces, props.activeSurfaceId),
             }
           : {})}
       >
-        {/* The chooser is only for an empty strip; open tabs always show one of themselves. */}
-        {props.surfaces.length === 0 ? (
-          <RightPanelEmptyState
-            onAddBrowser={props.onAddBrowser}
-            onAddBrowserInProfile={props.onAddBrowserInProfile}
-            browserProfiles={browserProfiles}
-            onAddTerminal={props.onAddTerminal}
-            onAddDevice={props.onAddDevice}
-            browserAvailable={props.browserAvailable}
-            terminalAvailable={props.terminalAvailable}
-            deviceAvailable={props.deviceAvailable}
-            supportedSurfaces={props.supportedSurfaces}
-          />
-        ) : (
-          props.children
-        )}
+        {props.surfaces.length === 0 ? <RightPanelEmptyState /> : props.children}
       </div>
     </PreviewPanelShell>
   );
@@ -1378,9 +886,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
 
 function activeTabDomId(
   prefix: string,
-  props: Pick<RightPanelTabsProps, "surfaces" | "activeSurfaceId">,
+  surfaces: readonly RightPanelSurface[],
+  activeSurfaceId: string | null,
 ): string | undefined {
-  const index = props.surfaces.findIndex((surface) => surface.id === props.activeSurfaceId);
+  const index = surfaces.findIndex((surface) => surface.id === activeSurfaceId);
   return index < 0 ? undefined : `${prefix}-tab-${index}`;
 }
 

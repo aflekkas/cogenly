@@ -1,4 +1,11 @@
-import { Globe2, PanelRightIcon, SettingsIcon, Smartphone, TerminalSquare } from "lucide-react";
+import {
+  Files,
+  Globe2,
+  PanelRightIcon,
+  SettingsIcon,
+  Smartphone,
+  TerminalSquare,
+} from "lucide-react";
 import { Maximize2, Minimize2 } from "lucide";
 import { MorphIcon } from "~/components/MorphIcon";
 import { memo } from "react";
@@ -7,7 +14,7 @@ import { Button } from "../ui/button";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-export type ThreadSurfaceButtonId = "browser" | "terminal" | "device";
+export type ThreadSurfaceButtonId = "browser" | "terminal" | "device" | "files";
 
 /** One of the Work header's surface buttons: it opens, focuses or hides its right-panel tab. */
 export interface ThreadSurfaceButton {
@@ -24,6 +31,7 @@ const SURFACE_BUTTON_PRESENTATION = {
   browser: { label: "Browser", Icon: Globe2 },
   terminal: { label: "Terminal", Icon: TerminalSquare },
   device: { label: "Device", Icon: Smartphone },
+  files: { label: "Files", Icon: Files },
 } as const;
 
 export interface PanelLayoutControlsProps {
@@ -31,7 +39,7 @@ export interface PanelLayoutControlsProps {
   showThreadControls?: boolean;
   showRightPanelControl?: boolean;
   agentSettingsShortcutLabel: string | null;
-  /** Browser, Terminal and Device, in that order, for threads that offer them. */
+  /** Browser, Terminal and Device, then Files while a file is open, for threads that offer them. */
   surfaceButtons?: readonly ThreadSurfaceButton[] | undefined;
   rightPanelAvailable: boolean;
   rightPanelOpen: boolean;

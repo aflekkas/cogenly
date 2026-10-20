@@ -76,6 +76,7 @@ import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
 import { Badge } from "~/components/ui/badge";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { alternatePreviewRuntime, useRendersServerTabNatively } from "~/browser/previewRuntime";
+import type { PreviewStreamControl } from "@t3tools/client-runtime/preview/server-browser-stream";
 import { ServerBrowserSurface, type ServerBrowserHandle } from "~/browser/ServerBrowserSurface";
 import { cn } from "~/lib/utils";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
@@ -223,7 +224,12 @@ export function PreviewView({
       setServerToolbarWidth(Math.max(1, Math.round(entry?.contentRect.width ?? 0))),
     );
   }, [serverToolbarShown]);
-  const [serverControlledTabId, setServerControlledTabId] = useState<string | null>(null);
+  const [serverControl, setServerControl] = useState<{
+    tabId: string;
+    control: PreviewStreamControl;
+  } | null>(null);
+  const serverControlledTabId =
+    serverControl?.control.controller === "you" ? serverControl.tabId : null;
   const serverInputDisabled = isServerTab && serverControlledTabId !== runtimeTabId;
   const [serverFrameTabId, setServerFrameTabId] = useState<string | null>(null);
   const desktopOverlay = tabId ? (previewState.desktopByTabId[tabId] ?? null) : null;
@@ -1000,6 +1006,18 @@ export function PreviewView({
         pickDisabledReason={
           isUnreachable ? "Page didn't load — pick unavailable until the page renders" : undefined
         }
+        control={
+          isServerTab && serverControl && serverControl.tabId === runtimeTabId
+            ? {
+                controller: serverControl.control.controller,
+                canOperate: serverControl.control.canOperate,
+                onToggle: () =>
+                  serverSurfaceRef.current?.setControl(
+                    serverControl.control.controller === "you" ? "agent" : "you",
+                  ),
+              }
+            : null
+        }
         leadingActions={
           // Only when it differs from the default: labelling every tab
           // "Default" would be noise on the common case, while a tab in
@@ -1074,8 +1092,9 @@ export function PreviewView({
                 tabId={snapshot.tabId}
                 visible={visible}
                 onFirstFrame={() => setServerFrameTabId(runtimeTabId)}
+                controlPosition="none"
                 onControl={(control) =>
-                  setServerControlledTabId(control?.controller === "you" ? runtimeTabId : null)
+                  setServerControl(control ? { tabId: runtimeTabId, control } : null)
                 }
                 onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId, "panel")}
                 // Stays connected under the empty state so a URL picked there reaches the page.

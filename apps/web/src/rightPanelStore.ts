@@ -77,6 +77,30 @@ export interface ThreadRightPanelState {
   dismissedDeviceSurfaceIds?: string[];
   /** Kept with the thread so the layout survives a ChatView remount or a reload. */
   maximized?: true;
+  /**
+   * Surfaces in most-recently-active order, newest first. A header button
+   * that switches back to a kind returns to the tab the user last had there.
+   */
+  recentSurfaceIds?: string[];
+}
+
+/**
+ * The header's switcher groups surfaces by what they show: the files explorer
+ * and file previews are one group, every other kind is its own.
+ */
+export type RightPanelSurfaceGroup = "browser" | "terminal" | "device" | "files";
+
+export function surfaceGroupOf(surface: Pick<RightPanelSurface, "kind">): RightPanelSurfaceGroup {
+  switch (surface.kind) {
+    case "preview":
+      return "browser";
+    case "files":
+    case "file":
+      return "files";
+    case "terminal":
+    case "device":
+      return surface.kind;
+  }
 }
 
 interface RightPanelStoreState {
@@ -117,6 +141,12 @@ interface RightPanelStoreState {
    */
   revealAgentTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
   activateSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
+  /**
+   * Shows the group's most recently active surface and opens the panel. A
+   * no-op when the thread has no surface in that group, so the caller can
+   * decide what to create.
+   */
+  activateGroup: (ref: ScopedThreadRef, group: RightPanelSurfaceGroup) => void;
   closeSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeOtherSurfaces: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeSurfacesToRight: (ref: ScopedThreadRef, surfaceId: string) => void;
@@ -229,7 +259,7 @@ const updateThreadStateMap = (
   updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
 ): Record<string, ThreadRightPanelState> => {
   const current = byThreadKey[threadKey] ?? EMPTY_THREAD_STATE;
-  const next = updater(current);
+  const next = withRecentSurfaces(current, updater(current));
   if (
     !next.isOpen &&
     next.activeSurfaceId === null &&
@@ -243,6 +273,48 @@ const updateThreadStateMap = (
   if (next === current) return byThreadKey;
   return { ...byThreadKey, [threadKey]: next };
 };
+
+/**
+ * Keeps `recentSurfaceIds` in step with the selection: the active surface
+ * moves to the front, and closed surfaces drop out. Runs on every update so
+ * no action has to remember it.
+ */
+function withRecentSurfaces(
+  current: ThreadRightPanelState,
+  next: ThreadRightPanelState,
+): ThreadRightPanelState {
+  if (next === current) return current;
+  const alive = new Set<string>(next.surfaces.map((surface) => surface.id));
+  const previous = next.recentSurfaceIds ?? current.recentSurfaceIds ?? [];
+  const recent = [
+    ...(next.activeSurfaceId !== null && alive.has(next.activeSurfaceId)
+      ? [next.activeSurfaceId]
+      : []),
+    ...previous.filter((id) => alive.has(id) && id !== next.activeSurfaceId),
+  ];
+  const unchanged =
+    recent.length === previous.length && recent.every((id, index) => id === previous[index]);
+  if (unchanged && (next.recentSurfaceIds !== undefined || recent.length === 0)) return next;
+  if (recent.length === 0) {
+    const { recentSurfaceIds: _empty, ...rest } = next;
+    return rest;
+  }
+  return { ...next, recentSurfaceIds: recent };
+}
+
+/** The group's surface the user had most recently, falling back to its first tab. */
+export function selectGroupSurface(
+  state: ThreadRightPanelState,
+  group: RightPanelSurfaceGroup,
+): RightPanelSurface | null {
+  const inGroup = state.surfaces.filter((surface) => surfaceGroupOf(surface) === group);
+  if (inGroup.length === 0) return null;
+  for (const id of state.recentSurfaceIds ?? []) {
+    const match = inGroup.find((surface) => surface.id === id);
+    if (match) return match;
+  }
+  return inGroup[0] ?? null;
+}
 
 const updateThread = (
   state: Pick<RightPanelStoreState, "byThreadKey">,
@@ -408,6 +480,14 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                       }
                     : {}),
                   ...(validThreadState?.maximized === true ? { maximized: true as const } : {}),
+                  ...(Array.isArray(validThreadState?.recentSurfaceIds)
+                    ? {
+                        recentSurfaceIds: validThreadState.recentSurfaceIds.filter(
+                          (id): id is string =>
+                            typeof id === "string" && surfaces.some((surface) => surface.id === id),
+                        ),
+                      }
+                    : {}),
                 },
               ];
             }),
@@ -577,6 +657,15 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               ? { ...current, isOpen: true, activeSurfaceId: surfaceId }
               : current,
           ),
+        ),
+      activateGroup: (ref, group) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) => {
+            const surface = selectGroupSurface(current, group);
+            if (!surface) return current;
+            if (current.isOpen && current.activeSurfaceId === surface.id) return current;
+            return { ...current, isOpen: true, activeSurfaceId: surface.id };
+          }),
         ),
       closeSurface: (ref, surfaceId) =>
         set((state) =>
