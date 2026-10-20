@@ -4,6 +4,13 @@ import { cn } from "~/lib/utils";
 
 export type SidebarShelf = "working" | "snoozed" | "settled";
 
+/** Each shelf's glyph, shared by its count-bar segment and its empty state. */
+export const SIDEBAR_SHELF_ICONS: Record<SidebarShelf, LucideIcon> = {
+  working: LoaderIcon,
+  snoozed: ClockIcon,
+  settled: ArchiveIcon,
+};
+
 interface ShelfSegment {
   readonly shelf: SidebarShelf | null;
   readonly icon: LucideIcon;
@@ -40,9 +47,16 @@ export function SidebarShelfBar({
     { shelf: null, icon: activeIcon, label: activeLabel, count: activeCount },
     ...(workingCount === null
       ? []
-      : [{ shelf: "working" as const, icon: LoaderIcon, label: "Working", count: workingCount }]),
-    { shelf: "snoozed", icon: ClockIcon, label: "Snoozed", count: snoozedCount },
-    { shelf: "settled", icon: ArchiveIcon, label: "Settled", count: settledCount },
+      : [
+          {
+            shelf: "working" as const,
+            icon: SIDEBAR_SHELF_ICONS.working,
+            label: "Working",
+            count: workingCount,
+          },
+        ]),
+    { shelf: "snoozed", icon: SIDEBAR_SHELF_ICONS.snoozed, label: "Snoozed", count: snoozedCount },
+    { shelf: "settled", icon: SIDEBAR_SHELF_ICONS.settled, label: "Settled", count: settledCount },
   ];
   const selectedIndex = Math.max(
     0,
@@ -73,6 +87,11 @@ export function SidebarShelfBar({
             role="tab"
             aria-selected={selected}
             aria-label={`${segment.label} (${segment.count})`}
+            // A click never parks focus on the segment, so no focus ring
+            // lingers after it (a later keypress would otherwise make the
+            // ring show over the filled highlight). Keyboard focus still
+            // gets the ring.
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => onOpenShelf(selected ? null : segment.shelf)}
             className={cn(
               "flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg text-xs tabular-nums outline-none transition-colors duration-(--motion-duration-base) focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-3.5 [&_svg]:shrink-0",
