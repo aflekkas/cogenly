@@ -448,10 +448,12 @@ const layerProductionBase = Layer.mergeAll(
   layerProviderContinuationWorkerProvided,
   layerAgentSessionImporterProvided,
   EffectOutbox.layerPruneWorker.pipe(Layer.provide(EffectOutbox.layer)),
-)
-  .pipe(Layer.provide(Scheduler.layer), Layer.provideMerge(layerEventInfrastructure))
-  // Visual states read the thread projection and dispatch through thread
-  // management, so it joins after the merge that provides them.
-  .pipe(Layer.provideMerge(VisualStates.layer));
+).pipe(Layer.provide(Scheduler.layer), Layer.provideMerge(layerEventInfrastructure));
 
-export const layerProduction = layerProductionBase;
+// Visual states read the thread projection and dispatch through thread
+// management, so they are built from the merged runtime that provides them.
+// Merging the bare layer would re-export thread management as an input
+// requirement, which leaks into every CLI command through runServer.
+const layerVisualStatesProvided = VisualStates.layer.pipe(Layer.provide(layerProductionBase));
+
+export const layerProduction = Layer.mergeAll(layerProductionBase, layerVisualStatesProvided);
