@@ -34,11 +34,11 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
             pressed={rightPanelOpen}
             onPressedChange={onToggleRightPanel}
             aria-label="Toggle right panel"
-            variant="ghost"
+            variant="ghost-muted"
             size="sm"
             disabled={!rightPanelAvailable}
           >
-            <PanelRightIcon className="size-4" />
+            <PanelRightIcon className="size-4.5" />
           </Toggle>
         </TooltipTrigger>
         <TooltipPopup side="bottom">
@@ -68,10 +68,10 @@ export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl
             pressed={maximized}
             onPressedChange={onToggle}
             aria-label={label}
-            variant="ghost"
+            variant="ghost-muted"
             size="sm"
           >
-            <MorphIcon className="size-4" icon={maximized ? Minimize2 : Maximize2} />
+            <MorphIcon className="size-4.5" icon={maximized ? Minimize2 : Maximize2} />
           </Toggle>
         }
       />

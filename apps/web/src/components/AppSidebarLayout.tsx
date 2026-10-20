@@ -146,7 +146,6 @@ function SidebarControl({
         <TooltipTrigger
           render={
             <SidebarTrigger
-              variant="ghost"
               className="pointer-events-auto"
               aria-label="Toggle main sidebar"
               aria-disabled={disabled || undefined}

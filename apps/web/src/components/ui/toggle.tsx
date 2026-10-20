@@ -26,6 +26,10 @@ const toggleVariants = cva(
       variant: {
         default: "border-transparent",
         pill: "border-transparent rounded-full px-3 font-normal text-muted-foreground data-pressed:text-foreground",
+        // Header icon toggles: muted at rest, foreground on hover, and the
+        // selected fill and foreground while pressed. Matches Button ghost-muted.
+        "ghost-muted":
+          "border-transparent text-muted-foreground shadow-none transition-[color,background-color,box-shadow] duration-150 ease-out before:shadow-none [:disabled,:active,[data-pressed]]:shadow-none [&_svg:not([class*='opacity-'])]:opacity-100",
         ghost:
           "border-transparent text-foreground shadow-none [:disabled,:active,[data-pressed]]:shadow-none before:shadow-none disabled:opacity-100 disabled:text-muted-foreground disabled:[&_svg]:opacity-100",
         outline:

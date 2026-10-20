@@ -157,16 +157,17 @@ export function ThreadDetailsMenu(props: {
             <PopoverTrigger
               render={
                 <Button
-                  variant="ghost"
+                  variant="ghost-muted"
                   size="icon-sm"
                   aria-label={label}
+                  data-pressed={open ? "" : undefined}
                   className="relative shrink-0 [-webkit-app-region:no-drag]"
                 />
               }
             />
           }
         >
-          <ListTreeIcon className="size-4" />
+          <ListTreeIcon className="size-4.5" />
           {summary.running > 0 ? (
             <span
               aria-hidden
