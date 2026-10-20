@@ -1,3 +1,4 @@
+import { useLastPresent } from "~/components/ui/overlay-presence";
 import { useAtomValue } from "@effect/atom-react";
 import { usesChatGptSharing } from "@t3tools/shared/usageLimits";
 import { useState } from "react";
@@ -44,6 +45,8 @@ export function ChatGptWelcomeCoordinator() {
         })),
   );
   const next = profiles.find((profile) => !acknowledged.includes(profile.key));
+  // Keeps the last profile's text while the dialog closes.
+  const shown = useLastPresent(next);
   const dismiss = () => {
     if (!next) return;
     const updated = [...acknowledged, next.key];
@@ -70,7 +73,7 @@ export function ChatGptWelcomeCoordinator() {
             credit settings in ChatGPT.
           </DialogDescription>
           <p className="text-xs text-muted-foreground">
-            {next?.providerName} on {next?.environmentLabel}
+            {shown?.providerName} on {shown?.environmentLabel}
           </p>
         </DialogHeader>
         <DialogFooter>

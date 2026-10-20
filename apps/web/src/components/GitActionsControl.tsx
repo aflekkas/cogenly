@@ -1,3 +1,4 @@
+import { useLastPresent } from "~/components/ui/overlay-presence";
 import { useRightPanelStore } from "../rightPanelStore";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import { useAtomValue } from "@effect/atom-react";
@@ -1198,11 +1199,13 @@ export default function GitActionsControl({
       ? (quickAction.hint ?? "This action is currently unavailable.")
       : null;
   const gitActionProgress = resolveGitActionProgressPresentation(vcsActionState);
-  const pendingDefaultBranchActionCopy = pendingDefaultBranchAction
+  // The dialog keeps its copy while it closes.
+  const shownDefaultBranchAction = useLastPresent(pendingDefaultBranchAction);
+  const pendingDefaultBranchActionCopy = shownDefaultBranchAction
     ? resolveDefaultBranchActionDialogCopy({
-        action: pendingDefaultBranchAction.action,
-        branchName: pendingDefaultBranchAction.branchName,
-        includesCommit: pendingDefaultBranchAction.includesCommit,
+        action: shownDefaultBranchAction.action,
+        branchName: shownDefaultBranchAction.branchName,
+        includesCommit: shownDefaultBranchAction.includesCommit,
         terminology: changeRequestTerminology,
       })
     : null;

@@ -1,3 +1,4 @@
+import { useLastPresent } from "~/components/ui/overlay-presence";
 import { Spinner } from "~/components/ui/spinner";
 import {
   ArchiveIcon,
@@ -1177,6 +1178,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   );
   const [projectGroupingTarget, setProjectGroupingTarget] =
     useState<SidebarProjectGroupMember | null>(null);
+  // The rename and grouping dialogs keep their project's copy while they close.
+  const shownProjectRenameTarget = useLastPresent(projectRenameTarget);
+  const shownProjectGroupingTarget = useLastPresent(projectGroupingTarget);
   const [projectGroupingSelection, setProjectGroupingSelection] = useState<
     SidebarProjectGroupingMode | "inherit"
   >("inherit");
@@ -2438,8 +2442,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           <DialogHeader>
             <DialogTitle>Rename repository</DialogTitle>
             <DialogDescription>
-              {projectRenameTarget
-                ? `Update the title for ${projectRenameTarget.workspaceRoot}.`
+              {shownProjectRenameTarget
+                ? `Update the title for ${shownProjectRenameTarget.workspaceRoot}.`
                 : "Update the repository name."}
             </DialogDescription>
           </DialogHeader>
@@ -2459,9 +2463,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 }}
               />
             </div>
-            {projectRenameTarget?.environmentLabel ? (
+            {shownProjectRenameTarget?.environmentLabel ? (
               <p className="text-xs text-muted-foreground">
-                Environment: {projectRenameTarget.environmentLabel}
+                Environment: {shownProjectRenameTarget.environmentLabel}
               </p>
             ) : null}
             {!canRenameProject ? (
@@ -2493,8 +2497,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           <DialogHeader>
             <DialogTitle>Repository grouping</DialogTitle>
             <DialogDescription>
-              {projectGroupingTarget
-                ? `Choose how ${projectGroupingTarget.workspaceRoot} should be grouped in the sidebar.`
+              {shownProjectGroupingTarget
+                ? `Choose how ${shownProjectGroupingTarget.workspaceRoot} should be grouped in the sidebar.`
                 : "Choose how this repository should be grouped in the sidebar."}
             </DialogDescription>
           </DialogHeader>

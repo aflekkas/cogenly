@@ -1,3 +1,4 @@
+import { useLastPresent } from "~/components/ui/overlay-presence";
 import { SessionPermissions } from "./SessionPermissions";
 import { AUTH_SCOPE_OPTIONS as PAIRING_SCOPE_OPTIONS } from "@t3tools/shared/authScopeOptions";
 import {
@@ -2222,6 +2223,8 @@ export function ConnectionsSettings() {
     | { readonly kind: "wsl-only"; readonly nextValue: boolean };
   const [pendingWslChange, setPendingWslChange] = useState<PendingWslChange | null>(null);
   const isWslConfirmDialogOpen = pendingWslChange !== null;
+  // The confirmation keeps its copy while it closes.
+  const shownWslChange = useLastPresent(pendingWslChange);
   const [pendingTailscaleServeEndpoint, setPendingTailscaleServeEndpoint] =
     useState<AdvertisedEndpoint | null>(null);
   const [disableTailscaleServeDialogOpen, setDisableTailscaleServeDialogOpen] = useState(false);
@@ -2350,6 +2353,7 @@ export function ConnectionsSettings() {
       return pendingTailscaleServeEndpoint.httpBaseUrl;
     }
   }, [isTailscaleServePortValid, parsedTailscaleServePort, pendingTailscaleServeEndpoint]);
+  const shownTailscaleServeBaseUrl = useLastPresent(pendingTailscaleServeBaseUrl);
 
   const handleDesktopServerExposureChange = useCallback(
     async (checked: boolean) => {
@@ -3847,28 +3851,28 @@ export function ConnectionsSettings() {
             <AlertDialogPopup>
               <AlertDialogHeader>
                 <AlertDialogTitle>
-                  {pendingWslChange?.kind === "disable"
-                    ? pendingWslChange.wasWslOnly
+                  {shownWslChange?.kind === "disable"
+                    ? shownWslChange.wasWslOnly
                       ? "Turn off WSL and switch back to Windows?"
                       : "Disable WSL backend?"
-                    : pendingWslChange?.kind === "distro"
+                    : shownWslChange?.kind === "distro"
                       ? "Switch WSL distro?"
-                      : pendingWslChange?.kind === "enable"
+                      : shownWslChange?.kind === "enable"
                         ? "Start the WSL backend"
-                        : pendingWslChange?.nextValue
+                        : shownWslChange?.nextValue
                           ? "Run only the WSL backend?"
                           : "Re-enable the Windows backend?"}
                 </AlertDialogTitle>
                 <AlertDialogDescription>
-                  {pendingWslChange?.kind === "disable"
-                    ? pendingWslChange.wasWslOnly
+                  {shownWslChange?.kind === "disable"
+                    ? shownWslChange.wasWslOnly
                       ? "Cogenly will restart on the Windows backend. Threads and repositories opened against WSL stay safe inside the distro and become available again when you re-enable WSL."
                       : "The WSL backend will stop. Threads and repositories opened against WSL stay safe inside the distro, but they'll be unavailable in Cogenly until you re-enable WSL."
-                    : pendingWslChange?.kind === "distro"
+                    : shownWslChange?.kind === "distro"
                       ? "Cogenly will restart the WSL backend on the new distro. Sessions still running on the current distro will be interrupted."
-                      : pendingWslChange?.kind === "enable"
+                      : shownWslChange?.kind === "enable"
                         ? "Run the WSL backend alongside the Windows one, or stop the Windows backend and use only WSL? You can change this later from Settings."
-                        : pendingWslChange?.nextValue
+                        : shownWslChange?.nextValue
                           ? "Cogenly will restart and start only the WSL backend. Your Windows-side repositories won't be accessible until you turn this off again."
                           : "Cogenly will restart and bring the Windows backend back up alongside WSL."}
                 </AlertDialogDescription>
@@ -3880,7 +3884,7 @@ export function ConnectionsSettings() {
                 >
                   Cancel
                 </AlertDialogClose>
-                {pendingWslChange?.kind === "enable" ? (
+                {shownWslChange?.kind === "enable" ? (
                   <>
                     <Button
                       variant="outline"
@@ -3927,15 +3931,15 @@ export function ConnectionsSettings() {
                         <Spinner size="sm" />
                         Applying…
                       </>
-                    ) : pendingWslChange?.kind === "disable" ? (
-                      pendingWslChange.wasWslOnly ? (
+                    ) : shownWslChange?.kind === "disable" ? (
+                      shownWslChange.wasWslOnly ? (
                         "Switch to Windows"
                       ) : (
                         "Disable WSL"
                       )
-                    ) : pendingWslChange?.kind === "distro" ? (
+                    ) : shownWslChange?.kind === "distro" ? (
                       "Switch distro"
-                    ) : pendingWslChange?.nextValue ? (
+                    ) : shownWslChange?.nextValue ? (
                       "Restart and enable"
                     ) : (
                       "Restart and disable"
@@ -4022,12 +4026,12 @@ export function ConnectionsSettings() {
                     <TooltipTrigger
                       render={
                         <p className="mt-1 truncate text-sm text-foreground">
-                          {pendingTailscaleServeBaseUrl ?? "Pending MagicDNS endpoint"}
+                          {shownTailscaleServeBaseUrl ?? "Pending MagicDNS endpoint"}
                         </p>
                       }
                     />
-                    {pendingTailscaleServeBaseUrl ? (
-                      <TooltipPopup side="top">{pendingTailscaleServeBaseUrl}</TooltipPopup>
+                    {shownTailscaleServeBaseUrl ? (
+                      <TooltipPopup side="top">{shownTailscaleServeBaseUrl}</TooltipPopup>
                     ) : null}
                   </Tooltip>
                 </div>

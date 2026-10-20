@@ -79,3 +79,14 @@ export function useOverlayPresenceRoot(
 export function OverlayPresenceBoundary({ children }: { children: ReactNode }) {
   return <OverlayPresenceContext value={null}>{children}</OverlayPresenceContext>;
 }
+
+/**
+ * The value, or while it is empty the last value it held. For the content of
+ * an overlay that stays mounted and closes when its subject clears, so the
+ * text does not change while it animates out.
+ */
+export function useLastPresent<T>(value: T | null | undefined): T | null | undefined {
+  const [last, setLast] = useState(value);
+  if (value !== null && value !== undefined && value !== last) setLast(value);
+  return value ?? last;
+}

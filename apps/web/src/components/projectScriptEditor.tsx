@@ -1,3 +1,4 @@
+import { useLastPresent } from "~/components/ui/overlay-presence";
 import {
   AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
@@ -188,7 +189,8 @@ export function ProjectScriptEditorDialog({
   const pendingSubmissionRef = useRef<{ request: ProjectScriptEditorRequest } | null>(null);
 
   const isOpen = request !== null;
-  const isEditing = request?.scriptId != null;
+  // Copy follows the last request, so it holds while the dialog closes.
+  const isEditing = useLastPresent(request)?.scriptId != null;
   const isSaving = request !== null && savingRequest === request;
 
   // A save completion must not affect a replacement request or an unmounted editor.
