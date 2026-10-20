@@ -31,12 +31,12 @@ export function RepositoryGroupHeading({ name }: { name: string | null }) {
     <li
       role="presentation"
       data-sidebar-group-label
-      className="flex h-7 list-none items-center gap-2 px-3 pt-3 font-mono text-[12px] text-sidebar-muted-foreground"
+      className="flex h-7 list-none items-center gap-2 px-3 pt-3 font-mono text-xs text-sidebar-muted-foreground"
     >
       {tint && name ? (
         <span
           aria-hidden
-          className="flex size-3.5 shrink-0 items-center justify-center rounded-[3px] font-sans font-semibold text-[7px] leading-none"
+          className="flex size-3.5 shrink-0 items-center justify-center rounded-sm font-sans font-semibold text-5xs leading-none"
           style={{ backgroundColor: tint.background, color: tint.foreground }}
         >
           {badgeInitials(name)}
