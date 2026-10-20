@@ -5,6 +5,8 @@ import * as Schema from "effect/Schema";
 import { ORCHESTRATION_V2_WS_METHODS } from "./orchestrationV2.ts";
 import { WsRpcGroup, WsSubscribeServerConfigRpc } from "./rpc.ts";
 
+const decodeServerConfigPayload = Schema.decodeSync(WsSubscribeServerConfigRpc.payloadSchema);
+
 /**
  * The client always sends `usageLimitSources`, including to servers built
  * before the field existed, whose payload schema was an empty struct. What
@@ -19,14 +21,14 @@ describe("subscribeServerConfig payload compatibility", () => {
   });
 
   it("is carried by a server that declares it", () => {
-    const decoded = Schema.decodeSync(WsSubscribeServerConfigRpc.payloadSchema)({
+    const decoded = decodeServerConfigPayload({
       usageLimitSources: true,
     });
     expect(decoded).toEqual({ usageLimitSources: true });
   });
 
   it("stays optional, so a client that never sends it still subscribes", () => {
-    const decoded = Schema.decodeSync(WsSubscribeServerConfigRpc.payloadSchema)({});
+    const decoded = decodeServerConfigPayload({});
     expect(decoded).toEqual({});
   });
 });
@@ -67,4 +69,11 @@ describe("WebSocket RPC contracts", () => {
       ),
     ).toBe(true);
   });
+});
+
+it("removes obsolete project tag suggestion and review RPCs", () => {
+  const methods = [...WsRpcGroup.requests.keys()] as ReadonlyArray<string>;
+  expect(methods).not.toContain("projectLabels.suggestLabels");
+  expect(methods).not.toContain("projectLabels.reviewSuggestion");
+  expect(methods).toContain("projectLabels.moveThread");
 });

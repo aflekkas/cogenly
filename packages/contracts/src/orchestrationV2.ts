@@ -65,7 +65,7 @@ import {
   RuntimeMode,
 } from "./providerPolicy.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
-import { ProjectLabelId } from "./projectLabel.ts";
+import { ProjectLabelId, ProjectFolderSource } from "./projectLabel.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import {
   TurnTokenUsage,
@@ -394,6 +394,8 @@ export type WorkHandoffLink = typeof WorkHandoffLink.Type;
 export const OrchestrationV2AppThread = Schema.Struct({
   /** Read-time effective folder. Context only; explicit filing wins over repository membership. */
   projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
+  /** Absent only on older servers/caches. Null means unfiled. */
+  projectFolderSource: Schema.optional(ProjectFolderSource),
   ...WorkMetadataFields,
   workHandoffs: Schema.optional(Schema.Array(WorkHandoffLink)),
   /** Agent identity is provenance; work threads remain ordinary visible coding threads. */
@@ -1978,6 +1980,8 @@ export type OrchestrationV2LatestVisibleMessageSummary =
 export const OrchestrationV2ThreadShell = Schema.Struct({
   /** Effective folder; null means unfiled. Optional only for older persisted clients. */
   projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
+  /** Absent only on older servers/caches. Null means unfiled. */
+  projectFolderSource: Schema.optional(ProjectFolderSource),
   ...WorkMetadataFields,
   workHandoffs: Schema.optional(Schema.Array(WorkHandoffLink)),
   agent: Schema.optional(AgentThreadIdentity),

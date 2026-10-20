@@ -24,6 +24,51 @@ const seed = Effect.gen(function* () {
   yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${threadId}, ${repoA}, 'Chat', 'codex', 'full-access', 'default', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '{}')`;
 });
 describe("project labels", () => {
+  it.effect(
+    "counts only visible chats and Work, preserving independent forks and excluding archives and child threads",
+    () =>
+      Effect.gen(function* () {
+        yield* seed;
+        const sql = yield* SqlClient.SqlClient;
+        const folders = yield* Labels.ProjectLabelService;
+        const folder = (yield* folders.create({ name: "Folder" })).label.id;
+        yield* folders.linkRepository({ labelId: folder, repositoryId: repoA });
+        const at = "2026-01-01T00:00:00.000Z";
+        for (const [id, payload, archived, deleted] of [
+          ["root-chat", { surface: "chat" }, false, false],
+          [
+            "fork",
+            {
+              surface: "work",
+              lineage: { parentThreadId: threadId, relationshipToParent: "fork" },
+            },
+            false,
+            false,
+          ],
+          ["agent-work", { agent: { id: "agent:owner", role: "work" } }, false, false],
+          [
+            "subagent",
+            { lineage: { parentThreadId: threadId, relationshipToParent: "subagent" } },
+            false,
+            false,
+          ],
+          ["archived", { surface: "work" }, true, false],
+          ["deleted", { surface: "work" }, false, true],
+          ["conversation", { agent: { id: "agent:owner", role: "conversation" } }, false, false],
+          ["registered-conversation", {}, false, false],
+        ] as const) {
+          yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json,archived_at,deleted_at) VALUES (${id},${repoA},${id},'codex','full-access','default',${at},${at},${JSON.stringify(payload)},${archived ? at : null},${deleted ? at : null})`;
+        }
+        yield* sql`INSERT INTO agents(agent_id,conversation_thread_id,payload_json,enabled) VALUES ('agent:owner','registered-conversation','{}',1)`;
+        yield* folders.moveThread({ threadId: ThreadId.make("root-chat"), folderId: folder });
+        expect((yield* folders.read(folder)).label.threadCount).toBe(4);
+        yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at=${at} WHERE thread_id=${threadId}`;
+        expect((yield* folders.list()).labels[0]?.threadCount).toBe(3);
+        yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at=NULL WHERE thread_id=${threadId}`;
+        expect((yield* folders.list()).labels[0]?.threadCount).toBe(4);
+      }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("creates, updates, clears fields and links multiple repositories independently", () =>
     Effect.gen(function* () {
       yield* seed;
@@ -102,11 +147,6 @@ describe("project labels", () => {
       expect((yield* sql`SELECT * FROM orchestration_v2_projection_threads`).length).toBe(1);
       yield* service.moveThread({ threadId, folderId: a });
       yield* service.moveThread({ threadId, folderId: null });
-      expect((yield* service.suggestLabels(threadId)).labels).toEqual([]);
-      expect(
-        (yield* service.reviewSuggestion({ threadId, labelId: a, accept: true }).pipe(Effect.flip))
-          .reason,
-      ).toBe("not_suggested");
       // No-repository work (the app's scratch project) can be explicitly filed.
       yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json = '{"surface":"work"}' WHERE thread_id = ${threadId}`;
       yield* service.unlinkRepository({ labelId: a, repositoryId: repoA });
@@ -274,19 +314,76 @@ describe("project labels", () => {
         const folders = yield* Labels.ProjectLabelService;
         const a = (yield* folders.create({ name: "A" })).label.id;
         const b = (yield* folders.create({ name: "B" })).label.id;
-        expect((yield* projections.getThreadShell(threadId))?.projectFolderId).toBeNull();
+        expect(yield* projections.getThreadShell(threadId)).toMatchObject({
+          projectFolderId: null,
+          projectFolderSource: null,
+        });
         yield* folders.linkRepository({ labelId: a, repositoryId: repoA });
-        expect((yield* projections.getShellSnapshot()).threads[0]?.projectFolderId).toBe(a);
-        expect((yield* projections.getThreadProjection(threadId)).thread.projectFolderId).toBe(a);
-        yield* folders.moveThread({ threadId, folderId: b });
-        expect((yield* projections.getThreadShell(threadId))?.projectFolderId).toBe(b);
-        yield* folders.delete(b);
-        expect((yield* projections.getThreadShell(threadId))?.projectFolderId).toBe(a);
-        yield* folders.unlinkRepository({ labelId: a, repositoryId: repoA });
-        expect(
-          (yield* projections.getThreadProjection(threadId)).thread.projectFolderId,
-        ).toBeNull();
-      }).pipe(Effect.provide(layer)),
+        expect((yield* projections.getShellSnapshot()).threads[0]).toMatchObject({
+          projectFolderId: a,
+          projectFolderSource: "repository",
+        });
+        expect((yield* projections.getThreadProjection(threadId)).thread).toMatchObject({
+          projectFolderId: a,
+          projectFolderSource: "repository",
+        });
+        // A move to the same effective folder still changes its filing source.
+        yield* folders.moveThread({ threadId, folderId: a });
+        expect(yield* projections.getThreadShell(threadId)).toMatchObject({
+          projectFolderId: a,
+          projectFolderSource: "explicit",
+        });
+        yield* folders.moveThread({ threadId, folderId: null });
+        yield* folders.linkRepository({ labelId: b, repositoryId: repoA });
+        expect(yield* projections.getThreadShell(threadId)).toMatchObject({
+          projectFolderId: b,
+          projectFolderSource: "repository",
+        });
+        yield* folders.moveThread({ threadId, folderId: a });
+        yield* folders.linkRepository({ labelId: a, repositoryId: repoA });
+        yield* folders.linkRepository({ labelId: b, repositoryId: repoA });
+        expect((yield* projections.getThreadProjection(threadId)).thread).toMatchObject({
+          projectFolderId: a,
+          projectFolderSource: "explicit",
+        });
+        yield* folders.delete(a);
+        expect(yield* projections.getThreadShell(threadId)).toMatchObject({
+          projectFolderId: b,
+          projectFolderSource: "repository",
+        });
+        yield* folders.unlinkRepository({ labelId: b, repositoryId: repoA });
+        expect((yield* projections.getThreadProjection(threadId)).thread).toMatchObject({
+          projectFolderId: null,
+          projectFolderSource: null,
+        });
+        yield* folders.linkRepository({ labelId: b, repositoryId: repoA });
+        const liveCounts = yield* folders.subscribe().pipe(Stream.toQueue({ capacity: 16 }));
+        expect((yield* Queue.take(liveCounts)).labels[0]?.threadCount).toBe(1);
+        const events = yield* Events.OrchestrationEventStore;
+        const thread = (yield* projections.getThreadProjection(threadId)).thread;
+        for (const archived of [true, false]) {
+          const event = {
+            id: EventId.make(archived ? "folder-archive" : "folder-unarchive"),
+            type: archived ? ("thread.archived" as const) : ("thread.unarchived" as const),
+            threadId,
+            occurredAt: thread.updatedAt,
+            payload: { ...thread, archivedAt: archived ? thread.updatedAt : null },
+          };
+          const committed = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* projections.apply(event);
+              return yield* events.appendAgentEvents({ events: [event] });
+            }),
+          );
+          yield* events.publishCommitted(committed);
+          expect((yield* Queue.take(liveCounts)).labels[0]?.threadCount).toBe(archived ? 0 : 1);
+          if (archived)
+            expect((yield* projections.getShellSnapshot()).archivedThreads[0]).toMatchObject({
+              projectFolderId: b,
+              projectFolderSource: "repository",
+            });
+        }
+      }).pipe(Effect.scoped, Effect.provide(layer)),
   );
   it.effect("removes deleted label metadata from facts while preserving change history", () =>
     Effect.gen(function* () {

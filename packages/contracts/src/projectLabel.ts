@@ -21,6 +21,7 @@ export type ProjectLabel = typeof ProjectLabel.Type;
 export const ProjectLabelWithRepositories = Schema.Struct({
   ...ProjectLabel.fields,
   repositoryIds: Schema.Array(ProjectId),
+  /** Visible chats and Work: excludes archives, delegated children and agent conversations. */
   threadCount: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 });
 export type ProjectLabelWithRepositories = typeof ProjectLabelWithRepositories.Type;
@@ -70,17 +71,13 @@ export const MoveThreadProjectFolderInput = Schema.Struct({
   folderId: Schema.NullOr(ProjectLabelId),
 });
 export type MoveThreadProjectFolderInput = typeof MoveThreadProjectFolderInput.Type;
+/** How the effective folder was selected; does not grant access. */
+export const ProjectFolderSource = Schema.NullOr(Schema.Literals(["explicit", "repository"]));
 export const ThreadProjectFolderResult = Schema.Struct({
   threadId: ThreadId,
   projectFolderId: Schema.NullOr(ProjectLabelId),
 });
 export type ThreadProjectFolderResult = typeof ThreadProjectFolderResult.Type;
-export const ReviewThreadProjectLabelInput = Schema.Struct({
-  threadId: ThreadId,
-  labelId: ProjectLabelId,
-  accept: Schema.Boolean,
-});
-export type ReviewThreadProjectLabelInput = typeof ReviewThreadProjectLabelInput.Type;
 export const ThreadProjectLabelsResult = Schema.Struct({
   labels: Schema.Array(ThreadProjectLabel),
 });
@@ -88,7 +85,7 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
   "ProjectLabelError",
   {
     operation: Schema.String,
-    reason: Schema.Literals(["storage", "not_found", "not_suggested", "invalid_membership"]),
+    reason: Schema.Literals(["storage", "not_found", "invalid_membership"]),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -98,8 +95,6 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
         return "The folder, repository, or thread was not found.";
       case "invalid_membership":
         return "A thread can belong to at most one project folder.";
-      case "not_suggested":
-        return "Project folders do not support suggestions.";
       case "storage":
         return "Could not access project folders.";
     }

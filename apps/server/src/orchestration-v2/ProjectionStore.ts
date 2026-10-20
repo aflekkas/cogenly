@@ -1528,6 +1528,7 @@ export function threadShellFromProjection(
     id: projection.thread.id,
     projectId: projection.thread.projectId,
     projectFolderId: projection.thread.projectFolderId ?? null,
+    projectFolderSource: projection.thread.projectFolderSource ?? null,
     title: projection.thread.title,
     providerInstanceId: projection.thread.providerInstanceId,
     modelSelection: projection.thread.modelSelection,
@@ -1804,6 +1805,7 @@ function shellFromState(input: {
     id: input.state.thread.id,
     projectId: input.state.thread.projectId,
     projectFolderId: input.state.thread.projectFolderId ?? null,
+    projectFolderSource: input.state.thread.projectFolderSource ?? null,
     title: input.state.thread.title,
     providerInstanceId: input.state.thread.providerInstanceId,
     modelSelection: input.state.thread.modelSelection,
@@ -2797,7 +2799,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       Effect.gen(function* () {
         const threadRows = yield* sql<PayloadRow>`
           SELECT json_set(payload_json, '$.projectFolderId',
-            (SELECT folder_id FROM effective_thread_project_folders WHERE thread_id = ${threadId})) AS payload_json
+            (SELECT folder_id FROM effective_thread_project_folders WHERE thread_id = ${threadId}),
+            '$.projectFolderSource', CASE
+              WHEN EXISTS (SELECT 1 FROM thread_project_labels WHERE thread_id = ${threadId}) THEN 'explicit'
+              WHEN EXISTS (SELECT 1 FROM effective_thread_project_folders WHERE thread_id = ${threadId} AND folder_id IS NOT NULL) THEN 'repository'
+              ELSE NULL END) AS payload_json
           FROM orchestration_v2_projection_threads
           WHERE thread_id = ${threadId}
           LIMIT 1
@@ -5328,7 +5334,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             SELECT
               t.thread_id,
               json_set(t.payload_json, '$.projectFolderId',
-                (SELECT folder_id FROM effective_thread_project_folders f WHERE f.thread_id = t.thread_id)) AS payload_json,
+                (SELECT folder_id FROM effective_thread_project_folders f WHERE f.thread_id = t.thread_id),
+                '$.projectFolderSource', CASE
+                  WHEN EXISTS (SELECT 1 FROM thread_project_labels e WHERE e.thread_id = t.thread_id) THEN 'explicit'
+                  WHEN EXISTS (SELECT 1 FROM effective_thread_project_folders f WHERE f.thread_id = t.thread_id AND f.folder_id IS NOT NULL) THEN 'repository'
+                  ELSE NULL END) AS payload_json,
               CASE
                 WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
                   THEN json_extract(t.payload_json, '$.forkedFrom.threadId')

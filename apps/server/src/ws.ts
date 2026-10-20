@@ -1587,9 +1587,6 @@ const makeWsRpcHandlers = (
         projectLabels.subscribeConfirmedThreadLabels(),
       [WS_METHODS.projectLabelsMoveThread]: (input) => projectLabels.moveThread(input),
       [WS_METHODS.projectLabelsSetThreadLabels]: (input) => projectLabels.setThreadLabels(input),
-      [WS_METHODS.projectLabelsReviewSuggestion]: (input) => projectLabels.reviewSuggestion(input),
-      [WS_METHODS.projectLabelsSuggestLabels]: (input) =>
-        projectLabels.suggestLabels(input.threadId),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
       [WS_METHODS.workProposeHandoff]: (input) => workHandoff.proposeHandoff(input.sourceThreadId),
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),

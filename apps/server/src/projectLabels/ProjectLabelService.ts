@@ -8,7 +8,6 @@ import {
   type ProjectLabelUpdateInput,
   type ProjectLabelRepository,
   type SetThreadProjectLabelsInput,
-  type ReviewThreadProjectLabelInput,
   type MoveThreadProjectFolderInput,
   type ThreadProjectFolderResult,
   type ThreadId,
@@ -63,10 +62,6 @@ export class ProjectLabelService extends Context.Service<
       input: SetThreadProjectLabelsInput,
       confirmedByUser?: boolean,
     ) => Effect.Effect<Tags, ProjectLabelError>;
-    readonly reviewSuggestion: (
-      input: ReviewThreadProjectLabelInput,
-    ) => Effect.Effect<Tags, ProjectLabelError>;
-    readonly suggestLabels: (threadId: ThreadId) => Effect.Effect<Tags, ProjectLabelError>;
   }
 >()("t3/projectLabels/ProjectLabelService") {}
 
@@ -92,7 +87,14 @@ const make = Effect.gen(function* () {
   const readLabels = (id?: ProjectLabelId) =>
     sql`SELECT label_id AS id, name, color, description, created_at AS createdAt, updated_at AS updatedAt,
     (SELECT json_group_array(repository_id) FROM (SELECT repository_id FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositories
-    , (SELECT count(*) FROM effective_thread_project_folders f WHERE f.folder_id = l.label_id) AS threadCount
+    , (SELECT count(*) FROM effective_thread_project_folders f
+      JOIN orchestration_v2_projection_threads t ON t.thread_id = f.thread_id
+      WHERE f.folder_id = l.label_id AND t.archived_at IS NULL
+        AND COALESCE(json_extract(t.payload_json, '$.lineage.relationshipToParent'), '') <> 'subagent'
+        AND (json_extract(t.payload_json, '$.agent.role') = 'work' OR (
+          json_extract(t.payload_json, '$.agent') IS NULL
+          AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.conversation_thread_id = t.thread_id)
+        ))) AS threadCount
     FROM project_labels l ${id === undefined ? sql`` : sql`WHERE label_id = ${id}`} ORDER BY name COLLATE NOCASE, label_id`.pipe(
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (row) =>
@@ -229,7 +231,13 @@ const make = Effect.gen(function* () {
   const membershipLifecycle = (stored: ApplicationStoredEvent) =>
     ("type" in stored && stored.type === "project.deleted") ||
     ("event" in stored &&
-      ["thread.created", "thread.deleted", "thread.metadata-updated"].includes(stored.event.type));
+      [
+        "thread.created",
+        "thread.deleted",
+        "thread.metadata-updated",
+        "thread.archived",
+        "thread.unarchived",
+      ].includes(stored.event.type));
   return ProjectLabelService.of({
     moveThread,
     subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
@@ -310,13 +318,6 @@ const make = Effect.gen(function* () {
         })),
       );
     },
-    // Kept as inert compatibility endpoints for older clients. Folder filing is
-    // always explicit or derived from the repository, never keyword-suggested.
-    reviewSuggestion: () =>
-      Effect.fail(
-        new ProjectLabelError({ operation: "reviewSuggestion", reason: "not_suggested" }),
-      ),
-    suggestLabels: getThreadLabels,
   });
 });
 export const layer = Layer.effect(ProjectLabelService, make);

@@ -486,7 +486,6 @@ it.effect("project folders do not let read-only clients move threads or change m
       WS_METHODS.projectLabelsList,
       WS_METHODS.projectLabelsMoveThread,
       WS_METHODS.projectLabelsSetThreadLabels,
-      WS_METHODS.projectLabelsSuggestLabels,
     ] as const;
     const group = WsRpcGroup.omit(
       ...[...WsRpcGroup.requests.keys()].filter(
@@ -511,12 +510,6 @@ it.effect("project folders do not let read-only clients move threads or change m
               return { labels: [] };
             }),
           ),
-          group.toLayerHandler(WS_METHODS.projectLabelsSuggestLabels, () =>
-            Effect.sync(() => {
-              writes++;
-              return { labels: [] };
-            }),
-          ),
           RpcAuthorization.layer([AuthOrchestrationReadScope]),
         ),
       ),
@@ -535,14 +528,6 @@ it.effect("project folders do not let read-only clients move threads or change m
       yield* client[WS_METHODS.projectLabelsSetThreadLabels]({
         threadId: ThreadId.make("tagged"),
         labelIds: [],
-      }).pipe(Effect.flip),
-    ).toMatchObject({
-      _tag: "EnvironmentAuthorizationError",
-      requiredPermission: AuthOrchestrationOperateScope,
-    });
-    expect(
-      yield* client[WS_METHODS.projectLabelsSuggestLabels]({
-        threadId: ThreadId.make("tagged"),
       }).pipe(Effect.flip),
     ).toMatchObject({
       _tag: "EnvironmentAuthorizationError",

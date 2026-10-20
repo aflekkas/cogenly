@@ -1160,14 +1160,6 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:setThreadProjectLabels",
       tag: WS_METHODS.projectLabelsSetThreadLabels,
     }),
-    reviewThreadProjectLabelSuggestion: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:projectLabels:reviewThreadProjectLabelSuggestion",
-      tag: WS_METHODS.projectLabelsReviewSuggestion,
-    }),
-    suggestThreadProjectLabels: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:projectLabels:suggestThreadProjectLabels",
-      tag: WS_METHODS.projectLabelsSuggestLabels,
-    }),
     /** Live scheduled-task list: snapshot on subscribe, fresh list after every server-side change. */
     scheduledTasksLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:scheduled-tasks:live",

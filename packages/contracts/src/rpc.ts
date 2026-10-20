@@ -503,8 +503,6 @@ export const WS_METHODS = {
   projectLabelsSubscribeConfirmedThreadLabels: "projectLabels.subscribeConfirmedThreadLabels",
   projectLabelsMoveThread: "projectLabels.moveThread",
   projectLabelsSetThreadLabels: "projectLabels.setThreadLabels",
-  projectLabelsReviewSuggestion: "projectLabels.reviewSuggestion",
-  projectLabelsSuggestLabels: "projectLabels.suggestLabels",
   workStart: "work.start",
   workProposeHandoff: "work.proposeHandoff",
   agentsList: "agents.list",
@@ -1839,16 +1837,6 @@ const WsProjectLabelsSetThreadLabelsRpc = Rpc.make(WS_METHODS.projectLabelsSetTh
   success: ProjectLabels.ThreadProjectLabelsResult,
   error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
-const WsProjectLabelsReviewSuggestionRpc = Rpc.make(WS_METHODS.projectLabelsReviewSuggestion, {
-  payload: ProjectLabels.ReviewThreadProjectLabelInput,
-  success: ProjectLabels.ThreadProjectLabelsResult,
-  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
-});
-const WsProjectLabelsSuggestLabelsRpc = Rpc.make(WS_METHODS.projectLabelsSuggestLabels, {
-  payload: ProjectLabels.ThreadProjectLabelsInput,
-  success: ProjectLabels.ThreadProjectLabelsResult,
-  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
-});
 const WsWorkStartRpc = Rpc.make(WS_METHODS.workStart, {
   payload: Work.WorkStartInput,
   success: Work.WorkStartResult,
@@ -2177,8 +2165,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsSubscribeConfirmedThreadLabelsRpc,
   WsProjectLabelsMoveThreadRpc,
   WsProjectLabelsSetThreadLabelsRpc,
-  WsProjectLabelsReviewSuggestionRpc,
-  WsProjectLabelsSuggestLabelsRpc,
   WsWorkStartRpc,
   WsWorkProposeHandoffRpc,
   WsAgentsApprovalsListRpc,
