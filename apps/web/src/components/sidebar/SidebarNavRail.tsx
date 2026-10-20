@@ -13,6 +13,7 @@ import { ChartNoAxesColumnIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactElement, useRef } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
+import { useAgentsEmpty } from "../../agents/agentsClient";
 import { openCommandPalette } from "../../commandPaletteBus";
 import { isElectron } from "../../env";
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -68,8 +69,12 @@ export function SidebarNavRail({
   const onUtilityPage = isSidebarUtilityPage(pathname);
   const onSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const onUsage = pathname === "/usage";
-  // Usage and Projects have no list column, so nothing to toggle there.
-  const listColumnHidden = routeHidesListColumn(pathname);
+  // Usage, Projects and an empty Agents list have no list column, so nothing
+  // to toggle there.
+  const agentsEmpty = useAgentsEmpty();
+  const listColumnHidden = routeHidesListColumn(pathname, {
+    agentsEmpty: mode === "agents" && agentsEmpty,
+  });
   const toggleShortcut = shortcutLabelForCommand(keybindings, "sidebar.toggle", {
     context: { usagePageOpen: onUsage },
   });

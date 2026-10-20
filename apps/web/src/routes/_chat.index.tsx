@@ -17,6 +17,7 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useAgents } from "../agents/agentsClient";
 import { requestAgentCreation } from "../agents/AgentsCreateHost";
+import { AgentFace } from "../components/agents/face";
 import {
   resolveModeLanding,
   type ModeLanding,
@@ -195,15 +196,31 @@ function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
           description="This machine can’t start a chat without a repository right now."
         />
       );
+    // With no agents the list column is hidden (routeHidesListColumn), so this
+    // is the one empty state: mascot, a line of copy and the brand CTA.
     case "agents-empty":
       return (
         <IndexEmptyState
           title="No agents yet"
           description="An agent is a persistent specialist with its own conversation and responsibility."
+          media={
+            <AgentFace
+              seed="new-friend"
+              expression="neutre"
+              color="currentColor"
+              paper="none"
+              size={64}
+              className="text-foreground/90"
+            />
+          }
         >
-          <Button size="sm" onClick={() => requestAgentCreation(primaryEnvironmentId)}>
+          <Button
+            variant="brand"
+            size="sm"
+            onClick={() => requestAgentCreation(primaryEnvironmentId)}
+          >
             <PlusIcon className="size-4" />
-            New agent
+            Create your first agent
           </Button>
         </IndexEmptyState>
       );
@@ -215,6 +232,7 @@ function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
 function IndexEmptyState(props: {
   readonly title: string;
   readonly description: string;
+  readonly media?: ReactNode;
   readonly children?: ReactNode;
 }) {
   return (
@@ -222,6 +240,7 @@ function IndexEmptyState(props: {
       {isElectron ? <WorkspacePageHeader electron /> : null}
       <Empty className="flex-1">
         <EmptyHeader className="max-w-md">
+          {props.media ? <div className="mb-4 flex justify-center">{props.media}</div> : null}
           <EmptyTitle>{props.title}</EmptyTitle>
           <EmptyDescription>{props.description}</EmptyDescription>
           {props.children ? <div className="mt-5 flex justify-center">{props.children}</div> : null}

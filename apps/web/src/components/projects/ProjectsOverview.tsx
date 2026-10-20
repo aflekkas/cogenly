@@ -126,6 +126,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                 </EmptyHeader>
                 <EmptyContent>
                   <Button
+                    variant="brand"
                     size="sm"
                     disabled={createEnvironmentId === null || !canCreate}
                     onClick={() => setCreating(true)}

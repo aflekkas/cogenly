@@ -37,6 +37,8 @@ import { SidebarNavRail } from "./sidebar/SidebarNavRail";
 import { resolveWorkspaceTitlebarLayout } from "../workspaceTitlebar";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { routeHidesListColumn } from "./sidebar/listColumnRoutes";
+import { useAgentsEmpty } from "../agents/agentsClient";
+import { useUiStateStore } from "../uiStateStore";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
 import { useProjects } from "../state/entities";
 import {
@@ -219,9 +221,14 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // mobile sheet keeps those, and the legacy sidebar keeps its own layout.
   const isMobile = useIsMobile();
   const navRailVisible = !isMobile && !legacySidebarEnabled;
-  // Usage and Projects are full-width pages: with the rail there to navigate
-  // away, they have no list column. The mobile sheet stays, since it is the only way back.
-  const listSidebarHidden = navRailVisible && routeHidesListColumn(pathname);
+  // Usage, Projects and an empty Agents list are full-width pages: with the
+  // rail there to navigate away, they have no list column. The mobile sheet
+  // stays, since it is the only way back.
+  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
+  const agentsEmpty = useAgentsEmpty();
+  const listSidebarHidden =
+    navRailVisible &&
+    routeHidesListColumn(pathname, { agentsEmpty: sidebarMode === "agents" && agentsEmpty });
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(() => {
     const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState;
     return isMacosDesktop && typeof getWindowFullscreenState === "function"
@@ -306,8 +313,13 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
             data-app-sidebar=""
             role="navigation"
             aria-label={isOnSettings ? "Settings" : "Threads"}
-            // The list column starts after the rail and slides under it when collapsed.
-            className={navRailVisible ? "left-(--nav-rail-width)" : undefined}
+            // The list column starts after the rail and slides under it when
+            // collapsed. When it mounts (the first agent created, a return from
+            // a full-width page) it starts off-canvas, so the Sidebar's own
+            // toggle transition slides it in.
+            className={
+              navRailVisible ? "left-(--nav-rail-width) starting:-translate-x-full" : undefined
+            }
             // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
             style={windowControlsInsetStyle}
           >

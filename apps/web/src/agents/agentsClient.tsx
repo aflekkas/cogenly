@@ -148,6 +148,11 @@ export function useAgents() {
   const agents = useMemo(() => sortAgentContacts(snapshot.agents), [snapshot.agents]);
   return { ...snapshot, agents };
 }
+/** True once the list has loaded and holds no agents; false while loading. */
+export function useAgentsEmpty() {
+  const { agents, loading } = useAgents();
+  return !loading && agents.length === 0;
+}
 export function useAgent(key: string | null) {
   return useAgents().agents.find((agent) => agentContactKey(agent) === key) ?? null;
 }

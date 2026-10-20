@@ -1,6 +1,4 @@
-import { PlusIcon } from "lucide-react";
 import { AgentFace } from "~/components/agents/face";
-import { Button } from "~/components/ui/button";
 import { agentContactKey, agentStatusLabel } from "./agents.logic";
 import { agentAttentionCount } from "./agentWorkspace.logic";
 import { useAgentUnread, useAgents } from "./agentsClient";
@@ -9,10 +7,10 @@ import type { AgentContact } from "./agents.types";
 export function AgentContacts({
   activeKey,
   onOpen,
-  onCreate,
 }: {
   activeKey: string | null;
   onOpen: (agent: AgentContact) => void;
+  /** Unused since the empty state moved to the index route; kept so callers stay stable. */
   onCreate: () => void;
 }) {
   const { agents, loading, error } = useAgents();
@@ -28,26 +26,8 @@ export function AgentContacts({
           Connecting to your agents…
         </p>
       )}
-      {!loading && agents.length === 0 && (
-        <div className="agent-empty">
-          {/* Neutral and awake: drawn in the foreground ink, with eye holes
-              that show the panel behind. */}
-          <AgentFace
-            seed="new-friend"
-            expression="neutre"
-            color="currentColor"
-            paper="none"
-            size={48}
-            className="text-foreground/90"
-          />
-          <p>No agents yet</p>
-          <span>Create an agent to talk to, give work to, and hear back from.</span>
-          <Button size="sm" onClick={onCreate}>
-            <PlusIcon aria-hidden />
-            Create your first agent
-          </Button>
-        </div>
-      )}
+      {/* With no agents the list column is hidden and the index route shows
+          the one empty state, so nothing is rendered here for that case. */}
       <ul aria-label="Agents">
         {agents.map((agent) => (
           <Contact

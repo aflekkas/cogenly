@@ -39,6 +39,13 @@ const buttonVariants = cva(
         xs: "h-7 gap-1 px-[calc(--spacing(2)-1px)] text-sm sm:h-6 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5",
       },
       variant: {
+        // The brand orange, reserved for first-run empty-state hero CTAs that
+        // start something new (first agent, first project, first repository).
+        // Everything else is the neutral default. The label is semibold so the
+        // white-on-ember contrast (3.2:1 at the top of the gradient, 4.1:1 at
+        // the bottom in dark; 4.7:1 in light) holds as large-text.
+        brand:
+          "border-transparent bg-linear-to-b from-brand-cta-top to-brand-cta-bottom font-semibold text-white shadow-black/24 shadow-xs not-disabled:inset-shadow-[0_1px_--theme(--color-white/22%)] [:active,[data-pressed]]:inset-shadow-[0_1px_--theme(--color-black/12%)] [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:from-brand-cta-top-hover [:hover,[data-pressed]]:to-brand-cta-bottom-hover [&_svg]:text-white",
         default:
           "not-disabled:inset-shadow-[0_1px_--theme(--color-white/16%)] border-primary bg-primary text-primary-foreground shadow-primary/24 shadow-xs [:active,[data-pressed]]:inset-shadow-[0_1px_--theme(--color-black/8%)] [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:bg-primary/90",
         destructive:

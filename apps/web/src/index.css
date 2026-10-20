@@ -132,15 +132,17 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --workspace-titlebar-control-size: 1.75rem;
   --workspace-titlebar-control-gap: 0.75rem;
   --workspace-titlebar-scroll-fade-height: 1.5rem;
-  /* Motion durations. fast: hover, press and color feedback. base: selection,
-     status swaps and toasts. slow: panels and larger surfaces. Pair them with
-     ease-standard; reduced motion zeroes the transitions that use them. */
+  /* Motion durations, tuned toward Apple's feel. fast: hover, press and color
+     feedback. base: selection, status swaps, popovers and toasts. slow: panels,
+     sheets and other large spatial moves (panels leave at 0.7x, see panelFlip).
+     Pair them with ease-standard; reduced motion zeroes the transitions that
+     use them. */
   --motion-duration-fast: 150ms;
-  --motion-duration-base: 200ms;
-  --motion-duration-slow: 250ms;
+  --motion-duration-base: 220ms;
+  --motion-duration-slow: 400ms;
   /* ease-standard for inline transitions and scripts (the theme token is
      inlined into utilities, so it has no runtime variable). */
-  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
   /* The reference column: the composer lands at 853px. */
   --chat-content-max-width: 53.8125rem;
   /* Transcript text sits this far inside the lane; the composer and user
@@ -207,21 +209,22 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --text-4xs--line-height: 1;
   --text-5xs: 0.4375rem;
   --text-5xs--line-height: 1;
-  /* Motion. standard is the app's default curve: a gentle start and a long
-     settle, so small state changes (hover, selection, status swaps) glide
-     rather than snap. ease-out and every bare transition-* utility use it too;
-     durations live in --motion-duration-* (:root). drawer is the decelerating
-     curve for surfaces that slide or pop in (composer context, pills). */
-  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --ease-out: cubic-bezier(0.2, 0, 0, 1);
-  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  /* Motion. standard is the app's default curve: the iOS sheet curve, a close
+     match for a critically damped spring (quick to respond, a long soft
+     settle, no bounce), so moves and state changes glide rather than snap.
+     ease-out and every bare transition-* utility use it too; durations live in
+     --motion-duration-* (:root). drawer is the same curve, named for surfaces
+     that slide or pop in (composer context, pills). */
+  --ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --default-transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
   --default-transition-duration: 150ms;
   --inset-shadow-control-highlight: 0 1px rgb(255 255 255 / 16%);
   --inset-shadow-control-pressed: 0 1px rgb(0 0 0 / 8%);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   /* Overlays (popup-motion, dialogs, sheets) enter on drawer and leave on
-     popup-exit, a quicker accelerating curve. */
-  --ease-popup-exit: cubic-bezier(0.4, 0, 1, 1);
+     popup-exit, a quicker, simpler ease-in-out. */
+  --ease-popup-exit: cubic-bezier(0.4, 0, 0.2, 1);
   /* The composer's elevation: a soft drop pulled in under the surface, shared
      by the composer, its context strip and attached banners. */
   --shadow-composer: 0 12px 28px -18px rgb(0 0 0 / 40%);
@@ -275,6 +278,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* The brand orange as a colour utility, for the few deliberate uses. */
   --color-brand-accent: var(--brand-accent-fill);
   --color-brand-accent-tint: var(--brand-accent-tint);
+  /* The brand button's gradient (components/ui/button, variant "brand"). */
+  --color-brand-cta-top: var(--brand-accent-cta-top);
+  --color-brand-cta-bottom: var(--brand-accent-cta-bottom);
+  --color-brand-cta-top-hover: var(--brand-accent-cta-top-hover);
+  --color-brand-cta-bottom-hover: var(--brand-accent-cta-bottom-hover);
   --color-primary-hover: var(--primary-hover);
   --color-send-idle: #595c5d;
   --color-send-idle-foreground: #121516;
@@ -659,7 +667,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   [data-app-sidebar] :is(.state-hover, .state-selected),
   .state-fade {
     transition-property: color, background-color, border-color, box-shadow, opacity, scale;
-    transition-duration: var(--motion-duration-base);
+    transition-duration: var(--motion-duration-fast);
     transition-timing-function: --theme(--ease-standard);
 
     @media (prefers-reduced-motion: reduce) {
@@ -679,7 +687,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    Compositor-only properties, a single transition per open or close. */
 @utility popup-motion {
   --popup-motion-offset: 4px;
-  --tw-duration: 160ms;
+  --tw-duration: 200ms;
   --tw-ease: --theme(--ease-drawer);
 
   &:is([data-starting-style], [data-ending-style]) {
@@ -705,7 +713,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     translate: calc(-1 * var(--popup-motion-offset)) 0;
   }
   &[data-ending-style] {
-    --tw-duration: 110ms;
+    --tw-duration: 140ms;
     --tw-ease: --theme(--ease-popup-exit);
   }
 
@@ -1436,6 +1444,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --brand-accent-fill-deep: #b03d10;
   --brand-accent-fill-foreground: var(--color-white);
   --brand-accent-tint: color-mix(in srgb, var(--brand-accent-fill) 12%, transparent);
+  /* Text-bearing brand buttons: the same burnt orange (white text 4.7:1),
+     lifting a step on hover. */
+  --brand-accent-cta-top: var(--brand-accent-fill);
+  --brand-accent-cta-bottom: var(--brand-accent-fill-deep);
+  --brand-accent-cta-top-hover: #d9511a;
+  --brand-accent-cta-bottom-hover: var(--brand-accent-fill);
   /* Everything else that used to be the accent (primary buttons, focus rings,
      checks, switches, sliders, progress, badges, links, text selection) is
      neutral: near-black on white here, near-white on dark below. */
@@ -1571,6 +1585,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --brand-accent-fill-deep: #e63e22;
     --brand-accent-fill-foreground: var(--color-white);
     --brand-accent-tint: color-mix(in srgb, var(--brand-accent-fill) 14%, transparent);
+    /* Text-bearing brand buttons start a step deeper than the icon-only send
+       tile so a semibold white label holds 3.2:1 at the top and 4.1:1 at the
+       bottom; hover lifts to the pure brand ramp. */
+    --brand-accent-cta-top: #f2652a;
+    --brand-accent-cta-bottom: var(--brand-accent-fill-deep);
+    --brand-accent-cta-top-hover: var(--brand-accent-fill);
+    --brand-accent-cta-bottom-hover: #f0472d;
     /* Neutral primary: the foreground white with the canvas as its text
        (17:1), a step dimmer on hover. */
     --primary: #f2f4f7;
