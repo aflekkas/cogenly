@@ -30,6 +30,7 @@ function ScrollArea({
   /** Override Base UI's focusable viewport when focusable descendants provide scroll access. */
   viewportTabIndex?: number;
 }) {
+  const outOfTabOrder = viewportTabIndex !== undefined && viewportTabIndex < 0;
   return (
     <ScrollAreaPrimitive.Root
       className={cn(
@@ -42,9 +43,15 @@ function ScrollArea({
       <ScrollAreaPrimitive.Viewport
         {...(viewportTabIndex === undefined ? {} : { tabIndex: viewportTabIndex })}
         className={cn(
-          "h-full max-h-[inherit] overflow-auto overscroll-contain rounded-[inherit] outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background data-has-overflow-x:overscroll-x-contain",
+          "h-full max-h-[inherit] overflow-auto overscroll-contain rounded-[inherit] outline-none data-has-overflow-x:overscroll-x-contain",
+          // Only a viewport that is a tab stop shows a focus ring. One taken out
+          // of the tab order can still receive focus from a click or a closing
+          // popup, and should not frame the whole region when it does.
+          !outOfTabOrder &&
+            "transition-shadow focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
           chainVerticalScroll && "overscroll-y-auto",
-          scrollFade && "scroll-fade focus-visible:mask-none",
+          scrollFade && "scroll-fade",
+          scrollFade && !outOfTabOrder && "focus-visible:mask-none",
           scrollFade && scrollFadePadding && "scroll-p-(--scroll-fade-size)",
           scrollFade && !scrollFadePadding && "has-focus-visible:mask-none",
           scrollbarGutter && "scrollbar-gutter-stable",

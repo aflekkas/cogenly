@@ -502,7 +502,10 @@ export function UsagePage() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron}>{topbarContent}</WorkspacePageHeader>
 
-        <ScrollArea className="min-h-0 flex-1">
+        {/* The page's buttons and rows give keyboard access, so the viewport
+            stays out of the tab order. As a tab stop, a click followed by a
+            page shortcut (C, T, L) drew a focus ring around the whole page. */}
+        <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
           <WorkspacePageContainer width="wide">
             {selectedEnvironments.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -1069,34 +1072,35 @@ function UsageEnvironmentFilter({
 
   return (
     <Menu>
-      <MenuTrigger render={<InlineButton />} className="group/usage-environment min-w-0 max-w-full">
+      <MenuTrigger
+        render={<Button variant="ghost" size="sm" />}
+        className="-mx-2 min-w-0 max-w-full shrink"
+      >
         <WorkspaceBreadcrumbText>{label}</WorkspaceBreadcrumbText>
-        <span className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">
-          {showUsageStatus && hasIssue ? (
-            <CircleAlertIcon
-              className="size-3.5 text-warning-foreground"
-              aria-label="Some environments could not report usage"
-            />
-          ) : (
-            <ChevronDownIcon
-              className="size-3.5 opacity-0 transition-opacity group-hover/usage-environment:opacity-100 group-focus-visible/usage-environment:opacity-100 group-data-popup-open/usage-environment:opacity-100"
-              aria-hidden
-            />
-          )}
-        </span>
+        {showUsageStatus && hasIssue ? (
+          <CircleAlertIcon
+            className="size-3.5 text-warning-foreground"
+            aria-label="Some environments could not report usage"
+          />
+        ) : (
+          <ChevronDownIcon className="size-3.5" aria-hidden />
+        )}
       </MenuTrigger>
       <MenuPopup align="start">
+        {/* "All" and individual environments are exclusive: picking one
+            environment out of "All" narrows to it, and clearing the last
+            one, or picking every one, goes back to "All". */}
         <MenuCheckboxItem
           checked={allSelected}
           closeOnClick={false}
-          onCheckedChange={(checked) => onSelectionChange(checked ? null : new Set())}
+          onCheckedChange={() => onSelectionChange(null)}
         >
           All environments
         </MenuCheckboxItem>
         <MenuSeparator />
         {environments.map((environment) => {
           const checked =
-            selectedEnvironmentIds === null ||
+            selectedEnvironmentIds !== null &&
             selectedEnvironmentIds.has(environment.environmentId);
           const progress = usageEnvironmentProgress(environment, refreshing);
           const status =
@@ -1123,10 +1127,12 @@ function UsageEnvironmentFilter({
               checked={checked}
               closeOnClick={false}
               onCheckedChange={(nextChecked) => {
-                const next = new Set(selectedEnvironments.map((entry) => entry.environmentId));
+                const next = new Set(selectedEnvironmentIds);
                 if (nextChecked) next.add(environment.environmentId);
                 else next.delete(environment.environmentId);
-                onSelectionChange(next.size === environments.length ? null : next);
+                onSelectionChange(
+                  next.size === 0 || next.size === environments.length ? null : next,
+                );
               }}
             >
               <span className="flex min-w-0 items-center gap-3">
@@ -1174,29 +1180,31 @@ function UsageProviderFilter({
   readonly onChange: (hiddenProviders: readonly UsageProviderKind[]) => void;
 }) {
   const visible = PROVIDER_ORDER.filter((provider) => !hiddenProviders.has(provider));
-  const label =
-    visible.length === PROVIDER_ORDER.length
-      ? "All providers"
-      : visible.length === 0
-        ? "No providers"
-        : visible.length === 1
-          ? PROVIDER_PRESENTATION[visible[0]!].label
-          : `${visible.length} providers`;
+  const allVisible = visible.length === PROVIDER_ORDER.length;
+  const label = allVisible
+    ? "All providers"
+    : visible.length === 0
+      ? "No providers"
+      : visible.length === 1
+        ? PROVIDER_PRESENTATION[visible[0]!].label
+        : `${visible.length} providers`;
 
   return (
     <Menu>
-      <MenuTrigger render={<InlineButton />} className="group/usage-provider min-w-0 max-w-full">
-        <span className="min-w-0 truncate">{label}</span>
-        <ChevronDownIcon
-          className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/usage-provider:opacity-100 group-focus-visible/usage-provider:opacity-100 group-data-popup-open/usage-provider:opacity-100"
-          aria-hidden
-        />
+      <MenuTrigger
+        render={<Button variant="ghost" size="sm" />}
+        className="-mx-2 min-w-0 max-w-full shrink"
+      >
+        <WorkspaceBreadcrumbText>{label}</WorkspaceBreadcrumbText>
+        <ChevronDownIcon className="size-3.5" aria-hidden />
       </MenuTrigger>
       <MenuPopup align="start">
+        {/* Exclusive like the environment filter: picking a provider out of
+            "All" narrows to it, and hiding none or every one goes back to "All". */}
         <MenuCheckboxItem
-          checked={hiddenProviders.size === 0}
+          checked={allVisible}
           closeOnClick={false}
-          onCheckedChange={(checked) => onChange(checked ? [] : PROVIDER_ORDER)}
+          onCheckedChange={() => onChange([])}
         >
           All providers
         </MenuCheckboxItem>
@@ -1204,15 +1212,16 @@ function UsageProviderFilter({
         {PROVIDER_ORDER.map((provider) => (
           <MenuCheckboxItem
             key={provider}
-            checked={!hiddenProviders.has(provider)}
+            checked={!allVisible && !hiddenProviders.has(provider)}
             closeOnClick={false}
-            onCheckedChange={(checked) =>
-              onChange(
-                PROVIDER_ORDER.filter((entry) =>
-                  entry === provider ? !checked : hiddenProviders.has(entry),
-                ),
-              )
-            }
+            onCheckedChange={(checked) => {
+              const next = allVisible
+                ? PROVIDER_ORDER.filter((entry) => entry !== provider)
+                : PROVIDER_ORDER.filter((entry) =>
+                    entry === provider ? !checked : hiddenProviders.has(entry),
+                  );
+              onChange(next.length === PROVIDER_ORDER.length ? [] : next);
+            }}
           >
             <span className="flex min-w-0 items-center gap-2">
               <ProviderMark provider={provider} className="size-3.5" />
