@@ -26,7 +26,10 @@ function badgeTint(name: string) {
 
 /**
  * A repository's tinted square with its initials. `heading` is the small mark
- * in the Work list; `inline` sits in running text at the size of the capitals.
+ * in the Work list. `inline` sits in running text: sized in em to the capitals
+ * of the surrounding text, resting on its baseline. It is an atomic inline box,
+ * so an underline on the surrounding link or button never runs through it, and
+ * its overflow clip puts its bottom edge on the baseline of the line.
  */
 export function RepositoryBadge({
   name,
@@ -36,15 +39,26 @@ export function RepositoryBadge({
   size?: "heading" | "inline";
 }) {
   const tint = badgeTint(name);
+  const colors = { backgroundColor: tint.background, color: tint.foreground };
+  if (size === "inline") {
+    return (
+      <span
+        aria-hidden
+        className="inline-block select-none overflow-hidden rounded-tile text-center align-baseline font-sans font-bold"
+        style={{ ...colors, width: "0.74em", height: "0.74em", marginInlineEnd: "0.3em" }}
+      >
+        {/* Initials are 0.38em of the surrounding text; the unitless line height fills the box. */}
+        <span className="block" style={{ fontSize: "0.38em", lineHeight: 1.95 }}>
+          {badgeInitials(name)}
+        </span>
+      </span>
+    );
+  }
   return (
     <span
       aria-hidden
-      className={
-        size === "inline"
-          ? "inline-flex size-5 shrink-0 items-center justify-center rounded-tile font-sans font-semibold text-2xs leading-none sm:size-6"
-          : "flex size-3.5 shrink-0 items-center justify-center rounded-tile font-sans font-semibold text-5xs leading-none"
-      }
-      style={{ backgroundColor: tint.background, color: tint.foreground }}
+      className="flex size-3.5 shrink-0 items-center justify-center rounded-tile font-sans font-semibold text-5xs leading-none"
+      style={colors}
     >
       {badgeInitials(name)}
     </span>

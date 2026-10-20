@@ -323,15 +323,13 @@ export function DraftHeroHeadline({
             />
           }
         >
-          <span className="inline-flex min-w-0 items-center gap-2">
+          {/* Plain inline flow, so the name shares the heading's baseline. The badge is an
+              atomic inline box and stays clear of the button's underline. */}
+          <span className="block">
             {!isScratchDraft && activeProjectDisplayName ? (
               <RepositoryBadge name={activeProjectDisplayName} size="inline" />
             ) : null}
-            <span className="min-w-0 truncate">
-              {isScratchDraft
-                ? "No repository"
-                : (activeProjectDisplayName ?? "Choose a repository")}
-            </span>
+            {isScratchDraft ? "No repository" : (activeProjectDisplayName ?? "Choose a repository")}
           </span>
         </TooltipTrigger>
         {activeProjectDisplayName && !isScratchDraft ? (
