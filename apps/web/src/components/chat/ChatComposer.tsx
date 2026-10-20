@@ -347,6 +347,7 @@ import {
 } from "./composerScrollGesture";
 import { prepareVideoFirstFrame } from "../../lib/videoFirstFrame";
 import { observeResize } from "~/lib/observeResize";
+import { subscribePanelMotion } from "~/lib/panelFlip";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
@@ -1114,16 +1115,18 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
 
     // The composer is centered and capped at a max width, so opening a side
     // panel slides it sideways without ever resizing it. Watching the anchor
-    // alone would leave the menu behind; the ancestors are what shrink, and
-    // they resize on every frame of the panel animation.
+    // alone would leave the menu behind; the ancestors are what shrink.
     const observed: Element[] = [anchor];
     for (let element = anchor.parentElement; element; element = element.parentElement) {
       observed.push(element);
     }
     const stopObserving = observeResize(observed, updatePosition);
+    // The composer glides on a transform when a panel toggles.
+    const stopFollowingPanels = subscribePanelMotion(updatePosition);
 
     return () => {
       stopObserving();
+      stopFollowingPanels();
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };

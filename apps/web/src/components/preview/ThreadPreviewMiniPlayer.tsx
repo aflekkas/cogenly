@@ -461,6 +461,8 @@ function MiniPlayerShell({
         <section
           aria-label={label}
           data-preview-mini-player={sourceKey}
+          // Glides from its old place when a panel toggle moves it.
+          data-panel-flip="start"
           className="pointer-events-none absolute select-none"
           style={{
             left: frame.x,

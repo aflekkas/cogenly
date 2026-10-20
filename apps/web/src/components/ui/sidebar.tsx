@@ -4,6 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { PanelLeft, PanelLeftClose } from "lucide";
 import * as React from "react";
 import { cn } from "~/lib/utils";
+import { capturePanelFlip, playPanelFlip, type PanelFlipSnapshot } from "~/lib/panelFlip";
 import { Button } from "~/components/ui/button";
 import { Input, type InputProps } from "~/components/ui/input";
 import { MorphIcon } from "~/components/MorphIcon";
@@ -118,9 +119,17 @@ function SidebarProvider({
   // We use openProp and setOpenProp for control from outside the component.
   const [_open, _setOpen] = React.useState(defaultOpen);
   const open = openProp ?? _open;
+  const wrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const flipSnapshotRef = React.useRef<PanelFlipSnapshot | null>(null);
   const setOpen = React.useCallback(
     async (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === "function" ? value(open) : value;
+      // Only a user toggle animates: the snapshot is taken here, before the
+      // layout changes, and played once the new state commits.
+      const wrapper = wrapperRef.current;
+      if (openState !== open && !isMobile && wrapper?.dataset.panelAnimations === "true") {
+        flipSnapshotRef.current = capturePanelFlip(wrapper);
+      }
       if (setOpenProp) {
         setOpenProp(openState);
       } else {
@@ -135,8 +144,22 @@ function SidebarProvider({
         value: String(openState),
       });
     },
-    [setOpenProp, open],
+    [setOpenProp, open, isMobile],
   );
+
+  // The gap snaps to its new width in one layout. The panel slides on
+  // translate (Sidebar) and marked main-pane content glides from where it was
+  // on the same curve, so nothing lays out per frame.
+  React.useLayoutEffect(() => {
+    const snapshot = flipSnapshotRef.current;
+    flipSnapshotRef.current = null;
+    const wrapper = wrapperRef.current;
+    if (!snapshot || !wrapper) return;
+    const duration =
+      Number.parseFloat(getComputedStyle(wrapper).getPropertyValue("--panel-animation-duration")) ||
+      0;
+    if (duration > 0) playPanelFlip(snapshot, duration);
+  }, [open]);
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
@@ -174,6 +197,7 @@ function SidebarProvider({
   return (
     <SidebarContext value={contextValue}>
       <div
+        ref={wrapperRef}
         // Inset layouts opt into bg-sidebar through className.
         className={cn(
           "group/sidebar-wrapper flex min-h-svh w-full",
@@ -199,50 +223,6 @@ function SidebarProvider({
   );
 }
 
-/**
- * Slides the main pane after an offcanvas toggle. The sidebar gap snaps to its
- * new width, so the pane lays out once at its final size instead of every
- * frame (a width transition re-ran ResizeObservers and re-rendered the chat on
- * each frame). The pane then plays a transform from where it was back to rest:
- * closing, it starts under the leaving sidebar; opening, it starts at the old
- * edge while its right side, already narrowed, shows the wrapper behind it.
- */
-function useSidebarMainSlide(
-  peerRef: React.RefObject<HTMLDivElement | null>,
-  state: "expanded" | "collapsed",
-  side: "left" | "right",
-  enabled: boolean,
-) {
-  const previousStateRef = React.useRef(state);
-  React.useLayoutEffect(() => {
-    if (previousStateRef.current === state) return;
-    previousStateRef.current = state;
-    const peer = peerRef.current;
-    if (!enabled || !peer || !peer.closest("[data-panel-animations='true']")) return;
-    const container = peer.querySelector<HTMLElement>("[data-slot='sidebar-container']");
-    const width = container?.offsetWidth ?? 0;
-    if (width === 0) return;
-    let main = peer.nextElementSibling;
-    while (main && !(main instanceof HTMLElement && main.dataset.slot === "sidebar-inset")) {
-      main = main.nextElementSibling;
-    }
-    if (!(main instanceof HTMLElement)) return;
-    const direction = side === "left" ? 1 : -1;
-    const from = (state === "collapsed" ? width : -width) * direction;
-    const duration =
-      Number.parseFloat(getComputedStyle(peer).getPropertyValue("--panel-animation-duration")) ||
-      200;
-    main.getAnimations().forEach((animation) => {
-      if (animation.id === "sidebar-main-slide") animation.cancel();
-    });
-    const animation = main.animate(
-      [{ transform: `translateX(${from}px)` }, { transform: "translateX(0)" }],
-      { duration, easing: "cubic-bezier(0.32, 0.72, 0, 1)" },
-    );
-    animation.id = "sidebar-main-slide";
-  }, [enabled, peerRef, side, state]);
-}
-
 function Sidebar({
   side = "left",
   variant = "sidebar",
@@ -258,8 +238,6 @@ function Sidebar({
   resizable?: boolean | SidebarResizableOptions;
 }) {
   const { isMobile, state, openMobile, setOpenMobile, setMobileSheetElement } = useSidebar();
-  const peerRef = React.useRef<HTMLDivElement | null>(null);
-  useSidebarMainSlide(peerRef, state, side, !isMobile && collapsible === "offcanvas");
   const resolvedResizable = React.useMemo<SidebarResolvedResizableOptions | null>(() => {
     if (isMobile || collapsible === "none" || !resizable) {
       return null;
@@ -340,7 +318,6 @@ function Sidebar({
   return (
     <SidebarInstanceContext value={instanceContextValue}>
       <div
-        ref={peerRef}
         className="group peer hidden text-sidebar-foreground md:block"
         data-collapsible={state === "collapsed" ? collapsible : ""}
         data-side={side}
@@ -351,9 +328,11 @@ function Sidebar({
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
-            // The gap snaps to its new width in one layout; useSidebarMainSlide
-            // then slides the main pane there on the compositor.
-            "relative w-(--sidebar-width) bg-transparent",
+            // The gap snaps to its new width in one layout; SidebarProvider
+            // glides the main pane's marked content there on the compositor.
+            // While the panel slides in, the gap shows beside it in the main
+            // pane's color, so the pane reads as already making room.
+            "relative w-(--sidebar-width) bg-transparent group-data-[variant=sidebar]:bg-background",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
@@ -366,9 +345,10 @@ function Sidebar({
           className={cn(
             "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex",
             // Offcanvas open/close is a transform only, so it runs on the
-            // compositor without relayout or repainting the grain. The main
-            // pane rides the same curve (useSidebarMainSlide), edge to edge.
-            "[[data-panel-animations=true]_&]:transition-[translate] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-drawer",
+            // compositor without relayout or repainting the grain. It sits
+            // above the main pane, so its edge is the pane's moving edge while
+            // the pane's content glides on the same curve (panelFlip).
+            "[[data-panel-animations=true]_&]:transition-[translate] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-standard",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:-translate-x-full"
               : "right-0 group-data-[collapsible=offcanvas]:translate-x-full",
@@ -386,7 +366,11 @@ function Sidebar({
             data-sidebar="sidebar"
             data-slot="sidebar-inner"
           >
-            {children}
+            {/* The surface stays opaque while it slides under the rail; only
+                its contents fade, as one layer rather than per row. */}
+            <div className="flex min-h-0 w-full flex-1 flex-col group-data-[collapsible=offcanvas]:opacity-0 [[data-panel-animations=true]_&]:transition-opacity [[data-panel-animations=true]_&]:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:ease-standard">
+              {children}
+            </div>
           </div>
         </div>
       </div>

@@ -22,7 +22,7 @@ export function NoProjectsHero() {
         {/* The desktop window only moves where CSS opts in, so keep a titlebar strip. */}
         {isElectron ? <WorkspacePageHeader electron /> : null}
         <Empty size="hero" className="flex-1">
-          <div className="w-full max-w-lg px-8 py-12">
+          <div className="w-full max-w-lg px-8 py-12" data-panel-flip="center">
             <EmptyHeader className="max-w-none">
               <EmptyTitle>What should we work on?</EmptyTitle>
               <EmptyDescription>

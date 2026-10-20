@@ -9536,7 +9536,7 @@ export default function ChatView(props: ChatViewProps) {
           ref={threadPanelPopoverAnchorRef}
           data-chat-header
           className={cn(
-            "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
+            "relative bg-background",
             isElectron
               ? cn(
                   "drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 sm:px-5",
@@ -9572,8 +9572,9 @@ export default function ChatView(props: ChatViewProps) {
           />
         </header>
 
-        {/* Main content area with optional plan sidebar */}
-        <div className="relative flex min-h-0 min-w-0 flex-1">
+        {/* Main content area with optional plan sidebar. Its centered lane
+            glides to its new center when a panel opens or closes (panelFlip). */}
+        <div className="relative flex min-h-0 min-w-0 flex-1" data-panel-flip="center">
           {/* Chat column */}
           <ThreadFindCanvas
             findOptions={{

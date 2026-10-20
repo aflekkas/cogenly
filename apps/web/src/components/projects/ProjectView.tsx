@@ -139,7 +139,7 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
 
   const header = (
     <WorkspacePageHeader electron={isElectron} className="border-b border-border">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2" data-panel-flip="start">
         {label ? <ProjectColorDot color={label.color} className="size-2.5" /> : null}
         <h1 className="min-w-0 truncate text-sm font-medium">{label?.name ?? "Project"}</h1>
       </div>

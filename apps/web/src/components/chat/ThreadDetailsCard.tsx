@@ -172,6 +172,9 @@ export function ThreadDetailsCard({
             }}
             data-density={density}
             data-thread-details-panel="inline"
+            // Held to the canvas's right edge: it stays put while the chat
+            // lane around it glides on a panel toggle.
+            data-panel-flip="end"
           >
             {card}
           </aside>
