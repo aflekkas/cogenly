@@ -238,7 +238,8 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           />
         </>
       )}
-      <SidebarUpdatePill />
+      {/* The rail's Updates button carries updates beside the rail. */}
+      {navRailVisible ? null : <SidebarUpdatePill />}
     </SidebarMenu>
   );
 });

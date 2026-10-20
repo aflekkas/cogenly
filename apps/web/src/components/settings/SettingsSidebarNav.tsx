@@ -103,6 +103,13 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navItems = SETTINGS_NAV_ITEMS.filter(
     (item) => item.to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch),
   );
+  const activeNavIndex = navItems.findIndex(
+    (item) =>
+      // Open source licenses is a detail page of General.
+      (item.to === "/settings/general" && pathname === "/settings/open-source-licenses") ||
+      pathname === item.to ||
+      pathname.startsWith(`${item.to}/`),
+  );
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -305,29 +312,38 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 ))}
               </SidebarMenu>
             ) : (
-              <SidebarMenu>
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const isGeneralDetailPage =
-                    item.to === "/settings/general" &&
-                    pathname === "/settings/open-source-licenses";
-                  const isActive =
-                    isGeneralDetailPage ||
-                    pathname === item.to ||
-                    pathname.startsWith(`${item.to}/`);
-                  return (
-                    <SidebarMenuItem key={item.to}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        onClick={() => handleSectionClick(item.to)}
-                      >
-                        <Icon />
-                        <span className="truncate">{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
+              <div className="sliding-selection relative isolate">
+                <SidebarMenu>
+                  {activeNavIndex >= 0 ? (
+                    // One highlight slides between the rows, which keep their
+                    // selected text but drop their own fill. The rows are h-8
+                    // with the menu's gap-1 between them.
+                    <li
+                      aria-hidden
+                      className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-8 rounded-(--control-radius) state-selected transition-transform duration-(--motion-duration-mode-switch) ease-out motion-reduce:transition-none"
+                      style={{
+                        transform: `translateY(calc(${activeNavIndex} * (100% + var(--spacing))))`,
+                      }}
+                    />
+                  ) : null}
+                  {navItems.map((item, index) => {
+                    const Icon = item.icon;
+                    const isActive = index === activeNavIndex;
+                    return (
+                      <SidebarMenuItem key={item.to}>
+                        <SidebarMenuButton
+                          isActive={isActive}
+                          aria-current={isActive ? "page" : undefined}
+                          onClick={() => handleSectionClick(item.to)}
+                        >
+                          <Icon />
+                          <span className="truncate">{item.label}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </div>
             )}
           </div>
         </SidebarGroup>

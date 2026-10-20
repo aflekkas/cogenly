@@ -757,6 +757,19 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+/* Around a menu whose selection fill is one highlight sliding behind its rows
+   (the settings nav): the selected row keeps its selected text, drops its own fill. */
+@utility sliding-selection {
+  & [data-slot="sidebar-menu-button"][data-active="true"] {
+    --state-selected-fill: transparent;
+    --state-selected-sheen-top: transparent;
+    --state-selected-sheen-bottom: transparent;
+    --state-selected-highlight: transparent;
+    --state-selected-edge: transparent;
+    --state-selected-shadow: 0 0 #0000;
+  }
+}
+
 /* Popup rows (menu, select, combobox, autocomplete and command items) show
    hover, highlight and selection as a plain fill, without the selected edge,
    top highlight or shadow. The highlighted row is the keyboard focus, so a
