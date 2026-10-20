@@ -162,7 +162,6 @@ interface RightPanelStoreState {
   close: (ref: ScopedThreadRef) => void;
   setMaximized: (ref: ScopedThreadRef, maximized: boolean) => void;
   toggleVisibility: (ref: ScopedThreadRef) => void;
-  toggle: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
   removeThread: (ref: ScopedThreadRef) => void;
 }
 
@@ -814,22 +813,6 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             ...current,
             isOpen: !current.isOpen,
           })),
-        ),
-      toggle: (ref, kind) =>
-        set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => {
-            const active = current.surfaces.find(
-              (surface) => surface.id === current.activeSurfaceId,
-            );
-            if (current.isOpen && active?.kind === kind) {
-              return { ...current, isOpen: false };
-            }
-            if (kind === "preview") {
-              const existing = current.surfaces.find((surface) => surface.kind === "preview");
-              return upsertSurface(current, existing ?? browserSurface(null));
-            }
-            return upsertSurface(current, singletonSurface(kind));
-          }),
         ),
       removeThread: (ref) =>
         set((state) => {
