@@ -7,6 +7,7 @@ import {
   usePreviewPanelInlineSize,
 } from "~/hooks/usePreviewPanelInlineSize";
 import { RESIZABLE_WIDTH_PROPERTY } from "~/hooks/useResizableWidth";
+import { PANEL_EXIT_DURATION_SCALE } from "~/lib/panelFlip";
 
 export { getPreviewPanelMaxWidth };
 import { cn } from "~/lib/utils";
@@ -88,6 +89,10 @@ function PreviewPanelShellFrame(
         // once and slides out over the widened chat column.
         collapsible &&
           "[[data-panel-animations=true]_&]:transition-[translate] [[data-panel-animations=true]_&]:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:ease-standard",
+        // Closing is quicker than opening, on the sidebar's scale (panelFlip).
+        collapsible &&
+          !open &&
+          "[[data-panel-animations=true]_&]:duration-(--panel-exit-animation-duration)",
         collapsible && open && "[[data-panel-animations=true]_&]:starting:translate-x-full",
         collapsible && !open && "pointer-events-none absolute inset-y-0 right-0 translate-x-full",
       )}
@@ -96,6 +101,7 @@ function PreviewPanelShellFrame(
           ? ({
               [RESIZABLE_WIDTH_PROPERTY]: `${width}px`,
               width: maximized ? "100%" : `var(${RESIZABLE_WIDTH_PROPERTY})`,
+              "--panel-exit-animation-duration": `calc(var(--panel-animation-duration) * ${PANEL_EXIT_DURATION_SCALE})`,
             } as CSSProperties)
           : undefined
       }

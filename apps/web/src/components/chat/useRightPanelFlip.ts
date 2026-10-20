@@ -2,20 +2,29 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useEffect, useLayoutEffect, useRef } from "react";
 
-import { capturePanelFlip, playPanelFlip, type PanelFlipSnapshot } from "../../lib/panelFlip";
+import {
+  capturePanelFlip,
+  PANEL_EXIT_DURATION_SCALE,
+  playPanelFlip,
+  type PanelFlipSnapshot,
+} from "../../lib/panelFlip";
 import { usePanelAnimationSettings } from "../../panelAnimations";
 import { useRightPanelStore } from "../../rightPanelStore";
 
 /**
- * Glides the chat's marked content when the inline right panel opens or
- * closes. The store notifies synchronously, before React renders the change,
- * so the snapshot holds the old layout; the flip plays once `open` commits.
+ * Glides the chat's marked content when the inline right panel opens, closes
+ * or maximizes. The store notifies synchronously, before React renders the
+ * change, so the snapshot holds the old layout; the flip plays once the new
+ * layout commits. Contained, like the sidebar's: the chat column keeps its
+ * fixed edge while the panel covers or uncovers the other, so it never lays
+ * out past the window. Closing is quicker than opening.
  */
 export function useRightPanelFlip(
   root: HTMLElement | null,
   threadRef: ScopedThreadRef | null,
   inline: boolean,
   open: boolean,
+  maximized: boolean,
 ) {
   const { active, durationMs } = usePanelAnimationSettings();
   const snapshotRef = useRef<PanelFlipSnapshot | null>(null);
@@ -24,8 +33,12 @@ export function useRightPanelFlip(
   useEffect(() => {
     if (!root || threadKey === null || !inline || !active) return;
     return useRightPanelStore.subscribe((state, previous) => {
-      const isOpen = state.byThreadKey[threadKey]?.isOpen === true;
-      if (isOpen !== (previous.byThreadKey[threadKey]?.isOpen === true)) {
+      const next = state.byThreadKey[threadKey];
+      const before = previous.byThreadKey[threadKey];
+      if (
+        next?.isOpen !== before?.isOpen ||
+        (next?.maximized ?? false) !== (before?.maximized ?? false)
+      ) {
         snapshotRef.current = capturePanelFlip(root);
       }
     });
@@ -34,6 +47,13 @@ export function useRightPanelFlip(
   useLayoutEffect(() => {
     const snapshot = snapshotRef.current;
     snapshotRef.current = null;
-    if (snapshot) playPanelFlip(snapshot, durationMs);
-  }, [durationMs, open]);
+    if (!snapshot) return;
+    playPanelFlip(
+      snapshot,
+      open ? durationMs : Math.round(durationMs * PANEL_EXIT_DURATION_SCALE),
+      {
+        contain: true,
+      },
+    );
+  }, [durationMs, open, maximized]);
 }
