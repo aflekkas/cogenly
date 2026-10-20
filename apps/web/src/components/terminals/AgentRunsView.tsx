@@ -166,7 +166,7 @@ function RunRow({
             onDoubleClick={onOpenOutput}
             className={cn(
               "group mx-1 flex h-7 cursor-pointer items-center gap-2 rounded-md px-2 text-xs [contain-intrinsic-size:auto_1.75rem] [content-visibility:auto] state-hover",
-              selected && "state-selected state-selected-indicator",
+              selected && "state-selected",
             )}
           />
         }
