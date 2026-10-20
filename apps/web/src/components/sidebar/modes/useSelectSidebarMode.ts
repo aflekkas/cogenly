@@ -1,11 +1,8 @@
 import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 
-import { useComposerDraftStore } from "../../../composerDraftStore";
-import { useThreadKindResolver } from "../../../hooks/useThreadKind";
-import { readThreadShell } from "../../../state/entities";
+import { useReadRouteThreadKind } from "../../../hooks/useThreadKind";
 import { sidebarModeForThreadKind } from "../../../threadCapabilities";
-import { resolveThreadRouteTarget } from "../../../threadRoutes";
 import { useUiStateStore } from "../../../uiStateStore";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "../mainAppLocation";
 import { modeSwitchReplacesMainPanel, type MainPanelContent } from "./modeLanding.logic";
@@ -21,27 +18,19 @@ import type { SidebarMode } from "./sidebarModes.logic";
 export function useSelectSidebarMode() {
   const setMode = useUiStateStore((store) => store.setSidebarMode);
   const router = useRouter();
-  const resolveThreadKind = useThreadKindResolver();
+  const readRouteThreadKind = useReadRouteThreadKind();
   const navigateToMainApp = useNavigateToMainApp();
 
   const readMainPanelContent = useCallback((): MainPanelContent => {
-    const { location, matches } = router.state;
-    if (location.pathname === "/") return { kind: "index" };
-    if (location.pathname === "/project" || location.pathname.startsWith("/project/"))
+    const { pathname } = router.state.location;
+    if (pathname === "/") return { kind: "index" };
+    if (pathname === "/project" || pathname.startsWith("/project/"))
       return { kind: "project-view" };
-    const target = resolveThreadRouteTarget(matches.at(-1)?.params ?? {});
-    if (target === null) return { kind: "other" };
-    if (target.kind === "server") {
-      const thread = readThreadShell(target.threadRef);
-      return thread
-        ? { kind: "thread", mode: sidebarModeForThreadKind(resolveThreadKind(thread)) }
-        : { kind: "other" };
-    }
-    const draft = useComposerDraftStore.getState().getDraftSession(target.draftId);
-    return draft
-      ? { kind: "thread", mode: sidebarModeForThreadKind(resolveThreadKind(draft)) }
-      : { kind: "other" };
-  }, [resolveThreadKind, router]);
+    const kind = readRouteThreadKind();
+    return kind === null
+      ? { kind: "other" }
+      : { kind: "thread", mode: sidebarModeForThreadKind(kind) };
+  }, [readRouteThreadKind, router]);
 
   return useCallback(
     (next: SidebarMode, options?: { readonly leaveUtilityPage?: boolean }) => {

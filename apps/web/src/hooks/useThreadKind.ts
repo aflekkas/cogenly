@@ -1,11 +1,14 @@
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentId } from "@t3tools/contracts";
+import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 
 import { useAgents } from "../agents/agentsClient";
-import { useProjects } from "../state/entities";
+import { useComposerDraftStore } from "../composerDraftStore";
+import { readThreadShell, useProjects } from "../state/entities";
 import { useEnvironments } from "../state/environments";
 import { classifyThreadKind, type ThreadKind } from "../threadCapabilities";
+import { resolveThreadRouteTarget } from "../threadRoutes";
 
 interface ThreadKindInput {
   readonly environmentId: EnvironmentId;
@@ -54,4 +57,23 @@ export function useThreadKindResolver(): (thread: ThreadKindInput) => ThreadKind
 export function useThreadKind(thread: ThreadKindInput | null): ThreadKind | null {
   const resolve = useThreadKindResolver();
   return thread === null ? null : resolve(thread);
+}
+
+/**
+ * Reads, at call time, the kind of the thread or draft the route shows; null
+ * on any other page or before the thread reaches this client. For event
+ * handlers that act on whatever is open.
+ */
+export function useReadRouteThreadKind(): () => ThreadKind | null {
+  const router = useRouter();
+  const resolve = useThreadKindResolver();
+  return useCallback(() => {
+    const target = resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});
+    if (target === null) return null;
+    const thread =
+      target.kind === "server"
+        ? readThreadShell(target.threadRef)
+        : useComposerDraftStore.getState().getDraftSession(target.draftId);
+    return thread ? resolve(thread) : null;
+  }, [resolve, router]);
 }
