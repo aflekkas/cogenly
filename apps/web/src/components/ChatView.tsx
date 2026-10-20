@@ -333,6 +333,7 @@ import {
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
+import { useRightPanelFlip } from "./chat/useRightPanelFlip";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
@@ -1770,6 +1771,12 @@ export default function ChatView(props: ChatViewProps) {
     panelAnimationDurationMs,
   );
   const rightPanelPresent = rightPanelPresence.present;
+  useRightPanelFlip(
+    workspaceLayoutElement,
+    activeThreadRef,
+    !shouldUsePlanSidebarSheet,
+    rightPanelOpen,
+  );
   const rightPanelControlsInPanel =
     shouldUsePlanSidebarSheet && rightPanelPresent && rightPanelOpen;
   const rightPanelControlsAtRoot = rightPanelPresent && !shouldUsePlanSidebarSheet;
@@ -9526,8 +9533,10 @@ export default function ChatView(props: ChatViewProps) {
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
       <div
         className={cn(
-          "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
-          rightPanelMaximized ? "w-0 flex-none" : "flex-1",
+          // isolate keeps the chat's raised overlays under the right panel, so
+          // content gliding beside a sliding panel passes beneath it unclipped.
+          "isolate flex min-h-0 min-w-0 flex-col",
+          rightPanelMaximized ? "w-0 flex-none overflow-x-hidden" : "flex-1",
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
