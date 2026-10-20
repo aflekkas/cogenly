@@ -1,4 +1,9 @@
-import { type EnvironmentId, type ProjectLabelId, type ScopedProjectRef } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  type ProjectId,
+  type ProjectLabelId,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { ThreadTerminalStatusButton } from "./ThreadStatusIndicators";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
@@ -161,6 +166,8 @@ import {
   firstValidTimestampMs,
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
+  isSidebarThreadAwaitingUser,
+  sidebarThreadActivityMs,
   isSidebarThreadWorking,
   isTrailingDoubleClick,
   resolveAdjacentThreadId,
@@ -272,6 +279,7 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 const SETTLED_SHELF_EXPANDED_KEY = "cogenly:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "cogenly:sidebar:snoozed-expanded";
 const WORKING_SHELF_EXPANDED_KEY = "cogenly:sidebar:working-expanded";
+const ATTENTION_FILTER_OPEN_KEY = "cogenly:sidebar:attention-open";
 
 // Working beta: when this client saw each thread leave the Working shelf.
 // Module scope keeps the inbox order across routes that unmount the sidebar.
@@ -458,10 +466,9 @@ function SnoozeMenuButton(props: {
   );
 }
 
-// Unsent work shares one look: the new-thread draft rows and thread rows
-// with unsent composer text both use this tint and pen so they read alike.
-const draftSurfaceClassName = "state-fade bg-warning/4 hover:bg-warning/8";
-const draftPenClassName = "size-3 shrink-0 text-warning-foreground";
+// Unsent work is marked by a quiet pen, on draft cards and on thread rows
+// with unsent composer text alike; their surface is the plain card's.
+const draftPenClassName = "size-3 shrink-0 text-secondary-label";
 
 // Pointer travel before a press on a row starts a context drag, or a press on
 // its action button starts a sweep. Shorter presses stay clicks.
@@ -510,6 +517,7 @@ function SidebarSectionHeader(props: {
 const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   draftId: DraftId;
   composer: ComposerThreadDraftState;
+  branch?: string | null;
   project: ProjectFaviconProject | null;
   projectDisplayName: string | null;
   isActive: boolean;
@@ -623,8 +631,9 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
       </li>
     );
   }
+  // A Work card like any other, marked as a draft in the status slot.
   return (
-    <li className="list-none py-0.5">
+    <li className="list-none py-1">
       <div
         role="button"
         tabIndex={0}
@@ -632,33 +641,105 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         aria-current={accessibility.current}
         data-testid="sidebar-draft-row"
         className={cn(
-          "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-lg text-left text-sidebar-foreground outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          props.isActive ? "state-selected" : draftSurfaceClassName,
+          "group/sidebar-row sidebar-row-motion relative w-full cursor-pointer overflow-hidden rounded-rail text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          props.isActive
+            ? "state-selected"
+            : "state-hover bg-(--sidebar-card) text-sidebar-foreground",
         )}
         onClick={handleActivate}
         onContextMenu={handleContextMenu}
         onKeyDown={handleKeyDown}
       >
         <span className="sr-only">{preview}</span>
-        <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
+        <div className="relative z-10 h-[66px] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
           <div className="flex h-5 min-w-0 items-center gap-1.5">
-            <SquarePenIcon aria-hidden className={draftPenClassName} />
-            {props.project ? (
-              <ProjectFavicon project={props.project} className="size-4 shrink-0" />
-            ) : null}
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-secondary-label">
-              {props.projectDisplayName}
+            <span
+              aria-hidden
+              className={cn(
+                "min-w-0 flex-1 truncate text-card font-medium transition-colors duration-(--motion-duration-base) motion-reduce:transition-none",
+                props.isActive
+                  ? "text-foreground"
+                  : "text-muted-foreground group-hover/sidebar-row:text-foreground",
+              )}
+            >
+              {preview}
             </span>
-            <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end">
-              {discardButton}
+            <span className="relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
+              <span
+                aria-hidden
+                className="pointer-events-none flex items-center gap-1 self-center text-secondary-label transition-[opacity,translate] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none group-has-[:focus-visible]/sidebar-row:-translate-x-1 group-has-[:focus-visible]/sidebar-row:opacity-0 group-any-hover/sidebar-row:-translate-x-1 group-any-hover/sidebar-row:opacity-0"
+              >
+                <SquarePenIcon className={draftPenClassName} />
+                Draft
+              </span>
+              <span className="absolute inset-y-0 right-0 flex items-center">{discardButton}</span>
             </span>
           </div>
-          <div aria-hidden className="mt-0.5 truncate text-sm font-medium text-foreground/90">
-            {preview}
+          <div className="mt-1 flex min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
+            {props.branch ? (
+              <>
+                <GitBranchIcon aria-hidden className="size-3 shrink-0" />
+                <span className="min-w-0 flex-1 fade-truncate">{props.branch}</span>
+              </>
+            ) : null}
           </div>
         </div>
       </div>
     </li>
+  );
+});
+
+/**
+ * One Work draft, placed in its repository's group by the sidebar. Reads its
+ * own composer, so typing in another draft repaints nothing here. The open
+ * draft's card is frozen at the moment it became the route, and a draft never
+ * left has no card at all, as in SidebarDraftBlock.
+ */
+const SidebarWorkDraftCard = memo(function SidebarWorkDraftCard(props: {
+  draftId: DraftId;
+  branch: string | null;
+  project: ProjectFaviconProject | null;
+  projectDisplayName: string | null;
+  isActive: boolean;
+  onNavigate: (draftId: DraftId) => void;
+  onContextMenu: (draftId: DraftId, position: { x: number; y: number }) => void;
+}) {
+  const withContent = (composer: ComposerThreadDraftState | undefined) =>
+    composer && composerDraftHasUserContent(composer) ? composer : null;
+  const [frozen, setFrozen] = useState(() => ({
+    isActive: props.isActive,
+    composer: props.isActive
+      ? withContent(useComposerDraftStore.getState().draftsByThreadKey[props.draftId])
+      : null,
+  }));
+  if (frozen.isActive !== props.isActive) {
+    setFrozen({
+      isActive: props.isActive,
+      composer: props.isActive
+        ? withContent(useComposerDraftStore.getState().draftsByThreadKey[props.draftId])
+        : null,
+    });
+  }
+  const liveComposer = useComposerDraftStore((store) =>
+    props.isActive ? undefined : store.draftsByThreadKey[props.draftId],
+  );
+  const composer = props.isActive ? frozen.composer : withContent(liveComposer);
+  if (!composer) return null;
+  return (
+    <SidebarDraftRow
+      draftId={props.draftId}
+      composer={composer}
+      branch={props.branch}
+      project={props.project}
+      projectDisplayName={props.projectDisplayName}
+      isActive={props.isActive}
+      slim={false}
+      onNavigate={props.onNavigate}
+      // The /draft/$draftId route redirects home on its own when the draft it
+      // renders disappears, so discarding the open draft needs nothing more.
+      onDiscard={discardComposerDraft}
+      onContextMenu={props.onContextMenu}
+    />
   );
 });
 
@@ -1437,12 +1518,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const [snoozeMenuOpenRaw, setSnoozeMenuOpen] = useState(false);
   // Snooze is offered only where it can succeed: capability-gated and never
   // on blocked-on-you work or queued turns (the server rejects both).
+  // Snoozing is an action on live work; snoozed rows wake and settled rows unsettle.
   const showSnoozeButton =
+    variantAction === "settle" &&
     canOperateThread &&
     props.snoozeSupported &&
     canSnooze(thread, { now: new Date().toISOString() });
-  const showHoverActions =
-    (canOperateThread && props.settlementSupported) || showSnoozeButton || hasUnsentDraft;
+  // The card's primary hover action: settle live work, wake a snoozed task,
+  // unsettle a settled one.
+  const showPrimaryAction =
+    variantAction === "unsnooze" ? props.snoozeSupported : props.settlementSupported;
   // If the thread becomes blocked while the popover is open, the button
   // unmounts without firing onOpenChange(false). Deriving the flag keeps a
   // stale true from permanently hiding the status label / pinning the
@@ -1466,7 +1551,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     props.isActive || isSelected || props.sweepAction !== null
       ? "state-selected"
       : hasUnsentDraft
-        ? cn(draftSurfaceClassName, "text-sidebar-foreground")
+        ? "state-hover bg-(--sidebar-card) text-sidebar-foreground"
         : shouldRecede
           ? "state-hover bg-(--sidebar-card) text-sidebar-muted-foreground/75"
           : "state-hover bg-(--sidebar-card) text-sidebar-foreground",
@@ -1679,7 +1764,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   render={
                     <button
                       type="button"
-                      aria-label="Un-settle thread"
+                      aria-label="Unsettle thread"
                       onClick={handleUnsettleClick}
                       onPointerDown={handleActionPointerDown}
                       className={cn(
@@ -1691,7 +1776,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 >
                   <Undo2Icon className="mb-px size-3.5" />
                 </TooltipTrigger>
-                <TooltipPopup side="top">Un-settle thread</TooltipPopup>
+                <TooltipPopup side="top">Unsettle thread</TooltipPopup>
               </Tooltip>
             ) : (
               <button
@@ -1776,7 +1861,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   snoozeMenuOpen && "pointer-events-none -translate-x-1 opacity-0",
                 )}
               >
-                {topStatus ? (
+                {variantAction === "unsnooze" &&
+                props.snoozeWakeLabelText !== null &&
+                !isWokeStatus ? (
+                  // Snoozed tasks show when they come back.
+                  <span key="wake" className="swap-motion text-info-foreground">
+                    {props.snoozeWakeLabelText}
+                  </span>
+                ) : topStatus ? (
                   isWokeStatus ? (
                     <Tooltip>
                       <TooltipTrigger
@@ -1838,11 +1930,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   )
                 ) : (
                   <span key="time" className="swap-motion">
-                    {threadTimeLabel(thread)}
+                    {variantAction === "unsettle"
+                      ? settledTimeLabel(thread)
+                      : threadTimeLabel(thread)}
                   </span>
                 )}
               </span>
-              {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
+              {showPrimaryAction || showSnoozeButton || hasUnsentDraft ? (
                 <span
                   data-row-hover-actions=""
                   className={cn(
@@ -1883,23 +1977,55 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       timestampFormat={props.timestampFormat}
                     />
                   ) : null}
-                  {props.settlementSupported ? (
+                  {showPrimaryAction ? (
                     <Tooltip>
                       <TooltipTrigger
                         render={
                           <button
                             type="button"
-                            aria-label="Settle thread"
-                            onClick={handleSettleClick}
+                            aria-label={
+                              variantAction === "unsnooze"
+                                ? "Wake thread now"
+                                : variantAction === "unsettle"
+                                  ? "Unsettle thread"
+                                  : "Settle thread"
+                            }
+                            onClick={
+                              variantAction === "unsnooze"
+                                ? handleUnsnoozeClick
+                                : variantAction === "unsettle"
+                                  ? handleUnsettleClick
+                                  : handleSettleClick
+                            }
                             onPointerDown={handleActionPointerDown}
                             className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
                           />
                         }
                       >
-                        <CheckIcon className="size-3.5" />
-                        Settle
+                        {variantAction === "unsnooze" ? (
+                          <>
+                            <AlarmClockOffIcon className="size-3.5" />
+                            Wake
+                          </>
+                        ) : variantAction === "unsettle" ? (
+                          <>
+                            <Undo2Icon className="size-3.5" />
+                            Unsettle
+                          </>
+                        ) : (
+                          <>
+                            <CheckIcon className="size-3.5" />
+                            Settle
+                          </>
+                        )}
                       </TooltipTrigger>
-                      <TooltipPopup>Settle thread</TooltipPopup>
+                      <TooltipPopup>
+                        {variantAction === "unsnooze"
+                          ? "Wake thread now"
+                          : variantAction === "unsettle"
+                            ? "Unsettle thread"
+                            : "Settle thread"}
+                      </TooltipPopup>
                     </Tooltip>
                   ) : null}
                 </span>
@@ -2417,6 +2543,49 @@ export default function Sidebar() {
     }
     return count;
   });
+  // Work files each draft under its repository like any card, so the list
+  // needs which drafts exist, not their text: a signature typing never
+  // changes. The open draft is listed as is; its card decides whether it
+  // shows (frozen at route entry, as in SidebarDraftBlock).
+  const workDraftSignature = useComposerDraftStore((store) => {
+    if (sidebarMode !== "tasks") return "";
+    const parts: string[] = [];
+    for (const [draftKey, session] of Object.entries(store.draftThreadsByThreadKey)) {
+      if (session.promotedTo != null || !sidebarModes.draftInMode(session)) continue;
+      if (
+        draftKey !== routeDraftIdForRows &&
+        !composerDraftHasUserContent(store.draftsByThreadKey[draftKey])
+      ) {
+        continue;
+      }
+      parts.push(
+        [
+          draftKey,
+          session.environmentId,
+          session.projectId,
+          session.createdAt,
+          session.branch ?? "",
+        ].join("\t"),
+      );
+    }
+    return parts.join("\n");
+  });
+  const workDrafts = useMemo(
+    () =>
+      workDraftSignature === ""
+        ? []
+        : workDraftSignature.split("\n").map((line) => {
+            const [draftId, environmentId, projectId, createdAt, branch] = line.split("\t");
+            return {
+              draftId: DraftId.make(draftId!),
+              environmentId: environmentId as EnvironmentId,
+              projectId: projectId as ProjectId,
+              createdAtMs: Date.parse(createdAt!) || 0,
+              branch: branch || null,
+            };
+          }),
+    [workDraftSignature],
+  );
   // Mode flips drop the selection: rows selected under the old mode are
   // hidden now, and bulk actions must never count or touch invisible rows.
   useEffect(() => {
@@ -2466,9 +2635,12 @@ export default function Sidebar() {
       const active: EnvironmentThreadShell[] = [];
       const working: EnvironmentThreadShell[] = [];
       // Working beta: only inbox threads fold away. Snoozed and settled
-      // threads keep their shelves.
+      // threads keep their shelves. Work lists running tasks with the rest:
+      // its first filter is all tasks.
       const inbox = (thread: EnvironmentThreadShell) =>
-        workingShelfEnabled && isSidebarThreadWorking(thread) ? working : active;
+        workingShelfEnabled && sidebarMode !== "tasks" && isSidebarThreadWorking(thread)
+          ? working
+          : active;
       const snoozed: EnvironmentThreadShell[] = [];
       const settled: EnvironmentThreadShell[] = [];
       for (const thread of visible) {
@@ -2709,9 +2881,15 @@ export default function Sidebar() {
     () => setWorkingShelfExpanded((value) => !value),
     [setWorkingShelfExpanded],
   );
-  // The count bar shows one shelf at a time; opening one closes the others.
-  const openShelf: SidebarShelf | null = workingShelfExpanded
-    ? "working"
+  // Work's "Needs attention" filter: the tasks waiting on the user.
+  const [attentionFilterOpen, setAttentionFilterOpen] = useLocalStorage(
+    ATTENTION_FILTER_OPEN_KEY,
+    false,
+    Schema.Boolean,
+  );
+  // The count bar shows one filter at a time; opening one closes the others.
+  const openShelf: SidebarShelf | null = attentionFilterOpen
+    ? "attention"
     : snoozedShelfExpanded
       ? "snoozed"
       : settledShelfExpanded
@@ -2719,12 +2897,22 @@ export default function Sidebar() {
         : null;
   const openSidebarShelf = useCallback(
     (shelf: SidebarShelf | null) => {
-      setWorkingShelfExpanded(shelf === "working");
+      setAttentionFilterOpen(shelf === "attention");
       setSnoozedShelfExpanded(shelf === "snoozed");
       setSettledShelfExpanded(shelf === "settled");
     },
-    [setSettledShelfExpanded, setSnoozedShelfExpanded, setWorkingShelfExpanded],
+    [setAttentionFilterOpen, setSettledShelfExpanded, setSnoozedShelfExpanded],
   );
+  const attentionThreadKeys = useMemo(() => {
+    const keys = new Set<string>();
+    if (sidebarMode !== "tasks") return keys;
+    for (const thread of activeThreads) {
+      if (isSidebarThreadAwaitingUser(thread)) {
+        keys.add(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)));
+      }
+    }
+    return keys;
+  }, [activeThreads, sidebarMode]);
   const visibleWorkingThreads = useMemo(() => {
     if (workingShelfExpanded) return workingThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
@@ -4231,9 +4419,9 @@ export default function Sidebar() {
             {sidebarMode === "tasks" ? (
               <SidebarShelfBar
                 activeIcon={SIDEBAR_MODE_ICONS.tasks}
-                activeLabel="Work"
+                activeLabel="All tasks"
                 activeCount={activeThreads.length}
-                workingCount={workingThreads.length}
+                attentionCount={attentionThreadKeys.size}
                 snoozedCount={snoozedThreads.length}
                 settledCount={settledThreads.length}
                 openShelf={openShelf}
@@ -4398,7 +4586,9 @@ export default function Sidebar() {
                         />
                       );
                     }
-                    const isCard = section === "active" || section === "working";
+                    // Work shows every filter as the same cards.
+                    const isCard =
+                      sidebarMode === "tasks" || section === "active" || section === "working";
                     const rowVariant = isCard ? "card" : "slim";
                     return (
                       <SidebarThreadRow
@@ -4422,8 +4612,13 @@ export default function Sidebar() {
                           serverConfigs.get(thread.environmentId)?.environment.capabilities
                             .threadSnooze === true
                         }
-                        // The group heading names the repository in Work.
-                        repositoryName={sidebarMode === "tasks" ? null : repositoryNameFor(thread)}
+                        // The group heading names the repository in Work; the
+                        // flat Settled list names it on the card.
+                        repositoryName={
+                          sidebarMode === "tasks" && section !== "settled"
+                            ? null
+                            : repositoryNameFor(thread)
+                        }
                         folder={folderFor(thread)}
                         sweepAction={actionSweep?.keys.has(threadKey) ? actionSweep.action : null}
                         snoozeWakeLabelText={
@@ -4489,7 +4684,8 @@ export default function Sidebar() {
                   // shows active work (and drafts), each other one only its shelf.
                   const shownSection = sidebarMode === "tasks" ? (openShelf ?? "active") : null;
                   const items: ReactNode[] = [];
-                  if (shownSection === null || shownSection === "active")
+                  // Work's drafts go into their repository groups below.
+                  if (shownSection === null)
                     items.push(
                       <SidebarDraftBlock
                         key="draft-sessions"
@@ -4507,19 +4703,39 @@ export default function Sidebar() {
                   // Work groups its cards under their repository, newest at the
                   // bottom beside the search dock: groups by latest activity, rows
                   // within a group oldest to newest.
+                  // Settled is one flat list, newest settled at the bottom.
                   const repositoryGroups =
-                    shownSection !== null
-                      ? new Map<string, { name: string | null; rows: ReactNode[] }>()
+                    shownSection !== null && shownSection !== "settled"
+                      ? new Map<
+                          string,
+                          { name: string | null; rows: ReactNode[]; times: number[] }
+                        >()
                       : null;
+                  const flatShelfRows: ReactNode[] | null = shownSection === "settled" ? [] : null;
                   for (const item of sidebarListItems) {
                     if (item.kind === "thread") {
-                      if (shownSection !== null && item.section !== shownSection) continue;
+                      if (shownSection === "attention") {
+                        if (item.section !== "active" || !attentionThreadKeys.has(item.key)) {
+                          continue;
+                        }
+                      } else if (shownSection !== null && item.section !== shownSection) {
+                        continue;
+                      }
                       const thread = threadByKey.get(item.key)!;
+                      if (flatShelfRows) {
+                        flatShelfRows.push(renderThreadRow(thread, item.section));
+                        continue;
+                      }
                       if (repositoryGroups) {
                         const name = repositoryNameFor(thread);
                         const groupKey = name ?? "";
-                        const group = repositoryGroups.get(groupKey) ?? { name, rows: [] };
+                        const group = repositoryGroups.get(groupKey) ?? {
+                          name,
+                          rows: [],
+                          times: [],
+                        };
                         group.rows.push(renderThreadRow(thread, item.section));
+                        group.times.push(sidebarThreadActivityMs(thread));
                         repositoryGroups.set(groupKey, group);
                         continue;
                       }
@@ -4595,6 +4811,45 @@ export default function Sidebar() {
                         break;
                     }
                   }
+                  if (repositoryGroups && shownSection === "active") {
+                    // Drafts join their repository's group as cards, placed
+                    // by when they were started among the group's tasks
+                    // (rows run newest first until the group is reversed).
+                    for (const draft of workDrafts) {
+                      const name = repositoryNameFor(draft);
+                      const groupKey = name ?? "";
+                      const projectKey = `${draft.environmentId}:${draft.projectId}` as const;
+                      const card = (
+                        <SidebarWorkDraftCard
+                          key={`draft:${draft.draftId}`}
+                          draftId={draft.draftId}
+                          branch={draft.branch}
+                          project={projectByKey.get(projectKey) ?? null}
+                          projectDisplayName={projectDisplayNameByKey.get(projectKey) ?? null}
+                          isActive={draft.draftId === routeDraftIdForRows}
+                          onNavigate={navigateToDraft}
+                          onContextMenu={handleDraftContextMenu}
+                        />
+                      );
+                      const group = repositoryGroups.get(groupKey);
+                      if (!group) {
+                        // A draft's own group sits with the newest groups.
+                        const entries = [...repositoryGroups];
+                        repositoryGroups.clear();
+                        repositoryGroups.set(groupKey, {
+                          name,
+                          rows: [card],
+                          times: [draft.createdAtMs],
+                        });
+                        for (const [key, value] of entries) repositoryGroups.set(key, value);
+                        continue;
+                      }
+                      const index = group.times.findIndex((time) => time < draft.createdAtMs);
+                      const at = index === -1 ? group.rows.length : index;
+                      group.rows.splice(at, 0, card);
+                      group.times.splice(at, 0, draft.createdAtMs);
+                    }
+                  }
                   if (repositoryGroups) {
                     for (const [groupKey, group] of [...repositoryGroups].toReversed()) {
                       items.push(
@@ -4603,10 +4858,11 @@ export default function Sidebar() {
                       );
                     }
                   }
+                  if (flatShelfRows) items.push(...flatShelfRows.toReversed());
                   if (shownSection !== null && shownSection !== "active") {
                     const shelfCount =
-                      shownSection === "working"
-                        ? workingThreads.length
+                      shownSection === "attention"
+                        ? attentionThreadKeys.size
                         : shownSection === "snoozed"
                           ? snoozedThreads.length
                           : settledThreads.length;
@@ -4618,8 +4874,8 @@ export default function Sidebar() {
                           className="flex flex-1 list-none"
                         >
                           <SidebarListEmptyState icon={SIDEBAR_SHELF_ICONS[shownSection]}>
-                            {shownSection === "working"
-                              ? "Nothing working right now"
+                            {shownSection === "attention"
+                              ? "Nothing needs you right now"
                               : shownSection === "snoozed"
                                 ? "Nothing snoozed"
                                 : "Nothing settled yet"}

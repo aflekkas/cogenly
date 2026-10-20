@@ -677,6 +677,37 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   return "ready";
 }
 
+/** When a task last came back to the user, in ms (0 when unknown): the time
+    the Work list orders by, so a draft can be placed among its tasks. */
+export function sidebarThreadActivityMs(
+  thread: Pick<SidebarThreadSummary, "createdAt" | "unsettledAt" | "latestRun">,
+): number {
+  return Math.max(
+    ...[
+      thread.createdAt,
+      thread.unsettledAt,
+      thread.latestRun?.requestedAt,
+      thread.latestRun?.completedAt,
+    ].map((value) => (value ? Date.parse(value) || 0 : 0)),
+  );
+}
+
+/** Work that is waiting on the user: an approval or permission request, a
+    question (its own or a subagent's), or a plan awaiting approval once its
+    turn has ended. The "Needs attention" filter lists these. */
+export function isSidebarThreadAwaitingUser(
+  thread: SidebarThreadStatusInput &
+    Pick<SidebarThreadSummary, "interactionMode" | "hasActionableProposedPlan" | "latestRun">,
+): boolean {
+  const status = resolveSidebarThreadStatus(thread);
+  if (status === "approval" || status === "input") return true;
+  return (
+    thread.interactionMode === "plan" &&
+    thread.hasActionableProposedPlan &&
+    isLatestRunSettled(thread.latestRun, thread.runtime)
+  );
+}
+
 export type SidebarV2TopStatusKind =
   | "approval"
   | "done"

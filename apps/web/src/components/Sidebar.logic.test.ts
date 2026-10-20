@@ -29,6 +29,7 @@ import {
   resolveSidebarThreadSection,
   resolveSidebarRowAccessibility,
   resolveSidebarThreadStatus,
+  isSidebarThreadAwaitingUser,
   resolveSidebarV2TopStatus,
   resolveThreadLastVisitedAt,
   resolveThreadRowClassName,
@@ -826,6 +827,63 @@ describe("isContextMenuPointerDown", () => {
         isMac: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("isSidebarThreadAwaitingUser", () => {
+  const runtime = {
+    status: "running" as const,
+    activeRunId: null,
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    providerName: "Codex",
+    lastError: null,
+    updatedAt: "2026-03-09T10:00:00.000Z",
+  };
+  const settledRun = {
+    runId: RunId.make("run-1"),
+    status: "completed" as const,
+    requestedAt: "2026-03-09T10:00:00.000Z",
+    startedAt: "2026-03-09T10:00:00.000Z",
+    completedAt: "2026-03-09T10:01:00.000Z",
+  } as unknown as Parameters<typeof isSidebarThreadAwaitingUser>[0]["latestRun"];
+  const quiet = {
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    runtime: null,
+    interactionMode: DEFAULT_INTERACTION_MODE,
+    hasActionableProposedPlan: false,
+    latestRun: null,
+  };
+
+  it("counts approvals and questions, even while the turn runs", () => {
+    expect(isSidebarThreadAwaitingUser({ ...quiet, hasPendingApprovals: true, runtime })).toBe(
+      true,
+    );
+    expect(isSidebarThreadAwaitingUser({ ...quiet, hasPendingUserInput: true, runtime })).toBe(
+      true,
+    );
+  });
+
+  it("counts a plan awaiting approval only once its turn has ended", () => {
+    const plan = {
+      ...quiet,
+      interactionMode: "plan" as const,
+      hasActionableProposedPlan: true,
+    };
+    expect(isSidebarThreadAwaitingUser({ ...plan, latestRun: settledRun })).toBe(true);
+    expect(
+      isSidebarThreadAwaitingUser({
+        ...plan,
+        latestRun: { ...settledRun!, status: "running" as const },
+        runtime,
+      }),
+    ).toBe(false);
+  });
+
+  it("leaves running, finished and idle work out", () => {
+    expect(isSidebarThreadAwaitingUser({ ...quiet, runtime })).toBe(false);
+    expect(isSidebarThreadAwaitingUser({ ...quiet, latestRun: settledRun })).toBe(false);
+    expect(isSidebarThreadAwaitingUser(quiet)).toBe(false);
   });
 });
 

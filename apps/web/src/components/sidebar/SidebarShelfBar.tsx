@@ -1,33 +1,48 @@
-import { ArchiveIcon, ClockIcon, LoaderIcon, type LucideIcon } from "lucide-react";
+import { BellDotIcon, CircleCheckIcon, ClockIcon, type LucideIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-export type SidebarShelf = "working" | "snoozed" | "settled";
+/** Work's filters past the first: tasks waiting on the user, then the two shelves. */
+export type SidebarShelf = "attention" | "snoozed" | "settled";
 
-/** Each shelf's glyph, shared by its count-bar segment and its empty state. */
+/** Each filter's glyph, shared by its count-bar segment and its empty state. */
 export const SIDEBAR_SHELF_ICONS: Record<SidebarShelf, LucideIcon> = {
-  working: LoaderIcon,
+  attention: BellDotIcon,
   snoozed: ClockIcon,
-  settled: ArchiveIcon,
+  settled: CircleCheckIcon,
 };
+
+export const SIDEBAR_SHELF_LABELS: Record<SidebarShelf, string> = {
+  attention: "Needs attention",
+  snoozed: "Snoozed",
+  settled: "Settled",
+};
+
+/** Counts past two digits read "99+"; the tooltip and label keep the number. */
+export function formatSidebarShelfCount(count: number): string {
+  return count > 99 ? "99+" : String(count);
+}
 
 interface ShelfSegment {
   readonly shelf: SidebarShelf | null;
   readonly icon: LucideIcon;
   readonly label: string;
   readonly count: number;
+  /** Lit in the brand accent while non-zero. */
+  readonly highlight?: boolean;
 }
 
 /**
- * The count bar above the search dock: the active list plus one segment per
- * shelf. Choosing a shelf opens it and closes the others; choosing the open
- * shelf (or the active segment) goes back to the active list.
+ * The count bar above the search dock: all tasks, the ones that need the
+ * user, then one segment per shelf. Choosing a filter opens it and closes the
+ * others; choosing the open one (or the first segment) goes back to all tasks.
  */
 export function SidebarShelfBar({
   activeIcon,
   activeLabel,
   activeCount,
-  workingCount,
+  attentionCount,
   snoozedCount,
   settledCount,
   openShelf,
@@ -36,8 +51,7 @@ export function SidebarShelfBar({
   activeIcon: LucideIcon;
   activeLabel: string;
   activeCount: number;
-  /** Null hides the Working segment, for modes without that shelf. */
-  workingCount: number | null;
+  attentionCount: number;
   snoozedCount: number;
   settledCount: number;
   openShelf: SidebarShelf | null;
@@ -45,18 +59,25 @@ export function SidebarShelfBar({
 }) {
   const segments: ShelfSegment[] = [
     { shelf: null, icon: activeIcon, label: activeLabel, count: activeCount },
-    ...(workingCount === null
-      ? []
-      : [
-          {
-            shelf: "working" as const,
-            icon: SIDEBAR_SHELF_ICONS.working,
-            label: "Working",
-            count: workingCount,
-          },
-        ]),
-    { shelf: "snoozed", icon: SIDEBAR_SHELF_ICONS.snoozed, label: "Snoozed", count: snoozedCount },
-    { shelf: "settled", icon: SIDEBAR_SHELF_ICONS.settled, label: "Settled", count: settledCount },
+    {
+      shelf: "attention",
+      icon: SIDEBAR_SHELF_ICONS.attention,
+      label: SIDEBAR_SHELF_LABELS.attention,
+      count: attentionCount,
+      highlight: true,
+    },
+    {
+      shelf: "snoozed",
+      icon: SIDEBAR_SHELF_ICONS.snoozed,
+      label: SIDEBAR_SHELF_LABELS.snoozed,
+      count: snoozedCount,
+    },
+    {
+      shelf: "settled",
+      icon: SIDEBAR_SHELF_ICONS.settled,
+      label: SIDEBAR_SHELF_LABELS.settled,
+      count: settledCount,
+    },
   ];
   const selectedIndex = Math.max(
     0,
@@ -80,29 +101,44 @@ export function SidebarShelfBar({
       {segments.map((segment) => {
         const selected = segment.shelf === openShelf;
         const Icon = segment.icon;
+        const label = `${segment.label} (${segment.count})`;
         return (
-          <button
-            key={segment.label}
-            type="button"
-            role="tab"
-            aria-selected={selected}
-            aria-label={`${segment.label} (${segment.count})`}
-            // A click never parks focus on the segment, so no focus ring
-            // lingers after it (a later keypress would otherwise make the
-            // ring show over the filled highlight). Keyboard focus still
-            // gets the ring.
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => onOpenShelf(selected ? null : segment.shelf)}
-            className={cn(
-              "flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg text-xs tabular-nums outline-none transition-colors duration-(--motion-duration-base) focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-3.5 [&_svg]:shrink-0",
-              selected
-                ? "text-sidebar-foreground"
-                : "text-(--sidebar-shelf-muted,var(--nav-rail-muted)) hover:text-sidebar-foreground",
-            )}
-          >
-            <Icon aria-hidden />
-            {segment.count}
-          </button>
+          <Tooltip key={segment.label}>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-label={label}
+                  // A click never parks focus on the segment, so no focus ring
+                  // lingers after it (a later keypress would otherwise make the
+                  // ring show over the filled highlight). Keyboard focus still
+                  // gets the ring.
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onOpenShelf(selected ? null : segment.shelf)}
+                  className={cn(
+                    // Equal-width segments, so a count changing length never shifts the row.
+                    "flex min-w-0 flex-1 basis-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg text-xs tabular-nums outline-none transition-colors duration-(--motion-duration-base) focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-3.5 [&_svg]:shrink-0",
+                    selected
+                      ? "text-sidebar-foreground"
+                      : "text-(--sidebar-shelf-muted,var(--nav-rail-muted)) hover:text-sidebar-foreground",
+                  )}
+                />
+              }
+            >
+              <Icon aria-hidden />
+              <span
+                className={cn(
+                  "transition-colors duration-(--motion-duration-base) motion-reduce:transition-none",
+                  segment.highlight && segment.count > 0 && "font-medium text-brand-accent",
+                )}
+              >
+                {formatSidebarShelfCount(segment.count)}
+              </span>
+            </TooltipTrigger>
+            <TooltipPopup side="top">{label}</TooltipPopup>
+          </Tooltip>
         );
       })}
     </div>
