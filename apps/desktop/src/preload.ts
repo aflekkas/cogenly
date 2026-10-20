@@ -50,11 +50,13 @@ const clientPlatform = process.platform;
 if (clientPlatform === "darwin") {
   // Native window buttons do not scale with Chromium zoom. Keep their reserved
   // space in native points, including when a zoomed page is reloaded.
+  // The buttons start 16pt in (see DesktopWindow) and span 54pt, so they end at
+  // 70pt; the inset leaves room for a control beside them.
   const syncWindowControlInset = () => {
-    document.documentElement.style.setProperty(
-      "--desktop-window-controls-inset",
-      `${90 / webFrame.getZoomFactor()}px`,
-    );
+    const zoomFactor = webFrame.getZoomFactor();
+    const style = document.documentElement.style;
+    style.setProperty("--desktop-window-controls-inset", `${90 / zoomFactor}px`);
+    style.setProperty("--desktop-window-controls-right", `${70 / zoomFactor}px`);
   };
   window.addEventListener("DOMContentLoaded", syncWindowControlInset, { once: true });
   window.addEventListener("resize", syncWindowControlInset);

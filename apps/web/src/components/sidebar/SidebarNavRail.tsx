@@ -46,7 +46,11 @@ function RailTooltip(props: { label: string; children: ReactElement }) {
   );
 }
 
-export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boolean }) {
+export function SidebarNavRail({
+  sidebarToggleBelowTitlebar,
+}: {
+  sidebarToggleBelowTitlebar: boolean;
+}) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const mode = useUiStateStore((store) => store.sidebarMode);
   const selectSidebarMode = useSelectSidebarMode();
@@ -80,6 +84,21 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
     tabRefs.current[nextIndex]?.focus();
   };
 
+  const sidebarToggle = (
+    <RailTooltip label={`Toggle main sidebar${toggleShortcut ? ` (${toggleShortcut})` : ""}`}>
+      <button
+        type="button"
+        aria-label="Toggle main sidebar"
+        aria-pressed={sidebarVisible}
+        data-sidebar="trigger"
+        onClick={toggleSidebar}
+        className={cn(RAIL_BUTTON_CLASS, railButtonTone(false), "[-webkit-app-region:no-drag]")}
+      >
+        <MorphIcon icon={sidebarVisible ? PanelLeftClose : PanelLeft} />
+      </button>
+    </RailTooltip>
+  );
+
   return (
     <nav
       aria-label="Workspace"
@@ -92,41 +111,24 @@ export function SidebarNavRail({ showSidebarToggle }: { showSidebarToggle: boole
       )}
     >
       {/* The titlebar row. It holds the sidebar toggle, sized and centred like
-          the mode buttons; under macOS traffic lights the fixed toggle sits
-          beside them instead and this row stays empty. */}
+          the mode buttons. Where the macOS traffic lights own the row, it stays
+          an empty drag strip and the toggle leads the buttons below it. */}
       <div
-        aria-hidden={showSidebarToggle ? undefined : true}
         className={cn(
           "flex h-[var(--workspace-topbar-height)] w-full shrink-0 items-center justify-center",
           isElectron && "drag-region",
         )}
       >
-        {showSidebarToggle ? (
-          <RailTooltip label={`Toggle main sidebar${toggleShortcut ? ` (${toggleShortcut})` : ""}`}>
-            <button
-              type="button"
-              aria-label="Toggle main sidebar"
-              aria-pressed={sidebarVisible}
-              data-sidebar="trigger"
-              onClick={toggleSidebar}
-              className={cn(
-                RAIL_BUTTON_CLASS,
-                railButtonTone(false),
-                "[-webkit-app-region:no-drag]",
-              )}
-            >
-              <MorphIcon icon={sidebarVisible ? PanelLeftClose : PanelLeft} />
-            </button>
-          </RailTooltip>
-        ) : null}
+        {sidebarToggleBelowTitlebar ? null : sidebarToggle}
       </div>
+      {sidebarToggleBelowTitlebar ? sidebarToggle : null}
       <div
         role="tablist"
         aria-label="Sidebar view"
         aria-orientation="vertical"
         onKeyDown={handleTabsKeyDown}
         // The toggle is chrome, not a mode: a wider gap sets it apart.
-        className={cn("flex flex-col items-center gap-1", showSidebarToggle && "mt-1.5")}
+        className="mt-1.5 flex flex-col items-center gap-1"
       >
         {SIDEBAR_MODES.map((segment, segmentIndex) => {
           // A utility page owns the column, so no mode reads as current there.

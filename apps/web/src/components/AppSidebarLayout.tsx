@@ -34,7 +34,7 @@ import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarNavRail } from "./sidebar/SidebarNavRail";
-import { NAV_RAIL_WIDTH_PX } from "./sidebar/navRail.logic";
+import { resolveWorkspaceTitlebarLayout } from "../workspaceTitlebar";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
 import { useProjects } from "../state/entities";
@@ -46,8 +46,6 @@ import {
 } from "./threadSidebarWidth";
 import { Sidebar, SidebarProvider, SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
-
-const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
 
 function subscribeToViewportWidth(onChange: () => void): () => void {
   window.addEventListener("resize", onChange);
@@ -220,32 +218,27 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // mobile sheet keeps those, and the legacy sidebar keeps its own layout.
   const isMobile = useIsMobile();
   const navRailVisible = !isMobile && !legacySidebarEnabled;
-  const navRailWidth = navRailVisible ? NAV_RAIL_WIDTH_PX : 0;
-  const sidebarMinimumWidth = resolveThreadSidebarMinimumWidth(brandWidth);
-  // The sidebar width is the list column alone; the rail takes its own room.
-  const sidebarMaximumWidth = resolveThreadSidebarMaximumWidth(
-    viewportWidth - navRailWidth,
-    sidebarMinimumWidth,
-  );
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(() => {
     const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState;
     return isMacosDesktop && typeof getWindowFullscreenState === "function"
       ? getWindowFullscreenState()
       : false;
   });
-  // The toggle joins the rail as its first button unless the macOS traffic
-  // lights own that corner, where it stays fixed beside them.
-  const sidebarToggleInRail = navRailVisible && !(isMacosDesktop && !isWindowFullscreen);
-  const windowControlsInsetStyle = (
-    isMacosDesktop && !isWindowFullscreen
-      ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
-      : {}
-  ) as CSSProperties;
+  const titlebarLayout = resolveWorkspaceTitlebarLayout({
+    navRailVisible,
+    macosWindowControlsVisible: isMacosDesktop && !isWindowFullscreen,
+  });
+  const sidebarMinimumWidth = resolveThreadSidebarMinimumWidth(brandWidth);
+  // The sidebar width is the list column alone; the rail takes its own room.
+  const sidebarMaximumWidth = resolveThreadSidebarMaximumWidth(
+    viewportWidth - titlebarLayout.navRailWidthPx,
+    sidebarMinimumWidth,
+  );
+  const windowControlsInsetStyle = titlebarLayout.windowControlsStyle as CSSProperties;
   const sidebarProviderStyle = {
     "--sidebar-width": `${clampThreadSidebarWidth(resolveInitialThreadSidebarWidth(null, viewportWidth), sidebarMinimumWidth, sidebarMaximumWidth)}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
-    "--nav-rail-width": `${navRailWidth}px`,
-    ...windowControlsInsetStyle,
+    ...titlebarLayout.style,
   } as CSSProperties;
 
   useEffect(() => {
@@ -297,7 +290,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       >
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
         <ProjectProjectionRetention />
-        {navRailVisible ? <SidebarNavRail showSidebarToggle={sidebarToggleInRail} /> : null}
+        {navRailVisible ? (
+          <SidebarNavRail
+            sidebarToggleBelowTitlebar={titlebarLayout.sidebarToggle === "rail-below-titlebar"}
+          />
+        ) : null}
         <Sidebar
           side="left"
           collapsible="offcanvas"
@@ -330,7 +327,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           </div>
         </Sidebar>
         {children}
-        <SidebarControl showButton={!sidebarToggleInRail} />
+        <SidebarControl showButton={titlebarLayout.sidebarToggle === "fixed"} />
         <NavigationHistoryShortcuts />
         <MainAppLocationTracker />
       </SidebarProvider>

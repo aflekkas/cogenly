@@ -1,4 +1,4 @@
-/** Rail width in px: centers its icons under the titlebar's sidebar toggle. */
+/** Rail width in px. Under the macOS traffic lights it widens to hold them (see workspaceTitlebar). */
 export const NAV_RAIL_WIDTH_PX = 54;
 
 /**
