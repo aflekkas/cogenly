@@ -283,33 +283,29 @@ On web and desktop, right-click a pull request link in a thread and choose
 same link to return to the branch PR, if one exists.
 The linked pull request participates in automatic settlement.
 
-## Tag threads with projects
+## Organize threads in projects
 
-A project, such as a client or a course, is a tag for related chats and Work. It is
-separate from the repository a thread runs in: one project can link several
-repositories, and a chat can carry several projects or none. Tags organize and
-suggest context only; they never change what an agent can access, since agents reach
-every project.
+A project, such as a client or a course, is a folder for related chats, Work and
+repositories. A project can hold several repositories, but each repository and each
+thread is in at most one project. Work goes in its repository's project unless you move
+it. Projects are context only; they never change what an agent can access.
 
 Projects have their own sidebar view: pick **Projects** in the navigation rail (or the
-mobile switcher), or press `mod+alt+4`. Open a project to see its Work, chats and
-agents, and to rename, recolor, describe, or delete it and link its repositories with
-**Edit project**. Start one with **New project** at the top of the list or in the
-command palette. Deleting a project removes its tag from threads but keeps the threads.
+mobile switcher), or press `mod+alt+4`. Open a project to see its repositories, chats
+and Work. Use **Add repository** to bring one in (a repository already in another
+project asks before it moves), the remove button on a repository row to take it out,
+and **Edit** to rename, recolor, describe or delete the project. Deleting a project
+keeps its chats, Work and repositories; they are just no longer in a folder. Start one
+with **New project** at the top of the list or in the command palette.
 
-To tag a thread, click the tag button beside its title, or run **Edit this thread's
-projects** from the command palette. Pick projects to add or remove them, type a new
-name to create one, or choose **No project** to clear them. After a thread's first
-reply, Cogenly may suggest projects from its repository and wording. Suggestions
-show outlined and do nothing until you accept them; a dismissed suggestion is not
-offered again for that thread. Confirmed projects also give the chat
+To file a thread, right-click it and choose **Move to folder**, use the folder picker
+in the thread's details, or run **Move to folder…** from the command palette. Choose
+**Remove from folder** to take it out; Work then falls back to its repository's
+project. A filed chat also gets
 [project context](./memory-and-export.md#project-context-in-chats).
 
-**Chats** stays one list of titles by date, and the filter button beside search
-narrows it to one project. **Work** is one list, newest activity first. Each row
-names its repository beside the branch and shows its projects: the ones you tagged
-and the ones linking its repository. Right-click a row for **Repository settings** or
-to open one of its projects.
+**Chats** stays one list of titles by date. **Work** is one list, newest activity
+first. Hover a row to see its project, or right-click it to open that project.
 
 ## Find and reference work
 

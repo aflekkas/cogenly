@@ -17,9 +17,9 @@ Agents propose facts as they work. A proposal is never used until you choose **C
 
 ## Project context in chats
 
-A chat tagged with a confirmed project sends that project's confirmed facts, open items, and Work
-outcomes to the model at the start of each turn. Suggested tags send nothing. To keep a chat's tags
-without sending context, turn off **Use project context** in the chat's project tag menu.
+A chat in a project sends that project's confirmed facts, open items, and Work outcomes to the
+model at the start of each turn. To keep a chat in its project without sending context, turn off
+**Use project context** in the chat's folder picker.
 
 When a reply used context, **Context used** appears under it. Expand it to see each item and open
 where it came from.

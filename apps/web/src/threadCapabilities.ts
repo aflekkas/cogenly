@@ -104,7 +104,7 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
   },
   // The agent owns this thread: its name is the title, and deleting the agent
   // removes the conversation. Agents reach every project, so the conversation
-  // carries no project tags of its own.
+  // is filed in no project folder of its own.
   agentConversation: {
     startWork: false,
     rename: false,
