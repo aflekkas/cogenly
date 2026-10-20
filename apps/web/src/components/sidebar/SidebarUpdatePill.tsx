@@ -195,7 +195,7 @@ export async function installLocalUpdate(
 }
 
 /** This app's part in a running pass, for {@link SidebarUpdateCapsule}. */
-export function resolveUpdateRunLocalState(
+function resolveUpdateRunLocalState(
   run: UpdateEverythingRun,
   state: DesktopUpdateState | null,
 ): UpdateRunLocalState {

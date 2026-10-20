@@ -10,6 +10,7 @@ import {
   collectProviderUpdateRows,
   describeDesktopUpdateRow,
   describeServerUpdateRow,
+  describeUpdatesSummary,
   rowNeedsUpdate,
 } from "./navRailUpdates.logic";
 
@@ -148,7 +149,7 @@ describe("describeDesktopUpdateRow", () => {
         availableVersion: "2.1.0",
         downloadPercent: 42.7,
       }),
-    ).toMatchObject({ status: "updating", detail: "Downloading 42%" });
+    ).toMatchObject({ status: "updating", detail: "Downloading 42%", percent: 42.7 });
     expect(
       describeDesktopUpdateRow({
         ...base,
@@ -197,5 +198,51 @@ describe("describeServerUpdateRow", () => {
         },
       }),
     ).toMatchObject({ status: "failed", detail: "rolled back" });
+  });
+
+  it("always shows the server that stands in for the app", () => {
+    expect(
+      describeServerUpdateRow({
+        currentVersion: "2.0.0",
+        behindVersion: null,
+        state: { status: "idle" },
+        name: "Cogenly",
+        always: true,
+      }),
+    ).toMatchObject({ name: "Cogenly", status: "current", currentVersion: "2.0.0" });
+  });
+});
+
+describe("describeUpdatesSummary", () => {
+  const rows = (...statuses: Array<"current" | "available" | "updating" | "failed">) =>
+    statuses.map((status, index) => ({ key: String(index), status }));
+
+  it("counts updates on through a batch", () => {
+    expect(
+      describeUpdatesSummary({ rows: rows("updating", "updating"), batchSize: 2, checking: false }),
+    ).toBe("Updating 1 of 2…");
+    expect(
+      describeUpdatesSummary({ rows: rows("current", "updating"), batchSize: 2, checking: false }),
+    ).toBe("Updating 2 of 2…");
+    // A row updated on its own, beside one that is still available.
+    expect(
+      describeUpdatesSummary({
+        rows: rows("updating", "available"),
+        batchSize: 1,
+        checking: false,
+      }),
+    ).toBe("Updating…");
+  });
+
+  it("reports checking, then the result", () => {
+    expect(describeUpdatesSummary({ rows: rows("current"), batchSize: 0, checking: true })).toBe(
+      "Checking…",
+    );
+    expect(
+      describeUpdatesSummary({ rows: rows("available", "failed"), batchSize: 0, checking: false }),
+    ).toBe("2 updates available");
+    expect(describeUpdatesSummary({ rows: rows("current"), batchSize: 0, checking: false })).toBe(
+      "Everything is up to date",
+    );
   });
 });

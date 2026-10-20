@@ -1247,6 +1247,30 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   will-change: var(--visible-animation-will-change, auto);
 }
 
+/* An update's progress bar when the updater reports no percentage: a short
+   segment sweeps across while the update runs, paused offscreen like
+   visible-animate-spin (pair with observeVisibleAnimation). Reduced motion
+   holds it still in the middle. */
+@keyframes update-progress-sweep {
+  from {
+    translate: -100% 0;
+  }
+
+  to {
+    translate: 300% 0;
+  }
+}
+
+@utility update-progress-indeterminate {
+  animation: update-progress-sweep 1.4s --theme(--ease-standard) infinite;
+  animation-play-state: var(--visible-animation-state, paused);
+
+  @media (prefers-reduced-motion: reduce) {
+    translate: 100% 0;
+    animation: none;
+  }
+}
+
 @keyframes live-activity-focus {
   from {
     transform: translateX(0);

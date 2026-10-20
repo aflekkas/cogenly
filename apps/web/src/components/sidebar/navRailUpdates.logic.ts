@@ -21,7 +21,7 @@ export type UpdateRowStatus = "current" | "available" | "updating" | "failed";
 export const UPDATE_ROW_STATUS_LABELS: Record<UpdateRowStatus, string> = {
   current: "Up to date",
   available: "Update available",
-  updating: "Updating…",
+  updating: "Updating",
   failed: "Failed",
 };
 
@@ -34,6 +34,8 @@ export interface UpdateRowView {
   readonly status: UpdateRowStatus;
   /** Replaces the status label, e.g. download progress or a failure reason. */
   readonly detail: string | null;
+  /** How far an update has got, 0-100, when the updater reports it. */
+  readonly percent?: number | null;
 }
 
 export interface ProviderUpdateRowView extends UpdateRowView {
@@ -99,8 +101,16 @@ export function describeDesktopUpdateRow(state: DesktopUpdateState): DesktopUpda
   } as const;
   if (state.status === "downloading") {
     const percent =
-      typeof state.downloadPercent === "number" ? ` ${Math.floor(state.downloadPercent)}%` : "";
-    return { ...base, status: "updating", detail: `Downloading${percent}`, action: null };
+      typeof state.downloadPercent === "number"
+        ? Math.min(100, Math.max(0, state.downloadPercent))
+        : null;
+    return {
+      ...base,
+      status: "updating",
+      detail: percent === null ? "Downloading" : `Downloading ${Math.floor(percent)}%`,
+      percent,
+      action: null,
+    };
   }
   if (state.status === "error") {
     return {
@@ -119,14 +129,36 @@ export function describeDesktopUpdateRow(state: DesktopUpdateState): DesktopUpda
   return { ...base, status: "current", detail: null, action: null };
 }
 
-/** A server's row. `behindVersion` is the version the update pass would move it to. */
+/** This app's row when there is no desktop updater, e.g. in a browser. */
+export function describeAppRow(version: string | null): UpdateRowView {
+  return {
+    key: "app",
+    name: "Cogenly",
+    currentVersion: version,
+    latestVersion: null,
+    status: "current",
+    detail: null,
+  };
+}
+
+/**
+ * A server's row. `behindVersion` is the version the update pass would move
+ * it to. A server shows only while it is behind or updating, unless `always`
+ * (the browser app's own server, which stands in for the app).
+ */
 export function describeServerUpdateRow(input: {
   readonly currentVersion: string | null;
   readonly behindVersion: string | null;
   readonly state: ServerUpdateState;
+  readonly name?: string;
+  readonly always?: boolean;
 }): UpdateRowView | null {
   const { state } = input;
-  const base = { key: "server", name: "Cogenly server", currentVersion: input.currentVersion };
+  const base = {
+    key: "server",
+    name: input.name ?? "Cogenly server",
+    currentVersion: input.currentVersion,
+  };
   if (state.status === "running") {
     return {
       ...base,
@@ -145,11 +177,34 @@ export function describeServerUpdateRow(input: {
       detail: state.message,
     };
   }
-  if (input.behindVersion === null) return null;
+  if (input.behindVersion === null) {
+    return input.always ? { ...base, latestVersion: null, status: "current", detail: null } : null;
+  }
   return { ...base, latestVersion: input.behindVersion, status: "available", detail: null };
 }
 
 /** True when the row still needs an update: the count on the rail's badge. */
 export function rowNeedsUpdate(row: Pick<UpdateRowView, "status">): boolean {
   return row.status === "available" || row.status === "failed";
+}
+
+/**
+ * The popover header's line: what is updating, else what needs an update.
+ * `batch` is every row that has been updating since the popover last saw
+ * nothing updating, so "Updating 2 of 3" counts on as rows finish.
+ */
+export function describeUpdatesSummary(input: {
+  readonly rows: ReadonlyArray<Pick<UpdateRowView, "key" | "status">>;
+  readonly batchSize: number;
+  readonly checking: boolean;
+}): string {
+  const updating = input.rows.filter((row) => row.status === "updating").length;
+  if (updating > 0) {
+    const total = Math.max(input.batchSize, updating);
+    return total === 1 ? "Updating…" : `Updating ${total - updating + 1} of ${total}…`;
+  }
+  if (input.checking) return "Checking…";
+  const needed = input.rows.filter(rowNeedsUpdate).length;
+  if (needed > 0) return `${needed} ${needed === 1 ? "update" : "updates"} available`;
+  return "Everything is up to date";
 }
