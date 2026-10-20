@@ -1368,9 +1368,18 @@ function OpenCommandPaletteDialog(props: {
             providerEntryByEnvironmentAndInstanceId.get(
               `${thread.environmentId}:${modelInstanceId}`,
             ) ?? null;
+          const threadProject =
+            projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null;
+          // Chat threads sit in the hidden scratch project: no project icon,
+          // like the Chats list.
+          const isChatThread =
+            thread.source?.surface !== undefined
+              ? thread.source.surface === "chat"
+              : threadProject !== null &&
+                isScratchProject(threadProject, scratchWorkspaceRootFor(thread.environmentId));
           return (
             <ThreadCommandSubtitle
-              project={projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null}
+              project={isChatThread ? null : threadProject}
               projectTitle={projectTitle ?? null}
               environmentLabel={
                 projectEnvironmentLocationById.get(thread.environmentId)?.label ?? "Remote"

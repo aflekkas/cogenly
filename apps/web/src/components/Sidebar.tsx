@@ -2167,6 +2167,7 @@ function latestRunDiff(
 }
 
 const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
+  showProjectIcon: boolean;
   isSettled: boolean;
   thread: SidebarThreadSummary;
   project: EnvironmentProject | null;
@@ -2282,7 +2283,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
             />
           }
         >
-          {props.project ? (
+          {props.project && props.showProjectIcon ? (
             <ProjectFavicon
               project={props.project}
               className={cn(
@@ -4500,6 +4501,10 @@ export default function Sidebar() {
                         thread={thread}
                         project={
                           projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
+                        }
+                        // Chats list rows carry no project icon; search matches that.
+                        showProjectIcon={
+                          sidebarModeForThread(thread, sidebarModes.classifier) !== "chats"
                         }
                         projectDisplayName={
                           projectDisplayNameByKey.get(
