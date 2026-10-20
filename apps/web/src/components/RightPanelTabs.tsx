@@ -20,7 +20,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  FileDiff,
   Files,
   Globe2,
   Plus,
@@ -121,13 +120,9 @@ interface RightPanelTabsProps {
   onAddBrowserInProfile: (profileId: string) => void;
   /** Shows the Terminal surface (agent runs and shells); it never starts a shell by itself. */
   onAddTerminal: () => void;
-  onAddDiff: () => void;
-  onAddFiles: () => void;
   onAddDevice: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
-  diffAvailable: boolean;
-  filesAvailable: boolean;
   deviceAvailable: boolean;
   /** Surfaces the thread's kind offers at all; the rest are left out, not disabled. */
   supportedSurfaces: SupportedRightPanelSurfaces;
@@ -136,8 +131,6 @@ interface RightPanelTabsProps {
 
 export interface SupportedRightPanelSurfaces {
   readonly terminal: boolean;
-  readonly files: boolean;
-  readonly diff: boolean;
 }
 
 export function shouldOpenDefaultBrowserProfileFromMenuClick(
@@ -149,8 +142,6 @@ export function shouldOpenDefaultBrowserProfileFromMenuClick(
 const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the Cogenly desktop app.",
   terminal: "Agent terminals are only available from a repository thread.",
-  files: "Files are only available when a repository is open.",
-  diff: "Diff is only available for server threads in Git repositories.",
   device: "Devices are only available from a thread.",
 } as const;
 
@@ -170,8 +161,6 @@ const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
 const SURFACE_UNAVAILABLE_HINTS = {
   browser: "Only available in the desktop app.",
   terminal: "Available when a repository is open.",
-  files: "Available when a repository is open.",
-  diff: "Available for Git repositories.",
   device: "Available from a thread.",
 } as const;
 
@@ -316,13 +305,9 @@ function RightPanelEmptyState(props: {
   onAddBrowserInProfile: (profileId: string) => void;
   browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
   onAddTerminal: () => void;
-  onAddDiff: () => void;
-  onAddFiles: () => void;
   onAddDevice: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
-  diffAvailable: boolean;
-  filesAvailable: boolean;
   deviceAvailable: boolean;
   supportedSurfaces: SupportedRightPanelSurfaces;
 }) {
@@ -347,24 +332,6 @@ function RightPanelEmptyState(props: {
       disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
       supported: props.supportedSurfaces.terminal,
       onClick: props.onAddTerminal,
-    },
-    {
-      label: "Files",
-      icon: Files,
-      shortcut: "F",
-      available: props.filesAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
-      supported: props.supportedSurfaces.files,
-      onClick: props.onAddFiles,
-    },
-    {
-      label: "Diff",
-      icon: FileDiff,
-      shortcut: "D",
-      available: props.diffAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
-      supported: props.supportedSurfaces.diff,
-      onClick: props.onAddDiff,
     },
     {
       label: "Device",
@@ -565,8 +532,6 @@ function surfaceTitle(
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
 ): string {
   switch (surface.kind) {
-    case "diff":
-      return "Diff";
     case "files":
       return "Files";
     case "file":
@@ -631,8 +596,6 @@ function SurfaceIcon({
         favicon && url && sameOrigin(favicon.pageUrl, url) ? favicon.dataUrl : null;
       return <PreviewFavicon capturedUrl={capturedUrl} url={url} />;
     }
-    case "diff":
-      return <FileDiff className="size-3 shrink-0" />;
     case "files":
       return <Files className="size-3 shrink-0" />;
     case "file":
@@ -800,24 +763,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       disabledReason: SURFACE_DISABLED_REASONS.terminal,
       supported: props.supportedSurfaces.terminal,
       onClick: props.onAddTerminal,
-    },
-    {
-      label: "Files",
-      icon: Files,
-      shortcut: "F",
-      available: props.filesAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.files,
-      supported: props.supportedSurfaces.files,
-      onClick: props.onAddFiles,
-    },
-    {
-      label: "Diff",
-      icon: FileDiff,
-      shortcut: "D",
-      available: props.diffAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.diff,
-      supported: props.supportedSurfaces.diff,
-      onClick: props.onAddDiff,
     },
     {
       label: "Device",
@@ -1415,13 +1360,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddBrowserInProfile={props.onAddBrowserInProfile}
             browserProfiles={browserProfiles}
             onAddTerminal={props.onAddTerminal}
-            onAddDiff={props.onAddDiff}
-            onAddFiles={props.onAddFiles}
             onAddDevice={props.onAddDevice}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
-            diffAvailable={props.diffAvailable}
-            filesAvailable={props.filesAvailable}
             deviceAvailable={props.deviceAvailable}
             supportedSurfaces={props.supportedSurfaces}
           />

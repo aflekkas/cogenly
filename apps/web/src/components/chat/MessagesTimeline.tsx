@@ -176,9 +176,7 @@ import {
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
-import { ChangedFilesCard } from "./ChangedFilesTree";
-import { useFileContextMenuHandler } from "../../fileContextMenu";
-import { useProject, useThreadShell } from "../../state/entities";
+import { useThreadShell } from "../../state/entities";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
   readTimelinePosition,
@@ -275,7 +273,6 @@ import { useClientSettings } from "~/hooks/useSettings";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "~/lib/utils";
-import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import {
   formatChatTimestampTooltip,
@@ -342,7 +339,6 @@ interface TimelineRowSharedState {
   findActive: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   displayThreadKey?: string;
-  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
@@ -485,7 +481,6 @@ interface MessagesTimelineProps {
   displayThreadKey?: string;
   /** The rows are a held snapshot of the previous thread while the next one loads. */
   paintOnly?: boolean;
-  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   parentThreadLink?: {
     readonly threadId: ThreadId;
@@ -600,7 +595,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
   routeThreadKey,
   displayThreadKey,
   paintOnly = false,
-  onOpenTurnDiff,
   onOpenThread,
   parentThreadLink = null,
   onForkFromRun,
@@ -1373,7 +1367,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onAppFullscreenChange,
       onFileDownload,
       openPullRequest,
-      onOpenTurnDiff,
       onOpenThread,
       onForkFromRun,
       onRollbackCheckpoint,
@@ -1411,7 +1404,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onAppFullscreenChange,
       onFileDownload,
       openPullRequest,
-      onOpenTurnDiff,
       onOpenThread,
       onForkFromRun,
       onRollbackCheckpoint,
@@ -2907,12 +2899,6 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             />
           </AssistantCitationSource>
         </div>
-        <AssistantChangedFilesSection
-          turnSummary={row.assistantTurnDiffSummary}
-          routeThreadKey={ctx.routeThreadKey}
-          resolvedTheme={ctx.resolvedTheme}
-          onOpenTurnDiff={ctx.onOpenTurnDiff}
-        />
         {row.showAssistantMeta ? (
           <AssistantMessageMeta
             className="mt-1.5"
@@ -3361,7 +3347,6 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
               cwd={ctx.markdownCwd}
               workspaceRoot={ctx.workspaceRoot}
               onOpenThread={ctx.onOpenThread}
-              onOpenTurnDiff={ctx.onOpenTurnDiff}
               onRollbackCheckpoint={ctx.onRollbackCheckpoint}
               onImageExpand={ctx.onImageExpand}
             />
@@ -3436,7 +3421,6 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
               cwd={ctx.markdownCwd}
               workspaceRoot={ctx.workspaceRoot}
               onOpenThread={ctx.onOpenThread}
-              onOpenTurnDiff={ctx.onOpenTurnDiff}
               onRollbackCheckpoint={ctx.onRollbackCheckpoint}
               onImageExpand={ctx.onImageExpand}
             />
@@ -4320,95 +4304,6 @@ function WorkGroupHeader(props: {
       }
       trailing={
         <TimelineRowTimestamp createdAt={props.createdAt} timestampFormat={props.timestampFormat} />
-      }
-    />
-  );
-}
-
-/** Subscribes directly to the UI state store for expand/collapse state,
- *  so toggling re-renders only this component — not the entire list. */
-const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection({
-  turnSummary,
-  routeThreadKey,
-  resolvedTheme,
-  onOpenTurnDiff,
-}: {
-  turnSummary: TurnDiffSummary | undefined;
-  routeThreadKey: string;
-  resolvedTheme: "light" | "dark";
-  displayThreadKey?: string;
-  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
-}) {
-  if (!turnSummary) return null;
-  const checkpointFiles = turnSummary.files;
-  if (checkpointFiles.length === 0) return null;
-
-  return (
-    <AssistantChangedFilesSectionInner
-      turnSummary={turnSummary}
-      checkpointFiles={checkpointFiles}
-      routeThreadKey={routeThreadKey}
-      resolvedTheme={resolvedTheme}
-      onOpenTurnDiff={onOpenTurnDiff}
-    />
-  );
-});
-
-/** Inner component that only mounts when there are actual changed files,
- *  so the store subscription is unconditional (no hooks after early return). */
-function AssistantChangedFilesSectionInner({
-  turnSummary,
-  checkpointFiles,
-  routeThreadKey,
-  resolvedTheme,
-  onOpenTurnDiff,
-}: {
-  turnSummary: TurnDiffSummary;
-  checkpointFiles: TurnDiffSummary["files"];
-  routeThreadKey: string;
-  resolvedTheme: "light" | "dark";
-  displayThreadKey?: string;
-  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
-}) {
-  const ctx = use(TimelineRowCtx);
-  const persistedExpanded = useUiStateStore(
-    (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.runId],
-  );
-  const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
-  const allDirectoriesExpanded = persistedExpanded ?? false;
-
-  const thread = useThreadShell(ctx.threadRef);
-  const activeProject = useProject(
-    thread && thread.projectId
-      ? { environmentId: thread.environmentId, projectId: thread.projectId }
-      : null,
-  );
-  const onFileContextMenu = useFileContextMenuHandler(ctx.activeThreadEnvironmentId);
-
-  return (
-    <ChangedFilesCard
-      runId={turnSummary.runId}
-      files={checkpointFiles}
-      allDirectoriesExpanded={allDirectoriesExpanded}
-      resolvedTheme={resolvedTheme}
-      onToggleAllDirectories={() =>
-        setExpanded(routeThreadKey, turnSummary.runId, !allDirectoriesExpanded)
-      }
-      onOpenTurnDiff={onOpenTurnDiff}
-      onFileContextMenu={(filePath, event) =>
-        onFileContextMenu(
-          {
-            environmentId: ctx.activeThreadEnvironmentId,
-            threadRef: ctx.threadRef,
-            filePath,
-            workspaceRoot: ctx.workspaceRoot,
-            repositoryRoot:
-              thread?.worktreePath == null
-                ? activeProject?.repositoryIdentity?.rootPath
-                : undefined,
-          },
-          event,
-        )
       }
     />
   );
@@ -5946,7 +5841,6 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               cwd={ctx.markdownCwd}
               workspaceRoot={workspaceRoot}
               onOpenThread={ctx.onOpenThread}
-              onOpenTurnDiff={ctx.onOpenTurnDiff}
               onRollbackCheckpoint={ctx.onRollbackCheckpoint}
               onImageExpand={ctx.onImageExpand}
             />

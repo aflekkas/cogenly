@@ -5,7 +5,6 @@ import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
-  resolveProactiveTurnDiffAction,
   resolveDraftHeroState,
   resolveWorktreeSetupProgress,
   isPaintOnlyThreadTimeline,
@@ -21,7 +20,6 @@ import {
   shouldDockDraftHeroForSubmission,
   shouldReleaseTimelineAnchorForToolActivity,
   shouldRefocusComposerOnWindowFocus,
-  shouldOpenProactiveTurnDiff,
   shouldRenderPreviewMiniPlayer,
   branchMismatchKey,
   buildExpiredTerminalContextToastCopy,
@@ -72,7 +70,7 @@ import { Atom } from "effect/reactivity";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadDetails } from "../state/threads";
 
-import type { Thread, TurnDiffSummary } from "../types";
+import type { Thread } from "../types";
 import { makeThreadFixture, makeThreadProjectionFixture } from "../test-fixtures";
 
 const environmentId = EnvironmentId.make("environment-local");
@@ -741,7 +739,7 @@ describe("agent browser close confirmation", () => {
   const surfaces = [
     { id: "browser:one", kind: "preview", resourceId: "tab-1" },
     { id: "browser:two", kind: "preview", resourceId: "tab-2" },
-    { id: "diff", kind: "diff" },
+    { id: "terminal", kind: "terminal" },
   ] satisfies RightPanelSurface[];
 
   it("only warns for browsers under active agent control", () => {
@@ -800,47 +798,9 @@ describe("floating browser preview", () => {
     expect(
       shouldRenderPreviewMiniPlayer(
         { kind: "browser", tabId: "tab-1" },
-        { id: "diff", kind: "diff" },
+        { id: "terminal", kind: "terminal" },
       ),
     ).toBe(true);
-  });
-});
-
-describe("proactive panels", () => {
-  it("opens a completed diff on entry or when the observed running turn settles", () => {
-    const turnId = RunId.make("turn-1");
-    expect(
-      shouldOpenProactiveTurnDiff({
-        previousRunningTurnId: undefined,
-        runningTurnId: null,
-        settledTurnId: turnId,
-        turnCompleted: true,
-      }),
-    ).toBe(true);
-    expect(
-      shouldOpenProactiveTurnDiff({
-        previousRunningTurnId: turnId,
-        runningTurnId: null,
-        settledTurnId: turnId,
-        turnCompleted: true,
-      }),
-    ).toBe(true);
-    expect(
-      shouldOpenProactiveTurnDiff({
-        previousRunningTurnId: turnId,
-        runningTurnId: RunId.make("turn-2"),
-        settledTurnId: turnId,
-        turnCompleted: true,
-      }),
-    ).toBe(false);
-    expect(
-      shouldOpenProactiveTurnDiff({
-        previousRunningTurnId: turnId,
-        runningTurnId: null,
-        settledTurnId: turnId,
-        turnCompleted: false,
-      }),
-    ).toBe(false);
   });
 });
 
@@ -1402,92 +1362,6 @@ describe("resolveBackgroundDraftWorkspaceOptions", () => {
       worktreePath: null,
       startFromOrigin: true,
     });
-  });
-});
-
-describe("proactive completed diff guard", () => {
-  it.each([
-    { files: 0, additions: 0, deletions: 0, action: "ignore" },
-    { files: 1, additions: 1, deletions: 0, action: "ignore" },
-    { files: 2, additions: 12, deletions: 12, action: "ignore" },
-    { files: 1, additions: 25, deletions: 24, action: "ignore" },
-    { files: 1, additions: 25, deletions: 25, action: "open" },
-    { files: 1, additions: 0, deletions: 50, action: "open" },
-    { files: 3, additions: 1, deletions: 0, action: "open" },
-  ])(
-    "uses change size for automatic diffs: $files files, +$additions/-$deletions",
-    ({ files, additions, deletions, action }) => {
-      const changedCheckpoint = {
-        status: "ready",
-        files: Array.from({ length: files }, (_, index) => ({
-          path: `src/app-${index}.ts`,
-          kind: "modified" as const,
-          additions,
-          deletions,
-        })),
-      } satisfies Pick<TurnDiffSummary, "status" | "files">;
-
-      expect(
-        resolveProactiveTurnDiffAction({
-          checkpoint: changedCheckpoint,
-          isGitRepo: true,
-          activeSurfaceKind: null,
-        }),
-      ).toBe(action);
-    },
-  );
-
-  it("waits for definitive checkpoint and repository state", () => {
-    const missingCheckpoint = {
-      status: "missing",
-      files: [],
-    } satisfies Pick<TurnDiffSummary, "status" | "files">;
-    const changedCheckpoint = {
-      status: "ready",
-      files: [{ path: "src/app.ts", kind: "modified", additions: 1, deletions: 0 }],
-    } satisfies Pick<TurnDiffSummary, "status" | "files">;
-
-    expect(
-      resolveProactiveTurnDiffAction({
-        checkpoint: undefined,
-        isGitRepo: true,
-        activeSurfaceKind: null,
-      }),
-    ).toBe("defer");
-    expect(
-      resolveProactiveTurnDiffAction({
-        checkpoint: missingCheckpoint,
-        isGitRepo: true,
-        activeSurfaceKind: null,
-      }),
-    ).toBe("defer");
-    expect(
-      resolveProactiveTurnDiffAction({
-        checkpoint: changedCheckpoint,
-        isGitRepo: undefined,
-        activeSurfaceKind: null,
-      }),
-    ).toBe("defer");
-  });
-
-  it("leaves an already open diff and its chosen scope alone", () => {
-    const largeCheckpoint = {
-      status: "ready",
-      files: Array.from({ length: 3 }, (_, index) => ({
-        path: `src/app-${index}.ts`,
-        kind: "modified" as const,
-        additions: 20,
-        deletions: 0,
-      })),
-    } satisfies Pick<TurnDiffSummary, "status" | "files">;
-
-    expect(
-      resolveProactiveTurnDiffAction({
-        checkpoint: largeCheckpoint,
-        isGitRepo: true,
-        activeSurfaceKind: "diff",
-      }),
-    ).toBe("ignore");
   });
 });
 

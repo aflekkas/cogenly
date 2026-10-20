@@ -1,4 +1,4 @@
-import type { ResolvedKeybindingsConfig, ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import { Bot, Check, Copy, ExternalLink, Square } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
@@ -310,7 +310,6 @@ export interface AgentRunsViewProps {
   readonly listCollapsed: boolean;
   readonly canOperate: boolean;
   readonly visible: boolean;
-  readonly keybindings: ResolvedKeybindingsConfig;
   readonly focusToken: number;
   readonly autoFocus: boolean;
   readonly onSelect: (terminalId: string) => void;
@@ -454,7 +453,6 @@ export function AgentRunsView(props: AgentRunsViewProps) {
             autoFocus={props.autoFocus}
             visible={props.visible}
             resizeEpoch={0}
-            keybindings={props.keybindings}
           />
         </div>
         <RunStatusFooter entry={selected} />

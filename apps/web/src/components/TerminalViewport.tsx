@@ -16,7 +16,6 @@ import {
   AuthTerminalOperateScope,
   type ContextMenuItem,
   type ProviderInstanceId,
-  type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -37,7 +36,6 @@ import { type GhosttyColor, type GhosttyTheme } from "~/terminal/ghostty/core";
 import { resolvePathLinkTarget, splitFilePathPosition } from "@t3tools/shared/fileLinks";
 import { isTerminalUrl } from "../terminal-links";
 import {
-  isDiffToggleShortcut,
   isTerminalClearShortcut,
   terminalDeleteShortcutData,
   terminalNavigationShortcutData,
@@ -343,7 +341,6 @@ interface TerminalViewportProps {
   autoFocus: boolean;
   visible: boolean;
   resizeEpoch: number;
-  keybindings: ResolvedKeybindingsConfig;
 }
 
 export function TerminalViewport({
@@ -362,7 +359,6 @@ export function TerminalViewport({
   autoFocus,
   visible,
   resizeEpoch,
-  keybindings,
 }: TerminalViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<GhosttyTerminalSurface | null>(null);
@@ -396,7 +392,6 @@ export function TerminalViewport({
   // popup that was superseded (but whose menu promise has not settled yet)
   // cannot be mistaken for the active flow.
   const openSelectionMenuRequestIdRef = useRef<number | null>(null);
-  const keybindingsRef = useRef(keybindings);
   const runtimeEnvKey = useMemo(() => runtimeEnvSignature(runtimeEnv), [runtimeEnv]);
   const handleSessionExited = useEffectEvent(() => {
     if (onSessionExited && hasTerminalWriteAccess()) onSessionExited();
@@ -503,10 +498,6 @@ export function TerminalViewport({
     status: terminalStatus,
     version: terminalVersion,
   };
-
-  useEffect(() => {
-    keybindingsRef.current = keybindings;
-  }, [keybindings]);
 
   useLayoutEffect(() => {
     if (terminalRef.current) terminalRef.current.input.readOnly = !canOperateTerminal;
@@ -819,12 +810,6 @@ export function TerminalViewport({
       };
 
       function handleBeforeKey(event: KeyboardEvent): boolean {
-        const currentKeybindings = keybindingsRef.current;
-        const options = { context: { terminalFocus: true } };
-        if (isDiffToggleShortcut(event, currentKeybindings, options)) {
-          return false;
-        }
-
         const navigationData = terminalNavigationShortcutData(event);
         if (navigationData !== null) {
           event.preventDefault();

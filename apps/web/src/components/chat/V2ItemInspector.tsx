@@ -1,9 +1,4 @@
-import type {
-  EnvironmentId,
-  OrchestrationV2ProjectedTurnItem,
-  RunId,
-  ThreadId,
-} from "@t3tools/contracts";
+import type { EnvironmentId, OrchestrationV2ProjectedTurnItem, ThreadId } from "@t3tools/contracts";
 import {
   toolCallLines,
   turnItemDetailRevision,
@@ -37,7 +32,6 @@ interface V2ItemInspectorProps {
   readonly cwd?: string | undefined;
   readonly workspaceRoot?: string | undefined;
   readonly onOpenThread: (threadId: ThreadId) => void;
-  readonly onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   readonly onRollbackCheckpoint?: (input: {
     readonly checkpointId: string;
     readonly scopeId: string;
@@ -299,15 +293,6 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
                 <span className="text-success">+{formatDiffCount(item.additions ?? 0)}</span>{" "}
                 <span className="text-destructive">-{formatDiffCount(item.deletions ?? 0)}</span>
               </span>
-            ) : null}
-            {item.runId !== null ? (
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => props.onOpenTurnDiff(item.runId!, item.fileName)}
-              >
-                Open diff
-              </Button>
             ) : null}
           </div>
           {item.status === "failed" && item.diffStr?.trim() ? (

@@ -4,7 +4,7 @@
  * This is intentionally a shallow workspace model: it owns an ordered set of
  * surface descriptors and the active surface, while each feature continues to
  * own its durable resource state. Browser surfaces point at preview tab ids,
- * file surfaces point at workspace paths, and diff/files/terminal remain
+ * file surfaces point at workspace paths, and files/terminal remain
  * singleton surfaces. The terminal surface holds the thread's agent runs and
  * shells and remembers which one is selected.
  */
@@ -18,7 +18,7 @@ import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
 import type { ChatFileAttachment } from "./types";
 
-const RIGHT_PANEL_KINDS = ["diff", "files", "file", "preview", "device", "terminal"] as const;
+const RIGHT_PANEL_KINDS = ["files", "file", "preview", "device", "terminal"] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export interface DeviceTabTarget {
@@ -38,7 +38,6 @@ export type RightPanelSurface =
       /** The terminal shown below the command list; the newest one when unset. */
       activeTerminalId?: string;
     }
-  | { id: "diff"; kind: "diff" }
   | {
       id: "files";
       kind: "files";
@@ -69,7 +68,8 @@ const RIGHT_PANEL_STORAGE_KEY = "cogenly:right-panel-state:v2";
 // v12 adds the device surface.
 // v14 removes the agents surface; lineage lives in the thread title bar.
 // v16 folds per-shell terminal surfaces into the single agent terminal surface.
-const RIGHT_PANEL_STORAGE_VERSION = 16;
+// v17 removes the diff surface.
+const RIGHT_PANEL_STORAGE_VERSION = 17;
 
 export interface ThreadRightPanelState {
   isOpen: boolean;
@@ -95,19 +95,7 @@ interface RightPanelStoreState {
   requestMaximize: (ref: ScopedThreadRef) => void;
   consumeMaximizeRequest: (ref: ScopedThreadRef) => boolean;
   threadPanelVisibilityByThreadKey: Record<string, ThreadPanelVisibility>;
-  /** Session-only count of user panel choices per thread. Automatic updates do not advance it. */
-  userActionRevisionByThreadKey: Record<string, number>;
   closeRevisionByThreadKey: Record<string, number>;
-  getUserActionRevision: (ref: ScopedThreadRef) => number;
-  /**
-   * Open a surface on behalf of the app, not the user. Refused when the user
-   * made a panel choice after `expectedUserActionRevision` was read.
-   */
-  openProactive: (
-    ref: ScopedThreadRef,
-    surface: Extract<RightPanelSurface, { kind: "diff" }>,
-    expectedUserActionRevision: number,
-  ) => boolean;
   open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
@@ -176,8 +164,6 @@ const singletonSurface = (
   kind: Exclude<RightPanelKind, "file" | "preview" | "terminal">,
 ): RightPanelSurface => {
   switch (kind) {
-    case "diff":
-      return { id: "diff", kind };
     case "files":
       return { id: "files", kind };
     case "device":
@@ -333,8 +319,8 @@ const updateThread = (
 };
 
 // Every store action is a user choice unless it goes through `automaticUpdate`.
-// Only `openProactive`, agent terminal reveals and resource reconciliation are
-// automatic, so a new action counts as a user choice by default.
+// Only agent terminal and device reveals and resource reconciliation are
+// automatic: a user choice is what remembers dismissed devices.
 const automaticUpdate = (
   state: RightPanelStoreState,
   threadKey: string,
@@ -367,10 +353,6 @@ const userAction = (
       ],
     };
   }),
-  userActionRevisionByThreadKey: {
-    ...state.userActionRevisionByThreadKey,
-    [threadKey]: (state.userActionRevisionByThreadKey[threadKey] ?? 0) + 1,
-  },
   ...(closesView
     ? {
         closeRevisionByThreadKey: {
@@ -412,10 +394,12 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
               let seenTerminalSurface = false;
               const surfaces = Array.isArray(validThreadState?.surfaces)
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
-                    // Removed surfaces: plans render inline, agents in thread lineage.
+                    // Removed surfaces: plans render inline, agents in thread lineage,
+                    // and the thread UI has no diff view.
                     const kind = (surface as { kind?: string }).kind;
                     if (
                       kind === "plan" ||
+                      kind === "diff" ||
                       kind === "agents" ||
                       kind === "pull-request" ||
                       kind === "pull-requests"
@@ -526,24 +510,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         return true;
       },
       threadPanelVisibilityByThreadKey: {},
-      userActionRevisionByThreadKey: {},
       closeRevisionByThreadKey: {},
-      getUserActionRevision: (ref) =>
-        get().userActionRevisionByThreadKey[scopedThreadKey(ref)] ?? 0,
-      openProactive: (ref, surface, expectedUserActionRevision) => {
-        let opened = false;
-        set((state) => {
-          const threadKey = scopedThreadKey(ref);
-          if (
-            (state.userActionRevisionByThreadKey[threadKey] ?? 0) !== expectedUserActionRevision
-          ) {
-            return state;
-          }
-          opened = true;
-          return automaticUpdate(state, threadKey, (current) => upsertSurface(current, surface));
-        });
-        return opened;
-      },
       open: (ref, kind) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
@@ -752,8 +719,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               : { ...current, isOpen: false, surfaces: [], activeSurfaceId: null },
           ),
         ),
-      // Reordering is not a choice about what the panel shows, so it leaves the
-      // user-action revision alone and proactive opens still apply.
+      // Reordering is not a choice about what the panel shows.
       moveSurface: (ref, surfaceId, toIndex) =>
         set((state) =>
           updateThread(state, scopedThreadKey(ref), (current) => {
@@ -827,7 +793,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             current.isOpen ? { ...current, isOpen: false } : current,
           ),
         ),
-      // Layout only: it changes no surface, so proactive panels still apply.
+      // Layout only: it changes no surface.
       setMaximized: (ref, maximized) =>
         set((state) =>
           automaticUpdate(state, scopedThreadKey(ref), (current) => {
@@ -887,7 +853,6 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           if (
             !(threadKey in state.byThreadKey) &&
             !(threadKey in state.threadPanelVisibilityByThreadKey) &&
-            !(threadKey in state.userActionRevisionByThreadKey) &&
             !(threadKey in state.closeRevisionByThreadKey)
           ) {
             return state;
@@ -895,14 +860,11 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           const { [threadKey]: _removed, ...byThreadKey } = state.byThreadKey;
           const { [threadKey]: _visibility, ...threadPanelVisibilityByThreadKey } =
             state.threadPanelVisibilityByThreadKey;
-          const { [threadKey]: _revision, ...userActionRevisionByThreadKey } =
-            state.userActionRevisionByThreadKey;
           const { [threadKey]: _closeRevision, ...closeRevisionByThreadKey } =
             state.closeRevisionByThreadKey;
           return {
             byThreadKey,
             threadPanelVisibilityByThreadKey,
-            userActionRevisionByThreadKey,
             closeRevisionByThreadKey,
           };
         }),

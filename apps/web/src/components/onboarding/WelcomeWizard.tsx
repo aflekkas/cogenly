@@ -644,7 +644,6 @@ interface AgentTerminalSession {
   readonly providerInstanceId: ServerProvider["instanceId"];
   readonly cwd: string;
   readonly command: string;
-  readonly keybindings: ServerConfig["keybindings"];
 }
 
 /** Codex uses managed setup; existing CLI installs retain the terminal path. */
@@ -777,7 +776,6 @@ function ConnectedAgentsStep({
                         driver,
                         serverConfig.environment.platform.os,
                       ),
-                  keybindings: serverConfig.keybindings,
                 });
               }}
             />
@@ -810,7 +808,6 @@ function ConnectedAgentsStep({
                         driver,
                         serverConfig.environment.platform.os,
                       ),
-                  keybindings: serverConfig.keybindings,
                 });
               }}
             />
@@ -1011,7 +1008,7 @@ function AgentInstallTerminal({
   readonly session: AgentTerminalSession;
   readonly onClose: () => void;
 }) {
-  const { command, cwd, driver, environmentId, keybindings, providerInstanceId } = session;
+  const { command, cwd, driver, environmentId, providerInstanceId } = session;
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
   // Same terminal typography preference the thread drawer honors.
   const openTerminal = useAtomCommand(terminalEnvironment.open, { reportFailure: false });
@@ -1156,7 +1153,6 @@ function AgentInstallTerminal({
             autoFocus
             visible
             resizeEpoch={0}
-            keybindings={keybindings}
           />
         ) : null}
       </div>

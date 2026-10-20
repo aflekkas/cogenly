@@ -1,4 +1,4 @@
-import type { ResolvedKeybindingsConfig, ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import { Plus, SquareTerminal } from "lucide-react";
 import { useRef, useState, type KeyboardEvent } from "react";
@@ -155,7 +155,6 @@ export interface TerminalShellsViewProps {
   readonly shellCwd: string | null;
   readonly shellWorktreePath: string | null;
   readonly visible: boolean;
-  readonly keybindings: ResolvedKeybindingsConfig;
   readonly focusToken: number;
   readonly autoFocus: boolean;
   readonly onSelect: (terminalId: string) => void;
@@ -232,7 +231,6 @@ export function TerminalShellsView(props: TerminalShellsViewProps) {
             autoFocus={props.autoFocus}
             visible={props.visible}
             resizeEpoch={0}
-            keybindings={props.keybindings}
           />
         ) : null}
       </div>

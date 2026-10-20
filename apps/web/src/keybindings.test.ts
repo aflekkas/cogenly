@@ -14,7 +14,6 @@ import {
 import {
   effectiveShortcutsForCommand,
   formatShortcutLabel,
-  isDiffToggleShortcut,
   isRichTextBoldShortcut,
   modelPickerJumpCommandForIndex,
   modelPickerJumpIndexFromCommand,
@@ -707,21 +706,6 @@ describe("chat/editor shortcuts", () => {
         context: { terminalFocus: true },
       }),
       "projectSearch.toggle",
-    );
-  });
-
-  it("matches diff.toggle shortcut outside terminal focus", () => {
-    assert.isTrue(
-      isDiffToggleShortcut(event({ key: "d", metaKey: true }), DEFAULT_BINDINGS, {
-        platform: "MacIntel",
-        context: { terminalFocus: false },
-      }),
-    );
-    assert.isFalse(
-      isDiffToggleShortcut(event({ key: "d", metaKey: true }), DEFAULT_BINDINGS, {
-        platform: "MacIntel",
-        context: { terminalFocus: true },
-      }),
     );
   });
 });

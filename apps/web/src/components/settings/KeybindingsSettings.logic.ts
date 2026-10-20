@@ -217,7 +217,7 @@ const KEYBINDING_GROUPS = [
   },
   { id: "threads", title: "Threads", prefixes: ["thread", "chat", "pullRequest"] },
   { id: "composer", title: "Composer", prefixes: ["composer", "modelPicker"] },
-  { id: "preview", title: "Preview & diff", prefixes: ["preview", "diff"] },
+  { id: "preview", title: "Preview", prefixes: ["preview"] },
   { id: "appearance", title: "Appearance", prefixes: ["appearance"] },
   { id: "scripts", title: "Repository scripts", prefixes: ["script"] },
 ] as const;
@@ -349,10 +349,11 @@ export function buildWhenVariableOptions(): ReadonlyArray<WhenVariableOption> {
   });
 }
 
-// Still decodable so stored keybindings load, but no longer offered: pinning and the
-// terminal drawer were removed.
+// Still decodable so stored keybindings load, but no longer offered: pinning, the
+// terminal drawer and the diff panel were removed.
 export const RETIRED_KEYBINDING_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
   "thread.pin",
+  "diff.toggle",
   "terminal.toggle",
   "terminal.split",
   "terminal.splitVertical",

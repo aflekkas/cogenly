@@ -143,15 +143,6 @@ function findEffectiveShortcutForCommand(
   return effectiveShortcutsForCommand(keybindings, command, options)[0] ?? null;
 }
 
-function matchesCommandShortcut(
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  command: KeybindingCommand,
-  options?: ShortcutMatchOptions,
-): boolean {
-  return resolveShortcutCommand(event, keybindings, options) === command;
-}
-
 export function resolveShortcutCommand(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
@@ -294,14 +285,6 @@ export function modelPickerJumpIndexFromCommand(command: string): number | null 
     command as ModelPickerJumpKeybindingCommand,
   );
   return index === -1 ? null : index;
-}
-
-export function isDiffToggleShortcut(
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-): boolean {
-  return matchesCommandShortcut(event, keybindings, "diff.toggle", options);
 }
 
 /**

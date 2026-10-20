@@ -1,7 +1,6 @@
 import {
   AuthTerminalOperateScope,
   AuthTerminalReadScope,
-  type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { nextTerminalId } from "@t3tools/shared/terminalLabels";
@@ -85,7 +84,6 @@ export interface AgentTerminalsPanelProps {
   /** Where a new shell starts; null when the thread has no workspace. */
   readonly shellCwd: string | null;
   readonly shellWorktreePath: string | null;
-  readonly keybindings: ResolvedKeybindingsConfig;
   readonly onSelectTerminal: (terminalId: string) => void;
   readonly onAddTerminalContext: (selection: TerminalContextSelection) => void;
 }
@@ -103,7 +101,6 @@ export function AgentTerminalsPanel({
   activeTerminalId,
   shellCwd,
   shellWorktreePath,
-  keybindings,
   onSelectTerminal,
   onAddTerminalContext,
 }: AgentTerminalsPanelProps) {
@@ -291,7 +288,6 @@ export function AgentTerminalsPanel({
           listCollapsed={listCollapsed}
           canOperate={canOperate}
           visible={visible}
-          keybindings={keybindings}
           focusToken={focusTarget?.token ?? 0}
           autoFocus={focusTarget?.terminalId === selectedRun?.terminalId}
           onSelect={onSelectTerminal}
@@ -310,7 +306,6 @@ export function AgentTerminalsPanel({
           shellCwd={shellCwd}
           shellWorktreePath={shellWorktreePath}
           visible={visible}
-          keybindings={keybindings}
           focusToken={focusTarget?.token ?? 0}
           autoFocus={focusTarget?.terminalId === selectedShell?.terminalId}
           onSelect={(terminalId) => {

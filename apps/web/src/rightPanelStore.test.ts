@@ -43,19 +43,14 @@ describe("migratePersistedRightPanelState", () => {
     expect(migrated.byThreadKey["env-1:thread-1"]).toEqual({
       isOpen: true,
       activeSurfaceId: "terminal",
-      surfaces: [
-        { id: "diff", kind: "diff" },
-        { id: "terminal", kind: "terminal" },
-      ],
+      surfaces: [{ id: "terminal", kind: "terminal" }],
     });
   });
 });
 
 describe("terminal surface actions", () => {
-  it("reveals an agent terminal without counting as a user panel choice", () => {
-    const store = useRightPanelStore.getState();
-    store.open(threadRef, "diff");
-    const revision = useRightPanelStore.getState().getUserActionRevision(threadRef);
+  it("reveals an agent terminal in the single terminal surface", () => {
+    useRightPanelStore.getState().open(threadRef, "files");
 
     useRightPanelStore.getState().revealAgentTerminal(threadRef, "agent-1");
 
@@ -67,7 +62,6 @@ describe("terminal surface actions", () => {
       kind: "terminal",
       activeTerminalId: "agent-1",
     });
-    expect(useRightPanelStore.getState().getUserActionRevision(threadRef)).toBe(revision);
 
     // A later reveal selects the newer command in the same surface.
     useRightPanelStore.getState().revealAgentTerminal(threadRef, "agent-2");

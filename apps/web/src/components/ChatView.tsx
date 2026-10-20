@@ -182,7 +182,6 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
-import { useDiffPanelStore } from "../diffPanelStore";
 import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
 import {
   type ComposerSubmissionIntent,
@@ -508,7 +507,6 @@ import {
   isBranchMismatchDismissedForSession,
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
-  shouldOpenProactiveTurnDiff,
   shouldReleaseTimelineAnchorForToolActivity,
   shouldRenderPreviewMiniPlayer,
   getStartedThreadModelChangeBlockReason,
@@ -524,8 +522,6 @@ import {
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
   getProviderSendBlockReason,
-  observeProactivePanelUserChoice,
-  resolveProactiveTurnDiffAction,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
@@ -680,7 +676,6 @@ function useDraftHeroLayoutTransition(
 const PreviewPanel = lazy(() =>
   import("./preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
 );
-const DiffPanel = lazy(() => import("./DiffPanel"));
 const selectAutoShowFloatingPreview = (settings: { browserAutoShowFloatingPreview: boolean }) =>
   settings.browserAutoShowFloatingPreview;
 const DevicePanel = lazy(() =>
@@ -807,7 +802,6 @@ type ChatViewProps =
   | {
       environmentId: EnvironmentId;
       threadId: ThreadId;
-      onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
       routeKind: "server";
@@ -816,7 +810,6 @@ type ChatViewProps =
   | {
       environmentId: EnvironmentId;
       threadId: ThreadId;
-      onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
       routeKind: "draft";
@@ -907,7 +900,6 @@ function chatActionErrorMessage(error: unknown): string {
 
 const ENVIRONMENT_UNAVAILABLE_SEND_TOAST_TRAIL_SIZE = 3;
 const EMPTY_HELD_TURN_DIFF_SUMMARIES: readonly never[] = [];
-const noopHeldTurnDiff = (_turnId: RunId, _filePath?: string) => {};
 const noopHeldRevert = (_targetTurnCount: number) => {};
 const noopHeldAttachment = (_attachment: ChatFileAttachment) => {};
 
@@ -1036,7 +1028,6 @@ export default function ChatView(props: ChatViewProps) {
     environmentId,
     threadId,
     routeKind,
-    onDiffPanelOpen,
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
   } = props;
@@ -1714,17 +1705,6 @@ export default function ChatView(props: ChatViewProps) {
   const activeRightPanelKind = useRightPanelStore((state) =>
     selectActiveRightPanel(state.byThreadKey, activeThreadRef),
   );
-  const diffOpen = activeRightPanelKind === "diff";
-  const explicitDiffOpenRef = useRef<ScopedThreadRef | null>(null);
-  useLayoutEffect(() => {
-    const explicitThreadRef = explicitDiffOpenRef.current;
-    explicitDiffOpenRef.current = null;
-    // Generic openings always show Changes, including tab fallbacks and thread changes.
-    // A timeline click instead opens the specific turn/file the user requested.
-    if (diffOpen && activeThreadRef && explicitThreadRef !== activeThreadRef) {
-      useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
-    }
-  }, [activeThreadRef, diffOpen]);
   const rightPanelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, activeThreadRef),
   );
@@ -3563,18 +3543,6 @@ export default function ChatView(props: ChatViewProps) {
   const mountComposerModelStrip =
     routeKind === "server" && !mountComposerContextStrip && !showProviderSubagentBar;
   const showComposerModelStrip = mountComposerModelStrip && restingComposerControlsVisible;
-  const onToggleDiff = () => {
-    if (!isServerThread) {
-      return;
-    }
-    if (!diffOpen) {
-      onDiffPanelOpen?.();
-    }
-    if (activeThreadRef) {
-      useRightPanelStore.getState().toggle(activeThreadRef, "diff");
-    }
-  };
-  const onToggleDiffStable = useStableCallback(onToggleDiff);
 
   const needsLoadBalancing = automaticEnvironment && !draftThread?.loadBalancedEnvironmentId;
   const loadBalancingCandidates = useMemo(
@@ -4334,22 +4302,6 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
   const createBrowserSurfaceStable = useStableCallback(createBrowserSurface);
-  const addDiffSurface = () => {
-    if (!activeThreadRef || !isServerThread || !isGitRepo) return;
-    useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
-    useRightPanelStore.getState().open(activeThreadRef, "diff");
-    onDiffPanelOpen?.();
-  };
-  const addDiffSurfaceStable = useStableCallback(addDiffSurface);
-  const openChangesFromThreadPanel = () => {
-    addDiffSurface();
-  };
-  const openChangesFromThreadPanelStable = useStableCallback(openChangesFromThreadPanel);
-  const addFilesSurface = () => {
-    if (!activeThreadRef || !activeProject) return;
-    useRightPanelStore.getState().open(activeThreadRef, "files");
-  };
-  const addFilesSurfaceStable = useStableCallback(addFilesSurface);
 
   const { state: deviceState, loaded: deviceStateLoaded } = useDeviceState(
     activeThreadRef?.environmentId ?? null,
@@ -4483,76 +4435,6 @@ export default function ChatView(props: ChatViewProps) {
   };
   const openFileSurfaceStable = useStableCallback(openFileSurface);
   const activeRunningTurnId = activeRuntime?.activeRunId ?? null;
-  const proactivePanelObservationRef = useRef<ReturnType<
-    typeof observeProactivePanelUserChoice
-  > | null>(null);
-
-  useEffect(() => {
-    if (!isServerThread || activeThreadKey === null || activeThreadRef === null) {
-      proactivePanelObservationRef.current = null;
-      return;
-    }
-    const panels = useRightPanelStore.getState();
-    const observation = observeProactivePanelUserChoice(proactivePanelObservationRef.current, {
-      threadKey: activeThreadKey,
-      runningTurnId: activeRunningTurnId,
-      userActionRevision: panels.getUserActionRevision(activeThreadRef),
-    });
-    proactivePanelObservationRef.current = observation;
-    const { runningTurnId: previousRunningTurnId, userActionRevision } = observation;
-    const openSurface = selectActiveRightPanelSurface(panels.byThreadKey, activeThreadRef);
-    if (!clientSettingsHydrated) return;
-    const proactivePanelsEnabled = settings.proactivePanelsEnabled && !shouldUsePlanSidebarSheet;
-    if (threadDetailLoading) return;
-
-    const settledTurnId = latestRunSettled ? (activeLatestRun?.runId ?? null) : null;
-    const newlyCompletedTurnId = shouldOpenProactiveTurnDiff({
-      previousRunningTurnId,
-      runningTurnId: activeRunningTurnId,
-      settledTurnId,
-      turnCompleted: activeLatestRun?.status === "completed",
-    })
-      ? settledTurnId
-      : null;
-    const eligibleCompletion = proactivePanelsEnabled && newlyCompletedTurnId !== null;
-    const completedCheckpoint = eligibleCompletion
-      ? turnDiffSummaries.find((checkpoint) => checkpoint.runId === newlyCompletedTurnId)
-      : undefined;
-    const diffAction = eligibleCompletion
-      ? resolveProactiveTurnDiffAction({
-          checkpoint: completedCheckpoint,
-          isGitRepo: gitStatusQuery.data?.isRepo,
-          activeSurfaceKind: openSurface?.kind ?? null,
-        })
-      : "ignore";
-    proactivePanelObservationRef.current = {
-      ...proactivePanelObservationRef.current,
-      // Preserve first-entry eligibility while capabilities, checkpoint or repository load.
-      runningTurnId: diffAction === "defer" ? previousRunningTurnId : activeRunningTurnId,
-    };
-    if (diffAction !== "open" || newlyCompletedTurnId === null) return;
-    if (!panels.openProactive(activeThreadRef, { id: "diff", kind: "diff" }, userActionRevision)) {
-      return;
-    }
-    useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
-    onDiffPanelOpen?.();
-  }, [
-    turnDiffSummaries,
-    activeLatestRun?.runId,
-    activeLatestRun?.status,
-    activeRunningTurnId,
-    activeThreadKey,
-    activeThreadRef,
-    clientSettingsHydrated,
-    gitStatusQuery.data?.isRepo,
-    isServerThread,
-    latestRunSettled,
-    onDiffPanelOpen,
-
-    settings.proactivePanelsEnabled,
-    shouldUsePlanSidebarSheet,
-    threadDetailLoading,
-  ]);
   const closePreviewPanel = () => {
     if (activeThreadRef) {
       // Closing the panel on a live browser or device floats it instead of dropping it.
@@ -4605,9 +4487,6 @@ export default function ChatView(props: ChatViewProps) {
     }
     if (surface.kind === "terminal") {
       setTerminalFocusRequestId((value) => value + 1);
-    }
-    if (surface.kind === "diff" && !diffOpen) {
-      onDiffPanelOpen?.();
     }
   };
   const activateRightPanelSurfaceStable = useStableCallback(activateRightPanelSurface);
@@ -6554,14 +6433,6 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
-      if (command === "diff.toggle") {
-        if (!activeThreadCapabilities.diff) return;
-        event.preventDefault();
-        event.stopPropagation();
-        onToggleDiffStable();
-        return;
-      }
-
       if (command === "modelPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -6691,7 +6562,6 @@ export default function ChatView(props: ChatViewProps) {
     isServerThread,
     serverConfig?.threadFind,
     onInterruptStable,
-    onToggleDiffStable,
     settleThread,
     supportsSettlement,
     copyActiveThreadReferenceStable,
@@ -9241,16 +9111,6 @@ export default function ChatView(props: ChatViewProps) {
     setExpandedImage(preview);
   };
   const onExpandTimelineImageStable = useStableCallback(onExpandTimelineImage);
-  const onOpenTurnDiff = (runId: RunId, filePath?: string) => {
-    if (!isServerThread || !activeThreadRef) return;
-    const diffOpen =
-      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
-    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
-    useDiffPanelStore.getState().selectTurn(activeThreadRef, runId, filePath);
-    useRightPanelStore.getState().open(activeThreadRef, "diff");
-    onDiffPanelOpen?.();
-  };
-  const onOpenTurnDiffStable = useStableCallback(onOpenTurnDiff);
   const onTimelineRollbackCheckpoint = (input: {
     readonly checkpointId: string;
     readonly scopeId: string;
@@ -9328,19 +9188,9 @@ export default function ChatView(props: ChatViewProps) {
         shellCwd={gitCwd}
         shellWorktreePath={activeThread.worktreePath ?? null}
         focusRequestId={terminalFocusRequestId}
-        keybindings={keybindings}
         onSelectTerminal={selectPanelTerminalStable}
         onAddTerminalContext={addTerminalContextToDraftStable}
       />
-    ) : renderedRightPanelSurface?.kind === "diff" ? (
-      <Suspense fallback={null}>
-        <DiffPanel
-          key={activeThreadKey}
-          mode="embedded"
-          composerDraftTarget={composerDraftTarget}
-          workspaceMutationId={workspaceMutationId}
-        />
-      </Suspense>
     ) : renderedRightPanelSurface?.kind === "device" ? (
       <Suspense fallback={null}>
         <DevicePanel
@@ -9454,7 +9304,6 @@ export default function ChatView(props: ChatViewProps) {
     startFromOrigin,
     onStartFromOriginChange,
     onComposerFocusRequest: scheduleComposerFocusStable,
-    ...(isServerThread && isGitRepo ? { onOpenChanges: openChangesFromThreadPanelStable } : {}),
     onRunProjectScript: runProjectScriptStable,
     onAddProjectScript: saveProjectScriptStable,
     onUpdateProjectScript: updateProjectScriptStable,
@@ -9733,9 +9582,6 @@ export default function ChatView(props: ChatViewProps) {
                 routeThreadKey={displayedTimelineKey}
                 displayThreadKey={displayedTimelineKey}
                 paintOnly={paintOnlyDisplayedTimeline}
-                onOpenTurnDiff={
-                  paintOnlyDisplayedTimeline ? noopHeldTurnDiff : onOpenTurnDiffStable
-                }
                 onOpenThread={onOpenRelatedThreadStable}
                 parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}
                 onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRunStable}
@@ -10218,14 +10064,10 @@ export default function ChatView(props: ChatViewProps) {
           onAddBrowser={() => createBrowserSurface()}
           onAddBrowserInProfile={createBrowserSurfaceStable}
           onAddTerminal={openTerminalSurfaceStable}
-          onAddDiff={addDiffSurfaceStable}
-          onAddFiles={addFilesSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && (canReadTerminal || canOperateTerminal)}
           supportedSurfaces={activeThreadCapabilities}
-          diffAvailable={isServerThread && isGitRepo}
-          filesAvailable={activeProject !== null}
           deviceAvailable={activeThreadRef !== null}
         >
           {rightPanelContent}
@@ -10273,14 +10115,10 @@ export default function ChatView(props: ChatViewProps) {
             onAddBrowser={() => createBrowserSurface()}
             onAddBrowserInProfile={createBrowserSurfaceStable}
             onAddTerminal={openTerminalSurfaceStable}
-            onAddDiff={addDiffSurfaceStable}
-            onAddFiles={addFilesSurfaceStable}
             onAddDevice={addDeviceSurfaceStable}
             browserAvailable={canOperatePreview && browserAvailable}
             terminalAvailable={activeProject !== null && (canReadTerminal || canOperateTerminal)}
             supportedSurfaces={activeThreadCapabilities}
-            diffAvailable={isServerThread && isGitRepo}
-            filesAvailable={activeProject !== null}
             deviceAvailable={activeThreadRef !== null}
           >
             {rightPanelContent}

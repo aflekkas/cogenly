@@ -64,7 +64,7 @@ describe("KeybindingsSettings.logic", () => {
       "Navigation",
       "Threads",
       "Composer",
-      "Preview & diff",
+      "Preview",
       "Appearance",
       "Other",
     ]);
@@ -73,7 +73,7 @@ describe("KeybindingsSettings.logic", () => {
       expect.arrayContaining(["composer.host", "modelPicker.toggle"]),
     );
     expect(
-      groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "diff.toggle")),
+      groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, "preview.toggle")),
     ).toEqual([expect.objectContaining({ id: "preview" })]);
   });
   it("orders Usage bindings and command choices like the page", () => {

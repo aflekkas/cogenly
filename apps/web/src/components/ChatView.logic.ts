@@ -38,13 +38,7 @@ import {
   type CodexArtifactTemplate,
 } from "@t3tools/shared/codexArtifactTemplates";
 import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
-import {
-  type ChatMessage,
-  isImageAttachment,
-  type SessionPhase,
-  type Thread,
-  type TurnDiffSummary,
-} from "../types";
+import { type ChatMessage, isImageAttachment, type SessionPhase, type Thread } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -109,72 +103,6 @@ export function shouldRenderPreviewMiniPlayer(
     renderedRightPanelSurface.target?.hostId === source.hostId &&
     renderedRightPanelSurface.target.deviceId === source.deviceId
   );
-}
-
-interface ProactivePanelObservation {
-  threadKey: string;
-  runningTurnId: RunId | null | undefined;
-  targetKey: string | null | undefined;
-  userActionTurnId: RunId | null;
-  userActionRevision: number;
-}
-
-/** Capture user intent before loading or metadata writes can defer panel activation. */
-export function observeProactivePanelUserChoice(
-  previous: ProactivePanelObservation | null,
-  input: { threadKey: string; runningTurnId: RunId | null; userActionRevision: number },
-): ProactivePanelObservation {
-  const sameThread = previous?.threadKey === input.threadKey;
-  const newTurn =
-    sameThread && input.runningTurnId !== null && input.runningTurnId !== previous.userActionTurnId;
-  return {
-    threadKey: input.threadKey,
-    runningTurnId: sameThread ? previous.runningTurnId : undefined,
-    targetKey: sameThread ? previous.targetKey : undefined,
-    userActionTurnId: input.runningTurnId ?? (sameThread ? previous.userActionTurnId : null),
-    userActionRevision:
-      !sameThread || newTurn ? input.userActionRevision : previous.userActionRevision,
-  };
-}
-
-export function shouldOpenProactiveTurnDiff(input: {
-  previousRunningTurnId: RunId | null | undefined;
-  runningTurnId: RunId | null;
-  settledTurnId: RunId | null;
-  turnCompleted: boolean;
-}): boolean {
-  return (
-    input.runningTurnId === null &&
-    input.turnCompleted &&
-    input.settledTurnId !== null &&
-    (input.previousRunningTurnId === undefined ||
-      input.settledTurnId === input.previousRunningTurnId)
-  );
-}
-
-export function resolveProactiveTurnDiffAction(input: {
-  checkpoint: Pick<TurnDiffSummary, "status" | "files"> | undefined;
-  isGitRepo: boolean | undefined;
-  activeSurfaceKind: RightPanelSurface["kind"] | null;
-}): "defer" | "ignore" | "open" {
-  // An open diff already shows the work; reopening it would reset the chosen scope.
-  if (input.activeSurfaceKind === "diff") {
-    return "ignore";
-  }
-  if (input.checkpoint === undefined || input.checkpoint.status === "missing") return "defer";
-  if (input.isGitRepo === undefined) return "defer";
-  if (
-    !input.isGitRepo ||
-    input.checkpoint.status !== "ready" ||
-    input.checkpoint.files.length === 0
-  ) {
-    return "ignore";
-  }
-  const changedLines = input.checkpoint.files.reduce(
-    (total, file) => total + file.additions + file.deletions,
-    0,
-  );
-  return input.checkpoint.files.length >= 3 || changedLines >= 50 ? "open" : "ignore";
 }
 
 export function codexArtifactTemplatePromptToAppend(

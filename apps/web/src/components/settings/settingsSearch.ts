@@ -331,30 +331,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["output token paragraph buffered wait turn legacy"],
   },
   {
-    id: "hide-whitespace-changes",
-    title: "Hide whitespace changes",
-    to: "/settings/general",
-    searchTerms: ["diff ignore spaces edits default"],
-  },
-  {
-    id: "default-diff-file-state",
-    title: "Default diff file state",
-    to: "/settings/general",
-    searchTerms: ["collapsed expanded collapse expand files pull request pr code tab"],
-  },
-  {
-    id: "diff-layout",
-    title: "Diff layout",
-    to: "/settings/general",
-    searchTerms: ["stacked split side by side unified inline view"],
-  },
-  {
-    id: "proactive-panels",
-    title: "Proactive panels",
-    to: "/settings/general",
-    searchTerms: ["automatically open diff pull request pr right panel agent completion"],
-  },
-  {
     id: "skills-in-slash-menu",
     title: "Show skills in slash menu",
     to: "/settings/general",
