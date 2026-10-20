@@ -423,6 +423,7 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { CollapsePresence } from "./chat/StateTransition";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
@@ -10083,7 +10084,7 @@ export default function ChatView(props: ChatViewProps) {
                               />
                             </ComposerSurface.ContextStrip>
                           ) : null}
-                          {mountComposerContextStrip && (
+                          <CollapsePresence open={mountComposerContextStrip}>
                             <div className="pointer-events-auto">
                               <BranchToolbar
                                 forceNewWorktree={multipleModelSelections !== null}
@@ -10123,7 +10124,7 @@ export default function ChatView(props: ChatViewProps) {
                                 contextStripVisible={showComposerContextStrip}
                               />
                             </div>
-                          )}
+                          </CollapsePresence>
                         </div>
                       </div>
                     </ComposerSurface.Shell>

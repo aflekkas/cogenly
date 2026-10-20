@@ -30,7 +30,9 @@ import {
 import { useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
-import { ProjectFavicon } from "../ProjectFavicon";
+import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
+import { chatGreeting } from "./chatGreeting";
+import { FadeSwap } from "./StateTransition";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
   Combobox,
@@ -321,8 +323,15 @@ export function DraftHeroHeadline({
             />
           }
         >
-          <span className="min-w-0 truncate">
-            {isScratchDraft ? "No repository" : (activeProjectDisplayName ?? "Choose a repository")}
+          <span className="inline-flex min-w-0 items-center gap-2">
+            {!isScratchDraft && activeProjectDisplayName ? (
+              <RepositoryBadge name={activeProjectDisplayName} size="inline" />
+            ) : null}
+            <span className="min-w-0 truncate">
+              {isScratchDraft
+                ? "No repository"
+                : (activeProjectDisplayName ?? "Choose a repository")}
+            </span>
           </span>
         </TooltipTrigger>
         {activeProjectDisplayName && !isScratchDraft ? (
@@ -345,7 +354,7 @@ export function DraftHeroHeadline({
                 {item.value === ADD_PROJECT_VALUE ? (
                   <FolderPlusIcon className="size-4 shrink-0" />
                 ) : entry ? (
-                  <ProjectFavicon project={entry.group} className="size-4 shrink-0" />
+                  <RepositoryBadge name={item.label} />
                 ) : null}
                 <Tooltip>
                   <TooltipTrigger render={<span className="min-w-0 flex-1 truncate text-sm" />}>
@@ -380,8 +389,10 @@ export function DraftHeroHeadline({
   // a complete sentence too. The project picker is a control rendered inline
   // in the h1; without an explicit label its widget state bleeds into the
   // announced phrase.
+  // Fixed when the screen opens, so the line holds still while the user types.
+  const [greeting] = useState(() => chatGreeting(new Date()));
   const headingLabel = isChatDraft
-    ? "What’s on your mind?"
+    ? greeting
     : isScratchDraft
       ? "What should we build?"
       : hasResolvedProject
@@ -423,23 +434,35 @@ export function DraftHeroHeadline({
         aria-label={headingLabel}
         className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
       >
-        {isChatDraft ? (
-          <>What’s on your mind?</>
-        ) : isScratchDraft ? (
-          <>What should we build?</>
-        ) : hasResolvedProject ? (
-          <>What should we build in {projectSelector}?</>
-        ) : canChooseProject ? (
-          <>{projectSelector} to start</>
-        ) : (
-          <>Add a repository to start</>
-        )}
+        <FadeSwap
+          swapKey={
+            isChatDraft
+              ? "chat"
+              : isScratchDraft
+                ? "no-repository"
+                : `repository:${activeProjectKey}`
+          }
+        >
+          {isChatDraft ? (
+            <>{greeting}</>
+          ) : isScratchDraft ? (
+            <>What should we build?</>
+          ) : hasResolvedProject ? (
+            <>What should we build in {projectSelector}?</>
+          ) : canChooseProject ? (
+            <>{projectSelector} to start</>
+          ) : (
+            <>Add a repository to start</>
+          )}
+        </FadeSwap>
       </h1>
       {/* Reserved whenever threads can skip a project, so the heading does not
           move. Without a project, the picker moves here to choose one. */}
       {isChatDraft || scratchWorkspaceRoot === null ? null : (
         <p className="mt-2 flex h-6 items-center text-sm">
-          {isScratchDraft ? projectSelector : orStartWithoutProject}
+          <FadeSwap swapKey={isScratchDraft ? "picker" : "start-without"}>
+            {isScratchDraft ? projectSelector : orStartWithoutProject}
+          </FadeSwap>
         </p>
       )}
     </div>
