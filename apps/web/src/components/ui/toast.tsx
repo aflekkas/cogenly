@@ -29,7 +29,7 @@ import {
   shouldHideCollapsedToastContent,
   shouldRenderThreadScopedToast,
 } from "./toast.logic";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "./tooltip";
+import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./tooltip";
 
 export type ThreadToastData = {
   threadRef?: ScopedThreadRef | null;
@@ -520,7 +520,11 @@ function ThreadToastVisibleAutoDismiss({
 function ToastProvider({ children, position = "top-center", ...props }: ToastProviderProps) {
   return (
     <Toast.Provider toastManager={toastManager} {...props}>
-      {children}
+      {/* One tooltip group for the app: once a tooltip has been shown, the next trigger reached
+          within the timeout opens at once without replaying the entrance, as on macOS. */}
+      <TooltipProvider delay={500} closeDelay={0} timeout={400}>
+        {children}
+      </TooltipProvider>
       <Toasts position={position} />
     </Toast.Provider>
   );
@@ -733,7 +737,11 @@ function AnchoredToasts() {
                 <Toast.Root
                   className={cn(
                     "dropdown-glass surface-raised surface-raised-floating relative overflow-visible text-balance text-popover-foreground text-xs transition-[scale,opacity] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0",
-                    tooltipStyle ? "rounded-md" : "rounded-lg",
+                    tooltipStyle
+                      ? // A small pop from the button it confirms: springs in with a slight overshoot,
+                        // shrinks away fast. Reduced motion fades only.
+                        "origin-(--transform-origin) rounded-md transition-[scale,opacity,translate] duration-220 ease-[cubic-bezier(0.34,1.56,0.64,1)] data-ending-style:scale-90 data-ending-style:duration-120 data-ending-style:ease-popup-exit data-starting-style:translate-y-1 data-starting-style:scale-85 motion-reduce:data-ending-style:scale-100 motion-reduce:data-starting-style:translate-y-0 motion-reduce:data-starting-style:scale-100"
+                      : "rounded-lg",
                   )}
                   data-slot="toast-popup"
                   toast={toast}

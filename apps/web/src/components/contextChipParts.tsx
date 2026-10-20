@@ -82,7 +82,7 @@ export function ContextChipPopover(props: {
         {props.icon}
         <ContextChipLabel>{props.label}</ContextChipLabel>
       </PopoverTrigger>
-      <PopoverPopup side="top" width="lg" padding="compact">
+      <PopoverPopup side="top" width="lg" padding="compact" bubble>
         <PopoverTitle className="sr-only">{props.accessibleLabel}</PopoverTitle>
         {props.children}
       </PopoverPopup>

@@ -1,5 +1,13 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
-import { createContext, use, useEffect, useRef, type ComponentProps, type RefObject } from "react";
+import {
+  createContext,
+  use,
+  useEffect,
+  useRef,
+  type ComponentProps,
+  type ReactNode,
+  type RefObject,
+} from "react";
 
 import { cn } from "~/lib/utils";
 import { useNativeTitlebarHeight } from "~/lib/windowControlsOverlay";
@@ -106,6 +114,35 @@ function TooltipPositioner(props: TooltipPrimitive.Positioner.Props) {
   );
 }
 
+/** The text of a tooltip whose label is a plain string, else null. */
+function plainLabel(children: ReactNode): string | null {
+  return typeof children === "string" ? children : null;
+}
+
+/**
+ * A tooltip that turns into "Copied" confirms a copy, so it pops the way the anchored "Copied!"
+ * toast does: a small spring from 0.85 with a slight overshoot. Reduced motion skips it.
+ */
+function usePopWhenCopied(label: string | null) {
+  const popupRef = useRef<HTMLDivElement>(null);
+  const copied = label !== null && /^copied/i.test(label);
+  useEffect(() => {
+    const popup = popupRef.current;
+    if (!copied || !popup || typeof popup.animate !== "function") return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const pop = popup.animate(
+      [
+        { transform: "scale(0.85)" },
+        { transform: "scale(1.06)", offset: 0.6 },
+        { transform: "scale(1)" },
+      ],
+      { duration: 260, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)" },
+    );
+    return () => pop.cancel();
+  }, [copied]);
+  return popupRef;
+}
+
 function TooltipPopup({
   className,
   align = "center",
@@ -123,10 +160,12 @@ function TooltipPopup({
   variant?: "default" | "glass" | "code";
   anchor?: TooltipPrimitive.Positioner.Props["anchor"];
 }) {
+  const popupRef = usePopWhenCopied(plainLabel(children));
   return (
     <TooltipPrimitive.Portal>
       <TooltipPositioner align={align} anchor={anchor} side={side} sideOffset={sideOffset}>
         <TooltipPrimitive.Popup
+          ref={popupRef}
           className={cn(
             "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) text-balance rounded-md text-popover-foreground text-xs popup-motion transition-[width,height,opacity,scale,translate] [--popup-motion-offset:2px] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] data-instant:duration-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             variant === "glass"

@@ -46,6 +46,7 @@ function PopoverPopup({
   alignOffset = 0,
   collisionAvoidance,
   tooltipStyle = false,
+  bubble = false,
   keepMounted = false,
   anchor,
   ...props
@@ -58,6 +59,11 @@ function PopoverPopup({
   alignOffset?: PopoverPrimitive.Positioner.Props["alignOffset"];
   collisionAvoidance?: PopoverPrimitive.Positioner.Props["collisionAvoidance"];
   tooltipStyle?: boolean;
+  /**
+   * A calmer, rounder entrance for small previews such as a quoted source: grows from 0.94 at the
+   * anchor on a soft spring and leaves faster. Reduced motion fades only.
+   */
+  bubble?: boolean;
   keepMounted?: PopoverPrimitive.Portal.Props["keepMounted"];
   anchor?: PopoverPrimitive.Positioner.Props["anchor"];
   width?: keyof typeof popoverPopupWidthClassName;
@@ -93,6 +99,8 @@ function PopoverPopup({
             variant !== "panel" && "dropdown-glass surface-raised surface-raised-floating",
             tooltipStyle &&
               "w-fit text-balance rounded-md text-xs before:rounded-[calc(var(--radius-md)-1px)]",
+            bubble &&
+              "rounded-xl before:rounded-[calc(var(--radius-xl)-1px)] [--tw-duration:180ms]! [--tw-ease:cubic-bezier(0.34,1.3,0.64,1)]! data-ending-style:[--tw-duration:110ms]! data-ending-style:[--tw-ease:var(--ease-popup-exit)]! data-ending-style:scale-95! data-starting-style:scale-94! motion-reduce:data-ending-style:scale-100! motion-reduce:data-starting-style:scale-100! motion-reduce:data-ending-style:translate-y-0! motion-reduce:data-starting-style:translate-y-0!",
             width !== "auto" && ["max-w-[calc(100vw-2rem)]", popoverPopupWidthClassName[width]],
             variant === "panel" &&
               "w-full overflow-visible rounded-none border-0 bg-transparent shadow-none before:hidden [backdrop-filter:none] [-webkit-backdrop-filter:none]",

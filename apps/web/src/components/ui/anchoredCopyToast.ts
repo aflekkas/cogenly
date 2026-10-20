@@ -1,7 +1,8 @@
 import type { RefObject } from "react";
 import { anchoredToastManager } from "./toast";
 
-export const ANCHORED_COPY_TOAST_TIMEOUT_MS = 1000;
+/** How long "Copied!" holds, and how long the copy icon stays a check beside it. */
+export const ANCHORED_COPY_TOAST_TIMEOUT_MS = 1200;
 
 export function showAnchoredCopySuccessToast(ref: RefObject<HTMLButtonElement | null>) {
   if (!ref.current) return;
