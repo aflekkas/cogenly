@@ -84,7 +84,9 @@ import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { requestStartWork } from "./work/StartWorkDialog";
 import { agentStatusLabel } from "../agents/agents.logic";
 import { useAgents } from "../agents/agentsClient";
-import { isSidebarUtilityPage, useNavigateToMainApp } from "./sidebar/mainAppLocation";
+import { useSelectSidebarMode } from "./sidebar/modes/useSelectSidebarMode";
+import { useReadRouteThreadKind, useThreadKind } from "../hooks/useThreadKind";
+import { threadCapabilities } from "../threadCapabilities";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES } from "./sidebar/modes/sidebarModes.logic";
 import {
@@ -376,6 +378,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { appearanceMode, setAppearanceMode } = useTheme();
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
+  const readRouteThreadKind = useReadRouteThreadKind();
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
@@ -450,6 +453,11 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       if (mode === null) {
         return;
       }
+      // Go to file and repository search need a repository; a chat leaves the keys alone.
+      if (mode !== "command") {
+        const kind = readRouteThreadKind();
+        if (kind !== null && !threadCapabilities(kind).files) return;
+      }
       event.preventDefault();
       event.stopPropagation();
       toggleMode(mode);
@@ -461,6 +469,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     keybindings,
     navigate,
     previewOpen,
+    readRouteThreadKind,
     router,
     setAppearanceMode,
     setOpen,
@@ -631,6 +640,10 @@ function OpenCommandPaletteDialog(props: {
   const canStartWork = useAtomValue(
     serverEnvironment.startWork.permissionAtom(activeThread?.environmentId ?? null),
   );
+  // With nothing open every action stays; an open thread or draft offers what its kind does.
+  const activeThreadKind = useThreadKind(activeThread ?? activeDraftThread ?? null);
+  const activeCapabilities =
+    activeThreadKind === null ? null : threadCapabilities(activeThreadKind);
   const activeThreadReferenceCopyTarget =
     referenceThreadRef === null
       ? null
@@ -660,8 +673,7 @@ function OpenCommandPaletteDialog(props: {
     }
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const setSidebarMode = useUiStateStore((store) => store.setSidebarMode);
-  const navigateToMainApp = useNavigateToMainApp();
+  const selectSidebarMode = useSelectSidebarMode();
   const agents = useAgents().agents;
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -1889,7 +1901,7 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/project" });
     },
   });
-  if (activeThreadId) {
+  if (activeThreadId && (activeCapabilities?.projectTags ?? true)) {
     actionItems.push({
       kind: "action",
       value: "action:edit-thread-project-labels",
@@ -1914,9 +1926,8 @@ function OpenCommandPaletteDialog(props: {
       icon: <ModeIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: `sidebar.mode.${mode}`,
       run: async () => {
-        setSidebarMode(mode);
         // As from the rail: a utility page hands the column back to the list.
-        if (isSidebarUtilityPage(pathname)) await navigateToMainApp();
+        selectSidebarMode(mode, { leaveUtilityPage: true });
       },
     });
   }
@@ -1999,7 +2010,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (referenceThreadRef !== null && activeThread?.source.agent === undefined && canStartWork) {
+  if (referenceThreadRef !== null && activeCapabilities?.startWork === true && canStartWork) {
     const threadRef = referenceThreadRef;
     actionItems.push({
       kind: "action",
@@ -2057,31 +2068,34 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  actionItems.push({
-    kind: "action",
-    value: "action:open-file-picker",
-    searchTerms: ["go to file", "open file", "file picker", "find file", "quick open"],
-    title: "Go to file",
-    icon: <FileSearchIcon className={ITEM_ICON_CLASS} />,
-    keepOpen: true,
-    shortcutCommand: "filePicker.toggle",
-    run: async () => {
-      openOverlayMode("files");
-    },
-  });
+  // A chat has no repository to search.
+  if (activeCapabilities?.files ?? true) {
+    actionItems.push({
+      kind: "action",
+      value: "action:open-file-picker",
+      searchTerms: ["go to file", "open file", "file picker", "find file", "quick open"],
+      title: "Go to file",
+      icon: <FileSearchIcon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      shortcutCommand: "filePicker.toggle",
+      run: async () => {
+        openOverlayMode("files");
+      },
+    });
 
-  actionItems.push({
-    kind: "action",
-    value: "action:search-project-contents",
-    searchTerms: ["search project", "find in files", "grep", "content search", "text search"],
-    title: "Search repository contents",
-    icon: <TextSearchIcon className={ITEM_ICON_CLASS} />,
-    keepOpen: true,
-    shortcutCommand: "projectSearch.toggle",
-    run: async () => {
-      openOverlayMode("content");
-    },
-  });
+    actionItems.push({
+      kind: "action",
+      value: "action:search-project-contents",
+      searchTerms: ["search project", "find in files", "grep", "content search", "text search"],
+      title: "Search repository contents",
+      icon: <TextSearchIcon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      shortcutCommand: "projectSearch.toggle",
+      run: async () => {
+        openOverlayMode("content");
+      },
+    });
+  }
 
   if (newProjectEnvironmentOptions.length > 0) {
     actionItems.push({
@@ -2216,7 +2230,7 @@ function OpenCommandPaletteDialog(props: {
       : null) ??
     projectGroups[0] ??
     null;
-  if (contextualProjectGroup) {
+  if (contextualProjectGroup && (activeCapabilities?.repositorySettings ?? true)) {
     actionItems.push({
       kind: "action",
       value: "action:project-settings",

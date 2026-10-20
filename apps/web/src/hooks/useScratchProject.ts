@@ -77,12 +77,15 @@ export function useScratchProject() {
     [openScratch],
   );
 
+  /** `replace` swaps the current history entry, for landings that pick the chat themselves. */
   const startScratchThread = useCallback(
-    async (environmentId: EnvironmentId) => {
+    async (environmentId: EnvironmentId, options?: { readonly replace?: boolean }) => {
       const project = await openScratchProject(environmentId);
       if (project) {
-        await handleNewThread(scopeProjectRef(project.environmentId, project.id)).catch(
-          (error: unknown) => reportScratchFailure("Could not start without a repository", error),
+        await handleNewThread(scopeProjectRef(project.environmentId, project.id), {
+          replace: options?.replace ?? false,
+        }).catch((error: unknown) =>
+          reportScratchFailure("Could not start without a repository", error),
         );
       }
     },

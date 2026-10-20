@@ -409,7 +409,6 @@ import {
   useEnvironmentSupportsServerBrowser,
   useProject,
   useProjects,
-  readThreadShell,
   useThreadProjection,
   useThreadStatus,
   useThreadHistory,
@@ -470,6 +469,7 @@ import {
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 import { requestStartWork } from "./work/StartWorkDialog";
+import { classifyThreadKind, threadCapabilities } from "../threadCapabilities";
 import { WorkHandoffLines } from "./work/WorkHandoffLines";
 import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
 import { ComposerSurface } from "./chat/ComposerSurface";
@@ -2121,6 +2121,14 @@ export default function ChatView(props: ChatViewProps) {
       activeProject,
       environmentById.get(activeProject.environmentId)?.serverConfig?.scratchWorkspaceRoot ?? null,
     );
+  // What this thread's kind offers: a chat has no repository controls, an
+  // agent's conversation leaves its lifecycle to the agent.
+  const activeThreadCapabilities = threadCapabilities(
+    classifyThreadKind({
+      agentRole: activeThreadShell?.source.agent?.role ?? null,
+      isScratch: activeProjectIsScratch,
+    }),
+  );
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const envs: EnvironmentOption[] = [];
@@ -3499,7 +3507,10 @@ export default function ChatView(props: ChatViewProps) {
       rememberCheckoutIsRepo(environmentId, gitStatusCwd, liveIsGitRepo);
     }
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
-  const isGitRepo = liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true;
+  // A chat never offers branch, worktree or diff controls, whatever its folder holds.
+  const isGitRepo =
+    activeThreadCapabilities.git &&
+    (liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true);
   // When context is enabled, keep a hidden, off-flow strip mounted so the composer
   // can measure whether its relocated controls fit. The visible chrome remains
   // content-driven: Git/environment context or controls that actually fit.
@@ -6455,6 +6466,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "thread.settle") {
+        if (!activeThreadCapabilities.settle) return;
         if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
         event.preventDefault();
         event.stopPropagation();
@@ -6481,15 +6493,11 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "thread.startWork") {
+        // Only a chat hands off to Work; agent conversations start Work through the agent.
+        if (!activeThreadCapabilities.startWork) return;
         event.preventDefault();
         event.stopPropagation();
-        // Agent conversations hand work off through the agent, not this dialog.
-        if (
-          !event.repeat &&
-          isServerThread &&
-          activeThreadRef &&
-          !readThreadShell(activeThreadRef)?.source.agent
-        ) {
+        if (!event.repeat && isServerThread && activeThreadRef) {
           requestStartWork(activeThreadRef);
         }
         return;
@@ -6520,8 +6528,8 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "threadPanel.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        if (agentConversationViewKey) openAgentSettingsStable();
-        else toggleThreadPanelStable();
+        if (activeThreadCapabilities.agentSettings) openAgentSettingsStable();
+        else if (activeThreadCapabilities.threadDetails) toggleThreadPanelStable();
         return;
       }
 
@@ -6536,6 +6544,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "diff.toggle") {
+        if (!activeThreadCapabilities.diff) return;
         event.preventDefault();
         event.stopPropagation();
         onToggleDiffStable();
@@ -6555,6 +6564,7 @@ export default function ChatView(props: ChatViewProps) {
         command === "composer.mode" ||
         command === "composer.workspace"
       ) {
+        if (command === "composer.workspace" && !activeThreadCapabilities.git) return;
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) composerRef.current?.openControl(command);
@@ -6577,6 +6587,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "composer.branch") {
+        if (!activeThreadCapabilities.git) return;
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) branchToolbarRef.current?.openBranchPicker();
@@ -6584,6 +6595,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "composer.previousWorktree") {
+        if (!activeThreadCapabilities.git) return;
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) branchToolbarRef.current?.usePreviousWorktree();
@@ -6620,7 +6632,8 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       const scriptId = projectScriptIdFromCommand(command);
-      if (!scriptId || !activeProject || !canOperateTerminal) return;
+      if (!scriptId || !activeProject || !canOperateTerminal || !activeThreadCapabilities.terminal)
+        return;
       const script = activeProjectScripts.find((entry) => entry.id === scriptId);
       if (!script) return;
       event.preventDefault();
@@ -9394,12 +9407,14 @@ export default function ChatView(props: ChatViewProps) {
     threadId: activeThread.id,
     ...(draftId ? { draftId } : {}),
     activeProjectName: activeProject?.title,
-    activeProjectScripts: activeProject ? activeProjectScripts : undefined,
+    // Scripts run in a terminal, and the card's git sections follow the kind's git controls.
+    activeProjectScripts:
+      activeProject && activeThreadCapabilities.terminal ? activeProjectScripts : undefined,
     preferredScriptId: activeProject
       ? (lastInvokedScriptByProjectId[activeProject.id] ?? null)
       : null,
     keybindings,
-    gitCwd,
+    gitCwd: activeThreadCapabilities.git ? gitCwd : null,
     isGitRepo,
     envLocked,
     availableEnvironments: logicalProjectEnvironments,
@@ -9568,7 +9583,8 @@ export default function ChatView(props: ChatViewProps) {
             onOpenThread={onOpenRelatedThreadStable}
             rightPanelOpen={inlineRightPanelOwnsTitleBar}
             onNewThreadInProject={handleNewThreadInActiveProjectStable}
-            {...(activeDraftLogicalProjectKey
+            capabilities={activeThreadCapabilities}
+            {...(activeDraftLogicalProjectKey && activeThreadCapabilities.repositorySettings
               ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
               : {})}
           />
@@ -10192,6 +10208,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddDevice={addDeviceSurfaceStable}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && (canReadTerminal || canOperateTerminal)}
+          supportedSurfaces={activeThreadCapabilities}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
           deviceAvailable={activeThreadRef !== null}
@@ -10246,6 +10263,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddDevice={addDeviceSurfaceStable}
             browserAvailable={canOperatePreview && browserAvailable}
             terminalAvailable={activeProject !== null && (canReadTerminal || canOperateTerminal)}
+            supportedSurfaces={activeThreadCapabilities}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
             deviceAvailable={activeThreadRef !== null}
