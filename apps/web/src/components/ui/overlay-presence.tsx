@@ -14,7 +14,8 @@ const OverlayPresenceContext = createContext<OverlayPresenceState | null>(null);
  * closes, so its exit motion plays. Render the overlay from `children` with the
  * value that opens it; the overlay inside may keep a hard-coded `open`. When
  * `when` empties, the last value stays rendered with the overlay closed until
- * its exit finishes.
+ * its exit finishes. An overlay rendered beside another overlay inside an
+ * outer presence closes when that presence does.
  *
  *   <OverlayPresence when={editing ? label : null}>
  *     {(label) => <LabelEditorDialog label={label} onClose={...} />}
@@ -28,6 +29,9 @@ export function OverlayPresence<T>({
   children: (value: T) => ReactNode;
 }) {
   const present = when !== null && when !== undefined && when !== false;
+  // Nested beside an outer presence's overlay, this one closes with it.
+  const outer = use(OverlayPresenceContext);
+  const open = present && (outer?.open ?? true);
   // The value last shown open, so the closing overlay keeps its content.
   const [shown, setShown] = useState<{ readonly value: T } | null>(
     present ? { value: when } : null,
@@ -35,12 +39,14 @@ export function OverlayPresence<T>({
   if (present && shown?.value !== when) setShown({ value: when });
   const presence = useMemo<OverlayPresenceState>(
     () => ({
-      open: present,
+      open,
       onExitComplete: () => {
+        if (open) return;
         if (!present) setShown(null);
+        if (outer && !outer.open) outer.onExitComplete();
       },
     }),
-    [present],
+    [open, present, outer],
   );
   if (!present && !shown) return null;
   return (

@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -241,25 +242,31 @@ export function RememberMessageButton(props: {
           {actions.canWrite ? "Remember this" : "This connection cannot change memory."}
         </TooltipPopup>
       </Tooltip>
-      {editing ? (
-        <FactEditorDialog
-          title="Remember this"
-          description="Saved as a confirmed fact that links back to this message. Manage it in Settings → Memory."
-          labels={labels}
-          initial={{ subject: factSubjectFrom(input.text), text: input.text, labelIds: confirmed }}
-          saveLabel="Remember"
-          onClose={() => setEditing(false)}
-          onSave={async (draft) => {
-            const saved = await actions.create(
-              factInputFromDraft(draft, { sourceRefs: input.sourceRefs }),
-            );
-            if (saved) {
-              setEditing(false);
-              toastManager.add({ type: "success", title: "Remembered" });
-            }
-          }}
-        />
-      ) : null}
+      <OverlayPresence when={editing}>
+        {() => (
+          <FactEditorDialog
+            title="Remember this"
+            description="Saved as a confirmed fact that links back to this message. Manage it in Settings → Memory."
+            labels={labels}
+            initial={{
+              subject: factSubjectFrom(input.text),
+              text: input.text,
+              labelIds: confirmed,
+            }}
+            saveLabel="Remember"
+            onClose={() => setEditing(false)}
+            onSave={async (draft) => {
+              const saved = await actions.create(
+                factInputFromDraft(draft, { sourceRefs: input.sourceRefs }),
+              );
+              if (saved) {
+                setEditing(false);
+                toastManager.add({ type: "success", title: "Remembered" });
+              }
+            }}
+          />
+        )}
+      </OverlayPresence>
     </>
   );
 }

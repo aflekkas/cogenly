@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { createFileRoute, redirect, useLocation, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { EnvironmentId } from "@t3tools/contracts";
@@ -41,22 +42,24 @@ function WelcomeRouteView() {
   return (
     <>
       <NoProjectsHero />
-      {isWelcomeRoute && !dismissed ? (
-        <WelcomeWizard
-          localAvailable={localAvailable}
-          resumeEnvironmentId={resumeEnvironmentId}
-          onDone={async (projectRef) => {
-            setDismissed(true);
-            if (projectRef !== undefined) {
-              await openNewThread(projectRef, { replace: true }).catch(() =>
-                navigate({ to: "/", replace: true }),
-              );
-              return;
-            }
-            await navigate({ to: "/", replace: true });
-          }}
-        />
-      ) : null}
+      <OverlayPresence when={isWelcomeRoute && !dismissed}>
+        {() => (
+          <WelcomeWizard
+            localAvailable={localAvailable}
+            resumeEnvironmentId={resumeEnvironmentId}
+            onDone={async (projectRef) => {
+              setDismissed(true);
+              if (projectRef !== undefined) {
+                await openNewThread(projectRef, { replace: true }).catch(() =>
+                  navigate({ to: "/", replace: true }),
+                );
+                return;
+              }
+              await navigate({ to: "/", replace: true });
+            }}
+          />
+        )}
+      </OverlayPresence>
     </>
   );
 }

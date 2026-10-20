@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -49,16 +50,19 @@ export function AgentsCreateHost() {
     });
     setCreated(null);
   }, [created, agents, threads, navigate]);
-  if (!target) return null;
   return (
-    <CreateAgent
-      key={target}
-      environmentId={target}
-      workspaces={workspaces}
-      labels={labels}
-      projectId={projectId}
-      onClose={() => setTarget(null)}
-      onCreated={setCreated}
-    />
+    <OverlayPresence when={target}>
+      {(target) => (
+        <CreateAgent
+          key={target}
+          environmentId={target}
+          workspaces={workspaces}
+          labels={labels}
+          projectId={projectId}
+          onClose={() => setTarget(null)}
+          onCreated={setCreated}
+        />
+      )}
+    </OverlayPresence>
   );
 }

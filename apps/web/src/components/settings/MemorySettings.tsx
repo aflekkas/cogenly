@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type { AgentId, ProjectLabelId } from "@t3tools/contracts";
 import { BrainIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -170,24 +171,26 @@ export function MemorySettings() {
         confirmed facts as context. Proposals are never used until you confirm them. Private facts
         stay with you and the agent they belong to.
       </p>
-      {creating && environmentId !== null ? (
-        <FactEditorDialog
-          title="Remember something"
-          description="Saved as confirmed. You can correct or forget it later."
-          labels={labels}
-          initial={{
-            subject: "",
-            text: "",
-            labelIds: labelId === ALL ? [] : [labelId as ProjectLabelId],
-          }}
-          saveLabel="Remember"
-          onClose={() => setCreating(false)}
-          onSave={async (draft) => {
-            const saved = await actions.create(factInputFromDraft(draft, { sourceRefs: [] }));
-            if (saved) setCreating(false);
-          }}
-        />
-      ) : null}
+      <OverlayPresence when={creating && environmentId}>
+        {(environmentId) => (
+          <FactEditorDialog
+            title="Remember something"
+            description="Saved as confirmed. You can correct or forget it later."
+            labels={labels}
+            initial={{
+              subject: "",
+              text: "",
+              labelIds: labelId === ALL ? [] : [labelId as ProjectLabelId],
+            }}
+            saveLabel="Remember"
+            onClose={() => setCreating(false)}
+            onSave={async (draft) => {
+              const saved = await actions.create(factInputFromDraft(draft, { sourceRefs: [] }));
+              if (saved) setCreating(false);
+            }}
+          />
+        )}
+      </OverlayPresence>
     </SettingsPageContainer>
   );
 }

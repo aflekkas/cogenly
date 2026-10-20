@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -10324,13 +10325,15 @@ export default function ChatView(props: ChatViewProps) {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
-      {expandedImage && (
-        <ExpandedImageDialog
-          key={expandedImageKey(expandedImage)}
-          preview={expandedImage}
-          onClose={closeExpandedImageStable}
-        />
-      )}
+      <OverlayPresence when={expandedImage}>
+        {(expandedImage) => (
+          <ExpandedImageDialog
+            key={expandedImageKey(expandedImage)}
+            preview={expandedImage}
+            onClose={closeExpandedImageStable}
+          />
+        )}
+      </OverlayPresence>
     </div>
   );
   return (

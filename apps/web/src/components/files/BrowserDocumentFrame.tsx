@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useAtomValue } from "@effect/atom-react";
 import {
   type KeybindingCommand,
@@ -318,9 +319,11 @@ export function HtmlRenderDocument(props: {
         className={cn("border-0 scheme-light", props.className)}
         style={loaded ? { colorScheme: theme.appearance } : undefined}
       />
-      {expandedImage !== null ? (
-        <ExpandedImageDialog preview={expandedImage} onClose={() => setExpandedImage(null)} />
-      ) : null}
+      <OverlayPresence when={expandedImage}>
+        {(expandedImage) => (
+          <ExpandedImageDialog preview={expandedImage} onClose={() => setExpandedImage(null)} />
+        )}
+      </OverlayPresence>
     </>
   );
 }

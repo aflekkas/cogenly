@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { SettingsGroup } from "./SettingsGroup";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import {
@@ -1202,15 +1203,17 @@ export function EnvironmentProviderSettings({
         />
       </SettingsSection>
 
-      {isAddInstanceDialogOpen && !readOnly ? (
-        <AddProviderInstanceDialog
-          open
-          environmentId={environmentId}
-          environmentLabel={environmentLabel}
-          onOpenChange={setIsAddInstanceDialogOpen}
-          onCreated={setSelectedInstanceId}
-        />
-      ) : null}
+      <OverlayPresence when={isAddInstanceDialogOpen && !readOnly}>
+        {() => (
+          <AddProviderInstanceDialog
+            open
+            environmentId={environmentId}
+            environmentLabel={environmentLabel}
+            onOpenChange={setIsAddInstanceDialogOpen}
+            onCreated={setSelectedInstanceId}
+          />
+        )}
+      </OverlayPresence>
     </>
   );
 }

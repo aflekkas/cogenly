@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type { AgentId, EnvironmentId, ProjectLabelWithRepositories } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
@@ -69,22 +70,24 @@ export function AgentFactsSection(props: {
       >
         {hidden > 0 ? `All memory, including ${hidden} replaced or forgotten` : "All memory"}
       </Button>
-      {creating ? (
-        <FactEditorDialog
-          title={`Remember for ${agent.name}`}
-          description={`Saved as confirmed and owned by ${agent.name}. Untagged facts stay private to you and ${agent.name}.`}
-          labels={props.labels}
-          initial={null}
-          saveLabel="Remember"
-          onClose={() => setCreating(false)}
-          onSave={async (draft) => {
-            const saved = await actions.create(
-              factInputFromDraft(draft, { sourceRefs: [], agentId: agent.id }),
-            );
-            if (saved) setCreating(false);
-          }}
-        />
-      ) : null}
+      <OverlayPresence when={creating}>
+        {() => (
+          <FactEditorDialog
+            title={`Remember for ${agent.name}`}
+            description={`Saved as confirmed and owned by ${agent.name}. Untagged facts stay private to you and ${agent.name}.`}
+            labels={props.labels}
+            initial={null}
+            saveLabel="Remember"
+            onClose={() => setCreating(false)}
+            onSave={async (draft) => {
+              const saved = await actions.create(
+                factInputFromDraft(draft, { sourceRefs: [], agentId: agent.id }),
+              );
+              if (saved) setCreating(false);
+            }}
+          />
+        )}
+      </OverlayPresence>
     </ThreadDetailsSection>
   );
 }

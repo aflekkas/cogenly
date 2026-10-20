@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useAuth } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
 import type {
@@ -826,15 +827,17 @@ function ConnectedAgentsStep({
           </Button>
         </div>
       ) : null}
-      {addingAccount ? (
-        <AddManagedCodexAccountDialog
-          environmentId={environmentId}
-          onClose={() => setAddingAccount(false)}
-          onAccountCreated={(instanceId, displayName) =>
-            setCreatedAccount({ instanceId, displayName, autoStart: true })
-          }
-        />
-      ) : null}
+      <OverlayPresence when={addingAccount}>
+        {() => (
+          <AddManagedCodexAccountDialog
+            environmentId={environmentId}
+            onClose={() => setAddingAccount(false)}
+            onAccountCreated={(instanceId, displayName) =>
+              setCreatedAccount({ instanceId, displayName, autoStart: true })
+            }
+          />
+        )}
+      </OverlayPresence>
       {terminalSession !== null ? (
         <AgentInstallTerminal
           key={`${terminalSession.environmentId}:${terminalSession.providerInstanceId}:${terminalSession.driver}`}

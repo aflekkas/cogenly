@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
 import * as Option from "effect/Option";
@@ -348,14 +349,16 @@ export function ScheduledTasksSettings(target: {
           </div>
         )}
       </SettingsSection>
-      {editor ? (
-        <ScheduledTaskEditorDialog
-          key={`${editor.environmentId}:${editor.task?.id ?? "new"}`}
-          initialEnvironmentId={editor.environmentId}
-          task={editor.task}
-          onClose={() => setEditor(null)}
-        />
-      ) : null}
+      <OverlayPresence when={editor}>
+        {(editor) => (
+          <ScheduledTaskEditorDialog
+            key={`${editor.environmentId}:${editor.task?.id ?? "new"}`}
+            initialEnvironmentId={editor.environmentId}
+            task={editor.task}
+            onClose={() => setEditor(null)}
+          />
+        )}
+      </OverlayPresence>
     </SettingsPageContainer>
   );
 }
@@ -724,13 +727,15 @@ function ScheduledTaskRow({
               </MenuItem>
             </MenuPopup>
           </Menu>
-          {deliveriesOpen ? (
-            <WebhookDeliveriesDialog
-              environmentId={environmentId}
-              task={task}
-              onClose={() => setDeliveriesOpen(false)}
-            />
-          ) : null}
+          <OverlayPresence when={deliveriesOpen}>
+            {() => (
+              <WebhookDeliveriesDialog
+                environmentId={environmentId}
+                task={task}
+                onClose={() => setDeliveriesOpen(false)}
+              />
+            )}
+          </OverlayPresence>
         </div>
       }
     />

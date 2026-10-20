@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { MarkdownFindContext, useFindRevealRef } from "./chat/markdownFindContext";
 import {
   buildFileLinkParentSuffixByPath,
@@ -3273,12 +3274,14 @@ function ChatMarkdown({
           {text}
         </ReactMarkdown>
       </ChatMarkdownRendererContext>
-      {localMediaPreview ? (
-        <ExpandedImageDialog
-          preview={localMediaPreview}
-          onClose={() => setLocalMediaPreview(null)}
-        />
-      ) : null}
+      <OverlayPresence when={localMediaPreview}>
+        {(localMediaPreview) => (
+          <ExpandedImageDialog
+            preview={localMediaPreview}
+            onClose={() => setLocalMediaPreview(null)}
+          />
+        )}
+      </OverlayPresence>
     </div>
   );
 }

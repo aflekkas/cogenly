@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import {
   ChevronLeftIcon,
   LoaderCircleIcon,
@@ -195,14 +196,16 @@ function AgentView({
           onShowActivity={() => setTab("activity")}
         />
       )}
-      {startingWork && (
-        <AgentStartWork
-          agent={agent}
-          workspace={workspace}
-          onClose={() => setStartingWork(false)}
-          onOpenItems={() => setTab("items")}
-        />
-      )}
+      <OverlayPresence when={startingWork}>
+        {() => (
+          <AgentStartWork
+            agent={agent}
+            workspace={workspace}
+            onClose={() => setStartingWork(false)}
+            onOpenItems={() => setTab("items")}
+          />
+        )}
+      </OverlayPresence>
     </section>
   );
 }

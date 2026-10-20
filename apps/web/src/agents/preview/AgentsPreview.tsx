@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { useEffect, useState } from "react";
 import { PlusIcon, MessageCircleIcon, HammerIcon } from "lucide-react";
 import { AgentContacts } from "../AgentContacts";
@@ -89,17 +90,19 @@ function PreviewContent() {
           </div>
         )}
       </main>
-      {create && (
-        <CreateAgent
-          environmentId={environmentId}
-          projectId={null}
-          onClose={() => setCreate(false)}
-          onCreated={(contact) => {
-            setKey(agentContactKey(contact));
-            setMobileList(false);
-          }}
-        />
-      )}
+      <OverlayPresence when={create}>
+        {() => (
+          <CreateAgent
+            environmentId={environmentId}
+            projectId={null}
+            onClose={() => setCreate(false)}
+            onCreated={(contact) => {
+              setKey(agentContactKey(contact));
+              setMobileList(false);
+            }}
+          />
+        )}
+      </OverlayPresence>
     </div>
   );
 }

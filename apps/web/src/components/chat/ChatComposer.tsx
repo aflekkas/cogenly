@@ -1,3 +1,4 @@
+import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
@@ -7266,43 +7267,45 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : undefined
                 }
               >
-                {previewFile ? (
-                  <Dialog
-                    open
-                    onOpenChange={(open) => {
-                      if (!open) setPreviewFileId(null);
-                    }}
-                  >
-                    <DialogPopup
-                      {...composerFloatingLayerProps}
-                      className="h-[min(85vh,52rem)] max-w-4xl overflow-hidden"
-                      showCloseButton={false}
+                <OverlayPresence when={previewFile}>
+                  {(previewFile) => (
+                    <Dialog
+                      open
+                      onOpenChange={(open) => {
+                        if (!open) setPreviewFileId(null);
+                      }}
                     >
-                      <DialogTitle className="sr-only">{previewFile.name}</DialogTitle>
-                      <AttachmentFilePreview
-                        key={previewFile.id}
-                        name={previewFile.name}
-                        mimeType={previewFile.mimeType}
-                        sizeBytes={previewFile.sizeBytes}
-                        file={previewFile.file}
-                        origin="Draft"
-                        {...(previewFile.uploadedAttachmentId && previewFile.uploadEnvironmentId
-                          ? {
-                              asset: {
-                                environmentId: previewFile.uploadEnvironmentId,
-                                attachmentId: previewFile.uploadedAttachmentId,
-                              },
-                            }
-                          : {})}
-                        onRemove={() => {
-                          removeComposerFileFromDraft(previewFile.id);
-                          setPreviewFileId(null);
-                        }}
-                        onClose={() => setPreviewFileId(null)}
-                      />
-                    </DialogPopup>
-                  </Dialog>
-                ) : null}
+                      <DialogPopup
+                        {...composerFloatingLayerProps}
+                        className="h-[min(85vh,52rem)] max-w-4xl overflow-hidden"
+                        showCloseButton={false}
+                      >
+                        <DialogTitle className="sr-only">{previewFile.name}</DialogTitle>
+                        <AttachmentFilePreview
+                          key={previewFile.id}
+                          name={previewFile.name}
+                          mimeType={previewFile.mimeType}
+                          sizeBytes={previewFile.sizeBytes}
+                          file={previewFile.file}
+                          origin="Draft"
+                          {...(previewFile.uploadedAttachmentId && previewFile.uploadEnvironmentId
+                            ? {
+                                asset: {
+                                  environmentId: previewFile.uploadEnvironmentId,
+                                  attachmentId: previewFile.uploadedAttachmentId,
+                                },
+                              }
+                            : {})}
+                          onRemove={() => {
+                            removeComposerFileFromDraft(previewFile.id);
+                            setPreviewFileId(null);
+                          }}
+                          onClose={() => setPreviewFileId(null)}
+                        />
+                      </DialogPopup>
+                    </Dialog>
+                  )}
+                </OverlayPresence>
                 <ComposerContextActionsContext value={composerContextActions}>
                   <ComposerPromptEditor
                     ariaLabel="Message"
