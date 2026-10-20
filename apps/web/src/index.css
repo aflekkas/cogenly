@@ -2645,6 +2645,18 @@ code {
   cursor: pointer;
 }
 
+/* Transcript and composer text, as in the reference: 15px on a 26px line.
+   Unlayered so it outranks the text-sm the components carry. */
+:root {
+  --chat-text-size: 0.9375rem;
+  --chat-line-height: 1.625rem;
+}
+[data-timeline-root] .chat-markdown,
+.composer-tiptap {
+  font-size: var(--chat-text-size);
+  line-height: var(--chat-line-height);
+}
+
 .composer-tiptap li[data-checked] > div {
   flex: 1 1 auto;
   min-width: 0;

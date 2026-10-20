@@ -217,6 +217,7 @@ import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrom
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
+import { RepositoryGroupHeading } from "./sidebar/modes/RepositoryGroupHeading";
 import { ChatsProjectFilter } from "../projectLabels/ChatsProjectFilter";
 import {
   projectLabelKey,
@@ -2106,6 +2107,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     <ThreadWorktreeIndicator thread={thread} />
                   ) : props.repositoryName ? (
                     <FolderIcon aria-hidden className="size-3 shrink-0" />
+                  ) : thread.branch ? (
+                    <GitBranchIcon aria-hidden className="size-3 shrink-0" />
                   ) : null}
                   <span className="min-w-0 flex-1 fade-truncate">
                     {props.repositoryName ? <span>{props.repositoryName}</span> : null}
@@ -4682,7 +4685,8 @@ export default function Sidebar() {
                           serverConfigs.get(thread.environmentId)?.environment.capabilities
                             .threadSnooze === true
                         }
-                        repositoryName={repositoryNameFor(thread)}
+                        // The group heading names the repository in Work.
+                        repositoryName={sidebarMode === "tasks" ? null : repositoryNameFor(thread)}
                         projectTags={
                           sidebarMode === "tasks" ? workProjectTagsFor(thread) : NO_PROJECT_TAGS
                         }
@@ -4767,10 +4771,25 @@ export default function Sidebar() {
                     );
                   const chatDateGroupOf =
                     sidebarMode === "chats" ? createChatDateGrouper(new Date()) : null;
+                  // Work groups its cards under their repository, newest at the
+                  // bottom beside the search dock: groups by latest activity, rows
+                  // within a group oldest to newest.
+                  const repositoryGroups =
+                    shownSection !== null
+                      ? new Map<string, { name: string | null; rows: ReactNode[] }>()
+                      : null;
                   for (const item of sidebarListItems) {
                     if (item.kind === "thread") {
                       if (shownSection !== null && item.section !== shownSection) continue;
                       const thread = threadByKey.get(item.key)!;
+                      if (repositoryGroups) {
+                        const name = repositoryNameFor(thread);
+                        const groupKey = name ?? "";
+                        const group = repositoryGroups.get(groupKey) ?? { name, rows: [] };
+                        group.rows.push(renderThreadRow(thread, item.section));
+                        repositoryGroups.set(groupKey, group);
+                        continue;
+                      }
                       const dateGroup =
                         item.section === "active" ? chatDateGroupOf?.(thread) : null;
                       if (dateGroup) {
@@ -4841,6 +4860,14 @@ export default function Sidebar() {
                           />,
                         );
                         break;
+                    }
+                  }
+                  if (repositoryGroups) {
+                    for (const [groupKey, group] of [...repositoryGroups].toReversed()) {
+                      items.push(
+                        <RepositoryGroupHeading key={`repository:${groupKey}`} name={group.name} />,
+                        ...group.rows.toReversed(),
+                      );
                     }
                   }
                   if (shownSection !== null && shownSection !== "active") {
