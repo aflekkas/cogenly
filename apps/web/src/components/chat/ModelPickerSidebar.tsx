@@ -3,7 +3,6 @@ import { type ProviderInstanceId } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { HistoryIcon, SparklesIcon } from "lucide-react";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import {
   isProviderInstancePickerReady,
@@ -35,10 +34,6 @@ const SELECTED_INDICATOR_CLASS =
 const BADGE_BASE_CLASS =
   "pointer-events-none absolute -right-0.5 top-0.5 z-10 flex size-3.5 items-center justify-center rounded-full bg-transparent shadow-sm ";
 const NEW_BADGE_CLASS = `${BADGE_BASE_CLASS} text-update-foreground `;
-
-/** Opens toward the rail so the list stays readable (not over the model names). */
-const PICKER_TOOLTIP_SIDE = "left" as const;
-const PICKER_TOOLTIP_SIDE_OFFSET = 8;
 
 /** The rail entry that lists the models used most and most recently. */
 export const MODEL_PICKER_RECENT = "recent";
@@ -121,28 +116,15 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
           {props.showRecent ? (
             <>
               <div className="relative w-full" data-model-picker-provider={MODEL_PICKER_RECENT}>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Toolbar.Button
-                        className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors state-hover focus-visible:bg-state-hover focus-visible:outline-none aria-pressed:state-selected"
-                        onClick={() => handleSelect(MODEL_PICKER_RECENT)}
-                        type="button"
-                        aria-label="Recent models"
-                        aria-pressed={props.selectedInstanceId === MODEL_PICKER_RECENT}
-                      >
-                        <HistoryIcon className="size-5 shrink-0" aria-hidden />
-                      </Toolbar.Button>
-                    }
-                  />
-                  <TooltipPopup
-                    side={PICKER_TOOLTIP_SIDE}
-                    sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
-                    align="center"
-                  >
-                    Recent
-                  </TooltipPopup>
-                </Tooltip>
+                <Toolbar.Button
+                  className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors state-hover focus-visible:bg-state-hover focus-visible:outline-none aria-pressed:state-selected"
+                  onClick={() => handleSelect(MODEL_PICKER_RECENT)}
+                  type="button"
+                  aria-label="Recent models"
+                  aria-pressed={props.selectedInstanceId === MODEL_PICKER_RECENT}
+                >
+                  <HistoryIcon className="size-5 shrink-0" aria-hidden />
+                </Toolbar.Button>
               </div>
               <div className="border-b border-border/70" aria-hidden="true" />
             </>
@@ -232,16 +214,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 className="relative w-full"
                 data-model-picker-provider={entry.instanceId}
               >
-                <Tooltip>
-                  <TooltipTrigger render={trigger} />
-                  <TooltipPopup
-                    side={PICKER_TOOLTIP_SIDE}
-                    sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
-                    align="center"
-                  >
-                    {tooltip}
-                  </TooltipPopup>
-                </Tooltip>
+                {trigger}
               </div>
             );
           })}
