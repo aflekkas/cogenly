@@ -10,7 +10,6 @@ import { FolderPlusIcon, SquarePenIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -27,15 +26,11 @@ export interface SidebarThreadHeaderProps {
   filterControl?: ReactNode;
   /** Null hides add repository (Chats); the command palette still offers it. */
   onNewProject: (() => void) | null;
-  /** Receives the click so Shift+click can skip the project picker. */
-  onNewThread: (event: ReactMouseEvent) => void;
+  onNewThread: () => void;
   /** What the new button makes in the current sidebar mode; defaults to "New thread". */
   newThreadLabel?: string;
   newThreadDisabled: boolean;
   newThreadShortcutLabel: string | null | undefined;
-  newThreadInProjectShortcutLabel: string | null | undefined;
-  /** Shift+click only matters once there is more than one project to pick. */
-  showNewThreadInProjectHint: boolean;
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
@@ -54,8 +49,6 @@ export function SidebarThreadHeader({
   newThreadLabel: newItemLabel = "New thread",
   newThreadDisabled,
   newThreadShortcutLabel,
-  newThreadInProjectShortcutLabel,
-  showNewThreadInProjectHint,
   searchInputRef,
   searchQuery,
   onSearchQueryChange,
@@ -108,19 +101,7 @@ export function SidebarThreadHeader({
           ) : null}
           <SidebarHeaderIconButton
             label={newItemLabel}
-            tooltip={
-              showNewThreadInProjectHint ? (
-                <span className="flex flex-col gap-0.5">
-                  <span>{newThreadLabel}</span>
-                  <span className="text-muted-foreground">
-                    New thread in current repository: Shift+click
-                    {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
-                  </span>
-                </span>
-              ) : (
-                newThreadLabel
-              )
-            }
+            tooltip={newThreadLabel}
             disabled={newThreadDisabled}
             onClick={onNewThread}
           >
