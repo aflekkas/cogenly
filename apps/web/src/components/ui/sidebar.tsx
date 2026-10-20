@@ -211,9 +211,10 @@ function SidebarProvider({
     <SidebarContext value={contextValue}>
       <div
         ref={wrapperRef}
-        // Inset layouts opt into bg-sidebar through className.
+        // The app surface fills the layout, so nothing behind a moving panel
+        // shows the window or page backdrop.
         className={cn(
-          "group/sidebar-wrapper flex min-h-svh w-full",
+          "group/sidebar-wrapper flex min-h-svh w-full bg-background",
           SIDEBAR_TITLEBAR_CONTROL_SIZE,
           className,
         )}
@@ -344,8 +345,10 @@ function Sidebar({
             // The gap snaps to its new width in one layout; SidebarProvider
             // glides the main pane's marked content there on the compositor.
             // While the panel slides in, the gap shows beside it in the main
-            // pane's color, so the pane reads as already making room.
-            "relative w-(--sidebar-width) bg-transparent group-data-[variant=sidebar]:bg-background",
+            // pane's color, so the pane reads as already making room. It spans
+            // the full height: an empty block collapses to 0px tall and lets
+            // the page backdrop show through the whole column.
+            "relative h-full w-(--sidebar-width) bg-transparent group-data-[variant=sidebar]:bg-background",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"

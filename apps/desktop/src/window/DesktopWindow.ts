@@ -155,8 +155,10 @@ function getIconOption(
   });
 }
 
+// The app surface (--background in apps/web/src/index.css), so the window
+// backdrop never shows as a darker or lighter band behind the page.
 function getInitialWindowBackgroundColor(shouldUseDarkColors: boolean): string {
-  return shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
+  return shouldUseDarkColors ? "#0d0d0f" : "#fcfcfc";
 }
 
 type DisplayBounds = Pick<Electron.Rectangle, "x" | "y" | "width" | "height">;

@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="theme-color" content="#0d0d0f" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/cogenly-mark.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -43,15 +43,25 @@
         margin: 0;
       }
 
-      body {
-        background: #0a0a0a;
-        color: #f5f5f5;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      /* Boot colors match the app surface (--background in src/index.css). They sit in
+         the lowest cascade layer, so once the app stylesheet loads its tokens (and any
+         palette) own the page backdrop that shows behind moving panels. */
+      @layer boot {
+        html,
+        body {
+          background: #0d0d0f;
+          color: #f5f5f5;
+        }
+
+        html:not(.dark),
+        html:not(.dark) body {
+          background: #fcfcfc;
+          color: #262626;
+        }
       }
 
-      html:not(.dark) body {
-        background: #ffffff;
-        color: #262626;
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
       }
 
       /* The boot splash sits outside #root as a full-window ember overlay. The app removes it
@@ -157,7 +167,7 @@
       /* The boot error replaces the splash with the same quiet layout as the app's error
          screen (src/components/AppErrorScreen.tsx); src/lib/bootError.ts builds it. */
       #boot-shell[data-state="error"] {
-        background: #0a0a0a;
+        background: #0d0d0f;
         color: #f4f4f5;
         font-family:
           "Inter Variable",
@@ -168,7 +178,7 @@
       }
 
       html:not(.dark) #boot-shell[data-state="error"] {
-        background: #ffffff;
+        background: #fcfcfc;
         color: #27272a;
       }
 
