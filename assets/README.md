@@ -2,7 +2,7 @@
 
 ## Cogenly mark (current)
 
-Every tracked icon is rendered from `brand/cogenly-mark.svg`: an ember-gradient rounded tile with a white lowercase "c" and a dot in its mouth. Sizes up to 32px (16/32px favicons and the small ICO entries) use `brand/cogenly-mark-small.svg`, a heavier cut with a larger dot that stays legible on the pixel grid; the sidebar's `CogenlyMark` component and the DMG backgrounds embed that same small cut. `brand/cogenly-glyph.svg` is the bare "c" and dot. All three channels currently share the same artwork.
+Every tracked icon is rendered from `brand/cogenly-mark.svg`: an ember-gradient rounded tile with a white lowercase "c" and a dot in its mouth. Sizes up to 32px (16/32px favicons and the small ICO entries) use `brand/cogenly-mark-small.svg`, a heavier cut with a larger dot that stays legible on the pixel grid. Both tiles, and every inline copy, use `rx="28"` on the 128 viewBox (a 21.875% circular corner); the sidebar's `CogenlyMark` component and the DMG backgrounds embed that same small cut. `brand/cogenly-glyph.svg` is the bare "c" and dot. All three channels currently share the same artwork.
 
 Run `vp run icons:mark` from the repository root to re-render the web favicons, apple-touch icons, Linux/universal PNGs, Windows ICOs, and macOS PNGs (with the 100px pre-Tahoe safe area) for all three channels, plus the `apps/web/public` copies. It rasterizes with headless Chromium through the server's `playwright-core`; pass `--chromium <path>` to pick the binary. The desktop build turns the macOS PNG into `icon.icns` with `iconutil`, so no `.icns` is tracked.
 

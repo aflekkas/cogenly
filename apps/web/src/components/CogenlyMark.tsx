@@ -27,7 +27,7 @@ export function CogenlyMark({ className }: { className?: string }) {
           <stop offset="1" stopColor="var(--color-brand-ember-to)" />
         </linearGradient>
       </defs>
-      <rect width="128" height="128" rx="26" fill={`url(#${gradientId})`} />
+      <rect width="128" height="128" rx="28" fill={`url(#${gradientId})`} />
       <path
         d="M76.71 44.08A26 26 0 1 0 76.71 83.92"
         stroke="var(--color-brand-glyph)"
