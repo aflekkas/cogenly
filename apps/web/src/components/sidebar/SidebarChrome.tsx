@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import { ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
@@ -19,7 +19,7 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
+import { isSidebarUtilityPage } from "./mainAppLocation";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { observeResize } from "~/lib/observeResize";
@@ -163,7 +163,6 @@ function SidebarUtilityItem({
 
 export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
-  const navigateToMainApp = useNavigateToMainApp();
   const { isMobile, setOpenMobile } = useSidebar();
   // Matches AppSidebarLayout: the rail already shows Settings as current.
   const legacySidebarEnabled = useLegacySidebarEnabled();
@@ -188,30 +187,19 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     closeMobileSidebar();
     void navigate({ to: "/usage" });
   }, [closeMobileSidebar, navigate]);
-  const handleBackClick = useCallback(() => {
-    closeMobileSidebar();
-    void navigateToMainApp();
-  }, [closeMobileSidebar, navigateToMainApp]);
 
   return (
     <SidebarMenu className="flex-row items-center">
       {isOnUtilityPage ? (
-        <>
-          <SidebarMenuItem className="min-w-0 flex-1">
-            <SidebarMenuButton onClick={handleBackClick}>
-              <ArrowLeftIcon />
-              <span>Back</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          {navRailVisible ? null : (
-            <SidebarUtilityItem
-              icon={<SettingsIcon />}
-              isActive={isOnSettings}
-              label="Settings"
-              onClick={handleSettingsClick}
-            />
-          )}
-        </>
+        // The rail (or Escape) leads back; without the rail only Settings stays.
+        navRailVisible ? null : (
+          <SidebarUtilityItem
+            icon={<SettingsIcon />}
+            isActive={isOnSettings}
+            label="Settings"
+            onClick={handleSettingsClick}
+          />
+        )
       ) : (
         <>
           <SidebarMenuItem className="min-w-0 flex-1">
