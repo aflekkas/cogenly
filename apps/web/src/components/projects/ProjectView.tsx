@@ -190,7 +190,7 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
   const noPermission = "You don't have permission to change projects here.";
 
   const header = (
-    <WorkspacePageHeader electron={isElectron} className="border-b border-border">
+    <WorkspacePageHeader electron={isElectron}>
       <div className="flex min-w-0 flex-1 items-center gap-2" data-panel-flip="start">
         <Button
           size="xs"

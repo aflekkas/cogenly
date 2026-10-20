@@ -1,6 +1,7 @@
 /**
  * Full-width pages: with the nav rail there to navigate away, these routes
- * have no sidebar list column (and so no toggle for it). The mobile sheet
+ * have no sidebar list column. The toggle keeps its place but is disabled, and
+ * its shortcut does nothing. The mobile sheet
  * keeps the list, since it is the only way back there. The Agents index with
  * nothing to list (`agentsEmpty`) is full-width too: its empty state lives in
  * the main pane, and the column returns with the first agent.
@@ -16,3 +17,6 @@ export function routeHidesListColumn(
     (pathname === "/" && context.agentsEmpty)
   );
 }
+
+/** Why the sidebar toggle is disabled on a route without the list column. */
+export const SIDEBAR_TOGGLE_DISABLED_LABEL = "Nothing to show in the sidebar here";

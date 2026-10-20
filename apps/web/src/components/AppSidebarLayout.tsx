@@ -36,7 +36,7 @@ import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarCh
 import { SidebarNavRail } from "./sidebar/SidebarNavRail";
 import { resolveWorkspaceTitlebarLayout } from "../workspaceTitlebar";
 import { useIsMobile } from "../hooks/useMediaQuery";
-import { routeHidesListColumn } from "./sidebar/listColumnRoutes";
+import { routeHidesListColumn, SIDEBAR_TOGGLE_DISABLED_LABEL } from "./sidebar/listColumnRoutes";
 import { useAgentsEmpty } from "../agents/agentsClient";
 import { useUiStateStore } from "../uiStateStore";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
@@ -59,7 +59,14 @@ function readViewportWidth(): number {
   return window.innerWidth;
 }
 
-function SidebarControl({ showButton }: { showButton: boolean }) {
+function SidebarControl({
+  showButton,
+  disabled,
+}: {
+  showButton: boolean;
+  /** No list column on this route: the button stays, disabled, and the shortcut is a no-op. */
+  disabled: boolean;
+}) {
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
@@ -93,20 +100,20 @@ function SidebarControl({ showButton }: { showButton: boolean }) {
 
       event.preventDefault();
       event.stopPropagation();
-      toggleSidebar();
+      if (!disabled) toggleSidebar();
     };
 
     // Capture before focused editors consume commands such as Mod+B for rich-text formatting.
     window.addEventListener("keydown", onKeyDown, true);
     // A focused desktop browser page forwards the chord as a menu action.
     const unsubscribe = window.desktopBridge?.onMenuAction((action) => {
-      if (action === "sidebar.toggle") toggleSidebar();
+      if (action === "sidebar.toggle" && !disabled) toggleSidebar();
     });
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
       unsubscribe?.();
     };
-  }, [keybindings, toggleSidebar, usagePageOpen]);
+  }, [disabled, keybindings, toggleSidebar, usagePageOpen]);
 
   // The rail draws the toggle itself; this still owns the shortcut.
   if (!showButton) return null;
@@ -130,11 +137,14 @@ function SidebarControl({ showButton }: { showButton: boolean }) {
               variant="ghost"
               className="pointer-events-auto"
               aria-label="Toggle main sidebar"
+              aria-disabled={disabled || undefined}
             />
           }
         />
         <TooltipPopup side="bottom">
-          Toggle main sidebar{shortcutLabel ? ` (${shortcutLabel})` : ""}
+          {disabled
+            ? SIDEBAR_TOGGLE_DISABLED_LABEL
+            : `Toggle main sidebar${shortcutLabel ? ` (${shortcutLabel})` : ""}`}
         </TooltipPopup>
       </Tooltip>
     </div>
@@ -296,6 +306,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         className="h-dvh! min-h-0! overflow-x-clip"
         data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
         data-nav-rail={navRailVisible ? "" : undefined}
+        data-list-column-hidden={listSidebarHidden ? "" : undefined}
         defaultOpen
         style={sidebarProviderStyle}
       >
@@ -344,9 +355,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         )}
         {children}
         {/* Without the rail, or after the macOS traffic lights beside it. A page
-            without the list column has nothing to toggle. */}
+            without the list column keeps the button in place, disabled. */}
         <SidebarControl
-          showButton={titlebarLayout.sidebarToggle === "fixed" && !listSidebarHidden}
+          showButton={titlebarLayout.sidebarToggle === "fixed"}
+          disabled={listSidebarHidden}
         />
         <NavigationHistoryShortcuts />
         <MainAppLocationTracker />

@@ -201,6 +201,7 @@ function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
     case "agents-empty":
       return (
         <IndexEmptyState
+          pageTitle="Agents"
           title="No agents yet"
           description="An agent is a persistent specialist with its own conversation and responsibility."
           media={
@@ -230,6 +231,8 @@ function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
 }
 
 function IndexEmptyState(props: {
+  /** Titles the page header where the list column would, when there is none. */
+  readonly pageTitle?: string;
   readonly title: string;
   readonly description: string;
   readonly media?: ReactNode;
@@ -237,7 +240,18 @@ function IndexEmptyState(props: {
 }) {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
-      {isElectron ? <WorkspacePageHeader electron /> : null}
+      {props.pageTitle ? (
+        <WorkspacePageHeader electron={isElectron}>
+          <h1
+            className="min-w-0 flex-1 truncate text-sm font-medium tracking-tight"
+            data-panel-flip="start"
+          >
+            {props.pageTitle}
+          </h1>
+        </WorkspacePageHeader>
+      ) : isElectron ? (
+        <WorkspacePageHeader electron />
+      ) : null}
       <Empty className="flex-1">
         <EmptyHeader className="max-w-md">
           {props.media ? <div className="mb-4 flex justify-center">{props.media}</div> : null}

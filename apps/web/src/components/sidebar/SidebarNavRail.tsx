@@ -24,7 +24,7 @@ import { useUiStateStore } from "../../uiStateStore";
 import { useSidebar, useSidebarVisibility } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { isSidebarUtilityPage } from "./mainAppLocation";
-import { routeHidesListColumn } from "./listColumnRoutes";
+import { routeHidesListColumn, SIDEBAR_TOGGLE_DISABLED_LABEL } from "./listColumnRoutes";
 import { SIDEBAR_MODE_ICONS } from "./modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./modes/sidebarModes.logic";
 import { useSelectSidebarMode } from "./modes/useSelectSidebarMode";
@@ -76,8 +76,8 @@ export function SidebarNavRail({
   const onUtilityPage = isSidebarUtilityPage(pathname);
   const onSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const onUsage = pathname === "/usage";
-  // Usage, Projects and an empty Agents list have no list column, so nothing
-  // to toggle there.
+  // Usage, Projects and an empty Agents list have no list column, so the
+  // toggle stays in place but disabled there.
   const agentsEmpty = useAgentsEmpty();
   const listColumnHidden = routeHidesListColumn(pathname, {
     agentsEmpty: mode === "agents" && agentsEmpty,
@@ -104,17 +104,29 @@ export function SidebarNavRail({
     tabRefs.current[nextIndex]?.focus();
   };
 
+  // aria-disabled rather than disabled, so the tooltip still explains why.
   const sidebarToggle = (
-    <RailTooltip label={`Toggle main sidebar${toggleShortcut ? ` (${toggleShortcut})` : ""}`}>
+    <RailTooltip
+      label={
+        listColumnHidden
+          ? SIDEBAR_TOGGLE_DISABLED_LABEL
+          : `Toggle main sidebar${toggleShortcut ? ` (${toggleShortcut})` : ""}`
+      }
+    >
       <button
         type="button"
         aria-label="Toggle main sidebar"
-        aria-pressed={sidebarVisible}
+        aria-pressed={sidebarVisible && !listColumnHidden}
+        aria-disabled={listColumnHidden || undefined}
         data-sidebar="trigger"
-        onClick={toggleSidebar}
-        className={cn(RAIL_BUTTON_CLASS, RAIL_TOGGLE_TONE, "[-webkit-app-region:no-drag]")}
+        onClick={listColumnHidden ? undefined : toggleSidebar}
+        className={cn(
+          RAIL_BUTTON_CLASS,
+          RAIL_TOGGLE_TONE,
+          "[-webkit-app-region:no-drag] aria-disabled:cursor-not-allowed aria-disabled:opacity-64 aria-disabled:hover:text-sidebar-muted-foreground",
+        )}
       >
-        <MorphIcon icon={sidebarVisible ? PanelLeftClose : PanelLeft} />
+        <MorphIcon icon={sidebarVisible && !listColumnHidden ? PanelLeftClose : PanelLeft} />
       </button>
     </RailTooltip>
   );
@@ -139,7 +151,7 @@ export function SidebarNavRail({
           isElectron && "drag-region",
         )}
       >
-        {showSidebarToggle && !listColumnHidden ? sidebarToggle : null}
+        {showSidebarToggle ? sidebarToggle : null}
       </div>
       <div
         role="tablist"

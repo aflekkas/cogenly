@@ -399,7 +399,9 @@ function Sidebar({
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
   const { toggleSidebar } = useSidebar();
-  const isOpen = useSidebarVisibility();
+  // aria-disabled keeps the trigger hoverable for its tooltip but inert.
+  const inert = props["aria-disabled"] === true || props["aria-disabled"] === "true";
+  const isOpen = useSidebarVisibility() && !inert;
 
   return (
     <Button
@@ -412,7 +414,7 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       aria-pressed={isOpen}
       onClick={(event) => {
         onClick?.(event);
-        toggleSidebar();
+        if (!inert) toggleSidebar();
       }}
       size="icon"
       variant="ghost"
