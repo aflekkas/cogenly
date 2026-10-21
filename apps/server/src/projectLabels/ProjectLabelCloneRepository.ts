@@ -1,0 +1,138 @@
+import {
+  CommandId,
+  OrchestrationDispatchCommandError,
+  ProjectId,
+  ProjectLabelError,
+  SourceControlProviderKind,
+  SourceControlRepositoryError,
+  type ProjectLabelCloneRepositoryInput,
+} from "@t3tools/contracts";
+import type * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import type * as Path from "effect/Path";
+
+import {
+  repositoryDirectoryNameFromRemote,
+  resolveProjectsRootDirectory,
+  resolveRepositoryDirectory,
+} from "../project/ProjectsRoot.ts";
+import type * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
+import type * as ProjectService from "../project/ProjectService.ts";
+import type * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import type * as ServerSettings from "../serverSettings.ts";
+import type * as ProjectLabelService from "./ProjectLabelService.ts";
+
+export interface ProjectLabelCloneDeps {
+  readonly labels: Pick<
+    ProjectLabelService.ProjectLabelService["Service"],
+    "read" | "linkRepository"
+  >;
+  readonly clones: Pick<ProjectCloneTracker.ProjectCloneTracker["Service"], "start">;
+  readonly projects: Pick<ProjectService.ProjectService["Service"], "create" | "update">;
+  readonly identities: Pick<
+    RepositoryIdentityResolver.RepositoryIdentityResolver["Service"],
+    "resolve"
+  >;
+  readonly settings: Pick<ServerSettings.ServerSettingsService["Service"], "getSettings">;
+  readonly crypto: Crypto.Crypto;
+  readonly path: Path.Path;
+  readonly home: string;
+  readonly refreshGitStatus: (cwd: string) => Effect.Effect<void>;
+}
+
+/**
+ * Clone a repository into a project: the destination resolves under the
+ * projects root (`<root>/<Project>/<repo>`), the clone runs through the
+ * tracked clone flow (progress on the project-clone subscription), and the
+ * repository is filed in the project — immediately, so the picker shows it
+ * while it clones, and again once it lands, which files its GitHub link too.
+ */
+export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.clone")(function* (
+  input: ProjectLabelCloneRepositoryInput,
+  deps: ProjectLabelCloneDeps,
+) {
+  const { label } = yield* deps.labels.read(input.id);
+  const folderName = repositoryDirectoryNameFromRemote(input);
+  if (folderName === "") {
+    return yield* new SourceControlRepositoryError({
+      operation: "cloneRepository",
+      provider: input.provider ?? SourceControlProviderKind.make("unknown"),
+      detail: "Enter a repository path or clone URL before cloning.",
+    });
+  }
+  const settings = yield* deps.settings.getSettings.pipe(
+    Effect.mapError(
+      (cause) => new ProjectLabelError({ operation: "cloneRepository", reason: "storage", cause }),
+    ),
+  );
+  const destinationPath = resolveRepositoryDirectory(
+    resolveProjectsRootDirectory(settings.projectsRoot, deps.home, deps.path),
+    label.name,
+    folderName,
+    deps.path,
+  );
+  const projectId =
+    input.projectId ??
+    ProjectId.make(
+      yield* deps.crypto
+        .randomUUIDv4()
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProjectLabelError({ operation: "cloneRepository", reason: "storage", cause }),
+          ),
+        ),
+    );
+  const started = yield* deps.clones.start(
+    {
+      projectId,
+      title: input.title ?? folderName,
+      createdAt: DateTime.formatIso(yield* DateTime.now),
+      ...(input.provider === undefined ? {} : { provider: input.provider }),
+      ...(input.repository === undefined ? {} : { repository: input.repository }),
+      ...(input.remoteUrl === undefined ? {} : { remoteUrl: input.remoteUrl }),
+      destinationPath,
+      ...(input.protocol === undefined ? {} : { protocol: input.protocol }),
+    },
+    {
+      createProject: (project) =>
+        deps.projects
+          .create({
+            commandId: CommandId.make(`project-clone-create:${project.projectId}`),
+            projectId: project.projectId,
+            title: project.title,
+            workspaceRoot: project.workspaceRoot,
+            createWorkspaceRootIfMissing: true,
+          })
+          .pipe(
+            Effect.asVoid,
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationDispatchCommandError({
+                  message: "Failed to create clone project.",
+                  cause,
+                }),
+            ),
+          ),
+      onCloned: (project) =>
+        deps.identities.resolve(project.workspaceRoot, { refresh: true }).pipe(
+          Effect.andThen(
+            deps.projects.update({
+              commandId: CommandId.make(`project-clone-done:${project.projectId}`),
+              projectId: project.projectId,
+            }),
+          ),
+          Effect.andThen(
+            deps.labels.linkRepository({ labelId: input.id, repositoryId: project.projectId }),
+          ),
+          Effect.andThen(deps.refreshGitStatus(project.workspaceRoot)),
+          Effect.ignoreCause({ log: true }),
+        ),
+    },
+  );
+  yield* deps.labels
+    .linkRepository({ labelId: input.id, repositoryId: started.projectId })
+    .pipe(Effect.ignoreCause({ log: true }));
+  return started;
+});

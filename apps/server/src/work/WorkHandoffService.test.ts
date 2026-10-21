@@ -241,7 +241,7 @@ const makeHarness = (
         runForThread: () => Effect.succeed({ status: "no-script" }),
       }),
       Layer.mock(Folders.ManagedProjectFolders)({
-        namedProjectsRoot: "/unused",
+        namedProjectsRoot: Effect.succeed("/unused"),
         scratchRoot: Effect.succeed(
           options.scratch ? Option.some(scratch.workspaceRoot) : Option.none(),
         ),
@@ -642,7 +642,7 @@ it.effect(
         }),
         Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void }),
         Layer.mock(Folders.ManagedProjectFolders)({
-          namedProjectsRoot: "/unused",
+          namedProjectsRoot: Effect.succeed("/unused"),
           scratchRoot: Effect.succeed(Option.none()),
         }),
         Projections.layer,

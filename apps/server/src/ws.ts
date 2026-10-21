@@ -10,6 +10,10 @@ import * as VisualStates from "./htmlRender/VisualState.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
+import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
+import * as ProjectLabelOwnerSearch from "./projectLabels/ProjectOwnerRepositorySearch.ts";
+import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as WorkHandoff from "./work/WorkHandoffService.ts";
 import * as AgentWorkspace from "./agents/AgentWorkspaceService.ts";
 import * as Agents from "./agents/AgentService.ts";
@@ -1055,6 +1059,9 @@ const makeWsRpcHandlers = (
     const globalSearch = yield* GlobalSearch.GlobalSearch;
     const exports = yield* Exports.ExportService;
     const projectLabels = yield* ProjectLabels.ProjectLabelService;
+    const github = yield* GitHubRest.GitHubRest;
+    const home = yield* HostProcess.HomeDirectory;
+    const path = yield* Path.Path;
     const agents = yield* Agents.AgentService;
     const agentWorkspace = yield* AgentWorkspace.AgentWorkspaceService;
     const agentStore = yield* AgentStore.AgentStore;
@@ -1241,7 +1248,10 @@ const makeWsRpcHandlers = (
             onNone: () => ({}),
             onSome: (root) => ({ scratchWorkspaceRoot: root }),
           }),
-          newProjectsRoot: managedFolders.namedProjectsRoot,
+          ...Option.match(yield* managedFolders.namedProjectsRoot.pipe(Effect.option), {
+            onNone: () => ({}),
+            onSome: (root) => ({ newProjectsRoot: root }),
+          }),
         };
       });
 
@@ -1590,6 +1600,27 @@ const makeWsRpcHandlers = (
         projectLabels.subscribeConfirmedThreadLabels(),
       [WS_METHODS.projectLabelsMoveThread]: (input) => projectLabels.moveThread(input),
       [WS_METHODS.projectLabelsSetThreadLabels]: (input) => projectLabels.setThreadLabels(input),
+      [WS_METHODS.projectLabelsLinkSource]: (input) => projectLabels.linkSource(input),
+      [WS_METHODS.projectLabelsUnlinkSource]: (input) => projectLabels.unlinkSource(input),
+      [WS_METHODS.projectLabelsSearchOwnerRepositories]: (input) =>
+        ProjectLabelOwnerSearch.searchLabelOwnerRepositories(input, {
+          labels: projectLabels,
+          github,
+          projects: projectStore,
+          identities: repositoryIdentityResolver,
+        }),
+      [WS_METHODS.projectLabelsCloneRepository]: (input) =>
+        ProjectLabelClone.cloneRepositoryIntoLabel(input, {
+          labels: projectLabels,
+          clones: projectCloneTracker,
+          projects: projectService,
+          identities: repositoryIdentityResolver,
+          settings: serverSettings,
+          crypto,
+          path,
+          home,
+          refreshGitStatus,
+        }),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>
@@ -2648,6 +2679,7 @@ type WsRequestServices =
   | ExternalLauncher.ExternalLauncher
   | Facts.FactService
   | FileSystem.FileSystem
+  | GitHubRest.GitHubRest
   | GitWorkflowService.GitWorkflowService
   | GlobalSearch.GlobalSearch
   | HostResources.HostResources

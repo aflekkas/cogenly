@@ -25,6 +25,8 @@ import {
   parseGitCloneProgressLine,
   type GitCloneProgressLine,
 } from "../project/gitCloneProgress.ts";
+import { resolveDefaultCloneDestination } from "../project/ProjectsRoot.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -161,6 +163,7 @@ export const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const path = yield* Path.Path;
   const providers = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
 
   const ensureConcreteProvider = (input: {
     readonly operation: string;
@@ -245,10 +248,47 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  const defaultCloneDestinationPath = Effect.fn(
+    "SourceControlRepositoryService.defaultCloneDestination",
+  )(function* (
+    input: Pick<SourceControlCloneRepositoryInput, "provider" | "repository" | "remoteUrl">,
+  ) {
+    const provider = input.provider ?? SourceControlProviderKind.make("unknown");
+    const settings = yield* serverSettings.getSettings.pipe(
+      Effect.mapError(
+        (cause) =>
+          new SourceControlRepositoryError({
+            operation: "cloneRepository",
+            provider,
+            detail: "The projects root setting could not be read.",
+            cause,
+          }),
+      ),
+    );
+    const resolved = resolveDefaultCloneDestination({
+      projectsRootSetting: settings.projectsRoot,
+      home: yield* HostProcess.HomeDirectory,
+      repository: input.repository,
+      remoteUrl: input.remoteUrl,
+      path,
+    });
+    if (resolved === null) {
+      return yield* new SourceControlRepositoryError({
+        operation: "cloneRepository",
+        provider,
+        detail: "Enter a repository path or clone URL before cloning.",
+      });
+    }
+    return resolved;
+  });
+
   const prepareClone = Effect.fn("SourceControlRepositoryService.prepareClone")(function* (
     input: SourceControlCloneRepositoryInput,
   ) {
-    const preparedDestination = yield* prepareDestination(input.destinationPath);
+    const trimmedDestination = input.destinationPath?.trim() ?? "";
+    const destinationPath =
+      trimmedDestination === "" ? yield* defaultCloneDestinationPath(input) : trimmedDestination;
+    const preparedDestination = yield* prepareDestination(destinationPath);
     let repository: SourceControlRepositoryInfo | null = null;
     let remoteUrl = input.remoteUrl?.trim() ?? null;
     let provider: SourceControlProviderKind =

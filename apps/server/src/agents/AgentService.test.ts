@@ -89,7 +89,7 @@ const makeHarness = Effect.sync(() => {
   });
   const boundaries = Layer.mergeAll(
     Layer.mock(Folders.ManagedProjectFolders)({
-      namedProjectsRoot: "/unused",
+      namedProjectsRoot: Effect.succeed("/unused"),
       scratchRoot: Effect.succeed(Option.none()),
       ensureScratchProject: Effect.succeed({ projectId: ProjectId.make("project:scratch") }),
     }),

@@ -200,6 +200,12 @@ export const ProjectCreatePayload = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
+  /**
+   * Run `git init` when the workspace root is not inside a repository yet, so
+   * a picked local folder becomes a repository instead of a plain folder.
+   * Never commits: the folder already holds the user's files.
+   */
+  initRepository: Schema.optional(Schema.Boolean),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
 });

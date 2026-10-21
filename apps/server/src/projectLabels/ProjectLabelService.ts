@@ -3,10 +3,12 @@ import {
   ProjectLabelError,
   ProjectLabelId,
   ProjectLabelWithRepositories,
+  ProjectSourceLink,
   ThreadProjectLabel,
   type ProjectLabelCreateInput,
   type ProjectLabelUpdateInput,
   type ProjectLabelRepository,
+  type ProjectLabelSourceLinkInput,
   type SetThreadProjectLabelsInput,
   type MoveThreadProjectFolderInput,
   type ThreadProjectFolderResult,
@@ -18,6 +20,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
@@ -25,6 +28,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as Events from "../persistence/OrchestrationEventStore.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 
 type Labels = { readonly labels: ReadonlyArray<ProjectLabelWithRepositories> };
 type Tags = { readonly labels: ReadonlyArray<ThreadProjectLabel> };
@@ -53,6 +57,12 @@ export class ProjectLabelService extends Context.Service<
     readonly unlinkRepository: (
       input: ProjectLabelRepository,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    readonly linkSource: (
+      input: ProjectLabelSourceLinkInput,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    readonly unlinkSource: (
+      input: ProjectLabelSourceLinkInput,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly getThreadLabels: (threadId: ThreadId) => Effect.Effect<Tags, ProjectLabelError>;
     readonly subscribeThreadLabels: (threadId: ThreadId) => Stream.Stream<Tags, ProjectLabelError>;
     /** Effective folder memberships across every live thread. */
@@ -69,6 +79,12 @@ const isProjectLabelError = Schema.is(ProjectLabelError);
 const decodeRepositories = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(ProjectId)),
 );
+const decodeSourceLinkRows = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Array(Schema.Struct({ kind: Schema.String, owner: Schema.String, repo: Schema.String })),
+  ),
+);
+const decodeSourceLink = Schema.decodeUnknownOption(ProjectSourceLink);
 const decodeLabel = Schema.decodeUnknownEffect(ProjectLabelWithRepositories);
 const decodeTag = Schema.decodeUnknownEffect(ThreadProjectLabel);
 const encodeAudit = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
@@ -87,6 +103,7 @@ const make = Effect.gen(function* () {
   const readLabels = (id?: ProjectLabelId) =>
     sql`SELECT label_id AS id, name, color, description, created_at AS createdAt, updated_at AS updatedAt,
     (SELECT json_group_array(repository_id) FROM (SELECT repository_id FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositories
+    , (SELECT json_group_array(json(source)) FROM (SELECT json_object('kind', kind, 'owner', owner, 'repo', repo) AS source FROM label_source_links s WHERE s.label_id = l.label_id ORDER BY kind, owner, repo)) AS sources
     , (SELECT count(*) FROM effective_thread_project_folders f
       JOIN orchestration_v2_projection_threads t ON t.thread_id = f.thread_id
       WHERE f.folder_id = l.label_id AND t.archived_at IS NULL
@@ -100,11 +117,24 @@ const make = Effect.gen(function* () {
         Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
             const repositoryIds = yield* decodeRepositories(row.repositories);
+            const sourceLinkRows = yield* decodeSourceLinkRows(row.sources);
+            const sourceLinks = sourceLinkRows.flatMap((source) =>
+              source.kind === "github-owner"
+                ? Option.toArray(decodeSourceLink({ kind: source.kind, owner: source.owner }))
+                : Option.toArray(
+                    decodeSourceLink({
+                      kind: "github-repo",
+                      owner: source.owner,
+                      repo: source.repo,
+                    }),
+                  ),
+            );
             return yield* decodeLabel({
               ...row,
               color: row.color ?? undefined,
               description: row.description ?? undefined,
               repositoryIds,
+              sourceLinks,
             });
           }),
         ),
@@ -197,6 +227,32 @@ const make = Effect.gen(function* () {
         );
       }),
     );
+  // Optional so layers built without process access (unit tests over a memory
+  // database) still link repositories; production always provides it, and only
+  // then does linking auto-add the repository's own source link below.
+  const identities = yield* Effect.serviceOption(
+    RepositoryIdentityResolver.RepositoryIdentityResolver,
+  );
+  // A linked repository files its own GitHub link with the project, so owner
+  // search and the picker know it without a manual step. Best-effort: no
+  // remote, a non-GitHub remote, or an unparseable one simply adds nothing.
+  const autoAddRepositorySourceLink = Effect.fn("ProjectLabelService.autoAddRepositorySourceLink")(
+    function* (labelId: ProjectLabelId, repositoryId: ProjectId) {
+      if (Option.isNone(identities)) return;
+      const rows = yield* sql<{
+        workspace_root: string;
+      }>`SELECT workspace_root FROM projection_projects WHERE project_id = ${repositoryId} AND deleted_at IS NULL`;
+      const workspaceRoot = rows[0]?.workspace_root;
+      if (typeof workspaceRoot !== "string" || workspaceRoot.length === 0) return;
+      const identity = yield* identities.value.resolve(workspaceRoot);
+      if (identity?.provider !== "github" || !identity.owner || !identity.name) return;
+      const link = Option.getOrUndefined(
+        decodeSourceLink({ kind: "github-repo", owner: identity.owner, repo: identity.name }),
+      );
+      if (!link || link.kind !== "github-repo") return;
+      yield* sql`INSERT INTO label_source_links(label_id, kind, owner, repo, created_at) VALUES (${labelId}, ${link.kind}, ${link.owner}, ${link.repo}, ${yield* now}) ON CONFLICT(label_id, kind, owner, repo) DO NOTHING`;
+    },
+  );
   const repository = (input: ProjectLabelRepository, link: boolean) =>
     mutate(
       link ? "linkRepository" : "unlinkRepository",
@@ -208,10 +264,27 @@ const make = Effect.gen(function* () {
             yield* sql`SELECT project_id FROM projection_projects WHERE project_id = ${input.repositoryId} AND deleted_at IS NULL`;
           if (!rows.length) return yield* missing("repository");
           yield* sql`INSERT INTO label_repositories(label_id, repository_id) VALUES (${input.labelId}, ${input.repositoryId}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id`;
+          yield* autoAddRepositorySourceLink(input.labelId, input.repositoryId);
         } else
           yield* sql`DELETE FROM label_repositories WHERE label_id = ${input.labelId} AND repository_id = ${input.repositoryId}`;
         yield* sql`UPDATE project_labels SET updated_at = ${yield* now} WHERE label_id = ${input.labelId}`;
         return yield* get(input.labelId);
+      }),
+    );
+  const sourceLink = (input: ProjectLabelSourceLinkInput, link: boolean) =>
+    mutate(
+      link ? "linkSource" : "unlinkSource",
+      input,
+      Effect.gen(function* () {
+        yield* get(input.id);
+        const repo = input.link.kind === "github-owner" ? "" : input.link.repo;
+        if (link) {
+          yield* sql`INSERT INTO label_source_links(label_id, kind, owner, repo, created_at) VALUES (${input.id}, ${input.link.kind}, ${input.link.owner}, ${repo}, ${yield* now}) ON CONFLICT(label_id, kind, owner, repo) DO NOTHING`;
+        } else {
+          yield* sql`DELETE FROM label_source_links WHERE label_id = ${input.id} AND kind = ${input.link.kind} AND owner = ${input.link.owner} AND repo = ${repo}`;
+        }
+        yield* sql`UPDATE project_labels SET updated_at = ${yield* now} WHERE label_id = ${input.id}`;
+        return yield* get(input.id);
       }),
     );
   const moveThread = (input: MoveThreadProjectFolderInput) =>
@@ -295,6 +368,8 @@ const make = Effect.gen(function* () {
       ),
     linkRepository: (input) => repository(input, true),
     unlinkRepository: (input) => repository(input, false),
+    linkSource: (input) => sourceLink(input, true),
+    unlinkSource: (input) => sourceLink(input, false),
     setThreadLabels: (input) => {
       const ids = [...new Set(input.labelIds)];
       if (ids.length > 1)

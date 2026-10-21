@@ -901,6 +901,9 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
+/** Home for repositories Cogenly creates, so clones and new repositories stay user-visible. */
+export const DEFAULT_PROJECTS_ROOT = "~/Cogenly";
+
 export const ServerSettings = Schema.Struct({
   // Null means no client has migrated this preference yet; an empty value is
   // authoritative so another device cannot resurrect cleared preferences.
@@ -1054,6 +1057,15 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /**
+   * Home for repositories Cogenly creates: clones and new repositories land in
+   * `<projectsRoot>/<Project>/<repo>`, or `<projectsRoot>/Repositories/<repo>`
+   * when no project holds them. `~` expands to the server user's home; empty
+   * resolves to the default. Existing repositories never move.
+   */
+  projectsRoot: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROJECTS_ROOT)),
+  ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -1385,6 +1397,7 @@ export const ServerSettingsPatch = Schema.Struct({
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeSubmodules: Schema.optionalKey(Schema.NullOr(WorktreeSubmodules)),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
+  projectsRoot: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   branchNamingMode: Schema.optionalKey(BranchNamingMode),
   branchNamePrefix: Schema.optionalKey(TrimmedString),

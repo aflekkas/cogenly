@@ -31,6 +31,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import { planThreadDeletion } from "../orchestration-v2/ThreadDeletion.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 
@@ -88,6 +89,7 @@ export class ProjectOperationError extends Schema.TaggedError<ProjectOperationEr
   {
     operation: Schema.Literals([
       "normalize-workspace",
+      "init-repository",
       "read-project",
       "list-projects",
       "list-threads",
@@ -155,6 +157,7 @@ export const make = Effect.gen(function* () {
   const legacyImporter = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
   const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
   // Commands for one project run in order. Commands that claim a workspace root
   // also hold that root, so two projects cannot both claim it.
   const projectLocks = yield* KeyedLock.make<ProjectId>();
@@ -336,6 +339,27 @@ export const make = Effect.gen(function* () {
     return Option.isNone(row) ? Option.none() : Option.some(yield* hydrate(row.value));
   });
 
+  // A picked local folder becomes a repository before the project claims
+  // it. Never commits: the folder already holds the user's files. Skipped
+  // unless requested, so clones (which fill the empty destination
+  // themselves) and plain attaches are untouched.
+  const ensureGitRepository = Effect.fn("ProjectService.ensureGitRepository")(function* (
+    workspaceRoot: string,
+    projectId: ProjectId,
+  ) {
+    const initError = (cause: unknown) =>
+      new ProjectOperationError({
+        operation: "init-repository",
+        projectId,
+        workspaceRoot,
+        cause,
+      });
+    const driver = yield* vcsRegistry.get("git").pipe(Effect.mapError(initError));
+    const existing = yield* driver.detectRepository(workspaceRoot).pipe(Effect.mapError(initError));
+    if (existing !== null) return;
+    yield* driver.initRepository({ cwd: workspaceRoot }).pipe(Effect.mapError(initError));
+  });
+
   const create: ProjectService["Service"]["create"] = Effect.fn("ProjectService.create")(
     function* (input) {
       const workspaceRoot = yield* normalizeWorkspaceRoot({
@@ -343,6 +367,9 @@ export const make = Effect.gen(function* () {
         workspaceRoot: input.workspaceRoot,
         createIfMissing: input.createWorkspaceRootIfMissing ?? false,
       });
+      if (input.initRepository === true) {
+        yield* ensureGitRepository(workspaceRoot, input.projectId);
+      }
       yield* commit({
         type: "project.create",
         commandId: input.commandId,

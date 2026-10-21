@@ -127,7 +127,7 @@ const serverLayer = Layer.mergeAll(
   Layer.provideMerge(Layer.mock(ThreadLaunch.ThreadLaunchService)({})),
   Layer.provideMerge(
     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-      namedProjectsRoot: "/unused",
+      namedProjectsRoot: Effect.succeed("/unused"),
     }),
   ),
   Layer.provideMerge(Layer.mock(GitVcsDriver.GitVcsDriver)({})),

@@ -19,6 +19,9 @@ export const projectMutationOperation = Effect.fn("projectMutationOperation")(fu
         ...(mutation.createWorkspaceRootIfMissing === undefined
           ? {}
           : { createWorkspaceRootIfMissing: mutation.createWorkspaceRootIfMissing }),
+        ...(mutation.initRepository === undefined
+          ? {}
+          : { initRepository: mutation.initRepository }),
         ...(mutation.defaultModelSelection === undefined
           ? {}
           : { defaultModelSelection: mutation.defaultModelSelection }),

@@ -510,6 +510,10 @@ export const WS_METHODS = {
   projectLabelsSubscribeConfirmedThreadLabels: "projectLabels.subscribeConfirmedThreadLabels",
   projectLabelsMoveThread: "projectLabels.moveThread",
   projectLabelsSetThreadLabels: "projectLabels.setThreadLabels",
+  projectLabelsLinkSource: "projectLabels.linkSource",
+  projectLabelsUnlinkSource: "projectLabels.unlinkSource",
+  projectLabelsSearchOwnerRepositories: "projectLabels.searchOwnerRepositories",
+  projectLabelsCloneRepository: "projectLabels.cloneRepository",
   workStart: "work.start",
   agentsList: "agents.list",
   agentsSubscribe: "agents.subscribe",
@@ -1862,6 +1866,41 @@ const WsProjectLabelsSetThreadLabelsRpc = Rpc.make(WS_METHODS.projectLabelsSetTh
   success: ProjectLabels.ThreadProjectLabelsResult,
   error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
+const WsProjectLabelsLinkSourceRpc = Rpc.make(WS_METHODS.projectLabelsLinkSource, {
+  payload: ProjectLabels.ProjectLabelSourceLinkInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsUnlinkSourceRpc = Rpc.make(WS_METHODS.projectLabelsUnlinkSource, {
+  payload: ProjectLabels.ProjectLabelSourceLinkInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsSearchOwnerRepositoriesRpc = Rpc.make(
+  WS_METHODS.projectLabelsSearchOwnerRepositories,
+  {
+    payload: ProjectLabels.ProjectLabelOwnerRepositorySearchInput,
+    success: ProjectLabels.ProjectLabelOwnerRepositorySearchResult,
+    error: Schema.Union([
+      ProjectLabels.ProjectLabelError,
+      ProjectLabels.ProjectLabelOwnerSearchError,
+      EnvironmentAuthorizationError,
+    ]),
+  },
+);
+// Clone-backed repository creation filed in a project. `start` returns once
+// the project exists and the clone is running; progress arrives on the
+// project-clone subscription like any other clone.
+const WsProjectLabelsCloneRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsCloneRepository, {
+  payload: ProjectLabels.ProjectLabelCloneRepositoryInput,
+  success: ProjectCloneStartResult,
+  error: Schema.Union([
+    ProjectLabels.ProjectLabelError,
+    SourceControlRepositoryError,
+    OrchestrationDispatchCommandError,
+    EnvironmentAuthorizationError,
+  ]),
+});
 const WsWorkStartRpc = Rpc.make(WS_METHODS.workStart, {
   payload: Work.WorkStartInput,
   success: Work.WorkStartResult,
@@ -2190,6 +2229,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsSubscribeConfirmedThreadLabelsRpc,
   WsProjectLabelsMoveThreadRpc,
   WsProjectLabelsSetThreadLabelsRpc,
+  WsProjectLabelsLinkSourceRpc,
+  WsProjectLabelsUnlinkSourceRpc,
+  WsProjectLabelsSearchOwnerRepositoriesRpc,
+  WsProjectLabelsCloneRepositoryRpc,
   WsWorkStartRpc,
   WsAgentsApprovalsListRpc,
   WsAgentsRequestApprovalRpc,

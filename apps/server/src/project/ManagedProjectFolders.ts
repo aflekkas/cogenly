@@ -1,11 +1,11 @@
 /**
- * ManagedProjectFolders - the project folders T3 Code makes for the user under
- * its data dir, rather than ones the user picks:
+ * ManagedProjectFolders - the project folders T3 Code makes for the user,
+ * rather than ones the user picks:
  *
  * - `<baseDir>/scratch`: the Scratch project ("No project"), with a folder of
  *   its own for each thread;
- * - `<baseDir>/projects/<slug>`: projects started from just a name, each a new
- *   Git repository with a README, an icon, and a first commit.
+ * - `<projectsRoot>/Repositories/<slug>`: projects started from just a name,
+ *   each a new Git repository with a README, an icon, and a first commit.
  *
  * @module ManagedProjectFolders
  */
@@ -33,8 +33,11 @@ import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ProjectService from "./ProjectService.ts";
+import { UNFILED_REPOSITORIES_SEGMENT, resolveProjectsRootDirectory } from "./ProjectsRoot.ts";
 
 export class ScratchUnavailableError extends Schema.TaggedError<ScratchUnavailableError>()(
   "ScratchUnavailableError",
@@ -113,8 +116,8 @@ export class ManagedProjectFolders extends Context.Service<
       readonly threadId: ThreadId;
       readonly text: string;
     }) => Effect.Effect<Option.Option<string>, ScratchFolderError>;
-    /** The folder that holds projects started from just a name. */
-    readonly namedProjectsRoot: string;
+    /** The folder that holds projects started from just a name, under the projects root. */
+    readonly namedProjectsRoot: Effect.Effect<string, NamedProjectFolderError>;
     /**
      * Starts a project from just a name: claims `<namedProjectsRoot>/<slug>`
      * (adding `-2`, `-3`, ... when taken), makes it a Git repository with a
@@ -242,6 +245,8 @@ const make = Effect.gen(function* () {
   const gitWorkflow = yield* GitWorkflow.GitWorkflowService;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const projects = yield* ProjectService.ProjectService;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const home = yield* HostProcess.HomeDirectory;
   const crypto = yield* Crypto.Crypto;
 
   /**
@@ -387,39 +392,40 @@ const make = Effect.gen(function* () {
     );
   });
 
-  // Projects started from just a name live beside Scratch and worktrees, away
-  // from folders the user organizes by hand. A nested repository is fine here
-  // (unlike Scratch) because each project gets its own `git init`.
-  const namedProjectsRoot = path.resolve(config.baseDir, "projects");
+  // Projects started from just a name live under the projects root, where the
+  // user can see them, filed with the repositories no project holds. A nested
+  // repository is fine here (unlike Scratch) because each project gets its own
+  // `git init`. Resolved per call so a changed setting takes effect at once.
+  const namedProjectsRoot = serverSettings.getSettings.pipe(
+    Effect.map((settings) =>
+      path.join(
+        resolveProjectsRootDirectory(settings.projectsRoot, home, path),
+        UNFILED_REPOSITORIES_SEGMENT,
+      ),
+    ),
+    Effect.mapError((cause) => new NamedProjectFolderError({ folder: "<projects root>", cause })),
+  );
 
   const claimNamedFolder = Effect.fn("ManagedProjectFolders.claimNamedFolder")(function* (
     name: string,
   ) {
+    const root = yield* namedProjectsRoot;
     yield* fileSystem
-      .makeDirectory(namedProjectsRoot, { recursive: true })
-      .pipe(
-        Effect.mapError(
-          (cause) => new NamedProjectFolderError({ folder: namedProjectsRoot, cause }),
-        ),
-      );
+      .makeDirectory(root, { recursive: true })
+      .pipe(Effect.mapError((cause) => new NamedProjectFolderError({ folder: root, cause })));
     const folderName = newProjectFolderName(name);
     const claimed = yield* claimFreeFolder(
       (attempt) =>
         Effect.succeed(
           attempt > MAX_NAMED_FOLDER_ATTEMPTS
             ? Option.none()
-            : Option.some(
-                path.join(
-                  namedProjectsRoot,
-                  attempt === 1 ? folderName : `${folderName}-${attempt}`,
-                ),
-              ),
+            : Option.some(path.join(root, attempt === 1 ? folderName : `${folderName}-${attempt}`)),
         ),
       (folder, cause) => new NamedProjectFolderError({ folder, cause }),
     );
     if (Option.isSome(claimed)) return claimed.value;
     return yield* new NamedProjectFolderError({
-      folder: path.join(namedProjectsRoot, folderName),
+      folder: path.join(root, folderName),
       cause: `Every folder name for "${folderName}" is taken.`,
     });
   });
