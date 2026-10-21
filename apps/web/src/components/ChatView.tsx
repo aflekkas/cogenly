@@ -152,7 +152,6 @@ import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
 import {
   Fragment,
-  lazy,
   type SetStateAction,
   Suspense,
   useCallback,
@@ -296,6 +295,7 @@ import {
 } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+import { preloadableComponent } from "~/lib/preloadableComponent";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { registerFaviconProjectForThread } from "~/browserFaviconStore";
@@ -654,15 +654,20 @@ function useDraftHeroLayoutTransition(
   } as const;
 }
 
-const PreviewPanel = lazy(() =>
-  import("./preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
+// The panel's surfaces are code-split and preloaded while a thread that offers
+// them is on screen, so the first open slides in a finished panel rather than
+// a strip whose toolbar and body arrive mid-slide (see preloadableComponent).
+const { Component: PreviewPanel, preload: preloadPreviewPanel } = preloadableComponent(() =>
+  import("./preview/PreviewPanel").then((module) => module.PreviewPanel),
 );
 const selectAutoShowFloatingPreview = (settings: { browserAutoShowFloatingPreview: boolean }) =>
   settings.browserAutoShowFloatingPreview;
-const DevicePanel = lazy(() =>
-  import("./device/DevicePanel").then((module) => ({ default: module.DevicePanel })),
+const { Component: DevicePanel, preload: preloadDevicePanel } = preloadableComponent(() =>
+  import("./device/DevicePanel").then((module) => module.DevicePanel),
 );
-const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+const { Component: FilePreviewPanel, preload: preloadFilePreviewPanel } = preloadableComponent(() =>
+  import("./files/FilePreviewPanel").then((module) => module.default),
+);
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -1704,6 +1709,12 @@ export default function ChatView(props: ChatViewProps) {
   // A thread kind without panel surfaces has no right panel: nothing below opens,
   // shows or toggles one for it. Chats offer the browser only.
   const rightPanelSupported = hasRightPanel(activeThreadCapabilities);
+  useEffect(() => {
+    if (!rightPanelSupported) return;
+    void preloadPreviewPanel();
+    void preloadDevicePanel();
+    void preloadFilePreviewPanel();
+  }, [rightPanelSupported]);
   const activeRightPanelKind = useRightPanelStore((state) =>
     rightPanelSupported ? selectActiveRightPanel(state.byThreadKey, activeThreadRef) : null,
   );

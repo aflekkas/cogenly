@@ -7,7 +7,6 @@ import {
   usePreviewPanelInlineSize,
 } from "~/hooks/usePreviewPanelInlineSize";
 import { RESIZABLE_WIDTH_PROPERTY } from "~/hooks/useResizableWidth";
-import { PANEL_EXIT_DURATION_SCALE } from "~/lib/panelFlip";
 
 export { getPreviewPanelMaxWidth };
 import { cn } from "~/lib/utils";
@@ -84,16 +83,18 @@ function PreviewPanelShellFrame(
             : "shrink-0 border-l border-border"
           : "w-full",
         // Open and close slide on translate, on the compositor. The row lays
-        // out once at its final size and the chat's marked content glides
-        // beside the panel (panelFlip). Closing, the panel leaves the row at
+        // out once at its final size, the panel's content is laid out at that
+        // size from the first frame and clipped as it moves, and the chat's
+        // marked content glides beside the panel on the same duration
+        // (panelFlip). Closing reverses the slide: the panel leaves the row at
         // once and slides out over the widened chat column.
         collapsible &&
           "[[data-panel-animations=true]_&]:transition-[translate] [[data-panel-animations=true]_&]:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:ease-standard",
-        // Closing is quicker than opening, on the sidebar's scale (panelFlip).
-        collapsible &&
-          !open &&
-          "[[data-panel-animations=true]_&]:duration-(--panel-exit-animation-duration)",
         collapsible && open && "[[data-panel-animations=true]_&]:starting:translate-x-full",
+        // Reduced motion: the layout is instant and the panel fades in briefly.
+        collapsible &&
+          open &&
+          "motion-reduce:transition-opacity motion-reduce:duration-(--motion-duration-fast) motion-reduce:ease-out motion-reduce:starting:opacity-0",
         collapsible && !open && "pointer-events-none absolute inset-y-0 right-0 translate-x-full",
       )}
       style={
@@ -101,7 +102,6 @@ function PreviewPanelShellFrame(
           ? ({
               [RESIZABLE_WIDTH_PROPERTY]: `${width}px`,
               width: maximized ? "100%" : `var(${RESIZABLE_WIDTH_PROPERTY})`,
-              "--panel-exit-animation-duration": `calc(var(--panel-animation-duration) * ${PANEL_EXIT_DURATION_SCALE})`,
             } as CSSProperties)
           : undefined
       }

@@ -152,6 +152,34 @@ export function playPanelFlip(
 ): void {
   flipPanelContent(snapshot, durationMs, false, options);
   notifyPanelMotion(durationMs);
+  retargetAfterResize(snapshot, durationMs, options);
+}
+
+/**
+ * Re-aims a flip that is already playing at the layout as it is now, keeping
+ * the time it has run. For a second commit that moves the same content again
+ * (the list column stepping aside for the right panel): the content keeps
+ * gliding from where it was last painted, in one motion, instead of a second
+ * flip restarting from a layout that was never shown. Call it after the other
+ * flip has played: its resize retarget then also lands after that flip's,
+ * since observers deliver in the order they were created.
+ */
+export function retargetPanelFlip(
+  snapshot: PanelFlipSnapshot,
+  durationMs: number,
+  options: PanelFlipOptions = {},
+): void {
+  flipPanelContent(snapshot, durationMs, true, options);
+  notifyPanelMotion(durationMs);
+  retargetAfterResize(snapshot, durationMs, options);
+}
+
+/** One more aim once the frame's resize step has re-rendered size-derived positions. */
+function retargetAfterResize(
+  snapshot: PanelFlipSnapshot,
+  durationMs: number,
+  options: PanelFlipOptions,
+): void {
   let retargeted = false;
   const stopObserving = observeResize(document.documentElement, () => {
     if (retargeted) return;
