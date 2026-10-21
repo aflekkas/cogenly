@@ -559,6 +559,13 @@ type MessagesTimelineRowContent =
       active: boolean;
     }
   | {
+      kind: "restart-divider";
+      id: string;
+      createdAt: string;
+      /** Every restart notice this one divider stands for, oldest first. */
+      restarts: ReadonlyArray<TimelineRestart>;
+    }
+  | {
       kind: "message";
       id: string;
       createdAt: string;
@@ -2043,13 +2050,79 @@ export function deriveMessagesTimelineRows(input: {
   }
 
   const result = attachTrailingToolGroupsToAssistant(
-    attachCreatedThreadSummaries(nextRows, timelineEntries),
+    collapseRestartMarkers(attachCreatedThreadSummaries(nextRows, timelineEntries)),
   );
   return result.map((row, index) =>
     timelineRowIsWorkLog(row) && timelineRowIsWorkLog(result[index + 1])
       ? { ...row, continuesWorkLog: true }
       : row,
   );
+}
+
+export interface TimelineRestart {
+  readonly at: string;
+  readonly summary: string;
+}
+
+/** A server restart notice, such as "Cogenly restarted and resumed this turn". */
+function workEntryRestart(entry: WorkLogEntry): TimelineRestart | null {
+  const item = entry.structuredPayload;
+  if (item?.type !== "notification" || item.source.kind !== "system") return null;
+  return /\brestarted\b/i.test(item.summary)
+    ? { at: entry.createdAt, summary: item.summary }
+    : null;
+}
+
+/** Quiet lifecycle rows a run of restart notices can span without splitting. */
+function timelineRowIsSystemMarker(row: MessagesTimelineRow): boolean {
+  return (
+    row.kind === "restart-divider" ||
+    row.kind === "context-compaction" ||
+    (row.kind === "work" &&
+      row.groupedEntries.every(
+        (entry) => entry.itemType === "notification" || entry.itemType === "system_notice",
+      ))
+  );
+}
+
+/**
+ * Turns restart notices into divider rows and folds repeats into one: a
+ * restart directly after another, or separated only by other system notices,
+ * joins the earlier divider instead of adding a row.
+ */
+export function collapseRestartMarkers(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+): MessagesTimelineRow[] {
+  const result: MessagesTimelineRow[] = [];
+  for (const row of rows) {
+    const entry =
+      row.kind === "work" && !row.isExpandedToolGroup && row.groupedEntries.length === 1
+        ? row.groupedEntries[0]
+        : undefined;
+    const restart = entry ? workEntryRestart(entry) : null;
+    if (!restart) {
+      result.push(row);
+      continue;
+    }
+    let index = result.length - 1;
+    while (index >= 0) {
+      const candidate = result[index]!;
+      if (candidate.kind === "restart-divider" || !timelineRowIsSystemMarker(candidate)) break;
+      index -= 1;
+    }
+    const previous = result[index];
+    if (previous?.kind === "restart-divider") {
+      result[index] = { ...previous, restarts: [...previous.restarts, restart] };
+      continue;
+    }
+    result.push({
+      kind: "restart-divider",
+      id: row.id,
+      createdAt: restart.at,
+      restarts: [restart],
+    });
+  }
+  return result;
 }
 
 /** Adjacent work stays one visual list even when virtualization splits its groups. */
@@ -2316,6 +2389,19 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "context-compaction": {
       const bc = b as typeof a;
       return a.createdAt === bc.createdAt && a.label === bc.label && a.active === bc.active;
+    }
+
+    case "restart-divider": {
+      const br = b as typeof a;
+      return (
+        a.createdAt === br.createdAt &&
+        a.restarts.length === br.restarts.length &&
+        a.restarts.every(
+          (restart, index) =>
+            restart.at === br.restarts[index]?.at &&
+            restart.summary === br.restarts[index]?.summary,
+        )
+      );
     }
 
     case "proposed-plan":

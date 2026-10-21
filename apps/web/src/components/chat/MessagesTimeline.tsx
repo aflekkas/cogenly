@@ -2381,6 +2381,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                   !row.showLiveActivity) ||
                 row.kind === "worktree-setup" ||
                 row.kind === "event" ||
+                row.kind === "restart-divider" ||
                 row.kind === "attempt-fold" ||
                 row.kind === "html-render" ||
                 row.kind === "mcp-app"
@@ -2437,6 +2438,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
       {row.kind === "attempt-fold" ? <AttemptFoldTimelineRow row={row} /> : null}
       {row.kind === "context-compaction" ? <ContextCompactionTimelineRow row={row} /> : null}
+      {row.kind === "restart-divider" ? <RestartDividerTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
@@ -2540,6 +2542,49 @@ function ContextCompactionTimelineRow({
         ) : null}
       </span>
       <span className="h-px flex-1 bg-border/70" />
+    </div>
+  );
+}
+
+/** Divider ids already shown, so history and virtualized remounts never replay the fade. */
+const shownRestartDividerIds = new Set<string>();
+const RESTART_DIVIDER_ENTER_WINDOW_MS = 10_000;
+
+/** Server restarts read as one quiet divider; hovering lists each restart and its time. */
+function RestartDividerTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "restart-divider" }>;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const latestAt = row.restarts.at(-1)?.at ?? row.createdAt;
+  // Only a restart that just arrived fades in.
+  const [entering] = useState(() => {
+    if (shownRestartDividerIds.has(row.id)) return false;
+    shownRestartDividerIds.add(row.id);
+    return Date.now() - Date.parse(latestAt) < RESTART_DIVIDER_ENTER_WINDOW_MS;
+  });
+  return (
+    <div
+      role="separator"
+      aria-label="Cogenly restarted"
+      className={cn(
+        "mx-auto w-full max-w-(--chat-content-max-width)",
+        entering && "animate-activity-enter",
+      )}
+    >
+      <TimelineSystemDivider
+        label="Cogenly restarted"
+        hint={
+          <span className="flex flex-col gap-0.5">
+            {row.restarts.map((restart) => (
+              <span key={restart.at}>
+                {formatDayAwareTimestamp(restart.at, ctx.timestampFormat)} · {restart.summary}
+              </span>
+            ))}
+          </span>
+        }
+      />
     </div>
   );
 }

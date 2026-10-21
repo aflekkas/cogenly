@@ -15,8 +15,10 @@ import { describe, expect, it } from "vite-plus/test";
 import type { TimelineEntry, WorkLogEntry } from "../../session-logic";
 import type { ChatMessage } from "../../types";
 import {
+  collapseRestartMarkers,
   collapseWorkEntryRuns,
   deriveMessagesTimelineRows,
+  type MessagesTimelineRow,
   type TimelineLatestRun,
 } from "./MessagesTimeline.logic";
 
@@ -296,5 +298,96 @@ describe("a turn's delegations read as one subagent row", () => {
           row.groupedEntries.some((entry) => entry.id === "d1" || entry.id === "d2"),
       ),
     ).toBe(false);
+  });
+});
+
+describe("collapseRestartMarkers", () => {
+  const noticeRow = (
+    id: string,
+    at: number,
+    item: Record<string, unknown>,
+  ): MessagesTimelineRow => {
+    const createdAt = new Date(Date.UTC(2026, 0, 1, 0, 0, at)).toISOString();
+    return {
+      kind: "work",
+      id,
+      createdAt,
+      isExpandedToolGroup: false,
+      groupedEntries: [
+        {
+          id,
+          createdAt,
+          label: String(item.summary ?? item.message ?? id),
+          tone: "info",
+          itemType: item.type as OrchestrationV2TurnItem["type"],
+          structuredPayload: item as unknown as OrchestrationV2TurnItem,
+        },
+      ],
+    };
+  };
+  const restart = (id: string, at: number, summary = "Cogenly restarted and resumed this turn") =>
+    noticeRow(id, at, {
+      type: "notification",
+      source: { kind: "system" },
+      outcome: "updated",
+      summary,
+    });
+  const systemNotice = (id: string, at: number) =>
+    noticeRow(id, at, { type: "system_notice", message: "Model switched" });
+  const shape = (rows: MessagesTimelineRow[]) =>
+    rows.map((row) =>
+      row.kind === "restart-divider"
+        ? `restart:${row.id}×${row.restarts.length}`
+        : `${row.kind}:${row.id}`,
+    );
+
+  it("folds adjacent restarts into one divider that keeps every restart", () => {
+    const rows = collapseRestartMarkers([restart("r1", 1), restart("r2", 2), restart("r3", 3)]);
+    expect(shape(rows)).toEqual(["restart:r1×3"]);
+    const [divider] = rows;
+    expect(divider?.kind === "restart-divider" && divider.restarts.map((r) => r.at)).toEqual([
+      "2026-01-01T00:00:01.000Z",
+      "2026-01-01T00:00:02.000Z",
+      "2026-01-01T00:00:03.000Z",
+    ]);
+  });
+
+  it("folds restarts separated only by other system notices", () => {
+    const rows = collapseRestartMarkers([
+      restart("r1", 1),
+      systemNotice("s1", 2),
+      restart("r2", 3, "Cogenly restarted and stopped background work"),
+    ]);
+    expect(shape(rows)).toEqual(["restart:r1×2", "work:s1"]);
+  });
+
+  it("keeps restarts apart once real conversation sits between them", () => {
+    const message = messageEntry("a1", "assistant", { at: 2 });
+    if (message.kind !== "message") throw new Error("expected a message entry");
+    const rows = collapseRestartMarkers([
+      restart("r1", 1),
+      {
+        kind: "message",
+        id: "a1",
+        createdAt: message.createdAt,
+        message: message.message,
+        durationStart: message.createdAt,
+        showAssistantMeta: false,
+        showAssistantCopyButton: false,
+        assistantCopyStreaming: false,
+      },
+      restart("r2", 3),
+    ]);
+    expect(shape(rows)).toEqual(["restart:r1×1", "message:a1", "restart:r2×1"]);
+  });
+
+  it("leaves other system notifications as they are", () => {
+    const other = noticeRow("n1", 1, {
+      type: "notification",
+      source: { kind: "system" },
+      outcome: "updated",
+      summary: "Background task finished",
+    });
+    expect(shape(collapseRestartMarkers([other]))).toEqual(["work:n1"]);
   });
 });
