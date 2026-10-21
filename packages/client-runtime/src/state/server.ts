@@ -1132,6 +1132,26 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:unlinkProjectLabelRepository",
       tag: WS_METHODS.projectLabelsUnlinkRepository,
     }),
+    linkProjectLabelSource: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:linkProjectLabelSource",
+      tag: WS_METHODS.projectLabelsLinkSource,
+    }),
+    unlinkProjectLabelSource: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:unlinkProjectLabelSource",
+      tag: WS_METHODS.projectLabelsUnlinkSource,
+    }),
+    /** GitHub repositories under a project's linked owners; empty query lists recent pushes. */
+    projectLabelOwnerRepositories: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projectLabels:ownerRepositories",
+      tag: WS_METHODS.projectLabelsSearchOwnerRepositories,
+      staleTimeMs: 60_000,
+      idleTtlMs: 60_000,
+    }),
+    /** Clone a repository into a project; progress arrives on the project-clone stream. */
+    cloneProjectLabelRepository: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:cloneProjectLabelRepository",
+      tag: WS_METHODS.projectLabelsCloneRepository,
+    }),
     moveThreadProjectFolder: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:moveThreadProjectFolder",
       tag: WS_METHODS.projectLabelsMoveThread,
