@@ -22,7 +22,7 @@ import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { restartContinuationRun } from "./RestartContinuation.ts";
+import { isUnstartedRestartContinuation, restartContinuationRun } from "./RestartContinuation.ts";
 import { isBufferedProviderNotification } from "./NotificationMailbox.ts";
 import {
   endOrphanedNativeSubagent,
@@ -195,7 +195,16 @@ export const make = Effect.gen(function* () {
     ) {
       const now = yield* DateTime.now;
       const runs = [] as Array<OrchestrationV2ThreadProjection["runs"][number]>;
+      const revivedRuns = [] as Array<OrchestrationV2ThreadProjection["runs"][number]>;
       for (const run of nonterminalRuns(projection)) {
+        // An unstarted restart continuation never reached the provider, so
+        // cancelling it and chaining another continuation would only stack a
+        // "resumed" marker for a turn that never ran. It is left alone and
+        // restarted below instead, keeping the marker it already has.
+        if (isUnstartedRestartContinuation(run, projection.attempts, projection.providerTurns)) {
+          revivedRuns.push(run);
+          continue;
+        }
         if (run.status === "waiting") {
           const checkpointEffects = yield* outbox
             .listByCommandId(CommandId.make(`command:effect:checkpoint.capture:${run.id}`))
@@ -673,6 +682,40 @@ export const make = Effect.gen(function* () {
             ),
           );
         retiredEffects = result.cancelledEffectCount;
+      }
+      if (revivedRuns.length > 0) {
+        // Both branches above cancelled this thread's process-bound effects,
+        // including these runs' original turn-start effects, so each recovery
+        // enqueues a fresh start under its own command rather than reusing a
+        // cancelled row. Turn start is idempotent once the run advances, so a
+        // leftover start racing this one is a no-op.
+        const reviveCommandId = CommandId.make(
+          `command:restart-revive:${trigger}:${projection.thread.id}:${DateTime.formatIso(now)}`,
+        );
+        yield* eventSink
+          .writeWithEffects({
+            commandId: reviveCommandId,
+            events: [],
+            effects: revivedRuns.map(
+              (run) =>
+                ({
+                  id: `effect:${reviveCommandId}:provider-turn.start:${run.id}`,
+                  commandId: reviveCommandId,
+                  threadId: projection.thread.id,
+                  request: { type: "provider-turn.start", runId: run.id },
+                }) satisfies EffectOutbox.PendingOrchestrationEffectV2,
+            ),
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderRuntimeRecoveryError({
+                  operation: "reconcile",
+                  threadId: projection.thread.id,
+                  cause,
+                }),
+            ),
+          );
       }
       return {
         terminalizedRuns: runs.length,

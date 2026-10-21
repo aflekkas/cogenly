@@ -4,7 +4,9 @@ import {
   CommandId,
   latestProviderTurnForAttempt,
   MessageId,
+  type OrchestrationV2ProviderTurn,
   type OrchestrationV2Run,
+  type OrchestrationV2RunAttempt,
   type RunId,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -118,9 +120,68 @@ function hasOpenAwaitedWork(
 }
 
 /**
+ * Provider-turn statuses proving a run reached the provider: its turn went
+ * live and either is still running or ended. A `pending` turn never started,
+ * and `cancelled` also covers recovery cancelling a row that never went live,
+ * so neither proves it on its own.
+ */
+const LIVE_OR_ENDED_PROVIDER_TURN_STATUS: ReadonlySet<OrchestrationV2ProviderTurn["status"]> =
+  new Set(["running", "completed", "failed", "interrupted"]);
+
+/**
+ * Whether a run's provider turn went live: the run started (`startedAt` is
+ * set when the turn start commits), or one of its attempts has a provider
+ * turn that ran or ended. An unstarted restart continuation — dispatched by
+ * an earlier restart but cut again before its turn began — never went live,
+ * so continuing it once more would only stack another marker for a turn that
+ * was never actually resumed.
+ */
+export function runReachedProvider(
+  run: Pick<OrchestrationV2Run, "id" | "activeAttemptId" | "startedAt">,
+  attempts: ReadonlyArray<Pick<OrchestrationV2RunAttempt, "id" | "runId">>,
+  providerTurns: ReadonlyArray<Pick<OrchestrationV2ProviderTurn, "runAttemptId" | "status">>,
+): boolean {
+  if (run.startedAt !== null) return true;
+  const attemptIds = new Set(
+    attempts.filter((attempt) => attempt.runId === run.id).map((attempt) => attempt.id),
+  );
+  if (run.activeAttemptId !== null) attemptIds.add(run.activeAttemptId);
+  return providerTurns.some(
+    (turn) =>
+      turn.runAttemptId !== null &&
+      attemptIds.has(turn.runAttemptId) &&
+      LIVE_OR_ENDED_PROVIDER_TURN_STATUS.has(turn.status),
+  );
+}
+
+/**
+ * An unstarted restart continuation: dispatched by an earlier restart but cut
+ * again before its turn began. Recovery revives it instead of chaining
+ * another continuation onto it, so rapid restarts resume the turn once rather
+ * than stacking a "resumed" marker per restart.
+ */
+export function isUnstartedRestartContinuation(
+  run: Pick<
+    OrchestrationV2Run,
+    "id" | "status" | "activeAttemptId" | "startedAt" | "restartContinuationOfRunId"
+  >,
+  attempts: ReadonlyArray<Pick<OrchestrationV2RunAttempt, "id" | "runId">>,
+  providerTurns: ReadonlyArray<Pick<OrchestrationV2ProviderTurn, "runAttemptId" | "status">>,
+): boolean {
+  return (
+    run.status === "starting" &&
+    run.restartContinuationOfRunId !== undefined &&
+    !runReachedProvider(run, attempts, providerTurns)
+  );
+}
+
+/**
  * The run a restart continues: an unfinished root turn, or a settled one
  * waiting on awaited work that the restart cancels. A settled run needs a
- * live session, so stale records from an older crash never wake it. Other
+ * live session, so stale records from an older crash never wake it. A run
+ * that already has a continuation was resumed already and is never picked up
+ * again, and an unstarted continuation (no live turn) is revived by recovery
+ * instead of chained, so a turn that never ran stacks no markers. Other
  * leftover work is cleaned up and reported on the next user turn.
  */
 export function restartContinuationRun(
@@ -145,12 +206,18 @@ export function restartContinuationRun(
     undefined,
   );
   if (!run) return;
-  const preparedContinuation =
-    run.status === "starting" && run.restartContinuationOfRunId !== undefined;
   const settled = run.status === "completed" || run.status === "waiting";
-  if (run.status !== "running" && !preparedContinuation && !settled) return;
+  if (run.status !== "running" && run.status !== "starting" && !settled) return;
+  // The run was already resumed once: its continuation exists, so a later
+  // restart must not pick it up again. Delivery would decline it anyway (the
+  // continuation message exists), but skipping here avoids an effect that
+  // would gate delegated delivery while pending.
+  if (projection.runs.some((candidate) => candidate.restartContinuationOfRunId === run.id)) return;
   if (restartContinuationBlocked(projection, run, now, settled)) return;
-  const liveTurnRequired = !preparedContinuation && !settled;
+  // A starting run qualifies only with a genuinely live turn. An unstarted
+  // continuation is revived by recovery instead of chained, so it is skipped
+  // here: the live-turn check below excludes it.
+  const liveTurnRequired = !settled;
   if (projection.thread.providerInstanceId !== run.providerInstanceId) return;
   const providerThread = projection.providerThreads.find(
     (thread) => thread.id === run.providerThreadId,
@@ -177,7 +244,8 @@ export function restartContinuationRun(
     session === undefined ||
     session.providerInstanceId !== run.providerInstanceId ||
     session.driver !== providerThread.driver ||
-    (!preparedContinuation && (session.status === "stopped" || session.status === "error"))
+    session.status === "stopped" ||
+    session.status === "error"
   )
     return;
   if (settled) return hasOpenAwaitedWork(projection, providerThread) ? run : undefined;
@@ -226,6 +294,20 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       )
     )
       return;
+    // A source that never reached the provider is an unstarted continuation
+    // cut by a later restart, or a stale effect for one: chaining it would
+    // stack another "resumed" marker without resuming anything. Recovery
+    // revives the unstarted run itself instead.
+    if (
+      !isRestartNoteSource(source, projection.providerTurns) &&
+      !runReachedProvider(source, projection.attempts, projection.providerTurns)
+    ) {
+      yield* Effect.logInfo("orchestration-v2.restart-continuation.source-never-started", {
+        threadId: input.threadId,
+        sourceRunId: input.sourceRunId,
+      });
+      return;
+    }
     // A user submission after reconciliation takes precedence over an automatic
     // prompt. Queued runs never started and stay held behind this one.
     if (
