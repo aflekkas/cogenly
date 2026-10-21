@@ -38,6 +38,8 @@ export function ProjectRepositoryPicker(props: {
   readonly repositories: ReadonlyArray<Repository>;
   readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
   readonly disabled: boolean;
+  /** The trigger's text; "Add repository" unless the surface already says what is added. */
+  readonly triggerLabel?: string;
 }) {
   const { folder } = props;
   const environmentId: EnvironmentId = folder.environmentId;
@@ -100,7 +102,7 @@ export function ProjectRepositoryPicker(props: {
         render={<Button type="button" size="xs" variant="ghost-muted" />}
       >
         <PlusIcon />
-        Add repository
+        {props.triggerLabel ?? "Add repository"}
       </ComboboxTrigger>
       <ComboboxPopup align="end" className="w-72">
         <ComboboxSearchInput

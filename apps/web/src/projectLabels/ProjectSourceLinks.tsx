@@ -36,39 +36,96 @@ import {
 import { reportProjectFolderFailure } from "./useMoveThreadToFolder";
 import { useEnvironmentProjectLabels } from "./useProjectLabels";
 
-/**
- * A project's linked code sources as removable chips, and a field to add a
- * GitHub owner (org or user) or one owner/repo. A linked owner is what the
- * repository picker searches on GitHub under this project.
- */
-export function ProjectSourceLinks(props: {
+/** Chips for a project's linked sources, each removable; nothing when none are linked. */
+export function ProjectSourceLinkChips(props: {
   readonly environmentId: EnvironmentId;
   readonly label: ProjectLabelWithRepositories;
-  readonly autoFocus?: boolean;
+}) {
+  const { environmentId, label } = props;
+  const canUnlink = useAtomValue(
+    serverEnvironment.unlinkProjectLabelSource.permissionAtom(environmentId),
+  );
+  const unlinkSource = useAtomCommand(serverEnvironment.unlinkProjectLabelSource, {
+    label: "unlink project source",
+    reportFailure: false,
+  });
+  // Chips on their way out fade while the server drops them.
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(new Set());
+  const links = sortProjectSourceLinks(label.sourceLinks);
+
+  const remove = async (link: ProjectSourceLink) => {
+    const key = projectSourceLinkKey(link);
+    setRemoving((current) => new Set([...current, key]));
+    const result = await unlinkSource({ environmentId, input: { id: label.id, link } });
+    setRemoving((current) => {
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      reportProjectFolderFailure(`Could not unlink ${projectSourceLinkLabel(link)}`, result);
+    }
+  };
+
+  if (links.length === 0) return null;
+  return (
+    <ul aria-label="Linked sources" className="flex flex-wrap gap-1.5 pb-0.5">
+      {links.map((link) => {
+        const key = projectSourceLinkKey(link);
+        const text = projectSourceLinkLabel(link);
+        return (
+          <li
+            key={key}
+            className={cn(
+              "list-none transition-opacity duration-(--motion-duration-fast) ease-standard reveal-motion",
+              removing.has(key) && "pointer-events-none opacity-0",
+            )}
+          >
+            <Badge variant="outline" size="control">
+              <GitHubIcon aria-hidden />
+              <span className="max-w-48 truncate">{text}</span>
+              <button
+                type="button"
+                aria-label={`Unlink ${text}`}
+                disabled={!canUnlink}
+                className="-me-1 flex size-4 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none transition-colors duration-(--motion-duration-fast) ease-standard hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => void remove(link)}
+              >
+                <XIcon className="size-3" />
+              </button>
+            </Badge>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/**
+ * The field that links a GitHub owner (org or user) or one owner/repo, with
+ * a one-line hint that reads back what the draft would link. A linked owner
+ * is what the repository picker searches on GitHub under this project.
+ */
+export function ProjectSourceLinkField(props: {
+  readonly environmentId: EnvironmentId;
+  readonly label: ProjectLabelWithRepositories;
+  readonly autoFocus?: boolean | undefined;
+  /** After a link lands, for a caller that shows the field on demand. */
+  readonly onLinked?: () => void;
 }) {
   const { environmentId, label } = props;
   const canLink = useAtomValue(
     serverEnvironment.linkProjectLabelSource.permissionAtom(environmentId),
   );
-  const canUnlink = useAtomValue(
-    serverEnvironment.unlinkProjectLabelSource.permissionAtom(environmentId),
-  );
   const linkSource = useAtomCommand(serverEnvironment.linkProjectLabelSource, {
     label: "link project source",
     reportFailure: false,
   });
-  const unlinkSource = useAtomCommand(serverEnvironment.unlinkProjectLabelSource, {
-    label: "unlink project source",
-    reportFailure: false,
-  });
   const [draft, setDraft] = useState("");
   const [linking, setLinking] = useState(false);
-  // Chips on their way out fade while the server drops them.
-  const [removing, setRemoving] = useState<ReadonlySet<string>>(new Set());
 
   const parsed = parseProjectSourceLink(draft);
   const duplicate = parsed !== null && hasProjectSourceLink(label.sourceLinks, parsed);
-  const links = sortProjectSourceLinks(label.sourceLinks);
   const hint =
     draft.trim().length === 0
       ? "An org or user lets the repository picker search its GitHub repositories."
@@ -92,57 +149,11 @@ export function ProjectSourceLinks(props: {
       return;
     }
     setDraft("");
-  };
-
-  const remove = async (link: ProjectSourceLink) => {
-    const key = projectSourceLinkKey(link);
-    setRemoving((current) => new Set([...current, key]));
-    const result = await unlinkSource({ environmentId, input: { id: label.id, link } });
-    setRemoving((current) => {
-      const next = new Set(current);
-      next.delete(key);
-      return next;
-    });
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      reportProjectFolderFailure(`Could not unlink ${projectSourceLinkLabel(link)}`, result);
-    }
+    props.onLinked?.();
   };
 
   return (
     <div className="space-y-2">
-      <AnimatedHeight>
-        {links.length > 0 ? (
-          <ul aria-label="Linked sources" className="flex flex-wrap gap-1.5 pb-0.5">
-            {links.map((link) => {
-              const key = projectSourceLinkKey(link);
-              const text = projectSourceLinkLabel(link);
-              return (
-                <li
-                  key={key}
-                  className={cn(
-                    "list-none transition-opacity duration-(--motion-duration-fast) ease-standard reveal-motion",
-                    removing.has(key) && "pointer-events-none opacity-0",
-                  )}
-                >
-                  <Badge variant="outline" size="control">
-                    <GitHubIcon aria-hidden />
-                    <span className="max-w-48 truncate">{text}</span>
-                    <button
-                      type="button"
-                      aria-label={`Unlink ${text}`}
-                      disabled={!canUnlink}
-                      className="-me-1 flex size-4 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none transition-colors duration-(--motion-duration-fast) ease-standard hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={() => void remove(link)}
-                    >
-                      <XIcon className="size-3" />
-                    </button>
-                  </Badge>
-                </li>
-              );
-            })}
-          </ul>
-        ) : null}
-      </AnimatedHeight>
       <form
         className="flex items-center gap-2"
         onSubmit={(event) => {
@@ -175,6 +186,26 @@ export function ProjectSourceLinks(props: {
       <p className="text-xs text-muted-foreground" aria-live="polite">
         {canLink ? hint : "You don't have permission to change projects here."}
       </p>
+    </div>
+  );
+}
+
+/** A project's linked sources as chips above the field that adds one. */
+export function ProjectSourceLinks(props: {
+  readonly environmentId: EnvironmentId;
+  readonly label: ProjectLabelWithRepositories;
+  readonly autoFocus?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <AnimatedHeight>
+        <ProjectSourceLinkChips environmentId={props.environmentId} label={props.label} />
+      </AnimatedHeight>
+      <ProjectSourceLinkField
+        environmentId={props.environmentId}
+        label={props.label}
+        autoFocus={props.autoFocus}
+      />
     </div>
   );
 }

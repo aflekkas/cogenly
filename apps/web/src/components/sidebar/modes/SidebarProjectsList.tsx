@@ -1,7 +1,12 @@
+import { useNavigate } from "@tanstack/react-router";
 import { FolderPlusIcon } from "lucide-react";
+import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { cn } from "~/lib/utils";
-import { projectFolderSummary } from "../../../projectLabels/projectContents.logic";
+import { projectPanelSummary } from "../../projects/projectPanel.logic";
+import { useProjectFolderMenu } from "../../projects/useProjectFolderMenu";
+import { ProjectLabelEditorDialog } from "../../../projectLabels/ProjectLabelEditorDialog";
+import { ProjectSourceLinksDialog } from "../../../projectLabels/ProjectSourceLinks";
 import type {
   EnvironmentProjectLabel,
   ProjectLabelKey,
@@ -9,13 +14,85 @@ import type {
 import { ProjectFolderIcon } from "../../../projectLabels/ProjectFolderMark";
 import { useProjectLabelDirectory } from "../../../projectLabels/useProjectLabels";
 import { useConnectedEnvironmentIds } from "../../../state/environments";
+import { OverlayPresence } from "../../ui/overlay-presence";
 import { SidebarListEmptyState } from "../SidebarListEmptyState";
 import { SIDEBAR_MODE_ICONS } from "./SidebarModeSwitcher";
 
 /**
+ * One project in the list, at a Chats row's density: the folder and name,
+ * then a muted line of what it holds. Right-click (or the context-menu key)
+ * opens its menu; the row reads as selected while that menu is up.
+ */
+function ProjectRow(props: {
+  readonly entry: EnvironmentProjectLabel;
+  readonly active: boolean;
+  readonly environmentLabel: string | null;
+  readonly onOpen: () => void;
+  readonly onRename: () => void;
+  readonly onLinkSources: () => void;
+  readonly onDeleted: () => void;
+}) {
+  const { entry } = props;
+  const { label } = entry;
+  const menu = useProjectFolderMenu(entry, props);
+  const summary = projectPanelSummary({
+    repositories: label.repositoryIds.length,
+    chats: label.threadCount,
+    work: 0,
+    files: 0,
+  });
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      event.preventDefault();
+      menu.openMenuAtElement(event.currentTarget);
+    }
+  };
+  return (
+    <li className="list-none">
+      <button
+        type="button"
+        aria-current={props.active ? "page" : undefined}
+        aria-label={[label.name, summary ?? "Empty"].join(", ")}
+        onClick={props.onOpen}
+        onKeyDown={onKeyDown}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          void menu.openMenu({ x: event.clientX, y: event.clientY });
+        }}
+        className={cn(
+          "group/sidebar-project flex h-11 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg px-2.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          props.active || menu.menuOpen ? "state-selected" : "state-hover",
+          menu.menuOpen && "focus-visible:ring-0",
+        )}
+      >
+        <span className="flex min-w-0 flex-1 flex-col justify-center">
+          <span className="flex min-w-0 items-center gap-2 text-sm">
+            <ProjectFolderIcon color={label.color} className="size-4" />
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate",
+                props.active ? "text-foreground" : "text-foreground/80",
+              )}
+            >
+              {label.name}
+            </span>
+          </span>
+          <span className="flex h-4 min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground group-[.state-selected]/sidebar-project:text-secondary-label">
+            <span className="min-w-0 flex-1 truncate tabular-nums">{summary ?? "Empty"}</span>
+            {props.environmentLabel ? (
+              <span className="max-w-1/3 shrink-0 truncate">{props.environmentLabel}</span>
+            ) : null}
+          </span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+/**
  * The Projects mode list: every project folder across connected machines,
- * with how many repositories and threads it holds. A folder opens its view
- * in the main area.
+ * with what each holds. A folder opens its chat hero in the main area and
+ * its detail in the right panel.
  */
 export function SidebarProjectsList(props: {
   activeProjectKey: ProjectLabelKey | null;
@@ -23,7 +100,13 @@ export function SidebarProjectsList(props: {
   onOpenProject: (entry: EnvironmentProjectLabel) => void;
   onCreateProject: () => void;
 }) {
+  const navigate = useNavigate();
   const directory = useProjectLabelDirectory(useConnectedEnvironmentIds());
+  const [renaming, setRenaming] = useState<EnvironmentProjectLabel | null>(null);
+  const [linking, setLinking] = useState<EnvironmentProjectLabel | null>(null);
+  const leaveIfActive = (entry: EnvironmentProjectLabel) => {
+    if (entry.key === props.activeProjectKey) void navigate({ to: "/project" });
+  };
   if (directory.labels.length === 0) {
     return (
       <SidebarListEmptyState icon={SIDEBAR_MODE_ICONS.projects} label="No projects yet">
@@ -39,42 +122,40 @@ export function SidebarProjectsList(props: {
     );
   }
   return (
-    <ul aria-label="Projects" className="flex flex-col gap-1">
-      {directory.labels.map((entry) => {
-        const repositoryCount = entry.label.repositoryIds.length;
-        const threadCount = entry.label.threadCount;
-        const active = entry.key === props.activeProjectKey;
-        const environment = props.environmentLabel(entry);
-        return (
-          <li key={entry.key} className="list-none">
-            <button
-              type="button"
-              aria-current={active ? "page" : undefined}
-              onClick={() => props.onOpenProject(entry)}
-              className={cn(
-                "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                active ? "state-selected" : "state-hover",
-              )}
-            >
-              <ProjectFolderIcon color={entry.label.color} className="size-4" />
-              <span className="min-w-0 flex-1 truncate">{entry.label.name}</span>
-              {environment ? (
-                <span className="max-w-1/3 shrink-0 truncate text-xs text-secondary-label">
-                  {environment}
-                </span>
-              ) : null}
-              {repositoryCount + threadCount > 0 ? (
-                <span
-                  className="shrink-0 text-xs tabular-nums text-secondary-label"
-                  aria-label={projectFolderSummary(repositoryCount, threadCount) ?? undefined}
-                >
-                  {repositoryCount > 0 ? `${repositoryCount} · ${threadCount}` : threadCount}
-                </span>
-              ) : null}
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      <ul aria-label="Projects" className="flex flex-col gap-1">
+        {directory.labels.map((entry) => (
+          <ProjectRow
+            key={entry.key}
+            entry={entry}
+            active={entry.key === props.activeProjectKey}
+            environmentLabel={props.environmentLabel(entry)}
+            onOpen={() => props.onOpenProject(entry)}
+            onRename={() => setRenaming(entry)}
+            onLinkSources={() => setLinking(entry)}
+            onDeleted={() => leaveIfActive(entry)}
+          />
+        ))}
+      </ul>
+      <OverlayPresence when={renaming}>
+        {(entry) => (
+          <ProjectLabelEditorDialog
+            environmentId={entry.environmentId}
+            label={entry.label}
+            onClose={() => setRenaming(null)}
+            onDeleted={() => leaveIfActive(entry)}
+          />
+        )}
+      </OverlayPresence>
+      <OverlayPresence when={linking}>
+        {(entry) => (
+          <ProjectSourceLinksDialog
+            environmentId={entry.environmentId}
+            label={entry.label}
+            onClose={() => setLinking(null)}
+          />
+        )}
+      </OverlayPresence>
+    </>
   );
 }

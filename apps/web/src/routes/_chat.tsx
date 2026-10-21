@@ -5,6 +5,7 @@ import { Activity, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
+import { ProjectPanelHost } from "../components/projects/ProjectPanelHost";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
 import {
@@ -321,6 +322,7 @@ function ChatRouteLayout() {
           <Outlet />
         </div>
       ) : null}
+      <ProjectPanelHost />
     </>
   );
 }
