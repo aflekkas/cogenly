@@ -76,7 +76,14 @@ export const layerEventInfrastructure = Layer.mergeAll(
 );
 
 const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
-  Layer.provide(ProjectStore.layer),
+  Layer.provide(
+    Layer.mergeAll(
+      ProjectStore.layer,
+      ProjectLabelFolders.layer,
+      // Nested: a merge would leave the files layer's folder requirement dangling.
+      ProjectFiles.layer.pipe(Layer.provide(ProjectLabelFolders.layer)),
+    ),
+  ),
 );
 
 const layerEventStoreProvided = EventStore.layerFromOrchestrationEventStore.pipe(

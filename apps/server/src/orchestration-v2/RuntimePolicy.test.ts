@@ -3,6 +3,7 @@ import {
   type ModelSelection,
   type OrchestrationV2AppThread,
   ProjectId,
+  ProjectLabelId,
   ProviderInstanceId,
   RuntimeMode,
   type ServerProvider,
@@ -18,6 +19,7 @@ import * as Stream from "effect/Stream";
 
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 
@@ -206,6 +208,56 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
       assert.isTrue(yield* conversationFor("builder"));
       assert.isUndefined(yield* conversationFor("work"));
       assert.isUndefined(yield* conversationFor(undefined));
+    }),
+  );
+
+  it.effect("omits the project manifest without the files service", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const resolved = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: null, surface: "chat" }),
+        modelSelection,
+      });
+      assert.isUndefined(resolved.projectManifest);
+    }),
+  );
+});
+
+const filedLabelId = ProjectLabelId.make("label:manifest");
+
+const layerWithFiles = layerTest.pipe(
+  Layer.provideMerge(
+    Layer.mock(ProjectFiles.ProjectFiles)({
+      folderForThread: (threadId) =>
+        Effect.succeed(
+          ThreadId.make("thread:runtime-policy") === threadId
+            ? {
+                labelId: filedLabelId,
+                name: "Manifest",
+                dir: "/projects/Manifest",
+              }
+            : null,
+        ),
+      manifestEntries: () =>
+        Effect.succeed({ entries: ["Resources/brief.md", "notes.md"], total: 2 }),
+    }),
+  ),
+);
+
+it.layer(layerWithFiles)("RuntimePolicyV2 project manifest", (it) => {
+  it.effect("resolves a manifest for threads filed in a project", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const resolved = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: null, surface: "work" }),
+        modelSelection,
+      });
+      assert.include(resolved.projectManifest ?? "", "<project_manifest>");
+      assert.include(resolved.projectManifest ?? "", '"Manifest" at /projects/Manifest');
+      assert.include(resolved.projectManifest ?? "", "- Resources/brief.md");
+      assert.include(resolved.projectManifest ?? "", "project_recall");
     }),
   );
 });

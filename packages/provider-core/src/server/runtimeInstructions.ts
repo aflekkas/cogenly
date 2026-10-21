@@ -34,6 +34,29 @@ function toSingleLine(value: string): string {
   return value.replaceAll(/\s+/g, " ").trim();
 }
 
+/** Resource paths listed in the project manifest before `+N more`. */
+export const PROJECT_MANIFEST_MAX_RESOURCES = 30;
+
+/**
+ * Compact manifest of the thread's project folder, appended to the turn
+ * context for chats and Work threads filed in a project. Paths are
+ * project-relative; the directory is the edge-resolved absolute path.
+ */
+export function buildProjectManifest(input: {
+  readonly name: string;
+  readonly directory: string;
+  readonly resources: ReadonlyArray<string>;
+  readonly total: number;
+}): string {
+  const shown = input.resources.slice(0, PROJECT_MANIFEST_MAX_RESOURCES);
+  const files =
+    shown.length === 0
+      ? "(no project files yet)"
+      : shown.map((resource) => `- ${toSingleLine(resource)}`).join("\n");
+  const more = input.total - shown.length;
+  return `<project_manifest>The thread's project folder is "${toSingleLine(input.name)}" at ${toSingleLine(input.directory)}. Project files:\n${files}${more > 0 ? `\n+${more} more` : ""}\nUse project_recall to search these files and project_file_read to read one.</project_manifest>`;
+}
+
 /**
  * System prompt for chat-surface turns. The thread is a conversation, not a
  * coding session: the adapter pairs this with conversation-only tools (no

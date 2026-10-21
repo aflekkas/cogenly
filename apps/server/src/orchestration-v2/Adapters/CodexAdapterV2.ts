@@ -741,12 +741,22 @@ export function buildCodexTurnStartParams(input: {
               value: CONVERSATION_MODE_INSTRUCTIONS,
             },
           };
+    const projectContext =
+      input.runtimePolicy.projectManifest === undefined
+        ? undefined
+        : {
+            cogenly_project: {
+              kind: "application" as const,
+              value: input.runtimePolicy.projectManifest,
+            },
+          };
     const additionalContext =
       t3Context === undefined &&
       Object.keys(appContext).length === 0 &&
-      conversationContext === undefined
+      conversationContext === undefined &&
+      projectContext === undefined
         ? undefined
-        : { ...t3Context, ...appContext, ...conversationContext };
+        : { ...t3Context, ...appContext, ...conversationContext, ...projectContext };
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
       input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
         ? undefined

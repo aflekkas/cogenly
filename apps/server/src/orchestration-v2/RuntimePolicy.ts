@@ -12,6 +12,8 @@ import * as Schema from "effect/Schema";
 
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import { buildProjectManifest } from "@t3tools/provider-core/server/runtimeInstructions";
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 
 /**
@@ -87,6 +89,34 @@ export const layerFromProjectStore: Layer.Layer<
   RuntimePolicyV2,
   Effect.gen(function* () {
     const projects = yield* ProjectStore.ProjectStoreV2;
+    // Optional so layers without the project-files service (unit tests over a
+    // memory database) still resolve; production always provides it.
+    const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
+    // The manifest is best-effort turn context from the derived index: any
+    // failure resolves to no manifest rather than failing the turn.
+    const manifestFor = (
+      thread: OrchestrationV2AppThread,
+    ): Effect.Effect<string | undefined, never> =>
+      Option.isNone(files)
+        ? Effect.succeed(undefined)
+        : Effect.gen(function* () {
+            const folder = yield* files.value.folderForThread(thread.id);
+            if (folder === null) return undefined;
+            const { entries, total } = yield* files.value.manifestEntries(folder.labelId);
+            return buildProjectManifest({
+              name: folder.name,
+              directory: folder.dir,
+              resources: entries,
+              total,
+            });
+          }).pipe(
+            Effect.catch((cause) =>
+              Effect.logDebug("Project manifest lookup failed; resolving without it.", {
+                threadId: thread.id,
+                cause,
+              }).pipe(Effect.as(undefined)),
+            ),
+          );
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         const cwd =
@@ -114,11 +144,13 @@ export const layerFromProjectStore: Layer.Layer<
               }),
             ),
           ));
+        const projectManifest = yield* manifestFor(input.thread);
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: "full-access",
           interactionMode: input.thread.interactionMode,
           cwd,
           ...conversationModeFor(input.thread),
+          ...(projectManifest === undefined ? {} : { projectManifest }),
         });
       }),
     });

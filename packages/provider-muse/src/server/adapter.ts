@@ -2088,6 +2088,9 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                       (turnInput.runtimePolicy.conversationMode === true
                         ? `\n${CONVERSATION_MODE_INSTRUCTIONS}`
                         : "") +
+                      (turnInput.runtimePolicy.projectManifest === undefined
+                        ? ""
+                        : `\n${turnInput.runtimePolicy.projectManifest}`) +
                       (yield* mcpSessions
                         .read(turnInput.threadId)
                         .pipe(

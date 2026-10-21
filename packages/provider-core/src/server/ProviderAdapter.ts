@@ -58,6 +58,12 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
    * Absent or false keeps the full work toolset.
    */
   conversationMode: Schema.optional(Schema.Boolean),
+  /**
+   * Compact `<project_manifest>` block for threads filed in a project folder.
+   * Absent when the thread has no project. Adapters append it to the turn
+   * context next to the other runtime instructions.
+   */
+  projectManifest: Schema.optional(Schema.String),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 

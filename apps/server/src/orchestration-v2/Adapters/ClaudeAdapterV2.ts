@@ -1122,6 +1122,8 @@ export function makeClaudeQueryOptions(input: {
   readonly disallowedTools?: ReadonlyArray<string>;
   /** Chat-surface turns: appends the conversation-mode instructions. */
   readonly conversationMode?: boolean;
+  /** Threads filed in a project: appends the project manifest block. */
+  readonly projectManifest?: string;
   readonly permissionMode?: PermissionMode;
   readonly canUseTool?: CanUseTool;
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
@@ -1206,6 +1208,7 @@ export function makeClaudeQueryOptions(input: {
       append:
         buildRuntimeInstructions({ harness: "Claude Code" }) +
         (input.conversationMode === true ? `\n${CONVERSATION_MODE_INSTRUCTIONS}` : "") +
+        (input.projectManifest === undefined ? "" : `\n${input.projectManifest}`) +
         (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS) +
         // Conversation turns have no shell at all, so they never route
         // commands through the terminal tools.
@@ -8501,6 +8504,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             environment: adapterOptions.environment,
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(conversationMode ? { conversationMode } : {}),
+            ...(turnInput.runtimePolicy.projectManifest === undefined
+              ? {}
+              : { projectManifest: turnInput.runtimePolicy.projectManifest }),
             ...(mcpOverrides.allowedTools === undefined
               ? {}
               : { allowedTools: mcpOverrides.allowedTools }),

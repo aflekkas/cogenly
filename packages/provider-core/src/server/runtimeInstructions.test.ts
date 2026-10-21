@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   CONVERSATION_MODE_INSTRUCTIONS,
   HOW_COGENLY_WORKS_INSTRUCTIONS,
+  buildProjectManifest,
   buildRuntimeInstructions,
 } from "./runtimeInstructions.ts";
 
@@ -64,6 +65,37 @@ describe("HOW_COGENLY_WORKS_INSTRUCTIONS", () => {
     for (const harness of ["Claude Code", "Codex", "Muse Code"]) {
       expect(buildRuntimeInstructions({ harness })).toContain("<how_cogenly_works>");
     }
+  });
+});
+
+describe("buildProjectManifest", () => {
+  it("names the project, its directory, and up to thirty resources", () => {
+    const resources = Array.from({ length: 35 }, (_, i) => `Resources/file-${i}.md`);
+    const manifest = buildProjectManifest({
+      name: "Spawn Partners",
+      directory: "/home/user/projects/Spawn Partners",
+      resources,
+      total: 35,
+    });
+    expect(manifest).toContain("<project_manifest>");
+    expect(manifest).toContain('"Spawn Partners" at /home/user/projects/Spawn Partners');
+    expect(manifest).toContain("- Resources/file-0.md");
+    expect(manifest).toContain("- Resources/file-29.md");
+    expect(manifest).not.toContain("file-30.md");
+    expect(manifest).toContain("+5 more");
+    expect(manifest).toContain("project_recall");
+    expect(manifest).toContain("project_file_read");
+  });
+
+  it("says when the project has no files yet", () => {
+    const manifest = buildProjectManifest({
+      name: "Empty",
+      directory: "/projects/Empty",
+      resources: [],
+      total: 0,
+    });
+    expect(manifest).toContain("(no project files yet)");
+    expect(manifest).not.toContain("+");
   });
 });
 
