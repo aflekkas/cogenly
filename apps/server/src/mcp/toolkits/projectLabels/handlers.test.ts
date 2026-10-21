@@ -1,5 +1,12 @@
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectLabelError,
+  ProjectLabelId,
+  ThreadId,
+  type OrchestrationV2AppThread,
+  type OrchestrationV2Run,
+} from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -166,5 +173,145 @@ it.effect("lets a chat-surface thread organize project folders", () =>
       .handle("t3_project_label_create", { name: "Spawn Partners" })
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
     expect(results.at(-1)?.result).toMatchObject({ label: { name: "Spawn Partners" } });
+  }),
+);
+
+const fileSetup = (input: {
+  readonly turned: boolean;
+  readonly access?: "read-only" | "full-access";
+}) =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread:file-source");
+    const labelId = ProjectLabelId.make("label:file-target");
+    const moved: Array<ThreadId> = [];
+    const dispatched: Array<string> = [];
+    const dependencies = Layer.mergeAll(
+      Layer.succeed(Invocation.McpInvocationContext, {
+        environmentId: EnvironmentId.make("environment"),
+        capabilities: new Set(["orchestration" as const]),
+        requestNamespace: "test",
+        issuedAt: 0,
+        thread: undefined,
+        client: { sessionId: "session", label: "Agent", access: input.access ?? "full-access" },
+      }),
+      Layer.mock(Threads.ThreadManagementService)({
+        getThreadShell: (id) => Effect.succeed(liveThreadShell(id)),
+        getThreadRecords: (id) =>
+          Effect.succeed({
+            thread: {
+              id,
+              deletedAt: null,
+              lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: id },
+            } as unknown as OrchestrationV2AppThread,
+            runs: input.turned ? [{ status: "completed" } as OrchestrationV2Run] : [],
+          }) as never,
+        dispatch: (command) =>
+          Effect.sync(() => {
+            dispatched.push(command.type);
+            return { sequence: 1, storedEvents: [] };
+          }) as never,
+      }),
+      Layer.mock(Labels.ProjectLabelService)({
+        read: (id) => Effect.succeed({ label: { ...labelShape, id } }),
+        // Mirrors the server gate: a chat with turns cannot be re-parented,
+        // but its turnless fork can.
+        moveThread: (move) =>
+          input.turned && move.threadId === threadId
+            ? Effect.fail(
+                new ProjectLabelError({ operation: "moveThread", reason: "fork_required" }),
+              )
+            : Effect.sync(() => {
+                moved.push(move.threadId);
+                return { threadId: move.threadId, projectFolderId: move.folderId };
+              }),
+        setThreadLabels: (labels) =>
+          input.turned && labels.threadId === threadId
+            ? Effect.fail(
+                new ProjectLabelError({ operation: "moveThread", reason: "fork_required" }),
+              )
+            : Effect.succeed({ labels: [] }),
+      }),
+      cloneDependencies,
+    );
+    const toolkit = yield* ProjectLabelsToolkit.pipe(
+      Effect.provide(Access.HandlersLayer.layer(Handlers.layer).pipe(Layer.provide(dependencies))),
+    );
+    return { toolkit, dependencies, threadId, labelId, moved, dispatched };
+  });
+
+it.effect("files a turnless chat or Work thread into a project in place", () =>
+  Effect.gen(function* () {
+    const { toolkit, dependencies, threadId, labelId, moved, dispatched } = yield* fileSetup({
+      turned: false,
+    });
+    const results = yield* toolkit
+      .handle("t3_project_label_file_thread", { threadId, labelId })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+    expect(results.at(-1)?.result).toMatchObject({
+      threadId,
+      sourceThreadId: threadId,
+      projectFolderId: labelId,
+      forked: false,
+    });
+    expect(moved).toEqual([threadId]);
+    expect(dispatched).toEqual([]);
+  }),
+);
+
+it.effect("forks a chat with turns into the project and leaves the original in place", () =>
+  Effect.gen(function* () {
+    const { toolkit, dependencies, threadId, labelId, moved, dispatched } = yield* fileSetup({
+      turned: true,
+    });
+    const results = yield* toolkit
+      .handle("t3_project_label_file_thread", { threadId, labelId })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+    const result = results.at(-1)?.result as { threadId: ThreadId; message: string };
+    expect(result).toMatchObject({
+      sourceThreadId: threadId,
+      projectFolderId: labelId,
+      forked: true,
+    });
+    expect(result.threadId).not.toBe(threadId);
+    expect(result.message).toContain("original chat was left in place");
+    expect(dispatched).toEqual(["thread.fork"]);
+    expect(moved).toEqual([result.threadId]);
+  }),
+);
+
+it.effect("keeps read-only callers from filing threads into a project", () =>
+  Effect.gen(function* () {
+    const { toolkit, dependencies, threadId, labelId, moved, dispatched } = yield* fileSetup({
+      turned: true,
+      access: "read-only",
+    });
+    const results = yield* toolkit
+      .handle("t3_project_label_file_thread", { threadId, labelId })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+    expect(results.at(-1)?.result).toMatchObject({ code: "capability_denied" });
+    expect(moved).toEqual([]);
+    expect(dispatched).toEqual([]);
+  }),
+);
+
+it.effect.each([
+  { tool: "t3_thread_move_project_folder" as const },
+  { tool: "t3_thread_set_project_labels" as const },
+])("$tool refuses to re-parent a chat with turns and points at the fork", ({ tool }) =>
+  Effect.gen(function* () {
+    const { toolkit, dependencies, threadId, labelId, moved, dispatched } = yield* fileSetup({
+      turned: true,
+    });
+    const results = yield* (
+      tool === "t3_thread_move_project_folder"
+        ? toolkit.handle(tool, { threadId, folderId: labelId })
+        : toolkit.handle(tool, { threadId, labelIds: [labelId] })
+    ).pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+    expect(results.at(-1)?.result).toMatchObject({
+      code: "invalid_request",
+      message: expect.stringContaining("t3_project_label_file_thread"),
+    });
+    expect(moved).toEqual([]);
+    expect(dispatched).toEqual([]);
   }),
 );

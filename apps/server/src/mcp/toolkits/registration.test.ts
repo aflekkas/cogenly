@@ -438,6 +438,7 @@ const smokeCases = [
       "t3_project_label_link_repository",
       "t3_project_label_unlink_repository",
       "t3_project_label_clone_repository",
+      "t3_project_label_file_thread",
       "t3_thread_move_project_folder",
       "t3_thread_set_project_labels",
     ],

@@ -57,6 +57,10 @@ describe("resolveT3McpToolPresentation", () => {
       displayName: "File a thread into a project",
       logo: "t3-code",
     });
+    expect(resolveT3McpToolPresentation("mcp__cogenly__t3_project_label_file_thread")).toEqual({
+      displayName: "File a thread into a project",
+      logo: "t3-code",
+    });
     expect(resolveT3McpToolPresentation("t3-code.start_agent_builder")).toEqual({
       displayName: "Start an agent builder",
       logo: "t3-code",

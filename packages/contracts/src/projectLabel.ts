@@ -197,6 +197,19 @@ export const ForkThreadToProjectInput = Schema.Struct({
 export type ForkThreadToProjectInput = typeof ForkThreadToProjectInput.Type;
 export const ForkThreadToProjectResult = Schema.Struct({ threadId: ThreadId });
 export type ForkThreadToProjectResult = typeof ForkThreadToProjectResult.Type;
+/**
+ * Filing a thread into a project from MCP: a chat with turns forks (threadId
+ * is the new chat, sourceThreadId stays where it was); turnless chats and Work
+ * threads file in place (threadId === sourceThreadId).
+ */
+export const FileThreadIntoProjectResult = Schema.Struct({
+  threadId: ThreadId,
+  sourceThreadId: ThreadId,
+  projectFolderId: ProjectLabelId,
+  forked: Schema.Boolean,
+  message: Schema.String,
+});
+export type FileThreadIntoProjectResult = typeof FileThreadIntoProjectResult.Type;
 /** How the effective folder was selected; does not grant access. */
 export const ProjectFolderSource = Schema.NullOr(Schema.Literals(["explicit", "repository"]));
 export const ThreadProjectFolderResult = Schema.Struct({

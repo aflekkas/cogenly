@@ -407,6 +407,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       "mcp__cogenly__t3_project_label_link_repository",
       "mcp__cogenly__t3_project_label_unlink_repository",
       "mcp__cogenly__t3_thread_move_project_folder",
+      "mcp__cogenly__t3_project_label_file_thread",
       "mcp__cogenly__list_agents",
       "mcp__cogenly__start_agent_builder",
     ]);

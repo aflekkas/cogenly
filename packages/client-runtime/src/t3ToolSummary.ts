@@ -360,6 +360,14 @@ export function summarizeT3ToolCalls(
     case "project-label-clone":
       label = phrase("Started", "start", quantity(selected.length, "project clone"));
       break;
+    case "project-label-file-thread":
+      // Count the source threads: a chat with turns returns its fork's id.
+      label = phrase(
+        "Filed",
+        "file",
+        `${quantity(countEntities(selected.map((call) => id(call.input?.threadId))), "thread")} into a project`,
+      );
+      break;
     case "agent-list":
       label = phrase("Listed", "list", `agents ${times}`);
       break;

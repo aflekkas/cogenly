@@ -60,6 +60,20 @@ describe("summarizeT3ToolCalls for project folders and agents", () => {
         },
       ]).label,
     ).toBe("Started 1 agent builder");
+    expect(
+      summarizeT3ToolCalls("project-label-file-thread", [
+        {
+          input: { threadId: "thread:chat", labelId: "label:one" },
+          output: { threadId: "thread:fork", sourceThreadId: "thread:chat", forked: true },
+          outcome: "completed",
+        },
+        {
+          input: { threadId: "thread:chat", labelId: "label:one" },
+          output: { threadId: "thread:fork-2", sourceThreadId: "thread:chat", forked: true },
+          outcome: "completed",
+        },
+      ]).label,
+    ).toBe("Filed 1 thread into a project");
   });
 
   it("summarizes project file calls", () => {

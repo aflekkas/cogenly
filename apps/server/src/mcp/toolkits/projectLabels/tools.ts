@@ -1,4 +1,6 @@
 import {
+  FileThreadIntoProjectResult,
+  ForkThreadToProjectInput,
   OrchestratorMcpFailure,
   ProjectLabelCloneRepositoryInput,
   ProjectCloneStartResult,
@@ -55,19 +57,27 @@ export const ProjectLabelsToolkit = Toolkit.make(
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
+  Tool.make("t3_project_label_file_thread", {
+    ...shared,
+    dependencies: [...shared.dependencies, Crypto.Crypto],
+    parameters: ForkThreadToProjectInput,
+    success: FileThreadIntoProjectResult,
+    description:
+      "File a thread into a project. A chat with turns is forked: the returned threadId is the new project chat carrying the history, and the original chat is left in place. Turnless chats and Work threads are filed directly. Prefer this over t3_thread_move_project_folder for chats.",
+  }).annotate(Tool.Destructive, false),
   Tool.make("t3_thread_move_project_folder", {
     ...shared,
     parameters: MoveThreadProjectFolderInput,
     success: ThreadProjectFolderResult,
     description:
-      "Move a thread into one project folder. folderId null clears explicit filing and restores the repository default for work. Folders provide context only and never grant access.",
+      "Move a thread into one project folder. folderId null clears explicit filing and restores the repository default for work. A chat with turns cannot be re-parented; use t3_project_label_file_thread to fork it into the project. Folders provide context only and never grant access.",
   }).annotate(Tool.Destructive, false),
   Tool.make("t3_thread_set_project_labels", {
     ...shared,
     parameters: SetThreadProjectLabelsInput,
     success: ThreadProjectLabelsResult,
     description:
-      "Move a thread into one project folder using a singleton labelIds array. Empty clears explicit filing and restores the repository default for work. Folders never widen access.",
+      "Move a thread into one project folder using a singleton labelIds array. Empty clears explicit filing and restores the repository default for work. A chat with turns cannot be re-parented; use t3_project_label_file_thread to fork it into the project. Folders never widen access.",
   }).annotate(Tool.Destructive, true),
   Tool.make("t3_project_label_create", {
     ...shared,

@@ -54,6 +54,7 @@ export type T3McpToolSummaryAction =
   | "project-label-delete"
   | "project-label-link"
   | "project-label-clone"
+  | "project-label-file-thread"
   | "agent-list"
   | "agent-builder-start"
   | "environment-read"
@@ -369,6 +370,10 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   t3_project_label_clone_repository: tool(
     ["Clone", "Cloning", "Started cloning", "a repository into a project"],
     "project-label-clone",
+  ),
+  t3_project_label_file_thread: tool(
+    ["File", "Filing", "Filed", "a thread into a project"],
+    "project-label-file-thread",
   ),
   t3_thread_move_project_folder: tool(
     ["File", "Filing", "Filed", "a thread into a project"],
