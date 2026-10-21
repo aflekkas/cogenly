@@ -60,9 +60,11 @@ import {
   ensureInlineContextReferences,
   formatInlineContextReference,
   removeInlineContextReference,
+  retargetInlineContextReference,
 } from "./lib/composerContextReferences";
 import {
   fileContextReference,
+  imageContextReference,
   previewAnnotationContextId,
   previewAnnotationContextReference,
   reviewCommentContextId,
@@ -636,6 +638,16 @@ interface ComposerDraftStoreState {
     options?: { allowDuplicates?: boolean },
   ) => string[];
   removeImage: (threadRef: ComposerThreadTarget, imageId: string) => void;
+  /**
+   * Swaps an image for another in place (a marked-up copy, or the original
+   * back), moving its inline links to the new one. Neither preview URL is
+   * revoked: the caller owns both. Returns whether the image was found.
+   */
+  replaceImage: (
+    threadRef: ComposerThreadTarget,
+    imageId: string,
+    next: ComposerImageAttachment,
+  ) => boolean;
   /** Returns the ids of files appended; a re-pick that replaces a marker is not listed. */
   addFiles: (
     threadRef: ComposerThreadTarget,
@@ -3520,6 +3532,35 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             }
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
+        },
+        replaceImage: (threadRef, imageId, next) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          const existing = get().draftsByThreadKey[threadKey];
+          const previous = existing?.images.find((image) => image.id === imageId);
+          if (!existing || !previous) return false;
+          set((state) => {
+            const current = state.draftsByThreadKey[threadKey];
+            if (!current) return state;
+            return {
+              draftsByThreadKey: {
+                ...state.draftsByThreadKey,
+                [threadKey]: {
+                  ...current,
+                  prompt: retargetInlineContextReference(
+                    current.prompt,
+                    imageContextReference(previous).contextId,
+                    imageContextReference(next),
+                  ),
+                  images: current.images.map((image) => (image.id === imageId ? next : image)),
+                  nonPersistedImageIds: current.nonPersistedImageIds.filter((id) => id !== imageId),
+                  persistedAttachments: current.persistedAttachments.filter(
+                    (attachment) => attachment.id !== imageId,
+                  ),
+                },
+              },
+            };
+          });
+          return true;
         },
         addFiles: (threadRef, files, options) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";

@@ -128,3 +128,16 @@ export function ensureInlineContextReferences(
   }
   return result;
 }
+
+/** Points every link to `contextId` at `reference` instead, each where it sat. */
+export function retargetInlineContextReference(
+  prompt: string,
+  contextId: string,
+  reference: ComposerContextReference,
+): string {
+  return replaceComposerContextReferences(prompt, (occurrence) =>
+    occurrence.contextId === contextId
+      ? formatInlineContextReference(reference)
+      : occurrence.source,
+  );
+}

@@ -1,10 +1,19 @@
 import { MinusIcon, PlusIcon } from "lucide-react";
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
+import {
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from "react";
 
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 
 import { Button } from "../ui/button";
+import { canvasToImagePoint, type Point } from "./imageMarkup";
 import {
   IMAGE_ZOOM_STEP,
   clampView,
@@ -48,6 +57,21 @@ export interface ZoomableImageHandle {
 }
 
 /**
+ * Lets a single-pointer drag draw on the image instead of panning it. Points
+ * arrive in the image's natural pixels; a second finger cancels the stroke
+ * (`onEnd(false)`) and pinches instead.
+ */
+export interface ZoomableImageDrawing {
+  readonly active: boolean;
+  readonly onStart: (point: Point, canvas: { view: ImageView; natural: Size }) => void;
+  readonly onMove: (point: Point) => void;
+  readonly onEnd: (commit: boolean) => void;
+}
+
+/** Elements on the canvas that keep their own pointer handling. */
+const INTERACTIVE_TARGET = "button, input, textarea";
+
+/**
  * An image on a canvas: it opens fitted inside the padding (never upscaled past
  * 100%), and zooms around the cursor with ⌘/ctrl-scroll or a pinch, up to 8×.
  * Once larger than the canvas it pans by dragging or two-finger scroll, never
@@ -59,11 +83,16 @@ export function ZoomableImage({
   name,
   onError,
   ref,
+  drawing,
+  overlay,
 }: {
   src: string;
   name: string;
   onError: () => void;
   ref?: Ref<ZoomableImageHandle>;
+  drawing?: ZoomableImageDrawing;
+  /** Drawn over the image in its box, which tracks the zoom and pan. */
+  overlay?: (view: ImageView, natural: Size) => ReactNode;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<Size>({ width: 0, height: 0 });
@@ -244,6 +273,10 @@ export function ZoomableImage({
   // Active pointers: one drags, two pinch (touch screens).
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ distance: number; scale: number } | null>(null);
+  /** The pointer drawing a stroke, while one is. */
+  const drawPointer = useRef<number | null>(null);
+  const toImage = (clientX: number, clientY: number) =>
+    canvasToImagePoint(toCanvas(clientX, clientY), viewRef.current);
   const pinchSpan = () => {
     const [a, b] = [...pointers.current.values()];
     if (!a || !b) return null;
@@ -254,6 +287,10 @@ export function ZoomableImage({
   };
   const endPointer = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!pointers.current.delete(event.pointerId)) return;
+    if (drawPointer.current === event.pointerId) {
+      drawPointer.current = null;
+      drawing?.onEnd(event.type === "pointerup");
+    }
     if (pointers.current.size < 2) pinch.current = null;
     if (pointers.current.size === 0) setDragging(false);
   };
@@ -270,13 +307,27 @@ export function ZoomableImage({
       aria-description="Scroll or pinch with Command to zoom, drag to pan, double-click for 100%. Plus and minus zoom, 0 fits, 1 shows actual size."
       className={cn(
         "group relative h-(--media-height) w-(--media-width) touch-none overflow-hidden rounded-lg bg-background shadow-2xl ring-1 ring-border/70 select-none",
-        canPan && (dragging ? "cursor-grabbing" : "cursor-grab"),
+        drawing?.active
+          ? "cursor-crosshair"
+          : canPan && (dragging ? "cursor-grabbing" : "cursor-grab"),
       )}
       onPointerDown={(event) => {
-        if (event.button !== 0 || (event.target as Element).closest("button")) return;
+        if (event.button !== 0 || (event.target as Element).closest(INTERACTIVE_TARGET)) return;
         stopAnimation();
         pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
         event.currentTarget.setPointerCapture(event.pointerId);
+        if (drawing?.active && ready && pointers.current.size === 1) {
+          drawPointer.current = event.pointerId;
+          drawing.onStart(toImage(event.clientX, event.clientY), {
+            view: viewRef.current,
+            natural: metricsRef.current.natural,
+          });
+          return;
+        }
+        if (drawPointer.current !== null) {
+          drawPointer.current = null;
+          drawing?.onEnd(false);
+        }
         const span = pinchSpan();
         if (span) pinch.current = { distance: span.distance, scale: viewRef.current.scale };
         setDragging(true);
@@ -286,6 +337,10 @@ export function ZoomableImage({
         if (!last) return;
         const next = { x: event.clientX, y: event.clientY };
         pointers.current.set(event.pointerId, next);
+        if (drawPointer.current === event.pointerId) {
+          drawing?.onMove(toImage(next.x, next.y));
+          return;
+        }
         const span = pinchSpan();
         if (span && pinch.current) {
           zoomTo(
@@ -297,11 +352,17 @@ export function ZoomableImage({
         }
         panBy(next.x - last.x, next.y - last.y, false);
       }}
+      onMouseDown={(event) => {
+        // Drawing keeps focus where it is (a text label being typed) and selects nothing.
+        if (drawing?.active && !(event.target as Element).closest(INTERACTIVE_TARGET)) {
+          event.preventDefault();
+        }
+      }}
       onPointerUp={endPointer}
       onPointerCancel={endPointer}
       onLostPointerCapture={endPointer}
       onDoubleClick={(event) => {
-        if ((event.target as Element).closest("button")) return;
+        if (drawing?.active || (event.target as Element).closest(INTERACTIVE_TARGET)) return;
         zoomTo(
           toggleScale(viewRef.current, metricsRef.current),
           toCanvas(event.clientX, event.clientY),
@@ -333,6 +394,18 @@ export function ZoomableImage({
         }}
         onError={onError}
       />
+      {ready && overlay ? (
+        <div
+          className="absolute top-0 left-0 origin-top-left"
+          style={{
+            width: natural.width * view.scale,
+            height: natural.height * view.scale,
+            transform: `translate(${view.x}px, ${view.y}px)`,
+          }}
+        >
+          {overlay(view, natural)}
+        </div>
+      ) : null}
       {ready ? (
         <div className="absolute right-3 bottom-3 flex items-center gap-1 opacity-0 transition-opacity duration-(--motion-duration-fast) ease-out group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">
           <Button

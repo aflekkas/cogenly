@@ -8,6 +8,7 @@ import {
   insertInlineContextReference,
   inlineContextReferenceReplacement,
   removeInlineContextReference,
+  retargetInlineContextReference,
   stripInlineContextReferences,
 } from "./composerContextReferences";
 
@@ -59,5 +60,18 @@ describe("composerContextReferences", () => {
     );
     expect(ensureInlineContextReferences("", [review])).toBe(`${reviewLink} `);
     expect(ensureInlineContextReferences(reviewLink, [review])).toBe(reviewLink);
+  });
+
+  it("retargets every link to one record in place, leaving the others", () => {
+    const retargeted = { kind: "review-comment", contextId: "rc-2", label: "b.ts L9" } as const;
+    expect(
+      retargetInlineContextReference(
+        `see ${reviewLink} and ${previewLink}, again ${reviewLink}`,
+        "rc-1",
+        retargeted,
+      ),
+    ).toBe(
+      `see ${formatInlineContextReference(retargeted)} and ${previewLink}, again ${formatInlineContextReference(retargeted)}`,
+    );
   });
 });

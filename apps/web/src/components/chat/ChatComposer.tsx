@@ -259,6 +259,14 @@ import {
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerRunningBar } from "./ComposerRunningBar";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
+import { ImageMarkupDialog } from "./ImageMarkupDialog";
+import {
+  endImageMarkupSession,
+  readImageMarkupSession,
+  setImageMarkupSession,
+  useImageMarkupSessionStore,
+} from "./imageMarkupSessions";
+import type { MarkupShape } from "./imageMarkup";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
@@ -309,6 +317,7 @@ import {
   BotIcon,
   CircleAlertIcon,
   PaperclipIcon,
+  PencilIcon,
   PencilRulerIcon,
   PlayIcon,
   XIcon,
@@ -1820,6 +1829,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
+  const replaceComposerDraftImage = useComposerDraftStore((store) => store.replaceImage);
+  const [markupImageId, setMarkupImageId] = useState<string | null>(null);
+  const markupImage = composerImages.find((image) => image.id === markupImageId) ?? null;
+  const markupSessionsByImageId = useImageMarkupSessionStore((state) => state.sessionsByImageId);
   const addComposerDraftFiles = useComposerDraftStore((store) => store.addFiles);
   const removeComposerDraftFile = useComposerDraftStore((store) => store.removeFile);
   const setComposerDraftFileUpload = useComposerDraftStore((store) => store.setFileUpload);
@@ -2854,6 +2867,59 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (questionAttachmentTarget && activePendingIsResponding) return;
     releaseAttachmentUpload(imageId);
     removeComposerDraftImage(attachmentDraftTarget, imageId);
+  };
+
+  /**
+   * Puts `next` where `current` sits in the draft. The marked-up copy gets a
+   * new id so it uploads afresh; the upload of the image it replaces is
+   * released. A marked-up copy's own preview is freed once replaced, but an
+   * original's is kept by its markup session until it is sent.
+   */
+  const swapComposerImage = (current: ComposerImageAttachment, next: ComposerImageAttachment) => {
+    if (questionAttachmentTarget && activePendingIsResponding) return false;
+    if (!replaceComposerDraftImage(attachmentDraftTarget, current.id, next)) return false;
+    releaseAttachmentUpload(current.id);
+    return true;
+  };
+
+  const applyImageMarkup = (
+    current: ComposerImageAttachment,
+    file: File,
+    original: ComposerImageAttachment,
+    shapes: ReadonlyArray<MarkupShape>,
+  ) => {
+    const marked: ComposerImageAttachment = {
+      type: "image",
+      id: randomUUID(),
+      name: file.name,
+      mimeType: file.type,
+      sizeBytes: file.size,
+      previewUrl: URL.createObjectURL(file),
+      file,
+    };
+    const wasMarked = readImageMarkupSession(current.id) !== undefined;
+    endImageMarkupSession(current.id);
+    setImageMarkupSession(marked.id, { original, shapes });
+    if (!swapComposerImage(current, marked)) {
+      endImageMarkupSession(marked.id);
+      URL.revokeObjectURL(marked.previewUrl);
+      if (wasMarked) setImageMarkupSession(current.id, { original, shapes });
+      return;
+    }
+    if (wasMarked) URL.revokeObjectURL(current.previewUrl);
+    setMarkupImageId(null);
+  };
+
+  const revertImageMarkup = (current: ComposerImageAttachment) => {
+    const session = readImageMarkupSession(current.id);
+    if (!session) return;
+    endImageMarkupSession(current.id);
+    if (!swapComposerImage(current, session.original)) {
+      setImageMarkupSession(current.id, session);
+      return;
+    }
+    URL.revokeObjectURL(current.previewUrl);
+    setMarkupImageId(null);
   };
 
   const removeComposerFileFromDraft = (fileId: string) => {
@@ -5864,29 +5930,36 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         <div
                           key={image.id}
                           data-chat-composer-expanded-image="true"
-                          className="group/attachment relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border/80 bg-background"
+                          className="group/attachment relative size-16 shrink-0 overflow-hidden rounded-lg border border-border bg-background"
                         >
                           {image.previewUrl ? (
                             <button
                               type="button"
-                              className="h-full w-full cursor-zoom-in"
-                              aria-label={`Preview ${image.name}`}
-                              onClick={() => {
-                                const preview = buildExpandedImagePreview(composerImages, image.id);
-                                if (!preview) return;
-                                onExpandImage(preview);
-                              }}
+                              className="group/edit relative size-full cursor-pointer outline-none"
+                              aria-label={
+                                markupSessionsByImageId[image.id]
+                                  ? `Edit markup on ${image.name}`
+                                  : `Mark up ${image.name}`
+                              }
+                              onClick={() => setMarkupImageId(image.id)}
                             >
                               <ComposerImageThumbnail
                                 file={image.file}
                                 alt={image.name}
-                                className="h-full w-full object-cover"
+                                className="size-full object-cover"
                                 fallback={
                                   <span className="flex h-full items-center justify-center px-1 text-3xs text-secondary-label">
                                     {image.name}
                                   </span>
                                 }
                               />
+                              {/* The edit affordance and the focus ring share one inset layer over the image. */}
+                              <span
+                                aria-hidden
+                                className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-black/30 text-white opacity-0 transition-opacity duration-(--motion-duration-fast) ease-standard group-hover/edit:opacity-100 group-focus-visible/edit:opacity-100 group-focus-visible/edit:ring-2 group-focus-visible/edit:ring-ring group-focus-visible/edit:ring-inset"
+                              >
+                                <PencilIcon className="size-4" />
+                              </span>
                             </button>
                           ) : (
                             <div className="flex h-full w-full items-center justify-center px-1 text-center text-3xs text-secondary-label">
@@ -5942,16 +6015,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               <TooltipPopup side="top">{upload.reason}</TooltipPopup>
                             </Tooltip>
                           )}
-                          <span className="absolute right-1 top-1 flex">
-                            <Button
-                              variant="media-close"
-                              size="icon-xs"
-                              onClick={() => removeComposerImage(image.id)}
-                              aria-label={`Remove ${image.name}`}
+                          {markupSessionsByImageId[image.id] ? (
+                            <span
+                              role="img"
+                              aria-label="Marked up"
+                              className="pointer-events-none absolute right-1 bottom-1 inline-flex size-4 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm transition-opacity duration-(--motion-duration-fast) ease-standard starting:opacity-0"
                             >
-                              <XIcon />
-                            </Button>
-                          </span>
+                              <PencilIcon className="size-2.5" strokeWidth={2.5} />
+                            </span>
+                          ) : null}
+                          {/* Matches the toast dismiss: out of the way until hover or focus, always shown on touch. */}
+                          <button
+                            type="button"
+                            onClick={() => removeComposerImage(image.id)}
+                            aria-label={`Remove ${image.name}`}
+                            className="absolute top-1 right-1 inline-flex size-5 cursor-pointer items-center justify-center rounded-md bg-background/80 text-muted-foreground opacity-0 outline-none backdrop-blur-sm transition-[color,opacity] duration-(--motion-duration-base) ease-standard hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset group-hover/attachment:opacity-100 group-focus-within/attachment:opacity-100 pointer-coarse:opacity-100 motion-reduce:transition-none"
+                          >
+                            <XIcon className="size-3" strokeWidth={2.25} />
+                          </button>
                         </div>
                       );
                     })}
@@ -6106,6 +6187,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               )}
 
               <div className="relative">
+                <OverlayPresence when={markupImage}>
+                  {(image) => (
+                    <ImageMarkupDialog
+                      key={image.id}
+                      image={image}
+                      session={markupSessionsByImageId[image.id]}
+                      onCancel={() => setMarkupImageId(null)}
+                      onApply={(file, original, shapes) =>
+                        applyImageMarkup(image, file, original, shapes)
+                      }
+                      onRevert={() => revertImageMarkup(image)}
+                    />
+                  )}
+                </OverlayPresence>
                 <OverlayPresence when={previewFile}>
                   {(previewFile) => (
                     <Dialog
