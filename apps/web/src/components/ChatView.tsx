@@ -208,12 +208,9 @@ import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
   timelineContentOverflowsViewport,
   readTimelinePosition,
-  observeTimelineRun,
-  type TimelineRunObservation,
   type TimelineScrollMode,
 } from "./chat/timelineScrollAnchoring";
-import { anchoredScrollTarget, sendAnchorOffset } from "./chat/timelineSendAnchor";
-import { animateScrollTop } from "~/lib/sendMotion";
+import { glideToLiveEnd } from "~/lib/sendMotion";
 import {
   buildPendingUserInputAnswers,
   carryDisplacedCustomAnswerIntoPrompt,
@@ -975,17 +972,19 @@ const EMPTY_HELD_TURN_DIFF_SUMMARIES: readonly never[] = [];
 const noopHeldRevert = (_targetTurnCount: number) => {};
 const noopHeldAttachment = (_attachment: ChatFileAttachment) => {};
 
-/**
- * Drops the send-time anchored end space. That space is what holds a sent
- * message near the top while its turn streams, and it keeps LegendList's
- * maintainScrollAtEnd switched off for as long as it is installed. Tool
- * activity and every return to the live edge release the anchor, otherwise
- * the timeline settles into "following-end" with nothing following anything.
- */
-function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | null }>(
-  current: T,
-): T {
-  return current.messageId === null ? current : { ...current, messageId: null };
+/** The id of the timeline row lowest on screen, or null when none is. */
+function latestTimelineRowId(scrollNode: HTMLElement): string | null {
+  const viewport = scrollNode.getBoundingClientRect();
+  let latest: { readonly id: string; readonly top: number } | null = null;
+  for (const row of scrollNode.querySelectorAll<HTMLElement>("[data-timeline-row-id]")) {
+    const rect = row.getBoundingClientRect();
+    const id = row.dataset.timelineRowId;
+    if (!id || rect.height === 0 || rect.top >= viewport.bottom || rect.bottom <= viewport.top) {
+      continue;
+    }
+    if (latest === null || rect.top > latest.top) latest = { id, top: rect.top };
+  }
+  return latest?.id ?? null;
 }
 
 /** Runs with a workspace preparation retry in flight, across ChatView instances. */
@@ -1764,40 +1763,6 @@ export default function ChatView(props: ChatViewProps) {
       ? null
       : visibleThreadError;
 
-  const [timelineAnchor, setTimelineAnchor] = useState<{
-    readonly threadKey: string | null;
-    readonly messageId: MessageId | null;
-  }>({ threadKey: activeThreadKey, messageId: null });
-  if (timelineAnchor.threadKey !== activeThreadKey) {
-    setTimelineAnchor({ threadKey: activeThreadKey, messageId: null });
-  }
-  const timelineAnchorMessageId = timelineAnchor.messageId;
-  // Release the turn anchor once its run finishes, unless its end space still
-  // holds the sent message at the top: dropping that space would pull the
-  // finished turn back down. LegendList resizes the space as rows change, so a
-  // kept anchor never leaves more room than the turn needs.
-  const anchorRunSettled = useMemo(() => {
-    if (timelineAnchorMessageId === null) return false;
-    const anchorRun = serverProjection?.runs.find(
-      (run) => run.userMessageId === timelineAnchorMessageId,
-    );
-    if (anchorRun === undefined) return false;
-    return (
-      anchorRun.status !== "preparing" &&
-      anchorRun.status !== "queued" &&
-      anchorRun.status !== "starting" &&
-      anchorRun.status !== "running" &&
-      anchorRun.status !== "waiting"
-    );
-  }, [serverProjection, timelineAnchorMessageId]);
-  // The anchored end space LegendList currently reserves under the sent turn.
-  // Declared before the effect that reads it, so the React Compiler knows it
-  // for a ref and lets the anchor handlers below write it.
-  const anchoredEndSpaceSizeRef = useRef(0);
-  useEffect(() => {
-    if (!anchorRunSettled || anchoredEndSpaceSizeRef.current > 0) return;
-    setTimelineAnchor({ threadKey: activeThreadKey, messageId: null });
-  }, [anchorRunSettled, activeThreadKey]);
   // Keyed on the two ids, so a new thread object for the same project keeps the ref.
   const activeThreadEnvironmentId = activeThread?.environmentId;
   const activeThreadProjectId = activeThread?.projectId;
@@ -4589,40 +4554,23 @@ export default function ChatView(props: ChatViewProps) {
   // re-pins on its own (independent of the refs), so the timeline needs a
   // render-visible flag to switch it off once the user scrolls away.
   const [timelineLiveFollowEnabled, setTimelineLiveFollowEnabled] = useState(true);
-  const cancelAnchorScrollRef = useRef<(() => void) | null>(null);
-  const pendingTimelineAnchorRef = useRef<MessageId | null>(null);
-  const positionedTimelineAnchorRef = useRef<MessageId | null>(null);
-  const settledTimelineAnchorRef = useRef<MessageId | null>(null);
-  const activeTimelineAnchorIndexRef = useRef<number | null>(null);
-  const observedTimelineActivityRef = useRef<TimelineRunObservation | null>(null);
+  const cancelSendGlideRef = useRef<(() => void) | null>(null);
+  // The thread whose send is gliding the timeline to its live end. While it
+  // runs, the list's own instant pin to the end holds off (see MessagesTimeline).
+  const [sendGlideThreadKey, setSendGlideThreadKey] = useState<string | null>(null);
   const anchorUserScrollGenerationRef = useRef(0);
   const cancelPositionRestoreRef = useRef<(() => void) | null>(null);
   const liveFollowUserScrollGenerationRef = useRef<number | null>(0);
-  const pendingAnchorScrollRestoreRef = useRef<{
-    readonly messageId: MessageId;
-    readonly offset: number;
-    readonly userScrollGeneration: number;
-  } | null>(null);
-  const anchorScrollRestoreFrameRef = useRef<number | null>(null);
   const cancelTimelineLiveFollowForUserNavigation = () => {
     cancelPositionRestoreRef.current?.();
-    cancelAnchorScrollRef.current?.();
+    cancelSendGlideRef.current?.();
     anchorUserScrollGenerationRef.current += 1;
     const wasProgrammaticScrollMode = timelineScrollModeRef.current !== "free-scrolling";
     timelineScrollModeRef.current = "free-scrolling";
     liveFollowUserScrollGenerationRef.current = null;
     setTimelineLiveFollowEnabled(false);
-    pendingTimelineAnchorRef.current = null;
-    positionedTimelineAnchorRef.current = null;
-    settledTimelineAnchorRef.current = null;
-    activeTimelineAnchorIndexRef.current = null;
-    pendingAnchorScrollRestoreRef.current = null;
-    if (anchorScrollRestoreFrameRef.current !== null) {
-      cancelAnimationFrame(anchorScrollRestoreFrameRef.current);
-      anchorScrollRestoreFrameRef.current = null;
-    }
     if (wasProgrammaticScrollMode) {
-      // While following or anchoring, our scrollToEnd/scrollToOffset calls can
+      // While following, our scrollToEnd/scrollToOffset calls can
       // sit in LegendList's pending-imperative-scroll queue (it defers them
       // while layout settles) and fire seconds later with stale targets,
       // yanking the view away after the user scrolled. Starting a new
@@ -4656,43 +4604,6 @@ export default function ChatView(props: ChatViewProps) {
     cancelTimelineLiveFollowForUserNavigationRef.current =
       cancelTimelineLiveFollowForUserNavigationStable;
   }, [cancelTimelineLiveFollowForUserNavigationStable]);
-  useEffect(() => {
-    const previous = observedTimelineActivityRef.current;
-    const dispatchedUserItem =
-      previous?.hydrated &&
-      previous.threadKey === activeThreadKey &&
-      activeActivityRun !== null &&
-      previous.runId !== activeActivityRun.runId
-        ? serverProjection?.visibleTurnItems.find(
-            (row) => row.item.type === "user_message" && row.item.runId === activeActivityRun.runId,
-          )
-        : undefined;
-    const { observation, anchorMessageId: messageId } = observeTimelineRun(previous, {
-      threadKey: activeThreadKey,
-      hydrated: !isServerThread || (serverProjection !== null && threadStatus === "live"),
-      runId: activeActivityRun?.runId ?? null,
-      queued: activeActivityRun?.status === "queued",
-      messageId:
-        dispatchedUserItem?.item.type === "user_message" ? dispatchedUserItem.item.messageId : null,
-    });
-    observedTimelineActivityRef.current = observation;
-    if (messageId === null) return;
-    if (
-      pendingTimelineAnchorRef.current !== null ||
-      timelineScrollModeRef.current === "free-scrolling"
-    ) {
-      return;
-    }
-
-    isAtEndRef.current = true;
-    timelineScrollModeRef.current = "anchoring-new-turn";
-    liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
-    pendingTimelineAnchorRef.current = messageId;
-    activeTimelineAnchorIndexRef.current = null;
-    showScrollDebouncer.current.cancel();
-    setShowScrollToBottom(false);
-    setTimelineAnchor({ threadKey: activeThreadKey, messageId });
-  }, [activeActivityRun, activeThreadKey, isServerThread, serverProjection, threadStatus]);
   const timelineRealContentOverflowsViewport = (list?: LegendListRef | null) =>
     timelineContentOverflowsViewport((list ?? legendListRef.current)?.getState(), {
       composerInset: composerTimelineInset,
@@ -4742,21 +4653,57 @@ export default function ChatView(props: ChatViewProps) {
   const onComposerPageScrollReleaseStable = useStableCallback(onComposerPageScrollRelease);
   // Live-follow stays active after send/thread-open until an actual list scroll
   // gesture opts out.
-  const scrollToEnd = (animated: boolean = false) => {
+  const followLiveEnd = () => {
     cancelPositionRestoreRef.current?.();
+    cancelSendGlideRef.current?.();
     isAtEndRef.current = true;
     timelineScrollModeRef.current = "following-end";
     liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
     setTimelineLiveFollowEnabled(true);
-    pendingTimelineAnchorRef.current = null;
-    activeTimelineAnchorIndexRef.current = null;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
-    setTimelineAnchor(releaseChatTimelineAnchor);
-    // The anchored end space must be gone before the scroll measures, or the
-    // list lands short of the real end (#6519).
+  };
+  const scrollToEnd = (animated: boolean = false) => {
+    followLiveEnd();
+    // Rows set alongside this call commit first, so the scroll measures them.
     requestAnimationFrame(() => {
       void legendListRef.current?.scrollToEnd?.({ animated });
+    });
+  };
+  /**
+   * A send brings the timeline to its live end in one glide, in step with the
+   * sent bubble's rise into place above the composer, from wherever the user
+   * was reading. The end is read every frame, so the sent row and its activity
+   * rows measuring in extend the same glide instead of adding a second scroll.
+   * LegendList's instant pin to the end holds off until the glide lands, then
+   * keeps the end pinned while the reply streams. Instant under reduced motion.
+   */
+  const glideToEndForSend = (threadKey: string, messageId: MessageId) => {
+    followLiveEnd();
+    const scrollNode = legendListRef.current?.getScrollableNode() as HTMLElement | undefined;
+    if (!scrollNode) return;
+    // The lowest row on screen before the send carries the motion over, found
+    // again by id each frame because the list recycles its row elements.
+    const referenceId = latestTimelineRowId(scrollNode);
+    let stopAnimation: (() => void) | null = null;
+    const stop = () => stopAnimation?.();
+    cancelSendGlideRef.current = stop;
+    setSendGlideThreadKey(threadKey);
+    stopAnimation = glideToLiveEnd(scrollNode, {
+      content: scrollNode.querySelector<HTMLElement>(":scope > .legend-list-content-container"),
+      reference: () =>
+        referenceId === null
+          ? null
+          : scrollNode.querySelector(`[data-timeline-row-id="${CSS.escape(referenceId)}"]`),
+      ready: () =>
+        scrollNode.querySelector(
+          `[data-message-role="user"][data-message-id="${CSS.escape(messageId)}"]`,
+        ) !== null,
+      onDone: () => {
+        if (cancelSendGlideRef.current !== stop) return;
+        cancelSendGlideRef.current = null;
+        setSendGlideThreadKey(null);
+      },
     });
   };
   const scrollToEndStable = useStableCallback(scrollToEnd);
@@ -4908,107 +4855,11 @@ export default function ChatView(props: ChatViewProps) {
     };
   }, [activeThread?.id, isTimelineAtLogicalEndStable, timelineRealContentOverflowsViewportStable]);
 
-  const onTimelineAnchorReady = (messageId: MessageId, anchorIndex: number) => {
-    if (pendingTimelineAnchorRef.current === messageId) {
-      pendingTimelineAnchorRef.current = null;
-    }
-    activeTimelineAnchorIndexRef.current = anchorIndex;
-    if (positionedTimelineAnchorRef.current === messageId) {
-      return;
-    }
-    positionedTimelineAnchorRef.current = messageId;
-    settledTimelineAnchorRef.current = null;
-    const list = legendListRef.current;
-    const scrollNode = list?.getScrollableNode() as HTMLElement | undefined;
-    if (!list || !scrollNode) return;
-    // The sent row glides to the top below the header on the send spring,
-    // over the same time as its bubble's rise (animate-message-send), so the
-    // two read as one upward motion. Rows still measuring move the target; it
-    // is read every frame.
-    const target = () => {
-      if (positionedTimelineAnchorRef.current !== messageId) return null;
-      const row = scrollNode.querySelector(
-        `[data-message-role="user"][data-message-id="${CSS.escape(messageId)}"]`,
-      );
-      if (!row) return null;
-      const anchorTop =
-        scrollNode.scrollTop +
-        row.getBoundingClientRect().top -
-        scrollNode.getBoundingClientRect().top;
-      return anchoredScrollTarget({
-        anchorTop,
-        anchorOffset: sendAnchorOffset(timelineHeaderInset(scrollNode)),
-        maxScroll: scrollNode.scrollHeight - scrollNode.clientHeight,
-      });
-    };
-    cancelAnchorScrollRef.current?.();
-    let finished = false;
-    const cancel = animateScrollTop(scrollNode, target, {
-      onDone: (completed) => {
-        finished = true;
-        if (completed && positionedTimelineAnchorRef.current === messageId) {
-          settledTimelineAnchorRef.current = messageId;
-        }
-      },
-    });
-    cancelAnchorScrollRef.current = finished ? null : cancel;
-  };
-  const onTimelineAnchorReadyStable = useStableCallback(onTimelineAnchorReady);
-  const onTimelineAnchorSizeChanged = (messageId: MessageId, size: number) => {
-    anchoredEndSpaceSizeRef.current = size;
-    if (settledTimelineAnchorRef.current !== messageId) {
-      return;
-    }
-    if (liveFollowUserScrollGenerationRef.current === anchorUserScrollGenerationRef.current) {
-      return;
-    }
-    const scrollOffset = legendListRef.current?.getState().scroll;
-    if (scrollOffset === undefined) {
-      return;
-    }
-    if (pendingAnchorScrollRestoreRef.current === null) {
-      pendingAnchorScrollRestoreRef.current = {
-        messageId,
-        offset: scrollOffset,
-        userScrollGeneration: anchorUserScrollGenerationRef.current,
-      };
-    }
-    if (anchorScrollRestoreFrameRef.current !== null) {
-      return;
-    }
-    anchorScrollRestoreFrameRef.current = requestAnimationFrame(() => {
-      anchorScrollRestoreFrameRef.current = null;
-      const pending = pendingAnchorScrollRestoreRef.current;
-      pendingAnchorScrollRestoreRef.current = null;
-      if (
-        pending &&
-        settledTimelineAnchorRef.current === pending.messageId &&
-        pending.userScrollGeneration === anchorUserScrollGenerationRef.current
-      ) {
-        const list = legendListRef.current;
-        const currentScrollOffset = list?.getState().scroll;
-        if (
-          typeof currentScrollOffset === "number" &&
-          Math.abs(currentScrollOffset - pending.offset) <= 2
-        ) {
-          void list?.scrollToOffset({ offset: pending.offset, animated: false });
-        }
-      }
-    });
-  };
-  const onTimelineAnchorSizeChangedStable = useStableCallback(onTimelineAnchorSizeChanged);
-
   const onIsAtEndChange = (isAtEnd: boolean) => {
-    // A sent turn that outgrew the viewport is no longer followed: the sent
-    // message stays at the top and the scroll-to-end pill takes over.
-    const anchoredTurnOverflowed =
-      !isAtEnd &&
-      timelineScrollModeRef.current === "anchoring-new-turn" &&
-      settledTimelineAnchorRef.current !== null &&
-      settledTimelineAnchorRef.current === timelineAnchorMessageId;
+    // Still following (a send's glide, or growth the pin has yet to catch):
+    // not at the end only for a moment, so no pill.
     if (
       !isAtEnd &&
-      !anchoredTurnOverflowed &&
       liveFollowUserScrollGenerationRef.current === anchorUserScrollGenerationRef.current
     ) {
       showScrollDebouncer.current.cancel();
@@ -5020,12 +4871,10 @@ export default function ChatView(props: ChatViewProps) {
     if (isAtEnd) {
       timelineScrollModeRef.current = "following-end";
       liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
+      // Reachable only once follow has broken: the user scrolled back to the
+      // live edge and expects the stream to stick to it again, exactly like
+      // the scroll-to-bottom pill.
       setTimelineLiveFollowEnabled(true);
-      // Reachable only once follow has broken, so the anchored turn framing is
-      // over: the user scrolled back to the live edge and expects the stream to
-      // stick to it again, exactly like the scroll-to-bottom pill (#6519). An
-      // end space still holding the sent message up stays, so nothing drops.
-      if (anchoredEndSpaceSizeRef.current === 0) setTimelineAnchor(releaseChatTimelineAnchor);
       showScrollDebouncer.current.cancel();
       setShowScrollToBottom(false);
     } else {
@@ -5045,10 +4894,7 @@ export default function ChatView(props: ChatViewProps) {
       ? anchorUserScrollGenerationRef.current
       : null;
     setTimelineLiveFollowEnabled(followEnd);
-    pendingTimelineAnchorRef.current = null;
-    positionedTimelineAnchorRef.current = null;
-    settledTimelineAnchorRef.current = null;
-    activeTimelineAnchorIndexRef.current = null;
+    cancelSendGlideRef.current?.();
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(!followEnd);
     // Environment identity is part of the scroll session too.
@@ -7880,21 +7726,13 @@ export default function ChatView(props: ChatViewProps) {
           },
     );
     if (!shouldQueueBehindActiveRun) {
-      // A sent turn returns to the live edge and anchors its new transcript
-      // row. Queued input stays in the composer queue and must not move the
-      // timeline away from the provider work already in flight.
-      isAtEndRef.current = true;
-      timelineScrollModeRef.current = "anchoring-new-turn";
-      liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
-      setTimelineLiveFollowEnabled(true);
-      pendingTimelineAnchorRef.current = messageIdForSend;
-      activeTimelineAnchorIndexRef.current = null;
-      showScrollDebouncer.current.cancel();
-      setShowScrollToBottom(false);
-      setTimelineAnchor({
-        threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
-        messageId: messageIdForSend,
-      });
+      // A sent turn glides the timeline to its live end, where the new row
+      // lands above the composer. Queued input stays in the composer queue and
+      // must not move the timeline away from the provider work in flight.
+      glideToEndForSend(
+        scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
+        messageIdForSend,
+      );
     }
     setOptimisticUserMessages((existing) => [
       ...existing,
@@ -8545,19 +8383,11 @@ export default function ChatView(props: ChatViewProps) {
     beginLocalDispatch({ preparingWorktree: false });
     setThreadError(threadIdForSend, null);
 
-    // Position this sent row once LegendList has measured the anchored tail.
-    isAtEndRef.current = true;
-    timelineScrollModeRef.current = "anchoring-new-turn";
-    liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
-    setTimelineLiveFollowEnabled(true);
-    pendingTimelineAnchorRef.current = messageIdForSend;
-    activeTimelineAnchorIndexRef.current = null;
-    showScrollDebouncer.current.cancel();
-    setShowScrollToBottom(false);
-    setTimelineAnchor({
-      threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
-      messageId: messageIdForSend,
-    });
+    // The sent row lands at the live end, above the composer.
+    glideToEndForSend(
+      scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
+      messageIdForSend,
+    );
 
     setOptimisticUserMessages((existing) => [
       ...existing,
@@ -9542,9 +9372,11 @@ export default function ChatView(props: ChatViewProps) {
                       : activeWorkspaceRoot
                   }
                   skills={timelineSkills}
-                  anchorMessageId={paintOnlyDisplayedTimeline ? null : timelineAnchorMessageId}
-                  onAnchorReady={onTimelineAnchorReadyStable}
-                  onAnchorSizeChanged={onTimelineAnchorSizeChangedStable}
+                  sendGlideActive={
+                    !paintOnlyDisplayedTimeline &&
+                    sendGlideThreadKey !== null &&
+                    sendGlideThreadKey === activeThreadKey
+                  }
                   contentInsetEndAdjustment={composerTimelineInset}
                   liveFollowEnabled={!paintOnlyDisplayedTimeline && timelineLiveFollowEnabled}
                   onIsAtEndChange={onIsAtEndChangeStable}

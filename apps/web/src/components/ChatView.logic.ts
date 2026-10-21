@@ -1057,10 +1057,18 @@ export function hasServerAcknowledgedLocalDispatch(input: {
   if (input.hasPendingApproval || input.hasPendingUserInput || Boolean(input.threadError)) {
     return true;
   }
-  // The thread shell can report a preparing or starting run before the detail
-  // projection behind `phase` loads, so either source still connecting holds
-  // the send.
-  if (input.phase === "connecting" || derivePhase(input.runtime ?? null) === "connecting") {
+  // The thread shell can report a preparing, starting or already running run
+  // before the detail projection behind `phase` loads, so either source still
+  // connecting, or the shell running while the detail has not loaded, holds
+  // the send. Releasing it there leaves nothing marking the turn as working
+  // until the detail loads, and the timeline's activity rows blink out under
+  // the just-sent message.
+  const shellPhase = derivePhase(input.runtime ?? null);
+  if (
+    input.phase === "connecting" ||
+    shellPhase === "connecting" ||
+    (shellPhase === "running" && input.phase === "disconnected")
+  ) {
     return false;
   }
 

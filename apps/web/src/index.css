@@ -845,10 +845,11 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   }
 }
 
-/* A user message just sent (or steered) rises straight up into place: 20px
-   up from below and a fade, on the spring, while the timeline scrolls it to
-   the top in the same 260ms (lib/sendMotion.ts), so it reads as one upward
-   movement. No scale, no sideways travel. Its intent label ("Steer") follows
+/* A user message just sent (or steered) rises straight up into place at the
+   bottom, above the composer: 20px up from below and a fade, on the spring,
+   while the timeline glides to its live end in the same 220ms
+   (lib/sendMotion.ts), so it reads as one upward movement. No scale, no
+   sideways travel. Its intent label ("Steer") follows
    once the bubble lands. Only messages sent while the thread is open play it,
    never history or remounts (MessagesTimeline's just-sent ids). Opacity only
    under reduced motion. */
@@ -866,7 +867,7 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
 }
 
 @utility animate-message-send {
-  animation: message-send-enter 260ms --theme(--ease-spring) both;
+  animation: message-send-enter 220ms --theme(--ease-spring) both;
   @media (prefers-reduced-motion: reduce) {
     animation-name: message-send-fade;
   }

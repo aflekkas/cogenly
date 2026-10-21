@@ -588,6 +588,24 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     ).toBe(false);
   });
 
+  it("holds a first send while the thread shell runs ahead of the detail projection", () => {
+    // The shell already reports the new run as running; `phase` still reads
+    // the unloaded detail. The turn is working, so the send must stay held.
+    const localDispatch = createLocalDispatchSnapshot(makeThread());
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        phase: "disconnected",
+        latestRun: null,
+        runtime: { ...readySession, status: "running", activeRunId: RunId.make("turn-2") },
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        threadError: null,
+      }),
+    ).toBe(false);
+  });
+
   it("waits for the matching running turn before acknowledging", () => {
     const localDispatch = createLocalDispatchSnapshot(
       makeThread({ latestRun: completedTurn, runtime: readySession }),

@@ -88,7 +88,6 @@ import { observeResize } from "~/lib/observeResize";
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 
-import { resolveSendAnchorEndSpace, sendAnchorOffset } from "./timelineSendAnchor";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { getProjectFaviconCacheKey } from "@t3tools/shared/projectFavicon";
@@ -567,9 +566,11 @@ interface MessagesTimelineProps {
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   providerStatuses: ReadonlyArray<ServerProvider>;
   runs: ReadonlyArray<HandoffTimelineRun>;
-  anchorMessageId: MessageId | null;
-  onAnchorReady: (messageId: MessageId, anchorIndex: number) => void;
-  onAnchorSizeChanged: (messageId: MessageId, size: number) => void;
+  /**
+   * A send's glide to the live end is running: the list's own instant pin to
+   * the end holds off so the glide is the one motion that moves the viewport.
+   */
+  sendGlideActive: boolean;
   contentInsetEndAdjustment: number;
   onIsAtEndChange: (isAtEnd: boolean) => void;
   /**
@@ -677,9 +678,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   skills = EMPTY_TIMELINE_SKILLS,
   providerStatuses,
   runs: runsProp,
-  anchorMessageId,
-  onAnchorReady,
-  onAnchorSizeChanged,
+  sendGlideActive,
   contentInsetEndAdjustment,
   onIsAtEndChange,
   onContentOverflowChange,
@@ -1253,35 +1252,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
   }, [citationAlwaysRender, restoringAlwaysRender, fullscreenAppRowId]);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const [minimapCurrentIndex, setMinimapCurrentIndex] = useState<number | null>(null);
-  const handleAnchorReady = useCallback(
-    (info: { anchorIndex: number | undefined }) => {
-      if (anchorMessageId !== null && info.anchorIndex !== undefined) {
-        onAnchorReady(anchorMessageId, info.anchorIndex);
-      }
-    },
-    [anchorMessageId, onAnchorReady],
-  );
-  const handleAnchorSizeChanged = useCallback(
-    (size: number) => {
-      if (anchorMessageId !== null) {
-        onAnchorSizeChanged(anchorMessageId, size);
-      }
-    },
-    [anchorMessageId, onAnchorSizeChanged],
-  );
-  // The floating chat header's inset, read from the scroller once it mounts.
-  const [headerInset, setHeaderInset] = useState(0);
-  const anchoredEndSpace = useMemo(() => {
-    const config = resolveSendAnchorEndSpace(
-      rows,
-      anchorMessageId,
-      (row) => (row.kind === "message" && row.message.role === "user" ? row.message.id : null),
-      sendAnchorOffset(headerInset),
-    );
-    return config
-      ? { ...config, onReady: handleAnchorReady, onSizeChanged: handleAnchorSizeChanged }
-      : undefined;
-  }, [anchorMessageId, handleAnchorReady, handleAnchorSizeChanged, headerInset, rows]);
   const maintainVisibleContentPosition = useMemo(
     () => ({
       data: true,
@@ -1292,9 +1262,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   );
   const timelineListFooter = useMemo(
     () => (
-      // The composer inset stays in the footer while a sent turn is anchored:
-      // the anchored end space counts the footer, and moving the inset out of
-      // it as a send lands made the list jump by the composer's height.
+      // The composer inset lives in the footer, so the list's end is the latest
+      // row plus the space the composer covers, and never further.
       <TimelineListFooter composerInset={contentInsetEndAdjustment}>{footer}</TimelineListFooter>
     ),
     [contentInsetEndAdjustment, footer],
@@ -1325,27 +1294,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onContentOverflowChange(measureContentOverflow());
     });
   }, [measureContentOverflow, onContentOverflowChange]);
-  // A sent turn's reply grows without scrolling: once it outgrows the
-  // viewport the list is no longer at its end, and the pill has to know.
-  const anchoredAtEndFrameRef = useRef<number | null>(null);
-  const reportAnchoredAtEnd = useCallback(() => {
-    if (!anchoredEndSpace || anchoredAtEndFrameRef.current !== null) return;
-    anchoredAtEndFrameRef.current = requestAnimationFrame(() => {
-      anchoredAtEndFrameRef.current = null;
-      const isAtEnd = resolveTimelineIsAtEnd(listRef.current?.getState?.());
-      if (isAtEnd !== undefined) onIsAtEndChange(isAtEnd);
-    });
-  }, [anchoredEndSpace, listRef, onIsAtEndChange]);
-  useEffect(
-    () => () => {
-      if (anchoredAtEndFrameRef.current !== null)
-        cancelAnimationFrame(anchoredAtEndFrameRef.current);
-    },
-    [],
-  );
   const handleItemSizeChanged = useCallback(() => {
     itemSizeChangesRef.current += 1;
-    reportAnchoredAtEnd();
     if (disclosurePinsEndRef.current) {
       queueMicrotask(pinDisclosureToEnd);
       scheduleDisclosureSettle();
@@ -1355,7 +1305,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       scheduleDisclosureSettle();
     }
     reportContentOverflow();
-  }, [pinDisclosureToEnd, reportAnchoredAtEnd, reportContentOverflow, scheduleDisclosureSettle]);
+  }, [pinDisclosureToEnd, reportContentOverflow, scheduleDisclosureSettle]);
   useEffect(() => cancelContentOverflowFrame, [cancelContentOverflowFrame]);
   // Shows the opened thread two frames after its rows last resized, or at the
   // cap, so a slow row cannot keep the thread hidden.
@@ -1422,7 +1372,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               workGroupState: workGroupViewState,
             },
           },
-          liveFollowEnabled && !anchoredEndSpace,
+          liveFollowEnabled,
         );
       }
     }
@@ -1476,7 +1426,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
     rows,
     listIdentityKey,
     liveFollowEnabled,
-    anchoredEndSpace,
     paintOnly,
     restoringThreadPosition,
     listRef,
@@ -1684,7 +1633,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
       listRef.current = list;
       const scroller = list?.getScrollableNode() ?? null;
       registerTimeline?.(scroller);
-      if (scroller) setHeaderInset(timelineHeaderInset(scroller));
     },
     [listRef, registerTimeline],
   );
@@ -1869,11 +1817,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
                   dataVersion={readyCitationRequest?.key ?? listIdentityKey}
                   {...(alwaysRender ? { alwaysRender } : {})}
                   onLoad={handleListLoad}
-                  {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+                  // A short thread sits at the bottom, just above the composer.
+                  alignItemsAtEnd
                   maintainScrollAtEnd={
                     citationPositioning ||
                     (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
-                    anchoredEndSpace ||
+                    sendGlideActive ||
                     !liveFollowEnabled ||
                     fullscreenAppRowId !== null ||
                     disclosureToggleSettling
