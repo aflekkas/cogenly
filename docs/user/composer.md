@@ -90,8 +90,8 @@ returns to the remembered selection.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
 
-The model picker opens on **Recent**, the top of its provider rail: the models you have picked
-or sent with most, and most recently, across providers. Each device keeps its own list.
+The model picker opens on **Favorites**, the top of its provider rail, when you have starred any
+models. Otherwise it opens on the current model's provider.
 
 ## Quote an assistant response
 

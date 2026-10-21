@@ -23,18 +23,9 @@ import { ChevronRightIcon, StarIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import {
   MODEL_PICKER_FAVORITES,
-  MODEL_PICKER_RECENT,
   ModelPickerSidebar,
   type ModelPickerRailSelection,
 } from "./ModelPickerSidebar";
-import {
-  mergeModelUsage,
-  pickRecentModels,
-  recordModelUsage,
-  threadModelUses,
-  useModelUsage,
-} from "~/lib/modelUsage";
-import { useThreadShells } from "~/state/entities";
 import {
   useEnvironmentModelPreferences,
   useToggleEnvironmentModelFavorite,
@@ -124,8 +115,6 @@ export function adjacentModelPickerProvider(input: {
   selectedInstanceId: ModelPickerRailSelection;
   /** Favorites leads the cycle when the rail shows it. */
   includeFavorites?: boolean;
-  /** Recent follows Favorites in the cycle when the rail shows it. */
-  includeRecent?: boolean;
   direction: 1 | -1;
   disabledInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
   selectableUnavailableInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
@@ -138,7 +127,6 @@ export function adjacentModelPickerProvider(input: {
           input.selectableUnavailableInstanceIds?.has(entry.instanceId)),
     )
     .map((entry) => entry.instanceId);
-  if (input.includeRecent) providers.unshift(MODEL_PICKER_RECENT);
   if (input.includeFavorites) providers.unshift(MODEL_PICKER_FAVORITES);
   if (providers.length === 0) {
     return input.selectedInstanceId;
@@ -199,7 +187,6 @@ function measureLegacyResize(input: {
 }
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
-const RECENT_MODEL_COUNT = 5;
 const MODEL_LIST_ESTIMATED_ITEM_SIZE = 52;
 
 // Rows sit 4px apart, the rail's own rhythm, so a selected row and a hovered
@@ -304,33 +291,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       new Set(favorites.map((favorite) => modelPickerModelKey(favorite.provider, favorite.model))),
     [favorites],
   );
-  // The rail entry the user chose; until then the picker opens on Recent when
-  // this device has used models, else on the current model's provider.
+  // The rail entry the user chose; until then the picker opens on Favorites
+  // when any model is starred, else on the current model's provider.
   const [chosenInstanceId, setChosenInstanceId] = useState<ModelPickerRailSelection | null>(null);
-  // What this device recorded, plus the threads the user wrote in, so Recent
-  // also covers models used before recording began or from another device.
-  const recordedModelUsage = useModelUsage();
-  const threadShells = useThreadShells();
-  const threadUsage = useMemo(
-    () =>
-      threadModelUses(
-        threadShells.map((thread) => ({
-          modelSelection: thread.modelSelection,
-          lastUserMessageAt:
-            thread.latestUserAuthoredMessageAt === undefined
-              ? thread.latestUserMessageAt
-              : thread.latestUserAuthoredMessageAt,
-        })),
-      ),
-    [threadShells],
-  );
-  const modelUsage = useMemo(
-    () => mergeModelUsage(recordedModelUsage, threadUsage),
-    [recordedModelUsage, threadUsage],
-  );
-  const [openedWithUsage] = useState(() => modelUsage.length > 0);
-  // Ranked as of opening, so the list holds still while the picker is open.
-  const [openedAt] = useState(() => Date.now());
+  const [openedWithFavorites] = useState(() => favorites.length > 0);
   const [expandedLegacyInstances, setExpandedLegacyInstances] = useState(
     () =>
       new Set<ProviderInstanceId>(
@@ -496,19 +460,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, [instanceEntries, isLocked, matchesLockedProvider]);
   const showSidebar = sidebarInstanceEntries.length > 0;
 
-  // Recent: the models this device used most and most recently, across
-  // providers, that this picker can still offer.
-  const recentModels = useMemo(
-    () =>
-      pickRecentModels(
-        flatModels.filter(matchesLockedProvider),
-        modelUsage,
-        openedAt,
-        RECENT_MODEL_COUNT,
-      ),
-    [flatModels, matchesLockedProvider, modelUsage, openedAt],
-  );
-  const showRecent = recentModels.length > 0;
   // Favorites: starred models this picker can still offer, in the order starred.
   const favoriteModels = useMemo(() => {
     const modelByKey = new Map(
@@ -522,10 +473,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     });
   }, [favorites, flatModels, matchesLockedProvider]);
   const selectedInstanceId: ModelPickerRailSelection =
-    chosenInstanceId === MODEL_PICKER_RECENT && !showRecent
-      ? props.activeInstanceId
-      : (chosenInstanceId ??
-        (openedWithUsage && showRecent ? MODEL_PICKER_RECENT : props.activeInstanceId));
+    chosenInstanceId ??
+    (openedWithFavorites && favoriteModels.length > 0
+      ? MODEL_PICKER_FAVORITES
+      : props.activeInstanceId);
   const showsFavorites = selectedInstanceId === MODEL_PICKER_FAVORITES;
 
   const handleSelectInstance = useCallback(
@@ -553,20 +504,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const filteredModels = useMemo(
     () =>
-      selectedInstanceId === MODEL_PICKER_RECENT
-        ? recentModels
-        : selectedInstanceId === MODEL_PICKER_FAVORITES
-          ? favoriteModels
-          : flatModels.filter(
-              (model) => model.instanceId === selectedInstanceId && matchesLockedProvider(model),
-            ),
-    [favoriteModels, flatModels, matchesLockedProvider, recentModels, selectedInstanceId],
+      selectedInstanceId === MODEL_PICKER_FAVORITES
+        ? favoriteModels
+        : flatModels.filter(
+            (model) => model.instanceId === selectedInstanceId && matchesLockedProvider(model),
+          ),
+    [favoriteModels, flatModels, matchesLockedProvider, selectedInstanceId],
   );
 
   const legacySection = useMemo(() => {
-    // Recent and Favorites list what was used or starred, legacy or not.
-    if (selectedInstanceId === MODEL_PICKER_RECENT || selectedInstanceId === MODEL_PICKER_FAVORITES)
-      return null;
+    // Favorites lists what was starred, legacy or not.
+    if (selectedInstanceId === MODEL_PICKER_FAVORITES) return null;
     const currentModels = filteredModels.filter((model) => !model.isLegacy);
     const legacyModels = filteredModels.filter((model) => model.isLegacy);
     if (legacyModels.length === 0) {
@@ -595,7 +543,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, [filteredModels, legacySection]);
 
   const selectedEntry =
-    selectedInstanceId === MODEL_PICKER_RECENT || selectedInstanceId === MODEL_PICKER_FAVORITES
+    selectedInstanceId === MODEL_PICKER_FAVORITES
       ? undefined
       : entryByInstanceId.get(selectedInstanceId);
   const providerSetupEntries =
@@ -661,7 +609,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       // normalization rules, so pass the driver kind here.
       const resolvedModel = resolveSelectableModel(entry.driverKind, modelSlug, options);
       if (resolvedModel) {
-        recordModelUsage(instanceId, resolvedModel);
         if (additive && onToggleModel) {
           onToggleModel(instanceId, resolvedModel);
         } else {
@@ -841,7 +788,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           entries: sidebarInstanceEntries,
           selectedInstanceId,
           includeFavorites: true,
-          includeRecent: showRecent,
           direction: command === "modelPicker.nextProvider" ? 1 : -1,
           disabledInstanceIds: lockedDisabledInstanceIds,
           selectableUnavailableInstanceIds,
@@ -881,7 +827,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     modelJumpShortcutContext,
     selectableUnavailableInstanceIds,
     selectedInstanceId,
-    showRecent,
     sidebarInstanceEntries,
   ]);
 
@@ -899,7 +844,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onSelectInstance={handleSelectInstance}
             onFocusList={focusModelList}
             showFavorites
-            showRecent={showRecent}
             instanceEntries={sidebarInstanceEntries}
             {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
             {...(lockedDisabledInstanceIds

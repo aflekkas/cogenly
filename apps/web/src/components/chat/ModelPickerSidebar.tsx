@@ -1,7 +1,7 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { HistoryIcon, SparklesIcon, StarIcon, type LucideIcon } from "lucide-react";
+import { SparklesIcon, StarIcon, type LucideIcon } from "lucide-react";
 import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
 import {
   createTooltipHandle,
@@ -58,19 +58,14 @@ const railTooltipHandle = createTooltipHandle<string>();
 
 /** The rail entry that lists starred models, in the order they were starred. */
 export const MODEL_PICKER_FAVORITES = "favorites";
-/** The rail entry that lists the models used most and most recently. */
-export const MODEL_PICKER_RECENT = "recent";
-export type ModelPickerRailSelection =
-  | ProviderInstanceId
-  | typeof MODEL_PICKER_FAVORITES
-  | typeof MODEL_PICKER_RECENT;
+export type ModelPickerRailSelection = ProviderInstanceId | typeof MODEL_PICKER_FAVORITES;
 
 const RAIL_LIST_BUTTON_CLASS =
   "relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors state-hover focus-visible:bg-state-hover focus-visible:outline-none aria-pressed:state-selected";
 
-/** A rail entry for a cross-provider list (Favorites, Recent) rather than one instance. */
+/** A rail entry for a cross-provider list (Favorites) rather than one instance. */
 function RailListButton(props: {
-  readonly value: typeof MODEL_PICKER_FAVORITES | typeof MODEL_PICKER_RECENT;
+  readonly value: typeof MODEL_PICKER_FAVORITES;
   readonly label: string;
   readonly tooltip: string;
   readonly icon: LucideIcon;
@@ -105,8 +100,6 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   onSelectInstance: (instanceId: ModelPickerRailSelection) => void;
   /** Shows the Favorites entry at the top. */
   showFavorites?: boolean;
-  /** Shows the Recent entry after Favorites; hidden while nothing has been used. */
-  showRecent?: boolean;
   /** Move focus from the rail into the model list. */
   onFocusList: () => void;
   /**
@@ -147,7 +140,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
       return;
     }
     setSelectedIndicatorTop(selectedItem.offsetTop + selectedItem.offsetHeight / 2 - 10);
-  }, [props.instanceEntries, props.selectedInstanceId, props.showFavorites, props.showRecent]);
+  }, [props.instanceEntries, props.selectedInstanceId, props.showFavorites]);
 
   const selectedEntry = props.instanceEntries.find(
     (entry) => entry.instanceId === props.selectedInstanceId,
@@ -200,17 +193,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 onSelect={() => handleSelect(MODEL_PICKER_FAVORITES)}
               />
             ) : null}
-            {props.showRecent ? (
-              <RailListButton
-                value={MODEL_PICKER_RECENT}
-                label="Recent models"
-                tooltip="Recent"
-                icon={HistoryIcon}
-                selected={props.selectedInstanceId === MODEL_PICKER_RECENT}
-                onSelect={() => handleSelect(MODEL_PICKER_RECENT)}
-              />
-            ) : null}
-            {props.showFavorites || props.showRecent ? (
+            {props.showFavorites ? (
               <div className="border-b border-border/70" aria-hidden="true" />
             ) : null}
             {/* Instance buttons (one per configured instance — built-in + custom) */}
