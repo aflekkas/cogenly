@@ -1,4 +1,5 @@
 import { AgentId } from "./agent.ts";
+import { AgentBuilderProposal } from "./agentBuilder.ts";
 import { OrchestrationMessageContext } from "./composerContext.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -373,9 +374,10 @@ export type WorkOrigin = typeof WorkOrigin.Type;
 /**
  * The sidebar surface a thread was created from. Decided once at creation and
  * never inferred from the project: Work can run without a project, and a chat
- * can sit in a real one. Threads from before this field omit it.
+ * can sit in a real one. Threads from before this field omit it. Builder
+ * threads run an agent-creation conversation and are listed nowhere.
  */
-export const ThreadSurface = Schema.Literals(["chat", "work"]);
+export const ThreadSurface = Schema.Literals(["chat", "work", "builder"]);
 export type ThreadSurface = typeof ThreadSurface.Type;
 const WorkMetadataFields = {
   surface: Schema.optional(ThreadSurface),
@@ -1520,6 +1522,16 @@ const OrchestrationV2SecretRequestFields = {
   secretStatus: OrchestrationV2SecretRequestStatus,
 } as const;
 
+/**
+ * The builder's current proposal for the agent being created. One per builder
+ * thread, replaced on every `propose_agent` call; the client renders it as
+ * the proposal card.
+ */
+const AgentProposalTurnItemFields = {
+  type: Schema.Literal("agent_proposal"),
+  proposal: AgentBuilderProposal,
+} as const;
+
 export const OrchestrationV2TurnItem = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -1724,6 +1736,10 @@ export const OrchestrationV2TurnItem = Schema.Union([
     output: Schema.optional(Schema.Unknown),
     /** Set on the wire when output was withheld; fetch it with getTurnItem. */
     outputOmitted: Schema.optional(Schema.Boolean),
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
+    ...AgentProposalTurnItemFields,
   }),
 ]);
 export type OrchestrationV2TurnItem = typeof OrchestrationV2TurnItem.Type;
@@ -2526,6 +2542,10 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     output: Schema.optional(Schema.Unknown),
     /** Set on the wire when output was withheld; fetch it with getTurnItem. */
     outputOmitted: Schema.optional(Schema.Boolean),
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
+    ...AgentProposalTurnItemFields,
   }),
 ]);
 export type OrchestrationV2TurnItemJson = typeof OrchestrationV2TurnItemJson.Type;

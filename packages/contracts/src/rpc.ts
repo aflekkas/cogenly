@@ -5,6 +5,7 @@ import * as Exports from "./export.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Work from "./work.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
+import * as AgentBuilder from "./agentBuilder.ts";
 import * as Agents from "./agent.ts";
 import {
   OrchestrationV2SearchThreadError,
@@ -520,6 +521,7 @@ export const WS_METHODS = {
   agentsMemoryWrite: "agents.memoryWrite",
   agentsMemoryForget: "agents.memoryForget",
   agentsRuns: "agents.runs",
+  agentsBuilderStart: "agents.builderStart",
   agentsApprovalsList: "agents.approvalsList",
   agentsRequestApproval: "agents.requestApproval",
   agentsApprove: "agents.approve",
@@ -2023,6 +2025,11 @@ const WsAgentsRunsRpc = Rpc.make(WS_METHODS.agentsRuns, {
   success: Agents.AgentRunsResult,
   error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
 });
+const WsAgentsBuilderStartRpc = Rpc.make(WS_METHODS.agentsBuilderStart, {
+  payload: AgentBuilder.AgentBuilderStartInput,
+  success: AgentBuilder.AgentBuilderStartResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
 
 const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
   payload: ScheduledTaskListInput,
@@ -2215,6 +2222,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAgentsMemoryWriteRpc,
   WsAgentsMemoryForgetRpc,
   WsAgentsRunsRpc,
+  WsAgentsBuilderStartRpc,
   WsScheduledTasksListRpc,
   WsScheduledTasksSubscribeRpc,
   WsScheduledTasksUpsertRpc,

@@ -5,7 +5,7 @@ import {
   MIN_SCHEDULED_TASK_INTERVAL_MS,
   ScheduledTaskSchedule,
   ScheduledTaskUpsertSchedule,
-} from "./scheduledTask.ts";
+} from "./scheduledTaskSchedule.ts";
 
 const decodeSchedule = Schema.decodeUnknownSync(ScheduledTaskSchedule);
 const decodeUpsertSchedule = Schema.decodeUnknownSync(ScheduledTaskUpsertSchedule);

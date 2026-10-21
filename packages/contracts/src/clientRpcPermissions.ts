@@ -72,6 +72,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.commitmentsConfirm]: AuthOrchestrationOperateScope,
   [WS_METHODS.commitmentsDismiss]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsUpsert]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentsBuilderStart]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsSend]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsMarkRead]: AuthOrchestrationOperateScope,

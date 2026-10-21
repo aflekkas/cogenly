@@ -86,8 +86,23 @@ export const AgentUpsertInput = Schema.Struct({
   responsibility: Schema.optional(AgentPolicyFields.responsibility),
   permissions: Schema.optional(AgentPermissions),
   notifyPolicy: Schema.optional(AgentPolicyFields.notifyPolicy),
+  /**
+   * On create, the server opens with a hidden first turn from the agent
+   * itself, so no fake owner greeting is needed. Ignored on edits.
+   */
+  kickoff: Schema.optional(Schema.Boolean),
 });
 export type AgentUpsertInput = typeof AgentUpsertInput.Type;
+/** What an agent may change about itself from its own threads. */
+export const AgentOwnProfileUpdateInput = Schema.Struct({
+  name: Schema.optional(AgentFields.name),
+  avatar: Schema.optional(
+    Schema.Struct({ ...AgentAvatar.fields, seed: Schema.optional(AgentAvatar.fields.seed) }),
+  ),
+  responsibility: Schema.optional(AgentPolicyFields.responsibility),
+  instructions: Schema.optional(AgentFields.instructions),
+});
+export type AgentOwnProfileUpdateInput = typeof AgentOwnProfileUpdateInput.Type;
 export const AgentKey = Schema.Struct({ id: AgentId });
 export const AgentListItem = Schema.Struct({
   ...Agent.fields,
