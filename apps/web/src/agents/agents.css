@@ -20,10 +20,12 @@
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
+/* The messages and the composer share the chat view's content lane, so the
+   composer sits exactly where it does in Chats and Work. */
 @utility agent-messages {
-  max-width: 780px;
+  max-width: var(--chat-content-max-width);
   margin: 0 auto;
-  padding: 21px 30px 26px;
+  padding: 21px var(--chat-content-inset) 26px;
   display: flex;
   flex-direction: column;
   min-height: 100%;
@@ -225,10 +227,10 @@
 }
 @utility agent-composer-area {
   flex: none;
-  max-width: 780px;
+  max-width: var(--chat-content-max-width);
   width: 100%;
   margin: 0 auto;
-  padding: 12px 30px 22px;
+  padding: 12px var(--chat-content-inset) 20px;
 }
 @utility agent-system-line {
   align-self: stretch;

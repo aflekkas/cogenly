@@ -1,8 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   useEffect,
-  useLayoutEffect,
-  useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -46,12 +44,7 @@ import {
   mainColumnCrampedBesidePanel,
   useListColumnLayoutStore,
 } from "./sidebar/listColumnLayoutStore";
-import {
-  clearModeEnter,
-  modeSwitchDirection,
-  playModeEnter,
-} from "./sidebar/modes/modeSwitchMotion";
-import type { SidebarMode } from "./sidebar/modes/sidebarModes.logic";
+import { modeSwitchCrossfadeRunning } from "./sidebar/modes/modeSwitchMotion";
 import { useProjects } from "../state/entities";
 import {
   clampThreadSidebarWidth,
@@ -274,10 +267,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   // The settings nav and the thread sidebar cross-fade when one replaces the
-  // other, never on the first paint.
+  // other, never on the first paint, nor inside a mode switch's own crossfade.
   const [sidebarView, setSidebarView] = useState({ settings: isOnSettings, swapped: false });
   if (sidebarView.settings !== isOnSettings) {
-    setSidebarView({ settings: isOnSettings, swapped: true });
+    setSidebarView({ settings: isOnSettings, swapped: !modeSwitchCrossfadeRunning() });
   }
   // The cross-fade runs once: a column shown again after a full-width page
   // (display: none) would otherwise replay its starting style.
@@ -332,23 +325,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   });
   const onListColumnOpenChange = (open: boolean) =>
     useListColumnLayoutStore.getState().applyOpenChange(sidebarMode, open);
-  // A mode switch fades the new list in once, from the rail's direction.
-  const listContentRef = useRef<HTMLDivElement | null>(null);
-  const listMotionModeRef = useRef<SidebarMode>(sidebarMode);
-  useLayoutEffect(() => {
-    const previous = listMotionModeRef.current;
-    listMotionModeRef.current = sidebarMode;
-    const list = listContentRef.current;
-    if (!list) return;
-    // A hidden column would replay the motion when it shows again.
-    if (listSidebarHidden) {
-      clearModeEnter(list);
-      return;
-    }
-    const direction = modeSwitchDirection(previous, sidebarMode);
-    if (direction === null || isOnSettings) return;
-    playModeEnter(list, direction);
-  }, [isOnSettings, listSidebarHidden, sidebarMode]);
   const sidebarProviderStyle = {
     "--sidebar-width": `${listColumnWidth}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
@@ -431,7 +407,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         >
           <div
             key={isOnSettings ? "settings" : "threads"}
-            ref={listContentRef}
             className={cn(
               "flex min-h-0 w-full flex-1 flex-col",
               sidebarView.swapped &&

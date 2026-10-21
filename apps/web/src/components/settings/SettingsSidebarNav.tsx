@@ -27,6 +27,7 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { SearchInput } from "../ui/search-input";
+import { crossfadeModeSwitch } from "../sidebar/modes/modeSwitchMotion";
 import {
   SidebarContent,
   SidebarFooter,
@@ -179,14 +180,23 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       if (isMobile) {
         setOpenMobile(false);
       }
-      void navigate({
-        to,
-        hash: "",
-        replace: true,
-        hashScrollIntoView: false,
-      });
+      const switchSection = () => {
+        void navigate({
+          to,
+          hash: "",
+          replace: true,
+          hashScrollIntoView: false,
+        });
+      };
+      // Another section crossfades in once its page commits (routes/settings.tsx).
+      if (pathname === to || pathname.startsWith(`${to}/`)) switchSection();
+      else
+        crossfadeModeSwitch(() => {
+          switchSection();
+          return true;
+        });
     },
-    [isMobile, navigate, setOpenMobile],
+    [isMobile, navigate, pathname, setOpenMobile],
   );
   const clearSearch = useCallback(() => {
     setQuery("");

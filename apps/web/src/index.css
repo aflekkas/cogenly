@@ -141,9 +141,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --motion-duration-fast: 150ms;
   --motion-duration-base: 220ms;
   --motion-duration-slow: 400ms;
-  /* The sidebar mode switch's enter fade and its travel. */
-  --motion-duration-mode-switch: 180ms;
-  --mode-switch-travel: 6px;
+  /* The mode switch crossfade (modeSwitchMotion.ts). */
+  --motion-duration-mode-switch: 150ms;
   /* ease-standard for inline transitions and scripts (the theme token is
      inlined into utilities, so it has no runtime variable). */
   --motion-ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
@@ -428,40 +427,29 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   display: none;
 }
 
-/* The sidebar mode switch's enter motion (modeSwitchMotion.ts): a short fade
-   with a small rise in the rail's direction. Opacity only under reduced motion. */
-@keyframes mode-enter-from-below {
-  from {
-    opacity: 0;
-    translate: 0 var(--mode-switch-travel);
-  }
+/* A mode switch is a pure crossfade of the window (modeSwitchMotion.ts): the
+   old frame fades out while the new one fades in, blended so that whatever is
+   the same in both stays still. Opacity only, nothing moves; no named element
+   morphs, and the fading frames never catch the pointer. */
+html[data-mode-switch-transition]::view-transition {
+  pointer-events: none;
 }
 
-@keyframes mode-enter-from-above {
-  from {
-    opacity: 0;
-    translate: 0 calc(var(--mode-switch-travel) * -1);
-  }
+html[data-mode-switch-transition]::view-transition-group(*) {
+  animation: none;
 }
 
-@keyframes mode-enter-fade {
-  from {
-    opacity: 0;
-  }
+html[data-mode-switch-transition]::view-transition-old(*),
+html[data-mode-switch-transition]::view-transition-new(*) {
+  animation-duration: var(--motion-duration-mode-switch);
+  animation-timing-function: var(--motion-ease-standard);
 }
 
-@utility animate-mode-enter-from-below {
-  animation: mode-enter-from-below var(--motion-duration-mode-switch) --theme(--ease-out) both;
-  @media (prefers-reduced-motion: reduce) {
-    animation-name: mode-enter-fade;
-  }
-}
-
-@utility animate-mode-enter-from-above {
-  animation: mode-enter-from-above var(--motion-duration-mode-switch) --theme(--ease-out) both;
-  @media (prefers-reduced-motion: reduce) {
-    animation-name: mode-enter-fade;
-  }
+/* The new screen's rows and labels mount inside the crossfade: their own
+   enter rise and fade would move them in the fading frame, so they appear in
+   place and the crossfade alone brings them in. */
+html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph) {
+  transition: none;
 }
 
 @utility surface-glass {

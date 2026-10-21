@@ -38,6 +38,7 @@ import { isSidebarUtilityPage } from "./mainAppLocation";
 import { routeHidesListColumn, SIDEBAR_TOGGLE_DISABLED_LABEL } from "./listColumnRoutes";
 import { SIDEBAR_MODE_ICONS } from "./modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./modes/sidebarModes.logic";
+import { crossfadeModeSwitch } from "./modes/modeSwitchMotion";
 import { useSelectSidebarMode } from "./modes/useSelectSidebarMode";
 import { resolveVerticalTabIndex } from "./navRail.logic";
 import { useNavRailBadgeStore } from "./navRailState";
@@ -267,8 +268,15 @@ export function SidebarNavRail({
             aria-label="Settings"
             aria-current={onSettings ? "page" : undefined}
             onClick={() => {
-              if (!open) setOpen(true);
-              if (!onSettings) void navigate({ to: "/settings" });
+              if (onSettings) {
+                if (!open) setOpen(true);
+                return;
+              }
+              crossfadeModeSwitch(() => {
+                if (!open) setOpen(true);
+                void navigate({ to: "/settings" });
+                return true;
+              });
             }}
             {...preloadOnIntent("settings")}
             className={cn(RAIL_BUTTON_CLASS, railButtonTone(onSettings))}

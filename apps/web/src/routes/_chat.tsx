@@ -7,7 +7,7 @@ import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
-import { playPendingMainPaneEnter } from "../components/sidebar/modes/modeSwitchMotion";
+import { settleModeSwitchMainPane } from "../components/sidebar/modes/modeSwitchMotion";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useProjects } from "../state/entities";
@@ -268,7 +268,7 @@ function ChatRouteLayout() {
     if (!outletRendered || !outlet) return;
     const settle = () => {
       if (outlet.firstElementChild === null) return false;
-      playPendingMainPaneEnter(outlet.firstElementChild);
+      settleModeSwitchMainPane();
       setRetained(null);
       return true;
     };

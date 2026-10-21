@@ -3,13 +3,13 @@ import { useAgents, useAgentConversation } from "../agents/agentsClient";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 
 import ChatView from "./ChatView";
 import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
 import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
 import { SidebarInset } from "./ui/sidebar";
-import { playPendingMainPaneEnter } from "./sidebar/modes/modeSwitchMotion";
+import { settleModeSwitchMainPane } from "./sidebar/modes/modeSwitchMotion";
 import {
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThreadByRef,
@@ -218,18 +218,16 @@ export function ThreadRouteView({
     );
   }
 
-  // A hand-picked sidebar mode plays its enter motion on the thread it lands on.
-  const insetRef = useRef<HTMLElement | null>(null);
+  // A hand-picked sidebar mode crossfades to the thread it lands on.
   const targetKey = target.kind === "server" ? scopedThreadKey(target.threadRef) : target.draftId;
   useLayoutEffect(() => {
-    // Plays when the view takes another thread.
+    // Settles when the view takes another thread.
     void targetKey;
-    if (!retained) playPendingMainPaneEnter(insetRef.current);
+    if (!retained) settleModeSwitchMainPane();
   }, [retained, targetKey]);
 
   return (
     <SidebarInset
-      ref={insetRef}
       className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh"
       data-retained-thread-view={retained ? "" : undefined}
       inert={retained || undefined}

@@ -1,75 +1,100 @@
-import { SIDEBAR_MODES, type SidebarMode } from "./sidebarModes.logic";
+import { flushSync } from "react-dom";
 
 /**
- * The one enter motion of a sidebar mode switch: the list column and the main
- * pane fade in, rising from below when the picked mode sits lower on the rail
- * and settling from above when it sits higher. Opacity only under reduced
- * motion (see the utilities in index.css).
+ * The one motion of a mode switch (Chats, Work, Agents, Projects, and the
+ * settings sections): a pure crossfade of the whole window, opacity only.
+ * Nothing moves. It is a same-document view transition of the root: the old
+ * frame fades out while the new one fades in, blended with plus-lighter, so
+ * whatever is the same in both modes (the rail, the search bar, the header)
+ * stays perfectly still and only what changed fades. Instant under reduced
+ * motion. See the `data-mode-switch-transition` rules in index.css.
  *
- * The list column plays it as soon as the mode changes. The main pane plays it
- * once, when its content for the new mode first commits (often a navigation
- * later), so the motion never runs over the outgoing content.
+ * The new frame is captured once the main pane's content for the new mode has
+ * committed (`settleModeSwitchMainPane`), often a navigation or two later, or
+ * after MAIN_PANE_WAIT_MS at the latest; until then the old frame stays on
+ * screen, so there is never a blank frame or a cut in the middle of the fade.
  */
-export type ModeSwitchDirection = "from-below" | "from-above";
 
-const ENTER_CLASS: Record<ModeSwitchDirection, string> = {
-  "from-below": "animate-mode-enter-from-below",
-  "from-above": "animate-mode-enter-from-above",
+/** The main pane's content for a picked mode lands within this long, or the fade runs without it. */
+export const MAIN_PANE_WAIT_MS = 400;
+const TRANSITION_ATTRIBUTE = "modeSwitchTransition";
+
+interface ModeSwitchViewTransition {
+  readonly finished: Promise<void>;
+}
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (update: () => Promise<void>) => ModeSwitchViewTransition;
 };
-/** The main pane's content for a picked mode lands within this long, or not at all. */
-const PENDING_MAIN_ENTER_MS = 1000;
 
-let pendingMainEnter: { direction: ModeSwitchDirection; expiresAt: number } | null = null;
+let settlePendingMainPane: (() => void) | null = null;
+let activeTransition: ModeSwitchViewTransition | null = null;
 
-export function modeSwitchDirection(
-  previous: SidebarMode,
-  next: SidebarMode,
-): ModeSwitchDirection | null {
-  if (previous === next) return null;
-  return SIDEBAR_MODES.indexOf(next) > SIDEBAR_MODES.indexOf(previous)
-    ? "from-below"
-    : "from-above";
+function crossfadeAvailable(): boolean {
+  if (typeof document === "undefined" || typeof window === "undefined") return false;
+  if (typeof (document as ViewTransitionDocument).startViewTransition !== "function") return false;
+  if (document.visibilityState === "hidden") return false;
+  return !(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
 }
 
-/** A hand-picked mode switch: the main pane's next content plays the enter motion. */
-export function noteModeSwitchForMainPane(previous: SidebarMode, next: SidebarMode): void {
-  const direction = modeSwitchDirection(previous, next);
-  if (direction === null) return;
-  pendingMainEnter = { direction, expiresAt: performance.now() + PENDING_MAIN_ENTER_MS };
+/** Resolves on `settleModeSwitchMainPane`, or after `timeoutMs`. */
+export function waitForModeSwitchMainPane(timeoutMs: number = MAIN_PANE_WAIT_MS): Promise<void> {
+  // A newer switch takes over: the older one stops waiting.
+  settlePendingMainPane?.();
+  return new Promise<void>((resolve) => {
+    const settle = () => {
+      if (settlePendingMainPane === settle) settlePendingMainPane = null;
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(settle, timeoutMs);
+    settlePendingMainPane = settle;
+  });
 }
 
 /**
- * Plays the pending main pane motion on the contents of `pane` (a
- * SidebarInset), once. The pane's own opaque background stays put, so the
- * fade never shows the window backdrop. Call before paint.
+ * The main pane's content for the switched-to mode has committed. Call from a
+ * layout effect (before paint), so the crossfade captures it as the new frame.
  */
-export function playPendingMainPaneEnter(pane: Element | null): void {
-  const pending = pendingMainEnter;
-  if (pending === null || pane === null) return;
-  pendingMainEnter = null;
-  if (performance.now() > pending.expiresAt) return;
-  for (const child of pane.children) playModeEnter(child, pending.direction);
+export function settleModeSwitchMainPane(): void {
+  settlePendingMainPane?.();
 }
 
-/** Drops a running enter motion, e.g. from a column about to be hidden. */
-export function clearModeEnter(element: Element): void {
-  element.classList.remove(ENTER_CLASS["from-below"], ENTER_CLASS["from-above"]);
+/**
+ * Runs a mode switch inside the crossfade. `update` changes the state (it runs
+ * in flushSync, so the list column commits at once) and returns true when the
+ * main pane changes too, which the fade then waits for. Runs `update` directly
+ * under reduced motion or without view transitions.
+ */
+export function crossfadeModeSwitch(update: () => boolean): void {
+  if (!crossfadeAvailable()) {
+    update();
+    return;
+  }
+  const root = document.documentElement;
+  // Set before the old frame is captured, so its fade already uses these rules.
+  root.dataset[TRANSITION_ATTRIBUTE] = "";
+  try {
+    const transition = (document as ViewTransitionDocument).startViewTransition!(async () => {
+      let awaitsMainPane = false;
+      flushSync(() => {
+        awaitsMainPane = update();
+      });
+      if (awaitsMainPane) await waitForModeSwitchMainPane();
+    });
+    activeTransition = transition;
+    const clear = () => {
+      if (activeTransition !== transition) return;
+      activeTransition = null;
+      delete root.dataset[TRANSITION_ATTRIBUTE];
+    };
+    transition.finished.then(clear, clear);
+  } catch {
+    if (activeTransition === null) delete root.dataset[TRANSITION_ATTRIBUTE];
+    update();
+  }
 }
 
-/** Restarts the enter motion on `element`. Call before paint. */
-export function playModeEnter(element: Element, direction: ModeSwitchDirection): void {
-  clearModeEnter(element);
-  // Restart the animation when the class was already there.
-  void (element as HTMLElement).offsetWidth;
-  const className = ENTER_CLASS[direction];
-  element.classList.add(className);
-  const onEnd = (event: Event) => {
-    // Ignore the animations of descendants, which bubble here.
-    if (event.target !== element) return;
-    element.classList.remove(className);
-    element.removeEventListener("animationend", onEnd);
-    element.removeEventListener("animationcancel", onEnd);
-  };
-  element.addEventListener("animationend", onEnd);
-  element.addEventListener("animationcancel", onEnd);
+/** True while a mode switch's crossfade runs, so nothing inside it plays a fade of its own. */
+export function modeSwitchCrossfadeRunning(): boolean {
+  return activeTransition !== null;
 }

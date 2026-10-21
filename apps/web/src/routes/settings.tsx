@@ -5,7 +5,7 @@ import {
   useChildMatches,
   useLocation,
 } from "@tanstack/react-router";
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useState, type ReactNode } from "react";
 import { RotateCcwIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
@@ -13,7 +13,7 @@ import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
 import { SidebarInset } from "../components/ui/sidebar";
 import { useNavigateToMainApp } from "../components/sidebar/mainAppLocation";
-import { playModeEnter } from "../components/sidebar/modes/modeSwitchMotion";
+import { settleModeSwitchMainPane } from "../components/sidebar/modes/modeSwitchMotion";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
 import { useEscapeToGoBack } from "../hooks/useNavigateBack";
@@ -129,15 +129,11 @@ function SettingsContentLayout() {
   const [restoreSignal, setRestoreSignal] = useState(0);
   // The section's route, which changes only once its (lazily loaded) page
   // commits; until then the old page stays on screen. Hash and search changes
-  // within a section keep it.
+  // within a section keep it. Its commit is the new frame of a section switch's
+  // crossfade (SettingsSidebarNav, the rail's Settings button).
   const sectionRouteId = useChildMatches({ select: (matches) => matches[0]?.routeId });
-  const contentRef = useRef<HTMLDivElement>(null);
-  const shownSectionRef = useRef(sectionRouteId);
   useLayoutEffect(() => {
-    if (shownSectionRef.current === sectionRouteId) return;
-    shownSectionRef.current = sectionRouteId;
-    // The sidebar mode switch's enter motion, once per section change.
-    if (contentRef.current) playModeEnter(contentRef.current, "from-below");
+    if (sectionRouteId !== undefined) settleModeSwitchMainPane();
   }, [sectionRouteId]);
 
   return (
@@ -156,11 +152,7 @@ function SettingsContentLayout() {
           </div>
         </WorkspacePageHeader>
 
-        <div
-          key={`${contentScopeKey}:${restoreSignal}`}
-          ref={contentRef}
-          className="min-h-0 flex flex-1 flex-col"
-        >
+        <div key={`${contentScopeKey}:${restoreSignal}`} className="min-h-0 flex flex-1 flex-col">
           <SettingsScopeBoundary pathname={location.pathname}>
             <Outlet />
           </SettingsScopeBoundary>

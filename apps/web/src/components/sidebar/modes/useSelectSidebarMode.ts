@@ -6,7 +6,7 @@ import { sidebarModeForThreadKind } from "../../../threadCapabilities";
 import { useUiStateStore } from "../../../uiStateStore";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "../mainAppLocation";
 import { modeSwitchReplacesMainPanel, type MainPanelContent } from "./modeLanding.logic";
-import { noteModeSwitchForMainPane } from "./modeSwitchMotion";
+import { crossfadeModeSwitch } from "./modeSwitchMotion";
 import type { SidebarMode } from "./sidebarModes.logic";
 
 /**
@@ -36,20 +36,30 @@ export function useSelectSidebarMode() {
   return useCallback(
     (next: SidebarMode, options?: { readonly leaveUtilityPage?: boolean }) => {
       const previous = useUiStateStore.getState().sidebarMode;
-      setMode(next);
-      if (isSidebarUtilityPage(router.state.location.pathname)) {
-        if (!options?.leaveUtilityPage) return;
-        // Back to where the user was in the same mode; a fresh landing in another,
-        // since the remembered page may be a thread that mode does not list.
-        noteModeSwitchForMainPane(previous, next);
-        void (next === previous ? navigateToMainApp() : router.navigate({ to: "/" }));
+      const onUtilityPage = isSidebarUtilityPage(router.state.location.pathname);
+      if (onUtilityPage && !options?.leaveUtilityPage) {
+        setMode(next);
         return;
       }
-      const content = readMainPanelContent();
-      const replacesMainPanel = modeSwitchReplacesMainPanel(next, content);
-      // The index lands again on its own (ModeIndexLanding is keyed by mode).
-      if (replacesMainPanel || content.kind === "index") noteModeSwitchForMainPane(previous, next);
-      if (replacesMainPanel) void router.navigate({ to: "/" });
+      const content = onUtilityPage ? null : readMainPanelContent();
+      const replacesMainPanel = content !== null && modeSwitchReplacesMainPanel(next, content);
+      // The same mode again changes nothing on screen, unless it leaves a utility page.
+      if (next === previous && !onUtilityPage && !replacesMainPanel) {
+        setMode(next);
+        return;
+      }
+      crossfadeModeSwitch(() => {
+        setMode(next);
+        if (onUtilityPage) {
+          // Back to where the user was in the same mode; a fresh landing in another,
+          // since the remembered page may be a thread that mode does not list.
+          void (next === previous ? navigateToMainApp() : router.navigate({ to: "/" }));
+          return true;
+        }
+        if (replacesMainPanel) void router.navigate({ to: "/" });
+        // The index lands again on its own (ModeIndexLanding is keyed by mode).
+        return replacesMainPanel || content?.kind === "index";
+      });
     },
     [navigateToMainApp, readMainPanelContent, router, setMode],
   );
