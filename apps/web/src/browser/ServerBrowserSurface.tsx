@@ -52,8 +52,8 @@ export interface ServerBrowserHandle {
   readonly reload: (options?: { readonly ignoreCache?: boolean }) => void;
   readonly viewport: (setting: PreviewViewportSetting) => void;
   readonly canvas: () => HTMLCanvasElement | null;
-  /** Claims the page for this viewer, or hands it back to the agent. */
-  readonly setControl: (owner: "you" | "agent") => void;
+  /** Claims the page for this viewer; the agent takes it back when it next acts. */
+  readonly takeControl: () => void;
 }
 
 const RESIZE_THROTTLE_MS = 150;
@@ -333,7 +333,7 @@ export function ServerBrowserSurface(props: {
         send({ type: "reload", ...(options?.ignoreCache ? { ignoreCache: true } : {}) }),
       viewport: (setting) => send({ type: "viewport", setting }),
       canvas: () => (hasFrameRef.current ? canvasRef.current : null),
-      setControl: (owner) => send({ type: owner === "you" ? "takeControl" : "releaseControl" }),
+      takeControl: () => send({ type: "takeControl" }),
     }),
     [send],
   );
@@ -749,7 +749,7 @@ export function ServerBrowserSurface(props: {
       data-server-browser-surface={tabId}
     >
       {controlPosition === "none" ? null : (
-        // One compact row of chrome: who drives the page, and the handoff button.
+        // One compact row of chrome: who drives the page, and a button to take it.
         // h-8 is PREVIEW_MINI_PLAYER_CHROME_HEIGHT; the floating player adds it to its frame.
         <div
           className={cn(
@@ -764,17 +764,10 @@ export function ServerBrowserSurface(props: {
             <ControlGlyph control={control} />
             <span className="truncate">{previewStreamControlLabel(control)}</span>
           </span>
-          {control?.canOperate ? (
-            <Button
-              variant="outline"
-              size="xs"
-              disabled={control.controller === "another-viewer"}
-              onClick={() =>
-                send({ type: control.controller === "you" ? "releaseControl" : "takeControl" })
-              }
-            >
-              {/* The label already says who drives; the short verb keeps the row on one line at the minimum width. */}
-              {control.controller === "you" ? "Release" : "Take control"}
+          {/* Nothing to hand back while you drive: the agent takes control when it next acts. */}
+          {control?.canOperate && control.controller !== "you" ? (
+            <Button variant="outline" size="xs" onClick={() => send({ type: "takeControl" })}>
+              Take control
             </Button>
           ) : null}
         </div>

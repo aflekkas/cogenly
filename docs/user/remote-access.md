@@ -189,8 +189,9 @@ only once. Some Linux hosts need [setup](#browser-host-setup) before it can
 start.
 
 Agent tabs have separate storage and share a Chromium process. Take control before
-typing into an agent's tab, then release control when you want the agent to
-continue. Read-only connections can watch without changing the page.
+typing into an agent's tab; taking control stops the agent's current action. The
+agent takes control back the next time it acts, so there is nothing to hand back.
+Read-only connections can watch without changing the page.
 
 While you have control, the tab works with your device: text the page copies or
 cuts goes to your clipboard, a file picker on the page opens your device's

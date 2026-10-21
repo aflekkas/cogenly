@@ -75,7 +75,10 @@ const PreviewAutomationTabTargetFields = {
 export const PreviewAutomationTabTargetInput = Schema.Struct(PreviewAutomationTabTargetFields);
 export type PreviewAutomationTabTargetInput = typeof PreviewAutomationTabTargetInput.Type;
 
-/** `human`: a person controls the tab now; `agent`: an agent session opened it; `unclaimed`: neither. */
+/**
+ * `human`: a person controls the tab now, until an agent acts on it; `agent`:
+ * an agent session opened it; `unclaimed`: neither.
+ */
 export const PreviewAutomationTabOwner = Schema.Literals(["agent", "human", "unclaimed"]);
 
 export const PreviewAutomationProfile = Schema.Struct({
@@ -130,8 +133,8 @@ export const PreviewAutomationStatus = Schema.Struct({
   ),
   /**
    * Server hosts: every tab in the thread, including ones the user or another
-   * agent session opened. Any of them can be read; acting needs `ownedByCaller`,
-   * or an `unclaimed` tab while no human controls it.
+   * agent session opened. Any of them can be read; acting needs `ownedByCaller`
+   * or a tab no agent opened, and takes control from a person driving it.
    */
   tabs: Schema.optional(
     Schema.Array(
@@ -970,7 +973,6 @@ export class PreviewAutomationTimeoutError extends Schema.TaggedError<PreviewAut
 
 export const PreviewAutomationControlReason = Schema.Literals([
   "agentMismatch",
-  "humanControl",
   "tabRequired",
   "closed",
   "interrupted",
@@ -990,8 +992,6 @@ export class PreviewAutomationControlInterruptedError extends Schema.TaggedError
   override get message(): string {
     if (this.reason === "agentMismatch")
       return "This browser tab belongs to another agent session or a human. Open your own tab.";
-    if (this.reason === "humanControl")
-      return "A human controls this browser tab. Wait until they release control.";
     if (this.reason === "tabRequired")
       return "Multiple browser tabs belong to this session. Pass a tabId from preview_open or from the tabs listed by preview_status.";
     if (this.reason === "dialogPending")

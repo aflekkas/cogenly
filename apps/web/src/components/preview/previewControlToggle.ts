@@ -1,53 +1,35 @@
 export type PreviewController = "agent" | "you" | "another-viewer" | "unclaimed";
 
 export interface PreviewControlToggleState {
-  /** Pressed means the page is in the agent's hands (or nobody's), not yours. */
+  /** Pressed means the page is in someone else's hands (or nobody's), not yours. */
   readonly pressed: boolean;
+  /** Set while you drive: there is nothing to hand back. */
   readonly disabled: boolean;
   /** The tooltip and accessible name: who drives, and what a click does. */
   readonly hint: string;
-  /** What a click asks the server for. */
-  readonly next: "you" | "agent" | null;
 }
 
 /**
- * The toolbar's control toggle, from the stream's controller. A click always
- * flips who drives: taking control interrupts the agent, handing it back
- * lets the agent act again. On a tab an agent opened, "handed back" shows as
- * the agent driving even between its actions; on a tab a person opened it is
- * simply nobody's until someone takes it.
+ * The toolbar's control toggle, from the stream's controller. A click only
+ * ever takes control, which interrupts whatever the agent or another viewer
+ * was doing. There is no way to hand the page back: the agent takes control
+ * again the next time it acts.
  */
 export function resolvePreviewControlToggle(
   controller: PreviewController,
 ): PreviewControlToggleState {
   switch (controller) {
     case "you":
-      return {
-        pressed: false,
-        disabled: false,
-        hint: "You have control · click to hand the page to the agent",
-        next: "agent",
-      };
+      return { pressed: false, disabled: true, hint: "You have control" };
     case "agent":
-      return {
-        pressed: true,
-        disabled: false,
-        hint: "Agent has control · click to take over",
-        next: "you",
-      };
+      return { pressed: true, disabled: false, hint: "Agent has control · click to take over" };
     case "unclaimed":
-      return {
-        pressed: true,
-        disabled: false,
-        hint: "Nobody has control · click to take it",
-        next: "you",
-      };
+      return { pressed: true, disabled: false, hint: "Nobody has control · click to take it" };
     case "another-viewer":
       return {
-        pressed: false,
-        disabled: true,
-        hint: "Another viewer has control",
-        next: null,
+        pressed: true,
+        disabled: false,
+        hint: "Another viewer has control · click to take over",
       };
   }
 }

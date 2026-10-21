@@ -84,7 +84,6 @@ const normalizeCapabilities = (value: unknown): PreviewStreamCapabilities | unde
 /** Client-to-server messages. Coordinates are page CSS px. */
 export type PreviewStreamInput =
   | { readonly type: "takeControl" }
-  | { readonly type: "releaseControl" }
   | { readonly type: "dialog"; readonly accept: boolean; readonly promptText?: string }
   | { readonly type: "viewport"; readonly setting: PreviewViewportSetting }
   | {

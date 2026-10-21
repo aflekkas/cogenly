@@ -276,6 +276,8 @@ interface ViewerState {
   readonly pressedButtons: Map<"left" | "middle" | "right", { x: number; y: number }>;
   readonly pickHitTest: ServerBrowserPick.PickHitTestQueue;
   readonly push: (output: ServerBrowserViewerOutput) => void;
+  /** Lets go of every key and button this viewer holds down. */
+  readonly releaseInput: () => Promise<void>;
   readonly pause: () => Promise<void>;
   readonly resume: () => Promise<void>;
   scrolledAt: number;
@@ -562,7 +564,7 @@ const make = Effect.gen(function* () {
             ? "you"
             : tab.control.controller !== null
               ? "another-viewer"
-              : tab.control.agentId !== null
+              : tab.control.agentDrives
                 ? "agent"
                 : "unclaimed",
         generation: tab.control.generation,
@@ -798,9 +800,13 @@ const make = Effect.gen(function* () {
     if (!desktop) await recordCopies(cdp);
     page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
-    const control = new SessionControl(snapshot.automationOwner ?? null, () =>
-      ServerBrowserPage.invalidateRefs(page),
-    );
+    const control = new SessionControl(snapshot.automationOwner ?? null, {
+      onGenerationChange: () => ServerBrowserPage.invalidateRefs(page),
+      // A person mid-drag loses control to an agent or another viewer: drop what they held.
+      onDisplaced: async (viewerId) => {
+        for (const viewer of tab.viewers) if (viewer.id === viewerId) await viewer.releaseInput();
+      },
+    });
     const tab: ServerTab = {
       threadId: ThreadId.make(snapshot.threadId),
       tabId: snapshot.tabId,
@@ -1732,6 +1738,20 @@ const make = Effect.gen(function* () {
     );
   };
 
+  /** Runs an agent's claim on a tab, telling viewers when control moved to the agent. */
+  const agentClaim = <A>(tab: ServerTab, claim: () => A): A => {
+    const drove = tab.control.agentDrives;
+    const generation = tab.control.generation;
+    const result = claim();
+    if (tab.control.agentDrives !== drove || tab.control.generation !== generation)
+      broadcastControl(tab);
+    return result;
+  };
+
+  /** An agent action; it takes control from a person driving the tab. */
+  const agentAction = <A>(tab: ServerTab, agentSessionId: string, run: () => Promise<A>) =>
+    agentClaim(tab, () => tab.control.agent(agentSessionId, run));
+
   const requireTab = async (request: PreviewAutomationRequest) => {
     if (!request.agentSessionId)
       throw new BrowserControlInterrupted("The agent session is missing. Reconnect the provider.");
@@ -1851,7 +1871,7 @@ const make = Effect.gen(function* () {
             "A browser dialog is pending. Read preview_status and use preview_dialog first.",
             "dialogPending",
           );
-        return tab.control.agent(request.agentSessionId, async () => {
+        return agentAction(tab, request.agentSessionId, async () => {
           if (tab.dialog)
             throw new BrowserControlInterrupted(
               "A browser dialog is pending. Read preview_status and use preview_dialog first.",
@@ -1911,7 +1931,7 @@ const make = Effect.gen(function* () {
             "No recording is active for this thread.",
           );
         }
-        return tab.control.agent(request.agentSessionId ?? "", () => stopRecording(tab));
+        return agentAction(tab, request.agentSessionId ?? "", () => stopRecording(tab));
       }
     }
     const tab = await requireTab(request);
@@ -1922,30 +1942,25 @@ const make = Effect.gen(function* () {
           "Only the agent session that opened this tab can close it.",
           "agentMismatch",
         );
-      if (tab.control.controller !== null)
-        throw new BrowserControlInterrupted("A human controls this tab.", "humanControl");
       void tab.control.close().catch(constVoid);
       await Effect.runPromise(manager.close({ threadId: tab.threadId, tabId: tab.tabId }));
       dropTab(tab, false);
       return {};
     }
     // A click can be waiting for its dialog. Resolve it outside the serial queue,
-    // with the same owner check, so the operation can finish and control can drain.
+    // taking control like any agent action, so the operation can finish and control can drain.
     if (request.operation === "dialog") {
-      if (tab.control.controller !== null)
-        throw new BrowserControlInterrupted("A human controls this tab.", "humanControl");
+      agentClaim(tab, () => tab.control.claimAgent(request.agentSessionId ?? ""));
       await resolveDialog(tab, input as PreviewAutomationDialogInput);
       return statusWithTitle(tab, request.agentSessionId);
     }
     const agentSessionId = request.agentSessionId!;
-    // A tab this session did not open, while it cannot act there (another
-    // agent's, or the user's while they drive): read it in place, without
-    // queueing behind the human's input. Its own tabs keep the takeover
-    // contract: a human taking control interrupts every agent call.
+    // A read of another agent's tab, or of any tab while a person drives it,
+    // runs in place: it neither queues behind their input nor takes control.
+    // Every other call takes control, and a person taking it back interrupts it.
     if (
       READ_OPERATIONS.has(request.operation) &&
-      tab.control.agentId !== agentSessionId &&
-      !tab.control.agentCanActNow(agentSessionId)
+      (tab.control.controller !== null || !tab.control.agentMayAct(agentSessionId))
     ) {
       return tab.control.observe(async () => {
         if (tab.dialog)
@@ -1956,7 +1971,7 @@ const make = Effect.gen(function* () {
         return executeTabOperation(tab, request);
       });
     }
-    return tab.control.agent(agentSessionId, async () => {
+    return agentAction(tab, agentSessionId, async () => {
       if (tab.dialog)
         throw new BrowserControlInterrupted(
           "A browser dialog is pending. Read preview_status and use preview_dialog first.",
@@ -2413,6 +2428,7 @@ const make = Effect.gen(function* () {
           },
         }),
         push: pushOutput,
+        releaseInput: () => releaseViewerInput(viewer, session),
         pause: () => {
           screencastParams = screencastParams.then(() =>
             session.send("Page.stopScreencast").then(constVoid, constVoid),
@@ -2436,7 +2452,8 @@ const make = Effect.gen(function* () {
             reportLiveTabs();
           }),
       );
-      if (input.canOperate && tab.control.agentId === null && tab.control.controller === null) {
+      // A person's tab is theirs when they open it, unless an agent is driving it.
+      if (input.canOperate && tab.control.controller === null && !tab.control.agentDrives) {
         yield* Effect.promise(() => tab.control.take(viewer.id));
       }
       broadcastControl(tab);
@@ -2537,12 +2554,6 @@ const make = Effect.gen(function* () {
                 broadcastControl(tab);
                 await taking;
                 pushFileChooser(tab);
-              } else if (message.type === "releaseControl") {
-                const releasing = tab.control.release(viewer.id, () =>
-                  releaseViewerInput(viewer, session),
-                );
-                broadcastControl(tab);
-                await releasing;
               } else if (
                 message.type === "dialog" &&
                 tab.control.controller === viewer.id &&

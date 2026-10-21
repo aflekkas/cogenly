@@ -1054,10 +1054,7 @@ export function PreviewView({
             ? {
                 controller: serverControl.control.controller,
                 canOperate: serverControl.control.canOperate,
-                onToggle: () =>
-                  serverSurfaceRef.current?.setControl(
-                    serverControl.control.controller === "you" ? "agent" : "you",
-                  ),
+                onTakeControl: () => serverSurfaceRef.current?.takeControl(),
               }
             : null
         }

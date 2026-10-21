@@ -33,14 +33,14 @@ import { resolvePreviewControlToggle } from "./previewControlToggle";
 export interface PreviewControlState {
   readonly controller: "agent" | "you" | "another-viewer" | "unclaimed";
   readonly canOperate: boolean;
-  readonly onToggle: () => void;
+  readonly onTakeControl: () => void;
 }
 
 /**
- * One cursor says who drives the page (previewControlToggle): a plain ghost
- * button while you do, pressed while the agent does (or nobody, on a tab a
- * person opened and let go). The words live in the tooltip and the
- * accessible name; a click always flips who drives.
+ * One cursor says who drives the page (previewControlToggle): a plain, inert
+ * ghost button while you do, pressed while the agent (or anyone else, or
+ * nobody) does. The words live in the tooltip and the accessible name; a
+ * click only takes control, since the agent takes it back when it next acts.
  */
 function PreviewControlToggle({ control }: { control: PreviewControlState }) {
   const state = resolvePreviewControlToggle(control.controller);
@@ -58,7 +58,7 @@ function PreviewControlToggle({ control }: { control: PreviewControlState }) {
           size="sm"
           variant="ghost"
           pressed={state.pressed}
-          onPressedChange={control.onToggle}
+          onPressedChange={control.onTakeControl}
           disabled={state.disabled}
           aria-label={state.hint}
           data-preview-control={control.controller}

@@ -11,23 +11,47 @@ export class BrowserControlInterrupted extends Error {
   }
 }
 
-/** Reserves control immediately, but drains running work before the new owner can act. */
+interface SessionControlHooks {
+  /** Runs on every owner change; earlier refs no longer point at what the new owner sees. */
+  readonly onGenerationChange?: () => void;
+  /**
+   * Runs in the queue after a viewer loses control to someone else, before the
+   * new owner acts, so a held key or button from a half-finished gesture lets go.
+   */
+  readonly onDisplaced?: (viewerId: string) => Promise<void>;
+}
+
+/**
+ * Reserves control immediately, but drains running work before the new owner
+ * can act. Control goes to whoever acts: a viewer takes it explicitly, which
+ * interrupts an agent action in flight, and an agent's next action takes it
+ * back. Nobody hands control over.
+ */
 export class SessionControl {
   readonly agentId: string | null;
   private readonly onGenerationChange: () => void;
+  private readonly onDisplaced: (viewerId: string) => Promise<void>;
   private tail: Promise<unknown> = Promise.resolve();
   private pending: Promise<void> = Promise.resolve();
   private owner: string | null = null;
+  private agentDriving = false;
   private epoch = 0;
   private closed = false;
 
-  constructor(agentId: string | null, onGenerationChange: () => void = () => {}) {
+  constructor(agentId: string | null, hooks: SessionControlHooks = {}) {
     this.agentId = agentId;
-    this.onGenerationChange = onGenerationChange;
+    this.onGenerationChange = hooks.onGenerationChange ?? (() => {});
+    this.onDisplaced = hooks.onDisplaced ?? (async () => {});
   }
 
+  /** The viewer in control, or `null` while an agent (or nobody) drives. */
   get controller() {
     return this.owner;
+  }
+
+  /** Whether an agent drives: it opened the tab, or acted since a person last took it. */
+  get agentDrives() {
+    return this.owner === null && (this.agentId !== null || this.agentDriving);
   }
 
   get generation() {
@@ -56,10 +80,14 @@ export class SessionControl {
     if (this.closed) throw new BrowserControlInterrupted("This browser tab is closed.", "closed");
   }
 
-  private changeOwner(owner: string | null) {
+  /** `displace` lets go of the previous viewer's held input before the new owner acts. */
+  private changeOwner(owner: string | null, displace = false) {
+    const previous = this.owner;
     this.owner = owner;
     this.epoch++;
     this.onGenerationChange();
+    if (displace && previous !== null)
+      this.enqueue(() => this.onDisplaced(previous)).catch(() => {});
   }
 
   private async action<A>(allowed: () => boolean, run: () => Promise<A>) {
@@ -79,24 +107,29 @@ export class SessionControl {
   }
 
   /**
-   * An agent action. It may act on its own tab or on one a human opened, but
-   * never while a human controls the tab; taking control interrupts it.
+   * An agent action. It may act on its own tab or on one a human opened. If a
+   * viewer controls the tab, the action takes control back first; a viewer
+   * taking control while it runs interrupts it.
    */
   agent<A>(agentId: string, run: () => Promise<A>) {
-    if (!this.agentMayAct(agentId))
-      return Promise.reject(
-        new BrowserControlInterrupted("This tab belongs to another agent.", "agentMismatch"),
-      );
-    if (this.owner !== null)
-      return Promise.reject(
-        new BrowserControlInterrupted("A human controls this tab.", "humanControl"),
-      );
+    try {
+      this.claimAgent(agentId);
+    } catch (cause) {
+      return Promise.reject(cause);
+    }
     return this.action(() => this.agentMayAct(agentId) && this.owner === null, run);
   }
 
-  /** Whether this agent's action would run now rather than be refused. */
-  agentCanActNow(agentId: string) {
-    return this.agentMayAct(agentId) && this.owner === null;
+  /**
+   * Takes control for an agent step that runs outside the queue, such as
+   * answering the dialog a queued click waits on.
+   */
+  claimAgent(agentId: string) {
+    this.assertOpen();
+    if (!this.agentMayAct(agentId))
+      throw new BrowserControlInterrupted("This tab belongs to another agent.", "agentMismatch");
+    this.agentDriving = true;
+    if (this.owner !== null) this.changeOwner(null, true);
   }
 
   /**
@@ -124,28 +157,21 @@ export class SessionControl {
     return this.action(() => this.owner === viewerId, run);
   }
 
+  /** Gives this viewer control, from the agent or another viewer; whatever they ran is interrupted. */
   async take(viewerId: string) {
     this.assertOpen();
-    if (this.owner !== null && this.owner !== viewerId) {
-      throw new BrowserControlInterrupted("Another viewer controls this browser tab.");
+    if (this.owner !== viewerId) {
+      this.agentDriving = false;
+      this.changeOwner(viewerId, true);
     }
-    if (this.owner !== viewerId) this.changeOwner(viewerId);
     return this.human(viewerId, async () => {});
   }
 
-  async release(viewerId: string, afterDrain: () => Promise<void> = async () => {}) {
-    this.assertOpen();
-    if (this.owner !== viewerId) {
-      throw new BrowserControlInterrupted(
-        "Only the controlling viewer can release this browser tab.",
-      );
-    }
+  /** A departing viewer gives up control; its held input lets go before anyone else acts. */
+  async disconnect(viewerId: string, afterDrain: () => Promise<void> = async () => {}) {
+    if (this.closed || this.owner !== viewerId) return;
     this.changeOwner(null);
     await this.enqueue(afterDrain);
-  }
-
-  async disconnect(viewerId: string, afterDrain?: () => Promise<void>) {
-    if (!this.closed && this.owner === viewerId) await this.release(viewerId, afterDrain);
   }
 
   async close() {
