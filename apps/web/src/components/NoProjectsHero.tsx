@@ -6,7 +6,7 @@ import { isElectron } from "../env";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { Button } from "./ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarInset } from "./ui/sidebar";
 import { WorkspacePageHeader } from "./WorkspacePageHeader";
 
@@ -21,16 +21,16 @@ export function NoProjectsHero() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         {/* The desktop window only moves where CSS opts in, so keep a titlebar strip. */}
         {isElectron ? <WorkspacePageHeader electron /> : null}
-        <Empty size="hero" className="flex-1">
-          <div className="w-full max-w-lg px-8 py-12" data-panel-flip="center">
-            <EmptyHeader className="max-w-none">
-              <EmptyTitle>What should we work on?</EmptyTitle>
-              <EmptyDescription>
-                {scratchTargetEnvironmentId === null
-                  ? "Add a repository to start your first thread."
-                  : "Add a repository, or start without one."}
-              </EmptyDescription>
-              <div className="mt-6 flex justify-center gap-2">
+        <Empty size="hero">
+          <EmptyHeader data-panel-flip="center">
+            <EmptyTitle>What should we work on?</EmptyTitle>
+            <EmptyDescription>
+              {scratchTargetEnvironmentId === null
+                ? "Add a repository to start your first thread."
+                : "Add a repository, or start without one."}
+            </EmptyDescription>
+            <EmptyContent>
+              <div className="flex flex-wrap justify-center gap-2">
                 <Button size="sm" onClick={openAddProject}>
                   <PlusIcon className="size-4" />
                   Add repository
@@ -46,8 +46,8 @@ export function NoProjectsHero() {
                   </Button>
                 )}
               </div>
-            </EmptyHeader>
-          </div>
+            </EmptyContent>
+          </EmptyHeader>
         </Empty>
       </div>
     </SidebarInset>

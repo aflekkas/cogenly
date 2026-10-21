@@ -206,7 +206,7 @@ function ProviderSettingsPlaceholder({
         )}
       >
         <Empty>
-          <EmptyMedia variant="icon">{icon}</EmptyMedia>
+          <EmptyMedia>{icon}</EmptyMedia>
           <EmptyHeader>
             <EmptyTitle>{title}</EmptyTitle>
             <EmptyDescription>{description}</EmptyDescription>

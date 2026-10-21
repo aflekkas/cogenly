@@ -234,8 +234,8 @@ export function T3ConnectUserProfilePage() {
           </ul>
         ) : environmentsState.error ? null : (
           <div className="border-t">
-            <Empty size="compact">
-              <EmptyMedia variant="icon">
+            <Empty size="sm">
+              <EmptyMedia>
                 <ServerIcon />
               </EmptyMedia>
               <EmptyHeader>

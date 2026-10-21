@@ -21,15 +21,13 @@ export function NoActiveThreadState() {
           )}
         </WorkspacePageHeader>
 
-        <Empty className="flex-1">
-          <div className="w-full max-w-lg px-8 py-12" data-panel-flip="center">
-            <EmptyHeader className="max-w-none">
-              <EmptyTitle>Pick a thread to continue</EmptyTitle>
-              <EmptyDescription>
-                Select an existing thread or create a new one to get started.
-              </EmptyDescription>
-            </EmptyHeader>
-          </div>
+        <Empty>
+          <EmptyHeader data-panel-flip="center">
+            <EmptyTitle>Pick a thread to continue</EmptyTitle>
+            <EmptyDescription>
+              Select an existing thread or create a new one to get started.
+            </EmptyDescription>
+          </EmptyHeader>
         </Empty>
       </div>
     </SidebarInset>

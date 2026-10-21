@@ -32,7 +32,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 
 import { sortScopedProjectsForSidebar } from "../Sidebar.logic";
 import { Button } from "../ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { SidebarInset } from "../ui/sidebar";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
@@ -328,11 +328,15 @@ function LinkPage({
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       {isElectron ? <WorkspacePageHeader electron /> : null}
-      <Empty className="flex-1">
-        <EmptyHeader className="max-w-md">
+      <Empty>
+        <EmptyHeader>
           <EmptyTitle>{title}</EmptyTitle>
           {description ? <EmptyDescription>{description}</EmptyDescription> : null}
-          {children ? <div className="mt-5 flex justify-center gap-2">{children}</div> : null}
+          {children ? (
+            <EmptyContent>
+              <div className="flex flex-wrap justify-center gap-2">{children}</div>
+            </EmptyContent>
+          ) : null}
         </EmptyHeader>
       </Empty>
     </SidebarInset>

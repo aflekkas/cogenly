@@ -3,6 +3,7 @@ import { Globe } from "lucide-react";
 
 import type { BrowserHistoryEntry } from "~/browserHistoryStore";
 import { DiscoveryList } from "../ui/discovery-list";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 
 import { PreviewLocalServerCard } from "./PreviewLocalServerCard";
 import { PreviewRecentUrlCard } from "./PreviewRecentUrlCard";
@@ -41,14 +42,20 @@ export function PreviewEmptyState({
       <div
         // Fills the surface body outright: it sits beside an absolutely placed
         // page surface, so it takes the same box rather than a percentage height.
-        className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 pb-20 text-center"
+        className="absolute inset-0 flex flex-col"
         data-preview-empty-state
       >
-        <Globe className="mb-1 size-4 text-muted-foreground" />
-        <p className="text-sm font-medium text-foreground">No preview yet</p>
-        <p className="text-xs text-muted-foreground">
-          Enter a URL, or start a dev server and it will appear here.
-        </p>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyMedia>
+              <Globe />
+            </EmptyMedia>
+            <EmptyTitle>No preview yet</EmptyTitle>
+            <EmptyDescription>
+              Enter a URL, or start a dev server and it will appear here.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       </div>
     );
   }

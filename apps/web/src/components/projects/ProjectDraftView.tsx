@@ -74,7 +74,7 @@ export function ProjectDraftView(props: {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron} />
         {scratch === null ? (
-          <Empty size="compact" className="h-full">
+          <Empty>
             <EmptyHeader>
               <EmptyTitle>Chats aren't available here</EmptyTitle>
               <EmptyDescription>

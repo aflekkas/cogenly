@@ -142,7 +142,7 @@ export function MemorySettings() {
             ) : facts.length === 0 ? (
               <Empty>
                 <EmptyHeader>
-                  <EmptyMedia variant="icon">
+                  <EmptyMedia>
                     <BrainIcon />
                   </EmptyMedia>
                   <EmptyTitle>{filtered ? "Nothing matches" : "Nothing remembered yet"}</EmptyTitle>

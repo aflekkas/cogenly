@@ -87,8 +87,8 @@ function MobileClientsSkeleton() {
 
 function EmptyMobileClients() {
   return (
-    <Empty size="compact">
-      <EmptyMedia variant="icon">
+    <Empty size="sm">
+      <EmptyMedia>
         <SmartphoneIcon />
       </EmptyMedia>
       <EmptyHeader>

@@ -20,6 +20,14 @@ import {
   type TerminalRunTone,
 } from "../AgentTerminalsPanel.logic";
 import { openTerminalLinkInPreview } from "../preview/openTerminalLinkInPreview";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../ui/empty";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 
 export const RUN_TONE_TEXT: Record<TerminalRunTone, string> = {
@@ -71,12 +79,14 @@ export function TerminalSectionEmpty(props: {
   action?: ReactNode;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-8 text-center">
-      <span className="mb-1 text-muted-foreground/60 [&_svg]:size-5">{props.icon}</span>
-      <p className="text-sm text-foreground">{props.title}</p>
-      <p className="max-w-72 text-xs leading-relaxed text-muted-foreground">{props.detail}</p>
-      {props.action ? <div className="mt-2">{props.action}</div> : null}
-    </div>
+    <Empty size="sm" className="min-h-0">
+      <EmptyHeader>
+        <EmptyMedia>{props.icon}</EmptyMedia>
+        <EmptyTitle>{props.title}</EmptyTitle>
+        <EmptyDescription>{props.detail}</EmptyDescription>
+      </EmptyHeader>
+      {props.action ? <EmptyContent>{props.action}</EmptyContent> : null}
+    </Empty>
   );
 }
 

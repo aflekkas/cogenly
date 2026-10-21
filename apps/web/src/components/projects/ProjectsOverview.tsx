@@ -13,7 +13,14 @@ import { ProjectLabelEditorDialog } from "../../projectLabels/ProjectLabelEditor
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { Button } from "../ui/button";
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../ui/empty";
 import { OverlayPresence } from "../ui/overlay-presence";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
@@ -77,9 +84,11 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron} />
-        <Empty size="compact" className="h-full">
+        <Empty>
           <EmptyHeader>
-            <FolderIcon aria-hidden className="mb-4 size-8 text-muted-foreground/60" />
+            <EmptyMedia>
+              <FolderIcon />
+            </EmptyMedia>
             <EmptyTitle>Select a project</EmptyTitle>
             <EmptyDescription>
               Pick one in the sidebar to start a chat in it and see what it holds.

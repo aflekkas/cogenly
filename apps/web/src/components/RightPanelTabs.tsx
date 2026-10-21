@@ -54,6 +54,14 @@ import { cn } from "~/lib/utils";
 import { resolveShortcutCommand, type ShortcutMatchContext } from "~/keybindings";
 import { readLocalApi } from "~/localApi";
 import { Button } from "~/components/ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "~/components/ui/empty";
 import { MorphIcon } from "~/components/MorphIcon";
 import { AndroidIcon, AppleIcon } from "~/components/Icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
@@ -419,32 +427,40 @@ function LeavingTabSlot({ width, onDone }: { width: number; onDone: () => void }
 function RightPanelEmptyState({ options }: { options: readonly RightPanelAddOption[] }) {
   const offered = options.filter((option) => option.available);
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-6 pb-(--workspace-topbar-height) text-center">
-      <PanelRight className="mb-1 size-4 text-muted-foreground" />
-      <p className="text-sm font-medium text-foreground">Nothing open</p>
-      <p className="text-xs text-muted-foreground">
-        {offered.length > 0 ? "Open something in this panel." : "This thread has nothing to open."}
-      </p>
+    <Empty size="sm" className="min-h-0">
+      <EmptyHeader>
+        <EmptyMedia>
+          <PanelRight />
+        </EmptyMedia>
+        <EmptyTitle>Nothing open</EmptyTitle>
+        <EmptyDescription>
+          {offered.length > 0
+            ? "Open something in this panel."
+            : "This thread has nothing to open."}
+        </EmptyDescription>
+      </EmptyHeader>
       {offered.length > 0 ? (
-        <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-          {offered.map((option) => {
-            const { label, Icon } = ADD_OPTION_PRESENTATION[option.kind];
-            return (
-              <Button
-                key={option.kind}
-                size="xs"
-                variant="outline"
-                onClick={option.onSelect}
-                data-right-panel-add={option.kind}
-              >
-                <Icon />
-                {label}
-              </Button>
-            );
-          })}
-        </div>
+        <EmptyContent>
+          <div className="flex flex-wrap justify-center gap-1.5">
+            {offered.map((option) => {
+              const { label, Icon } = ADD_OPTION_PRESENTATION[option.kind];
+              return (
+                <Button
+                  key={option.kind}
+                  size="xs"
+                  variant="outline"
+                  onClick={option.onSelect}
+                  data-right-panel-add={option.kind}
+                >
+                  <Icon />
+                  {label}
+                </Button>
+              );
+            })}
+          </div>
+        </EmptyContent>
       ) : null}
-    </div>
+    </Empty>
   );
 }
 

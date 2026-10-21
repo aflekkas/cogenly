@@ -10,6 +10,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useAssetUrlRefresh } from "~/assets/assetUrls";
 import ChatMarkdown from "~/components/ChatMarkdown";
 import { MorphIcon } from "~/components/MorphIcon";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { toastManager } from "~/components/ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -279,13 +280,15 @@ export function AttachmentFilePreview(props: {
       />
     </div>
   ) : (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-6 text-center">
-      <p className="text-sm font-medium">No preview for this file</p>
-      <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
-        Save it to open in an app that supports {props.name.split(".").at(-1) || "this format"}{" "}
-        files.
-      </p>
-    </div>
+    <Empty size="sm" className="min-h-0">
+      <EmptyHeader>
+        <EmptyTitle>No preview for this file</EmptyTitle>
+        <EmptyDescription>
+          Save it to open in an app that supports {props.name.split(".").at(-1) || "this format"}{" "}
+          files.
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 
   return (

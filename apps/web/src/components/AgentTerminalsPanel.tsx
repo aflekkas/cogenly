@@ -23,17 +23,19 @@ import {
   type AgentTerminalEntry,
 } from "./AgentTerminalsPanel.logic";
 import { AgentRunsView } from "./terminals/AgentRunsView";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
 
 function PanelMessage({ title, detail }: { title: string; detail?: string }) {
   return (
-    <div
-      data-agent-terminals
-      className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-1 px-6 text-center"
-    >
-      <TerminalSquare className="size-5 text-muted-foreground/70" />
-      <p className="text-sm text-foreground">{title}</p>
-      {detail ? <p className="text-xs text-muted-foreground">{detail}</p> : null}
-    </div>
+    <Empty data-agent-terminals size="sm" className="h-full min-h-0">
+      <EmptyHeader>
+        <EmptyMedia>
+          <TerminalSquare />
+        </EmptyMedia>
+        <EmptyTitle>{title}</EmptyTitle>
+        {detail ? <EmptyDescription>{detail}</EmptyDescription> : null}
+      </EmptyHeader>
+    </Empty>
   );
 }
 

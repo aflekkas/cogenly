@@ -8,7 +8,14 @@ import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { isElectron } from "../env";
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { Button } from "../components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -226,12 +233,12 @@ function IndexEmptyState(props: {
       ) : isElectron ? (
         <WorkspacePageHeader electron />
       ) : null}
-      <Empty className="flex-1">
-        <EmptyHeader className="max-w-md">
-          {props.media ? <div className="mb-4 flex justify-center">{props.media}</div> : null}
+      <Empty>
+        <EmptyHeader>
+          {props.media ? <EmptyMedia>{props.media}</EmptyMedia> : null}
           <EmptyTitle>{props.title}</EmptyTitle>
           <EmptyDescription>{props.description}</EmptyDescription>
-          {props.children ? <div className="mt-5 flex justify-center">{props.children}</div> : null}
+          {props.children ? <EmptyContent>{props.children}</EmptyContent> : null}
         </EmptyHeader>
       </Empty>
     </SidebarInset>
@@ -242,18 +249,18 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       {isElectron ? <WorkspacePageHeader electron /> : null}
-      <Empty className="flex-1">
-        <EmptyHeader className="max-w-md">
+      <Empty>
+        <EmptyHeader>
           <EmptyTitle>Couldn’t start a new thread</EmptyTitle>
           <EmptyDescription>
             The repository is still available. Try opening the draft again.
           </EmptyDescription>
-          <div className="mt-5 flex justify-center">
+          <EmptyContent>
             <Button size="sm" onClick={onRetry}>
               <RefreshIcon size="md" />
               Try again
             </Button>
-          </div>
+          </EmptyContent>
         </EmptyHeader>
       </Empty>
     </SidebarInset>
@@ -284,26 +291,24 @@ function HostedStaticOnboardingState() {
           </div>
         </WorkspacePageHeader>
 
-        <Empty className="flex-1">
-          <div className="w-full max-w-xl rounded-3xl border border-border/55 bg-card/20 px-8 py-12 shadow-sm/5">
-            <EmptyHeader className="max-w-none">
-              <div className="mx-auto mb-5 flex size-11 items-center justify-center rounded-xl border border-border/70 bg-background/70 text-muted-foreground">
-                <LinkIcon className="size-5" />
-              </div>
-              <EmptyTitle>Connect to a computer running Cogenly</EmptyTitle>
-              <EmptyDescription>
-                This app connects to Cogenly running on your computer or a server. Start the Cogenly
-                desktop app or command-line server on that machine and keep it running.
-              </EmptyDescription>
-              <EmptyDescription>{description}</EmptyDescription>
-              <div className="mt-6 flex justify-center">
-                <Button render={<Link to="/settings/connections" />} size="sm">
-                  <PlusIcon className="size-4" />
-                  Open Connections
-                </Button>
-              </div>
-            </EmptyHeader>
-          </div>
+        <Empty>
+          <EmptyHeader className="max-w-xl">
+            <EmptyMedia>
+              <LinkIcon />
+            </EmptyMedia>
+            <EmptyTitle>Connect to a computer running Cogenly</EmptyTitle>
+            <EmptyDescription>
+              This app connects to Cogenly running on your computer or a server. Start the Cogenly
+              desktop app or command-line server on that machine and keep it running.
+            </EmptyDescription>
+            <EmptyDescription>{description}</EmptyDescription>
+            <EmptyContent>
+              <Button render={<Link to="/settings/connections" />} size="sm">
+                <PlusIcon className="size-4" />
+                Open Connections
+              </Button>
+            </EmptyContent>
+          </EmptyHeader>
         </Empty>
       </div>
     </SidebarInset>

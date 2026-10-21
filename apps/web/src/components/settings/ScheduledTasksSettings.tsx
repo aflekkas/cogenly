@@ -316,7 +316,7 @@ export function ScheduledTasksSettings(target: {
         ) : environments.length === 0 ? (
           <Empty>
             <EmptyHeader>
-              <EmptyMedia variant="icon">
+              <EmptyMedia>
                 <Clock3Icon />
               </EmptyMedia>
               <EmptyTitle>No environments available</EmptyTitle>
