@@ -1,8 +1,7 @@
 /**
- * What the project panel says about a folder at a glance: "1 repo · 4 chats ·
- * 2 files", leaving out what the folder has none of; null when it is empty.
- * Work is counted with chats on purpose: the one-liner names what the user
- * files, and the sections below split it.
+ * What a project says about itself at a glance: "1 repo · 1 chat · 3 Work",
+ * leaving out what it has none of; null when it is empty. Work is a mass
+ * noun, so it reads the same at any count.
  */
 export function projectPanelSummary(counts: {
   readonly repositories: number;
@@ -10,10 +9,10 @@ export function projectPanelSummary(counts: {
   readonly work: number;
   readonly files: number;
 }): string | null {
-  const threads = counts.chats + counts.work;
   const parts = [
     plural(counts.repositories, "repo", "repos"),
-    plural(threads, "chat", "chats"),
+    plural(counts.chats, "chat", "chats"),
+    plural(counts.work, "Work", "Work"),
     plural(counts.files, "file", "files"),
   ].filter((part) => part !== null);
   return parts.length > 0 ? parts.join(" · ") : null;

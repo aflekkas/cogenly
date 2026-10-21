@@ -12,8 +12,7 @@ import type {
   ProjectLabelKey,
 } from "../../../projectLabels/projectLabels.logic";
 import { ProjectFolderIcon } from "../../../projectLabels/ProjectFolderMark";
-import { useProjectLabelDirectory } from "../../../projectLabels/useProjectLabels";
-import { useConnectedEnvironmentIds } from "../../../state/environments";
+import { useProjectContents } from "../../../projectLabels/useProjectContents";
 import { OverlayPresence } from "../../ui/overlay-presence";
 import { SidebarListEmptyState } from "../SidebarListEmptyState";
 import { SIDEBAR_MODE_ICONS } from "./SidebarModeSwitcher";
@@ -26,6 +25,8 @@ import { SIDEBAR_MODE_ICONS } from "./SidebarModeSwitcher";
 function ProjectRow(props: {
   readonly entry: EnvironmentProjectLabel;
   readonly active: boolean;
+  readonly chats: number;
+  readonly work: number;
   readonly environmentLabel: string | null;
   readonly onOpen: () => void;
   readonly onRename: () => void;
@@ -37,8 +38,8 @@ function ProjectRow(props: {
   const menu = useProjectFolderMenu(entry, props);
   const summary = projectPanelSummary({
     repositories: label.repositoryIds.length,
-    chats: label.threadCount,
-    work: 0,
+    chats: props.chats,
+    work: props.work,
     files: 0,
   });
   const onKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
@@ -101,7 +102,7 @@ export function SidebarProjectsList(props: {
   onCreateProject: () => void;
 }) {
   const navigate = useNavigate();
-  const directory = useProjectLabelDirectory(useConnectedEnvironmentIds());
+  const { directory, byProject } = useProjectContents();
   const [renaming, setRenaming] = useState<EnvironmentProjectLabel | null>(null);
   const [linking, setLinking] = useState<EnvironmentProjectLabel | null>(null);
   const leaveIfActive = (entry: EnvironmentProjectLabel) => {
@@ -129,6 +130,8 @@ export function SidebarProjectsList(props: {
             key={entry.key}
             entry={entry}
             active={entry.key === props.activeProjectKey}
+            chats={byProject.get(entry.key)?.chats.length ?? 0}
+            work={byProject.get(entry.key)?.work.length ?? 0}
             environmentLabel={props.environmentLabel(entry)}
             onOpen={() => props.onOpenProject(entry)}
             onRename={() => setRenaming(entry)}

@@ -11,6 +11,7 @@ import type {
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  FolderGit2Icon,
   FolderMinusIcon,
   HammerIcon,
   MessageCircleIcon,
@@ -52,7 +53,6 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { AnimatedHeight } from "../AnimatedHeight";
 import { GitHubIcon } from "../Icons";
-import { ProjectFavicon } from "../ProjectFavicon";
 import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -445,7 +445,7 @@ export function ProjectDetail(props: {
             linkedRepositories.map((repository) => (
               <ProjectPanelRow
                 key={repository.id}
-                icon={<ProjectFavicon project={repository} className="size-4 shrink-0" />}
+                icon={<FolderGit2Icon />}
                 title={repository.title}
                 actions={
                   <>

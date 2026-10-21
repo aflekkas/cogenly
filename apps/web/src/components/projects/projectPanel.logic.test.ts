@@ -3,17 +3,16 @@ import { describe, expect, it } from "vite-plus/test";
 import { latestProjectActivity, projectPanelSummary, sortRecentFirst } from "./projectPanel.logic";
 
 describe("projectPanelSummary", () => {
-  it("names what the folder holds, counting Work with chats", () => {
-    expect(projectPanelSummary({ repositories: 1, chats: 3, work: 1, files: 2 })).toBe(
-      "1 repo · 4 chats · 2 files",
+  it("names repos, chats, Work and files, each only when there are some", () => {
+    expect(projectPanelSummary({ repositories: 1, chats: 1, work: 3, files: 2 })).toBe(
+      "1 repo · 1 chat · 3 Work · 2 files",
     );
-  });
-
-  it("leaves out what it has none of, with singular forms", () => {
     expect(projectPanelSummary({ repositories: 2, chats: 0, work: 1, files: 0 })).toBe(
-      "2 repos · 1 chat",
+      "2 repos · 1 Work",
     );
-    expect(projectPanelSummary({ repositories: 0, chats: 0, work: 0, files: 1 })).toBe("1 file");
+    expect(projectPanelSummary({ repositories: 0, chats: 4, work: 0, files: 1 })).toBe(
+      "4 chats · 1 file",
+    );
   });
 
   it("is null for an empty folder", () => {

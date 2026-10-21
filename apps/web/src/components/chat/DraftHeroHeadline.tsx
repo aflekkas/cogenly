@@ -889,10 +889,12 @@ export function DraftHeroHeadline({
     ) : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col items-center">
+    <div className="@container mx-auto flex w-full max-w-5xl flex-col items-center">
+      {/* Sized to the pane, not the window: beside an open right panel the
+          greeting steps down so it and its project stay on one line. */}
       <h1
         aria-label={headingLabel}
-        className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
+        className="w-full text-center font-normal text-xl text-foreground tracking-tight @xl:text-2xl @2xl:text-3xl"
       >
         <FadeSwap
           group="draft-heading"
