@@ -87,6 +87,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.projectLabelsSubscribeThreadLabels]: "projectLabels",
   [WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels]: "projectLabels",
   [WS_METHODS.projectLabelsMoveThread]: "projectLabels",
+  [WS_METHODS.projectLabelsForkThreadToProject]: "projectLabels",
   [WS_METHODS.projectLabelsSetThreadLabels]: "projectLabels",
   [WS_METHODS.projectLabelsLinkSource]: "projectLabels",
   [WS_METHODS.projectLabelsUnlinkSource]: "projectLabels",

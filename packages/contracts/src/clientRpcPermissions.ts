@@ -59,6 +59,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.projectLabelsLinkSource]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsUnlinkSource]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsMoveThread]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsForkThreadToProject]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsSetThreadLabels]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsAddResource]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsRemoveResource]: AuthOrchestrationOperateScope,

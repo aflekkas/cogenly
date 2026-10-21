@@ -12,6 +12,7 @@ import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
+import * as ProjectLabelFork from "./projectLabels/ProjectLabelForkToProject.ts";
 import * as ProjectFiles from "./projectLabels/ProjectFiles.ts";
 import * as ProjectLabelOwnerSearch from "./projectLabels/ProjectOwnerRepositorySearch.ts";
 import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
@@ -1603,6 +1604,12 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels]: () =>
         projectLabels.subscribeConfirmedThreadLabels(),
       [WS_METHODS.projectLabelsMoveThread]: (input) => projectLabels.moveThread(input),
+      [WS_METHODS.projectLabelsForkThreadToProject]: (input) =>
+        ProjectLabelFork.forkThreadToProject(input, {
+          labels: projectLabels,
+          threads: threadManagement,
+          crypto,
+        }),
       [WS_METHODS.projectLabelsSetThreadLabels]: (input) => projectLabels.setThreadLabels(input),
       [WS_METHODS.projectLabelsLinkSource]: (input) => projectLabels.linkSource(input),
       [WS_METHODS.projectLabelsUnlinkSource]: (input) => projectLabels.unlinkSource(input),

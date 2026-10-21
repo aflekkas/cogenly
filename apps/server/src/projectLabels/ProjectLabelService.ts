@@ -314,7 +314,25 @@ const make = Effect.gen(function* () {
       input,
       Effect.gen(function* () {
         yield* requireThread(input.threadId);
-        if (input.folderId !== null) yield* get(input.folderId);
+        if (input.folderId !== null) {
+          yield* get(input.folderId);
+          // A chat with turns moves by forking, not by re-parenting: its
+          // scratch working directory no longer matches the project dir, so
+          // the history moves to a new chat through a context transfer
+          // instead (forkThreadToProject). Turnless chats still assign
+          // directly, unfiling stays allowed, and Work threads keep following
+          // their repo.
+          const turned = yield* sql`SELECT 1 AS one FROM orchestration_v2_projection_threads t
+              WHERE t.thread_id = ${input.threadId} AND t.deleted_at IS NULL
+              AND COALESCE(json_extract(t.payload_json, '$.surface'), 'chat') = 'chat'
+              AND COALESCE(json_extract(t.payload_json, '$.agent.role'), '') <> 'work'
+              AND EXISTS (SELECT 1 FROM orchestration_v2_projection_runs r WHERE r.thread_id = t.thread_id) LIMIT 1`;
+          if (turned.length > 0)
+            return yield* new ProjectLabelError({
+              operation: "moveThread",
+              reason: "fork_required",
+            });
+        }
         yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${input.threadId}`;
         if (input.folderId !== null)
           yield* sql`INSERT INTO thread_project_labels(thread_id, label_id) VALUES (${input.threadId}, ${input.folderId})`;

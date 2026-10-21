@@ -509,6 +509,7 @@ export const WS_METHODS = {
   projectLabelsSubscribeThreadLabels: "projectLabels.subscribeThreadLabels",
   projectLabelsSubscribeConfirmedThreadLabels: "projectLabels.subscribeConfirmedThreadLabels",
   projectLabelsMoveThread: "projectLabels.moveThread",
+  projectLabelsForkThreadToProject: "projectLabels.forkThreadToProject",
   projectLabelsSetThreadLabels: "projectLabels.setThreadLabels",
   projectLabelsLinkSource: "projectLabels.linkSource",
   projectLabelsUnlinkSource: "projectLabels.unlinkSource",
@@ -1866,6 +1867,18 @@ const WsProjectLabelsMoveThreadRpc = Rpc.make(WS_METHODS.projectLabelsMoveThread
   success: ProjectLabels.ThreadProjectFolderResult,
   error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
+const WsProjectLabelsForkThreadToProjectRpc = Rpc.make(
+  WS_METHODS.projectLabelsForkThreadToProject,
+  {
+    payload: ProjectLabels.ForkThreadToProjectInput,
+    success: ProjectLabels.ForkThreadToProjectResult,
+    error: Schema.Union([
+      ProjectLabels.ProjectLabelError,
+      OrchestrationDispatchCommandError,
+      EnvironmentAuthorizationError,
+    ]),
+  },
+);
 const WsProjectLabelsSetThreadLabelsRpc = Rpc.make(WS_METHODS.projectLabelsSetThreadLabels, {
   payload: ProjectLabels.SetThreadProjectLabelsInput,
   success: ProjectLabels.ThreadProjectLabelsResult,
@@ -2259,6 +2272,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsSubscribeThreadLabelsRpc,
   WsProjectLabelsSubscribeConfirmedThreadLabelsRpc,
   WsProjectLabelsMoveThreadRpc,
+  WsProjectLabelsForkThreadToProjectRpc,
   WsProjectLabelsSetThreadLabelsRpc,
   WsProjectLabelsLinkSourceRpc,
   WsProjectLabelsUnlinkSourceRpc,

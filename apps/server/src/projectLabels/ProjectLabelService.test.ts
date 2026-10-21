@@ -161,6 +161,42 @@ describe("project labels", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("requires chats with turns to fork into a project instead of moving", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const service = yield* Labels.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const folder = (yield* service.create({ name: "Folder" })).label.id;
+      const at = "2026-01-01T00:00:00.000Z";
+      for (const [id, payload] of [
+        ["turned-chat", { surface: "chat" }],
+        ["turned-work", { surface: "work" }],
+        ["turned-unfiled-chat", { surface: "chat" }],
+      ] as const) {
+        yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES (${id},${repoA},${id},'codex','full-access','default',${at},${at},${JSON.stringify(payload)})`;
+        yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json) VALUES (${`${id}:run`},${id},1,'codex','completed',${at},'{}')`;
+      }
+      // A chat with turns cannot re-parent into a project.
+      expect(
+        (yield* service
+          .moveThread({ threadId: ThreadId.make("turned-chat"), folderId: folder })
+          .pipe(Effect.flip)).reason,
+      ).toBe("fork_required");
+      expect((yield* service.getThreadLabels(ThreadId.make("turned-chat"))).labels).toEqual([]);
+      // Unfiling stays allowed, and Work keeps its repo-following assignment.
+      yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES ('turned-unfiled-chat',${folder})`;
+      expect(
+        yield* service.moveThread({
+          threadId: ThreadId.make("turned-unfiled-chat"),
+          folderId: null,
+        }),
+      ).toEqual({ threadId: ThreadId.make("turned-unfiled-chat"), projectFolderId: null });
+      expect(
+        yield* service.moveThread({ threadId: ThreadId.make("turned-work"), folderId: folder }),
+      ).toEqual({ threadId: ThreadId.make("turned-work"), projectFolderId: folder });
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect(
     "cascades label and thread deletion while preserving tags across projection repair",
     () =>

@@ -1156,6 +1156,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:moveThreadProjectFolder",
       tag: WS_METHODS.projectLabelsMoveThread,
     }),
+    /** Move a chat with turns into a project by forking it; returns the new chat. */
+    forkThreadToProject: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:forkThreadToProject",
+      tag: WS_METHODS.projectLabelsForkThreadToProject,
+    }),
     setThreadProjectLabels: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:setThreadProjectLabels",
       tag: WS_METHODS.projectLabelsSetThreadLabels,

@@ -200,6 +200,7 @@ describe("command permissions", () => {
     WS_METHODS.projectLabelsLinkRepository,
     WS_METHODS.projectLabelsUnlinkRepository,
     WS_METHODS.projectLabelsMoveThread,
+    WS_METHODS.projectLabelsForkThreadToProject,
     WS_METHODS.projectLabelsSetThreadLabels,
     WS_METHODS.projectLabelsAddResource,
     WS_METHODS.projectLabelsRemoveResource,

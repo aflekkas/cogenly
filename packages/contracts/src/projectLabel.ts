@@ -185,6 +185,18 @@ export const MoveThreadProjectFolderInput = Schema.Struct({
   folderId: Schema.NullOr(ProjectLabelId),
 });
 export type MoveThreadProjectFolderInput = typeof MoveThreadProjectFolderInput.Type;
+/**
+ * Moving a chat with turns into a project is a fork: the source keeps its
+ * history and the new chat, filed in the target project, carries it via a
+ * context transfer. Turnless chats keep using moveThread.
+ */
+export const ForkThreadToProjectInput = Schema.Struct({
+  threadId: ThreadId,
+  labelId: ProjectLabelId,
+});
+export type ForkThreadToProjectInput = typeof ForkThreadToProjectInput.Type;
+export const ForkThreadToProjectResult = Schema.Struct({ threadId: ThreadId });
+export type ForkThreadToProjectResult = typeof ForkThreadToProjectResult.Type;
 /** How the effective folder was selected; does not grant access. */
 export const ProjectFolderSource = Schema.NullOr(Schema.Literals(["explicit", "repository"]));
 export const ThreadProjectFolderResult = Schema.Struct({
@@ -199,7 +211,13 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
   "ProjectLabelError",
   {
     operation: Schema.String,
-    reason: Schema.Literals(["storage", "not_found", "invalid_membership", "invalid_path"]),
+    reason: Schema.Literals([
+      "storage",
+      "not_found",
+      "invalid_membership",
+      "invalid_path",
+      "fork_required",
+    ]),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -211,6 +229,8 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
         return "A thread can belong to at most one project folder.";
       case "invalid_path":
         return "That path is not a file in this project folder.";
+      case "fork_required":
+        return "This chat already has turns; fork it into the project instead of moving it.";
       case "storage":
         return "Could not access project folders.";
     }
