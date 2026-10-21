@@ -1252,6 +1252,30 @@ export const OrchestrationV2NotificationSource = kindUnionWithFallback(
 );
 export type OrchestrationV2NotificationSource = typeof OrchestrationV2NotificationSource.Type;
 
+/** Why a delegated task's child run stopped without a result, as its parent is told. */
+export const OrchestrationV2DelegatedTaskFailureKind = Schema.Literals([
+  "rate_limit",
+  "provider_error",
+  "interrupted_by_restart",
+  "crashed",
+]);
+export type OrchestrationV2DelegatedTaskFailureKind =
+  typeof OrchestrationV2DelegatedTaskFailureKind.Type;
+
+export const OrchestrationV2DelegatedTaskFailure = Schema.Struct({
+  taskId: NodeId,
+  childThreadId: ThreadId,
+  childRunId: RunId,
+  title: Schema.String,
+  kind: OrchestrationV2DelegatedTaskFailureKind,
+  message: Schema.String,
+  /** The provider's reported limit reset, for `rate_limit`. */
+  resetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  /** The child may have left edits or other partial work behind. */
+  partialWork: Schema.Boolean,
+});
+export type OrchestrationV2DelegatedTaskFailure = typeof OrchestrationV2DelegatedTaskFailure.Type;
+
 // A notification records an observed event, not whether its payload has reached the agent.
 // Provider delivery, wake policy, and agent-facing instructions belong to the backend.
 export const OrchestrationV2Notification = Schema.Struct({
@@ -1260,6 +1284,8 @@ export const OrchestrationV2Notification = Schema.Struct({
   outcome: Schema.Literals(["completed", "failed", "cancelled", "updated", "unknown"]),
   summary: TrimmedNonEmptyString,
   detail: Schema.optional(Schema.String),
+  /** Delegated child runs that failed or were cut off, when the notification reports them. */
+  delegatedFailures: Schema.optional(Schema.Array(OrchestrationV2DelegatedTaskFailure)),
 });
 export type OrchestrationV2Notification = typeof OrchestrationV2Notification.Type;
 

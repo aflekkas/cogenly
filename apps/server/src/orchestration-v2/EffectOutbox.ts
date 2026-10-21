@@ -118,6 +118,15 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     type: Schema.Literal("delegated-tasks.stop"),
     reason: Schema.optional(Schema.String),
   }),
+  /** Queues a notice on the parent (the effect's thread) that a delegated child run failed. */
+  Schema.Struct({
+    type: Schema.Literal("delegated-task.failure-notice"),
+    taskId: NodeId,
+    childThreadId: ThreadId,
+    childRunId: RunId,
+    /** Restart recovery settled the run, so a cut-off run reads as interrupted by the restart. */
+    afterRestart: Schema.optional(Schema.Boolean),
+  }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -131,6 +140,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "attachment.cleanup",
   "thread-title.generate",
   "delegated-tasks.stop",
+  "delegated-task.failure-notice",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [

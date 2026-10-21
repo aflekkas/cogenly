@@ -10400,6 +10400,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       readonly settledContinuationOf?: RunId;
       readonly taskId: NodeId;
       readonly resultRun?: OrchestrationV2Run;
+      readonly afterRestart?: boolean;
     },
   ) =>
     Effect.gen(function* () {
@@ -10584,8 +10585,29 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         updatedAt: now,
         consumedAt: now,
       };
+      // Committed with the result, so the parent hears of a failure exactly once
+      // even when the server stops before the notice is queued.
+      const failureNoticeEffects: ReadonlyArray<PendingOrchestrationEffectV2> =
+        terminalStatus === "completed"
+          ? []
+          : [
+              {
+                id: `effect:delegated-task-failure:${task.id}:${childRun.id}`,
+                commandId: CommandId.make(
+                  `command:delegated-task-failure:${task.id}:${childRun.id}`,
+                ),
+                threadId: parentThreadId,
+                request: {
+                  type: "delegated-task.failure-notice",
+                  taskId: task.id,
+                  childThreadId,
+                  childRunId: childRun.id,
+                  ...(options.afterRestart === true ? { afterRestart: true } : {}),
+                },
+              },
+            ];
 
-      yield* writeSystemEvents([
+      const resultEvents: ReadonlyArray<Omit<OrchestrationV2DomainEvent, "id">> = [
         {
           type: "subagent.updated",
           threadId: parentThreadId,
@@ -10686,7 +10708,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           occurredAt: now,
           payload: resultTransfer,
         },
-      ]);
+      ];
+
+      yield* writeSystemEvents(resultEvents, failureNoticeEffects);
 
       if (completionPlan.offer && completionPlan.parentRun !== undefined) {
         yield* offerDelegatedCompletionDelivery(parentThreadId, completionPlan.parentRun.id);
@@ -10695,7 +10719,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
   const finalizeAppOwnedSubagent = (
     childThreadId: ThreadId,
-    options?: { readonly settledContinuationOf?: RunId },
+    options?: { readonly settledContinuationOf?: RunId; readonly afterRestart?: boolean },
   ) =>
     Effect.gen(function* () {
       const childControls = yield* projectionStore.getThreadRecords(
@@ -11677,7 +11701,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               const thread = yield* projectionStore.getThreadShell(threadId);
               const parentThreadId = thread?.lineage.parentThreadId;
               if (parentThreadId === undefined || parentThreadId === null) return;
-              yield* threadDispatch.withLock(parentThreadId, finalizeAppOwnedSubagent(threadId));
+              yield* threadDispatch.withLock(
+                parentThreadId,
+                finalizeAppOwnedSubagent(threadId, { afterRestart: true }),
+              );
             }).pipe(
               Effect.catchCause((cause) =>
                 Effect.logWarning("Failed to recover terminal app-owned subagent", {
@@ -11792,7 +11819,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (parentThreadId === undefined) return;
       yield* threadDispatch.withLock(
         parentThreadId,
-        finalizeAppOwnedSubagent(threadId, { settledContinuationOf: sourceRunId }),
+        finalizeAppOwnedSubagent(threadId, {
+          settledContinuationOf: sourceRunId,
+          afterRestart: true,
+        }),
       );
     }).pipe(
       Effect.catchCause((cause) =>

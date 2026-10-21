@@ -29,6 +29,7 @@ import {
   type ThreadId,
   type EnvironmentId,
   type NodeId,
+  type OrchestrationV2DelegatedTaskFailure,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
@@ -51,7 +52,7 @@ import {
   type TooltipHandle,
 } from "../ui/tooltip";
 import { getProviderInstanceEntry } from "../../providerInstances";
-import { formatShortTimestamp } from "../../timestampFormat";
+import { formatShortTimestamp, formatUpcomingTimestamp } from "../../timestampFormat";
 import { getTriggerDisplayModelName } from "./providerIconUtils";
 import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
 import { cn } from "~/lib/utils";
@@ -331,11 +332,29 @@ const NOTIFICATION_OUTCOME_LABEL: Record<OrchestrationV2Notification["outcome"],
   unknown: "Finished",
 };
 
+const DELEGATED_FAILURE_LABEL: Record<OrchestrationV2DelegatedTaskFailure["kind"], string> = {
+  rate_limit: "rate limit",
+  provider_error: "provider error",
+  interrupted_by_restart: "interrupted by restart",
+  crashed: "crashed",
+};
+
+/** Why a delegated child stopped, with its limit reset in the user's own time. */
+function delegatedFailureLabel(
+  failure: OrchestrationV2DelegatedTaskFailure,
+  timestampFormat: TimestampFormat,
+): string {
+  const reset = failure.resetAt ? formatUpcomingTimestamp(failure.resetAt, timestampFormat) : "";
+  return `Stopped: ${DELEGATED_FAILURE_LABEL[failure.kind]}${reset ? `, resets ${reset}` : ""}`;
+}
+
 /** A notification about one subagent, drawn as that subagent's card. Renders `fallback` when the parent has no record of it. */
 export function SubagentNotificationLink(props: {
   readonly parentRef: ScopedThreadRef;
   readonly childThreadId: ThreadId;
   readonly outcome: OrchestrationV2Notification["outcome"];
+  /** Set when the notification reports this child's run failing or being cut off. */
+  readonly failure?: OrchestrationV2DelegatedTaskFailure | undefined;
   readonly createdAt: string;
   readonly timestampFormat: TimestampFormat;
   readonly providerStatuses: ReadonlyArray<ServerProvider>;
@@ -370,7 +389,9 @@ export function SubagentNotificationLink(props: {
       onOpenThread={props.onOpenThread}
       event={{
         status: NOTIFICATION_OUTCOME_STATUS[props.outcome],
-        label: NOTIFICATION_OUTCOME_LABEL[props.outcome],
+        label: props.failure
+          ? delegatedFailureLabel(props.failure, props.timestampFormat)
+          : NOTIFICATION_OUTCOME_LABEL[props.outcome],
         timestamp: formatShortTimestamp(props.createdAt, props.timestampFormat),
       }}
     />

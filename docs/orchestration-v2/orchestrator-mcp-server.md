@@ -200,6 +200,15 @@ later follow-ups. `hasPendingChildRuns` reports later queued or executing turns;
 `latestTerminal*` exposes later executed, non-monitor results without replacing
 the published task result.
 
+When a child run fails or is cut off, whatever the wait mode, the parent also gets a queued
+failure notice. This covers a provider error, a usage limit with its reset time, a restart that
+cancelled it, and a provider session that died. The notice waits behind the parent's current turn
+and names the task, the failure kind, the error, whether partial work may remain, and a suggested
+action. It never resumes or retries the child. A user Stop, a parent Stop, and `task_cancel`
+send no notice. Ids derive from the task and child run, so one failure yields at most one notice
+across restarts. A failure that arrives while an earlier notice is still queued is folded into
+it, so children cut off by one restart arrive together.
+
 ### `task_cancel`
 
 Stops the child thread with the internal `thread.stop` command, then stops every
