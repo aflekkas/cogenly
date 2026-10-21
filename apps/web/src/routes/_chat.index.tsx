@@ -1,6 +1,5 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { useAtomValue } from "@effect/atom-react";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
@@ -8,7 +7,6 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } 
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { isElectron } from "../env";
 import { NoProjectsHero } from "../components/NoProjectsHero";
-import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
@@ -18,15 +16,9 @@ import { useScratchProject } from "../hooks/useScratchProject";
 import { useAgents } from "../agents/agentsClient";
 import { requestAgentCreation } from "../agents/AgentsCreateHost";
 import { AgentFace } from "../components/agents/face";
-import {
-  resolveModeLanding,
-  type ModeLanding,
-} from "../components/sidebar/modes/modeLanding.logic";
-import {
-  sidebarModeForThread,
-  sortChatsByActivity,
-  type SidebarMode,
-} from "../components/sidebar/modes/sidebarModes.logic";
+import { type ModeLanding } from "../components/sidebar/modes/modeLanding.logic";
+import { type SidebarMode } from "../components/sidebar/modes/sidebarModes.logic";
+import { computeModeLanding } from "../components/sidebar/modes/useLandOnMode";
 import { useSidebarModeClassifier } from "../components/sidebar/modes/useSidebarModeState";
 import { environmentServerConfigsAtom } from "../state/server";
 import { buildThreadRouteParams } from "../threadRoutes";
@@ -66,7 +58,7 @@ function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   const { agents, loading: agentsLoading } = useAgents();
-  const { classifier, scratchProjectKeys } = useSidebarModeClassifier({
+  const { classifier } = useSidebarModeClassifier({
     threads,
     projects,
     serverConfigs,
@@ -82,48 +74,30 @@ function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
 
-  const landing = useMemo(() => {
-    const recentChat =
-      sortChatsByActivity(
-        threads.filter(
-          (thread) =>
-            thread.archivedAt === null && sidebarModeForThread(thread, classifier) === "chats",
-        ),
-      )[0] ?? null;
-    const recentRepository =
-      sortScopedProjectsForSidebar(
-        projects.filter(
-          (project) => !scratchProjectKeys.has(`${project.environmentId}:${project.id}`),
-        ),
+  const landing = useMemo(
+    () =>
+      computeModeLanding({
+        mode,
         threads,
-        "updated_at",
-      )[0] ?? null;
-    const recentAgent = agents[0] ?? null;
-    return resolveModeLanding({
-      mode,
+        projects,
+        agents,
+        agentsLoading,
+        bootstrapped,
+        classifier,
+        chatEnvironmentId: scratchEnvironmentId(primaryEnvironmentId),
+      }),
+    [
+      agents,
+      agentsLoading,
       bootstrapped,
-      recentChat: recentChat ? scopeThreadRef(recentChat.environmentId, recentChat.id) : null,
-      chatEnvironmentId: scratchEnvironmentId(primaryEnvironmentId),
-      recentRepository: recentRepository
-        ? scopeProjectRef(recentRepository.environmentId, recentRepository.id)
-        : null,
-      recentAgentConversation: recentAgent
-        ? scopeThreadRef(recentAgent.environmentId, recentAgent.conversationThreadId)
-        : null,
-      agentsLoaded: !agentsLoading,
-    });
-  }, [
-    agents,
-    agentsLoading,
-    bootstrapped,
-    classifier,
-    mode,
-    primaryEnvironmentId,
-    projects,
-    scratchEnvironmentId,
-    scratchProjectKeys,
-    threads,
-  ]);
+      classifier,
+      mode,
+      primaryEnvironmentId,
+      projects,
+      scratchEnvironmentId,
+      threads,
+    ],
+  );
 
   // `attempt` changes on a retry, so the same landing runs again.
   const land = useEffectEvent((landing: ModeLanding, _attempt: number) => {

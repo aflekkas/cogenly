@@ -317,7 +317,11 @@ import {
   useEnvironmentSettings,
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
-import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
+import {
+  PANEL_ANIMATION_DURATION,
+  readPanelAnimationsActive,
+  usePanelPresence,
+} from "../panelAnimations";
 import { useRightPanelFlip } from "./chat/useRightPanelFlip";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
@@ -584,11 +588,7 @@ const EMPTY_FEEDBACK_SUBMISSIONS: ReadonlyArray<CodexFeedbackSubmission> = [];
 const VISIT_DISPATCH_THROTTLE_MS = 10_000;
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
-function useDraftHeroLayoutTransition(
-  isDraftHeroState: boolean,
-  animationsActive: boolean,
-  animationDurationMs: number,
-) {
+function useDraftHeroLayoutTransition(isDraftHeroState: boolean, animationDurationMs: number) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
   const previousStateRef = useRef(isDraftHeroState);
@@ -618,7 +618,7 @@ function useDraftHeroLayoutTransition(
     const previousComposerRect = previousComposerRectRef.current;
     if (
       stateChanged &&
-      animationsActive &&
+      readPanelAnimationsActive() &&
       !mobileComposerTransitionActive &&
       transitionGroup &&
       previousComposerRect &&
@@ -649,7 +649,7 @@ function useDraftHeroLayoutTransition(
     }
     previousStateRef.current = isDraftHeroState;
     previousComposerRectRef.current = nextComposerRect;
-  }, [animationDurationMs, animationsActive, isDraftHeroState]);
+  }, [animationDurationMs, isDraftHeroState]);
 
   return {
     transitionGroupRef: attachTransitionGroupRef,
@@ -1764,8 +1764,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
   const rightPanelOpen = rightPanelState.isOpen && rightPanelSupported;
-  const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
-    usePanelAnimationSettings();
+  const panelAnimationDurationMs = PANEL_ANIMATION_DURATION;
   const rightPanelPresenceValue = useMemo(
     () => ({
       activeSurface: activeRightPanelSurface,
@@ -1776,7 +1775,6 @@ export default function ChatView(props: ChatViewProps) {
   const rightPanelPresence = usePanelPresence(
     rightPanelOpen && activeThreadRef !== null,
     rightPanelPresenceValue,
-    panelAnimationsActive,
     activeThreadKey,
     panelAnimationDurationMs,
   );
@@ -3387,7 +3385,6 @@ export default function ChatView(props: ChatViewProps) {
   });
   const draftHeroTransition = useDraftHeroLayoutTransition(
     isDraftHeroState,
-    panelAnimationsActive,
     panelAnimationDurationMs,
   );
   const captureDraftHeroComposerRect = draftHeroTransition.captureComposerRect;
@@ -7352,7 +7349,7 @@ export default function ChatView(props: ChatViewProps) {
           resolveDockStarted?.();
         },
         {
-          active: panelAnimationsActive,
+          active: readPanelAnimationsActive(),
           durationMs: panelAnimationDurationMs,
         },
       );
@@ -9066,8 +9063,9 @@ export default function ChatView(props: ChatViewProps) {
           aria-hidden={!rightPanelOpen}
           className={cn(
             "flex shrink-0",
-            panelAnimationsActive &&
-              "motion-safe:transition-opacity motion-safe:duration-(--panel-animation-duration) motion-safe:ease-out",
+            // Fades only where the layout lets panels animate, read from its
+            // attribute so a navigation's first frame never re-renders this view.
+            "in-data-[panel-animations=true]:motion-safe:transition-opacity in-data-[panel-animations=true]:motion-safe:duration-(--panel-animation-duration) in-data-[panel-animations=true]:motion-safe:ease-out",
             // Closed, the control leaves the flex flow so the cluster is only as wide as the two
             // toggles the header reserves room for; anchored to the cluster's left edge, it fades
             // out where it stood rather than over the terminal toggle.
@@ -9811,7 +9809,7 @@ export default function ChatView(props: ChatViewProps) {
       ) : null}
       {rightPanelPresent && shouldUsePlanSidebarSheet && activeThreadRef ? (
         <RightPanelSheet
-          animationDurationMs={panelAnimationsActive ? panelAnimationDurationMs : 0}
+          animationDurationMs={panelAnimationDurationMs}
           open={rightPanelOpen}
           onClose={closePreviewPanelStable}
         >

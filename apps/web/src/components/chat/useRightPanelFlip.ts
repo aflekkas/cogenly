@@ -9,7 +9,7 @@ import {
   retargetPanelFlip,
   type PanelFlipSnapshot,
 } from "../../lib/panelFlip";
-import { usePanelAnimationSettings } from "../../panelAnimations";
+import { PANEL_ANIMATION_DURATION, readPanelAnimationsActive } from "../../panelAnimations";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useListColumnLayoutStore } from "../sidebar/listColumnLayoutStore";
 
@@ -36,15 +36,18 @@ export function useRightPanelFlip(
   open: boolean,
   maximized: boolean,
 ) {
-  const { active, durationMs } = usePanelAnimationSettings();
+  const durationMs = PANEL_ANIMATION_DURATION;
   const snapshotRef = useRef<PanelFlipSnapshot | null>(null);
   const motionRef = useRef<{ snapshot: PanelFlipSnapshot; endsAt: number } | null>(null);
   const listColumnAutoCollapsed = useListColumnLayoutStore((state) => state.autoCollapsed);
   const threadKey = threadRef ? scopedThreadKey(threadRef) : null;
 
   useEffect(() => {
-    if (!root || threadKey === null || !inline || !active) return;
+    if (!root || threadKey === null || !inline) return;
     return useRightPanelStore.subscribe((state, previous) => {
+      // Read as the change happens: reduced motion, or a navigation's first
+      // frame, snaps the panel instead.
+      if (!readPanelAnimationsActive()) return;
       const next = state.byThreadKey[threadKey];
       const before = previous.byThreadKey[threadKey];
       if (
@@ -54,7 +57,7 @@ export function useRightPanelFlip(
         snapshotRef.current = capturePanelFlip(root);
       }
     });
-  }, [active, inline, root, threadKey]);
+  }, [inline, root, threadKey]);
 
   useLayoutEffect(() => {
     const snapshot = snapshotRef.current;

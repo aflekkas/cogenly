@@ -369,7 +369,7 @@ import { searchProviderSkills } from "../../providerSkillSearch";
 import { useDelayedStatus } from "../../hooks/useDelayedStatus";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useStableCallback } from "../../hooks/useStableCallback";
-import { usePanelAnimationSettings } from "../../panelAnimations";
+import { PANEL_ANIMATION_DURATION, readPanelAnimationsActive } from "../../panelAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { readEnvironmentScope } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
@@ -419,7 +419,6 @@ function useComposerRestingTransition(
   isCollapsed: boolean,
   restingControlsRef: React.RefObject<HTMLDivElement | null>,
   onOverlayHeightChange: (height: number) => void,
-  animationsActive: boolean,
   animationDurationMs: number,
 ) {
   const elementRef = useRef<HTMLDivElement>(null);
@@ -597,7 +596,7 @@ function useComposerRestingTransition(
 
       if (
         shouldAnimate &&
-        animationsActive &&
+        readPanelAnimationsActive() &&
         previousHeight !== null &&
         Math.abs(previousHeight - nextHeight) >= 0.5
       ) {
@@ -870,13 +869,7 @@ function useComposerRestingTransition(
         surfaceBottomInset: overlayRect ? overlayRect.bottom - nextRect.bottom : null,
       };
     },
-    [
-      animationDurationMs,
-      animationsActive,
-      clearTransitionStyles,
-      onOverlayHeightChange,
-      restingControlsRef,
-    ],
+    [animationDurationMs, clearTransitionStyles, onOverlayHeightChange, restingControlsRef],
   );
 
   useLayoutEffect(() => {
@@ -4350,14 +4343,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ) : null}
       </div>
     ) : null;
-  const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
-    usePanelAnimationSettings();
   const composerMainSurfaceRef = useComposerRestingTransition(
     composerControlsCollapsed,
     restingComposerControlsRef,
     onComposerOverlayHeightChange,
-    panelAnimationsActive,
-    panelAnimationDurationMs,
+    PANEL_ANIMATION_DURATION,
   );
   const restingHiddenBlockCount = composerControlsCollapsed
     ? restingControlsHiddenBlockCount

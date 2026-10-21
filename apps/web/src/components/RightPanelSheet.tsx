@@ -1,4 +1,6 @@
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+
+import { readPanelAnimationsActive } from "../panelAnimations";
 
 import { Sheet, SheetPopup } from "./ui/sheet";
 
@@ -8,6 +10,12 @@ export function RightPanelSheet(props: {
   open: boolean;
   onClose: () => void;
 }) {
+  // Whether the sheet slides is decided when it opens or closes: not under
+  // reduced motion, nor on the first frame of a navigation that restores it.
+  const [motion, setMotion] = useState(() => ({ open: props.open, animated: false }));
+  if (motion.open !== props.open) {
+    setMotion({ open: props.open, animated: readPanelAnimationsActive() });
+  }
   return (
     <Sheet
       open={props.open}
@@ -20,7 +28,7 @@ export function RightPanelSheet(props: {
       {/* Never narrower than 24rem where the viewport allows, so the width
           only grows with the window. */}
       <SheetPopup
-        transitionDurationMs={props.animationDurationMs}
+        transitionDurationMs={motion.animated ? props.animationDurationMs : 0}
         side="right"
         showCloseButton={false}
         keepMounted

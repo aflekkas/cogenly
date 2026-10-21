@@ -4,7 +4,6 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type {
   EnvironmentId,
   ResolvedKeybindingsConfig,
@@ -15,6 +14,7 @@ import { useCallback, useEffect, useMemo } from "react";
 
 import { resolveShortcutCommand } from "../../../keybindings";
 import { useSelectSidebarMode } from "./useSelectSidebarMode";
+import { buildScratchProjectKeys, buildSidebarModeClassifier } from "./useLandOnMode";
 import { useUiStateStore } from "../../../uiStateStore";
 import { useComposerDraftStore, type DraftId } from "../../../composerDraftStore";
 import {
@@ -51,31 +51,13 @@ export function useSidebarModeClassifier(input: {
   const { threads, projects, serverConfigs } = input;
   const { agents } = useAgents();
   const scratchProjectKeys = useMemo(
-    () =>
-      new Set(
-        projects
-          .filter(
-            (project) =>
-              project.isScratch === true ||
-              isScratchProject(
-                project,
-                serverConfigs.get(project.environmentId)?.scratchWorkspaceRoot,
-              ),
-          )
-          .map((project) => `${project.environmentId}:${project.id}`),
-      ),
+    () => buildScratchProjectKeys(projects, serverConfigs),
     [projects, serverConfigs],
   );
-  const classifier = useMemo((): SidebarModeThreadClassifier => {
-    const agentThreadKeys = new Set(
-      agents.map((agent) => sidebarModeThreadKey(agent.environmentId, agent.conversationThreadId)),
-    );
-    for (const thread of threads) {
-      if (thread.source.agent?.role === "conversation")
-        agentThreadKeys.add(sidebarModeThreadKey(thread.environmentId, thread.id));
-    }
-    return { agentThreadKeys, scratchProjectKeys };
-  }, [agents, scratchProjectKeys, threads]);
+  const classifier = useMemo(
+    () => buildSidebarModeClassifier(agents, threads, scratchProjectKeys),
+    [agents, scratchProjectKeys, threads],
+  );
   return { classifier, scratchProjectKeys };
 }
 

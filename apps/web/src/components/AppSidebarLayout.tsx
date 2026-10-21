@@ -23,11 +23,7 @@ import { resolveThreadRouteRef } from "../threadRoutes";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useLegacySidebarEnabled } from "../hooks/useSettings";
-import {
-  PanelAnimationSuppressionProvider,
-  usePanelAnimationSettings,
-  usePanelNavigationSuppression,
-} from "../panelAnimations";
+import { usePanelAnimationSettings, usePanelNavigationSuppression } from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
 import ThreadSidebar from "./Sidebar";
@@ -369,72 +365,70 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate, pathname]);
 
   return (
-    <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
-      <SidebarProvider
-        // Clip the main pane while it slides past the edge on sidebar close.
-        className="h-dvh! min-h-0! overflow-x-clip"
-        data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
-        data-nav-rail={navRailVisible ? "" : undefined}
-        data-list-column-hidden={listSidebarHidden ? "" : undefined}
-        open={listColumnOpen}
-        onOpenChange={onListColumnOpenChange}
-        style={sidebarProviderStyle}
-      >
-        <ListColumnAutoCollapse
-          cramped={mainColumnCramped && !listSidebarHidden}
-          preferredOpen={preferredOpen}
-        />
-        <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
-        <ProjectProjectionRetention />
-        {navRailVisible ? (
-          <SidebarNavRail showSidebarToggle={titlebarLayout.sidebarToggle === "rail-titlebar"} />
-        ) : null}
-        {/* Stays mounted on full-width pages, hidden by data-list-column-hidden
+    <SidebarProvider
+      // Clip the main pane while it slides past the edge on sidebar close.
+      className="h-dvh! min-h-0! overflow-x-clip"
+      data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
+      data-nav-rail={navRailVisible ? "" : undefined}
+      data-list-column-hidden={listSidebarHidden ? "" : undefined}
+      open={listColumnOpen}
+      onOpenChange={onListColumnOpenChange}
+      style={sidebarProviderStyle}
+    >
+      <ListColumnAutoCollapse
+        cramped={mainColumnCramped && !listSidebarHidden}
+        preferredOpen={preferredOpen}
+      />
+      <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
+      <ProjectProjectionRetention />
+      {navRailVisible ? (
+        <SidebarNavRail showSidebarToggle={titlebarLayout.sidebarToggle === "rail-titlebar"} />
+      ) : null}
+      {/* Stays mounted on full-width pages, hidden by data-list-column-hidden
             (index.css), so a return shows the list in place, without a remount
             or a slide. */}
-        <Sidebar
-          side="left"
-          collapsible="offcanvas"
-          data-app-sidebar=""
-          role="navigation"
-          aria-label={isOnSettings ? "Settings" : "Threads"}
-          aria-hidden={listSidebarHidden || undefined}
-          inert={listSidebarHidden || undefined}
-          // The list column starts after the rail and slides under it when collapsed.
-          className={navRailVisible ? "left-(--nav-rail-width)" : undefined}
-          // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
-          style={windowControlsInsetStyle}
+      <Sidebar
+        side="left"
+        collapsible="offcanvas"
+        data-app-sidebar=""
+        role="navigation"
+        aria-label={isOnSettings ? "Settings" : "Threads"}
+        aria-hidden={listSidebarHidden || undefined}
+        inert={listSidebarHidden || undefined}
+        // The list column starts after the rail and slides under it when collapsed.
+        className={navRailVisible ? "left-(--nav-rail-width)" : undefined}
+        // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
+        style={windowControlsInsetStyle}
+      >
+        <div
+          key={isOnSettings ? "settings" : "threads"}
+          className={cn(
+            "flex min-h-0 w-full flex-1 flex-col",
+            sidebarView.swapped &&
+              "motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-standard motion-safe:starting:opacity-0",
+          )}
         >
-          <div
-            key={isOnSettings ? "settings" : "threads"}
-            className={cn(
-              "flex min-h-0 w-full flex-1 flex-col",
-              sidebarView.swapped &&
-                "motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-standard motion-safe:starting:opacity-0",
-            )}
-          >
-            {isOnSettings ? (
-              <>
-                <SidebarChromeHeader isElectron={isElectron} />
-                <SettingsSidebarNav pathname={pathname} />
-              </>
-            ) : legacySidebarEnabled ? (
-              <LegacyThreadSidebar />
-            ) : (
-              <ThreadSidebar />
-            )}
-          </div>
-        </Sidebar>
-        {children}
-        {/* Without the rail, or after the macOS traffic lights beside it. A page
+          {isOnSettings ? (
+            <>
+              <SidebarChromeHeader isElectron={isElectron} />
+              <SettingsSidebarNav pathname={pathname} />
+            </>
+          ) : legacySidebarEnabled ? (
+            <LegacyThreadSidebar />
+          ) : (
+            <ThreadSidebar />
+          )}
+        </div>
+      </Sidebar>
+      {children}
+      {/* Without the rail, or after the macOS traffic lights beside it. A page
             without the list column keeps the button in place, disabled. */}
-        <SidebarControl
-          showButton={titlebarLayout.sidebarToggle === "fixed"}
-          disabled={listSidebarHidden}
-        />
-        <NavigationHistoryShortcuts />
-        <MainAppLocationTracker />
-      </SidebarProvider>
-    </PanelAnimationSuppressionProvider>
+      <SidebarControl
+        showButton={titlebarLayout.sidebarToggle === "fixed"}
+        disabled={listSidebarHidden}
+      />
+      <NavigationHistoryShortcuts />
+      <MainAppLocationTracker />
+    </SidebarProvider>
   );
 }

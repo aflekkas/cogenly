@@ -12,7 +12,7 @@ import { resolveChatCanvasLayout, type ChatCanvasPreview } from "./chatCanvasLay
 import type { PreviewMiniPlayerObstacles } from "../preview/previewMiniPlayerLayout";
 import { observeResize } from "../../lib/observeResize";
 import { notifyPanelMotion } from "../../lib/panelFlip";
-import { usePanelAnimationSettings } from "../../panelAnimations";
+import { readPanelAnimationsActive } from "../../panelAnimations";
 
 // Everything that reads the lane insets (index.css).
 const CHAT_LANE_SELECTOR =
@@ -181,17 +181,16 @@ export function ChatCanvas({
   // A details card that opens or closes where it does not fit beside the
   // centered chat moves the lanes over; they glide instead of jumping. A
   // resize, the first measure, or reduced motion snaps.
-  const { active: laneMotion } = usePanelAnimationSettings();
   const drawnLaneRef = useRef<{ left: number; card: boolean; width: number } | null>(null);
   useLayoutEffect(() => {
     const drawn = drawnLaneRef.current;
     const next = { left: layout.chat.left, card: detailsCard !== null, width: measurements.width };
     drawnLaneRef.current = next;
     const element = elementRef.current;
-    if (!element || !drawn || !laneMotion) return;
+    if (!element || !drawn || !readPanelAnimationsActive()) return;
     if (drawn.card === next.card || drawn.width !== next.width) return;
     if (Math.abs(drawn.left - next.left) >= 0.5) glideChatLanes(element, drawn.left - next.left);
-  }, [layout.chat.left, detailsCard, measurements.width, laneMotion]);
+  }, [layout.chat.left, detailsCard, measurements.width]);
   return (
     <ChatCanvasContext value={context}>
       <div
