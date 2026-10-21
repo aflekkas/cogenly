@@ -131,7 +131,6 @@ import {
   resolveSelectableModel,
 } from "@t3tools/shared/model";
 import { projectScriptCwd, resolveProjectScripts } from "@t3tools/shared/projectScripts";
-import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import {
   latestUnheldRun,
@@ -208,6 +207,8 @@ import {
   type TimelineRunObservation,
   type TimelineScrollMode,
 } from "./chat/timelineScrollAnchoring";
+import { anchoredScrollTarget, sendAnchorOffset } from "./chat/timelineSendAnchor";
+import { animateScrollTop } from "~/lib/sendMotion";
 import {
   buildPendingUserInputAnswers,
   carryDisplacedCustomAnswerIntoPrompt,
@@ -294,7 +295,7 @@ import {
   WifiOffIcon,
 } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS, timelineHeaderInset } from "~/workspaceTitlebar";
 import { preloadableComponent } from "~/lib/preloadableComponent";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
@@ -490,7 +491,6 @@ import {
   isBranchMismatchDismissedForSession,
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
-  shouldReleaseTimelineAnchorForToolActivity,
   shouldRenderPreviewMiniPlayer,
   getStartedThreadModelChangeBlockReason,
   type LocalDispatchSnapshot,
@@ -1662,10 +1662,10 @@ export default function ChatView(props: ChatViewProps) {
     setTimelineAnchor({ threadKey: activeThreadKey, messageId: null });
   }
   const timelineAnchorMessageId = timelineAnchor.messageId;
-  // Release the turn anchor once its run finishes. LegendList sizes the
-  // anchored end-space filler for the geometry at anchor time and never
-  // recomputes it, so a lingering anchor leaves stale filler height behind
-  // the composer — phantom scroll range on threads whose content fits.
+  // Release the turn anchor once its run finishes, unless its end space still
+  // holds the sent message at the top: dropping that space would pull the
+  // finished turn back down. LegendList resizes the space as rows change, so a
+  // kept anchor never leaves more room than the turn needs.
   const anchorRunSettled = useMemo(() => {
     if (timelineAnchorMessageId === null) return false;
     const anchorRun = serverProjection?.runs.find(
@@ -1681,7 +1681,7 @@ export default function ChatView(props: ChatViewProps) {
     );
   }, [serverProjection, timelineAnchorMessageId]);
   useEffect(() => {
-    if (!anchorRunSettled) return;
+    if (!anchorRunSettled || anchoredEndSpaceSizeRef.current > 0) return;
     setTimelineAnchor({ threadKey: activeThreadKey, messageId: null });
   }, [anchorRunSettled, activeThreadKey]);
   const activeProjectRef = useMemo(
@@ -4465,6 +4465,9 @@ export default function ChatView(props: ChatViewProps) {
   // re-pins on its own (independent of the refs), so the timeline needs a
   // render-visible flag to switch it off once the user scrolls away.
   const [timelineLiveFollowEnabled, setTimelineLiveFollowEnabled] = useState(true);
+  const cancelAnchorScrollRef = useRef<(() => void) | null>(null);
+  // The anchored end space LegendList currently reserves under the sent turn.
+  const anchoredEndSpaceSizeRef = useRef(0);
   const pendingTimelineAnchorRef = useRef<MessageId | null>(null);
   const positionedTimelineAnchorRef = useRef<MessageId | null>(null);
   const settledTimelineAnchorRef = useRef<MessageId | null>(null);
@@ -4481,6 +4484,7 @@ export default function ChatView(props: ChatViewProps) {
   const anchorScrollRestoreFrameRef = useRef<number | null>(null);
   const cancelTimelineLiveFollowForUserNavigation = () => {
     cancelPositionRestoreRef.current?.();
+    cancelAnchorScrollRef.current?.();
     anchorUserScrollGenerationRef.current += 1;
     const wasProgrammaticScrollMode = timelineScrollModeRef.current !== "free-scrolling";
     timelineScrollModeRef.current = "free-scrolling";
@@ -4792,48 +4796,44 @@ export default function ChatView(props: ChatViewProps) {
     }
     positionedTimelineAnchorRef.current = messageId;
     settledTimelineAnchorRef.current = null;
-    const positionAnchor = (remainingAttempts: number) => {
-      requestAnimationFrame(() => {
-        if (positionedTimelineAnchorRef.current !== messageId) {
-          return;
-        }
-        const list = legendListRef.current;
-        if (!list) {
-          if (remainingAttempts > 0) {
-            positionAnchor(remainingAttempts - 1);
-          }
-          return;
-        }
-        const scrollNode = list.getScrollableNode();
-        let finished = false;
-        const finishAnimatedPositioning = () => {
-          if (finished) {
-            return;
-          }
-          finished = true;
-          window.clearTimeout(fallbackTimer);
-          scrollNode.removeEventListener("scrollend", finishAnimatedPositioning);
-          if (positionedTimelineAnchorRef.current !== messageId) {
-            return;
-          }
-          const scrollOffset = list.getState().scroll;
-          void list.scrollToOffset({ offset: scrollOffset, animated: false });
-          settledTimelineAnchorRef.current = messageId;
-        };
-        const fallbackTimer = window.setTimeout(finishAnimatedPositioning, 750);
-        scrollNode.addEventListener("scrollend", finishAnimatedPositioning, { once: true });
-        void list.scrollToIndex({
-          index: anchorIndex,
-          animated: true,
-          viewPosition: 0,
-          viewOffset: CHAT_LIST_ANCHOR_OFFSET,
-        });
+    const list = legendListRef.current;
+    const scrollNode = list?.getScrollableNode() as HTMLElement | undefined;
+    if (!list || !scrollNode) return;
+    // The sent row glides to the top below the header on the send spring,
+    // over the same time as its bubble's rise (animate-message-send), so the
+    // two read as one upward motion. Rows still measuring move the target; it
+    // is read every frame.
+    const target = () => {
+      if (positionedTimelineAnchorRef.current !== messageId) return null;
+      const row = scrollNode.querySelector(
+        `[data-message-role="user"][data-message-id="${CSS.escape(messageId)}"]`,
+      );
+      if (!row) return null;
+      const anchorTop =
+        scrollNode.scrollTop +
+        row.getBoundingClientRect().top -
+        scrollNode.getBoundingClientRect().top;
+      return anchoredScrollTarget({
+        anchorTop,
+        anchorOffset: sendAnchorOffset(timelineHeaderInset(scrollNode)),
+        maxScroll: scrollNode.scrollHeight - scrollNode.clientHeight,
       });
     };
-    requestAnimationFrame(() => positionAnchor(12));
+    cancelAnchorScrollRef.current?.();
+    let finished = false;
+    const cancel = animateScrollTop(scrollNode, target, {
+      onDone: (completed) => {
+        finished = true;
+        if (completed && positionedTimelineAnchorRef.current === messageId) {
+          settledTimelineAnchorRef.current = messageId;
+        }
+      },
+    });
+    cancelAnchorScrollRef.current = finished ? null : cancel;
   };
   const onTimelineAnchorReadyStable = useStableCallback(onTimelineAnchorReady);
-  const onTimelineAnchorSizeChanged = (messageId: MessageId) => {
+  const onTimelineAnchorSizeChanged = (messageId: MessageId, size: number) => {
+    anchoredEndSpaceSizeRef.current = size;
     if (settledTimelineAnchorRef.current !== messageId) {
       return;
     }
@@ -4877,8 +4877,16 @@ export default function ChatView(props: ChatViewProps) {
   const onTimelineAnchorSizeChangedStable = useStableCallback(onTimelineAnchorSizeChanged);
 
   const onIsAtEndChange = (isAtEnd: boolean) => {
+    // A sent turn that outgrew the viewport is no longer followed: the sent
+    // message stays at the top and the scroll-to-end pill takes over.
+    const anchoredTurnOverflowed =
+      !isAtEnd &&
+      timelineScrollModeRef.current === "anchoring-new-turn" &&
+      settledTimelineAnchorRef.current !== null &&
+      settledTimelineAnchorRef.current === timelineAnchorMessageId;
     if (
       !isAtEnd &&
+      !anchoredTurnOverflowed &&
       liveFollowUserScrollGenerationRef.current === anchorUserScrollGenerationRef.current
     ) {
       showScrollDebouncer.current.cancel();
@@ -4891,11 +4899,11 @@ export default function ChatView(props: ChatViewProps) {
       timelineScrollModeRef.current = "following-end";
       liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
       setTimelineLiveFollowEnabled(true);
-      // Reachable only once manual navigation has already broken follow, so
-      // the anchored turn framing is over: the user scrolled back to the live
-      // edge and expects the stream to stick to it again, exactly like the
-      // scroll-to-bottom pill (#6519).
-      setTimelineAnchor(releaseChatTimelineAnchor);
+      // Reachable only once follow has broken, so the anchored turn framing is
+      // over: the user scrolled back to the live edge and expects the stream to
+      // stick to it again, exactly like the scroll-to-bottom pill (#6519). An
+      // end space still holding the sent message up stays, so nothing drops.
+      if (anchoredEndSpaceSizeRef.current === 0) setTimelineAnchor(releaseChatTimelineAnchor);
       showScrollDebouncer.current.cancel();
       setShowScrollToBottom(false);
     } else {
@@ -4905,26 +4913,6 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
   const onIsAtEndChangeStable = useStableCallback(onIsAtEndChange);
-
-  useLayoutEffect(() => {
-    if (timelineScrollModeRef.current !== "anchoring-new-turn") return;
-    if (
-      shouldReleaseTimelineAnchorForToolActivity({
-        anchorMessageId: timelineAnchorMessageId,
-        liveFollowEnabled: timelineLiveFollowEnabled,
-        runningTurnId: activeRunningTurnId,
-        timelineEntries,
-      })
-    ) {
-      scrollToEndStable();
-    }
-  }, [
-    activeRunningTurnId,
-    scrollToEndStable,
-    timelineAnchorMessageId,
-    timelineEntries,
-    timelineLiveFollowEnabled,
-  ]);
 
   useEffect(() => {
     const followEnd = readTimelinePosition(routeThreadKey)?.atEnd !== false;

@@ -88,7 +88,7 @@ import { observeResize } from "~/lib/observeResize";
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 
-import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
+import { resolveSendAnchorEndSpace, sendAnchorOffset } from "./timelineSendAnchor";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { getProjectFaviconCacheKey } from "@t3tools/shared/projectFavicon";
@@ -1018,7 +1018,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
     worktreeSetup,
   ]);
   const rows = useStableRows(rawRows, listIdentityKey);
-  const justSentMessageIds = useJustSentMessageIds(rows, listIdentityKey);
+  const { justSent: justSentMessageIds, claimActivityEnter } = useJustSentMessageIds(
+    rows,
+    listIdentityKey,
+  );
   // Run status/timestamps churn on every stream event; the shared row context
   // must not change with them or every timeline row re-renders per event.
   const runs = useStableHandoffRuns(runsProp);
@@ -1251,17 +1254,19 @@ const ConversationTimeline = memo(function ConversationTimeline({
     },
     [anchorMessageId, onAnchorSizeChanged],
   );
+  // The floating chat header's inset, read from the scroller once it mounts.
+  const [headerInset, setHeaderInset] = useState(0);
   const anchoredEndSpace = useMemo(() => {
-    const config = resolveChatListAnchoredEndSpace(
+    const config = resolveSendAnchorEndSpace(
       rows,
       anchorMessageId,
       (row) => (row.kind === "message" && row.message.role === "user" ? row.message.id : null),
-      { anchorOffset: CHAT_TIMELINE_ANCHOR_OFFSET },
+      sendAnchorOffset(headerInset),
     );
     return config
       ? { ...config, onReady: handleAnchorReady, onSizeChanged: handleAnchorSizeChanged }
       : undefined;
-  }, [anchorMessageId, handleAnchorReady, handleAnchorSizeChanged, rows]);
+  }, [anchorMessageId, handleAnchorReady, handleAnchorSizeChanged, headerInset, rows]);
   const maintainVisibleContentPosition = useMemo(
     () => ({
       data: true,
@@ -1272,11 +1277,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
   );
   const timelineListFooter = useMemo(
     () => (
-      <TimelineListFooter composerInset={anchoredEndSpace ? 0 : contentInsetEndAdjustment}>
-        {footer}
-      </TimelineListFooter>
+      // The composer inset stays in the footer while a sent turn is anchored:
+      // the anchored end space counts the footer, and moving the inset out of
+      // it as a send lands made the list jump by the composer's height.
+      <TimelineListFooter composerInset={contentInsetEndAdjustment}>{footer}</TimelineListFooter>
     ),
-    [anchoredEndSpace, contentInsetEndAdjustment, footer],
+    [contentInsetEndAdjustment, footer],
   );
 
   const measureContentOverflow = useCallback(
@@ -1304,8 +1310,27 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onContentOverflowChange(measureContentOverflow());
     });
   }, [measureContentOverflow, onContentOverflowChange]);
+  // A sent turn's reply grows without scrolling: once it outgrows the
+  // viewport the list is no longer at its end, and the pill has to know.
+  const anchoredAtEndFrameRef = useRef<number | null>(null);
+  const reportAnchoredAtEnd = useCallback(() => {
+    if (!anchoredEndSpace || anchoredAtEndFrameRef.current !== null) return;
+    anchoredAtEndFrameRef.current = requestAnimationFrame(() => {
+      anchoredAtEndFrameRef.current = null;
+      const isAtEnd = resolveTimelineIsAtEnd(listRef.current?.getState?.());
+      if (isAtEnd !== undefined) onIsAtEndChange(isAtEnd);
+    });
+  }, [anchoredEndSpace, listRef, onIsAtEndChange]);
+  useEffect(
+    () => () => {
+      if (anchoredAtEndFrameRef.current !== null)
+        cancelAnimationFrame(anchoredAtEndFrameRef.current);
+    },
+    [],
+  );
   const handleItemSizeChanged = useCallback(() => {
     itemSizeChangesRef.current += 1;
+    reportAnchoredAtEnd();
     if (disclosurePinsEndRef.current) {
       queueMicrotask(pinDisclosureToEnd);
       scheduleDisclosureSettle();
@@ -1315,7 +1340,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       scheduleDisclosureSettle();
     }
     reportContentOverflow();
-  }, [pinDisclosureToEnd, reportContentOverflow, scheduleDisclosureSettle]);
+  }, [pinDisclosureToEnd, reportAnchoredAtEnd, reportContentOverflow, scheduleDisclosureSettle]);
   useEffect(() => cancelContentOverflowFrame, [cancelContentOverflowFrame]);
   // Shows the opened thread two frames after its rows last resized, or at the
   // cap, so a slow row cannot keep the thread hidden.
@@ -1642,7 +1667,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const setTimelineList = useCallback(
     (list: LegendListRef | null) => {
       listRef.current = list;
-      registerTimeline?.(list?.getScrollableNode() ?? null);
+      const scroller = list?.getScrollableNode() ?? null;
+      registerTimeline?.(scroller);
+      if (scroller) setHeaderInset(timelineHeaderInset(scroller));
     },
     [listRef, registerTimeline],
   );
@@ -1777,82 +1804,83 @@ const ConversationTimeline = memo(function ConversationTimeline({
     <MarkdownFindContext value={findActive}>
       <TimelineRowCtx value={sharedState}>
         <JustSentMessagesCtx value={justSentMessageIds}>
-          <TimelineRowActivityCtx value={activityState}>
-            <TooltipScrollDismissArea
-              ref={setTimelineViewportElement}
-              className="relative h-full min-h-0"
-              style={holdingFirstLayout ? FIRST_LAYOUT_HOLD_STYLE : undefined}
-              data-assistant-citation-viewport="true"
-              data-timeline-hold={holdingFirstLayout ? "true" : undefined}
-            >
-              {onCiteAssistantText && citationThreadRef ? (
-                <AssistantSelectionToolbar
-                  viewport={timelineViewportElement}
-                  threadRef={citationThreadRef}
-                  onCite={onCiteAssistantText}
+          <ActivityEnterCtx value={claimActivityEnter}>
+            <TimelineRowActivityCtx value={activityState}>
+              <TooltipScrollDismissArea
+                ref={setTimelineViewportElement}
+                className="relative h-full min-h-0"
+                style={holdingFirstLayout ? FIRST_LAYOUT_HOLD_STYLE : undefined}
+                data-assistant-citation-viewport="true"
+                data-timeline-hold={holdingFirstLayout ? "true" : undefined}
+              >
+                {onCiteAssistantText && citationThreadRef ? (
+                  <AssistantSelectionToolbar
+                    viewport={timelineViewportElement}
+                    threadRef={citationThreadRef}
+                    onCite={onCiteAssistantText}
+                  />
+                ) : null}
+                <LegendList<MessagesTimelineRow>
+                  ref={setTimelineList}
+                  data={rows}
+                  extraData={`${listIdentityKey}:${rows.length}`}
+                  keyExtractor={keyExtractor}
+                  getItemType={getItemType}
+                  renderItem={renderItem}
+                  estimatedItemSize={90}
+                  initialScrollAtEnd={
+                    !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
+                  }
+                  // Legend needs a data refresh to mount new pins without a scroll event.
+                  dataVersion={readyCitationRequest?.key ?? listIdentityKey}
+                  {...(alwaysRender ? { alwaysRender } : {})}
+                  onLoad={handleListLoad}
+                  {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+                  maintainScrollAtEnd={
+                    citationPositioning ||
+                    (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
+                    anchoredEndSpace ||
+                    !liveFollowEnabled ||
+                    fullscreenAppRowId !== null ||
+                    disclosureToggleSettling
+                      ? false
+                      : TIMELINE_MAINTAIN_SCROLL_AT_END
+                  }
+                  maintainVisibleContentPosition={
+                    findActive ||
+                    citationPositioning ||
+                    (restoringThreadPosition && rememberedPosition?.atEnd === false)
+                      ? false
+                      : maintainVisibleContentPosition
+                  }
+                  maintainScrollAtEndThreshold={1}
+                  onScroll={handleScroll}
+                  onItemSizeChanged={handleItemSizeChanged}
+                  className={cn(
+                    "messages-timeline-scroll scroll-fade-y scrollbar-gutter-both min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+                  )}
+                  ListHeaderComponent={listHeader}
+                  ListFooterComponent={timelineListFooter}
                 />
-              ) : null}
-              <LegendList<MessagesTimelineRow>
-                ref={setTimelineList}
-                data={rows}
-                extraData={`${listIdentityKey}:${rows.length}`}
-                keyExtractor={keyExtractor}
-                getItemType={getItemType}
-                renderItem={renderItem}
-                estimatedItemSize={90}
-                initialScrollAtEnd={
-                  !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
-                }
-                // Legend needs a data refresh to mount new pins without a scroll event.
-                dataVersion={readyCitationRequest?.key ?? listIdentityKey}
-                {...(alwaysRender ? { alwaysRender } : {})}
-                onLoad={handleListLoad}
-                {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-                contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
-                maintainScrollAtEnd={
-                  citationPositioning ||
-                  (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
-                  anchoredEndSpace ||
-                  !liveFollowEnabled ||
-                  fullscreenAppRowId !== null ||
-                  disclosureToggleSettling
-                    ? false
-                    : TIMELINE_MAINTAIN_SCROLL_AT_END
-                }
-                maintainVisibleContentPosition={
-                  findActive ||
-                  citationPositioning ||
-                  (restoringThreadPosition && rememberedPosition?.atEnd === false)
-                    ? false
-                    : maintainVisibleContentPosition
-                }
-                maintainScrollAtEndThreshold={1}
-                onScroll={handleScroll}
-                onItemSizeChanged={handleItemSizeChanged}
-                className={cn(
-                  "messages-timeline-scroll scroll-fade-y scrollbar-gutter-both min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
-                )}
-                ListHeaderComponent={listHeader}
-                ListFooterComponent={timelineListFooter}
-              />
-              <TimelineMinimap
-                items={minimapItems}
-                hasPersistentGutter={minimapHasPersistentGutter}
-                hitStripWidth={minimapHitStripWidth}
-                currentIndex={minimapCurrentIndex}
-                stripMap={minimapStripMap}
-                onWheel={forwardMinimapWheel}
-                onSelect={(item) => {
-                  onManualNavigation();
-                  void listRef.current?.scrollToIndex({
-                    index: item.rowIndex,
-                    animated: true,
-                    viewOffset: 24 + timelineHeaderInset(listRef.current?.getScrollableNode()),
-                  });
-                }}
-              />
-            </TooltipScrollDismissArea>
-          </TimelineRowActivityCtx>
+                <TimelineMinimap
+                  items={minimapItems}
+                  hasPersistentGutter={minimapHasPersistentGutter}
+                  hitStripWidth={minimapHitStripWidth}
+                  currentIndex={minimapCurrentIndex}
+                  stripMap={minimapStripMap}
+                  onWheel={forwardMinimapWheel}
+                  onSelect={(item) => {
+                    onManualNavigation();
+                    void listRef.current?.scrollToIndex({
+                      index: item.rowIndex,
+                      animated: true,
+                      viewOffset: 24 + timelineHeaderInset(listRef.current?.getScrollableNode()),
+                    });
+                  }}
+                />
+              </TooltipScrollDismissArea>
+            </TimelineRowActivityCtx>
+          </ActivityEnterCtx>
         </JustSentMessagesCtx>
       </TimelineRowCtx>
     </MarkdownFindContext>
@@ -2305,10 +2333,12 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
   const isExpandedToolGroupHeader =
     (row.kind === "work-toggle" || row.kind === "work-live" || row.kind === "thinking") &&
     (row.expanded === true || row.closing === true);
+  const activityEnter = useActivityEnter(row);
 
   return (
     <div
       className={cn(
+        activityEnter && "animate-activity-enter",
         // Commentary (non-terminal assistant) rows carry no metadata row, so
         // they sit closer to the work that follows them.
         isWorkLogRow || isSubagentGroup
@@ -5651,6 +5681,18 @@ const FIRST_SEND_WINDOW_MS = 3_000;
 
 /** Ids of user messages that arrived while this thread was open, for the send motion. */
 const JustSentMessagesCtx = createContext<Set<string>>(new Set());
+/** How long after a send the turn's live activity row still fades in rather than showing. */
+const ACTIVITY_ENTER_WINDOW_MS = 10_000;
+/** Whether a live activity row ("Working for", "Thinking") should fade in: once, after a send. */
+const ActivityEnterCtx = createContext<(rowId: string) => boolean>(() => false);
+
+/** The "Working for" and "Thinking" rows of a turn sent here fade in just after its bubble. */
+function useActivityEnter(row: TimelineRow): boolean {
+  const claim = use(ActivityEnterCtx);
+  const live = row.kind === "working" || row.kind === "thinking";
+  const [enter] = useState(() => live && claim(row.id));
+  return enter;
+}
 
 /**
  * Records user messages that appear after the thread's rows first load (a
@@ -5660,15 +5702,34 @@ const JustSentMessagesCtx = createContext<Set<string>>(new Set());
 function useJustSentMessageIds(
   rows: ReadonlyArray<MessagesTimelineRow>,
   identity: string,
-): Set<string> {
+): { readonly justSent: Set<string>; readonly claimActivityEnter: (rowId: string) => boolean } {
   const stateRef = useRef<{
     identity: string;
     primed: boolean;
     known: Set<string>;
     justSent: Set<string>;
+    lastSentAt: number;
+    entered: Set<string>;
+    claimActivityEnter: (rowId: string) => boolean;
   } | null>(null);
   if (stateRef.current?.identity !== identity) {
-    stateRef.current = { identity, primed: false, known: new Set(), justSent: new Set() };
+    const entered = new Set<string>();
+    const next = {
+      identity,
+      primed: false,
+      known: new Set<string>(),
+      justSent: new Set<string>(),
+      lastSentAt: Number.NEGATIVE_INFINITY,
+      entered,
+      claimActivityEnter: (rowId: string) => {
+        if (entered.has(rowId) || Date.now() - next.lastSentAt > ACTIVITY_ENTER_WINDOW_MS) {
+          return false;
+        }
+        entered.add(rowId);
+        return true;
+      },
+    };
+    stateRef.current = next;
   }
   const state = stateRef.current;
   const now = Date.now();
@@ -5679,10 +5740,11 @@ function useJustSentMessageIds(
     const age = now - Date.parse(row.message.createdAt);
     if (age < (state.primed ? JUST_SENT_WINDOW_MS : FIRST_SEND_WINDOW_MS)) {
       state.justSent.add(row.message.id);
+      state.lastSentAt = now;
     }
   }
   if (rows.length > 0) state.primed = true;
-  return state.justSent;
+  return state;
 }
 
 function useStableRows(rows: MessagesTimelineRow[], identity: string): MessagesTimelineRow[] {

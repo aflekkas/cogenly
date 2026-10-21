@@ -863,17 +863,17 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   }
 }
 
-/* A user message that arrives without a composer origin (a steer, a queued
-   turn starting) rises in place: a fade, a 12px rise and a settle from 98%
-   scale. One sent from the composer travels there instead (flyIntoLayout in
-   lib/sendMotion.ts). Its intent label ("Steer") follows once the bubble lands. Only messages sent while the thread is open play it, never
-   history or remounts (MessagesTimeline's just-sent ids). Opacity only under
-   reduced motion. */
+/* A user message just sent (or steered) rises straight up into place: 20px
+   up from below and a fade, on the spring, while the timeline scrolls it to
+   the top in the same 260ms (lib/sendMotion.ts), so it reads as one upward
+   movement. No scale, no sideways travel. Its intent label ("Steer") follows
+   once the bubble lands. Only messages sent while the thread is open play it,
+   never history or remounts (MessagesTimeline's just-sent ids). Opacity only
+   under reduced motion. */
 @keyframes message-send-enter {
   from {
     opacity: 0;
-    translate: 0 12px;
-    scale: 0.98;
+    translate: 0 20px;
   }
 }
 
@@ -884,8 +884,7 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
 }
 
 @utility animate-message-send {
-  transform-origin: bottom right;
-  animation: message-send-enter var(--motion-duration-base) --theme(--ease-out) both;
+  animation: message-send-enter 260ms --theme(--ease-spring) both;
   @media (prefers-reduced-motion: reduce) {
     animation-name: message-send-fade;
   }
