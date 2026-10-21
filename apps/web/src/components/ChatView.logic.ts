@@ -59,6 +59,7 @@ import {
   resolveSelectableProviderInstanceEntry,
   type ProviderInstanceEntry,
 } from "../providerInstances";
+import { providerClients } from "./settings/providerDriverMeta";
 
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "cogenly:last-invoked-script-by-project";
 
@@ -471,9 +472,7 @@ export function resolveComposerProviderSelection(input: {
   // Removed providers retain their original instance as read-only history.
   const requiresExactInstance =
     input.lockedProvider !== null &&
-    input.lockedProvider !== "codex" &&
-    input.lockedProvider !== "claudeAgent" &&
-    input.lockedProvider !== "muse" &&
+    providerClients.get(input.lockedProvider) === undefined &&
     input.lockedInstanceId != null;
   const compatibleEntries = input.entries.filter(
     (entry) =>
@@ -527,10 +526,7 @@ export function getProviderSendBlockReason(
   provider: Pick<ServerProvider, "driver"> | null | undefined,
   _model: string,
 ): string | null {
-  return provider &&
-    provider.driver !== "codex" &&
-    provider.driver !== "claudeAgent" &&
-    provider.driver !== "muse"
+  return provider && providerClients.get(provider.driver) === undefined
     ? "This provider is no longer supported. This thread is read-only history."
     : null;
 }

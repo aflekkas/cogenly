@@ -7,7 +7,20 @@ instead of spreading provider checks through orchestration and clients.
 
 A driver kind identifies an integration; an instance identifies one configuration and account
 lifecycle. Route work by instance, so two accounts using the same driver do not share mutable
-session or catalog state. Cogenly ships only Claude and Codex. Keep unknown driver slugs decodable for stored history; the runtime registry marks their instances unavailable.
+session or catalog state. Cogenly ships Claude, Codex, and Muse Code. Keep unknown driver slugs decodable for stored history; the runtime registry marks their instances unavailable.
+
+## Adding a provider
+
+One package plus one registration per side. The package exports a server driver
+(`ProviderDriver`: `metadata` defaults, usage kind, fallback priority, optional
+version normalizer) and a client definition (`ProviderClientDefinition`: label,
+settings schema, glyph as data, usage colours, picker visibility, onboarding
+installers). The server registers the driver in `BUILT_IN_DRIVERS`; the client
+registers the definition in `providerClients`. Pickers, settings lists, usage
+colours, onboarding, and the text-generation fallback all read from those two
+registries — no other file names the driver. Contracts keeps mirrors of the
+per-driver defaults for callers without registry access; a registry test fails
+when they drift.
 
 ## Account isolation
 

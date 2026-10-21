@@ -73,6 +73,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { connectPairing } from "../../connection/onboarding";
 import { getProviderSummary } from "../settings/providerStatus";
 import { providerClients } from "../settings/providerDriverMeta";
+import { primaryOnboardingDriverKinds } from "@t3tools/provider-core/client";
 import { ChatGptWelcomeCoordinator } from "../settings/ChatGptWelcomeCoordinator";
 import { AddManagedCodexAccountDialog, CodexSetupSection } from "../settings/CodexSetupSection";
 import { readCodexSetupMode } from "../settings/CodexSetupSection.logic";
@@ -633,8 +634,8 @@ function PairingForm({
 
 // ── Step 3: agents ───────────────────────────────────────────
 
-const PRIMARY_AGENT_DRIVERS = ["codex", "claudeAgent"] as const;
-type OnboardingAgentDriver = (typeof PRIMARY_AGENT_DRIVERS)[number];
+const PRIMARY_AGENT_DRIVERS = primaryOnboardingDriverKinds(providerClients);
+type OnboardingAgentDriver = ProviderDriverKind;
 
 /** Setup values stay fixed while provider probes refresh the surrounding cards. */
 interface AgentTerminalSession {
@@ -727,7 +728,7 @@ function ConnectedAgentsStep({
     const [existing] = index >= 0 ? primaryAgents.splice(index, 1) : [];
     primaryAgents.unshift(
       existing ?? {
-        driver: "codex",
+        driver: ProviderDriverKind.make("codex"),
         provider: undefined,
         instanceId: createdAccount.instanceId,
       },
@@ -911,7 +912,7 @@ function OnboardingCodexSetup({
   };
   return existingChosen ? (
     <AgentCard
-      driver="codex"
+      driver={ProviderDriverKind.make("codex")}
       provider={provider}
       terminalOpen={terminalOpen}
       terminalAvailable={canOperateTerminal}

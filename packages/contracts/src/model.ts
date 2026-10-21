@@ -165,13 +165,25 @@ export const PREFERRED_DEFAULT_CODEX_MODELS: ReadonlyArray<string> = [
 export const DEFAULT_TEXT_GENERATION_MODEL = "gpt-6-luna";
 export const DEFAULT_TEXT_GENERATION_REASONING_EFFORT = "low";
 
+/**
+ * Per-driver default chat models.
+ *
+ * Contracts cannot import the provider registries (they would drag the
+ * runtime in), so this mirror stays for callers without registry access.
+ * The source of truth is each driver's `metadata.defaultModel` (server)
+ * and `defaultModel` (client definition); a test fails when they drift.
+ */
 export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-fable-5-1",
   [MUSE_DRIVER_KIND]: MUSE_DEFAULT_MODEL,
 };
 
-/** Per-provider text generation model defaults. */
+/**
+ * Per-driver text generation model defaults. Mirror of each driver's
+ * `metadata.defaultTextGenerationModel` / client `defaultTextGenerationModel`;
+ * see `DEFAULT_MODEL_BY_PROVIDER` for why the copy lives here.
+ */
 export const DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   Record<ProviderDriverKind, string>
 > = {
@@ -196,6 +208,11 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
 
 // ── Provider display names ────────────────────────────────────────────
 
+/**
+ * Per-driver brand labels. Mirror of each driver's `metadata.displayName` /
+ * client `label` for callers without registry access; see
+ * `DEFAULT_MODEL_BY_PROVIDER` for why the copy lives here.
+ */
 export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>> = {
   [CODEX_DRIVER_KIND]: "Codex",
   [CLAUDE_DRIVER_KIND]: "Claude",

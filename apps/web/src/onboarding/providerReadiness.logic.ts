@@ -1,15 +1,12 @@
 import {
-  ClaudeSettings,
-  CodexSettings,
   type ExecutionEnvironmentPlatformOs,
+  type ProviderDriverKind,
   type ServerProvider,
   type ServerSettings,
 } from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 
-const decodeClaudeSettings = Schema.decodeUnknownOption(ClaudeSettings);
-const decodeCodexSettings = Schema.decodeUnknownOption(CodexSettings);
+import { providerClients } from "../components/settings/providerDriverMeta";
+
 const SAFE_SHELL_BINARY_PATTERN = /^[A-Za-z0-9_./:\\-]+$/;
 
 function quoteProviderBinary(
@@ -74,32 +71,21 @@ export function selectOnboardingProvidersByDriver(
 }
 
 /**
- * Official standalone installers. Neither needs Node or npm, and both land in
- * the paths the server's provider maintenance recognizes as native, so the
- * one-click updater in Settings keeps working after install.
- */
-const NATIVE_INSTALL_COMMANDS = {
-  claudeAgent: {
-    windows: "irm https://claude.ai/install.ps1 | iex",
-    posix: "curl -fsSL https://claude.ai/install.sh | bash",
-  },
-  codex: {
-    windows: "irm https://chatgpt.com/codex/install.ps1 | iex",
-    posix: "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
-  },
-} as const;
-
-/**
- * Install command for the setup terminal, keyed on the environment's platform
- * (not the client's): a Windows desktop driving a WSL server gets the shell
- * script. Unknown platforms get the shell script too, since the terminal there
- * is a POSIX shell in practice.
+ * Install command for the setup terminal, from the driver's registry entry:
+ * official standalone installers that need neither Node nor npm and land in
+ * the paths provider maintenance recognizes as native, so the one-click
+ * updater in Settings keeps working after install. Keyed on the
+ * environment's platform (not the client's): a Windows desktop driving a
+ * WSL server gets the shell script. Unknown platforms get the shell script
+ * too, since the terminal there is a POSIX shell in practice. Drivers
+ * without installers fall back to their slug, like the login command.
  */
 export function resolveOnboardingProviderInstallCommand(
-  driver: keyof typeof NATIVE_INSTALL_COMMANDS,
+  driver: ProviderDriverKind,
   platform: ExecutionEnvironmentPlatformOs,
 ): string {
-  const commands = NATIVE_INSTALL_COMMANDS[driver];
+  const commands = providerClients.get(driver)?.onboarding?.installCommands;
+  if (commands === undefined) return driver;
   return platform === "windows" ? commands.windows : commands.posix;
 }
 
@@ -109,19 +95,19 @@ export function resolveOnboardingProviderLoginCommand(
   settings: ServerSettings,
   platform: ExecutionEnvironmentPlatformOs,
 ): string {
-  const instance = settings.providerInstances[provider.instanceId];
+  const onboarding = providerClients.get(provider.driver)?.onboarding;
+  const loginSubcommand = onboarding?.loginSubcommand;
+  const binaryFallback = onboarding?.binaryFallback ?? provider.driver;
+  if (loginSubcommand === undefined) return provider.driver;
 
-  if (provider.driver === "claudeAgent") {
-    const config = decodeClaudeSettings(instance?.config ?? {});
-    const binaryPath = Option.isSome(config) ? config.value.binaryPath : "claude";
-    return `${quoteProviderBinary(binaryPath, "claude", platform)} auth login`;
-  }
-
-  if (provider.driver === "codex") {
-    const config = decodeCodexSettings(instance?.config ?? {});
-    const binaryPath = Option.isSome(config) ? config.value.binaryPath : "codex";
-    return `${quoteProviderBinary(binaryPath, "codex", platform)} login`;
-  }
-
-  return provider.driver;
+  // Read `binaryPath` the way its setting decodes: trimmed, empty means the
+  // default. Matches `makeBinaryPathSetting` for every input shape.
+  const rawBinary = (
+    settings.providerInstances[provider.instanceId]?.config as
+      | { readonly binaryPath?: unknown }
+      | undefined
+  )?.binaryPath;
+  const trimmed = typeof rawBinary === "string" ? rawBinary.trim() : "";
+  const binaryPath = trimmed.length > 0 ? trimmed : binaryFallback;
+  return `${quoteProviderBinary(binaryPath, binaryFallback, platform)} ${loginSubcommand}`;
 }

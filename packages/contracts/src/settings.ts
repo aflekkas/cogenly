@@ -1175,7 +1175,11 @@ const DEFAULT_DISABLED_PROVIDER_DRIVERS: ReadonlySet<ProviderDriverKind> = new S
   ),
 );
 
-/** Built-in drivers whose default instance runs before the user configures it. */
+/**
+ * Built-in drivers whose default instance runs before the user configures it.
+ * Mirror of the startup registry's drivers with `hasDefaultInstance !== false`
+ * (contracts cannot import the registry); a test fails when they drift.
+ */
 const DEFAULT_ENABLED_DEFAULT_INSTANCES: ReadonlySet<ProviderInstanceId> = new Set(
   ["codex", "claudeAgent", "muse"].map((instanceId) => ProviderInstanceId.make(instanceId)),
 );
