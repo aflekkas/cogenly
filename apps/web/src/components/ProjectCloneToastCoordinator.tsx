@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
 import { useEnvironments } from "../state/environments";
-import { useEnvironmentProjectClones } from "../state/projectClones";
+import { isProjectCloneShownInline, useEnvironmentProjectClones } from "../state/projectClones";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
@@ -84,7 +84,8 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
 
   // Whether the user is already looking at this project's draft: the composer
   // banner shows the same progress and actions there, so the toast steps
-  // aside and comes back if they navigate away mid-clone.
+  // aside and comes back if they navigate away mid-clone. The repository
+  // picker that started a clone shows it inline the same way.
   const isViewingProjectDraft = useCallback(
     (projectId: ProjectId) => {
       if (!routeDraftId) return false;
@@ -115,7 +116,10 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
         toastManager.close(current.toastId);
         toasts.current.delete(clone.projectId);
       };
-      if (isViewingProjectDraft(clone.projectId)) {
+      if (
+        isViewingProjectDraft(clone.projectId) ||
+        isProjectCloneShownInline(scopeProjectRef(environmentId, clone.projectId))
+      ) {
         closeToast();
         continue;
       }

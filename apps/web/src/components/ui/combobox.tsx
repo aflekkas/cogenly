@@ -4,6 +4,7 @@ import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
 import { ChevronRightIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
@@ -139,6 +140,37 @@ function ComboboxTrigger({ className, children, ...props }: ComboboxPrimitive.Tr
   );
 }
 
+const POPUP_BODY_CLASS =
+  "flex min-w-0 max-h-[min(var(--available-height),23rem)] flex-col overflow-hidden text-foreground";
+
+/**
+ * The popup body at its natural height, inside a shell that eases to that
+ * height. The first measure lands before paint, so opening never animates;
+ * reduced motion resizes at once.
+ */
+function ComboboxPopupHeight({ children }: { children: React.ReactNode }) {
+  const bodyRef = React.useRef<HTMLDivElement>(null);
+  const [height, setHeight] = React.useState<number | null>(null);
+  React.useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const measure = () => setHeight(body.offsetHeight);
+    measure();
+    return observeResize(body, measure);
+  }, []);
+  return (
+    <div
+      className="min-w-0 flex-1 overflow-hidden transition-[height] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none"
+      style={height === null ? undefined : { height }}
+      data-slot="combobox-popup-height"
+    >
+      <div ref={bodyRef} className={POPUP_BODY_CLASS}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function ComboboxPopup({
   className,
   children,
@@ -150,6 +182,7 @@ function ComboboxPopup({
   // against a window side when its trigger is near one.
   collisionPadding = 12,
   anchor: anchorProp,
+  animateHeight = false,
   ...props
 }: ComboboxPrimitive.Popup.Props & {
   align?: ComboboxPrimitive.Positioner.Props["align"];
@@ -158,6 +191,12 @@ function ComboboxPopup({
   side?: ComboboxPrimitive.Positioner.Props["side"];
   collisionPadding?: ComboboxPrimitive.Positioner.Props["collisionPadding"];
   anchor?: ComboboxPrimitive.Positioner.Props["anchor"];
+  /**
+   * Glide to the new height when the rows change (a search narrowing the
+   * list, results arriving) instead of snapping. For lists the popup owns;
+   * a virtualized list sizes itself.
+   */
+  animateHeight?: boolean;
 }) {
   const { chipsRef, multiple } = React.use(ComboboxContext);
   const anchor = anchorProp ?? (multiple ? chipsRef : undefined);
@@ -183,9 +222,11 @@ function ComboboxPopup({
           data-slot="combobox-popup"
           {...props}
         >
-          <div className="flex min-w-0 max-h-[min(var(--available-height),23rem)] flex-1 flex-col overflow-hidden text-foreground">
-            {children}
-          </div>
+          {animateHeight ? (
+            <ComboboxPopupHeight>{children}</ComboboxPopupHeight>
+          ) : (
+            <div className={cn(POPUP_BODY_CLASS, "flex-1")}>{children}</div>
+          )}
         </ComboboxPrimitive.Popup>
       </ComboboxPrimitive.Positioner>
     </ComboboxPrimitive.Portal>

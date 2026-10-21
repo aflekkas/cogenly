@@ -50,3 +50,20 @@ export function useEnvironmentProjectClones(
 ): ReadonlyArray<ProjectCloneSnapshot> {
   return useAtomValue(environmentProjectClonesAtom(environmentId));
 }
+
+// Clones whose progress is on screen elsewhere (the repository picker that
+// started them), so the clone toast stays out of the way meanwhile.
+const inlineProjectClones = new Set<string>();
+
+/** Marks a clone as shown inline until the returned cleanup runs. */
+export function showProjectCloneInline(ref: ScopedProjectRef): () => void {
+  const key = scopedProjectKey(ref);
+  inlineProjectClones.add(key);
+  return () => {
+    inlineProjectClones.delete(key);
+  };
+}
+
+export function isProjectCloneShownInline(ref: ScopedProjectRef): boolean {
+  return inlineProjectClones.has(scopedProjectKey(ref));
+}

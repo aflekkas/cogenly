@@ -2,15 +2,16 @@ import type { DraftId } from "~/composerDraftStore";
 import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
 import {
   type EnvironmentId,
+  type ProjectLabelOwnerRepository,
   resolveEnvironmentMachineKind,
   type ScopedProjectRef,
   type ThreadSurface,
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import { FolderGit2Icon, FolderIcon, FolderPlusIcon, ListIcon } from "lucide-react";
+import { FolderGit2Icon, FolderIcon, FolderPlusIcon, ListIcon, LockIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { shortcutLabelForCommand } from "~/keybindings";
@@ -48,6 +49,16 @@ import {
   toggleCollapsedGroup,
 } from "~/projectLabels/projectMeta.logic";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
+import {
+  linkedGitHubOwners,
+  mergeRemoteRepositorySections,
+  type OwnerSearchState,
+} from "~/projectLabels/projectSourceLinks.logic";
+import { useOwnerRepositorySearch } from "~/projectLabels/useOwnerRepositorySearch";
+import {
+  type RemoteCloneView,
+  useRemoteRepositoryClone,
+} from "~/projectLabels/useRemoteRepositoryClone";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import * as Schema from "effect/Schema";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
@@ -60,6 +71,7 @@ import {
   ComboboxEmpty,
   ComboboxGroup,
   ComboboxGroupCollapse,
+  ComboboxGroupLabel,
   ComboboxGroupToggle,
   ComboboxItem,
   ComboboxItemIcon,
@@ -70,7 +82,9 @@ import {
   useComboboxFilter,
 } from "../ui/combobox";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { InlineButton } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
+import { Spinner } from "../ui/spinner";
+import { GitHubIcon } from "../Icons";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
 // Picker values for the action rows; repositories are keyed by their group
@@ -85,10 +99,15 @@ const EMPTY_GROUP_KEYS: string[] = [];
 interface PickerItem {
   readonly value: string;
   readonly label: string;
-  /** The logical project key; empty on action rows. */
+  /** The logical project key; empty on action rows and GitHub results. */
   readonly projectKey: string;
   /** The project group the row is listed under. */
   readonly groupKey: string;
+  /** A GitHub repository under a project's linked owner, not on this machine yet. */
+  readonly remote?: {
+    readonly project: EnvironmentProjectLabel;
+    readonly repository: ProjectLabelOwnerRepository;
+  };
 }
 
 interface PickerGroup {
@@ -98,6 +117,13 @@ interface PickerGroup {
   readonly color: string | undefined;
   readonly isProject: boolean;
   readonly items: readonly PickerItem[];
+  /** Set on a project's "On GitHub" section, which follows the project's own group. */
+  readonly remote?: {
+    readonly project: EnvironmentProjectLabel;
+    readonly state: OwnerSearchState;
+  };
+  /** Whether an "On GitHub" section follows this group, which keeps it open while searching. */
+  readonly remoteFollows?: boolean;
 }
 
 interface DraftHeroHeadlineProps {
@@ -269,26 +295,62 @@ export function DraftHeroHeadline({
     [projectEntryByKey],
   );
   const buildPickerGroups = useCallback(
-    (items: readonly PickerItem[], onlyProject: ProjectLabelKey | null, withActions: boolean) => {
+    (
+      items: readonly PickerItem[],
+      onlyProject: ProjectLabelKey | null,
+      withActions: boolean,
+      remote: ReadonlyMap<ProjectLabelKey, OwnerSearchState> | null = null,
+    ) => {
       const grouped = groupRepositoriesByProject({
         items,
         refsOf: refsOfRepository,
         projects: projectDirectory.labels,
         onlyProject,
       });
+      const sections =
+        remote === null || remote.size === 0
+          ? grouped.map((group) => ({ kind: "local" as const, group }))
+          : mergeRemoteRepositorySections({
+              groups: grouped,
+              projects: projectDirectory.labels,
+              remoteOf: (key) => remote.get(key),
+            });
       // Without any project there is nothing to group by: one plain list.
-      const titled = grouped.some((group) => group.project !== null);
-      const groups: PickerGroup[] = grouped.map((group) => ({
-        value: group.key,
-        label: titled ? (group.project?.label.name ?? "Other repositories") : null,
-        color: group.project?.label.color,
-        isProject: group.project !== null,
-        items: group.items.map((item) => ({
-          ...item,
-          value: `${group.key}|${item.projectKey}`,
-          groupKey: group.key,
-        })),
-      }));
+      const titled = sections.some(
+        (section) => section.kind === "remote" || section.group.project !== null,
+      );
+      const groups: PickerGroup[] = sections.map((section, index) => {
+        if (section.kind === "remote") {
+          const groupKey = `remote:${section.project.key}`;
+          return {
+            value: groupKey,
+            label: "On GitHub",
+            color: undefined,
+            isProject: false,
+            remote: { project: section.project, state: section.state },
+            items: section.repositories.map((repository) => ({
+              value: `${groupKey}|${repository.nameWithOwner}`,
+              label: repository.name,
+              projectKey: "",
+              groupKey,
+              remote: { project: section.project, repository },
+            })),
+          };
+        }
+        const { group } = section;
+        return {
+          value: group.key,
+          label: titled ? (group.project?.label.name ?? "Other repositories") : null,
+          color: group.project?.label.color,
+          isProject: group.project !== null,
+          remoteFollows: sections[index + 1]?.kind === "remote",
+          items: group.items.map((item) => ({
+            ...item,
+            value: `${group.key}|${item.projectKey}`,
+            groupKey: group.key,
+          })),
+        };
+      });
       if (withActions) {
         groups.push({
           value: ACTIONS_GROUP_KEY,
@@ -333,6 +395,11 @@ export function DraftHeroHeadline({
   );
   const [pickerQuery, setPickerQuery] = useState("");
   const pickerFilter = useComboboxFilter();
+  // A search also asks GitHub, under each project linked to an owner.
+  const ownerSearch = useOwnerRepositorySearch(
+    projectDirectory.labels,
+    pickerOpen ? pickerQuery : "",
+  );
   // Search runs across every repository, whatever project the list was narrowed to.
   const filteredPickerGroups = useMemo(() => {
     const query = pickerQuery.trim();
@@ -343,8 +410,28 @@ export function DraftHeroHeadline({
       ),
       null,
       false,
+      ownerSearch,
     );
-  }, [buildPickerGroups, pickerFilter, pickerProjectKey, pickerQuery, repositoryItems]);
+  }, [
+    buildPickerGroups,
+    ownerSearch,
+    pickerFilter,
+    pickerProjectKey,
+    pickerQuery,
+    repositoryItems,
+  ]);
+  const searchingGitHub = filteredPickerGroups.some((group) => group.remote !== undefined);
+  const remoteClone = useRemoteRepositoryClone(
+    (target) =>
+      pickerOpen &&
+      filteredPickerGroups.some((group) =>
+        group.items.some(
+          (item) =>
+            item.remote?.project.key === target.project.key &&
+            item.remote.repository.nameWithOwner === target.repository.nameWithOwner,
+        ),
+      ),
+  );
   const activeRepositoryRefs = activeProjectGroup?.memberProjectRefs;
   const heroProject = useMemo(() => {
     if (isScratchDraft || !activeRepositoryRefs) return null;
@@ -431,6 +518,35 @@ export function DraftHeroHeadline({
     return true;
   };
 
+  // A GitHub repository picked in the picker is cloned into its project; once
+  // the clone lands it becomes the draft's repository, as long as the draft
+  // still targets what it did when the clone started.
+  const cloneStartedForRef = useRef<string | null>(null);
+  const clonedRef = remoteClone.view?.phase === "done" ? remoteClone.ref : null;
+  const clonedProject = remoteClone.active?.project ?? null;
+  const clonedEntry = useMemo(() => {
+    if (clonedRef === null) return null;
+    const key = scopedProjectKey(clonedRef);
+    for (const entry of projectEntryByKey.values()) {
+      if (entry.group.memberProjectRefs.some((ref) => scopedProjectKey(ref) === key)) return entry;
+    }
+    return null;
+  }, [clonedRef, projectEntryByKey]);
+  useEffect(() => {
+    if (clonedEntry === null || clonedProject === null) return;
+    // Waits for the new repository to reach the project list.
+    if (cloneStartedForRef.current === activeProjectKey) {
+      setChosenProjectKey(clonedProject.key);
+      if (clonedEntry.group.projectKey !== activeProjectKey) {
+        selectProject(clonedEntry.targetProject, clonedEntry.group.projectKey);
+      }
+      setPickerOpen(false);
+      setPickerQuery("");
+    }
+    cloneStartedForRef.current = null;
+    remoteClone.dismiss();
+  });
+
   // The first action row carries the hairline that sets the actions apart.
   const filteredActionsLead =
     filteredPickerGroups.find((group) => group.value === ACTIONS_GROUP_KEY)?.items[0]?.value ??
@@ -472,6 +588,41 @@ export function DraftHeroHeadline({
     );
   };
 
+  const renderRemoteItem = (item: PickerItem) => {
+    const remote = item.remote;
+    if (!remote) return null;
+    const { repository } = remote;
+    const clone = remoteClone.isFor(remote) ? remoteClone.view : null;
+    const busy = clone?.phase === "starting" || clone?.phase === "running";
+    return (
+      <Fragment key={item.value}>
+        <ComboboxItem hideIndicator value={item}>
+          <ComboboxItemIcon>
+            {busy ? <Spinner size="xs" tone="muted" /> : <FolderGit2Icon className="size-4" />}
+          </ComboboxItemIcon>
+          <span className="min-w-0 shrink truncate text-sm">{repository.name}</span>
+          {repository.private ? (
+            <LockIcon aria-label="Private" className="size-3 shrink-0" />
+          ) : null}
+          {repository.description ? (
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+              {repository.description}
+            </span>
+          ) : null}
+        </ComboboxItem>
+        {clone ? (
+          <RemoteCloneStatus
+            key={clone.phase}
+            view={clone}
+            onCancel={() => void remoteClone.cancel()}
+            onRetry={() => void remoteClone.retry()}
+            onRemove={() => void remoteClone.remove()}
+          />
+        ) : null}
+      </Fragment>
+    );
+  };
+
   const projectSelector = shouldShowProjectMenu ? (
     <Combobox
       items={pickerGroups}
@@ -498,10 +649,34 @@ export function DraftHeroHeadline({
           setPickerProjectKey(null);
           return;
         }
+        // A GitHub result clones into its project with the picker still up,
+        // its row showing the progress; the repository is picked once it lands.
+        if (item.remote) {
+          keepPickerOpenRef.current = true;
+          const target = item.remote;
+          const view = remoteClone.isFor(target) ? remoteClone.view : null;
+          if (view?.phase === "starting" || view?.phase === "running") return;
+          if (view?.phase === "failed" || view?.phase === "cancelled") {
+            void remoteClone.retry();
+            return;
+          }
+          cloneStartedForRef.current = activeProjectKey;
+          void remoteClone.start(target);
+          return;
+        }
+        const addInto = pickerProjectKey ? projectDirectory.byKey.get(pickerProjectKey) : undefined;
         setPickerOpen(false);
         setPickerProjectKey(null);
         if (item.value === ADD_PROJECT_VALUE) {
-          openAddProject();
+          // Narrowed to one project, the new repository goes into it.
+          if (addInto) {
+            openCommandPalette({
+              open: "add-project",
+              into: { environmentId: addInto.environmentId, labelId: addInto.label.id },
+            });
+          } else {
+            openAddProject();
+          }
           return;
         }
         // Picking a repository under a project also picks that project.
@@ -551,25 +726,32 @@ export function DraftHeroHeadline({
         ) : null}
       </Tooltip>
       {/* Clear of the heading's underline, so the popup starts under the sentence rather than on it. */}
-      <ComboboxPopup align="center" sideOffset={8} className="w-72">
+      <ComboboxPopup align="center" sideOffset={8} className="w-72" animateHeight>
         <ComboboxSearchInput
           aria-label="Search repositories"
           placeholder="Search repositories…"
           value={pickerQuery}
           onChange={(event) => setPickerQuery(event.target.value)}
         />
-        <ComboboxEmpty>No matching repositories.</ComboboxEmpty>
+        <ComboboxEmpty>{searchingGitHub ? null : "No matching repositories."}</ComboboxEmpty>
         <ComboboxList>
           {(group: PickerGroup) => (
             <ComboboxGroup key={group.value} items={group.items}>
-              {group.label !== null ? (
+              {group.remote ? (
+                <RemoteRepositorySection
+                  group={group}
+                  state={group.remote.state}
+                  owners={linkedGitHubOwners(group.remote.project)}
+                  renderItem={renderRemoteItem}
+                />
+              ) : group.label !== null ? (
                 <RepositoryPickerGroupBody
                   group={group}
                   open={isRepositoryGroupOpen({
                     groupKey: group.value,
                     collapsedKeys: collapsedGroupKeys,
                     searching: pickerQuery.trim().length > 0,
-                    hasMatches: group.items.length > 0,
+                    hasMatches: group.items.length > 0 || group.remoteFollows === true,
                   })}
                   onToggle={() =>
                     setCollapsedGroupKeys((keys) => toggleCollapsedGroup(keys, group.value))
@@ -770,5 +952,86 @@ function RepositoryPickerGroupBody(props: {
         <ComboboxCollection>{(item: PickerItem) => props.renderItem(item)}</ComboboxCollection>
       </ComboboxGroupCollapse>
     </>
+  );
+}
+
+/**
+ * A project's GitHub results under its own repositories: a quiet "On GitHub"
+ * line, then the repositories not on this machine yet. A slow search shows
+ * one spinner row; a failed one a single muted line.
+ */
+function RemoteRepositorySection(props: {
+  readonly group: PickerGroup;
+  readonly state: OwnerSearchState;
+  readonly owners: ReadonlyArray<string>;
+  readonly renderItem: (item: PickerItem) => ReactNode;
+}) {
+  const { state } = props;
+  const ownerName = props.owners.length === 1 ? props.owners[0] : "linked owners";
+  return (
+    <div className="reveal-motion">
+      <ComboboxGroupLabel>
+        <span className="flex size-4 shrink-0 items-center justify-center">
+          <GitHubIcon aria-hidden className="size-3" />
+        </span>
+        <span className="min-w-0 flex-1 truncate">On GitHub</span>
+      </ComboboxGroupLabel>
+      {state.status === "loading" ? (
+        <div className="reveal-motion flex h-7 items-center gap-2 px-2 text-xs text-muted-foreground">
+          <span className="flex size-4 shrink-0 items-center justify-center">
+            <Spinner size="xs" tone="muted" />
+          </span>
+          <span className="min-w-0 truncate">Searching {ownerName}…</span>
+        </div>
+      ) : state.status === "error" ? (
+        <p className="reveal-motion truncate py-1 ps-8 pe-2 text-xs text-muted-foreground">
+          {state.message}
+        </p>
+      ) : null}
+      <ComboboxCollection>{(item: PickerItem) => props.renderItem(item)}</ComboboxCollection>
+    </div>
+  );
+}
+
+/** The clone of a picked GitHub repository, under its row: progress, then the way on. */
+function RemoteCloneStatus(props: {
+  readonly view: RemoteCloneView;
+  readonly onCancel: () => void;
+  readonly onRetry: () => void;
+  readonly onRemove: () => void;
+}) {
+  const { view } = props;
+  if (view.phase === "done") return null;
+  const text =
+    view.phase === "starting"
+      ? "Starting clone…"
+      : view.phase === "running"
+        ? view.summary
+        : view.phase === "cancelled"
+          ? "Clone cancelled"
+          : view.message;
+  return (
+    <div
+      role="status"
+      className="reveal-motion flex min-h-7 items-center gap-2 ps-8 pe-1 text-xs text-muted-foreground"
+    >
+      <span className="min-w-0 flex-1 truncate">{text}</span>
+      {view.phase === "running" ? (
+        <Button size="xs" variant="ghost" onClick={props.onCancel}>
+          Cancel
+        </Button>
+      ) : view.phase === "failed" || view.phase === "cancelled" ? (
+        <>
+          {view.phase === "cancelled" || view.canRemove ? (
+            <Button size="xs" variant="ghost" onClick={props.onRemove}>
+              Remove
+            </Button>
+          ) : null}
+          <Button size="xs" variant="ghost" onClick={props.onRetry}>
+            Retry
+          </Button>
+        </>
+      ) : null}
+    </div>
   );
 }
