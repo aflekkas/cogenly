@@ -1252,6 +1252,9 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__html_render",
   "mcp__cogenly__html_state_read",
   "mcp__cogenly__image_search",
+  "mcp__cogenly__project_files_list",
+  "mcp__cogenly__project_file_read",
+  "mcp__cogenly__project_recall",
 ];
 
 // Chat-surface turns get the read-only tools plus the handoff draft, the

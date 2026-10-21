@@ -78,6 +78,8 @@ import {
 } from "./toolkits/html/tools.ts";
 import * as ImageHandlers from "./toolkits/images/handlers.ts";
 import { ImageToolkit } from "./toolkits/images/tools.ts";
+import * as ProjectFilesHandlers from "./toolkits/projectFiles/handlers.ts";
+import { ProjectFilesToolkit } from "./toolkits/projectFiles/tools.ts";
 import * as ImageSearchService from "../images/ImageSearchService.ts";
 
 /** Where an MCP client discovers how to sign in (RFC 9728), at this request's own origin. */
@@ -989,6 +991,8 @@ export const layer = Layer.mergeAll(
   layerAttachmentToolkit,
   layerProjectRegistration,
   layerProjectLabelsRegistration,
+  // ProjectFiles bubbles to the server root like ThreadManagement.
+  toolkitRegistration(ProjectFilesToolkit, ProjectFilesHandlers.layer),
   layerEnvironmentToolkit,
   layerPreviewControlsRegistration,
   layerWorktreeToolkitRegistration,

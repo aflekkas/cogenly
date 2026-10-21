@@ -61,4 +61,26 @@ describe("summarizeT3ToolCalls for project folders and agents", () => {
       ]).label,
     ).toBe("Started 1 agent builder");
   });
+
+  it("summarizes project file calls", () => {
+    expect(
+      summarizeT3ToolCalls("project-files-list", [
+        { input: {}, output: { resources: [], truncated: false }, outcome: "completed" },
+      ]).label,
+    ).toBe("Listed project files 1 time");
+    expect(
+      summarizeT3ToolCalls("project-file-read", [
+        {
+          input: { path: "Resources/brief.md" },
+          output: { relativePath: "Resources/brief.md", binary: false },
+          outcome: "completed",
+        },
+      ]).label,
+    ).toBe("Read Resources/brief.md");
+    expect(
+      summarizeT3ToolCalls("project-recall", [
+        { input: { query: "brief" }, output: { matches: [] }, outcome: "completed" },
+      ]).label,
+    ).toBe("Searched project files 1 time");
+  });
 });

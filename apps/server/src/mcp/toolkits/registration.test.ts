@@ -1,6 +1,7 @@
 import * as GlobalSearch from "../../search/GlobalSearch.ts";
 import * as FactService from "../../context/FactService.ts";
 import * as ProjectLabels from "../../projectLabels/ProjectLabelService.ts";
+import * as ProjectFiles from "../../projectLabels/ProjectFiles.ts";
 import * as WorkHandoff from "../../work/WorkHandoffService.ts";
 import * as AgentService from "../../agents/AgentService.ts";
 import * as AgentWorkspace from "../../agents/AgentWorkspaceService.ts";
@@ -17,6 +18,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
+  ProjectLabelId,
   ProviderInstanceId,
   ThreadId,
   OrchestratorMcpFailure,
@@ -98,6 +100,15 @@ const project = {
 const layerStubServices = Layer.mergeAll(
   Layer.mock(GlobalSearch.GlobalSearch)({ query: () => Effect.succeed({ results: [] }) }),
   Layer.mock(ProjectLabels.ProjectLabelService)({ list: () => Effect.succeed({ labels: [] }) }),
+  Layer.mock(ProjectFiles.ProjectFiles)({
+    folderForThread: () =>
+      Effect.succeed({
+        labelId: ProjectLabelId.make("label:smoke"),
+        name: "MCP smoke",
+        dir: "/workspace/mcp-smoke",
+      }),
+    listResources: () => Effect.succeed({ resources: [], truncated: false }),
+  }),
   Layer.mock(WorkHandoff.WorkHandoffService)({
     proposeHandoff: () =>
       Effect.succeed({
@@ -406,6 +417,13 @@ const smokeCases = [
         locked: false,
       },
     },
+  },
+  {
+    toolkit: "projectFiles",
+    names: ["project_files_list", "project_file_read", "project_recall"],
+    tool: "project_files_list",
+    args: {},
+    expected: { resources: [], truncated: false },
   },
   {
     toolkit: "projectLabels",

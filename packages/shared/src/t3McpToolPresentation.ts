@@ -72,7 +72,10 @@ export type T3McpToolSummaryAction =
   | "device"
   | "html-preview"
   | "html-render"
-  | "image-search";
+  | "image-search"
+  | "project-files-list"
+  | "project-file-read"
+  | "project-recall";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -392,6 +395,9 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   html_preview: tool(["Preview", "Previewing", "Previewed", "an HTML page"], "html-preview"),
   html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
   image_search: tool(["Search", "Searching", "Searched", "the web for images"], "image-search"),
+  project_files_list: tool(["List", "Listing", "Listed", "project files"], "project-files-list"),
+  project_file_read: tool(["Read", "Reading", "Read", "a project file"], "project-file-read"),
+  project_recall: tool(["Search", "Searching", "Searched", "project files"], "project-recall"),
 };
 
 /**

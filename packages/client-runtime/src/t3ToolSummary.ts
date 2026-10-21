@@ -479,6 +479,20 @@ export function summarizeT3ToolCalls(
     case "image-search":
       label = phrase("Searched", "search", `the web for images ${times}`);
       break;
+    case "project-files-list":
+      label = phrase("Listed", "list", `project files ${times}`);
+      break;
+    case "project-file-read": {
+      const paths = selected.map((call) => id(call.input?.path));
+      label =
+        paths.length === 1 && paths[0] !== undefined
+          ? phrase("Read", "read", paths[0])
+          : phrase("Read", "read", `project files ${times}`);
+      break;
+    }
+    case "project-recall":
+      label = phrase("Searched", "search", `project files ${times}`);
+      break;
   }
   return { label, failedCount };
 }

@@ -63,6 +63,21 @@ describe("resolveT3McpToolPresentation", () => {
     });
   });
 
+  it("pretty prints project file tools", () => {
+    expect(resolveT3McpToolPresentation("mcp__cogenly__project_files_list")).toEqual({
+      displayName: "List project files",
+      logo: "t3-code",
+    });
+    expect(resolveT3McpToolPresentation("mcp__cogenly__project_file_read")).toEqual({
+      displayName: "Read a project file",
+      logo: "t3-code",
+    });
+    expect(resolveT3McpToolPresentation("t3-code.project_recall")).toEqual({
+      displayName: "Search project files",
+      logo: "t3-code",
+    });
+  });
+
   it("pretty prints bare T3 MCP toolkit names", () => {
     expect(resolveT3McpToolPresentation("list_scheduled_tasks")).toEqual({
       displayName: "List scheduled tasks",

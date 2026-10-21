@@ -1,4 +1,4 @@
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectLabelId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -28,6 +28,9 @@ import * as WorkHandoff from "../work/WorkHandoffService.ts";
 import * as ImageSearchService from "../images/ImageSearchService.ts";
 import { ImageToolkit } from "./toolkits/images/tools.ts";
 import { layer as ImageHandlers } from "./toolkits/images/handlers.ts";
+import { ProjectFilesToolkit } from "./toolkits/projectFiles/tools.ts";
+import { layer as ProjectFilesHandlers } from "./toolkits/projectFiles/handlers.ts";
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import { TerminalToolkit } from "./toolkits/terminal/tools.ts";
 import { layer as TerminalHandlers } from "./toolkits/terminal/handlers.ts";
 import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
@@ -68,6 +71,7 @@ const serverLayer = Layer.mergeAll(
   McpHttpServer.toolkitRegistration(WorkToolkit, WorkHandlers),
   McpHttpServer.toolkitRegistration(ProjectToolkit, ProjectHandlers),
   McpHttpServer.toolkitRegistration(ImageToolkit, ImageHandlers),
+  McpHttpServer.toolkitRegistration(ProjectFilesToolkit, ProjectFilesHandlers),
 ).pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
   Layer.provideMerge(threadLayers),
@@ -119,6 +123,40 @@ const serverLayer = Layer.mergeAll(
             {
               url: "https://upload.wikimedia.org/wikipedia/commons/1/2/Red_fox.jpg",
               title: "Red fox",
+            },
+          ],
+        }),
+    }),
+  ),
+  Layer.provideMerge(
+    Layer.mock(ProjectFiles.ProjectFiles)({
+      folderForThread: () =>
+        Effect.succeed({
+          labelId: ProjectLabelId.make("label:conversation"),
+          name: "Conversation",
+          dir: "/projects/Conversation",
+        }),
+      listResources: () =>
+        Effect.succeed({
+          resources: [
+            {
+              relativePath: "Resources/brief.md",
+              kind: "file" as const,
+              mimeType: "text/markdown",
+              sizeBytes: 12,
+              modifiedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+          truncated: false,
+        }),
+      searchResources: () =>
+        Effect.succeed({
+          matches: [
+            {
+              relativePath: "Resources/brief.md",
+              kind: "file" as const,
+              mimeType: "text/markdown",
+              snippet: "…brief…",
             },
           ],
         }),
@@ -254,6 +292,42 @@ describe("conversation-mode MCP boundary", () => {
           (JSON.parse(text) as { results: Array<{ title?: string }> }).results[0]?.title,
           "Red fox",
         );
+      }),
+    ),
+  );
+
+  it.effect("project_files_list serves a chat-surface caller", () =>
+    callText("project_files_list", chatThreadId, {}).pipe(
+      Effect.map((text) => {
+        assert.deepEqual(JSON.parse(text), {
+          resources: [
+            {
+              relativePath: "Resources/brief.md",
+              kind: "file",
+              mimeType: "text/markdown",
+              sizeBytes: 12,
+              modifiedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+          truncated: false,
+        });
+      }),
+    ),
+  );
+
+  it.effect("project_recall serves a chat-surface caller", () =>
+    callText("project_recall", chatThreadId, { query: "brief" }).pipe(
+      Effect.map((text) => {
+        assert.deepEqual(JSON.parse(text), {
+          matches: [
+            {
+              relativePath: "Resources/brief.md",
+              kind: "file",
+              mimeType: "text/markdown",
+              snippet: "…brief…",
+            },
+          ],
+        });
       }),
     ),
   );
