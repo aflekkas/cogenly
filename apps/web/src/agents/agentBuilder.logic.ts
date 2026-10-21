@@ -37,13 +37,13 @@ const SHAPE_IDS = new Set<string>(AGENT_FACE_SHAPES.map((shape) => shape.id));
 const COLOR_IDS = new Set<string>(AGENT_FACE_COLORS.map((color) => color.id));
 const EXPRESSION_IDS = new Set<string>(AGENT_FACE_EXPRESSIONS.map((expression) => expression.id));
 const EVENT_KINDS = new Set<string>(Object.keys(EVENT_TRIGGER_LABEL));
-const GRANTABLE: ReadonlyArray<keyof AgentPermissions> = [
+const GRANTABLE = new Set<keyof AgentPermissions>([
   "send",
   "create_pr",
   "merge",
   "deploy",
   "delete",
-];
+]);
 
 export interface AgentProposalTrigger {
   /** The builder's own words for when it runs, kept for the card when they don't parse. */
@@ -149,7 +149,7 @@ export function parseProposal(text: string): AgentProposal | null {
         proposal.permissions = list(value)
           .map((item) => item.toLowerCase().replace(/\s+/g, "_"))
           .filter((item): item is keyof AgentPermissions =>
-            GRANTABLE.includes(item as keyof AgentPermissions),
+            GRANTABLE.has(item as keyof AgentPermissions),
           );
         break;
     }
@@ -204,7 +204,7 @@ export function structuredProposal(proposal: AgentBuilderProposal): AgentProposa
     }),
     needs: [...proposal.needs],
     permissions: (Object.keys(proposal.permissions) as Array<keyof AgentPermissions>).filter(
-      (grant) => proposal.permissions[grant] === true && GRANTABLE.includes(grant),
+      (grant) => proposal.permissions[grant] === true && GRANTABLE.has(grant),
     ),
     complete: true,
   };

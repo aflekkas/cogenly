@@ -220,14 +220,22 @@ function AvatarPickerPanel({
 export function AgentAvatarPicker({
   avatar,
   onChange,
+  open,
+  onOpenChange,
   children,
 }: {
   avatar: AgentAvatar;
   onChange: (avatar: AgentAvatar) => void;
+  /** Controlled, for callers that open the picker from a menu rather than its trigger. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   children: ReactNode;
 }) {
   return (
-    <Popover>
+    <Popover
+      {...(open === undefined ? {} : { open })}
+      {...(onOpenChange === undefined ? {} : { onOpenChange })}
+    >
       {children}
       <PopoverPopup width="md" padding="compact" align="start" aria-label="Choose face">
         <AvatarPickerPanel avatar={avatar} onChange={onChange} />

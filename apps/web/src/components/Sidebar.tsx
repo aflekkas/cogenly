@@ -210,7 +210,6 @@ import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrom
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { PanOnHoverText } from "./sidebar/PanOnHoverText";
 import { useSidebarRowActionsOverlap } from "./sidebar/useSidebarRowActionsOverlap";
-import { Spinner } from "./ui/spinner";
 import { SIDEBAR_SHELF_ICONS, SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { RepositoryGroupHeading } from "./sidebar/modes/RepositoryGroupHeading";
@@ -251,6 +250,9 @@ import {
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
+import { SidebarChatStatusSlot } from "./sidebar/SidebarChatStatusSlot";
+import { SidebarListEmptyState } from "./sidebar/SidebarListEmptyState";
+import { AgentsShelfBar } from "../agents/AgentsShelfBar";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
   composerDraftHasUserContent,
@@ -907,56 +909,6 @@ function ChatListRevealSentinel(props: { onReveal: () => void }) {
     return () => observer.disconnect();
   }, [onReveal, sentinel]);
   return <li ref={setSentinel} aria-hidden className="h-px list-none" />;
-}
-
-const CHAT_STATUS_SPINNER_EXIT_MS = 220;
-const chatStatusLayerClassName =
-  "absolute inset-0 flex items-center justify-center transition-[opacity,scale] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none";
-
-/**
- * The fixed-size slot at the end of a Chats row. The spinner and the dot sit
- * in the same box and crossfade, so a turn starting or finishing never moves
- * the title. The spinner stays mounted just long enough to fade out.
- */
-function SidebarChatStatusSlot(props: { isRunning: boolean; dot: "info" | "warning" | null }) {
-  const [spinnerLingers, setSpinnerLingers] = useState(props.isRunning);
-  useEffect(() => {
-    if (props.isRunning) {
-      setSpinnerLingers(true);
-      return;
-    }
-    const timer = setTimeout(() => setSpinnerLingers(false), CHAT_STATUS_SPINNER_EXIT_MS);
-    return () => clearTimeout(timer);
-  }, [props.isRunning]);
-  const showDot = !props.isRunning && props.dot !== null;
-  return (
-    <span aria-hidden className="relative size-3 shrink-0">
-      {spinnerLingers || props.isRunning ? (
-        <span
-          className={cn(
-            chatStatusLayerClassName,
-            "swap-motion",
-            props.isRunning ? "scale-100 opacity-100" : "scale-50 opacity-0",
-          )}
-        >
-          <Spinner size="xs" tone="muted" />
-        </span>
-      ) : null}
-      <span
-        className={cn(
-          chatStatusLayerClassName,
-          showDot ? "scale-100 opacity-100" : "scale-50 opacity-0",
-        )}
-      >
-        <span
-          className={cn(
-            "size-1.5 rounded-full transition-colors duration-(--motion-duration-base)",
-            props.dot === "warning" ? "bg-warning" : "bg-info",
-          )}
-        />
-      </span>
-    </span>
-  );
 }
 
 /**
@@ -2124,22 +2076,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     </li>
   );
 });
-
-/**
- * A list column with nothing to show: the list's glyph (the mode's, or the
- * Work filter segment's) above a line of muted copy and any action, centred
- * in the column like the Agents empty state. It fades and rises in on mount,
- * so switching to an empty filter eases in instead of popping.
- */
-function SidebarListEmptyState(props: { icon: LucideIcon; children: ReactNode }) {
-  const Icon = props.icon;
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground reveal-motion">
-      <Icon aria-hidden className="size-5 text-muted-foreground/50" />
-      {props.children}
-    </div>
-  );
-}
 
 function latestRunDiff(
   thread: SidebarThreadSummary,
@@ -4422,6 +4358,7 @@ export default function Sidebar() {
                 onOpenShelf={openSidebarShelf}
               />
             ) : null}
+            {sidebarMode === "agents" ? <AgentsShelfBar /> : null}
             {threadHeader}
           </SidebarGroup>
         }

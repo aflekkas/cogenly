@@ -212,6 +212,10 @@ export function SidebarNavRail({
                 aria-selected={selected}
                 tabIndex={segment === mode ? 0 : -1}
                 data-testid={`sidebar-mode-${segment}`}
+                // A click never parks focus on the tab, so no ring lingers after
+                // it; the filled state alone says which mode is open. Keyboard
+                // focus (arrows, Tab) still gets the ring.
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => selectMode(segment)}
                 {...preloadOnIntent(segment === "projects" ? "projects" : "threads")}
                 className={cn(RAIL_BUTTON_CLASS, railButtonTone(selected))}
