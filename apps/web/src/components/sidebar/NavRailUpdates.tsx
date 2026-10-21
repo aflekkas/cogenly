@@ -41,6 +41,7 @@ import {
 } from "../desktopUpdate.logic";
 import { useServerUpdate } from "../ServerUpdateAction";
 import { Button } from "../ui/button";
+import { Separator } from "../ui/separator";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { Spinner } from "../ui/spinner";
@@ -87,7 +88,7 @@ function versionLabel(row: UpdateRowView): string | null {
   return version ? formatVersion(version) : null;
 }
 
-function RowIcon({ row }: { row: UpdateRowView }) {
+function RowIcon({ row, prominent }: { row: UpdateRowView; prominent: boolean }) {
   if ("driver" in row) {
     const provider = row as ProviderUpdateRowView;
     return (
@@ -105,14 +106,22 @@ function RowIcon({ row }: { row: UpdateRowView }) {
       alt=""
       aria-hidden
       draggable={false}
-      className="size-5 shrink-0 rounded-tile"
+      className={cn("shrink-0 rounded-tile", prominent ? "size-6" : "size-5")}
     />
   );
 }
 
 /** A thin bar under an updating row: the real percentage when the updater
     reports one, else a sweeping segment. */
-function RowProgress({ percent, label }: { percent: number | null; label: string }) {
+function RowProgress({
+  percent,
+  label,
+  prominent,
+}: {
+  percent: number | null;
+  label: string;
+  prominent: boolean;
+}) {
   return (
     <div
       role="progressbar"
@@ -120,7 +129,10 @@ function RowProgress({ percent, label }: { percent: number | null; label: string
       aria-valuemin={0}
       aria-valuemax={100}
       {...(percent === null ? {} : { "aria-valuenow": Math.floor(percent) })}
-      className="reveal-motion relative mb-1.5 ml-7.5 h-0.5 overflow-hidden rounded-full bg-muted"
+      className={cn(
+        "reveal-motion relative mb-1.5 h-0.5 overflow-hidden rounded-full bg-muted",
+        prominent ? "ml-8.5" : "ml-7.5",
+      )}
     >
       {percent === null ? (
         <div
@@ -170,11 +182,14 @@ function UpdateRow({
   row,
   updated,
   action,
+  prominent = false,
 }: {
   row: UpdateRowView;
   /** Just finished updating: shows a check for a moment. */
   updated: boolean;
   action?: ReactNode;
+  /** The app's own row: a touch larger than the provider rows below it. */
+  prominent?: boolean;
 }) {
   const versions = versionLabel(row);
   const status: RowDisplayStatus = updated && row.status === "current" ? "updated" : row.status;
@@ -187,10 +202,12 @@ function UpdateRow({
   const failure = row.status === "failed" ? row.detail : null;
   return (
     <div className="reveal-motion flex flex-col">
-      <div className="flex h-9 items-center gap-2.5">
-        <RowIcon row={row} />
+      <div className={cn("flex items-center gap-2.5", prominent ? "h-11" : "h-9")}>
+        <RowIcon row={row} prominent={prominent} />
         <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span className="shrink-0 text-sm font-medium">{row.name}</span>
+          <span className={cn("shrink-0 font-medium", prominent ? "text-base" : "text-sm")}>
+            {row.name}
+          </span>
           {versions ? (
             <span className="min-w-0 truncate text-xs text-muted-foreground tabular-nums">
               {versions}
@@ -203,10 +220,19 @@ function UpdateRow({
         </div>
       </div>
       {row.status === "updating" ? (
-        <RowProgress percent={row.percent ?? null} label={`Updating ${row.name}`} />
+        <RowProgress
+          percent={row.percent ?? null}
+          label={`Updating ${row.name}`}
+          prominent={prominent}
+        />
       ) : null}
       {failure ? (
-        <p className="reveal-motion pb-1.5 pl-7.5 text-xs break-words text-muted-foreground">
+        <p
+          className={cn(
+            "reveal-motion pb-1.5 text-xs break-words text-muted-foreground",
+            prominent ? "pl-8.5" : "pl-7.5",
+          )}
+        >
           {failure}
         </p>
       ) : null}
@@ -676,7 +702,20 @@ export function NavRailUpdates({
               </Tooltip>
             </div>
             <div className="flex flex-col">
-              <UpdateRow row={shownAppRow} updated={updated.has(appRowId)} action={appRowAction} />
+              <UpdateRow
+                prominent
+                row={shownAppRow}
+                updated={updated.has(appRowId)}
+                action={appRowAction}
+              />
+              {groups.length > 0 ? (
+                <>
+                  <Separator className="mt-1" />
+                  <span className="mt-2 mb-0.5 truncate text-2xs font-medium text-muted-foreground select-none">
+                    Providers
+                  </span>
+                </>
+              ) : null}
               {groups.map((group) => (
                 <section key={group.environmentId} className="flex flex-col">
                   {showMachineLabels ? (
