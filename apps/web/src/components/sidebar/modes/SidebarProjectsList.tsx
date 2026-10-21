@@ -6,7 +6,7 @@ import type {
   EnvironmentProjectLabel,
   ProjectLabelKey,
 } from "../../../projectLabels/projectLabels.logic";
-import { ProjectColorDot } from "../../../projectLabels/ProjectTag";
+import { ProjectFolderIcon } from "../../../projectLabels/ProjectFolderMark";
 import { useProjectLabelDirectory } from "../../../projectLabels/useProjectLabels";
 import { useConnectedEnvironmentIds } from "../../../state/environments";
 
@@ -55,7 +55,7 @@ export function SidebarProjectsList(props: {
                 active ? "state-selected" : "state-hover",
               )}
             >
-              <ProjectColorDot color={entry.label.color} className="size-2.5" />
+              <ProjectFolderIcon color={entry.label.color} className="size-4" />
               <span className="min-w-0 flex-1 truncate">{entry.label.name}</span>
               {environment ? (
                 <span className="max-w-1/3 shrink-0 truncate text-xs text-secondary-label">

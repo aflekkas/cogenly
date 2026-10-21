@@ -36,7 +36,6 @@ import {
 } from "./projectLabels.logic";
 import { composerProjectFolderId } from "./projectMeta.logic";
 import { ProjectFolderIcon } from "./ProjectFolderMark";
-import { ProjectColorDot } from "./ProjectTag";
 import { reportProjectFolderFailure, useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
 
@@ -61,7 +60,7 @@ function optionText(option: ProjectOption): string {
     case "new":
       return "New project";
     case "create":
-      return `New project ${option.name}`;
+      return `Create ${option.name}`;
   }
 }
 
@@ -120,26 +119,25 @@ export function ComposerProjectPicker(props: {
       : (directory.byKey.get(projectLabelKey(environmentId, currentId)) ?? null);
 
   const options = useMemo((): ProjectOption[] => {
+    // "No project" is a choice like any project, so it leads the list;
+    // creating one is the lone action at the end.
     const needle = query.trim().toLowerCase();
-    const result: ProjectOption[] = projects
-      .filter((entry) => needle === "" || entry.label.name.toLowerCase().includes(needle))
-      .map((entry) => ({
+    const result: ProjectOption[] = needle === "" ? [{ kind: "none", key: "none" }] : [];
+    for (const entry of projects) {
+      if (needle !== "" && !entry.label.name.toLowerCase().includes(needle)) continue;
+      result.push({
         kind: "project",
         key: entry.key,
         id: entry.label.id,
         name: entry.label.name,
         color: entry.label.color,
-      }));
-    if (needle === "") {
-      if (canCreate) result.push({ kind: "new", key: "new" });
-      result.push({ kind: "none", key: "none" });
+      });
     }
-    if (
-      needle !== "" &&
-      canCreate &&
-      !projects.some((entry) => entry.label.name.toLowerCase() === needle)
-    ) {
-      result.push({ kind: "create", key: "create", name: query.trim() });
+    if (canCreate) {
+      if (needle === "") result.push({ kind: "new", key: "new" });
+      else if (!projects.some((entry) => entry.label.name.toLowerCase() === needle)) {
+        result.push({ kind: "create", key: "create", name: query.trim() });
+      }
     }
     return result;
   }, [canCreate, projects, query]);
@@ -278,19 +276,15 @@ export function ComposerProjectPicker(props: {
               key={option.key}
               value={option}
               hideIndicator
-              tone={option.kind === "project" ? "default" : "action"}
-              // One hairline between the projects and the actions under them.
-              divider={
-                projects.length > 0 &&
-                query.trim() === "" &&
-                option.key === (canCreate ? "new" : "none")
-              }
+              tone={option.kind === "new" || option.kind === "create" ? "action" : "default"}
+              // One hairline sets the create action apart from the choices.
+              divider={(option.kind === "new" || option.kind === "create") && options.length > 1}
               disabled={busy || (option.kind === "create" && option.name.length > 200)}
             >
               {option.kind === "project" ? (
                 <>
                   <ComboboxItemIcon>
-                    <ProjectColorDot color={option.color} />
+                    <ProjectFolderIcon color={option.color} className="size-4" />
                   </ComboboxItemIcon>
                   <span className="min-w-0 flex-1 truncate">{option.name}</span>
                   {option.id === current?.label.id ? <CheckIcon className="ml-auto" /> : null}
@@ -305,7 +299,7 @@ export function ComposerProjectPicker(props: {
               ) : option.kind === "none" ? (
                 <>
                   <ComboboxItemIcon>
-                    <FolderMinusIcon />
+                    <FolderMinusIcon className="text-muted-foreground" />
                   </ComboboxItemIcon>
                   <span className="min-w-0 flex-1 truncate">No project</span>
                   {current === null ? <CheckIcon className="ml-auto" /> : null}
@@ -315,7 +309,7 @@ export function ComposerProjectPicker(props: {
                   <ComboboxItemIcon>
                     <PlusIcon />
                   </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">New project “{option.name}”</span>
+                  <span className="min-w-0 flex-1 truncate">Create “{option.name}”</span>
                 </>
               )}
             </ComboboxItem>

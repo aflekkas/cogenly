@@ -14,7 +14,6 @@ import {
 } from "../components/ui/combobox";
 import type { EnvironmentProjectLabel } from "./projectLabels.logic";
 import { ProjectFolderIcon } from "./ProjectFolderMark";
-import { ProjectColorDot } from "./ProjectTag";
 
 // Sized to the capitals of the hero sentence and resting on its baseline.
 export const HERO_INLINE_ICON_STYLE: CSSProperties = {
@@ -86,7 +85,7 @@ export function HeroProjectPicker(props: {
           {(entry: EnvironmentProjectLabel) => (
             <ComboboxItem key={entry.key} value={entry} hideIndicator>
               <ComboboxItemIcon>
-                <ProjectColorDot color={entry.label.color} />
+                <ProjectFolderIcon color={entry.label.color} className="size-4" />
               </ComboboxItemIcon>
               <span className="min-w-0 flex-1 truncate text-sm">{entry.label.name}</span>
               {entry.key === props.current.key ? <CheckIcon className="ml-auto" /> : null}

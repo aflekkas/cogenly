@@ -13,7 +13,8 @@ import {
   ComboboxTrigger,
 } from "../components/ui/combobox";
 import { sortProjectLabels } from "./projectLabels.logic";
-import { ProjectColorDot, ProjectTag } from "./ProjectTag";
+import { ProjectFolderIcon } from "./ProjectFolderMark";
+import { ProjectTag } from "./ProjectTag";
 
 /**
  * Choose several projects from one environment's list. Unlike the thread tag picker
@@ -83,7 +84,7 @@ export function ProjectLabelPicker(props: {
         <ComboboxList>
           {(label: ProjectLabelWithRepositories) => (
             <ComboboxItem key={label.id} value={label}>
-              <ProjectColorDot color={label.color} />
+              <ProjectFolderIcon color={label.color} className="size-4" />
               <span className="min-w-0 flex-1 truncate">{label.name}</span>
               {selected.has(label.id) ? <CheckIcon className="ml-auto" /> : null}
             </ComboboxItem>

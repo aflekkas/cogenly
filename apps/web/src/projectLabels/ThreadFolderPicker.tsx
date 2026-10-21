@@ -21,7 +21,7 @@ import { useThreadShell } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import { PROJECT_LABEL_COLORS, priorFiling, threadFolderState } from "./projectLabels.logic";
-import { ProjectColorDot } from "./ProjectTag";
+import { ProjectFolderIcon } from "./ProjectFolderMark";
 import { reportProjectFolderFailure, useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
 
@@ -169,7 +169,7 @@ export function ThreadFolderPicker(props: {
       >
         {current ? (
           <>
-            <ProjectColorDot color={current.label.color} />
+            <ProjectFolderIcon color={current.label.color} className="size-3.5" />
             <span className="min-w-0 truncate">{current.label.name}</span>
           </>
         ) : (
@@ -197,8 +197,9 @@ export function ThreadFolderPicker(props: {
             >
               {option.kind === "folder" ? (
                 <>
-                  <ProjectColorDot
+                  <ProjectFolderIcon
                     color={state.options.find((entry) => entry.key === option.key)?.label.color}
+                    className="size-4"
                   />
                   <span className="min-w-0 flex-1 truncate">{option.name}</span>
                   {option.id === current?.label.id ? <CheckIcon className="ml-auto" /> : null}

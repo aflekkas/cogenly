@@ -23,7 +23,7 @@ import {
   scopedRepositoryKey,
   type EnvironmentProjectLabel,
 } from "./projectLabels.logic";
-import { ProjectColorDot } from "./ProjectTag";
+import { ProjectFolderIcon } from "./ProjectFolderMark";
 import { reportProjectFolderFailure } from "./useMoveThreadToFolder";
 
 type Repository = ReturnType<typeof useEnvironmentRepositories>[number];
@@ -126,7 +126,7 @@ export function ProjectRepositoryPicker(props: {
                   <CheckIcon className="ml-auto" />
                 ) : current ? (
                   <span className="flex min-w-0 max-w-1/2 shrink-0 items-center gap-1 text-2xs text-muted-foreground">
-                    <ProjectColorDot color={current.label.color} className="size-1.5" />
+                    <ProjectFolderIcon color={current.label.color} />
                     <span className="truncate">{current.label.name}</span>
                   </span>
                 ) : null}

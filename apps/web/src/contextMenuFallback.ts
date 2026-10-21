@@ -444,7 +444,18 @@ export function showContextMenuFallback<T extends string>(
           button.style.pointerEvents = "none";
         }
 
-        if (typeof item.checked === "boolean") {
+        // An option with its own icon (a project's folder) keeps the icon in
+        // the slot and moves its check to the end of the row.
+        const trailingCheck = typeof item.checked === "boolean" && typeof item.icon === "string";
+        if (trailingCheck) {
+          button.setAttribute("role", "menuitemradio");
+          button.setAttribute("aria-checked", item.checked ? "true" : "false");
+          const icon = createIconElement(item.icon!, "neutral");
+          if (icon) {
+            if (item.iconColor) icon.style.color = item.iconColor;
+            button.appendChild(icon);
+          }
+        } else if (typeof item.checked === "boolean") {
           // Option rows use the icon slot for the check so labels line up
           // with icon rows. The unselected option keeps the slot empty.
           button.setAttribute("role", "menuitemradio");
@@ -462,6 +473,7 @@ export function showContextMenuFallback<T extends string>(
         } else if (typeof item.icon === "string") {
           const icon = createIconElement(item.icon, isLeafDestructive ? "destructive" : "neutral");
           if (icon) {
+            if (item.iconColor) icon.style.color = item.iconColor;
             button.appendChild(icon);
           }
         }
@@ -470,6 +482,16 @@ export function showContextMenuFallback<T extends string>(
         label.className = "min-w-0 flex-1 truncate";
         label.textContent = item.label;
         button.appendChild(label);
+        if (trailingCheck && item.checked) {
+          const check = createIconElement("check", "neutral");
+          if (check) {
+            check.setAttribute(
+              "class",
+              "ms-auto size-4.5 shrink-0 text-muted-foreground sm:size-4",
+            );
+            button.appendChild(check);
+          }
+        }
 
         if (hasChildren) {
           button.setAttribute("aria-haspopup", "menu");

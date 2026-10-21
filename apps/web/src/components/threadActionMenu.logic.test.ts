@@ -28,7 +28,7 @@ function stateFor(kind: ThreadKind, overrides: Partial<ThreadActionMenuState> = 
       removable: true,
       options: [
         { id: "bartr", name: "Bartr" },
-        { id: "spawn", name: "Spawn" },
+        { id: "spawn", name: "Spawn", color: "violet" },
       ],
       canMove: true,
     },
@@ -231,5 +231,21 @@ describe("buildDraftActionMenuItems", () => {
     expect(
       ids(buildDraftActionMenuItems({ hasPath: true, hasBranch: true, hasProject: true })),
     ).toEqual(["copy", "copy-path", "copy-branch", "project-settings", "discard"]);
+  });
+});
+
+describe("Move to folder options", () => {
+  it("lead each project with its folder in the project's color", () => {
+    const move = buildThreadActionMenuItems(stateFor("chat")).find(
+      (item) => item.id === "move-folder",
+    );
+    expect(
+      move?.children
+        ?.filter((item) => item.id.startsWith("move-folder:"))
+        .map((item) => [item.icon, item.iconColor, item.checked]),
+    ).toEqual([
+      ["folder", "var(--color-gray-500)", false],
+      ["folder", "var(--color-violet-500)", true],
+    ]);
   });
 });

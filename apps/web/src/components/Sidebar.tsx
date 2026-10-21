@@ -4016,6 +4016,7 @@ export default function Sidebar() {
                 options: folderState.options.map((entry) => ({
                   id: entry.label.id,
                   name: entry.label.name,
+                  color: entry.label.color,
                 })),
                 canMove: appAtomRegistry.get(
                   serverEnvironment.moveThreadProjectFolder.permissionAtom(thread.environmentId),

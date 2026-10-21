@@ -1,6 +1,7 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
+import { projectLabelColorValue } from "../projectLabels/projectLabels.logic";
 import type { ThreadCapabilities } from "../threadCapabilities";
 
 /**
@@ -108,7 +109,12 @@ export interface ThreadActionMenuFolder {
   readonly current: { readonly key: string; readonly id: string; readonly name: string } | null;
   /** Only an explicit filing offers "Remove from folder"; Work in its repository's folder does not. */
   readonly removable: boolean;
-  readonly options: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  readonly options: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    /** The project's stored color name; its folder icon takes it. */
+    readonly color?: string | undefined;
+  }>;
   /** The move command's permission on the thread's environment. */
   readonly canMove: boolean;
 }
@@ -143,6 +149,8 @@ function folderMenuItems(
   const children: Array<ContextMenuItem<ThreadActionMenuId>> = folder.options.map((option) => ({
     id: `move-folder:${option.id}` as const,
     label: option.name,
+    icon: "folder",
+    iconColor: projectLabelColorValue(option.color),
     checked: option.id === current?.id,
     disabled: disabled || option.id === current?.id,
   }));

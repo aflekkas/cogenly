@@ -79,7 +79,7 @@ import {
   TextSearchIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
-import { ProjectColorDot } from "../projectLabels/ProjectTag";
+import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
 import { priorFiling, threadFolderState } from "../projectLabels/projectLabels.logic";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
@@ -2022,7 +2022,7 @@ function OpenCommandPaletteDialog(props: {
               value: `move-folder:${entry.key}`,
               searchTerms: [entry.label.name],
               title: entry.label.name,
-              icon: <ProjectColorDot color={entry.label.color} className="size-2.5" />,
+              icon: <ProjectFolderIcon color={entry.label.color} className="size-4" />,
               disabled: entry.key === folderState.current?.key,
               ...(entry.key === folderState.current?.key
                 ? {
