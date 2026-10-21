@@ -7,16 +7,12 @@ import { useEffect, useRef, useState } from "react";
 import { isElectron } from "../../env";
 import type { ProjectLabelId } from "@t3tools/contracts";
 import { ProjectLabelEditorDialog } from "../../projectLabels/ProjectLabelEditorDialog";
-import { projectFolderSummary } from "../../projectLabels/projectContents.logic";
-import { ProjectColorDot } from "../../projectLabels/ProjectTag";
-import { useProjectLabelDirectory } from "../../projectLabels/useProjectLabels";
-import {
-  useConnectedEnvironmentIds,
-  useEnvironments,
-  usePrimaryEnvironmentId,
-} from "../../state/environments";
+import { useProjectContents } from "../../projectLabels/useProjectContents";
+import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings/settingsLayout";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { cn } from "../../lib/utils";
+import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
 import { Button } from "../ui/button";
 import {
   Empty,
@@ -28,10 +24,9 @@ import {
 } from "../ui/empty";
 import { OverlayPresence } from "../ui/overlay-presence";
 import { SidebarInset } from "../ui/sidebar";
-import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { WORKSPACE_PAGE_HEADER_INSET_CLASS, WorkspacePageHeader } from "../WorkspacePageHeader";
 import type { EnvironmentProjectLabel } from "../../projectLabels/projectLabels.logic";
-import { ProjectFolderGrid } from "./ProjectFolderGrid";
-import { ProjectFoldersContextNote } from "./ProjectView";
+import { ProjectFolderList } from "./ProjectFolderList";
 
 export interface ProjectsOverviewSearch {
   readonly create?: true | undefined;
@@ -69,12 +64,12 @@ function NewProjectDialog(props: {
 }
 
 /**
- * Every project folder across connected machines as a grid of cards, and
- * where new ones start. Opening a card shows the folder full width.
+ * Every project folder across connected machines as a list of rows, and
+ * where new ones start. Opening a row shows the folder full width.
  */
 export function ProjectsOverview(props: ProjectsOverviewSearch) {
   const navigate = useNavigate();
-  const directory = useProjectLabelDirectory(useConnectedEnvironmentIds());
+  const { directory, byProject } = useProjectContents();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
   const createEnvironmentId = props.environmentId ?? primaryEnvironmentId;
@@ -93,6 +88,15 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
     environments.map((environment) => [environment.environmentId, environment.label] as const),
   );
   const showEnvironments = new Set(directory.labels.map((entry) => entry.environmentId)).size > 1;
+  // Newest chat or Work in the folder; each list is already newest first.
+  const activityLabel = (entry: EnvironmentProjectLabel) => {
+    const contents = byProject.get(entry.key);
+    const latest = [contents?.chats[0], contents?.work[0]]
+      .filter((thread) => thread !== undefined)
+      .map(chatActivityAt)
+      .toSorted((left, right) => Date.parse(right) - Date.parse(left))[0];
+    return latest === undefined ? null : formatRelativeTimeLabel(latest) || null;
+  };
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
@@ -114,38 +118,39 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
             New project
           </Button>
         </WorkspacePageHeader>
-        <div className="scroll-fade-y min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6">
-            {directory.labels.length === 0 ? (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <FolderIcon />
-                  </EmptyMedia>
-                  <EmptyTitle>No projects yet</EmptyTitle>
-                  <EmptyDescription>
-                    A project is a folder for related chats, Work and repositories.
-                  </EmptyDescription>
-                </EmptyHeader>
-                <EmptyContent>
-                  <Button
-                    variant="brand"
-                    size="sm"
-                    disabled={createEnvironmentId === null || !canCreate}
-                    onClick={() => setCreating(true)}
-                  >
-                    <FolderPlusIcon />
-                    New project
-                  </Button>
-                </EmptyContent>
-              </Empty>
-            ) : (
-              <ProjectFolderGrid
+        <div className="scroll-fade-y min-h-0 flex-1 overflow-y-auto scrollbar-gutter-stable">
+          {directory.labels.length === 0 ? (
+            <Empty className="h-full">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FolderIcon />
+                </EmptyMedia>
+                <EmptyTitle>No projects yet</EmptyTitle>
+                <EmptyDescription>
+                  A project is a folder for related chats, Work and repositories. Projects are
+                  context only; they never change what an agent can access.
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button
+                  variant="brand"
+                  size="sm"
+                  disabled={createEnvironmentId === null || !canCreate}
+                  onClick={() => setCreating(true)}
+                >
+                  <FolderPlusIcon />
+                  New project
+                </Button>
+              </EmptyContent>
+            </Empty>
+          ) : (
+            <div className={cn("py-1", WORKSPACE_PAGE_HEADER_INSET_CLASS)}>
+              <ProjectFolderList
                 folders={directory.labels}
                 environmentLabel={(entry) =>
                   showEnvironments ? (environmentLabelById.get(entry.environmentId) ?? null) : null
                 }
-                canCreate={createEnvironmentId !== null && canCreate}
+                activityLabel={activityLabel}
                 onOpen={(entry) =>
                   void navigate({
                     to: "/project/$environmentId/$labelId",
@@ -153,11 +158,9 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                   })
                 }
                 onRename={setRenaming}
-                onCreate={() => setCreating(true)}
               />
-            )}
-            <ProjectFoldersContextNote />
-          </div>
+            </div>
+          )}
         </div>
       </div>
       <OverlayPresence when={renaming}>

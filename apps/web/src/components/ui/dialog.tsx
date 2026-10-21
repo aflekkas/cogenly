@@ -152,10 +152,21 @@ function DialogFooter({
   );
 }
 
-function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
+function DialogTitle({
+  className,
+  size = "default",
+  ...props
+}: DialogPrimitive.Title.Props & {
+  /** `sm` for short forms whose title is a label, not a heading. */
+  size?: "default" | "sm";
+}) {
   return (
     <DialogPrimitive.Title
-      className={cn("wrap-anywhere font-semibold text-xl leading-none", className)}
+      className={cn(
+        "wrap-anywhere font-semibold leading-none",
+        size === "sm" ? "text-base" : "text-xl",
+        className,
+      )}
       data-slot="dialog-title"
       {...props}
     />

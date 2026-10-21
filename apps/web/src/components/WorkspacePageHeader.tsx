@@ -11,6 +11,17 @@ const LIST_COLUMN_HIDDEN_TITLE_INSET_CLASS =
   "[[data-nav-rail][data-list-column-hidden][data-sidebar-state]_&]:pl-list-column-hidden-title-inset";
 
 /**
+ * The top bar's horizontal inset, for page content that lines up with its
+ * leading title (the Projects list). Excludes the native-controls reserve,
+ * which only the bar itself needs.
+ */
+export const WORKSPACE_PAGE_HEADER_INSET_CLASS = cn(
+  "pl-(--workspace-gutter-start) pr-(--workspace-gutter-end)",
+  COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+  LIST_COLUMN_HIDDEN_TITLE_INSET_CLASS,
+);
+
+/**
  * Shared workspace top-bar geometry. The height is `!important` so callers cannot
  * grow the bar and pull its content off the sidebar header's center line.
  * A leading title that isn't a WorkspaceBreadcrumb carries `data-panel-flip="start"`
@@ -28,11 +39,10 @@ export function WorkspacePageHeader({
   return (
     <header
       className={cn(
-        "flex h-[var(--workspace-topbar-height)]! min-h-[var(--workspace-topbar-height)]! max-h-[var(--workspace-topbar-height)]! shrink-0 items-center gap-3 pl-(--workspace-gutter-start) pr-(--workspace-gutter-end)",
+        "flex h-[var(--workspace-topbar-height)]! min-h-[var(--workspace-topbar-height)]! max-h-[var(--workspace-topbar-height)]! shrink-0 items-center gap-3",
+        WORKSPACE_PAGE_HEADER_INSET_CLASS,
         electron && "drag-region",
         reserveNativeControls && "wco:pr-(--workspace-native-controls-inset)",
-        COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
-        LIST_COLUMN_HIDDEN_TITLE_INSET_CLASS,
         className,
       )}
       {...props}

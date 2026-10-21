@@ -12,10 +12,10 @@ import type * as Cause from "effect/Cause";
 import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "../components/ui/button";
+import { ProjectColorPicker } from "../components/ProjectColorPicker";
 import {
   Dialog,
   DialogClose,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogPanel,
@@ -27,11 +27,9 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { toastManager } from "../components/ui/toast";
 import { requestConfirmDialog } from "../confirmDialog";
-import { cn } from "../lib/utils";
 import { useProjects, useServerConfigs } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
-import { PROJECT_LABEL_COLORS } from "./projectLabels.logic";
 
 function reportFailure(title: string, result: { readonly cause: Cause.Cause<unknown> }) {
   const error = squashAtomCommandFailure(result);
@@ -105,6 +103,7 @@ export function ProjectLabelEditorDialog(props: {
   const [name, setName] = useState(label?.name ?? "");
   const [color, setColor] = useState<string | undefined>(label?.color ?? "blue");
   const [description, setDescription] = useState(label?.description ?? "");
+  const [descriptionFocused, setDescriptionFocused] = useState(false);
   const [saving, setSaving] = useState(false);
   const createLabel = useAtomCommand(serverEnvironment.createProjectLabel, "create project");
   const updateLabel = useAtomCommand(serverEnvironment.updateProjectLabel, "update project");
@@ -179,23 +178,20 @@ export function ProjectLabelEditorDialog(props: {
         if (!open && !saving) onClose();
       }}
     >
-      <DialogPopup className="max-w-lg">
+      <DialogPopup className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{label ? "Edit project" : "New project"}</DialogTitle>
-          <DialogDescription>
-            A folder for chats, Work and the repositories they touch.
-          </DialogDescription>
+          <DialogTitle size="sm">{label ? "Edit project" : "New project"}</DialogTitle>
         </DialogHeader>
         <DialogPanel>
           <form
             id="project-label-editor"
-            className="space-y-5"
+            className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
               void save();
             }}
           >
-            <fieldset disabled={saving} className="space-y-5">
+            <fieldset disabled={saving} className="space-y-4">
               <div className="space-y-1.5">
                 <Label htmlFor="project-label-name">Name</Label>
                 <Input
@@ -208,32 +204,30 @@ export function ProjectLabelEditorDialog(props: {
                 />
               </div>
               <div className="space-y-1.5">
-                <div className="text-xs font-medium text-muted-foreground">Color</div>
-                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Project color">
-                  {PROJECT_LABEL_COLORS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      aria-label={option.label}
-                      aria-pressed={color === option.value}
-                      className={cn(
-                        "flex size-6 items-center justify-center rounded-full border border-transparent outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                        color === option.value && "border-foreground/64",
-                      )}
-                      onClick={() => setColor(option.value)}
-                    >
-                      <span className={cn("size-4 rounded-full", option.swatchClassName)} />
-                    </button>
-                  ))}
-                </div>
+                <Label id="project-label-color" render={<span />}>
+                  Color
+                </Label>
+                <ProjectColorPicker
+                  value={color}
+                  onChange={setColor}
+                  label="Project color"
+                  labelledBy="project-label-color"
+                  disabled={saving}
+                />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="project-label-description">Description</Label>
+                <Label htmlFor="project-label-description">
+                  Description
+                  <span className="font-normal text-muted-foreground">Optional</span>
+                </Label>
                 <Textarea
                   id="project-label-description"
+                  collapsed={!descriptionFocused}
                   value={description}
                   maxLength={4000}
                   placeholder="What belongs here"
+                  onFocus={() => setDescriptionFocused(true)}
+                  onBlur={() => setDescriptionFocused(false)}
                   onChange={(event) => setDescription(event.currentTarget.value)}
                 />
               </div>

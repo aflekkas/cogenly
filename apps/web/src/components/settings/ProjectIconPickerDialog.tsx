@@ -2,12 +2,9 @@ import { deriveProjectIdentity } from "../../projectIdentity";
 import type { ProjectIconColor, ProjectIconOverride } from "@t3tools/contracts";
 import { DynamicIcon, type IconName } from "lucide-react/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  filterProjectIconNames,
-  PROJECT_ICON_COLORS,
-  projectIconColorClassName,
-} from "../../projectIconOptions";
+import { filterProjectIconNames, projectIconColorClassName } from "../../projectIconOptions";
 import { cn } from "~/lib/utils";
+import { ProjectColorPicker } from "../ProjectColorPicker";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -81,25 +78,19 @@ export function ProjectIconPickerDialog({
           <DialogDescription>Pick an icon and a colour.</DialogDescription>
         </DialogHeader>
         <DialogPanel className="flex min-h-0 flex-col">
-          <div>
-            <div className="mb-2 text-xs font-medium text-muted-foreground">Color</div>
-            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Icon color">
-              {PROJECT_ICON_COLORS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  aria-label={option.label}
-                  aria-pressed={color === option.value}
-                  className={cn(
-                    "flex size-6 items-center justify-center rounded-full border border-transparent outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                    color === option.value && "border-foreground/64",
-                  )}
-                  onClick={() => setColor(option.value)}
-                >
-                  <span className={cn("size-4 rounded-full", option.swatchClassName)} />
-                </button>
-              ))}
+          <div className="space-y-1.5">
+            <div
+              id="project-icon-color-label"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Color
             </div>
+            <ProjectColorPicker
+              value={color}
+              onChange={setColor}
+              label="Icon color"
+              labelledBy="project-icon-color-label"
+            />
           </div>
 
           <SearchInput

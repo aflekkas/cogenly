@@ -9,9 +9,20 @@ import { cn } from "~/lib/utils";
 type TextareaProps = React.ComponentProps<"textarea"> & {
   size?: "sm" | "default" | "lg" | number;
   unstyled?: boolean;
+  /**
+   * One line tall, like an input, until the caller clears it (an optional
+   * field that opens up on focus). Content still grows it.
+   */
+  collapsed?: boolean;
 };
 
-function Textarea({ className, size = "default", unstyled = false, ...props }: TextareaProps) {
+function Textarea({
+  className,
+  size = "default",
+  unstyled = false,
+  collapsed = false,
+  ...props
+}: TextareaProps) {
   return (
     <span
       className={
@@ -29,10 +40,11 @@ function Textarea({ className, size = "default", unstyled = false, ...props }: T
           <textarea
             className={cn(
               // Auto-grows with content up to one cap, then scrolls.
-              "field-sizing-content min-h-17.5 max-h-64 w-full rounded-[inherit] px-[calc(--spacing(3)-1px)] py-[calc(--spacing(1.5)-1px)] outline-none wrap-anywhere max-sm:min-h-20.5",
+              "field-sizing-content min-h-17.5 max-h-64 w-full rounded-[inherit] px-[calc(--spacing(3)-1px)] py-[calc(--spacing(1.5)-1px)] outline-none wrap-anywhere transition-[min-height] duration-(--motion-duration-base) ease-standard max-sm:min-h-20.5 motion-reduce:transition-none",
               size === "sm" &&
                 "min-h-16.5 px-[calc(--spacing(2.5)-1px)] py-[calc(--spacing(1)-1px)] max-sm:min-h-19.5",
               size === "lg" && "min-h-18.5 py-[calc(--spacing(2)-1px)] max-sm:min-h-21.5",
+              collapsed && "min-h-0 max-sm:min-h-0",
             )}
             data-slot="textarea"
             {...mergeProps(defaultProps, props)}
