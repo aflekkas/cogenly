@@ -14,12 +14,18 @@ import {
   XIcon,
   ZapIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { AgentAvatar, AgentPermissions } from "@t3tools/contracts";
 import { PopoverTrigger } from "~/components/ui/popover";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import { ThreadDetailsSection } from "~/components/chat/ThreadDetailsSection";
 import { THREAD_DETAILS_PANEL_ICON_CLASS } from "~/components/chat/threadDetailsPanelStyles";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "~/components/ui/collapsible";
+import { CollapsibleSectionHeader } from "~/components/ui/collapsible-section-header";
+import { AgentActivity } from "./AgentActivity";
+import { AgentOpenItems } from "./AgentOpenItems";
+import { scheduleInWords } from "./agentBuilder.logic";
+import type { AgentDetailsSection } from "./agentViewIntent";
 import {
   Select,
   SelectItem,
@@ -29,13 +35,14 @@ import {
 } from "~/components/ui/select";
 import { Switch } from "~/components/ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { AgentAvatarPicker, AgentAvatarTrigger } from "./AgentAvatarPicker";
+import { AgentAvatarPicker } from "./AgentAvatarPicker";
 import { useAgentsClient } from "./agentsClient";
-import { agentDraft, agentStatusLabel, formatMessageTime } from "./agents.logic";
+import { agentDraft, formatMessageTime } from "./agents.logic";
 import {
   EVENT_RUN_NOW_UNSUPPORTED_MESSAGE,
   PERMISSION_OPTIONS,
   agentWorkStartPolicy,
+  countOpenCommitments,
   describeSchedule,
   eventFilterChoices,
   triggerErrorMessage,
@@ -59,16 +66,22 @@ const NOTIFY_LABEL = {
 } as const;
 
 /**
- * Everything the agent is allowed and asked to do, edited in place. Every change here
+ * The Details sheet's sections: identity and responsibility, schedule, tools, open
+ * items, activity, memory and the advanced settings, edited in place. Every change here
  * is the owner's own decision and saves directly; the agent can only ask for these.
  */
 export function AgentResponsibilities({
   agent,
   workspace,
+  section,
+  onOpenChat,
   onDeleted,
 }: {
   agent: AgentContact;
   workspace: AgentWorkspaceView;
+  /** The section to open on; the collapsed ones stay collapsed. */
+  section: AgentDetailsSection;
+  onOpenChat: (messageId?: string) => void;
   onDeleted?: (() => void) | undefined;
 }) {
   const client = useAgentsClient();
@@ -134,7 +147,10 @@ export function AgentResponsibilities({
   const close = () => setEditing(null);
   const isEditing = (kind: string, id?: string) =>
     editing?.kind === kind && (id === undefined || ("id" in editing && editing.id === id));
-  const status = agentStatusLabel(agent);
+  const [itemsOpen, setItemsOpen] = useState(section === "items");
+  const [activityOpen, setActivityOpen] = useState(section === "activity");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const openItems = agent.approvals.length + countOpenCommitments(workspace.commitments);
   const labelsById = new Map(workspace.labels.map((label) => [label.id as string, label]));
   const workStart = agentWorkStartPolicy(agent);
   const setPermission = (key: keyof AgentPermissions, value: boolean) =>
@@ -157,34 +173,17 @@ export function AgentResponsibilities({
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col pb-10">
+    <div className="flex w-full flex-col">
       <ThreadDetailsSection
-        headingId="agent-profile"
-        title="Profile"
+        headingId="agent-responsibility"
+        title="Responsibility"
         separated={false}
-        showHeading={false}
       >
         <AgentAvatarPicker avatar={avatar} onChange={(next) => void saveAvatar(next)}>
-          <div className="flex items-center gap-3 px-2.5 pt-1.5 pb-2">
-            <AgentAvatarTrigger
-              avatar={avatar}
-              size={40}
-              state={agent.state}
-              disabled={!canWrite}
-            />
-            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="truncate text-sm font-medium text-foreground">{agent.name}</span>
-              <span className="line-clamp-2 text-xs text-muted-foreground">{status}</span>
-            </span>
-            <PopoverTrigger
-              disabled={!canWrite}
-              render={
-                <ThreadDetailsControl part="icon" aria-label="Choose face" title="Choose face" />
-              }
-            >
-              <SmileIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-            </PopoverTrigger>
-          </div>
+          <PopoverTrigger
+            disabled={!canWrite}
+            render={<DetailRow icon={SmileIcon} label="Face" value="Choose" />}
+          />
         </AgentAvatarPicker>
         {isEditing("name") ? (
           <InlineEditor
@@ -204,9 +203,6 @@ export function AgentResponsibilities({
             onClick={() => setEditing({ kind: "name" })}
           />
         )}
-      </ThreadDetailsSection>
-
-      <ThreadDetailsSection headingId="agent-mission" title="Responsibility">
         {isEditing("responsibility") ? (
           <InlineEditor
             label="Responsibility"
@@ -222,7 +218,7 @@ export function AgentResponsibilities({
         ) : (
           <DetailRow
             icon={FlagIcon}
-            label="Mission"
+            label="Owns"
             detail={agent.responsibility.trim() || "Describe what it should own and keep track of"}
             disabled={!canWrite}
             onClick={() => setEditing({ kind: "responsibility" })}
@@ -249,91 +245,11 @@ export function AgentResponsibilities({
             onClick={() => setEditing({ kind: "instructions" })}
           />
         )}
-        <DetailRow
-          icon={FolderGit2Icon}
-          label="Home repository"
-          value={
-            workspace.repositories.find((repository) => repository.id === agent.projectId)?.title ??
-            "None"
-          }
-          detail="Where its conversation runs. It can work in every repository and add new ones."
-          disabled
-        />
-        <DailyCapRow
-          cap={agent.dailyRunCap}
-          pending={disabled}
-          onSave={(dailyRunCap) => saveProfile({ dailyRunCap })}
-        />
-      </ThreadDetailsSection>
-
-      <ThreadDetailsSection headingId="agent-permissions" title="Permissions">
-        {PERMISSION_OPTIONS.filter((option) => !option.highImpact).map((option) => (
-          <PermissionRow
-            key={option.key}
-            label={option.label}
-            description={option.description}
-            checked={agent.permissions[option.key]}
-            disabled={disabled}
-            onChange={(value) => setPermission(option.key, value)}
-          />
-        ))}
-        <div className="mx-1 mt-2 rounded-xl border border-warning/25 py-1">
-          <div className="flex items-center gap-1.5 px-2.5 pt-1 pb-1 text-2xs font-medium text-warning-foreground">
-            <ShieldAlertIcon className="size-3.5" />
-            High impact · off unless you need them
-          </div>
-          {PERMISSION_OPTIONS.filter((option) => option.highImpact).map((option) => (
-            <PermissionRow
-              key={option.key}
-              label={option.label}
-              description={option.description}
-              checked={agent.permissions[option.key]}
-              disabled={disabled}
-              onChange={(value) => setPermission(option.key, value)}
-            />
-          ))}
-        </div>
-        <p
-          className={cn(
-            "mx-2.5 mt-1.5 text-xs",
-            workStart.outcome === "starts" ? "text-foreground/70" : "text-muted-foreground",
-          )}
-        >
-          Work: {workStart.text}
-        </p>
-      </ThreadDetailsSection>
-
-      <ThreadDetailsSection headingId="agent-notify" title="Notifications">
-        <div className="flex min-h-8 items-center gap-2.5 px-2.5">
-          <BellIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-          <span className="flex-1 text-sm font-medium text-foreground/80">Tell me</span>
-          <div className="w-60 shrink-0">
-            <Select
-              value={agent.notifyPolicy}
-              disabled={disabled}
-              onValueChange={(value) => {
-                if (value && value in NOTIFY_LABEL && value !== agent.notifyPolicy)
-                  void saveProfile({ notifyPolicy: value as keyof typeof NOTIFY_LABEL });
-              }}
-            >
-              <SelectTrigger size="xs" aria-label="When to notify">
-                <SelectValue>{NOTIFY_LABEL[agent.notifyPolicy]}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup>
-                {Object.entries(NOTIFY_LABEL).map(([value, label]) => (
-                  <SelectItem key={value} value={value} label={label}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          </div>
-        </div>
       </ThreadDetailsSection>
 
       <ThreadDetailsSection
         headingId="agent-triggers"
-        title="Triggers"
+        title="Schedule"
         actions={
           <ThreadDetailsControl
             part="icon"
@@ -348,8 +264,8 @@ export function AgentResponsibilities({
         {agent.triggers.length === 0 && !isEditing("trigger:new") && (
           <DetailRow
             icon={ZapIcon}
-            label="Add a trigger"
-            detail="Wake it on a schedule, when something happens, or on a webhook. Each wake-up is one recorded run."
+            label="Only when you message it"
+            detail="Add a trigger to wake it on a schedule, when something happens, or on a webhook."
             tone="muted"
             disabled={!canWrite}
             onClick={() => setEditing({ kind: "trigger:new" })}
@@ -369,8 +285,12 @@ export function AgentResponsibilities({
             <div key={trigger.id} className="flex items-center">
               <DetailRow
                 icon={ZapIcon}
-                label={trigger.title}
-                detail={`${describeSchedule(trigger.schedule, filterNames)}${trigger.enabled ? "" : " · Paused"}`}
+                label={
+                  trigger.schedule.type === "event"
+                    ? describeSchedule(trigger.schedule, filterNames)
+                    : scheduleInWords(trigger.schedule)
+                }
+                detail={`${trigger.title}${trigger.enabled ? "" : " · Paused"}`}
                 className="flex-1"
                 disabled={!canWrite}
                 onClick={() => setEditing({ kind: "trigger", id: trigger.id })}
@@ -433,6 +353,67 @@ export function AgentResponsibilities({
           />
         )}
       </ThreadDetailsSection>
+
+      <ThreadDetailsSection headingId="agent-permissions" title="Tools & permissions">
+        {PERMISSION_OPTIONS.filter((option) => !option.highImpact).map((option) => (
+          <PermissionRow
+            key={option.key}
+            label={option.label}
+            description={option.description}
+            checked={agent.permissions[option.key]}
+            disabled={disabled}
+            onChange={(value) => setPermission(option.key, value)}
+          />
+        ))}
+        <div className="mx-1 mt-2 rounded-xl border border-warning/25 py-1">
+          <div className="flex items-center gap-1.5 px-2.5 pt-1 pb-1 text-2xs font-medium text-warning-foreground">
+            <ShieldAlertIcon className="size-3.5" />
+            High impact · off unless you need them
+          </div>
+          {PERMISSION_OPTIONS.filter((option) => option.highImpact).map((option) => (
+            <PermissionRow
+              key={option.key}
+              label={option.label}
+              description={option.description}
+              checked={agent.permissions[option.key]}
+              disabled={disabled}
+              onChange={(value) => setPermission(option.key, value)}
+            />
+          ))}
+        </div>
+        <p
+          className={cn(
+            "mx-2.5 mt-1.5 text-xs",
+            workStart.outcome === "starts" ? "text-foreground/70" : "text-muted-foreground",
+          )}
+        >
+          Work: {workStart.text}
+        </p>
+      </ThreadDetailsSection>
+
+      <CollapsibleDetails
+        id="agent-items"
+        title="Open items"
+        count={openItems}
+        open={itemsOpen}
+        onOpenChange={setItemsOpen}
+      >
+        <AgentOpenItems agent={agent} workspace={workspace} onOpenChat={onOpenChat} />
+      </CollapsibleDetails>
+
+      <CollapsibleDetails
+        id="agent-activity"
+        title="Recent activity"
+        open={activityOpen}
+        onOpenChange={setActivityOpen}
+      >
+        <AgentActivity
+          agent={agent}
+          workspace={workspace}
+          onOpenChat={() => onOpenChat()}
+          onOpenItems={() => setItemsOpen(true)}
+        />
+      </CollapsibleDetails>
 
       {client.MemorySection ? (
         <client.MemorySection agent={agent} labels={workspace.labels} />
@@ -521,7 +502,52 @@ export function AgentResponsibilities({
         </ThreadDetailsSection>
       )}
 
-      <ThreadDetailsSection headingId="agent-danger" title="Danger zone">
+      <CollapsibleDetails
+        id="agent-advanced"
+        title="Advanced"
+        open={advancedOpen}
+        onOpenChange={setAdvancedOpen}
+      >
+        <div className="flex min-h-8 items-center gap-2.5 px-2.5">
+          <BellIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+          <span className="flex-1 text-sm font-medium text-foreground/80">Tell me</span>
+          <div className="w-52 shrink-0">
+            <Select
+              value={agent.notifyPolicy}
+              disabled={disabled}
+              onValueChange={(value) => {
+                if (value && value in NOTIFY_LABEL && value !== agent.notifyPolicy)
+                  void saveProfile({ notifyPolicy: value as keyof typeof NOTIFY_LABEL });
+              }}
+            >
+              <SelectTrigger size="xs" aria-label="When to notify">
+                <SelectValue>{NOTIFY_LABEL[agent.notifyPolicy]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                {Object.entries(NOTIFY_LABEL).map(([value, label]) => (
+                  <SelectItem key={value} value={value} label={label}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </div>
+        </div>
+        <DailyCapRow
+          cap={agent.dailyRunCap}
+          pending={disabled}
+          onSave={(dailyRunCap) => saveProfile({ dailyRunCap })}
+        />
+        <DetailRow
+          icon={FolderGit2Icon}
+          label="Home repository"
+          value={
+            workspace.repositories.find((repository) => repository.id === agent.projectId)?.title ??
+            "None"
+          }
+          detail="Where its conversation runs. It can work in every repository and add new ones."
+          disabled
+        />
         {isEditing("delete") ? (
           <>
             <p className="px-2.5 py-2 text-xs text-muted-foreground">
@@ -551,7 +577,7 @@ export function AgentResponsibilities({
             onClick={() => setEditing({ kind: "delete" })}
           />
         )}
-      </ThreadDetailsSection>
+      </CollapsibleDetails>
       {!canWrite && (
         <p className="px-4 py-2 text-xs text-muted-foreground">
           This connection can view this agent but not change it.
@@ -587,5 +613,38 @@ function PermissionRow({
       </span>
       <Switch size="sm" checked={checked} disabled={disabled} onCheckedChange={onChange} />
     </label>
+  );
+}
+
+/** A section that folds away: open items, activity and the advanced settings. */
+function CollapsibleDetails({
+  id,
+  title,
+  count,
+  open,
+  onOpenChange,
+  children,
+}: {
+  id: string;
+  title: string;
+  count?: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <section className="border-t border-border/65 px-2 pt-2 pb-2.5" aria-labelledby={id}>
+        <CollapsibleTrigger
+          render={<CollapsibleSectionHeader id={id} expanded={open} variant="panel" />}
+        >
+          {title}
+          {count !== undefined && count > 0 && (
+            <span className="ms-1.5 tabular-nums text-muted-foreground">{count}</span>
+          )}
+        </CollapsibleTrigger>
+        <CollapsiblePanel>{children}</CollapsiblePanel>
+      </section>
+    </Collapsible>
   );
 }

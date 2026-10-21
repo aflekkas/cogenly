@@ -4213,7 +4213,7 @@ export default function ChatView(props: ChatViewProps) {
     useRightPanelStore.getState().toggleVisibility(activeThreadRef);
   };
   const toggleRightPanelStable = useStableCallback(toggleRightPanel);
-  // An agent's conversation shows its agent's settings (the Responsibilities view)
+  // An agent's conversation shows its agent's Details sheet
   // in the header instead of thread controls.
   const agentConversationViewKey =
     activeThreadRef && activeThreadShell?.source.agent?.role === "conversation"

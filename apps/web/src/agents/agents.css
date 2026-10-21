@@ -11,76 +11,6 @@
   color: var(--foreground);
   font-family: var(--font-sans);
 }
-@utility agent-contact-header {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  flex: none;
-  padding: 18px 24px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
-}
-@utility agent-header-person {
-  display: flex;
-  align-items: center;
-  flex-direction: column;
-  gap: 8px;
-  cursor: pointer;
-  background: none;
-  border: 0;
-  color: inherit;
-  font-size: 18px;
-  font-weight: 550;
-  letter-spacing: -0.025em;
-}
-.agent-header-person small {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--muted-foreground);
-  letter-spacing: 0;
-  margin-top: -4px;
-}
-.agent-header-person svg {
-  margin-bottom: 2px;
-}
-@utility agent-icon-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--muted-foreground);
-  cursor: pointer;
-}
-.agent-icon-button:hover {
-  background: var(--muted);
-  color: var(--foreground);
-}
-.agent-icon-button:focus-visible,
-.agent-contact:focus-visible,
-.agent-header-person:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-.agent-icon-button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-@utility agent-header-more {
-  position: absolute;
-  right: 16px;
-  top: 16px;
-}
-@utility agent-back {
-  position: absolute;
-  left: 15px;
-  top: 16px;
-}
 @utility agent-message-scroll {
   flex: 1;
   min-height: 0;
@@ -258,6 +188,41 @@
     animation: none;
   }
 }
+/* A row, card or status line that just arrived: a short rise and fade, once per
+   mount. Opacity only under reduced motion. */
+@utility agent-enter {
+  transition-property: opacity, translate;
+  transition-duration: var(--motion-duration-base);
+  transition-timing-function: --theme(--ease-out);
+  @starting-style {
+    opacity: 0;
+    translate: 0 6px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: opacity;
+    @starting-style {
+      translate: none;
+    }
+  }
+}
+/* A value that changed in place (a proposal field, a status): the new text
+   mounts and settles in from a couple of pixels below. */
+@utility agent-morph {
+  display: inline-block;
+  transition-property: opacity, translate;
+  transition-duration: var(--motion-duration-fast);
+  transition-timing-function: --theme(--ease-out);
+  @starting-style {
+    opacity: 0;
+    translate: 0 3px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition-property: opacity;
+    @starting-style {
+      translate: none;
+    }
+  }
+}
 @utility agent-composer-area {
   flex: none;
   max-width: 780px;
@@ -370,201 +335,6 @@
   padding: 8px;
   min-width: 0;
 }
-@utility agent-contacts {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  width: 100%;
-  padding: 6px;
-  color: var(--foreground);
-}
-@utility agent-list-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--muted-foreground);
-  padding: 3px 9px 10px;
-}
-.agent-contacts ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-@utility agent-contact {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 9px;
-  border: 0;
-  border-radius: var(--radius-lg);
-  width: 100%;
-  text-align: left;
-  background-color: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-@utility agent-contact-copy {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  gap: 2px;
-}
-@utility agent-contact-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  line-height: 18px;
-  font-weight: 550;
-}
-.agent-contact-name > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agent-contact > svg {
-  flex: none;
-}
-.agent-contact-name time {
-  margin-left: auto;
-  flex: none;
-  font-weight: 400;
-  font-size: 10px;
-  color: var(--muted-foreground);
-}
-@utility agent-contact-preview {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted-foreground);
-  font-size: 11px;
-  line-height: 1.4;
-}
-.agent-contact-preview > span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-@utility agent-unread {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  margin-left: auto;
-  border-radius: 10px;
-  min-width: 17px;
-  height: 17px;
-  padding: 0 4px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font-size: 9px;
-  font-weight: 600;
-}
-@utility agent-contact-status {
-  margin-left: auto;
-  flex: none;
-  font-size: 10px;
-  font-weight: 400;
-  color: var(--muted-foreground);
-}
-.agent-contact-status[data-status="Needs approval"],
-.agent-contact-status[data-status="Needs you"] {
-  color: var(--warning-foreground);
-}
-@utility agent-unread-dot {
-  flex: none;
-  margin-left: auto;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--primary);
-}
-/* Fills the list and sits in its vertical centre. */
-@utility agent-empty {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 14px;
-  text-align: center;
-  padding: 36px 15px;
-  font-size: 13px;
-}
-.agent-empty > span {
-  font-size: 12px;
-  color: var(--muted-foreground);
-  line-height: 1.6;
-}
-@utility agent-form {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-.agent-form > label {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  font-size: 11px;
-  font-weight: 500;
-}
-.agent-form label > input,
-.agent-form label > textarea {
-  font: inherit;
-  font-weight: 400;
-  font-size: 13px;
-  line-height: 1.5;
-  width: 100%;
-  min-width: 0;
-  background: var(--secondary);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 10px 12px;
-  outline: none;
-}
-.agent-form textarea {
-  resize: vertical;
-  min-height: 70px;
-}
-.agent-form label > input:focus-visible,
-.agent-form label > textarea:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.agent-form label.agent-cap-row {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-}
-.agent-form .agent-cap-row > input {
-  width: 80px;
-}
-.agent-form label small,
-.agent-form-field small {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--muted-foreground);
-}
-@utility agent-form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  font-size: 11px;
-  font-weight: 500;
-}
-@utility agent-face-picker {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-}
 @utility agent-text-button {
   display: inline-flex;
   align-items: center;
@@ -579,46 +349,7 @@
 .agent-text-button:hover {
   color: var(--foreground);
 }
-@utility agent-primary-button {
-  border: 0;
-  border-radius: 10px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  padding: 11px 16px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-}
-.agent-primary-button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-@utility agent-first-trigger {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  font-size: 11px;
-  color: var(--muted-foreground);
-}
-.agent-first-trigger span {
-  flex: 1;
-}
-
-@utility agent-muted {
-  font-size: 11px;
-  color: var(--muted-foreground);
-  line-height: 1.65;
-}
-
 @media (max-width: 600px) {
-  .agent-contact-header {
-    padding: 14px 12px 10px;
-  }
-  .agent-header-person svg {
-    width: 48px;
-    height: 48px;
-  }
   .agent-messages {
     padding: 12px 16px 20px;
   }

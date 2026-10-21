@@ -10,17 +10,21 @@ responsibility and permissions. The sidebar's **Agents** tab lists them. Each ro
 (**Needs approval**, **Needs you**, **Running** or **Idle**) and a
 count only when decisions are waiting on you.
 
-Choose **New agent** in the sidebar or command palette to create one. Give it a
-name, a responsibility and the workspace its conversation runs in. Nothing creates an
-agent for you.
+Choose **New agent** in the sidebar or command palette to create one. Tell the builder
+what the agent should take care of, in a sentence ("watch my GitHub PRs and summarize them
+every morning"). It asks a short question only when it has to, then proposes the agent as a
+card: its face, name, responsibility, when it runs, what it needs, and the model (your
+default). Keep talking to adjust anything ("make it run on Mondays only"); the card
+updates. **Create** makes the agent and opens its conversation, where it introduces itself
+and gets going. Nothing creates an agent for you.
 
 Opening an agent shows its chat. Ask it what is outstanding, give it direction, or
-ask it to start Work. The tabs above the chat hold the rest:
+ask it to start Work. **Details** in its header opens everything else in a side sheet:
 
-- **Activity**: each run with what woke it (your message, a trigger, an event, an
-  approved action, or Work), its recorded status, model and summary, and what it
-  did, such as items it proposed or Work it started. Work links open the session;
-  event runs also link the Work, pull request or open item the event was about.
+- **Responsibility**: its face, name, what it owns, and standing instructions.
+- **Schedule**: its triggers, each in plain words, with a switch, **Run now** and
+  **Delete**. **+** opens the full trigger editor.
+- **Tools & permissions**: what it may do on its own.
 - **Open items**: things to follow up on, owned by you, the agent or someone else,
   with due dates, projects, and links to where they came from. Items the agent
   finds stay **Proposed** until you confirm or dismiss them. **Mark done** asks
@@ -29,9 +33,16 @@ ask it to start Work. The tabs above the chat hold the rest:
   instead to keep a record. **History** on an item lists every status change: who
   made it, when, why, and any evidence. Pending approvals sit at the top, and also appear
   in the chat.
-- **Responsibilities**: the agent's mission, instructions, permissions, notifications, daily run cap, triggers, memory (facts it
-  proposed wait there for you to confirm; see [Memory](./memory-and-export.md#memory)),
-  and **Delete**.
+- **Recent activity**: each run with what woke it (your message, a trigger, an event, an
+  approved action, or Work), its recorded status, model and summary, and what it
+  did, such as items it proposed or Work it started. Work links open the session;
+  event runs also link the Work, pull request or open item the event was about.
+- **Memory**: facts it proposed wait there for you to confirm; see
+  [Memory](./memory-and-export.md#memory).
+- **Advanced**: notifications, the daily run cap, its home repository, and **Delete**.
+
+Everything in Details can also be changed by telling the agent in its chat; what it
+cannot do itself (a trigger, more permissions) it asks you to approve.
 
 Agents work on their own across all of your projects and repositories, and can add
 new projects. What they may do is set by permission switches: read, draft and start
@@ -40,7 +51,7 @@ delete stay off until you turn them on. An agent cannot grant itself anything.
 When it wants to start Work, add a trigger, or change its permissions, it
 asks, and you **Approve** or **Reject**. Approvals expire after seven days.
 
-**Start Work** in the agent's header starts a coding session in any repository, its
+**Start Work…** at the top of Details starts a coding session in any repository, its
 home repository first. Without the start Work permission the agent would ask you
 first; starting it yourself approves that one session. The session runs in a new worktree and appears in **Work** under its
 repository, marked with the agent's name.
@@ -57,14 +68,14 @@ Work finishing or becoming ready for review, or an open item coming due. An even
 trigger can be limited to some projects, repositories, or Work you, a chat or an
 agent started. Filters only narrow what wakes it, and a repeated event wakes it
 once. Event triggers have no **Run now**; they run when the event happens. Add triggers under
-**Responsibilities → Triggers**, when creating the agent, or in **Settings →
+**Details → Schedule**, by describing them when creating the agent, or in **Settings →
 Scheduled tasks**. An agent can suggest one, but it is added only if you approve.
 
 An agent uses the model picked in its chat, for its replies and its background runs.
 A new agent starts on the model a new chat in its workspace would get. Agents are
 always on: their triggers keep running, up to the daily run cap, and a run that fails
 waits a little longer before the next one. To stop a trigger, turn it off under
-**Triggers**. Messages sent while an agent is busy use its normal queue or steering
+**Schedule**. Messages sent while an agent is busy use its normal queue or steering
 behavior.
 
 Coding work an agent starts appears in **Work** with your own threads, under its
@@ -115,7 +126,7 @@ and the branch and worktree controls, the right panel, and its browser, terminal
 belong to Work. When a
 chat turns into code, **Start Work…** hands it to a new Work session. An agent's
 conversation belongs to the agent: rename it or remove it from the agent's
-**Responsibilities**.
+**Details**.
 
 ### Start without a project
 

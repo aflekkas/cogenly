@@ -1,68 +1,26 @@
-import { OverlayPresence } from "~/components/ui/overlay-presence";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import type { EnvironmentId } from "@t3tools/contracts";
-import type { AgentContact } from "./agents.types";
-import { useThreadShells } from "~/state/entities";
-import { useAgentCreationContext, useAgents } from "./agentsClient";
-import { CreateAgent } from "./AgentDetails";
-import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
 
+/**
+ * Every "new agent" entry point (sidebar, palette, the empty state) asks here. Creating
+ * an agent is a conversation on its own screen, so the request becomes a navigation.
+ */
 export function requestAgentCreation(environmentId: EnvironmentId | null) {
   window.dispatchEvent(new CustomEvent("cogenly:create-agent", { detail: environmentId }));
 }
 export function AgentsCreateHost() {
   const navigate = useNavigate();
-  const { agents } = useAgents();
-  const threads = useThreadShells();
-  const [created, setCreated] = useState<AgentContact | null>(null);
-  const [target, setTarget] = useState<EnvironmentId | null>(null);
-  const {
-    primaryEnvironmentId: primaryId,
-    projectId,
-    workspaces,
-  } = useAgentCreationContext(target);
-  const { labels } = useEnvironmentProjectLabels(target);
   useEffect(() => {
-    const handler = (event: Event) =>
-      setTarget((event as CustomEvent<EnvironmentId | null>).detail ?? primaryId);
+    const handler = (event: Event) => {
+      const environmentId = (event as CustomEvent<EnvironmentId | null>).detail;
+      void navigate({
+        to: "/agents/new",
+        search: environmentId ? { environmentId } : {},
+      });
+    };
     window.addEventListener("cogenly:create-agent", handler);
     return () => window.removeEventListener("cogenly:create-agent", handler);
-  }, [primaryId]);
-  // The mutation can return before either live list has consumed its update.
-  // Wait for both so the new route cannot mistake this conversation for a missing thread.
-  useEffect(() => {
-    if (
-      !created ||
-      !agents.some(
-        (agent) => agent.environmentId === created.environmentId && agent.id === created.id,
-      ) ||
-      !threads.some(
-        (thread) =>
-          thread.environmentId === created.environmentId &&
-          thread.id === created.conversationThreadId,
-      )
-    )
-      return;
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: { environmentId: created.environmentId, threadId: created.conversationThreadId },
-    });
-    setCreated(null);
-  }, [created, agents, threads, navigate]);
-  return (
-    <OverlayPresence when={target}>
-      {(target) => (
-        <CreateAgent
-          key={target}
-          environmentId={target}
-          workspaces={workspaces}
-          labels={labels}
-          projectId={projectId}
-          onClose={() => setTarget(null)}
-          onCreated={setCreated}
-        />
-      )}
-    </OverlayPresence>
-  );
+  }, [navigate]);
+  return null;
 }

@@ -117,7 +117,7 @@ export interface AgentsClient {
   modelStatus?: (agent: AgentContact, model: AgentModelRef) => AgentModelStatus;
   /** Model and effort pickers from the live provider catalog; absent where there is none. */
   ModelControls?: ComponentType<AgentModelControlsProps>;
-  /** The agent's facts in Responsibilities; absent where there is no facts service. */
+  /** The agent's facts in Details; absent where there is no facts service. */
   MemorySection?: ComponentType<{
     agent: AgentContact;
     labels: AgentWorkspaceView["labels"];
@@ -1057,10 +1057,11 @@ export function useAgentCreationContext(target: EnvironmentId | null) {
  * follow whatever their chat composer picks.
  */
 export function useDefaultAgentModel(
-  environmentId: EnvironmentId,
+  environmentId: EnvironmentId | null,
   projectId: ProjectId | null,
 ): ModelSelection | null {
-  const config = useServerConfigs().get(environmentId);
+  const configs = useServerConfigs();
+  const config = environmentId ? configs.get(environmentId) : undefined;
   const projects = useProjects();
   if (!config) return null;
   const project = projects.find(

@@ -1,14 +1,8 @@
-import { cn, randomUUID } from "~/lib/utils";
-import { ChevronDownIcon, GaugeIcon, SmileIcon, type LucideIcon } from "lucide-react";
+import { cn } from "~/lib/utils";
+import { ChevronDownIcon, GaugeIcon, type LucideIcon } from "lucide-react";
 import { useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
-import {
-  defaultAgentPermissions,
-  type EnvironmentId,
-  type ProjectId,
-  type ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
-import { eventFilterChoices, triggerErrorMessage } from "./agentWorkspace.logic";
-import { AgentAvatarPicker, AgentAvatarTrigger } from "./AgentAvatarPicker";
+import type { ProjectId, ProjectLabelWithRepositories } from "@t3tools/contracts";
+import { triggerErrorMessage } from "./agentWorkspace.logic";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
@@ -16,14 +10,6 @@ import {
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "~/components/chat/threadDetailsPanelStyles";
 import { Button } from "~/components/ui/button";
-import {
-  Dialog,
-  DialogDescription,
-  DialogHeader,
-  DialogPanel,
-  DialogPopup,
-  DialogTitle,
-} from "~/components/ui/dialog";
 import { Input } from "~/components/ui/input";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import {
@@ -36,14 +22,8 @@ import {
 import { Switch } from "~/components/ui/switch";
 import { Textarea } from "~/components/ui/textarea";
 import { Toggle } from "~/components/ui/toggle";
-import {
-  AgentCreatedWithoutTriggerError,
-  useAgents,
-  useAgentsClient,
-  useDefaultAgentModel,
-} from "./agentsClient";
 import { DEFAULT_EVENT_TRIGGER, EventTriggerFields } from "./EventTriggerFields";
-import type { AgentContact, AgentDraft, AgentTrigger } from "./agents.types";
+import type { AgentTrigger } from "./agents.types";
 
 /** One details row: a muted icon, a label, and an optional trailing value or control. */
 export function DetailRow({
@@ -242,91 +222,6 @@ export function InlineEditor({
   );
 }
 
-export function AgentForm({
-  initial,
-  onSubmit,
-  pending,
-  submitLabel,
-  children,
-}: {
-  initial: AgentDraft;
-  onSubmit: (draft: AgentDraft) => Promise<unknown>;
-  pending: boolean;
-  submitLabel: string;
-  children?: ReactNode;
-}) {
-  const [draft, setDraft] = useState(initial);
-  return (
-    <form
-      className="agent-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void onSubmit({ ...draft, name: draft.name.trim() });
-      }}
-    >
-      <div className="agent-face-picker">
-        <AgentAvatarPicker
-          avatar={draft.avatar}
-          onChange={(avatar) => setDraft((current) => ({ ...current, avatar }))}
-        >
-          <AgentAvatarTrigger avatar={draft.avatar} size={48}>
-            <SmileIcon size={13} />
-            Choose face
-          </AgentAvatarTrigger>
-        </AgentAvatarPicker>
-      </div>
-      <label>
-        Name
-        <input
-          value={draft.name}
-          required
-          maxLength={200}
-          placeholder="What should we call them?"
-          onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-        />
-      </label>
-      <label>
-        Responsibility
-        <textarea
-          value={draft.responsibility ?? ""}
-          rows={3}
-          maxLength={32000}
-          placeholder="What should it own? E.g. keep track of what I owe Spawn clients and follow up."
-          onChange={(event) => setDraft({ ...draft, responsibility: event.target.value })}
-        />
-      </label>
-      <label>
-        Instructions
-        <textarea
-          value={draft.instructions}
-          rows={5}
-          maxLength={32000}
-          placeholder="What should your agent help with? How should they talk to you?"
-          onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
-        />
-      </label>
-      <label className="agent-cap-row">
-        Daily run cap
-        <input
-          type="number"
-          required
-          min={1}
-          max={1000}
-          value={draft.dailyRunCap}
-          onChange={(event) => setDraft({ ...draft, dailyRunCap: event.target.valueAsNumber })}
-        />
-      </label>
-      {children}
-      <button
-        className="agent-primary-button"
-        type="submit"
-        disabled={pending || !draft.name.trim()}
-      >
-        {pending ? "Saving…" : submitLabel}
-      </button>
-    </form>
-  );
-}
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const SCHEDULE_LABELS = {
   interval: "On an interval",
@@ -335,13 +230,15 @@ const SCHEDULE_LABELS = {
   webhook: "On a webhook request",
 } as const;
 const NO_REPOSITORIES: ReadonlyArray<{ id: ProjectId; title: string }> = [];
+const NO_LABELS: ReadonlyArray<ProjectLabelWithRepositories> = [];
 
+/** The full trigger editor: every schedule kind and event filter, under Details → Schedule. */
 export function TriggerForm({
   initial,
   pending,
   onSave,
   onCancel,
-  labels = EMPTY_LABELS,
+  labels = NO_LABELS,
   repositories = NO_REPOSITORIES,
   onManageProjects,
 }: {
@@ -533,185 +430,5 @@ export function TriggerForm({
         </Button>
       </div>
     </form>
-  );
-}
-
-const EMPTY_WORKSPACES: ReadonlyArray<{ id: NonNullable<AgentDraft["projectId"]>; title: string }> =
-  [];
-const EMPTY_LABELS: ReadonlyArray<ProjectLabelWithRepositories> = [];
-
-/**
- * Creating an agent is always an explicit owner decision: nothing else in the app
- * creates one. New agents reach every project and start with read, draft and Start Work.
- */
-export function CreateAgent({
-  environmentId,
-  projectId,
-  workspaces = EMPTY_WORKSPACES,
-  labels = EMPTY_LABELS,
-  onClose,
-  onCreated,
-}: {
-  environmentId: EnvironmentId;
-  labels?: ReadonlyArray<ProjectLabelWithRepositories>;
-  projectId: AgentDraft["projectId"];
-  workspaces?: ReadonlyArray<{ id: NonNullable<AgentDraft["projectId"]>; title: string }>;
-  onClose: () => void;
-  onCreated: (agent: AgentContact) => void;
-}) {
-  const client = useAgentsClient();
-  const { models } = useAgents();
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [trigger, setTrigger] = useState<Omit<AgentTrigger, "id"> | undefined>();
-  const [addTrigger, setAddTrigger] = useState(false);
-  const [createdAgent, setCreatedAgent] = useState<AgentContact | null>(null);
-  const [workspaceId, setWorkspaceId] = useState(projectId);
-  const triggerChoices = eventFilterChoices(
-    { permissions: defaultAgentPermissions },
-    labels,
-    workspaces,
-  );
-  // An environment without a ready provider cannot create an agent.
-  const model =
-    useDefaultAgentModel(environmentId, workspaceId ?? null) ??
-    models.find((option) => !option.environmentId || option.environmentId === environmentId)
-      ?.selection;
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogPopup>
-        <DialogHeader>
-          <DialogTitle>Someone in your corner</DialogTitle>
-          <DialogDescription>
-            Give your agent a name and a little direction. You can figure out the rest together.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogPanel>
-          {error && (
-            <p className="agent-error" role="alert">
-              {error}
-            </p>
-          )}
-          {model ? (
-            <>
-              <AgentForm
-                initial={{
-                  name: "",
-                  responsibility: "",
-                  instructions: "",
-                  avatar: { seed: randomUUID() },
-                  modelSelection: model,
-                  runtimeMode: "full-access",
-                  projectId,
-                  dailyRunCap: 24,
-                }}
-                pending={pending}
-                submitLabel={createdAgent ? "Save agent & trigger" : "Create agent"}
-                onSubmit={async (draft) => {
-                  setPending(true);
-                  setError(null);
-                  try {
-                    const agent = await client.save(
-                      environmentId,
-                      {
-                        ...draft,
-                        modelSelection: model,
-                        projectId: workspaceId,
-                        ...(createdAgent ? { id: createdAgent.id } : {}),
-                      },
-                      trigger,
-                    );
-                    onCreated(agent);
-                    onClose();
-                  } catch (cause) {
-                    if (cause instanceof AgentCreatedWithoutTriggerError)
-                      setCreatedAgent(cause.agent);
-                    setError(triggerErrorMessage(cause, "Could not create agent."));
-                  } finally {
-                    setPending(false);
-                  }
-                }}
-              >
-                {workspaces.length > 0 && (
-                  <div className="agent-form-field">
-                    <span>Workspace</span>
-                    <Select
-                      required
-                      value={workspaceId ?? null}
-                      disabled={createdAgent !== null}
-                      onValueChange={(value) =>
-                        setWorkspaceId(
-                          workspaces.find((workspace) => workspace.id === value)?.id ?? null,
-                        )
-                      }
-                    >
-                      <SelectTrigger aria-label="Workspace">
-                        <SelectValue placeholder="Choose a workspace">
-                          {workspaces.find((workspace) => workspace.id === workspaceId)?.title ??
-                            "Choose a workspace"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectPopup>
-                        {workspaces.map((workspace) => (
-                          <SelectItem
-                            key={workspace.id}
-                            value={workspace.id}
-                            label={workspace.title}
-                          >
-                            {workspace.title}
-                          </SelectItem>
-                        ))}
-                      </SelectPopup>
-                    </Select>
-                  </div>
-                )}
-                <div className="agent-first-trigger">
-                  <span>
-                    {trigger ? `First trigger: ${trigger.title}` : "First trigger · optional"}
-                  </span>
-                  <button
-                    className="agent-text-button"
-                    type="button"
-                    onClick={() => setAddTrigger(true)}
-                  >
-                    {trigger ? "Change" : "Add"}
-                  </button>
-                  {trigger && (
-                    <button
-                      className="agent-text-button"
-                      type="button"
-                      onClick={() => setTrigger(undefined)}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </AgentForm>
-              <Dialog open={addTrigger} onOpenChange={setAddTrigger}>
-                <DialogPopup>
-                  <DialogHeader>
-                    <DialogTitle>First trigger</DialogTitle>
-                  </DialogHeader>
-                  <DialogPanel>
-                    <TriggerForm
-                      {...triggerChoices}
-                      onManageProjects={client.openProjectSettings}
-                      pending={false}
-                      onCancel={() => setAddTrigger(false)}
-                      onSave={async (value) => {
-                        setTrigger(value);
-                        setAddTrigger(false);
-                      }}
-                    />
-                  </DialogPanel>
-                </DialogPopup>
-              </Dialog>
-            </>
-          ) : (
-            <p className="agent-muted">Connect a provider in Settings to create an agent.</p>
-          )}
-        </DialogPanel>
-      </DialogPopup>
-    </Dialog>
   );
 }

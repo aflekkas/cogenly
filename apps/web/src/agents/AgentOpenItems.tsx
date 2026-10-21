@@ -141,7 +141,7 @@ export function AgentOpenItems({
   const [showClosed, setShowClosed] = useState(false);
   const groups = groupCommitments(workspace.commitments);
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-3 pb-10">
+    <div className="flex w-full flex-col gap-4 px-2 pt-1 pb-4">
       {agent.approvals.length > 0 && (
         <section aria-labelledby="agent-approvals" className="flex flex-col gap-2">
           <h3 id="agent-approvals" className="text-2xs font-medium text-muted-foreground">

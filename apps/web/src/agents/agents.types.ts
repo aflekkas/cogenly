@@ -82,7 +82,7 @@ export interface AgentContact extends AgentListItem {
   /** A run in its conversation or Work waits on an approval or answer, known before `requests` load. */
   waitingInRun?: boolean;
 }
-/** What the agent's Activity, Open items and Responsibilities tabs read. */
+/** What the agent's Details sheet reads: open items, activity, projects. */
 export interface AgentWorkspaceView {
   commitments: ReadonlyArray<Commitment>;
   activity: typeof AgentActivityResult.Type | null;

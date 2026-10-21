@@ -1,11 +1,19 @@
-export type AgentTab = "chat" | "activity" | "items" | "responsibilities";
-export type AgentView = AgentTab | "start-work";
+/** The sections of an agent's Details sheet a request can open on. */
+export type AgentDetailsSection = "responsibility" | "schedule" | "items" | "activity";
+export type AgentView =
+  | "chat"
+  | "details"
+  | "activity"
+  | "items"
+  | "responsibilities"
+  | "start-work";
 
 /**
- * What to show the next time an agent's view mounts or while it is already showing: a tab,
- * or the Start Work dialog. The command palette and search ask here, then navigate to the
- * agent's conversation thread, since the tab is view state rather than part of the route.
- * Only the latest request is kept, so one that never reaches its view can't fire later.
+ * What to show the next time an agent's view mounts or while it is already showing: the
+ * chat, a Details section, or the Start Work dialog. The command palette and search ask
+ * here, then navigate to the agent's conversation thread, since this is view state rather
+ * than part of the route. Only the latest request is kept, so one that never reaches its
+ * view can't fire later.
  */
 let pending: { key: string; view: AgentView } | null = null;
 const listeners = new Set<() => void>();

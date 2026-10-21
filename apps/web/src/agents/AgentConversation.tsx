@@ -3,14 +3,15 @@ import {
   ChevronLeftIcon,
   LoaderCircleIcon,
   ArrowUpRightIcon,
-  HammerIcon,
-  SettingsIcon,
+  SlidersHorizontalIcon,
 } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
+import { WorkspacePageHeader } from "~/components/WorkspacePageHeader";
+import { isElectron } from "~/env";
 import { useMessageMotion } from "./useMessageMotion";
 import {
   agentStatusLabel,
@@ -29,25 +30,38 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import { Toggle, ToggleGroup } from "~/components/ui/toggle-group";
-import { AgentActivity } from "./AgentActivity";
-import { AgentOpenItems, ApprovalDecision } from "./AgentOpenItems";
-import { AgentResponsibilities } from "./AgentResponsibilities";
+import { ApprovalDecision } from "./AgentOpenItems";
+import { AgentDetailsSheet } from "./AgentDetailsSheet";
 import { AgentStartWork } from "./AgentStartWork";
-import { agentViewKey, takeAgentView, watchAgentView, type AgentTab } from "./agentViewIntent";
+import {
+  agentViewKey,
+  takeAgentView,
+  watchAgentView,
+  type AgentDetailsSection,
+  type AgentView as AgentViewIntent,
+} from "./agentViewIntent";
 import { countOpenCommitments } from "./agentWorkspace.logic";
 import type { AgentContact, AgentModelRef, AgentRequest, AgentWorkspaceView } from "./agents.types";
 
-const TABS: ReadonlyArray<{ value: AgentTab; label: string }> = [
-  { value: "chat", label: "Chat" },
-  { value: "activity", label: "Activity" },
-  { value: "items", label: "Open items" },
-  { value: "responsibilities", label: "Responsibilities" },
-];
+/** Which Details section a view request lands on; the chat itself closes Details. */
+function detailsSectionFor(view: AgentViewIntent | null): AgentDetailsSection | null {
+  switch (view) {
+    case "items":
+      return "items";
+    case "activity":
+      return "activity";
+    case "responsibilities":
+    case "details":
+      return "responsibility";
+    default:
+      return null;
+  }
+}
 
 /**
- * An agent opens on its conversation. Activity, Open items and Responsibilities are
- * secondary tabs in the same view; there is no separate dashboard.
+ * An agent is its conversation. Everything else about it (responsibility, schedule,
+ * tools, open items, activity) sits behind one Details affordance in a side sheet, and
+ * can also be changed by telling the agent in chat.
  */
 export function AgentConversation(props: {
   agent: AgentContact;
@@ -76,18 +90,21 @@ function AgentView({
   const client = useAgentsClient();
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
   const viewKey = agentViewKey(agent);
-  // The command palette and search can ask for a tab or Start Work before or after this mounts.
+  // The command palette, search and the thread menu can ask for a Details section or
+  // Start Work before or after this mounts.
   const [initialView] = useState(() => takeAgentView(viewKey));
-  const [tab, setTab] = useState<AgentTab>(
-    initialView && initialView !== "start-work" ? initialView : "chat",
+  const [details, setDetails] = useState<AgentDetailsSection | null>(
+    detailsSectionFor(initialView),
   );
   const [startingWork, setStartingWork] = useState(initialView === "start-work" && canWrite);
   const [focusMessage, setFocusMessage] = useState<string | null>(null);
   const openChat = (messageId?: string) => {
-    setTab("chat");
+    setDetails(null);
     setFocusMessage(messageId ?? null);
   };
   const itemsCount = agent.approvals.length + countOpenCommitments(workspace.commitments);
+  const status = agentStatusLabel(agent);
+  const responsibility = agent.responsibility.trim().split("\n")[0] ?? "";
   useEffect(
     () =>
       watchAgentView(viewKey, (view) => {
@@ -95,114 +112,84 @@ function AgentView({
           if (canWrite) setStartingWork(true);
           return;
         }
-        setTab(view);
-        setFocusMessage(null);
+        const section = detailsSectionFor(view);
+        setDetails(section);
+        if (section === null) setFocusMessage(null);
       }),
     [viewKey, canWrite],
   );
   return (
     <section className="agent-conversation" aria-label={`Conversation with ${agent.name}`}>
-      <header className="agent-contact-header">
+      <WorkspacePageHeader electron={isElectron} className="border-b border-border/45">
         {onBack && (
-          <button
-            type="button"
-            className="agent-icon-button agent-back"
-            aria-label="Back to agents"
-            onClick={onBack}
-          >
-            <ChevronLeftIcon size={20} />
-          </button>
+          <Button size="icon-xs" variant="ghost-muted" aria-label="Back to agents" onClick={onBack}>
+            <ChevronLeftIcon />
+          </Button>
         )}
-        <button
-          type="button"
-          className="agent-header-person"
-          aria-label={`${agent.name}'s responsibilities`}
-          onClick={() => setTab("responsibilities")}
-        >
+        <div className="flex min-w-0 flex-1 items-center gap-2.5" data-panel-flip="start">
           <AgentFace
             {...avatarFaceProps(agent.avatar)}
             state={agent.requests.length ? "blocked" : agent.state}
-            size={56}
+            size={28}
           />
-          <span>{agent.name}</span>
-          <small>{agentStatusLabel(agent)}</small>
-        </button>
-        <div className="agent-header-more">
-          <Button
-            size="xs"
-            variant="ghost-muted"
-            disabled={!canWrite}
-            onClick={() => setStartingWork(true)}
-          >
-            <HammerIcon />
-            Start Work
-          </Button>
-          <Button
-            size="icon-xs"
-            variant="ghost-muted"
-            aria-label="Agent settings"
-            title="Agent settings"
-            aria-pressed={tab === "responsibilities"}
-            onClick={() => {
-              setTab("responsibilities");
-              setFocusMessage(null);
-            }}
-          >
-            <SettingsIcon />
-          </Button>
+          <div className="flex min-w-0 flex-col leading-tight">
+            <span className="truncate text-sm font-medium tracking-tight">{agent.name}</span>
+            <span className="truncate text-2xs text-muted-foreground">
+              <span key={status} className="agent-morph">
+                {status}
+              </span>
+              {responsibility && ` · ${responsibility}`}
+            </span>
+          </div>
         </div>
-        <ToggleGroup
-          aria-label={`${agent.name} views`}
-          className="max-w-full overflow-x-auto"
-          value={[tab]}
-          onValueChange={(value) => {
-            const next = TABS.find((candidate) => candidate.value === value[0]);
-            if (!next) return;
-            setTab(next.value);
-            setFocusMessage(null);
-          }}
+        <Button
+          size="xs"
+          variant="ghost-muted"
+          aria-expanded={details !== null}
+          aria-haspopup="dialog"
+          onClick={() => setDetails("responsibility")}
         >
-          {TABS.map((option) => (
-            <Toggle key={option.value} value={option.value}>
-              {option.label}
-              {option.value === "items" && itemsCount > 0 && (
-                <span className="tabular-nums text-muted-foreground">{itemsCount}</span>
-              )}
-            </Toggle>
-          ))}
-        </ToggleGroup>
-      </header>
-      {tab !== "chat" && (
-        <div className="agent-message-scroll">
-          {tab === "activity" ? (
-            <AgentActivity
-              agent={agent}
-              workspace={workspace}
-              onOpenChat={() => openChat()}
-              onOpenItems={() => setTab("items")}
-            />
-          ) : tab === "items" ? (
-            <AgentOpenItems agent={agent} workspace={workspace} onOpenChat={openChat} />
-          ) : (
-            <AgentResponsibilities agent={agent} workspace={workspace} onDeleted={onDeleted} />
+          <SlidersHorizontalIcon />
+          Details
+          {itemsCount > 0 && (
+            <span
+              className="rounded-full bg-primary px-1.5 text-2xs font-medium text-primary-foreground tabular-nums"
+              aria-label={`${itemsCount} open items`}
+            >
+              {itemsCount}
+            </span>
           )}
-        </div>
-      )}
-      {tab === "chat" && (
-        <ChatPane
-          agent={agent}
-          workspace={workspace}
-          focusMessage={focusMessage}
-          onShowActivity={() => setTab("activity")}
-        />
-      )}
+        </Button>
+      </WorkspacePageHeader>
+      <ChatPane
+        agent={agent}
+        workspace={workspace}
+        focusMessage={focusMessage}
+        onShowActivity={() => setDetails("activity")}
+      />
+      <OverlayPresence when={details}>
+        {(section) => (
+          <AgentDetailsSheet
+            agent={agent}
+            workspace={workspace}
+            section={section}
+            onClose={() => setDetails(null)}
+            onOpenChat={openChat}
+            onStartWork={() => {
+              setDetails(null);
+              setStartingWork(true);
+            }}
+            onDeleted={onDeleted}
+          />
+        )}
+      </OverlayPresence>
       <OverlayPresence when={startingWork}>
         {() => (
           <AgentStartWork
             agent={agent}
             workspace={workspace}
             onClose={() => setStartingWork(false)}
-            onOpenItems={() => setTab("items")}
+            onOpenItems={() => setDetails("items")}
           />
         )}
       </OverlayPresence>

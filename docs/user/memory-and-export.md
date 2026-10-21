@@ -13,7 +13,7 @@ private to you (and to the agent it belongs to).
 
 Agents propose facts as they work. A proposal is never used until you choose **Confirm**;
 **Reject** discards it. An agent's own facts also appear under **Memory** in its
-**Responsibilities**.
+**Details**.
 
 ## Project context in chats
 

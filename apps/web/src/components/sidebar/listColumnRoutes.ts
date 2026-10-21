@@ -2,9 +2,9 @@
  * Full-width pages: with the nav rail there to navigate away, these routes
  * have no sidebar list column. The toggle keeps its place but is disabled, and
  * its shortcut does nothing. The mobile sheet
- * keeps the list, since it is the only way back there. The Agents index with
- * nothing to list (`agentsEmpty`) is full-width too: its empty state lives in
- * the main pane, and the column returns with the first agent.
+ * keeps the list, since it is the only way back there. The Agents index and the
+ * agent builder with nothing to list (`agentsEmpty`) are full-width too: the empty
+ * state lives in the main pane, and the column returns with the first agent.
  */
 export function routeHidesListColumn(
   pathname: string,
@@ -14,7 +14,7 @@ export function routeHidesListColumn(
     pathname === "/usage" ||
     pathname === "/project" ||
     pathname.startsWith("/project/") ||
-    (pathname === "/" && context.agentsEmpty)
+    ((pathname === "/" || pathname === "/agents/new") && context.agentsEmpty)
   );
 }
 

@@ -67,7 +67,7 @@ export function AgentActivity({
 
   if (!activity)
     return (
-      <div className="mx-auto w-full max-w-2xl px-4 pt-3">
+      <div className="w-full px-2 pt-1">
         {workspace.error ? (
           <p className="text-xs text-destructive" role="alert">
             {workspace.error}
@@ -80,7 +80,7 @@ export function AgentActivity({
       </div>
     );
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-1 px-4 pt-3 pb-10">
+    <div className="flex w-full flex-col gap-1 px-2 pt-1 pb-4">
       <h3 className="mb-1 text-2xs font-medium text-muted-foreground">
         Runs · each wake-up, what it ran on, and what it did
       </h3>

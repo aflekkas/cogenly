@@ -1,0 +1,569 @@
+import { useNavigate } from "@tanstack/react-router";
+import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import * as Option from "effect/Option";
+import { LoaderCircleIcon, XIcon } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { AgentFace } from "~/components/agents/face";
+import { ComposerPrimaryActions } from "~/components/chat/ComposerPrimaryActions";
+import { ComposerSurface } from "~/components/chat/ComposerSurface";
+import { Button } from "~/components/ui/button";
+import { SidebarInset } from "~/components/ui/sidebar";
+import { toastManager } from "~/components/ui/toast";
+import { WorkspacePageHeader } from "~/components/WorkspacePageHeader";
+import { isElectron } from "~/env";
+import { useScratchProject } from "~/hooks/useScratchProject";
+import { cn, newMessageId, newThreadId, randomUUID } from "~/lib/utils";
+import { useThreadShells } from "~/state/entities";
+import { usePrimaryEnvironmentId } from "~/state/environments";
+import { threadEnvironment, useEnvironmentThread } from "~/state/threads";
+import { useOrchestrationCommand } from "~/state/use-orchestration-command";
+import { useUiStateStore } from "~/uiStateStore";
+import { noteAgentArrival } from "./agentArrivals";
+import {
+  BUILDER_EXAMPLES,
+  BUILDER_THREAD_TITLE,
+  builderPreamble,
+  canCreateProposal,
+  kickoffMessage,
+  ownerText,
+  proposalFromMessages,
+  proposalToDraft,
+  proposalTriggers,
+  stripProposal,
+} from "./agentBuilder.logic";
+import { AgentProposalCard } from "./AgentProposalCard";
+import { agentContactKey, modelDisplayName } from "./agents.logic";
+import {
+  AgentCreatedWithoutTriggerError,
+  useAgents,
+  useAgentsClient,
+  useDefaultAgentModel,
+} from "./agentsClient";
+import type { AgentContact } from "./agents.types";
+
+const LIVE_RUN = new Set(["preparing", "queued", "starting", "running"]);
+
+interface BuilderThread {
+  environmentId: EnvironmentId;
+  projectId: ProjectId;
+  threadId: ThreadId;
+}
+interface Row {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  streaming: boolean;
+}
+
+/**
+ * Creating an agent is a short conversation: the owner says what the agent should
+ * take care of, the builder (the owner's default model) proposes it as a live card, and
+ * one click creates it. The conversation runs in a plain thread in the scratch project;
+ * once the agent exists the thread is removed.
+ */
+export function AgentBuilder({ environmentId: requested }: { environmentId?: EnvironmentId }) {
+  const navigate = useNavigate();
+  const client = useAgentsClient();
+  const { agents, models } = useAgents();
+  const shells = useThreadShells();
+  const primary = usePrimaryEnvironmentId();
+  const { scratchEnvironmentId, openScratchProject } = useScratchProject();
+  const environmentId = scratchEnvironmentId(requested ?? primary);
+  const setSidebarMode = useUiStateStore((store) => store.setSidebarMode);
+  const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const deleteThread = useOrchestrationCommand(threadEnvironment.delete, {
+    reportFailure: false,
+  });
+  const [thread, setThread] = useState<BuilderThread | null>(null);
+  const [pending, setPending] = useState<ReadonlyArray<Row>>([]);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState<AgentContact | null>(null);
+  const [seed] = useState(() => randomUUID());
+  const modelSelection = useDefaultAgentModel(environmentId, thread?.projectId ?? null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => setSidebarMode("agents"), [setSidebarMode]);
+
+  const state = useEnvironmentThread(thread?.environmentId ?? null, thread?.threadId ?? null);
+  const projection = Option.getOrNull(state.data);
+  const rows = useMemo<ReadonlyArray<Row>>(() => {
+    const persisted: Row[] = (projection?.messages ?? [])
+      .filter((message) => message.role !== "system" && message.text.trim())
+      .map((message) => ({
+        id: message.id,
+        role: message.role as Row["role"],
+        text: message.text,
+        streaming: message.streaming,
+      }));
+    const ids = new Set(persisted.map((row) => row.id));
+    return [...persisted, ...pending.filter((row) => !ids.has(row.id))];
+  }, [projection?.messages, pending]);
+  const busy = sending || Boolean(projection?.runs.some((run) => LIVE_RUN.has(run.status)));
+  const proposal = useMemo(() => proposalFromMessages(rows), [rows]);
+  const modelName = modelSelection ? modelDisplayName(models, modelSelection) : null;
+
+  const send = useCallback(
+    async (text: string) => {
+      if (!environmentId || !modelSelection || sending) return;
+      setSending(true);
+      setError(null);
+      const messageId = newMessageId();
+      const first = thread === null;
+      setPending((current) => [
+        ...current,
+        {
+          id: messageId,
+          role: "user",
+          text: first ? builderPreamble(text) : text,
+          streaming: false,
+        },
+      ]);
+      try {
+        let target = thread;
+        if (target === null) {
+          const project = await openScratchProject(environmentId, "Could not start the builder");
+          if (!project) throw new Error("This machine can't start a conversation right now.");
+          target = { environmentId, projectId: project.id, threadId: newThreadId() };
+        }
+        const createdAt = new Date().toISOString();
+        const result = await startTurn({
+          environmentId: target.environmentId,
+          input: {
+            threadId: target.threadId,
+            message: {
+              messageId,
+              role: "user",
+              text: first ? builderPreamble(text) : text,
+              attachments: [],
+            },
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt,
+            ...(first
+              ? {
+                  bootstrap: {
+                    createThread: {
+                      surface: "chat",
+                      projectId: target.projectId,
+                      title: BUILDER_THREAD_TITLE,
+                      modelSelection,
+                      runtimeMode: "full-access",
+                      interactionMode: "default",
+                      branch: null,
+                      worktreePath: null,
+                      createdAt,
+                    },
+                  },
+                }
+              : {}),
+          },
+        });
+        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        if (first) setThread(target);
+      } catch (cause) {
+        setPending((current) => current.filter((row) => row.id !== messageId));
+        setError(cause instanceof Error ? cause.message : "Could not send.");
+      } finally {
+        setSending(false);
+      }
+    },
+    [environmentId, modelSelection, openScratchProject, sending, startTurn, thread],
+  );
+
+  const create = useCallback(async () => {
+    if (!thread || !modelSelection || !canCreateProposal(proposal) || creating) return;
+    setCreating(true);
+    setError(null);
+    const [first, ...rest] = proposalTriggers(proposal);
+    try {
+      const draft = proposalToDraft(proposal, {
+        seed,
+        modelSelection,
+        projectId: thread.projectId,
+      });
+      const contact = await client.save(thread.environmentId, draft, first);
+      await finish(contact, rest);
+    } catch (cause) {
+      if (cause instanceof AgentCreatedWithoutTriggerError) {
+        toastManager.add({
+          type: "warning",
+          title: `${cause.agent.name} was created, but its schedule didn't save`,
+          description: "Add it under Details, or ask the agent in its chat.",
+        });
+        await finish(cause.agent, rest);
+        return;
+      }
+      setCreating(false);
+      setError(cause instanceof Error ? cause.message : "Could not create the agent.");
+    }
+    async function finish(contact: AgentContact, more: typeof rest) {
+      for (const trigger of more) {
+        await client.saveTrigger(contact, trigger).catch((cause: unknown) =>
+          toastManager.add({
+            type: "warning",
+            title: `Could not save “${trigger.title}”`,
+            description: cause instanceof Error ? cause.message : "Add it under Details.",
+          }),
+        );
+      }
+      noteAgentArrival(agentContactKey(contact));
+      await flyToAgentsList(cardRef.current);
+      await client.send(contact, kickoffMessage(contact.name)).catch(() => {
+        /* The agent exists; a lost greeting is not worth stopping for. */
+      });
+      setCreated(contact);
+    }
+  }, [client, creating, modelSelection, proposal, seed, thread]);
+
+  // The save returns before the live lists carry the agent; wait so the route can't
+  // mistake the conversation for a missing thread, then leave and drop the builder thread.
+  useEffect(() => {
+    if (
+      !created ||
+      !agents.some(
+        (agent) => agent.environmentId === created.environmentId && agent.id === created.id,
+      ) ||
+      !shells.some(
+        (shell) =>
+          shell.environmentId === created.environmentId &&
+          shell.id === created.conversationThreadId,
+      )
+    )
+      return;
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: created.environmentId, threadId: created.conversationThreadId },
+      replace: true,
+    });
+    if (thread)
+      void deleteThread({
+        environmentId: thread.environmentId,
+        input: { threadId: thread.threadId },
+      });
+  }, [agents, created, deleteThread, navigate, shells, thread]);
+
+  const cancel = () => {
+    if (thread && !created)
+      void deleteThread({
+        environmentId: thread.environmentId,
+        input: { threadId: thread.threadId },
+      });
+    void navigate({ to: "/" });
+  };
+
+  return (
+    <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh">
+      <WorkspacePageHeader electron={isElectron}>
+        <h1
+          className="min-w-0 flex-1 truncate text-sm font-medium tracking-tight"
+          data-panel-flip="start"
+        >
+          New agent
+        </h1>
+        <Button size="icon-xs" variant="ghost-muted" aria-label="Cancel" onClick={cancel}>
+          <XIcon />
+        </Button>
+      </WorkspacePageHeader>
+      <section className="agent-conversation" aria-label="New agent">
+        <Transcript
+          rows={rows}
+          busy={busy && !created}
+          seed={seed}
+          proposal={proposal}
+          modelName={modelName}
+          creating={creating}
+          cardRef={cardRef}
+          onCreate={() => void create()}
+          onExample={(text) => void send(text)}
+        />
+        <footer className="agent-composer-area">
+          {error && (
+            <p role="alert" className="agent-error">
+              {error}
+            </p>
+          )}
+          {environmentId === null ? (
+            <p className="agent-conversation-empty">
+              Agents aren't available here.
+              <span>This machine can't start a conversation without a repository right now.</span>
+            </p>
+          ) : (
+            <BuilderComposer
+              placeholder={
+                thread
+                  ? "Adjust anything, or ask for something else"
+                  : "What should this agent take care of?"
+              }
+              disabled={!modelSelection || creating || created !== null}
+              sending={sending}
+              onSend={send}
+            />
+          )}
+        </footer>
+      </section>
+    </SidebarInset>
+  );
+}
+
+function Transcript({
+  rows,
+  busy,
+  seed,
+  proposal,
+  modelName,
+  creating,
+  cardRef,
+  onCreate,
+  onExample,
+}: {
+  rows: ReadonlyArray<Row>;
+  busy: boolean;
+  seed: string;
+  proposal: ReturnType<typeof proposalFromMessages>;
+  modelName: string | null;
+  creating: boolean;
+  cardRef: RefObject<HTMLDivElement | null>;
+  onCreate: () => void;
+  onExample: (text: string) => void;
+}) {
+  const scroll = useRef<HTMLDivElement>(null);
+  const atBottom = useRef(true);
+  // Rows present at mount are history and stay still; rows appended later enter.
+  const [initialCount] = useState(rows.length);
+  // No deps: streamed text and the assembling card keep the newest row in view.
+  useLayoutEffect(() => {
+    if (atBottom.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
+  });
+  return (
+    <div
+      ref={scroll}
+      className="agent-message-scroll"
+      onScroll={(event) => {
+        const element = event.currentTarget;
+        atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+      }}
+    >
+      <div className="agent-messages" role="log" aria-live="polite" aria-relevant="additions text">
+        {rows.length === 0 ? (
+          <Hero onExample={onExample} />
+        ) : (
+          rows.map((row, index) => {
+            const text = row.role === "user" ? ownerText(row.text) : stripProposal(row.text);
+            const isLatestAssistant =
+              row.role === "assistant" &&
+              rows.findLastIndex((candidate) => candidate.role === "assistant") === index;
+            return (
+              <div
+                key={row.id}
+                className={cn("agent-message-row", index >= initialCount && "agent-enter")}
+                data-owner={row.role === "user"}
+              >
+                {text && (
+                  <div className="agent-bubble" data-owner={row.role === "user"}>
+                    {row.role === "assistant" ? (
+                      <div className="agent-markdown">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      text
+                    )}
+                  </div>
+                )}
+                {isLatestAssistant && proposal && (
+                  <div className={cn("w-full", text && "mt-3")}>
+                    <AgentProposalCard
+                      ref={cardRef}
+                      proposal={proposal}
+                      seed={seed}
+                      modelName={modelName}
+                      creating={creating}
+                      onCreate={onCreate}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+        {busy && rows.length > 0 && !rows.at(-1)?.streaming && (
+          <p className="agent-working agent-enter" role="status">
+            <LoaderCircleIcon size={13} className="agent-spinner" />
+            <span>Thinking…</span>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Hero({ onExample }: { onExample: (text: string) => void }) {
+  return (
+    <div className="agent-conversation-empty agent-enter gap-3">
+      <AgentFace
+        seed="new-friend"
+        expression="curieux"
+        color="currentColor"
+        paper="none"
+        size={72}
+        className="text-foreground/90"
+      />
+      <span className="text-base text-foreground">Tell me what to take care of.</span>
+      <span>
+        Describe the job in a sentence. I'll pick a face, a name and a schedule; change anything by
+        just saying so.
+      </span>
+      <ul className="mt-2 flex flex-wrap justify-center gap-1.5" aria-label="Examples">
+        {BUILDER_EXAMPLES.map((example) => (
+          <li key={example}>
+            <Button variant="outline" size="xs" onClick={() => onExample(example)}>
+              {example}
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const MIN_HEIGHT = 78;
+const MAX_HEIGHT = 208;
+const noop = () => {};
+
+/** The agent composer's card around a plain prompt, without an agent to pick models for. */
+function BuilderComposer({
+  placeholder,
+  disabled,
+  sending,
+  onSend,
+}: {
+  placeholder: string;
+  disabled: boolean;
+  sending: boolean;
+  onSend: (text: string) => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const element = textarea.current;
+    if (!element) return;
+    element.style.height = `${MIN_HEIGHT}px`;
+    if (text)
+      element.style.height = `${Math.min(Math.max(element.scrollHeight, MIN_HEIGHT), MAX_HEIGHT)}px`;
+  }, [text]);
+  const submit = async () => {
+    const outgoing = text.trim();
+    if (!outgoing || sending || disabled) return;
+    setText("");
+    await onSend(outgoing);
+    textarea.current?.focus();
+  };
+  return (
+    <form
+      className="mx-auto w-full min-w-0"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      <ComposerSurface.Shell>
+        <ComposerSurface.Host>
+          <ComposerSurface.Main>
+            <div className="rounded-3xl">
+              <div className="relative px-3 pt-3.5 pb-2 sm:px-4 sm:pt-4">
+                <textarea
+                  ref={textarea}
+                  autoFocus
+                  disabled={disabled}
+                  aria-label={placeholder}
+                  placeholder={placeholder}
+                  rows={1}
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === "Enter" &&
+                      !event.shiftKey &&
+                      !event.nativeEvent.isComposing &&
+                      !window.matchMedia("(pointer: coarse)").matches
+                    ) {
+                      event.preventDefault();
+                      void submit();
+                    }
+                  }}
+                  className="-m-1 block w-[calc(100%+0.5rem)] resize-none overflow-y-auto bg-transparent p-1 font-(family-name:--font-composer,var(--font-sans)) text-(length:--font-size-prompt,var(--text-sm)) leading-relaxed text-foreground placeholder:text-placeholder/75 focus:outline-none max-sm:pointer-coarse:text-(length:--font-size-prompt-touch)"
+                />
+              </div>
+              <div className="flex items-center justify-end px-3 pb-3 sm:px-4 sm:pb-4">
+                <ComposerPrimaryActions
+                  compact={false}
+                  canOperateThread={!disabled}
+                  pendingAction={null}
+                  isRunning={false}
+                  canInterrupt={false}
+                  showPlanFollowUpPrompt={false}
+                  promptHasText={text.trim().length > 0}
+                  isSendBusy={sending}
+                  sendDisabledReason={null}
+                  isConnecting={false}
+                  isEnvironmentUnavailable={disabled}
+                  isPreparingWorktree={false}
+                  hasSendableContent={text.trim().length > 0}
+                  onPreviousPendingQuestion={noop}
+                  onInterrupt={noop}
+                  onImplementPlanInNewThread={noop}
+                />
+              </div>
+            </div>
+          </ComposerSurface.Main>
+        </ComposerSurface.Host>
+      </ComposerSurface.Shell>
+    </form>
+  );
+}
+
+/**
+ * The created card leaves toward the sidebar's agents list, shrinking as it goes, so the
+ * new row there reads as the same thing arriving. Without a visible list (mobile, a
+ * collapsed sidebar) or under reduced motion it only fades.
+ */
+function flyToAgentsList(card: HTMLElement | null): Promise<void> {
+  if (!card || typeof card.animate !== "function") return Promise.resolve();
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const target = document.querySelector("[data-agents-list]");
+  const from = card.getBoundingClientRect();
+  const to = target?.getBoundingClientRect();
+  const visible = to !== undefined && to.width > 0 && to.height > 0;
+  const easing = "cubic-bezier(0.32, 0.72, 0, 1)";
+  const animation =
+    reduced || !visible
+      ? card.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, easing, fill: "forwards" })
+      : (() => {
+          card.style.transformOrigin = "top left";
+          const dx = to.left + 12 - from.left;
+          const dy = to.top + 6 - from.top;
+          return card.animate(
+            [
+              { transform: "translate(0, 0) scale(1)", opacity: 1 },
+              { transform: `translate(${dx}px, ${dy}px) scale(0.28)`, opacity: 0 },
+            ],
+            { duration: 220, easing, fill: "forwards" },
+          );
+        })();
+  return animation.finished.then(
+    () => undefined,
+    () => undefined,
+  );
+}
