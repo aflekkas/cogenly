@@ -405,7 +405,7 @@ function Transcript({
     <>
       <div
         ref={scroll}
-        className="agent-message-scroll messages-timeline-scroll scroll-fade-y"
+        className="agent-message-scroll scroll-fade-y"
         onScroll={onScroll}
         onWheel={stopFollowing}
         onTouchStart={stopFollowing}

@@ -4,9 +4,9 @@ import { avatarFace } from "~/components/agents/face/agentAvatar.logic";
 import { resolveFaceColor } from "~/components/agents/face/agentFace.logic";
 
 /**
- * The hue an agent's conversation takes from its face: the owner's bubbles, the
- * send button and the composer glow. One source, set as CSS variables on the
- * conversation root (`--agent-accent`, `--agent-accent-foreground`).
+ * The hue an agent's conversation takes from its face: the send button (and the
+ * builder's proposal card). Bubbles stay neutral. One source, set as CSS variables
+ * on the conversation root (`--agent-accent`, `--agent-accent-foreground`).
  */
 export interface AgentAccent {
   /** The fill, a CSS colour. */

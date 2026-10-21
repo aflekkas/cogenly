@@ -274,7 +274,7 @@ function ChatPane({
   return (
     <>
       <div
-        className="agent-message-scroll messages-timeline-scroll scroll-fade-y"
+        className="agent-message-scroll scroll-fade-y"
         ref={scroll}
         onScroll={onScroll}
         onWheel={stopFollowing}
