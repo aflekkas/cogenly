@@ -309,15 +309,12 @@ function flipPanelContent(
   resolvePanelFlipOffsets(resolved, options).forEach((offset, index) => {
     if (offset === 0) return;
     const element = elements[index]!;
-    const stayVisible = element.dataset.panelFlipVisible !== undefined;
     const animation = element.animate(
-      [
-        { transform: `translateX(${offset}px)`, ...(stayVisible ? { visibility: "visible" } : {}) },
-        { transform: "translateX(0)", ...(stayVisible ? { visibility: "visible" } : {}) },
-      ],
+      [{ transform: `translateX(${offset}px)` }, { transform: "translateX(0)" }],
       { duration: durationMs, easing: PANEL_MOTION_EASING },
     );
     animation.id = PANEL_FLIP_ANIMATION_ID;
+    if (element.dataset.panelFlipVisible !== undefined) holdVisibleUntilDone(element, animation);
     const elapsed = elapsedByElement.get(element);
     if (elapsed === undefined || waitingElements.has(element)) {
       startNextFrame(animation);
@@ -325,6 +322,27 @@ function flipPanelContent(
       animation.currentTime = elapsed;
     }
   });
+}
+
+/**
+ * Content whose final state hides it (`data-panel-flip-visible`) stays visible
+ * through an inline style while its glide plays, not a `visibility` keyframe:
+ * `visibility` is inherited, so animating it restyles the whole document on
+ * every start, retarget and finish of the glide (five full style passes per
+ * sidebar close instead of three). The hold is released by whichever glide is
+ * current when it ends.
+ */
+const visibilityHolds = new Map<HTMLElement, Animation>();
+
+function holdVisibleUntilDone(element: HTMLElement, animation: Animation): void {
+  visibilityHolds.set(element, animation);
+  element.style.visibility = "visible";
+  const release = () => {
+    if (visibilityHolds.get(element) !== animation) return;
+    visibilityHolds.delete(element);
+    element.style.removeProperty("visibility");
+  };
+  animation.finished.then(release, release);
 }
 
 const motionListeners = new Set<() => void>();

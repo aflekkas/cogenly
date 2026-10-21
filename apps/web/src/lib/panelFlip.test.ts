@@ -117,8 +117,9 @@ interface FakeAnimation {
   currentTime: number | null;
   playState: "idle" | "paused" | "running";
   readonly from: string;
-  readonly visible: boolean;
+  readonly finished: Promise<unknown>;
   cancel(): void;
+  finish(): void;
   pause(): void;
   play(): void;
 }
@@ -130,6 +131,12 @@ function fakeElement(left: number, dataset: Record<string, string> = { panelFlip
     left,
     isConnected: true,
     dataset,
+    style: {
+      visibility: "",
+      removeProperty(property: "visibility") {
+        this[property] = "";
+      },
+    },
     matches: () => true,
     querySelector: () => null,
     parentElement: null,
@@ -140,15 +147,26 @@ function fakeElement(left: number, dataset: Record<string, string> = { panelFlip
       height: 20,
     }),
     getAnimations: () => animations.filter((animation) => animation.playState !== "idle"),
-    animate: (keyframes: ReadonlyArray<{ transform: string; visibility?: string }>) => {
+    animate: (keyframes: ReadonlyArray<{ transform: string }>) => {
+      let settle!: { resolve: (value: unknown) => void; reject: (reason: unknown) => void };
+      const finished = new Promise<unknown>((resolve, reject) => {
+        settle = { resolve, reject };
+      });
+      // A cancelled glide rejects `finished`; nothing awaits it in the tests.
+      finished.catch(() => undefined);
       const animation: FakeAnimation = {
         id: "",
         currentTime: 0,
         playState: "running",
         from: keyframes[0]!.transform,
-        visible: keyframes.every((keyframe) => keyframe.visibility === "visible"),
+        finished,
         cancel() {
           this.playState = "idle";
+          settle.reject(new Error("cancelled"));
+        },
+        finish() {
+          this.playState = "idle";
+          settle.resolve(this);
         },
         pause() {
           this.playState = "paused";
@@ -264,9 +282,16 @@ describe("playPanelFlip", () => {
     expect(panel.getAnimations().map((animation) => animation.from)).toEqual(["translateX(440px)"]);
   });
 
-  it("keeps a panel whose final state hides it visible while it leaves", () => {
+  it("keeps a panel whose final state hides it visible until its glide ends", async () => {
     const sidebar = fakeElement(-280, { panelFlip: "start", panelFlipVisible: "" });
     playPanelFlip(snapshotOf(sidebar, 0), 250);
-    expect(sidebar.getAnimations().map((animation) => animation.visible)).toEqual([true]);
+    expect(sidebar.style.visibility).toBe("visible");
+    // The frame's resize step retargets: the cancelled first glide keeps the hold.
+    await runResizeStep();
+    await Promise.resolve();
+    expect(sidebar.style.visibility).toBe("visible");
+    for (const animation of sidebar.getAnimations()) animation.finish();
+    await Promise.resolve();
+    expect(sidebar.style.visibility).toBe("");
   });
 });
