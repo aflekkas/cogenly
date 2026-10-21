@@ -67,7 +67,6 @@ import {
   GitBranchIcon,
   MessageCircleQuestionIcon,
   PinIcon,
-  PinOffIcon,
   PlusIcon,
   SettingsIcon,
   ShieldQuestionIcon,
@@ -932,8 +931,8 @@ function ChatListRevealSentinel(props: { onReveal: () => void }) {
  * with a status slot at its end. A running
  * turn shows a small spinner, a reply you have not seen shows a blue dot, a
  * chat waiting on you an amber one; an unread reply also makes the title
- * heavier. Hovering swaps the status for a Pin (or Unpin) button; everything
- * else (rename, archive, Start Work) lives in the context menu.
+ * heavier. Everything else (rename, pin, archive, Start Work) lives in the
+ * context menu.
  */
 const SidebarChatRow = memo(function SidebarChatRow(props: {
   thread: SidebarThreadSummary;
@@ -953,12 +952,9 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
   onCancelRename: () => void;
   onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
   onContextDragStart: (threadRef: ScopedThreadRef, event: PointerEvent) => void;
-  // Null where the thread's server can't pin.
-  onTogglePin: ((threadRef: ScopedThreadRef, pinned: boolean) => void) | null;
 }) {
   const {
     isRenaming,
-    onTogglePin,
     onCancelRename,
     onCommitRename,
     onContextDragStart,
@@ -984,7 +980,6 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const isContextMenuOpen = useSidebarContextMenuTarget((state) => state.threadKey === threadKey);
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
-  const isPinned = thread.pinnedAt != null;
   const status = resolveSidebarThreadStatus(thread);
   const needsYou = status === "approval" || status === "input";
   const isRunning = status === "working" || status === "waiting";
@@ -1140,43 +1135,10 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
           )}
           <SidebarChatProjectLine project={props.folder} animate={props.animateFolder} />
         </span>
-        {onTogglePin !== null && canOperateThread && !isRenaming ? (
-          // The Pin button takes the status slot's place on hover; it
-          // overhangs the slot into the row's padding so the title never moves.
-          <span className="relative size-3 shrink-0">
-            <span className="flex transition-opacity duration-(--motion-duration-base) ease-standard group-any-hover/sidebar-chat:opacity-0 group-has-[:focus-visible]/sidebar-chat:opacity-0">
-              <SidebarChatStatusSlot
-                isRunning={isRunning}
-                dot={needsYou ? "warning" : isUnread ? "info" : null}
-              />
-            </span>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    aria-label={isPinned ? "Unpin thread" : "Pin thread"}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onTogglePin(threadRef, isPinned);
-                    }}
-                    onDoubleClick={(event) => event.stopPropagation()}
-                    className="pointer-events-none absolute -inset-1.5 inline-flex cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard outline-none hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-chat:pointer-events-auto group-any-hover/sidebar-chat:opacity-100"
-                  />
-                }
-              >
-                {isPinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
-              </TooltipTrigger>
-              <TooltipPopup side="top">{isPinned ? "Unpin" : "Pin"}</TooltipPopup>
-            </Tooltip>
-          </span>
-        ) : (
-          <SidebarChatStatusSlot
-            isRunning={isRunning}
-            dot={needsYou ? "warning" : isUnread ? "info" : null}
-          />
-        )}
+        <SidebarChatStatusSlot
+          isRunning={isRunning}
+          dot={needsYou ? "warning" : isUnread ? "info" : null}
+        />
         {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
       </div>
     </li>
@@ -4717,12 +4679,6 @@ export default function Sidebar() {
                           onCancelRename={cancelThreadRename}
                           onContextMenu={handleThreadContextMenu}
                           onContextDragStart={startThreadContextDrag}
-                          onTogglePin={
-                            serverConfigs.get(thread.environmentId)?.environment.capabilities
-                              .threadPinning === true
-                              ? togglePin
-                              : null
-                          }
                         />
                       );
                     }
