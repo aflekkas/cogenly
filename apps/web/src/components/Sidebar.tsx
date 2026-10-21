@@ -205,8 +205,6 @@ import {
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { showCopiedToast } from "./ui/copiedToast";
-import { ScrambleText } from "./ui/scramble-text";
-import { Spinner } from "./ui/spinner";
 import {
   setSidebarContextMenuTarget,
   useSidebarContextMenuTarget,
@@ -216,6 +214,7 @@ import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { PanOnHoverText } from "./sidebar/PanOnHoverText";
+import { PendingTitleSlot } from "./sidebar/PendingTitleSlot";
 import { useSidebarRowActionsOverlap } from "./sidebar/useSidebarRowActionsOverlap";
 import { SIDEBAR_SHELF_ICONS, SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
@@ -1096,21 +1095,24 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
             className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm text-card-foreground outline-none focus:border-foreground"
           />
         ) : (
-          <PanOnHoverText
-            className={cn(
-              "min-w-0 flex-1 text-sm",
-              isUnread || needsYou ? "font-medium text-foreground" : "font-normal",
-              props.isActive ? "text-foreground" : !(isUnread || needsYou) && "text-foreground/80",
-            )}
+          <PendingTitleSlot
+            pending={thread.titleRegeneration != null}
+            className="min-w-0 flex-1 text-sm"
           >
-            <span aria-hidden>
-              <ScrambleText text={thread.title} scrambling={thread.titleRegeneration != null} />
-            </span>
-          </PanOnHoverText>
+            <PanOnHoverText
+              className={cn(
+                isUnread || needsYou ? "font-medium text-foreground" : "font-normal",
+                props.isActive
+                  ? "text-foreground"
+                  : !(isUnread || needsYou) && "text-foreground/80",
+              )}
+            >
+              <span aria-hidden>{thread.title}</span>
+            </PanOnHoverText>
+          </PendingTitleSlot>
         )}
         <SidebarChatStatusSlot
-          // A title regeneration shows the same spinner in place of the dot.
-          isRunning={isRunning || thread.titleRegeneration != null}
+          isRunning={isRunning}
           dot={needsYou ? "warning" : isUnread ? "info" : null}
         />
         {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
@@ -1559,36 +1561,38 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm font-medium text-card-foreground outline-none focus:border-foreground"
       />
     ) : (
-      <PanOnHoverText
-        className={cn(
-          "min-w-0 flex-1 transition-[color,opacity] duration-(--motion-duration-base) motion-reduce:transition-none",
-          variant === "card" ? "text-card" : "text-sm",
-          shouldRecede ? "font-normal" : "font-medium",
-          variant === "card"
-            ? cn(
-                // Cards rest in grey and brighten when selected or asking for you.
-                shouldRecede
-                  ? "text-secondary-label"
-                  : props.isActive || isUnread || isWoke || status === "input"
-                    ? "text-foreground"
-                    : "text-muted-foreground group-hover/sidebar-row:text-foreground",
-              )
-            : cn(
-                "group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
-                shouldRecede
-                  ? "text-secondary-label/70"
-                  : props.isActive || isWoke || status === "input"
-                    ? "text-foreground"
-                    : isUnread
-                      ? "text-muted-foreground"
-                      : "text-secondary-label/70",
-              ),
-        )}
+      <PendingTitleSlot
+        pending={isRegeneratingTitle}
+        className={cn("min-w-0 flex-1", variant === "card" ? "text-card" : "text-sm")}
       >
-        <span aria-hidden>
-          <ScrambleText text={thread.title} scrambling={isRegeneratingTitle} />
-        </span>
-      </PanOnHoverText>
+        <PanOnHoverText
+          className={cn(
+            "transition-[color,opacity] duration-(--motion-duration-base) motion-reduce:transition-none",
+            shouldRecede ? "font-normal" : "font-medium",
+            variant === "card"
+              ? cn(
+                  // Cards rest in grey and brighten when selected or asking for you.
+                  shouldRecede
+                    ? "text-secondary-label"
+                    : props.isActive || isUnread || isWoke || status === "input"
+                      ? "text-foreground"
+                      : "text-muted-foreground group-hover/sidebar-row:text-foreground",
+                )
+              : cn(
+                  "group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
+                  shouldRecede
+                    ? "text-secondary-label/70"
+                    : props.isActive || isWoke || status === "input"
+                      ? "text-foreground"
+                      : isUnread
+                        ? "text-muted-foreground"
+                        : "text-secondary-label/70",
+                ),
+          )}
+        >
+          <span aria-hidden>{thread.title}</span>
+        </PanOnHoverText>
+      </PendingTitleSlot>
     );
   const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
   const terminalStatusIcon = (
@@ -1701,13 +1705,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   />
                   <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
                 </Tooltip>
-              ) : isRegeneratingTitle ? (
-                // Same spinner as a running chat row, until the new title lands.
-                <span key="regenerating" className="swap-motion inline-flex h-4 items-center">
-                  <Spinner size="xs" tone="muted" />
-                </span>
               ) : (
-                <span key="time" className="swap-motion text-xs">
+                <span className="text-xs">
                   {variantAction === "unsettle"
                     ? settledTimeLabel(thread)
                     : threadTimeLabel(thread)}
@@ -1899,10 +1898,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       ) : null}
                     </span>
                   )
-                ) : isRegeneratingTitle ? (
-                  <span key="regenerating" className="swap-motion inline-flex h-4 items-center">
-                    <Spinner size="xs" tone="muted" />
-                  </span>
                 ) : (
                   <span key="time" className="swap-motion">
                     {variantAction === "unsettle"
@@ -2194,28 +2189,21 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
         ) : null}
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-2.5">
-            <PanOnHoverText
-              className={cn(
-                "min-w-0 flex-1",
-                props.isSettled
-                  ? "font-normal text-secondary-label/70 group-hover/sidebar-row:text-foreground"
-                  : "font-medium text-foreground",
-                (props.isHighlighted || props.isRouteActive) && "text-foreground",
-              )}
-            >
-              <ScrambleText text={thread.title} scrambling={thread.titleRegeneration != null} />
-            </PanOnHoverText>
+            <PendingTitleSlot pending={thread.titleRegeneration != null} className="min-w-0 flex-1">
+              <PanOnHoverText
+                className={cn(
+                  props.isSettled
+                    ? "font-normal text-secondary-label/70 group-hover/sidebar-row:text-foreground"
+                    : "font-medium text-foreground",
+                  (props.isHighlighted || props.isRouteActive) && "text-foreground",
+                )}
+              >
+                {thread.title}
+              </PanOnHoverText>
+            </PendingTitleSlot>
             <span id={`${props.resultId}-pr`} className="contents"></span>
-            <span className="flex w-8 shrink-0 justify-end text-xs text-muted-foreground/55 tabular-nums">
-              {thread.titleRegeneration != null ? (
-                <span key="regenerating" className="swap-motion inline-flex h-4 items-center">
-                  <Spinner size="xs" tone="muted" />
-                </span>
-              ) : (
-                <span key="time" className="swap-motion">
-                  {threadTimeLabel(thread)}
-                </span>
-              )}
+            <span className="w-8 shrink-0 text-right text-xs text-muted-foreground/55 tabular-nums">
+              {threadTimeLabel(thread)}
             </span>
           </span>
           {props.searchMatch ? (
