@@ -112,7 +112,7 @@ function FolderRow(props: {
         tabIndex={props.tabIndex}
         aria-label={[label.name, summary ?? "Empty"].join(", ")}
         className={cn(
-          "group/project relative flex h-10 w-full cursor-pointer items-center gap-3 rounded-md px-2.5 text-left outline-none select-none transition-colors duration-(--motion-duration-base) ease-standard focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none",
+          "group/project relative flex h-13 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left outline-none select-none transition-colors duration-(--motion-duration-base) ease-standard focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none",
           menuOpen ? "state-selected" : "state-hover",
         )}
         onClick={props.onOpen}
@@ -134,9 +134,9 @@ function FolderRow(props: {
           }
         }}
       >
-        <ProjectColorDot color={label.color} className="size-2.5" />
-        <span className="min-w-0 truncate text-sm font-medium text-foreground">{label.name}</span>
-        <span className="shrink-0 text-xs tabular-nums text-muted-foreground max-sm:hidden">
+        <ProjectColorDot color={label.color} className="size-3" />
+        <span className="min-w-0 truncate text-card font-medium text-foreground">{label.name}</span>
+        <span className="shrink-0 text-sm tabular-nums text-muted-foreground max-sm:hidden">
           {summary ?? "Empty"}
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-3">
@@ -151,12 +151,12 @@ function FolderRow(props: {
             </span>
           ) : null}
           {props.environmentLabel ? (
-            <span className="max-w-32 truncate text-xs text-secondary-label">
+            <span className="max-w-32 truncate text-sm text-secondary-label">
               {props.environmentLabel}
             </span>
           ) : null}
           {props.activityLabel ? (
-            <span className="text-xs tabular-nums text-muted-foreground">
+            <span className="text-sm tabular-nums text-muted-foreground">
               {props.activityLabel}
             </span>
           ) : null}
@@ -165,7 +165,7 @@ function FolderRow(props: {
             tabIndex={-1}
             aria-label={`Actions for ${label.name}`}
             className={cn(
-              "flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-opacity duration-(--motion-duration-base) ease-standard state-hover group-hover/project:opacity-100 group-focus-visible/project:opacity-100 motion-reduce:transition-none",
+              "flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-opacity duration-(--motion-duration-base) ease-standard state-hover group-hover/project:opacity-100 group-focus-visible/project:opacity-100 motion-reduce:transition-none",
               menuOpen ? "opacity-100" : "opacity-0",
             )}
             onClick={(event) => {
@@ -218,7 +218,7 @@ export function ProjectFolderList(props: {
   };
 
   return (
-    <ul aria-label="Projects" className="-mx-2.5 flex flex-col gap-0.5">
+    <ul aria-label="Projects" className="flex flex-col gap-px">
       {props.folders.map((entry, index) => (
         <FolderRow
           key={entry.key}

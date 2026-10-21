@@ -103,18 +103,18 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron}>
           <h1
-            className="min-w-0 flex-1 truncate text-sm font-medium tracking-tight"
+            className="min-w-0 flex-1 truncate text-base font-semibold tracking-tight"
             data-panel-flip="start"
           >
             Projects
           </h1>
           <Button
-            size="xs"
-            variant="ghost-muted"
+            size="sm"
+            variant="outline"
             disabled={createEnvironmentId === null || !canCreate}
             onClick={() => setCreating(true)}
           >
-            <FolderPlusIcon className="size-3" />
+            <FolderPlusIcon />
             New project
           </Button>
         </WorkspacePageHeader>
@@ -144,7 +144,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               </EmptyContent>
             </Empty>
           ) : (
-            <div className={cn("py-1", WORKSPACE_PAGE_HEADER_INSET_CLASS)}>
+            <div className={cn("py-2", WORKSPACE_PAGE_HEADER_INSET_CLASS)}>
               <ProjectFolderList
                 folders={directory.labels}
                 environmentLabel={(entry) =>
