@@ -2,6 +2,8 @@
 import { type DeviceHubAccess, withDeviceHubQuery } from "../device/hubAccess.ts";
 import {
   PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
+  type PreviewAnnotationPayload,
+  type PreviewStreamCapabilities,
   type PreviewStreamHostSetup,
   type PreviewViewportSetting,
 } from "@t3tools/contracts";
@@ -19,6 +21,8 @@ export interface PreviewStreamControl {
   readonly canOperate: boolean;
   readonly controller: "agent" | "you" | "another-viewer" | "unclaimed";
   readonly generation: number;
+  /** Absent from older servers; a missing flag means unsupported. */
+  readonly capabilities?: PreviewStreamCapabilities;
   readonly dialog: null | {
     readonly type: string;
     readonly message: string;
@@ -49,6 +53,33 @@ const isPreviewStreamDialog = (value: unknown): value is PreviewStreamControl["d
     typeof value.message === "string" &&
     "defaultValue" in value &&
     typeof value.defaultValue === "string");
+
+const isPickHoverBox = (value: unknown): value is PreviewStreamPickHover["box"] =>
+  value === null ||
+  (typeof value === "object" &&
+    value !== null &&
+    "x" in value &&
+    typeof value.x === "number" &&
+    "y" in value &&
+    typeof value.y === "number" &&
+    "width" in value &&
+    typeof value.width === "number" &&
+    "height" in value &&
+    typeof value.height === "number");
+
+const isPickHoverLabel = (value: unknown): value is PreviewStreamPickHover["label"] =>
+  value === null || typeof value === "string";
+
+/** Structural pass: the annotation pipeline validates the payload it keeps. */
+const isPickResultAnnotation = (value: unknown): value is PreviewAnnotationPayload =>
+  typeof value === "object" && value !== null;
+
+const normalizeCapabilities = (value: unknown): PreviewStreamCapabilities | undefined => {
+  if (typeof value !== "object" || value === null) return undefined;
+  const pick = "pick" in value ? value.pick : undefined;
+  if (pick === undefined) return undefined;
+  return typeof pick === "boolean" ? { pick } : undefined;
+};
 
 /** Client-to-server messages. Coordinates are page CSS px. */
 export type PreviewStreamInput =
@@ -92,7 +123,17 @@ export type PreviewStreamInput =
   | { readonly type: "history"; readonly delta: -1 | 1 }
   | { readonly type: "reload"; readonly ignoreCache?: boolean }
   /** Asks whether the page point takes text. Touch viewers send it on touch start. */
-  | { readonly type: "probe"; readonly x: number; readonly y: number };
+  | { readonly type: "probe"; readonly x: number; readonly y: number }
+  /** Element picking: hover probe, element commit, and region commit. Page CSS px. */
+  | { readonly type: "pickHitTest"; readonly x: number; readonly y: number }
+  | { readonly type: "pickCommit"; readonly x: number; readonly y: number }
+  | {
+      readonly type: "pickCommitRegion";
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    };
 
 export interface PreviewStreamDownload {
   readonly fileName: string;
@@ -168,6 +209,17 @@ export interface PreviewStreamPointer {
   readonly sequence: number;
 }
 
+/** Answer to `pickHitTest`: hovered element box and label, both null on a miss. */
+export interface PreviewStreamPickHover {
+  readonly box: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  } | null;
+  readonly label: string | null;
+}
+
 /** CDP modifier bitmask: Alt 1, Ctrl 2, Meta 4, Shift 8. */
 export const previewStreamModifiers = (event: {
   readonly altKey: boolean;
@@ -198,6 +250,12 @@ export interface PreviewStreamEvents {
   readonly onProbe?: (probe: PreviewStreamProbe) => void;
   /** The agent's cursor moved to, or clicked at, a page point. */
   readonly onPointer?: (pointer: PreviewStreamPointer) => void;
+  /** Answer to `pickHitTest`; draw the highlight from it. */
+  readonly onPickHover?: (hover: PreviewStreamPickHover) => void;
+  /** Answer to `pickCommit` / `pickCommitRegion`: a full annotation. */
+  readonly onPickResult?: (annotation: PreviewAnnotationPayload) => void;
+  /** A commit that captured nothing. */
+  readonly onPickError?: (message: string) => void;
   readonly onControl?: (control: PreviewStreamControl) => void;
   /** Text the page just copied or cut while this viewer had control. */
   readonly onClipboard?: (text: string) => void;
@@ -280,6 +338,7 @@ export function createPreviewStreamClient(
         canOperate,
         controller,
         generation,
+        capabilities,
         dialog,
         text,
         id,
@@ -290,6 +349,10 @@ export function createPreviewStreamClient(
         phase,
         sequence,
         tabId,
+        box,
+        label,
+        annotation,
+        message: errorMessage,
       } = message as Record<string, unknown>;
       if (
         type === "fileChooser" &&
@@ -341,6 +404,12 @@ export function createPreviewStreamClient(
         typeof editable === "boolean"
       ) {
         events.onProbe?.({ x, y, editable });
+      } else if (type === "pickHover" && isPickHoverBox(box) && isPickHoverLabel(label)) {
+        events.onPickHover?.({ box, label });
+      } else if (type === "pickResult" && isPickResultAnnotation(annotation)) {
+        events.onPickResult?.(annotation);
+      } else if (type === "pickError" && typeof errorMessage === "string") {
+        events.onPickError?.(errorMessage);
       } else if (
         type === "control" &&
         typeof canOperate === "boolean" &&
@@ -351,10 +420,12 @@ export function createPreviewStreamClient(
         typeof generation === "number" &&
         isPreviewStreamDialog(dialog)
       ) {
+        const parsedCapabilities = normalizeCapabilities(capabilities);
         const nextControl: PreviewStreamControl = {
           canOperate,
           controller,
           generation,
+          ...(parsedCapabilities === undefined ? {} : { capabilities: parsedCapabilities }),
           dialog,
         };
         control = nextControl;
@@ -394,7 +465,14 @@ export function createPreviewStreamClient(
     send: (input) => {
       if (socket?.readyState !== WebSocket.OPEN) return false;
       if (!control?.canOperate) return false;
-      if (input.type !== "takeControl" && control.controller !== "you") return false;
+      // Picking asks questions about the page without driving it, so it never
+      // needs control; everything else still waits for it.
+      const needsControl =
+        input.type !== "takeControl" &&
+        input.type !== "pickHitTest" &&
+        input.type !== "pickCommit" &&
+        input.type !== "pickCommitRegion";
+      if (needsControl && control.controller !== "you") return false;
       socket.send(JSON.stringify(input));
       return true;
     },

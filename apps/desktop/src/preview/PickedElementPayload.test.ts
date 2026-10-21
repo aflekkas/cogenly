@@ -47,6 +47,33 @@ describe("isPickedElementPayload", () => {
     expect(isPickedElementPayload(validPayload({ stack: [] }))).toBe(true);
   });
 
+  it("accepts server picks with the optional context fields", () => {
+    expect(
+      isPickedElementPayload(
+        validPayload({
+          role: "button",
+          accessibleName: "Buy It Now",
+          attributes: { id: "buy", "aria-pressed": "false" },
+          domPath: "body > main > button:nth-of-type(1)",
+          textContent: "Buy It Now",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isPickedElementPayload(validPayload({ role: null, accessibleName: null, domPath: null })),
+    ).toBe(true);
+  });
+
+  it("rejects mistyped optional context fields", () => {
+    expect(isPickedElementPayload(validPayload({ role: 42 }))).toBe(false);
+    expect(isPickedElementPayload(validPayload({ accessibleName: 42 }))).toBe(false);
+    expect(isPickedElementPayload(validPayload({ attributes: { id: 42 } }))).toBe(false);
+    expect(isPickedElementPayload(validPayload({ attributes: ["id"] }))).toBe(false);
+    expect(isPickedElementPayload(validPayload({ domPath: 42 }))).toBe(false);
+    expect(isPickedElementPayload(validPayload({ textContent: 42 }))).toBe(false);
+    expect(isPickedElementPayload(validPayload({ textContent: null }))).toBe(false);
+  });
+
   it("accepts stack frames with null fields", () => {
     expect(
       isPickedElementPayload(

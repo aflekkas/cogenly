@@ -16,6 +16,18 @@ function isStringOrNull(value: unknown): value is string | null {
   return value === null || typeof value === "string";
 }
 
+function isOptionalStringOrNull(value: unknown): boolean {
+  return value === undefined || isStringOrNull(value);
+}
+
+function isOptionalStringRecord(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every(
+    (entry) => typeof entry === "string",
+  );
+}
+
 function isFiniteNumberOrNull(value: unknown): value is number | null {
   return value === null || (typeof value === "number" && Number.isFinite(value));
 }
@@ -42,6 +54,11 @@ export function isPickedElementPayload(value: unknown): value is PickedElementPa
   if (!isStringOrNull(c["pageTitle"])) return false;
   if (!isStringOrNull(c["selector"])) return false;
   if (!isStringOrNull(c["componentName"])) return false;
+  if (!isOptionalStringOrNull(c["role"])) return false;
+  if (!isOptionalStringOrNull(c["accessibleName"])) return false;
+  if (!isOptionalStringRecord(c["attributes"])) return false;
+  if (!isOptionalStringOrNull(c["domPath"])) return false;
+  if (c["textContent"] !== undefined && typeof c["textContent"] !== "string") return false;
   if (c["source"] !== null && !isPickedStackFrame(c["source"])) return false;
   if (!Array.isArray(c["stack"])) return false;
   if (!c["stack"].every(isPickedStackFrame)) return false;

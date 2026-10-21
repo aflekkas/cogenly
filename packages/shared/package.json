@@ -304,6 +304,10 @@
       "types": "./src/previewViewport.ts",
       "import": "./src/previewViewport.ts"
     },
+    "./previewPick": {
+      "types": "./src/previewPick.ts",
+      "import": "./src/previewPick.ts"
+    },
     "./filePreview": {
       "types": "./src/filePreview.ts",
       "import": "./src/filePreview.ts"

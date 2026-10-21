@@ -34,6 +34,7 @@ import {
   type PreviewAutomationUploadInput,
   type PreviewAutomationWaitForInput,
   PreviewClearProfileError,
+  type PreviewAnnotationPayload,
   type PreviewEvent,
   type PreviewNavStatus,
   type PreviewSessionSnapshot,
@@ -78,6 +79,7 @@ import * as PreviewAutomationBroker from "../mcp/PreviewAutomationBroker.ts";
 import * as DesktopBrowserChannel from "./DesktopBrowserChannel.ts";
 import * as PreviewManager from "./Manager.ts";
 import * as ServerBrowserPage from "./ServerBrowserPage.ts";
+import * as ServerBrowserPick from "./ServerBrowserPick.ts";
 import * as PreviewBrowser from "./PreviewBrowser.ts";
 import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
 import { presentAsChrome, ServerBrowserContexts } from "./ServerBrowserContexts.ts";
@@ -165,12 +167,25 @@ export type ServerBrowserViewerOutput =
       readonly canOperate: boolean;
       readonly controller: "agent" | "you" | "another-viewer" | "unclaimed";
       readonly generation: number;
+      readonly capabilities: { readonly pick: boolean };
       readonly dialog: {
         readonly type: string;
         readonly message: string;
         readonly defaultValue: string;
       } | null;
     }
+  | {
+      readonly _tag: "pickHover";
+      readonly box: {
+        readonly x: number;
+        readonly y: number;
+        readonly width: number;
+        readonly height: number;
+      } | null;
+      readonly label: string | null;
+    }
+  | { readonly _tag: "pickResult"; readonly annotation: PreviewAnnotationPayload }
+  | { readonly _tag: "pickError"; readonly message: string }
   | {
       readonly _tag: "probe";
       readonly x: number;
@@ -259,6 +274,7 @@ interface ViewerState {
   readonly canOperate: boolean;
   readonly pressedKeys: Map<string, { key: string; code: string }>;
   readonly pressedButtons: Map<"left" | "middle" | "right", { x: number; y: number }>;
+  readonly pickHitTest: ServerBrowserPick.PickHitTestQueue;
   readonly push: (output: ServerBrowserViewerOutput) => void;
   readonly pause: () => Promise<void>;
   readonly resume: () => Promise<void>;
@@ -550,6 +566,7 @@ const make = Effect.gen(function* () {
                 ? "agent"
                 : "unclaimed",
         generation: tab.control.generation,
+        capabilities: ServerBrowserPick.PICK_CAPABILITIES,
         dialog: dialogStatus(tab),
       });
   };
@@ -2263,6 +2280,54 @@ const make = Effect.gen(function* () {
     }
   };
 
+  /**
+   * Answers one element or region commit. Like hover probes this is a read:
+   * it runs through `observe`, so picking never needs or takes control, and
+   * dispatches no input to the page. The screenshot pauses screencasts like
+   * any scaled capture.
+   */
+  const runPickRequest = async (
+    tab: ServerTab,
+    session: CDPSession,
+    viewer: ViewerState,
+    request: ServerBrowserPick.PickRequest,
+  ) => {
+    if (request.kind === "hitTest") {
+      viewer.pickHitTest.request(request.point);
+      return;
+    }
+    try {
+      const annotation = await tab.control.observe(() =>
+        withScreencastsPaused(tab, () =>
+          request.kind === "commit"
+            ? ServerBrowserPick.captureElementPick({
+                cdp: session,
+                page: tab.page,
+                point: request.point,
+                newId: () => NodeCrypto.randomUUID(),
+                nowIso: () => new Date().toISOString(),
+              })
+            : ServerBrowserPick.captureRegionPick({
+                cdp: session,
+                page: tab.page,
+                rect: request.rect,
+                newId: () => NodeCrypto.randomUUID(),
+                nowIso: () => new Date().toISOString(),
+              }),
+        ),
+      );
+      viewer.push({ _tag: "pickResult", annotation });
+    } catch (cause) {
+      viewer.push({
+        _tag: "pickError",
+        message:
+          cause instanceof ServerBrowserPick.PickCaptureError
+            ? cause.message
+            : "The pick failed. Move the pointer and try again.",
+      });
+    }
+  };
+
   const attachViewer: ServerBrowser["Service"]["attachViewer"] = (input) =>
     Effect.gen(function* () {
       const tab = yield* findTab(input.threadId, input.tabId);
@@ -2309,27 +2374,45 @@ const make = Effect.gen(function* () {
         });
         return screencastParams;
       };
+      const viewerId = NodeCrypto.randomUUID();
+      const pushOutput = (next: ServerBrowserViewerOutput) => {
+        // Dropped frames must still release Chromium.
+        if (Queue.offerUnsafe(output, next)) return;
+        if (next._tag === "frame") runFork(next.ack);
+        // State a stalled viewer cannot miss replaces its backlog. It runs
+        // synchronously so an older replacement can never land after a newer one.
+        else if (next._tag === "gone" || next._tag === "control" || next._tag === "fileChooser") {
+          const dropped = Effect.runSyncExit(Queue.clear(output));
+          if (dropped._tag === "Failure") return;
+          Queue.offerUnsafe(output, next);
+          // The controller's open picker may have been in the dropped backlog.
+          const chooser = next._tag === "control" ? fileChooserMessage(tab) : null;
+          if (chooser && tab.control.controller === viewerId) Queue.offerUnsafe(output, chooser);
+          for (const item of dropped.value) if (item._tag === "frame") runFork(item.ack);
+        }
+      };
       const viewer: ViewerState = {
-        id: NodeCrypto.randomUUID(),
+        id: viewerId,
         canOperate: input.canOperate,
         pressedKeys: new Map(),
         pressedButtons: new Map(),
-        push: (next) => {
-          // Dropped frames must still release Chromium.
-          if (Queue.offerUnsafe(output, next)) return;
-          if (next._tag === "frame") runFork(next.ack);
-          // State a stalled viewer cannot miss replaces its backlog. It runs
-          // synchronously so an older replacement can never land after a newer one.
-          else if (next._tag === "gone" || next._tag === "control" || next._tag === "fileChooser") {
-            const dropped = Effect.runSyncExit(Queue.clear(output));
-            if (dropped._tag === "Failure") return;
-            Queue.offerUnsafe(output, next);
-            // The controller's open picker may have been in the dropped backlog.
-            const chooser = next._tag === "control" ? fileChooserMessage(tab) : null;
-            if (chooser && tab.control.controller === viewer.id) Queue.offerUnsafe(output, chooser);
-            for (const item of dropped.value) if (item._tag === "frame") runFork(item.ack);
-          }
-        },
+        pickHitTest: ServerBrowserPick.createPickHitTestQueue({
+          minIntervalMs: ServerBrowserPick.PICK_HOVER_MIN_INTERVAL_MS,
+          now: () => Date.now(),
+          sleep: (ms) => sleepUntil(Date.now() + ms),
+          // A read, not an action: picking never needs or takes control.
+          run: async (point) => {
+            try {
+              const hover = await tab.control.observe(() =>
+                ServerBrowserPick.hitTestElement(session, point),
+              );
+              pushOutput({ _tag: "pickHover", box: hover.box, label: hover.label });
+            } catch {
+              pushOutput({ _tag: "pickHover", box: null, label: null });
+            }
+          },
+        }),
+        push: pushOutput,
         pause: () => {
           screencastParams = screencastParams.then(() =>
             session.send("Page.stopScreencast").then(constVoid, constVoid),
@@ -2434,6 +2517,20 @@ const make = Effect.gen(function* () {
             if (!viewer.canOperate) return;
             const message = asRecord(raw);
             if (!message) return;
+            // Picking answers questions about the page without touching
+            // control, so it runs before the ownership check below.
+            const pick = ServerBrowserPick.describePickRequest(viewer.canOperate, message);
+            if (pick.ok) {
+              await runPickRequest(tab, session, viewer, pick.request);
+              return;
+            }
+            if (pick.reason === "invalid" && pick.pickType !== "pickHitTest") {
+              viewer.push({
+                _tag: "pickError",
+                message: "That pick was malformed. Move the pointer and try again.",
+              });
+              return;
+            }
             try {
               if (message.type === "takeControl") {
                 const taking = tab.control.take(viewer.id);

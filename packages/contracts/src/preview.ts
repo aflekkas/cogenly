@@ -11,6 +11,7 @@
 import { Schema } from "effect";
 import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { BROWSER_PROFILE_MAX_COUNT, BrowserProfile, BrowserProfileId } from "./browserProfile.ts";
+import { PreviewAnnotationPayloadSchema } from "./ipc.ts";
 
 export const PREVIEW_URL_MAX_LENGTH = 2_048;
 export const CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS = 32;
@@ -202,6 +203,90 @@ export const PreviewStreamHostSetup = Schema.Struct({
 });
 export type PreviewStreamHostSetup = typeof PreviewStreamHostSetup.Type;
 export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
+
+/**
+ * Optional capabilities a preview-stream server offers. Absent on the wire
+ * from older servers, so every flag stays optional and clients treat a
+ * missing flag as unsupported.
+ */
+export const PreviewStreamCapabilities = Schema.Struct({
+  /** The tab answers element picking (`pickHitTest` / `pickCommit` / `pickCommitRegion`). */
+  pick: Schema.optional(Schema.Boolean),
+});
+export type PreviewStreamCapabilities = typeof PreviewStreamCapabilities.Type;
+
+/**
+ * Element picking on a server-streamed tab. The client draws the highlight on
+ * its own canvas; the server only answers questions about the page, and never
+ * dispatches input for them. All coordinates are page CSS px, the same space
+ * as pointer input.
+ */
+export const PreviewPickHitTestInput = Schema.Struct({
+  type: Schema.Literal("pickHitTest"),
+  x: Schema.Finite,
+  y: Schema.Finite,
+});
+export type PreviewPickHitTestInput = typeof PreviewPickHitTestInput.Type;
+
+export const PreviewPickCommitInput = Schema.Struct({
+  type: Schema.Literal("pickCommit"),
+  x: Schema.Finite,
+  y: Schema.Finite,
+});
+export type PreviewPickCommitInput = typeof PreviewPickCommitInput.Type;
+
+export const PreviewPickCommitRegionInput = Schema.Struct({
+  type: Schema.Literal("pickCommitRegion"),
+  x: Schema.Finite,
+  y: Schema.Finite,
+  width: Schema.Finite,
+  height: Schema.Finite,
+});
+export type PreviewPickCommitRegionInput = typeof PreviewPickCommitRegionInput.Type;
+
+export const PreviewStreamPickInput = Schema.Union([
+  PreviewPickHitTestInput,
+  PreviewPickCommitInput,
+  PreviewPickCommitRegionInput,
+]);
+export type PreviewStreamPickInput = typeof PreviewStreamPickInput.Type;
+
+export const PreviewPickBox = Schema.Struct({
+  x: Schema.Finite,
+  y: Schema.Finite,
+  width: Schema.Finite,
+  height: Schema.Finite,
+});
+export type PreviewPickBox = typeof PreviewPickBox.Type;
+
+/**
+ * Answer to `pickHitTest`: the hovered element's box and a short
+ * tag/role/name label. Both are null when the point hits no element.
+ */
+export const PreviewPickHover = Schema.Struct({
+  type: Schema.Literal("pickHover"),
+  box: Schema.NullOr(PreviewPickBox),
+  label: Schema.NullOr(Schema.String),
+});
+export type PreviewPickHover = typeof PreviewPickHover.Type;
+
+/**
+ * Answer to `pickCommit` / `pickCommitRegion`: a full annotation in the same
+ * shape the desktop picker produces, so the existing annotation pipeline
+ * takes it unchanged. The comment is empty; the client collects it.
+ */
+export const PreviewPickResult = Schema.Struct({
+  type: Schema.Literal("pickResult"),
+  annotation: PreviewAnnotationPayloadSchema,
+});
+export type PreviewPickResult = typeof PreviewPickResult.Type;
+
+/** A commit that captured nothing (no element, navigation, tab gone). Retried by moving. */
+export const PreviewPickError = Schema.Struct({
+  type: Schema.Literal("pickError"),
+  message: Schema.String,
+});
+export type PreviewPickError = typeof PreviewPickError.Type;
 
 export const PreviewSessionSnapshot = Schema.Struct({
   threadId: TrimmedNonEmptyString,

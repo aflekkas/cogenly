@@ -707,6 +707,22 @@ export interface PickedElementPayload {
   styles: string;
   /** Wall-clock pick time as ISO-8601 string. */
   pickedAt: string;
+  /**
+   * Explicit or implicit ARIA role (e.g. `"button"`), when known. Server picks
+   * only; the desktop preload leaves it absent.
+   */
+  role?: string | null;
+  /** Accessible name (aria-label, alt, label, or text), truncated. Server picks only. */
+  accessibleName?: string | null;
+  /**
+   * Key attributes (`id`, `class`, `href`, test ids, `aria-*`, …). Never
+   * includes `value`, so picked inputs cannot leak typed secrets.
+   */
+  attributes?: Readonly<Record<string, string>>;
+  /** `body > main:nth-of-type(1) > …` path to the element. Server picks only. */
+  domPath?: string | null;
+  /** Truncated text content of the element. Server picks only. */
+  textContent?: string;
 }
 
 export const PickedElementPayloadSchema: Schema.Codec<PickedElementPayload> = Schema.Struct({
@@ -720,6 +736,11 @@ export const PickedElementPayloadSchema: Schema.Codec<PickedElementPayload> = Sc
   stack: Schema.Array(PickedElementStackFrameSchema),
   styles: Schema.String,
   pickedAt: Schema.String,
+  role: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  accessibleName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  attributes: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  domPath: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  textContent: Schema.optionalKey(Schema.String),
 });
 
 export interface PreviewAnnotationRect {
