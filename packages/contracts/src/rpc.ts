@@ -514,6 +514,11 @@ export const WS_METHODS = {
   projectLabelsUnlinkSource: "projectLabels.unlinkSource",
   projectLabelsSearchOwnerRepositories: "projectLabels.searchOwnerRepositories",
   projectLabelsCloneRepository: "projectLabels.cloneRepository",
+  projectLabelsListResources: "projectLabels.listResources",
+  projectLabelsSubscribeResources: "projectLabels.subscribeResources",
+  projectLabelsAddResource: "projectLabels.addResource",
+  projectLabelsRemoveResource: "projectLabels.removeResource",
+  projectLabelsReadResource: "projectLabels.readResource",
   workStart: "work.start",
   agentsList: "agents.list",
   agentsSubscribe: "agents.subscribe",
@@ -1901,6 +1906,32 @@ const WsProjectLabelsCloneRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsClone
     EnvironmentAuthorizationError,
   ]),
 });
+const WsProjectLabelsListResourcesRpc = Rpc.make(WS_METHODS.projectLabelsListResources, {
+  payload: ProjectLabels.ProjectLabelKey,
+  success: ProjectLabels.ProjectLabelListResourcesResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsSubscribeResourcesRpc = Rpc.make(WS_METHODS.projectLabelsSubscribeResources, {
+  payload: ProjectLabels.ProjectLabelKey,
+  success: ProjectLabels.ProjectLabelListResourcesResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsProjectLabelsAddResourceRpc = Rpc.make(WS_METHODS.projectLabelsAddResource, {
+  payload: ProjectLabels.ProjectLabelAddResourceInput,
+  success: ProjectLabels.ProjectLabelAddResourceResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsRemoveResourceRpc = Rpc.make(WS_METHODS.projectLabelsRemoveResource, {
+  payload: ProjectLabels.ProjectLabelRemoveResourceInput,
+  success: ProjectLabels.ProjectLabelRemoveResourceResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsReadResourceRpc = Rpc.make(WS_METHODS.projectLabelsReadResource, {
+  payload: ProjectLabels.ProjectLabelReadResourceInput,
+  success: ProjectLabels.ProjectLabelReadResourceResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
 const WsWorkStartRpc = Rpc.make(WS_METHODS.workStart, {
   payload: Work.WorkStartInput,
   success: Work.WorkStartResult,
@@ -2233,6 +2264,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsUnlinkSourceRpc,
   WsProjectLabelsSearchOwnerRepositoriesRpc,
   WsProjectLabelsCloneRepositoryRpc,
+  WsProjectLabelsListResourcesRpc,
+  WsProjectLabelsSubscribeResourcesRpc,
+  WsProjectLabelsAddResourceRpc,
+  WsProjectLabelsRemoveResourceRpc,
+  WsProjectLabelsReadResourceRpc,
   WsWorkStartRpc,
   WsAgentsApprovalsListRpc,
   WsAgentsRequestApprovalRpc,

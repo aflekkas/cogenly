@@ -199,18 +199,110 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
   "ProjectLabelError",
   {
     operation: Schema.String,
-    reason: Schema.Literals(["storage", "not_found", "invalid_membership"]),
+    reason: Schema.Literals(["storage", "not_found", "invalid_membership", "invalid_path"]),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     switch (this.reason) {
       case "not_found":
-        return "The folder, repository, or thread was not found.";
+        return "The folder, repository, thread, or file was not found.";
       case "invalid_membership":
         return "A thread can belong to at most one project folder.";
+      case "invalid_path":
+        return "That path is not a file in this project folder.";
       case "storage":
         return "Could not access project folders.";
     }
   }
 }
+
+/** A project resource: a file or folder in the label's directory, by relative path. */
+export const ProjectResourceKind = Schema.Literals(["file", "folder"]);
+export type ProjectResourceKind = typeof ProjectResourceKind.Type;
+export const ProjectResource = Schema.Struct({
+  /** Posix-style path relative to the project directory, e.g. `Resources/brief.pdf`. */
+  relativePath: TrimmedNonEmptyString,
+  kind: ProjectResourceKind,
+  mimeType: TrimmedNonEmptyString,
+  sizeBytes: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  /** Sha256 of the file; absent for folders and for files above the hash cap. */
+  sha256: Schema.optional(Schema.String),
+  modifiedAt: IsoDateTime,
+});
+export type ProjectResource = typeof ProjectResource.Type;
+export const ProjectLabelListResourcesResult = Schema.Struct({
+  resources: Schema.Array(ProjectResource),
+  truncated: Schema.Boolean,
+});
+export type ProjectLabelListResourcesResult = typeof ProjectLabelListResourcesResult.Type;
+export const ProjectLabelAddResourceInput = Schema.Struct({
+  id: ProjectLabelId,
+  resource: Schema.Union([
+    Schema.Struct({
+      kind: Schema.Literal("upload"),
+      /** A pending upload id from `attachments.createUploadUrl`. */
+      attachmentId: TrimmedNonEmptyString,
+      /** Original file name; defaults to the upload's. */
+      fileName: Schema.optional(TrimmedNonEmptyString),
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("link"),
+      url: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
+      name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("note"),
+      title: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+      text: Schema.String.check(Schema.isMaxLength(1_000_000)),
+    }),
+  ]),
+});
+export type ProjectLabelAddResourceInput = typeof ProjectLabelAddResourceInput.Type;
+export const ProjectLabelAddResourceResult = Schema.Struct({ resource: ProjectResource });
+export type ProjectLabelAddResourceResult = typeof ProjectLabelAddResourceResult.Type;
+export const ProjectLabelRemoveResourceInput = Schema.Struct({
+  id: ProjectLabelId,
+  relativePath: TrimmedNonEmptyString,
+});
+export type ProjectLabelRemoveResourceInput = typeof ProjectLabelRemoveResourceInput.Type;
+export const ProjectLabelRemoveResourceResult = Schema.Struct({ removed: Schema.Boolean });
+export type ProjectLabelRemoveResourceResult = typeof ProjectLabelRemoveResourceResult.Type;
+export const PROJECT_RESOURCE_READ_DEFAULT_LIMIT = 200;
+export const PROJECT_RESOURCE_READ_MAX_LIMIT = 2000;
+export const ProjectLabelReadResourceInput = Schema.Struct({
+  id: ProjectLabelId,
+  relativePath: TrimmedNonEmptyString,
+  /** First line, zero-based. */
+  offset: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
+  /** Lines to return. Defaults to 200, at most 2000. */
+  limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(2000))),
+});
+export type ProjectLabelReadResourceInput = typeof ProjectLabelReadResourceInput.Type;
+export const ProjectLabelReadResourceResult = Schema.Struct({
+  relativePath: TrimmedNonEmptyString,
+  mimeType: TrimmedNonEmptyString,
+  sizeBytes: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  sha256: Schema.optional(Schema.String),
+  modifiedAt: IsoDateTime,
+  /** True for non-text files; `text` is then absent. */
+  binary: Schema.Boolean,
+  text: Schema.optional(Schema.String),
+  /** True when the file holds more lines or bytes than returned. */
+  truncated: Schema.Boolean,
+  /** Total lines, for text files only. */
+  totalLines: Schema.optional(Schema.Number),
+});
+export type ProjectLabelReadResourceResult = typeof ProjectLabelReadResourceResult.Type;
+export const PROJECT_RECALL_DEFAULT_LIMIT = 20;
+export const PROJECT_RECALL_MAX_LIMIT = 50;
+/** One recall match: the file plus a short snippet. */
+export const ProjectRecallMatch = Schema.Struct({
+  relativePath: TrimmedNonEmptyString,
+  kind: ProjectResourceKind,
+  mimeType: TrimmedNonEmptyString,
+  snippet: Schema.String,
+});
+export type ProjectRecallMatch = typeof ProjectRecallMatch.Type;
+export const ProjectRecallResult = Schema.Struct({ matches: Schema.Array(ProjectRecallMatch) });
+export type ProjectRecallResult = typeof ProjectRecallResult.Type;

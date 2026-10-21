@@ -7,6 +7,7 @@ import * as AgentEvents from "../agents/AgentEventBus.ts";
 import * as AgentEventReactor from "../agents/AgentEventReactor.ts";
 import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as WorkHandoff from "../work/WorkHandoffService.ts";
 import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
 import * as AgentMcpPolicy from "../agents/AgentMcpPolicy.ts";
@@ -447,6 +448,7 @@ const layerProductionBase = Layer.mergeAll(
   Exports.layer,
   layerProjectLabelsProvided,
   ProjectLabelFolders.layer,
+  ProjectFiles.layer.pipe(Layer.provide(ProjectLabelFolders.layer)),
   layerAgentWorkspaceProvided,
   layerAgentEventReactorProvided,
   layerAgentMcpPolicyProvided,

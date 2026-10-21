@@ -12,6 +12,7 @@ import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
+import * as ProjectFiles from "./projectLabels/ProjectFiles.ts";
 import * as ProjectLabelOwnerSearch from "./projectLabels/ProjectOwnerRepositorySearch.ts";
 import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -1061,6 +1062,7 @@ const makeWsRpcHandlers = (
     const exports = yield* Exports.ExportService;
     const projectLabels = yield* ProjectLabels.ProjectLabelService;
     const projectLabelFolders = yield* ProjectLabelFolders.ProjectLabelFolders;
+    const projectFiles = yield* ProjectFiles.ProjectFiles;
     const github = yield* GitHubRest.GitHubRest;
     const home = yield* HostProcess.HomeDirectory;
     const path = yield* Path.Path;
@@ -1611,6 +1613,12 @@ const makeWsRpcHandlers = (
           projects: projectStore,
           identities: repositoryIdentityResolver,
         }),
+      [WS_METHODS.projectLabelsListResources]: (input) => projectFiles.listResources(input.id),
+      [WS_METHODS.projectLabelsSubscribeResources]: (input) =>
+        projectFiles.subscribeResources(input.id),
+      [WS_METHODS.projectLabelsAddResource]: (input) => projectFiles.createResource(input),
+      [WS_METHODS.projectLabelsRemoveResource]: (input) => projectFiles.removeResource(input),
+      [WS_METHODS.projectLabelsReadResource]: (input) => projectFiles.readResource(input),
       [WS_METHODS.projectLabelsCloneRepository]: (input) =>
         ProjectLabelClone.cloneRepositoryIntoLabel(input, {
           labels: projectLabels,
@@ -2703,6 +2711,7 @@ type WsRequestServices =
   | ProjectCloneTracker.ProjectCloneTracker
   | ProjectEnrichmentService.ProjectEnrichmentService
   | ProjectFaviconResolver.ProjectFaviconResolver
+  | ProjectFiles.ProjectFiles
   | ProjectLabelFolders.ProjectLabelFolders
   | ProjectLabels.ProjectLabelService
   | ProjectService.ProjectService
