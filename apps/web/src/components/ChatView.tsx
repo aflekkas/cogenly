@@ -28,6 +28,7 @@ import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment"
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useDelayedStatus } from "../hooks/useDelayedStatus";
 import { recordModelUsage } from "../lib/modelUsage";
+import { useElementState } from "../hooks/useElementState";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
@@ -1359,8 +1360,10 @@ export default function ChatView(props: ChatViewProps) {
   const composerRef = useComposerHandleContext() ?? localComposerRef;
   const branchToolbarRef = useRef<BranchToolbarHandle>(null);
   const pasteAsTextShortcutUntilRef = useRef(0);
+  // Element states survive the view being hidden (useElementState), so a mode
+  // switch neither re-renders this view nor re-measures from no element.
   const [restingComposerControlsHost, setRestingComposerControlsHost] =
-    useState<HTMLDivElement | null>(null);
+    useElementState<HTMLDivElement>();
   const [restingComposerControlsVisible, setRestingComposerControlsVisible] = useState(false);
   const citeAssistantText = (
     citation: AssistantCitation,
@@ -1462,7 +1465,7 @@ export default function ChatView(props: ChatViewProps) {
     useState<Record<string, number>>({});
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const isMobileViewport = useMediaQuery("max-sm");
-  const [workspaceLayoutElement, setWorkspaceLayoutElement] = useState<HTMLDivElement | null>(null);
+  const [workspaceLayoutElement, setWorkspaceLayoutElement] = useElementState<HTMLDivElement>();
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
   // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
@@ -1478,7 +1481,7 @@ export default function ChatView(props: ChatViewProps) {
     setPendingServerThreadStartFromOriginByThreadId,
   ] = useState<Record<string, boolean>>({});
   const legendListRef = useRef<LegendListRef | null>(null);
-  const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
+  const [composerOverlayElement, setComposerOverlayElement] = useElementState<HTMLDivElement>();
   // Space the timeline keeps clear above its end. Tracks the overlay while the
   // composer is expanded and holds that height while it rests, so the resting
   // composer never exposes rows that its expansion will cover.
@@ -3061,8 +3064,10 @@ export default function ChatView(props: ChatViewProps) {
         revokeBlobPreviewUrl(previewUrl);
       }
     }
+    const hadHandoffs = Object.keys(attachmentPreviewHandoffByMessageIdRef.current).length > 0;
     attachmentPreviewHandoffByMessageIdRef.current = {};
-    setAttachmentPreviewHandoffByMessageId({});
+    // Runs whenever the view is hidden; with nothing handed off it changes nothing.
+    if (hadHandoffs) setAttachmentPreviewHandoffByMessageId({});
   };
   const clearAttachmentPreviewHandoffsStable = useStableCallback(clearAttachmentPreviewHandoffs);
   useEffect(() => {
@@ -5120,8 +5125,14 @@ export default function ChatView(props: ChatViewProps) {
 
   // Keyed on the thread, not the draft: a draft's promotion to its server
   // route keeps this instance and drops `draftId`, and the send it is still
-  // dispatching must survive that swap.
+  // dispatching must survive that swap. Effects also re-run when a hidden view
+  // is revealed (a mode switch); only a new thread resets.
+  const resetForThreadIdRef = useRef<ThreadId | null>(null);
   useEffect(() => {
+    if (resetForThreadIdRef.current === threadId) return;
+    const firstThread = resetForThreadIdRef.current === null;
+    resetForThreadIdRef.current = threadId;
+    if (firstThread) return;
     setOptimisticUserMessages((existing) => {
       for (const message of existing) {
         revokeUserMessagePreviewUrls(message);

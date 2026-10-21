@@ -30,10 +30,12 @@ export function useComposerTypingGuard(scope: string, requestIds: readonly strin
     }));
   }
   const dispatch = useCallback((event: Parameters<typeof updateComposerTypingGuard>[1]) => {
-    setSnapshot((current) => ({
-      ...current,
-      state: updateComposerTypingGuard(current.state, event),
-    }));
+    setSnapshot((current) => {
+      const next = updateComposerTypingGuard(current.state, event);
+      // A repeated focus or blur (a hidden view revealed) changes nothing; keep
+      // the snapshot so the composer does not re-render for it.
+      return typingGuardUnchanged(current.state, next) ? current : { ...current, state: next };
+    });
   }, []);
   const onDraftChange = useCallback(() => dispatch({ type: "type", now: Date.now() }), [dispatch]);
   const onFocus = useCallback(() => dispatch({ type: "focus" }), [dispatch]);
@@ -48,4 +50,15 @@ export function useComposerTypingGuard(scope: string, requestIds: readonly strin
     return () => window.clearTimeout(timeout);
   }, [state.held, state.lastTypedAt, dispatch]);
   return { heldRequestIds: state.held, onDraftChange, onFocus, onBlur, onSend };
+}
+
+type TypingGuardState = ReturnType<typeof createComposerTypingGuardState>;
+
+function typingGuardUnchanged(previous: TypingGuardState, next: TypingGuardState): boolean {
+  return (
+    previous.focused === next.focused &&
+    previous.lastTypedAt === next.lastTypedAt &&
+    previous.seen === next.seen &&
+    (previous.held === next.held || (previous.held.size === 0 && next.held.size === 0))
+  );
 }

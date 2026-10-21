@@ -367,6 +367,7 @@ import {
 } from "@t3tools/client-runtime/providerSkills";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useDelayedStatus } from "../../hooks/useDelayedStatus";
+import { useElementState } from "../../hooks/useElementState";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { PANEL_ANIMATION_DURATION, readPanelAnimationsActive } from "../../panelAnimations";
@@ -1065,12 +1066,17 @@ const extendReplacementRangeForTrailingSpace = (
 };
 
 function useRestingComposerControlsLayout(host: HTMLDivElement | null, useControlsAsHost = false) {
-  const [controls, setControls] = useState<HTMLDivElement | null>(null);
+  // Kept while the composer's view is hidden (useElementState), so a mode
+  // switch does not re-render the composer to detach and reattach it.
+  const [controls, setControls] = useElementState<HTMLDivElement>();
   const controlsRef = useRef<HTMLDivElement>(null);
-  const attachControls = useCallback((element: HTMLDivElement | null) => {
-    controlsRef.current = element;
-    setControls(element);
-  }, []);
+  const attachControls = useCallback(
+    (element: HTMLDivElement | null) => {
+      controlsRef.current = element;
+      setControls(element);
+    },
+    [setControls],
+  );
   const hostRef = useRef(host);
   hostRef.current = host;
   const [layout, setLayout] = useState<{
@@ -2253,7 +2259,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [providerInputSubmissionError, setProviderInputSubmissionError] = useState<string | null>(
     null,
   );
-  const [composerMenuAnchor, setComposerMenuAnchor] = useState<HTMLDivElement | null>(null);
+  const [composerMenuAnchor, setComposerMenuAnchor] = useElementState<HTMLDivElement>();
   const hasWrappedPrompt = useComposerMultilinePrompt(composerMenuAnchor);
   const hasMultilinePrompt = prompt.includes("\n") || hasWrappedPrompt;
   const [isTasksDrawerOpen, setIsTasksDrawerOpen] = useState(false);
@@ -2786,9 +2792,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isComposerOwned: true,
   } satisfies Parameters<typeof renderProviderTraitsPicker>[0];
   const providerTraitsPicker = renderProviderTraitsPicker(providerTraitsPickerInput);
-  const [inlineRestingControlsHost, setInlineRestingControlsHost] = useState<HTMLDivElement | null>(
-    null,
-  );
+  const [inlineRestingControlsHost, setInlineRestingControlsHost] =
+    useElementState<HTMLDivElement>();
   const {
     controlsRef: restingComposerControlsRef,
     attachControls: attachRestingComposerControls,
