@@ -92,26 +92,29 @@ export const layerFromProjectStore: Layer.Layer<
     // Optional so layers without the project-files service (unit tests over a
     // memory database) still resolve; production always provides it.
     const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
-    // The manifest is best-effort turn context from the derived index: any
-    // failure resolves to no manifest rather than failing the turn.
-    const manifestFor = (
+    // The project context is best-effort turn context from the derived index:
+    // any failure resolves to no folder rather than failing the turn.
+    const projectFor = (
       thread: OrchestrationV2AppThread,
-    ): Effect.Effect<string | undefined, never> =>
+    ): Effect.Effect<{ readonly dir: string; readonly manifest: string } | undefined, never> =>
       Option.isNone(files)
         ? Effect.succeed(undefined)
         : Effect.gen(function* () {
             const folder = yield* files.value.folderForThread(thread.id);
             if (folder === null) return undefined;
             const { entries, total } = yield* files.value.manifestEntries(folder.labelId);
-            return buildProjectManifest({
-              name: folder.name,
-              directory: folder.dir,
-              resources: entries,
-              total,
-            });
+            return {
+              dir: folder.dir,
+              manifest: buildProjectManifest({
+                name: folder.name,
+                directory: folder.dir,
+                resources: entries,
+                total,
+              }),
+            };
           }).pipe(
             Effect.catch((cause) =>
-              Effect.logDebug("Project manifest lookup failed; resolving without it.", {
+              Effect.logDebug("Project lookup failed; resolving without it.", {
                 threadId: thread.id,
                 cause,
               }).pipe(Effect.as(undefined)),
@@ -119,38 +122,44 @@ export const layerFromProjectStore: Layer.Layer<
           );
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
+        const project = yield* projectFor(input.thread);
+        // A chat filed in a project runs with the project dir as its working
+        // directory, even when the thread keeps a scratch worktree path from
+        // before it was filed. Chats without a project keep scratch, and Work
+        // in a repo still runs in that repo's worktree.
         const cwd =
-          input.thread.worktreePath ??
-          (yield* projects.get(input.thread.projectId).pipe(
-            Effect.mapError(
-              (cause) =>
-                new RuntimePolicyResolveError({
-                  projectId: input.thread.projectId,
-                  providerInstanceId: input.modelSelection.instanceId,
-                  cause,
-                }),
-            ),
-            Effect.flatMap(
-              Option.match({
-                onNone: () =>
-                  Effect.fail(
+          input.thread.surface === "chat" && project !== undefined
+            ? project.dir
+            : (input.thread.worktreePath ??
+              (yield* projects.get(input.thread.projectId).pipe(
+                Effect.mapError(
+                  (cause) =>
                     new RuntimePolicyResolveError({
                       projectId: input.thread.projectId,
                       providerInstanceId: input.modelSelection.instanceId,
-                      cause: "Project not found.",
+                      cause,
                     }),
-                  ),
-                onSome: (project) => Effect.succeed(project.workspaceRoot),
-              }),
-            ),
-          ));
-        const projectManifest = yield* manifestFor(input.thread);
+                ),
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () =>
+                      Effect.fail(
+                        new RuntimePolicyResolveError({
+                          projectId: input.thread.projectId,
+                          providerInstanceId: input.modelSelection.instanceId,
+                          cause: "Project not found.",
+                        }),
+                      ),
+                    onSome: (project) => Effect.succeed(project.workspaceRoot),
+                  }),
+                ),
+              )));
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: "full-access",
           interactionMode: input.thread.interactionMode,
           cwd,
           ...conversationModeFor(input.thread),
-          ...(projectManifest === undefined ? {} : { projectManifest }),
+          ...(project === undefined ? {} : { projectManifest: project.manifest }),
         });
       }),
     });

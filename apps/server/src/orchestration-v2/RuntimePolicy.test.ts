@@ -222,6 +222,18 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
       assert.isUndefined(resolved.projectManifest);
     }),
   );
+
+  it.effect("keeps scratch cwd for chats without a project", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const chat = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: "/scratch/chat", surface: "chat" }),
+        modelSelection,
+      });
+      assert.equal(chat.cwd, "/scratch/chat");
+    }),
+  );
 });
 
 const filedLabelId = ProjectLabelId.make("label:manifest");
@@ -258,6 +270,31 @@ it.layer(layerWithFiles)("RuntimePolicyV2 project manifest", (it) => {
       assert.include(resolved.projectManifest ?? "", '"Manifest" at /projects/Manifest');
       assert.include(resolved.projectManifest ?? "", "- Resources/brief.md");
       assert.include(resolved.projectManifest ?? "", "project_recall");
+    }),
+  );
+
+  it.effect("runs a filed chat with the project dir as cwd", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      // Even when the chat keeps a scratch worktree path from before filing.
+      const resolved = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: "/scratch/chat", surface: "chat" }),
+        modelSelection,
+      });
+      assert.equal(resolved.cwd, "/projects/Manifest");
+    }),
+  );
+
+  it.effect("keeps worktree cwd for filed work threads", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const work = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: "/repo/worktree", surface: "work" }),
+        modelSelection,
+      });
+      assert.equal(work.cwd, "/repo/worktree");
     }),
   );
 });
