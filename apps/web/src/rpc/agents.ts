@@ -46,6 +46,10 @@ export const agentsRpc = {
     label: "agents:markRead",
     tag: "agents.markRead",
   }),
+  builderStart: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "agents:builderStart",
+    tag: "agents.builderStart",
+  }),
   memory,
   saveMemory: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "agents:memoryWrite",

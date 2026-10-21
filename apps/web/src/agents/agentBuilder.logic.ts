@@ -1,18 +1,23 @@
 /**
  * The agent builder: a conversation with the owner's default model that ends in an
- * agent. The model talks in prose and keeps the live proposal in one fenced `agent`
- * block of `key: value` lines, so the card can assemble line by line while the reply
- * streams. Everything here is pure: the preamble, the parser, the schedule grammar,
- * and the turn from a proposal into the create payload.
+ * agent. The model talks in prose and keeps the live proposal in `propose_agent`
+ * calls, which the client reads as the thread's `agent_proposal` turn item. A
+ * fenced `agent` block of `key: value` lines stays as the fallback the card
+ * assembles line by line while a reply streams. Everything here is pure: the
+ * structured read, the fallback parser, the schedule grammar, and the turn
+ * from a proposal into the create payload.
  */
 import {
   defaultAgentPermissions,
   type AgentAvatar,
+  type AgentBuilderProposal,
   type AgentEventKind,
   type AgentPermissions,
   type ModelSelection,
+  type OrchestrationV2TurnItem,
   type ProjectId,
   type ScheduledTaskSchedule,
+  type ScheduledTaskUpsertSchedule,
 } from "@t3tools/contracts";
 import { EXPRESSIONS as AGENT_FACE_EXPRESSIONS } from "~/components/agents/face/engine/expressions";
 import {
@@ -21,10 +26,6 @@ import {
 } from "~/components/agents/face/engine/skins";
 import { EVENT_TRIGGER_LABEL } from "./agentWorkspace.logic";
 import type { AgentDraft, AgentTrigger } from "./agents.types";
-
-export const BUILDER_THREAD_TITLE = "New agent";
-/** Separates the hidden preamble from what the owner typed in the first message. */
-export const BUILDER_OWNER_MARKER = "=== What I want ===";
 
 export const BUILDER_EXAMPLES: ReadonlyArray<string> = [
   "Watch my GitHub PRs and summarize them every morning",
@@ -66,45 +67,6 @@ export interface AgentProposal {
 }
 
 const FENCE = "```agent";
-
-/** What the first message says before the owner's words. */
-export function builderPreamble(description: string): string {
-  return `You are helping me set up a new Cogenly agent: a persistent specialist with its own conversation, one responsibility, and optional triggers that wake it on a schedule or when something happens. Do not read or change files and do not run commands here; we are only talking.
-
-How to reply:
-- One or two short, warm sentences. No headings, no lists.
-- Ask at most one or two short questions, and only when you cannot propose anything sensible without the answers. Otherwise propose right away and let me adjust.
-- Whenever you propose or change the agent, end your reply with exactly one fenced block whose language is "agent", one field per line as "key: value". Always give the whole current proposal, not only what changed. Nothing after the block.
-
-Fields:
-name: a short name, one to three words
-face: <shape> <color> <expression> (shape: ${[...SHAPE_IDS].join(" ")}; color: ${[...COLOR_IDS].join(" ")}; expression: ${[...EXPRESSION_IDS].join(" ")})
-responsibility: one sentence, what it owns
-instructions: one or two sentences on how it should work and talk to me (optional)
-trigger: <when> :: <short title> :: <what to do when woken> (one line per trigger; leave out if it only needs to answer me. <when> is one of: every N minutes|hours|days; daily at HH:MM; weekdays at HH:MM; weekends at HH:MM; on mon,wed,fri at HH:MM; when ${[...EVENT_KINDS].join("|")}; webhook)
-needs: comma-separated tools or integrations it will rely on, or none
-permissions: comma-separated extra grants from ${GRANTABLE.join(", ")}, only if the job truly needs them, else none
-
-Example:
-${FENCE}
-name: PR Digest
-face: nuage bleu attentif
-responsibility: Watch my open pull requests and send me a morning summary.
-instructions: Keep it short; flag anything that needs my review today.
-trigger: weekdays at 09:00 :: Morning PR digest :: Review every open PR and post what changed and what needs me.
-needs: GitHub
-permissions: none
-\`\`\`
-
-${BUILDER_OWNER_MARKER}
-${description.trim()}`;
-}
-
-/** The owner's words from a builder message: the first one carries the preamble. */
-export function ownerText(text: string): string {
-  const index = text.indexOf(BUILDER_OWNER_MARKER);
-  return index === -1 ? text : text.slice(index + BUILDER_OWNER_MARKER.length).trim();
-}
 
 /** The reply without its proposal block, closed or still streaming. */
 export function stripProposal(text: string): string {
@@ -207,6 +169,60 @@ export function proposalFromMessages(
     if (proposal) return proposal;
   }
   return null;
+}
+
+/** A `propose_agent` schedule as the read model the card and the save share. */
+function proposalSchedule(schedule: ScheduledTaskUpsertSchedule): ScheduledTaskSchedule {
+  if (schedule.type !== "webhook") return schedule;
+  if (schedule.signature == null) return { ...schedule, signature: null };
+  // Signing secrets are owner settings, never part of a proposal.
+  const { secret: _secret, secretRef: _secretRef, ...signature } = schedule.signature;
+  return { ...schedule, signature };
+}
+
+/** A `propose_agent` call as the card reads it: whole, so always complete. */
+export function structuredProposal(proposal: AgentBuilderProposal): AgentProposal {
+  return {
+    name: proposal.name,
+    face: {
+      ...(SHAPE_IDS.has(proposal.face.shape) ? { shape: proposal.face.shape } : {}),
+      ...(COLOR_IDS.has(proposal.face.color) ? { color: proposal.face.color } : {}),
+      ...(EXPRESSION_IDS.has(proposal.face.expression)
+        ? { expression: proposal.face.expression }
+        : {}),
+    },
+    responsibility: proposal.responsibility,
+    ...(proposal.instructions ? { instructions: proposal.instructions } : {}),
+    triggers: proposal.triggers.map((trigger) => {
+      const schedule = proposalSchedule(trigger.schedule);
+      return {
+        when: scheduleInWords(schedule),
+        title: trigger.title,
+        prompt: trigger.prompt,
+        schedule,
+      };
+    }),
+    needs: [...proposal.needs],
+    permissions: (Object.keys(proposal.permissions) as Array<keyof AgentPermissions>).filter(
+      (grant) => proposal.permissions[grant] === true && GRANTABLE.includes(grant),
+    ),
+    complete: true,
+  };
+}
+
+/**
+ * The newest structured proposal in the thread; later `propose_agent` calls
+ * replace earlier ones. Null until the first call lands, when the card falls
+ * back to the fenced block.
+ */
+export function proposalFromTurnItems(
+  items: ReadonlyArray<OrchestrationV2TurnItem>,
+): AgentProposal | null {
+  const item = items.findLast(
+    (candidate): candidate is Extract<OrchestrationV2TurnItem, { type: "agent_proposal" }> =>
+      candidate.type === "agent_proposal",
+  );
+  return item ? structuredProposal(item.proposal) : null;
 }
 
 // Schedules -------------------------------------------------------------------
@@ -393,9 +409,4 @@ export function proposalTriggers(proposal: AgentProposal): Array<Omit<AgentTrigg
         ]
       : [],
   );
-}
-
-/** The first message to the new agent, so it introduces itself and gets going. */
-export function kickoffMessage(name: string): string {
-  return `Hi ${name}! Say hello, then get started on what you own.`;
 }

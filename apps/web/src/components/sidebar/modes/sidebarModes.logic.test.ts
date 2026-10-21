@@ -143,6 +143,17 @@ describe("filterThreadsForSidebarMode", () => {
     expect(agents.map((entry) => entry.id)).toEqual(["agent-thread", "scratch-agent"]);
     expect(chats.length + tasks.length + agents.length).toBe(threads.length);
   });
+
+  it("lists builder threads nowhere", () => {
+    const builder = {
+      ...thread("env-a", "builder", "scratch"),
+      source: { surface: "builder" as const },
+    };
+    expect(sidebarModeForThread(builder, classifier)).toBeNull();
+    expect(filterThreadsForSidebarMode([builder], "chats", classifier)).toEqual([]);
+    expect(filterThreadsForSidebarMode([builder], "tasks", classifier)).toEqual([]);
+    expect(filterThreadsForSidebarMode([builder], "agents", classifier)).toEqual([]);
+  });
 });
 
 describe("isSidebarMode", () => {

@@ -1,35 +1,119 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProjectId, ProviderInstanceId, defaultAgentPermissions } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import {
-  BUILDER_OWNER_MARKER,
-  builderPreamble,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  TurnItemId,
+  defaultAgentPermissions,
+  type AgentBuilderProposal,
+  type OrchestrationV2TurnItem,
+} from "@t3tools/contracts";
+import {
   canCreateProposal,
-  kickoffMessage,
-  ownerText,
   parseProposal,
   parseScheduleSpec,
   parseTimeOfDay,
   proposalFromMessages,
+  proposalFromTurnItems,
   proposalToDraft,
   proposalTriggers,
   scheduleInWords,
   stripProposal,
+  structuredProposal,
 } from "./agentBuilder.logic";
 
 const block = (lines: string) => "Here you go.\n\n```agent\n" + lines + "\n```";
 
 describe("builder messages", () => {
-  it("hides the preamble and keeps what the owner typed", () => {
-    const text = builderPreamble("  be my Halloween shirt shopper ");
-    expect(text).toContain(BUILDER_OWNER_MARKER);
-    expect(ownerText(text)).toBe("be my Halloween shirt shopper");
-    expect(ownerText("make it run on Mondays only")).toBe("make it run on Mondays only");
-  });
-
   it("strips a closed or still-streaming proposal block from the prose", () => {
     expect(stripProposal(block("name: Shopper"))).toBe("Here you go.");
     expect(stripProposal("Sure!\n\n```agent\nname: Sho")).toBe("Sure!");
     expect(stripProposal("Plain reply")).toBe("Plain reply");
+  });
+});
+
+const structured = (overrides: Partial<AgentBuilderProposal> = {}): AgentBuilderProposal => ({
+  name: "Halloween Shopper",
+  face: { shape: "nuage", color: "orange", expression: "excite" },
+  responsibility: "Find Halloween shirts I'd actually wear.",
+  instructions: "Keep a shortlist; ask before buying.",
+  triggers: [
+    {
+      schedule: { type: "fixed_time", timeOfDay: "09:00" },
+      title: "Morning picks",
+      prompt: "Look for new shirts and post the best three.",
+    },
+  ],
+  needs: ["Web browsing", "Amazon"],
+  permissions: { send: true, create_pr: true },
+  ...overrides,
+});
+
+const proposalItem = (proposal: AgentBuilderProposal): OrchestrationV2TurnItem => ({
+  id: TurnItemId.make("agent-proposal:thread-1"),
+  threadId: ThreadId.make("thread-1"),
+  runId: null,
+  nodeId: null,
+  providerThreadId: null,
+  providerTurnId: null,
+  nativeItemRef: null,
+  parentItemId: null,
+  ordinal: 0,
+  status: "completed",
+  title: proposal.name,
+  type: "agent_proposal",
+  proposal,
+  startedAt: null,
+  completedAt: null,
+  updatedAt: DateTime.makeUnsafe("2026-10-20T00:00:00.000Z"),
+});
+
+describe("structuredProposal", () => {
+  it("reads the whole call as a complete card", () => {
+    expect(structuredProposal(structured())).toEqual({
+      name: "Halloween Shopper",
+      face: { shape: "nuage", color: "orange", expression: "excite" },
+      responsibility: "Find Halloween shirts I'd actually wear.",
+      instructions: "Keep a shortlist; ask before buying.",
+      triggers: [
+        {
+          when: "Every day at 9am",
+          title: "Morning picks",
+          prompt: "Look for new shirts and post the best three.",
+          schedule: { type: "fixed_time", timeOfDay: "09:00" },
+        },
+      ],
+      needs: ["Web browsing", "Amazon"],
+      permissions: ["send", "create_pr"],
+      complete: true,
+    });
+  });
+
+  it("drops unknown face parts and default grants, and fills a bare webhook", () => {
+    const proposal = structuredProposal(
+      structured({
+        face: { shape: "nuage", color: "chartreuse", expression: "excite" },
+        permissions: { send: true, execute: true, merge: false },
+        triggers: [{ schedule: { type: "webhook" }, title: "Hook", prompt: "Run when called." }],
+      }),
+    );
+    expect(proposal.face).toEqual({ shape: "nuage", expression: "excite" });
+    expect(proposal.permissions).toEqual(["send"]);
+    expect(proposal.triggers).toEqual([
+      {
+        when: "When its webhook is called",
+        title: "Hook",
+        prompt: "Run when called.",
+        schedule: { type: "webhook", signature: null },
+      },
+    ]);
+  });
+
+  it("takes the newest proposal item in the thread", () => {
+    const items = [proposalItem(structured()), proposalItem(structured({ name: "Second" }))];
+    expect(proposalFromTurnItems(items)?.name).toBe("Second");
+    expect(proposalFromTurnItems([])).toBeNull();
   });
 });
 
@@ -212,9 +296,5 @@ describe("creating from a proposal", () => {
         enabled: true,
       },
     ]);
-  });
-
-  it("greets the new agent by name", () => {
-    expect(kickoffMessage("Shopper")).toContain("Hi Shopper!");
   });
 });

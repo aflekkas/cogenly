@@ -142,9 +142,16 @@ export function hasRightPanel(capabilities: ThreadCapabilities): boolean {
   return capabilities.browser || capabilities.terminal || capabilities.device;
 }
 
-/** The sidebar mode that lists a thread names its kind. */
-export function threadKindForSidebarMode(mode: SidebarThreadMode): ThreadKind {
-  return mode === "chats" ? "chat" : mode === "agents" ? "agentConversation" : "work";
+/**
+ * The sidebar mode that lists a thread names its kind. A thread no mode
+ * lists (an agent builder opened directly) acts like a chat.
+ */
+export function threadKindForSidebarMode(mode: SidebarThreadMode | null): ThreadKind {
+  return mode === "chats" || mode === null
+    ? "chat"
+    : mode === "agents"
+      ? "agentConversation"
+      : "work";
 }
 
 /**
@@ -162,7 +169,7 @@ export function classifyThreadKind(input: {
 }): ThreadKind {
   if (input.agentRole === "work") return "work";
   if (input.agentRole === "conversation" || input.isAgentConversation) return "agentConversation";
-  if (input.surface !== undefined) return input.surface;
+  if (input.surface !== undefined) return input.surface === "builder" ? "chat" : input.surface;
   return input.isScratch ? "chat" : "work";
 }
 

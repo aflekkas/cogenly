@@ -45,13 +45,15 @@ export function sidebarModeThreadKey(
  * scratch project. Agent conversations win over chats. Past that, the surface
  * the thread was created from decides; only threads that predate the field
  * (no `surface`) fall back to the old guess that a scratch project means chat.
+ * Builder threads are listed nowhere, so they classify to no mode.
  */
 export function classifySidebarThreadMode(input: {
   readonly isAgent: boolean;
   readonly isScratch: boolean;
   readonly isAgentWork?: boolean;
   readonly surface?: ThreadSurface | undefined;
-}): SidebarThreadMode {
+}): SidebarThreadMode | null {
+  if (input.surface === "builder") return null;
   if (input.isAgentWork) return "tasks";
   if (input.isAgent) return "agents";
   if (input.surface !== undefined) return input.surface === "chat" ? "chats" : "tasks";
@@ -79,7 +81,7 @@ export function sidebarModeForThread(
     };
   },
   classifier: SidebarModeThreadClassifier,
-): SidebarThreadMode {
+): SidebarThreadMode | null {
   return classifySidebarThreadMode({
     isAgentWork: thread.source?.agent?.role === "work",
     isAgent:

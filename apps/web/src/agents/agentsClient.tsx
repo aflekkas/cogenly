@@ -902,7 +902,13 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
       ...(workProjection ? projectRequests(workProjection) : []),
     ];
     const messages = projection.messages
-      .filter((message) => message.role !== "system" && message.text.trim())
+      // The agent's own turns (its kickoff greeting) are not owner bubbles.
+      .filter(
+        (message) =>
+          message.role !== "system" &&
+          (message.role !== "user" || message.createdBy === "user") &&
+          message.text.trim(),
+      )
       .map((message) => {
         const run = projection.runs.find((candidate) => candidate.id === message.runId);
         return {

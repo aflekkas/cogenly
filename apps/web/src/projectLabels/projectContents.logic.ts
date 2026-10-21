@@ -13,7 +13,7 @@ export interface ProjectContents<T> {
  */
 export function indexProjectContents<T>(input: {
   readonly threads: ReadonlyArray<T>;
-  readonly modeOf: (thread: T) => SidebarThreadMode;
+  readonly modeOf: (thread: T) => SidebarThreadMode | null;
   readonly folderKeyOf: (thread: T) => ProjectLabelKey | null;
 }): ReadonlyMap<ProjectLabelKey, ProjectContents<T>> {
   const index = new Map<ProjectLabelKey, { chats: T[]; work: T[] }>();

@@ -110,6 +110,13 @@ describe("classifyThreadKind", () => {
     expect(threadKindForSidebarMode("tasks")).toBe("work");
     expect(threadKindForSidebarMode("agents")).toBe("agentConversation");
   });
+
+  it("treats a builder as a chat wherever one opens directly", () => {
+    expect(classifyThreadKind({ agentRole: null, isScratch: true, surface: "builder" })).toBe(
+      "chat",
+    );
+    expect(threadKindForSidebarMode(null)).toBe("chat");
+  });
 });
 
 describe("hasRightPanel", () => {

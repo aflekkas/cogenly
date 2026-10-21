@@ -23,7 +23,8 @@ import { toastManager } from "~/components/ui/toast";
 import { WorkspacePageHeader } from "~/components/WorkspacePageHeader";
 import { isElectron } from "~/env";
 import { useScratchProject } from "~/hooks/useScratchProject";
-import { cn, newMessageId, newThreadId, randomUUID } from "~/lib/utils";
+import { cn, newMessageId, randomUUID } from "~/lib/utils";
+import { agentsRpc } from "~/rpc/agents";
 import { useThreadShells } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { threadEnvironment, useEnvironmentThread } from "~/state/threads";
@@ -32,12 +33,9 @@ import { useUiStateStore } from "~/uiStateStore";
 import { noteAgentArrival } from "./agentArrivals";
 import {
   BUILDER_EXAMPLES,
-  BUILDER_THREAD_TITLE,
-  builderPreamble,
   canCreateProposal,
-  kickoffMessage,
-  ownerText,
   proposalFromMessages,
+  proposalFromTurnItems,
   proposalToDraft,
   proposalTriggers,
   stripProposal,
@@ -69,7 +67,7 @@ interface Row {
 /**
  * Creating an agent is a short conversation: the owner says what the agent should
  * take care of, the builder (the owner's default model) proposes it as a live card, and
- * one click creates it. The conversation runs in a plain thread in the scratch project;
+ * one click creates it. The conversation runs in a builder thread the server starts;
  * once the agent exists the thread is removed.
  */
 export function AgentBuilder({ environmentId: requested }: { environmentId?: EnvironmentId }) {
@@ -82,6 +80,9 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
   const environmentId = scratchEnvironmentId(requested ?? primary);
   const setSidebarMode = useUiStateStore((store) => store.setSidebarMode);
   const startTurn = useOrchestrationCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const builderStart = useOrchestrationCommand(agentsRpc.builderStart, {
+    reportFailure: false,
+  });
   const deleteThread = useOrchestrationCommand(threadEnvironment.delete, {
     reportFailure: false,
   });
@@ -108,10 +109,18 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
         streaming: message.streaming,
       }));
     const ids = new Set(persisted.map((row) => row.id));
-    return [...persisted, ...pending.filter((row) => !ids.has(row.id))];
+    // The first message's id is server-made, so it never matches the optimistic
+    // row's; its text arriving covers it. Later sends reuse their row id.
+    const userTexts = new Set(
+      persisted.filter((row) => row.role === "user").map((row) => row.text),
+    );
+    return [...persisted, ...pending.filter((row) => !ids.has(row.id) && !userTexts.has(row.text))];
   }, [projection?.messages, pending]);
   const busy = sending || Boolean(projection?.runs.some((run) => LIVE_RUN.has(run.status)));
-  const proposal = useMemo(() => proposalFromMessages(rows), [rows]);
+  const proposal = useMemo(
+    () => proposalFromTurnItems(projection?.turnItems ?? []) ?? proposalFromMessages(rows),
+    [projection?.turnItems, rows],
+  );
   const modelName = modelSelection ? modelDisplayName(models, modelSelection) : null;
 
   const send = useCallback(
@@ -120,59 +129,38 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
       setSending(true);
       setError(null);
       const messageId = newMessageId();
-      const first = thread === null;
       setPending((current) => [
         ...current,
-        {
-          id: messageId,
-          role: "user",
-          text: first ? builderPreamble(text) : text,
-          streaming: false,
-        },
+        { id: messageId, role: "user", text, streaming: false },
       ]);
       try {
-        let target = thread;
-        if (target === null) {
+        if (thread === null) {
           const project = await openScratchProject(environmentId, "Could not start the builder");
           if (!project) throw new Error("This machine can't start a conversation right now.");
-          target = { environmentId, projectId: project.id, threadId: newThreadId() };
+          const result = await builderStart({
+            environmentId,
+            input: { projectId: project.id, modelSelection, text },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          setThread({
+            environmentId,
+            projectId: result.value.projectId,
+            threadId: result.value.threadId,
+          });
+          return;
         }
-        const createdAt = new Date().toISOString();
         const result = await startTurn({
-          environmentId: target.environmentId,
+          environmentId: thread.environmentId,
           input: {
-            threadId: target.threadId,
-            message: {
-              messageId,
-              role: "user",
-              text: first ? builderPreamble(text) : text,
-              attachments: [],
-            },
+            threadId: thread.threadId,
+            message: { messageId, role: "user", text, attachments: [] },
             modelSelection,
             runtimeMode: "full-access",
             interactionMode: "default",
-            createdAt,
-            ...(first
-              ? {
-                  bootstrap: {
-                    createThread: {
-                      surface: "chat",
-                      projectId: target.projectId,
-                      title: BUILDER_THREAD_TITLE,
-                      modelSelection,
-                      runtimeMode: "full-access",
-                      interactionMode: "default",
-                      branch: null,
-                      worktreePath: null,
-                      createdAt,
-                    },
-                  },
-                }
-              : {}),
+            createdAt: new Date().toISOString(),
           },
         });
         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-        if (first) setThread(target);
       } catch (cause) {
         setPending((current) => current.filter((row) => row.id !== messageId));
         setError(cause instanceof Error ? cause.message : "Could not send.");
@@ -180,7 +168,7 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
         setSending(false);
       }
     },
-    [environmentId, modelSelection, openScratchProject, sending, startTurn, thread],
+    [builderStart, environmentId, modelSelection, openScratchProject, sending, startTurn, thread],
   );
 
   const create = useCallback(async () => {
@@ -189,11 +177,14 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
     setError(null);
     const [first, ...rest] = proposalTriggers(proposal);
     try {
-      const draft = proposalToDraft(proposal, {
-        seed,
-        modelSelection,
-        projectId: thread.projectId,
-      });
+      const draft = {
+        ...proposalToDraft(proposal, {
+          seed,
+          modelSelection,
+          projectId: thread.projectId,
+        }),
+        kickoff: true,
+      };
       const contact = await client.save(thread.environmentId, draft, first);
       await finish(contact, rest);
     } catch (cause) {
@@ -221,9 +212,7 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
       }
       noteAgentArrival(agentContactKey(contact));
       await flyToAgentsList(cardRef.current);
-      await client.send(contact, kickoffMessage(contact.name)).catch(() => {
-        /* The agent exists; a lost greeting is not worth stopping for. */
-      });
+      // The server opens the agent's own first turn; nothing visible to send.
       setCreated(contact);
     }
   }, [client, creating, modelSelection, proposal, seed, thread]);
@@ -361,7 +350,7 @@ function Transcript({
           <Hero onExample={onExample} />
         ) : (
           rows.map((row, index) => {
-            const text = row.role === "user" ? ownerText(row.text) : stripProposal(row.text);
+            const text = row.role === "user" ? row.text : stripProposal(row.text);
             const isLatestAssistant =
               row.role === "assistant" &&
               rows.findLastIndex((candidate) => candidate.role === "assistant") === index;

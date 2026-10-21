@@ -23,7 +23,7 @@ import {
   type ScopedProjectRef,
   type ScopedThreadRef,
   ThreadId,
-  type ThreadSurface,
+  ThreadSurface,
 } from "@t3tools/contracts";
 import {
   parseScopedProjectKey,
@@ -310,7 +310,7 @@ const PersistedDraftThreadState = Schema.Struct({
   projectId: ProjectId,
   logicalProjectKey: Schema.optionalKey(Schema.String),
   environmentSelection: Schema.optionalKey(Schema.Literals(["auto", "manual"])),
-  surface: Schema.optionalKey(Schema.Literals(["chat", "work"])),
+  surface: Schema.optionalKey(ThreadSurface),
   loadBalancedEnvironmentId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
