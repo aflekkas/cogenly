@@ -1,28 +1,27 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import {
-  ChevronLeftIcon,
-  LoaderCircleIcon,
-  ArrowUpRightIcon,
-  SlidersHorizontalIcon,
-} from "lucide-react";
-import { Fragment, useEffect, useState } from "react";
+import { ArrowUpRightIcon } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace } from "~/components/agents/face";
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
-import { WorkspacePageHeader } from "~/components/WorkspacePageHeader";
-import { isElectron } from "~/env";
-import { useMessageMotion } from "./useMessageMotion";
+import { useMessageMotion, type SendOrigin } from "./useMessageMotion";
+import { accentStyle, agentAccent } from "./agentAccent.logic";
+import { AgentIdentity } from "./AgentIdentity";
+import { AgentTypingDots } from "./AgentTypingBubble";
 import {
+  INITIAL_TYPING_SLOT,
+  agentContactKey,
   agentStatusLabel,
   conversationRows,
   modelDisplayName,
   modelSwitches,
+  stepTypingSlot,
   type AgentModelStatus,
+  type TypingSlotState,
 } from "./agents.logic";
 import { useAgents, useAgentsClient } from "./agentsClient";
 import { AgentComposer } from "./AgentComposer";
-import { Button } from "~/components/ui/button";
 import {
   Select,
   SelectItem,
@@ -40,7 +39,6 @@ import {
   type AgentDetailsSection,
   type AgentView as AgentViewIntent,
 } from "./agentViewIntent";
-import { countOpenCommitments } from "./agentWorkspace.logic";
 import type { AgentContact, AgentModelRef, AgentRequest, AgentWorkspaceView } from "./agents.types";
 
 /** Which Details section a view request lands on; the chat itself closes Details. */
@@ -102,9 +100,9 @@ function AgentView({
     setDetails(null);
     setFocusMessage(messageId ?? null);
   };
-  const itemsCount = agent.approvals.length + countOpenCommitments(workspace.commitments);
   const status = agentStatusLabel(agent);
-  const responsibility = agent.responsibility.trim().split("\n")[0] ?? "";
+  const busy = agent.state === "thinking" || agent.state === "working";
+  const accent = agentAccent(agent.avatar);
   useEffect(
     () =>
       watchAgentView(viewKey, (view) => {
@@ -119,54 +117,22 @@ function AgentView({
     [viewKey, canWrite],
   );
   return (
-    <section className="agent-conversation" aria-label={`Conversation with ${agent.name}`}>
-      <WorkspacePageHeader electron={isElectron} className="border-b border-border/45">
-        {onBack && (
-          <Button size="icon-xs" variant="ghost-muted" aria-label="Back to agents" onClick={onBack}>
-            <ChevronLeftIcon />
-          </Button>
-        )}
-        <div className="flex min-w-0 flex-1 items-center gap-2.5" data-panel-flip="start">
-          <AgentFace
-            {...avatarFaceProps(agent.avatar)}
-            state={agent.requests.length ? "blocked" : agent.state}
-            size={28}
-          />
-          <div className="flex min-w-0 flex-col leading-tight">
-            <span className="truncate text-sm font-medium tracking-tight">{agent.name}</span>
-            <span className="truncate text-2xs text-muted-foreground">
-              <span key={status} className="agent-morph">
-                {status}
-              </span>
-              {responsibility && ` · ${responsibility}`}
-            </span>
-          </div>
-        </div>
-        <Button
-          size="xs"
-          variant="ghost-muted"
-          aria-expanded={details !== null}
-          aria-haspopup="dialog"
-          onClick={() => setDetails("responsibility")}
-        >
-          <SlidersHorizontalIcon />
-          Details
-          {itemsCount > 0 && (
-            <span
-              className="rounded-full bg-primary px-1.5 text-2xs font-medium text-primary-foreground tabular-nums"
-              aria-label={`${itemsCount} open items`}
-            >
-              {itemsCount}
-            </span>
-          )}
-        </Button>
-      </WorkspacePageHeader>
-      <ChatPane
-        agent={agent}
-        workspace={workspace}
-        focusMessage={focusMessage}
-        onShowActivity={() => setDetails("activity")}
+    <section
+      className="agent-conversation"
+      aria-label={`Conversation with ${agent.name}`}
+      style={accentStyle(accent)}
+    >
+      <AgentIdentity
+        face={{
+          ...avatarFaceProps(agent.avatar),
+          state: agent.requests.length ? "blocked" : agent.state,
+        }}
+        name={agent.name}
+        status={busy ? "Working…" : status}
+        onBack={onBack}
+        onDetails={() => setDetails("responsibility")}
       />
+      <ChatPane agent={agent} workspace={workspace} focusMessage={focusMessage} />
       <OverlayPresence when={details}>
         {(section) => (
           <AgentDetailsSheet
@@ -197,16 +163,28 @@ function AgentView({
   );
 }
 
+/** True `delayMs` after `value` turns on; off at once. */
+function useDelayedOn(value: boolean, delayMs: number) {
+  const [delayed, setDelayed] = useState(value);
+  useEffect(() => {
+    if (!value) {
+      setDelayed(false);
+      return;
+    }
+    const timer = setTimeout(() => setDelayed(true), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return value && delayed;
+}
+
 function ChatPane({
   agent,
   workspace,
   focusMessage,
-  onShowActivity,
 }: {
   agent: AgentContact;
   workspace: AgentWorkspaceView;
   focusMessage: string | null;
-  onShowActivity: () => void;
 }) {
   const client = useAgentsClient();
   const [sending, setSending] = useState(false);
@@ -218,13 +196,27 @@ function ChatPane({
   const currentModelUnavailable = modelStatus(agent.modelSelection).status === "unavailable";
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
   const busy = agent.state === "thinking" || agent.state === "working";
+  // The typing bubble follows a send by a beat, as a reply would.
+  const typingBusy = useDelayedOn(busy, 150);
   const lastOwner = agent.messages.findLast((message) => message.role === "user");
   const switches = modelSwitches(agent.messages, agent.modelSelection);
+  // The reply that arrives takes over the typing bubble's element (see stepTypingSlot).
+  const typingSlot = useRef<TypingSlotState>(INITIAL_TYPING_SLOT);
+  const { typingKey, claimed } = useMemo(() => {
+    const step = stepTypingSlot(typingSlot.current, agent.messages, typingBusy);
+    typingSlot.current = step.state;
+    return { typingKey: step.typingKey, claimed: step.state.claimed };
+  }, [agent.messages, typingBusy]);
+  const keep = useMemo(() => new Set(claimed.keys()), [claimed]);
+  const sendOrigin = useRef<SendOrigin | null>(null);
   const { scroll, onScroll, stopFollowing } = useMessageMotion(
-    agent,
+    { ...agent, key: agentContactKey(agent) },
     busy,
-    switches.trailing && `${switches.trailing.instanceId}:${switches.trailing.model}`,
+    typingKey ??
+      (switches.trailing && `${switches.trailing.instanceId}:${switches.trailing.model}`),
+    { keep, sendOrigin },
   );
+  const face = avatarFaceProps(agent.avatar);
   // An open item's source message opens here; bring it into view once.
   useEffect(() => {
     if (!focusMessage) return;
@@ -260,12 +252,14 @@ function ChatPane({
     document.addEventListener("visibilitychange", mark);
     return () => document.removeEventListener("visibilitychange", mark);
   }, [agent, client, canWrite]);
-  async function send(outgoing: string) {
+  async function send(outgoing: string, from: DOMRect | null) {
     if (sending) return;
     setSending(true);
     setError(null);
     try {
-      await client.send(agent, outgoing);
+      await client.send(agent, outgoing, (messageId) => {
+        if (from) sendOrigin.current = { rect: from, messageId };
+      });
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Could not send. Retry your message below.",
@@ -289,7 +283,7 @@ function ChatPane({
   return (
     <>
       <div
-        className="agent-message-scroll"
+        className="agent-message-scroll messages-timeline-scroll scroll-fade-y"
         ref={scroll}
         onScroll={onScroll}
         onWheel={stopFollowing}
@@ -337,13 +331,13 @@ function ChatPane({
               {agent.conversationError}
             </p>
           )}
-          {agent.messages.length === 0 && (
+          {agent.messages.length === 0 && !typingKey && (
             <div className="agent-conversation-empty">
-              This is the start of something good.<span>Say hello to {agent.name}.</span>
+              <span>Say hello to {agent.name}.</span>
             </div>
           )}
           {conversationRows(agent.messages).map(({ message, separator, grouped }) => (
-            <Fragment key={message.id}>
+            <Fragment key={claimed.get(message.id) ?? message.id}>
               {switches.before.has(message.id) && (
                 <ModelSwitchLine
                   name={modelDisplayName(models, switches.before.get(message.id)!)}
@@ -360,7 +354,16 @@ function ChatPane({
                     <time dateTime={message.createdAt}>{separator}</time>
                   </div>
                 )}
-                <div className="agent-bubble" data-owner={message.role === "user"}>
+                {message.role === "assistant" && !grouped && (
+                  <span className="agent-message-face" aria-hidden>
+                    <AgentFace {...face} size={22} />
+                  </span>
+                )}
+                <div
+                  className="agent-bubble"
+                  data-owner={message.role === "user"}
+                  data-streaming={message.streaming || undefined}
+                >
                   {message.source && (
                     <button
                       className="agent-source"
@@ -384,7 +387,8 @@ function ChatPane({
                     message.delivery === "failed" ||
                     message.delivery === "interrupted") && (
                     <span
-                      className="agent-delivery"
+                      key={message.delivery}
+                      className="agent-delivery agent-morph"
                       data-failed={
                         message.delivery === "failed" || message.delivery === "interrupted"
                       }
@@ -428,16 +432,28 @@ function ChatPane({
               </div>
             </div>
           ))}
-          {(busy || agent.activity.length > 0) && (
-            <button className="agent-working" type="button" onClick={onShowActivity}>
-              {busy ? (
-                <LoaderCircleIcon size={13} className="agent-spinner" />
-              ) : (
-                <span className="agent-work-dot" />
+          {typingKey && (
+            <div
+              key={typingKey}
+              data-message-id={typingKey}
+              className="agent-message-row"
+              data-owner={false}
+              data-grouped={agent.messages.at(-1)?.role === "assistant"}
+            >
+              {agent.messages.at(-1)?.role !== "assistant" && (
+                <span className="agent-message-face" aria-hidden>
+                  <AgentFace {...face} state="thinking" size={22} />
+                </span>
               )}
-              <span>{busy ? "Working on your request…" : "View recent work"}</span>
-              <ArrowUpRightIcon size={12} />
-            </button>
+              <div className="agent-bubble" data-owner={false}>
+                <AgentTypingDots />
+              </div>
+              {agent.workingOn && (
+                <span key={agent.workingOn} className="agent-typing-hint agent-morph">
+                  {agent.workingOn}
+                </span>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -457,7 +473,6 @@ function ChatPane({
           onSend={send}
           onError={setError}
         />
-        {busy && <p className="agent-composer-hint">You can keep messaging while I work.</p>}
       </footer>
     </>
   );

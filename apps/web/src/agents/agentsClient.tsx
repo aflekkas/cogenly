@@ -61,7 +61,12 @@ export interface AgentsClient {
   ) => Promise<AgentContact>;
   remove: (agent: AgentContact) => Promise<void>;
   markRead: (agent: AgentContact, messageId: string) => Promise<void>;
-  send: (agent: AgentContact, text: string) => Promise<void>;
+  /** `onMessageId` learns the optimistic message's id before it renders, for send motion. */
+  send: (
+    agent: AgentContact,
+    text: string,
+    onMessageId?: (messageId: string) => void,
+  ) => Promise<void>;
   respond: (
     agent: AgentContact,
     requestId: string,
@@ -522,7 +527,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           }),
         );
       },
-      send: async (agent, text) => {
+      send: async (agent, text, onMessageId) => {
         const key = agentContactKey(agent);
         const existing = pendingSends.current.get(key);
         const identity =
@@ -530,6 +535,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
             ? existing
             : { text, commandId: CommandId.make(randomUUID()), messageId: newMessageId() };
         pendingSends.current.set(key, identity);
+        onMessageId?.(identity.messageId);
         const updatePending = (delivery: NonNullable<AgentMessage["delivery"]>) =>
           setOutbox((current) => {
             const messages = current.get(key) ?? [];
@@ -829,8 +835,18 @@ function LiveCommitmentHistory({
 
 export type AgentConversationData = Pick<
   AgentContact,
-  "messages" | "requests" | "memory" | "activity"
+  "messages" | "requests" | "memory" | "activity" | "workingOn"
 >;
+
+/** The title of the newest tool call still running in a thread, for a typing hint. */
+export function workingOnFromItems(
+  items: ReadonlyArray<{ type: string; status: string; title: string | null }>,
+): string | null {
+  const live = items.findLast(
+    (item) => item.type === "tool_call" && (item.status === "running" || item.status === "pending"),
+  );
+  return live?.title?.trim() || null;
+}
 export function useAgentConversation(agent: AgentContact | null): AgentContact | null {
   const state = useEnvironmentThread(
     agent?.environmentId ?? null,
@@ -936,6 +952,7 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
       requests,
       memory: memory.data?.notes ?? [],
       activity: activity.data?.runs ?? [],
+      workingOn: workingOnFromItems(projection.turnItems),
     };
   }, [projection, workProjection, triggerNames, memory.data, activity.data]);
   const key = agent ? agentContactKey(agent) : null;
@@ -967,29 +984,39 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
 }
 
 /** The chat composer's own pickers over the same live catalog, limited to Claude and Codex. */
-function LiveAgentModelControls({
-  agent,
+function LiveAgentModelControls({ agent, ...props }: AgentModelControlsProps) {
+  return (
+    <LiveModelControls environmentId={agent.environmentId} projectId={agent.projectId} {...props} />
+  );
+}
+
+/** The same pickers for a conversation that has no agent yet, such as the builder. */
+export function LiveModelControls({
+  environmentId,
+  projectId,
   selection,
   disabled,
   unavailable,
   pickerOpen,
   onPickerOpenChange,
   onChange,
-}: AgentModelControlsProps) {
-  const settings = useEnvironmentSettings(agent.environmentId);
+}: Omit<AgentModelControlsProps, "agent"> & {
+  environmentId: EnvironmentId;
+  projectId: ProjectId | null;
+}) {
+  const settings = useEnvironmentSettings(environmentId);
   const providers =
-    useAtomValue(serverEnvironment.providersValueAtom(agent.environmentId)) ??
-    EMPTY_SERVER_PROVIDERS;
+    useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
   const instanceEntries = useMemo(
     () =>
       sortProviderInstanceEntries(
         applyProviderInstanceSettings(
           deriveProviderInstanceEntries(providers),
           settings,
-          agent.projectId,
+          projectId,
         ),
       ).filter(isProviderInstancePickerVisible),
-    [providers, settings, agent.projectId],
+    [providers, settings, projectId],
   );
   const modelOptionsByInstance = useMemo(
     () =>
@@ -1000,7 +1027,7 @@ function LiveAgentModelControls({
   return (
     <>
       <ProviderModelPicker
-        environmentId={agent.environmentId}
+        environmentId={environmentId}
         disabled={disabled}
         activeInstanceId={selection.instanceId}
         model={selection.model}

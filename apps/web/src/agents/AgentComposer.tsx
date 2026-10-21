@@ -1,5 +1,5 @@
 import type { ModelSelection } from "@t3tools/contracts";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { ComposerPrimaryActions } from "~/components/chat/ComposerPrimaryActions";
 import { ComposerSurface } from "~/components/chat/ComposerSurface";
 import { cn } from "~/lib/utils";
@@ -25,6 +25,7 @@ export function AgentComposer({
   onPickerOpenChange,
   onSend,
   onError,
+  textareaRef,
 }: {
   agent: AgentContact;
   canWrite: boolean;
@@ -33,12 +34,16 @@ export function AgentComposer({
   modelUnavailable: boolean;
   pickerOpen: boolean;
   onPickerOpenChange: (open: boolean) => void;
-  onSend: (text: string) => Promise<void>;
+  /** Called with the typed text's rect as it leaves, so its bubble can arrive from there. */
+  onSend: (text: string, from: DOMRect | null) => Promise<void>;
   onError: (message: string | null) => void;
+  /** The prompt editor, for callers that measure it. */
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
 }) {
   const client = useAgentsClient();
   const [text, setText] = useState("");
-  const textarea = useRef<HTMLTextAreaElement>(null);
+  const own = useRef<HTMLTextAreaElement>(null);
+  const textarea = textareaRef ?? own;
   // Shown until the saved profile catches up, so the pickers never snap back mid-save.
   const [pendingSelection, setPendingSelection] = useState<ModelSelection | null>(null);
   const [savingModel, setSavingModel] = useState(false);
@@ -71,9 +76,11 @@ export function AgentComposer({
     const outgoing = text.trim();
     // A text waits for a model switch to save so it reaches the newly chosen model.
     if (!outgoing || sending || savingModel || modelUnavailable) return;
+    const from = textarea.current?.getBoundingClientRect() ?? null;
+    // The composer clears in the same frame the bubble appears; the text travels.
     setText("");
     // A failed text stays in the conversation with its own Retry.
-    await onSend(outgoing);
+    await onSend(outgoing, from);
     textarea.current?.focus();
   }
   return (

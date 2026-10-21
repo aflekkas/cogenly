@@ -1,27 +1,29 @@
 import { useNavigate } from "@tanstack/react-router";
-import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ModelSelection, ProjectId, ThreadId } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
-import { LoaderCircleIcon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type RefObject,
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AgentFace } from "~/components/agents/face";
+import { AgentFace, type AgentFaceProps } from "~/components/agents/face";
+import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
 import { ComposerPrimaryActions } from "~/components/chat/ComposerPrimaryActions";
 import { ComposerSurface } from "~/components/chat/ComposerSurface";
 import { Button } from "~/components/ui/button";
 import { SidebarInset } from "~/components/ui/sidebar";
 import { toastManager } from "~/components/ui/toast";
-import { WorkspacePageHeader } from "~/components/WorkspacePageHeader";
-import { isElectron } from "~/env";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { cn, newMessageId, randomUUID } from "~/lib/utils";
 import { agentsRpc } from "~/rpc/agents";
@@ -30,6 +32,7 @@ import { usePrimaryEnvironmentId } from "~/state/environments";
 import { threadEnvironment, useEnvironmentThread } from "~/state/threads";
 import { useOrchestrationCommand } from "~/state/use-orchestration-command";
 import { useUiStateStore } from "~/uiStateStore";
+import { accentForColor, accentStyle, NEUTRAL_ACCENT } from "./agentAccent.logic";
 import { noteAgentArrival } from "./agentArrivals";
 import {
   BUILDER_EXAMPLES,
@@ -40,35 +43,51 @@ import {
   proposalTriggers,
   stripProposal,
 } from "./agentBuilder.logic";
+import { AgentIdentity } from "./AgentIdentity";
 import { AgentProposalCard } from "./AgentProposalCard";
-import { agentContactKey, modelDisplayName } from "./agents.logic";
+import { AgentTypingDots } from "./AgentTypingBubble";
+import {
+  INITIAL_TYPING_SLOT,
+  agentContactKey,
+  conversationRows,
+  modelDisplayName,
+  stepTypingSlot,
+  type TypingSlotState,
+} from "./agents.logic";
 import {
   AgentCreatedWithoutTriggerError,
+  LiveModelControls,
   useAgents,
   useAgentsClient,
   useDefaultAgentModel,
+  workingOnFromItems,
 } from "./agentsClient";
-import type { AgentContact } from "./agents.types";
+import type { AgentContact, AgentMessage } from "./agents.types";
+import { useMessageMotion, type SendOrigin } from "./useMessageMotion";
 
 const LIVE_RUN = new Set(["preparing", "queued", "starting", "running"]);
+/** The builder's own face: the mono cloud, until the proposal's face takes over. */
+const BUILDER_FACE: AgentFaceProps = {
+  seed: "new-friend",
+  expression: "curieux",
+  color: "currentColor",
+  paper: "none",
+  className: "text-foreground/90",
+};
 
 interface BuilderThread {
   environmentId: EnvironmentId;
   projectId: ProjectId;
   threadId: ThreadId;
 }
-interface Row {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  streaming: boolean;
-}
 
 /**
  * Creating an agent is a short conversation: the owner says what the agent should
- * take care of, the builder (the owner's default model) proposes it as a live card, and
- * one click creates it. The conversation runs in a builder thread the server starts;
- * once the agent exists the thread is removed.
+ * take care of, the builder (the owner's default model, or one picked below) proposes
+ * it as a live card, and one click creates it. The conversation runs in a builder
+ * thread the server starts; once the agent exists the thread is removed. The page is
+ * laid out like an agent's conversation, with the builder pinned at the top; its
+ * neutral accent crossfades to the proposed agent's colour as the card assembles.
  */
 export function AgentBuilder({ environmentId: requested }: { environmentId?: EnvironmentId }) {
   const navigate = useNavigate();
@@ -87,25 +106,28 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
     reportFailure: false,
   });
   const [thread, setThread] = useState<BuilderThread | null>(null);
-  const [pending, setPending] = useState<ReadonlyArray<Row>>([]);
+  const [pending, setPending] = useState<ReadonlyArray<AgentMessage>>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<AgentContact | null>(null);
   const [seed] = useState(() => randomUUID());
-  const modelSelection = useDefaultAgentModel(environmentId, thread?.projectId ?? null);
+  const defaultModel = useDefaultAgentModel(environmentId, thread?.projectId ?? null);
+  const [chosenModel, setChosenModel] = useState<ModelSelection | null>(null);
+  const modelSelection = chosenModel ?? defaultModel;
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => setSidebarMode("agents"), [setSidebarMode]);
 
   const state = useEnvironmentThread(thread?.environmentId ?? null, thread?.threadId ?? null);
   const projection = Option.getOrNull(state.data);
-  const rows = useMemo<ReadonlyArray<Row>>(() => {
-    const persisted: Row[] = (projection?.messages ?? [])
+  const messages = useMemo<ReadonlyArray<AgentMessage>>(() => {
+    const persisted: AgentMessage[] = (projection?.messages ?? [])
       .filter((message) => message.role !== "system" && message.text.trim())
       .map((message) => ({
         id: message.id,
-        role: message.role as Row["role"],
+        role: message.role as AgentMessage["role"],
         text: message.text,
+        createdAt: DateTime.formatIso(message.createdAt),
         streaming: message.streaming,
       }));
     const ids = new Set(persisted.map((row) => row.id));
@@ -116,22 +138,35 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
     );
     return [...persisted, ...pending.filter((row) => !ids.has(row.id) && !userTexts.has(row.text))];
   }, [projection?.messages, pending]);
-  const busy = sending || Boolean(projection?.runs.some((run) => LIVE_RUN.has(run.status)));
+  const busy =
+    !created && (sending || Boolean(projection?.runs.some((run) => LIVE_RUN.has(run.status))));
   const proposal = useMemo(
-    () => proposalFromTurnItems(projection?.turnItems ?? []) ?? proposalFromMessages(rows),
-    [projection?.turnItems, rows],
+    () => proposalFromTurnItems(projection?.turnItems ?? []) ?? proposalFromMessages(messages),
+    [projection?.turnItems, messages],
   );
+  const workingOn = workingOnFromItems(projection?.turnItems ?? []);
   const modelName = modelSelection ? modelDisplayName(models, modelSelection) : null;
+  const accent = proposal?.face?.color ? accentForColor(proposal.face.color) : NEUTRAL_ACCENT;
+  const face: AgentFaceProps = proposal?.face
+    ? avatarFaceProps({ seed, ...proposal.face })
+    : BUILDER_FACE;
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, from: DOMRect | null, onMessageId: (id: string) => void) => {
       if (!environmentId || !modelSelection || sending) return;
       setSending(true);
       setError(null);
       const messageId = newMessageId();
+      if (from) onMessageId(messageId);
       setPending((current) => [
         ...current,
-        { id: messageId, role: "user", text, streaming: false },
+        {
+          id: messageId,
+          role: "user",
+          text,
+          createdAt: new Date().toISOString(),
+          optimistic: true,
+        },
       ]);
       try {
         if (thread === null) {
@@ -255,61 +290,79 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
 
   return (
     <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh">
-      <WorkspacePageHeader electron={isElectron}>
-        <h1
-          className="min-w-0 flex-1 truncate text-sm font-medium tracking-tight"
-          data-panel-flip="start"
-        >
-          New agent
-        </h1>
-        <Button size="icon-xs" variant="ghost-muted" aria-label="Cancel" onClick={cancel}>
-          <XIcon />
-        </Button>
-      </WorkspacePageHeader>
-      <section className="agent-conversation" aria-label="New agent">
+      <section className="agent-conversation" aria-label="New agent" style={accentStyle(accent)}>
+        <AgentIdentity
+          face={{ ...face, state: busy ? "thinking" : "idle" }}
+          name={proposal?.name ?? "New agent"}
+          status={busy ? "Thinking…" : null}
+          trailing={
+            <Button size="icon-sm" variant="ghost-muted" aria-label="Cancel" onClick={cancel}>
+              <XIcon className="size-4.5" />
+            </Button>
+          }
+        />
         <Transcript
-          rows={rows}
-          busy={busy && !created}
+          threadKey={thread?.threadId ?? "builder"}
+          messages={messages}
+          busy={busy}
+          workingOn={workingOn}
+          face={face}
           seed={seed}
           proposal={proposal}
           modelName={modelName}
           creating={creating}
           cardRef={cardRef}
           onCreate={() => void create()}
-          onExample={(text) => void send(text)}
-        />
-        <footer className="agent-composer-area">
-          {error && (
-            <p role="alert" className="agent-error">
-              {error}
-            </p>
+          onExample={(text) => void send(text, null, () => {})}
+        >
+          {(sendOrigin) => (
+            <footer className="agent-composer-area">
+              {error && (
+                <p role="alert" className="agent-error">
+                  {error}
+                </p>
+              )}
+              {environmentId === null ? (
+                <p className="agent-conversation-empty">
+                  Agents aren't available here.
+                  <span>
+                    This machine can't start a conversation without a repository right now.
+                  </span>
+                </p>
+              ) : (
+                <BuilderComposer
+                  environmentId={environmentId}
+                  projectId={thread?.projectId ?? null}
+                  modelSelection={modelSelection}
+                  onModelChange={setChosenModel}
+                  placeholder={
+                    thread
+                      ? "Adjust anything, or ask for something else"
+                      : "What should this agent take care of?"
+                  }
+                  disabled={!modelSelection || creating || created !== null}
+                  sending={sending}
+                  onSend={(text, from) =>
+                    send(text, from, (messageId) => {
+                      if (from) sendOrigin.current = { rect: from, messageId };
+                    })
+                  }
+                />
+              )}
+            </footer>
           )}
-          {environmentId === null ? (
-            <p className="agent-conversation-empty">
-              Agents aren't available here.
-              <span>This machine can't start a conversation without a repository right now.</span>
-            </p>
-          ) : (
-            <BuilderComposer
-              placeholder={
-                thread
-                  ? "Adjust anything, or ask for something else"
-                  : "What should this agent take care of?"
-              }
-              disabled={!modelSelection || creating || created !== null}
-              sending={sending}
-              onSend={send}
-            />
-          )}
-        </footer>
+        </Transcript>
       </section>
     </SidebarInset>
   );
 }
 
 function Transcript({
-  rows,
+  threadKey,
+  messages,
   busy,
+  workingOn,
+  face,
   seed,
   proposal,
   modelName,
@@ -317,9 +370,13 @@ function Transcript({
   cardRef,
   onCreate,
   onExample,
+  children,
 }: {
-  rows: ReadonlyArray<Row>;
+  threadKey: string;
+  messages: ReadonlyArray<AgentMessage>;
   busy: boolean;
+  workingOn: string | null;
+  face: AgentFaceProps;
   seed: string;
   proposal: ReturnType<typeof proposalFromMessages>;
   modelName: string | null;
@@ -327,88 +384,140 @@ function Transcript({
   cardRef: RefObject<HTMLDivElement | null>;
   onCreate: () => void;
   onExample: (text: string) => void;
+  /** The composer, given where a sent text's bubble should arrive from. */
+  children: (sendOrigin: RefObject<SendOrigin | null>) => ReactNode;
 }) {
-  const scroll = useRef<HTMLDivElement>(null);
-  const atBottom = useRef(true);
-  // Rows present at mount are history and stay still; rows appended later enter.
-  const [initialCount] = useState(rows.length);
-  // No deps: streamed text and the assembling card keep the newest row in view.
-  useLayoutEffect(() => {
-    if (atBottom.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
+  // The typing bubble follows a send by a beat, as a reply would.
+  const [typingBusy, setTypingBusy] = useState(false);
+  useEffect(() => {
+    if (!busy) {
+      setTypingBusy(false);
+      return;
+    }
+    const timer = setTimeout(() => setTypingBusy(true), 150);
+    return () => clearTimeout(timer);
+  }, [busy]);
+  // The reply that arrives takes over the typing bubble's element (see stepTypingSlot).
+  const typingSlot = useRef<TypingSlotState>(INITIAL_TYPING_SLOT);
+  const { typingKey, claimed } = useMemo(() => {
+    const step = stepTypingSlot(typingSlot.current, messages, busy && typingBusy);
+    typingSlot.current = step.state;
+    return { typingKey: step.typingKey, claimed: step.state.claimed };
+  }, [messages, busy, typingBusy]);
+  const keep = useMemo(() => new Set(claimed.keys()), [claimed]);
+  const sendOrigin = useRef<SendOrigin | null>(null);
+  const conversation = useMemo(
+    () => ({ key: threadKey, messages, requests: [], hasMoreMessages: false }),
+    [threadKey, messages],
+  );
+  const { scroll, onScroll, stopFollowing } = useMessageMotion(conversation, busy, typingKey, {
+    keep,
+    sendOrigin,
   });
+  const latestAssistant = messages.findLast((message) => message.role === "assistant");
   return (
-    <div
-      ref={scroll}
-      className="agent-message-scroll"
-      onScroll={(event) => {
-        const element = event.currentTarget;
-        atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
-      }}
-    >
-      <div className="agent-messages" role="log" aria-live="polite" aria-relevant="additions text">
-        {rows.length === 0 ? (
-          <Hero onExample={onExample} />
-        ) : (
-          rows.map((row, index) => {
-            const text = row.role === "user" ? row.text : stripProposal(row.text);
-            const isLatestAssistant =
-              row.role === "assistant" &&
-              rows.findLastIndex((candidate) => candidate.role === "assistant") === index;
-            return (
-              <div
-                key={row.id}
-                className={cn("agent-message-row", index >= initialCount && "agent-enter")}
-                data-owner={row.role === "user"}
-              >
-                {text && (
-                  <div className="agent-bubble" data-owner={row.role === "user"}>
-                    {row.role === "assistant" ? (
-                      <div className="agent-markdown">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    <>
+      <div
+        ref={scroll}
+        className="agent-message-scroll messages-timeline-scroll scroll-fade-y"
+        onScroll={onScroll}
+        onWheel={stopFollowing}
+        onTouchStart={stopFollowing}
+      >
+        <div
+          className="agent-messages"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
+          {messages.length === 0 && !typingKey ? (
+            <Hero onExample={onExample} />
+          ) : (
+            conversationRows(messages).map(({ message, separator, grouped }) => {
+              const text = message.role === "user" ? message.text : stripProposal(message.text);
+              return (
+                <Fragment key={claimed.get(message.id) ?? message.id}>
+                  <div
+                    data-message-id={message.id}
+                    className="agent-message-row"
+                    data-owner={message.role === "user"}
+                    data-grouped={grouped}
+                  >
+                    {separator && (
+                      <div className="agent-separator">
+                        <time dateTime={message.createdAt}>{separator}</time>
                       </div>
-                    ) : (
-                      text
+                    )}
+                    {message.role === "assistant" && !grouped && (
+                      <span className="agent-message-face" aria-hidden>
+                        <AgentFace {...face} size={22} />
+                      </span>
+                    )}
+                    {text && (
+                      <div
+                        className="agent-bubble"
+                        data-owner={message.role === "user"}
+                        data-streaming={message.streaming || undefined}
+                      >
+                        {message.role === "assistant" ? (
+                          <div className="agent-markdown">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          text
+                        )}
+                      </div>
+                    )}
+                    {message.id === latestAssistant?.id && proposal && (
+                      <div className={cn("w-full", text && "mt-2")}>
+                        <AgentProposalCard
+                          ref={cardRef}
+                          proposal={proposal}
+                          seed={seed}
+                          modelName={modelName}
+                          creating={creating}
+                          onCreate={onCreate}
+                        />
+                      </div>
                     )}
                   </div>
-                )}
-                {isLatestAssistant && proposal && (
-                  <div className={cn("w-full", text && "mt-3")}>
-                    <AgentProposalCard
-                      ref={cardRef}
-                      proposal={proposal}
-                      seed={seed}
-                      modelName={modelName}
-                      creating={creating}
-                      onCreate={onCreate}
-                    />
-                  </div>
-                )}
+                </Fragment>
+              );
+            })
+          )}
+          {typingKey && (
+            <div
+              key={typingKey}
+              data-message-id={typingKey}
+              className="agent-message-row"
+              data-owner={false}
+              data-grouped={messages.at(-1)?.role === "assistant"}
+            >
+              {messages.at(-1)?.role !== "assistant" && (
+                <span className="agent-message-face" aria-hidden>
+                  <AgentFace {...face} state="thinking" size={22} />
+                </span>
+              )}
+              <div className="agent-bubble" data-owner={false}>
+                <AgentTypingDots />
               </div>
-            );
-          })
-        )}
-        {busy && rows.length > 0 && !rows.at(-1)?.streaming && (
-          <p className="agent-working agent-enter" role="status">
-            <LoaderCircleIcon size={13} className="agent-spinner" />
-            <span>Thinking…</span>
-          </p>
-        )}
+              {workingOn && (
+                <span key={workingOn} className="agent-typing-hint agent-morph">
+                  {workingOn}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+      {children(sendOrigin)}
+    </>
   );
 }
 
 function Hero({ onExample }: { onExample: (text: string) => void }) {
   return (
     <div className="agent-conversation-empty agent-enter gap-3">
-      <AgentFace
-        seed="new-friend"
-        expression="curieux"
-        color="currentColor"
-        paper="none"
-        size={72}
-        className="text-foreground/90"
-      />
       <span className="text-base text-foreground">Tell me what to take care of.</span>
       <span>
         Describe the job in a sentence. I'll pick a face, a name and a schedule; change anything by
@@ -431,19 +540,28 @@ const MIN_HEIGHT = 78;
 const MAX_HEIGHT = 208;
 const noop = () => {};
 
-/** The agent composer's card around a plain prompt, without an agent to pick models for. */
+/** The agent composer's card around a plain prompt, with the builder's model picker. */
 function BuilderComposer({
+  environmentId,
+  projectId,
+  modelSelection,
+  onModelChange,
   placeholder,
   disabled,
   sending,
   onSend,
 }: {
+  environmentId: EnvironmentId;
+  projectId: ProjectId | null;
+  modelSelection: ModelSelection | null;
+  onModelChange: (selection: ModelSelection) => void;
   placeholder: string;
   disabled: boolean;
   sending: boolean;
-  onSend: (text: string) => Promise<void>;
+  onSend: (text: string, from: DOMRect | null) => Promise<void>;
 }) {
   const [text, setText] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const element = textarea.current;
@@ -455,8 +573,9 @@ function BuilderComposer({
   const submit = async () => {
     const outgoing = text.trim();
     if (!outgoing || sending || disabled) return;
+    const from = textarea.current?.getBoundingClientRect() ?? null;
     setText("");
-    await onSend(outgoing);
+    await onSend(outgoing, from);
     textarea.current?.focus();
   };
   return (
@@ -495,25 +614,41 @@ function BuilderComposer({
                   className="-m-1 block w-[calc(100%+0.5rem)] resize-none overflow-y-auto bg-transparent p-1 font-(family-name:--font-composer,var(--font-sans)) text-(length:--font-size-prompt,var(--text-sm)) leading-relaxed text-foreground placeholder:text-placeholder/75 focus:outline-none max-sm:pointer-coarse:text-(length:--font-size-prompt-touch)"
                 />
               </div>
-              <div className="flex items-center justify-end px-3 pb-3 sm:px-4 sm:pb-4">
-                <ComposerPrimaryActions
-                  compact={false}
-                  canOperateThread={!disabled}
-                  pendingAction={null}
-                  isRunning={false}
-                  canInterrupt={false}
-                  showPlanFollowUpPrompt={false}
-                  promptHasText={text.trim().length > 0}
-                  isSendBusy={sending}
-                  sendDisabledReason={null}
-                  isConnecting={false}
-                  isEnvironmentUnavailable={disabled}
-                  isPreparingWorktree={false}
-                  hasSendableContent={text.trim().length > 0}
-                  onPreviousPendingQuestion={noop}
-                  onInterrupt={noop}
-                  onImplementPlanInNewThread={noop}
-                />
+              <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 px-3 pb-3 sm:gap-0 sm:px-4 sm:pb-4">
+                <div className="relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {modelSelection && (
+                    <LiveModelControls
+                      environmentId={environmentId}
+                      projectId={projectId}
+                      selection={modelSelection}
+                      disabled={disabled}
+                      unavailable={false}
+                      pickerOpen={pickerOpen}
+                      onPickerOpenChange={setPickerOpen}
+                      onChange={onModelChange}
+                    />
+                  )}
+                </div>
+                <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
+                  <ComposerPrimaryActions
+                    compact={false}
+                    canOperateThread={!disabled}
+                    pendingAction={null}
+                    isRunning={false}
+                    canInterrupt={false}
+                    showPlanFollowUpPrompt={false}
+                    promptHasText={text.trim().length > 0}
+                    isSendBusy={sending}
+                    sendDisabledReason={null}
+                    isConnecting={false}
+                    isEnvironmentUnavailable={disabled}
+                    isPreparingWorktree={false}
+                    hasSendableContent={text.trim().length > 0}
+                    onPreviousPendingQuestion={noop}
+                    onInterrupt={noop}
+                    onImplementPlanInNewThread={noop}
+                  />
+                </div>
               </div>
             </div>
           </ComposerSurface.Main>

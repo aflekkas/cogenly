@@ -81,6 +81,8 @@ export interface AgentContact extends AgentListItem {
   approvals: ReadonlyArray<AgentApproval>;
   /** A run in its conversation or Work waits on an approval or answer, known before `requests` load. */
   waitingInRun?: boolean;
+  /** What the agent is doing right now, from its running tool call, for the typing hint. */
+  workingOn?: string | null;
 }
 /** What the agent's Details sheet reads: open items, activity, projects. */
 export interface AgentWorkspaceView {

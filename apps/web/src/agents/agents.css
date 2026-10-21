@@ -1,4 +1,8 @@
 /* Feature-owned controls share the app's palette and typography. */
+/* The conversation root. --agent-accent (set inline from the agent's face colour)
+   tints the owner's bubbles, the send button and the composer glow; the pinned
+   identity floats over the transcript, which reaches up under it by
+   --chat-header-overlap and fades out across that band (messages-timeline-scroll). */
 @utility agent-conversation {
   position: relative;
   display: flex;
@@ -10,6 +14,98 @@
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  --chat-header-overlap: 6.5rem;
+  --agent-accent: var(--primary);
+  --agent-accent-foreground: var(--primary-foreground);
+  --agent-accent-soft: color-mix(in srgb, var(--agent-accent) 28%, transparent);
+  --color-send-top: var(--agent-accent);
+  --color-send-bottom: color-mix(in srgb, var(--agent-accent) 82%, black);
+  --color-send-top-hover: color-mix(in srgb, var(--agent-accent) 90%, white);
+  --color-send-bottom-hover: var(--agent-accent);
+  --color-send-foreground: var(--agent-accent-foreground);
+}
+/* The composer keeps its glow, tinted with the agent: a soft ring at rest and a
+   fuller one while writing. */
+.agent-conversation [data-slot="composer-shell"] {
+  --chat-composer-outline: color-mix(in srgb, var(--agent-accent) 30%, var(--border));
+  --surface-raised-shadow:
+    0 0 0 1px color-mix(in srgb, var(--agent-accent) 14%, transparent),
+    0 10px 28px -14px color-mix(in srgb, var(--agent-accent) 55%, transparent);
+  transition: --surface-raised-shadow var(--motion-duration-base) --theme(--ease-standard);
+}
+.agent-conversation [data-slot="composer-shell"]:focus-within {
+  --surface-raised-shadow:
+    0 0 0 1px color-mix(in srgb, var(--agent-accent) 30%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--agent-accent) 12%, transparent),
+    0 12px 32px -14px color-mix(in srgb, var(--agent-accent) 65%, transparent);
+}
+/* The pinned identity: the face centred at the top, the name in a pill under it
+   and a quiet status line, floating over the transcript with no bar of its own.
+   Pointer events pass through to the transcript except on its controls. */
+@utility agent-identity {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  height: var(--chat-header-overlap);
+  padding: 8px 12px 0;
+  pointer-events: none;
+}
+.agent-identity > * {
+  pointer-events: auto;
+}
+@utility agent-identity-person {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 6px;
+  pointer-events: none;
+}
+.agent-identity-person > * {
+  pointer-events: auto;
+}
+@utility agent-identity-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 14rem;
+  border: 0;
+  border-radius: 999px;
+  padding: 3px 8px 3px 10px;
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) --theme(--ease-standard),
+    color var(--motion-duration-fast) --theme(--ease-standard);
+}
+.agent-identity-name:hover {
+  background: var(--muted);
+}
+.agent-identity-name:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.agent-identity-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-identity-name > svg {
+  flex: none;
+  opacity: 0.6;
+}
+@utility agent-identity-status {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--muted-foreground);
 }
 @utility agent-message-scroll {
   flex: 1;
@@ -25,50 +121,129 @@
 @utility agent-messages {
   max-width: var(--chat-content-max-width);
   margin: 0 auto;
-  padding: 21px var(--chat-content-inset) 26px;
+  padding: calc(var(--chat-header-overlap, 0px) + 12px) var(--chat-content-inset) 20px;
   display: flex;
   flex-direction: column;
   min-height: 100%;
   justify-content: flex-end;
 }
+/* A row: the agent's bubbles on the left with a gutter for its face, which
+   shows beside the first bubble of a group; the owner's on the right. */
 @utility agent-message-row {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  margin-top: 13px;
+  margin-top: 10px;
   min-width: 0;
+  padding-left: 30px;
 }
 .agent-message-row[data-grouped="true"] {
-  margin-top: 4px;
+  margin-top: 2px;
 }
 .agent-message-row[data-owner="true"] {
   align-items: flex-end;
+  padding-left: 0;
+}
+@utility agent-message-face {
+  position: absolute;
+  left: 0;
+  bottom: 1px;
 }
 @utility agent-separator {
   align-self: stretch;
   text-align: center;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
-  padding: 14px 0 22px;
+  padding: 10px 0 14px;
   letter-spacing: 0.015em;
 }
+/* Both sides share the app's message-bubble spec; grouping sharpens the
+   corners toward the sender. */
 @utility agent-bubble {
-  max-width: 75%;
-  padding: 12px 17px;
-  border-radius: 23px 23px 23px 8px;
+  @apply message-bubble;
+  position: relative;
   background: var(--secondary);
   color: var(--foreground);
-  font-size: 16px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
   white-space: pre-wrap;
+  border-bottom-left-radius: 0.375rem;
+  transform-origin: bottom left;
+  transition:
+    background-color var(--motion-duration-base) --theme(--ease-standard),
+    color var(--motion-duration-base) --theme(--ease-standard);
 }
 .agent-bubble[data-owner="true"] {
-  border-radius: 23px 23px 8px 23px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  max-width: 75%;
+  border-radius: 1.125rem;
+  border-bottom-right-radius: 0.375rem;
+  background: var(--agent-accent);
+  color: var(--agent-accent-foreground);
+  transform-origin: bottom right;
+}
+.agent-bubble[data-owner="true"] a {
+  color: inherit;
+}
+/* The typing bubble: three dots that pulse in sequence, scaling in softly where
+   the next agent bubble will be. Reduced motion: the dots only fade. */
+@utility agent-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 1.45em;
+  transition: scale var(--motion-duration-base) --theme(--ease-spring);
+  @starting-style {
+    scale: 0.8;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+.agent-typing > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--agent-accent) 55%, var(--muted-foreground));
+  animation: agent-typing-dot 1.1s --theme(--ease-standard) infinite both;
+}
+.agent-typing > i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.agent-typing > i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes agent-typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    translate: 0 0;
+  }
+  30% {
+    opacity: 1;
+    translate: 0 -3px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-typing > i {
+    animation-name: agent-typing-fade;
+  }
+}
+@keyframes agent-typing-fade {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+/* A faint one-line activity hint under the typing bubble ("Looking up…"). */
+@utility agent-typing-hint {
+  margin: 4px 0 0 2px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  opacity: 0.8;
 }
 @utility agent-markdown {
   white-space: normal;
@@ -136,9 +311,9 @@
   border: 1px solid var(--border);
 }
 @utility agent-delivery {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted-foreground);
-  padding: 4px 7px 0;
+  padding: 3px 6px 0;
 }
 @utility agent-source {
   display: flex;
@@ -356,11 +531,6 @@
     padding: 12px 16px 20px;
   }
   .agent-bubble {
-    max-width: 85%;
-    font-size: 16px;
-    padding: 10px 14px;
-  }
-  .agent-bubble[data-owner="true"] {
     max-width: 85%;
   }
   .agent-composer-area {

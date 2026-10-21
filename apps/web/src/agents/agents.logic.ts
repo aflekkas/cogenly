@@ -203,3 +203,68 @@ export function resolveAgentModelStatus(
     providerName,
   };
 }
+
+// Typing slot -----------------------------------------------------------------
+
+/**
+ * Where the agent's next bubble will be. While the agent works and no reply is
+ * streaming yet, a typing bubble sits at the end of the transcript under a slot
+ * key; the reply that then arrives takes that same key, so React keeps the
+ * element and the typing bubble grows into the message instead of being replaced.
+ */
+export interface TypingSlotState {
+  /** The next slot key's number. */
+  slot: number;
+  /** Message ids rendered under a slot key, so later renders keep the element. */
+  claimed: ReadonlyMap<string, string>;
+  /** The slot key the typing bubble showed under on the previous step, if any. */
+  showing: string | null;
+  /** Message ids seen on the previous step. */
+  seen: ReadonlySet<string>;
+}
+
+export const INITIAL_TYPING_SLOT: TypingSlotState = {
+  slot: 0,
+  claimed: new Map(),
+  showing: null,
+  seen: new Set(),
+};
+
+/** Whether a typing bubble belongs at the end: the agent works and nothing of its reply is in yet. */
+export function typingVisible(
+  messages: ReadonlyArray<Pick<AgentMessage, "role" | "streaming">>,
+  busy: boolean,
+) {
+  if (!busy) return false;
+  const last = messages.at(-1);
+  return !(last?.role === "assistant" && last.streaming);
+}
+
+/**
+ * One step: a new assistant message that arrives while the typing bubble shows
+ * claims its slot key; afterwards the bubble, if still needed, moves on to a new key.
+ */
+export function stepTypingSlot(
+  state: TypingSlotState,
+  messages: ReadonlyArray<Pick<AgentMessage, "id" | "role" | "streaming">>,
+  busy: boolean,
+): { state: TypingSlotState; typingKey: string | null } {
+  let { slot, showing } = state;
+  const claimed = new Map(state.claimed);
+  const seen = new Set(messages.map((message) => message.id));
+  const arrived = messages.filter(
+    (message) => message.role === "assistant" && !state.seen.has(message.id),
+  );
+  const claimant = arrived.at(-1);
+  if (showing !== null && claimant && state.seen.size > 0) {
+    claimed.set(claimant.id, showing);
+    slot += 1;
+    showing = null;
+  }
+  const visible = typingVisible(messages, busy);
+  const typingKey = visible ? (showing ?? `typing-${slot}`) : null;
+  return {
+    state: { slot, claimed, showing: typingKey, seen },
+    typingKey,
+  };
+}

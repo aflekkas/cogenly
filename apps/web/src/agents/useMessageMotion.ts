@@ -1,21 +1,52 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, type RefObject } from "react";
 import { observeResize } from "~/lib/observeResize";
-import type { AgentContact } from "./agents.types";
-import { agentContactKey } from "./agents.logic";
+import type { AgentMessage } from "./agents.types";
 
-/** Animate only appended live messages; hydration and paginated history stay still. */
+// --ease-spring and --motion-duration-* in index.css.
+const SPRING = "cubic-bezier(0.22, 1, 0.36, 1)";
+const SEND_MS = 300;
+const REPLY_MS = 300;
+const REPLY_STAGGER_MS = 60;
+const GROW_MS = 160;
+const REDUCED = "(prefers-reduced-motion: reduce)";
+
+/** Where a text left the composer, taken as it was sent, so its bubble can arrive from there. */
+export interface SendOrigin {
+  rect: DOMRect;
+  messageId: string;
+}
+
+/**
+ * Texting-grade motion for an agent conversation, on the rows the owner just
+ * caused: a sent text travels from the composer into its bubble (a FLIP on the
+ * composer's rect), a reply rises out of the typing bubble and consecutive replies
+ * stagger, a streaming bubble grows smoothly, and the transcript follows the
+ * newest bubble. Hydration, paginated history and remounts stay still. Rows under
+ * `keep` (a reply that took over the typing bubble's element) are left alone so
+ * the morph is theirs. Opacity only under reduced motion.
+ */
 export function useMessageMotion(
-  agent: AgentContact,
+  conversation: {
+    key: string;
+    messages: ReadonlyArray<AgentMessage>;
+    requests: ReadonlyArray<{ id: string }>;
+    hasMoreMessages?: boolean | undefined;
+  },
   busy: boolean,
-  /** Rows after the last message, such as a pending model switch, that also keep the view pinned. */
+  /** Rows after the last message, such as a pending model switch or the typing bubble, that also keep the view pinned. */
   trailing: string | null = null,
+  options: {
+    keep?: ReadonlySet<string> | undefined;
+    sendOrigin?: RefObject<SendOrigin | null> | undefined;
+  } = {},
 ) {
-  const key = agentContactKey(agent);
-  const { messages, requests, hasMoreMessages } = agent;
+  const { key, messages, requests, hasMoreMessages } = conversation;
+  const { keep, sendOrigin } = options;
   const scroll = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const following = useRef(false);
   const viewportHeight = useRef(0);
+  const bubbleHeights = useRef(new Map<string, number>());
   const previous = useRef<{
     key: string;
     hydrated: boolean;
@@ -36,35 +67,104 @@ export function useMessageMotion(
       ...messages.map((message) => message.id),
       ...requests.map((request) => request.id),
     ]);
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduced = window.matchMedia(REDUCED).matches;
     const lastIndex = messages.findIndex((message) => message.id === before?.lastId);
-    const appended = new Set(
-      messages
-        .filter(
-          (message, index) =>
-            !reset &&
-            !before?.ids.has(message.id) &&
-            ((before?.hydrated && index > lastIndex) || message.optimistic),
-        )
-        .map((message) => message.id),
+    const appended = messages.filter(
+      (message, index) =>
+        !reset &&
+        !before?.ids.has(message.id) &&
+        !keep?.has(message.id) &&
+        ((before?.hydrated && index > lastIndex) || message.optimistic),
     );
-    if (!reset && before?.hydrated) {
-      for (const request of requests) {
-        if (!before.ids.has(request.id)) appended.add(request.id);
+    const appendedRequests =
+      !reset && before?.hydrated ? requests.filter((request) => !before.ids.has(request.id)) : [];
+    const rowFor = (id: string) =>
+      element.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
+    let replyIndex = 0;
+    for (const message of appended) {
+      const row = rowFor(message.id);
+      const bubble = row?.querySelector<HTMLElement>(".agent-bubble") ?? row;
+      if (!row || !bubble) continue;
+      if (reduced) {
+        row.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: SPRING });
+        continue;
       }
-    }
-    if (!reduced && appended.size) {
-      for (const row of element.querySelectorAll<HTMLElement>("[data-message-id]")) {
-        if (!appended.has(row.dataset.messageId!)) continue;
-        row.animate(
+      const origin = sendOrigin?.current;
+      if (sendOrigin && message.role === "user" && origin?.messageId === message.id) {
+        // The text travels from where it was typed into its bubble, filling in as it lands.
+        sendOrigin.current = null;
+        const to = bubble.getBoundingClientRect();
+        const dx = origin.rect.left - to.left;
+        const dy = origin.rect.top - to.top;
+        const sx = Math.max(0.2, Math.min(1.5, origin.rect.width / Math.max(to.width, 1)));
+        const sy = Math.max(0.2, Math.min(1.5, origin.rect.height / Math.max(to.height, 1)));
+        bubble.animate(
           [
-            { opacity: 0, transform: "translateY(10px)" },
-            { opacity: 1, transform: "translateY(0)" },
+            {
+              transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
+              opacity: 0.55,
+              transformOrigin: "top left",
+            },
+            { transform: "none", opacity: 1, transformOrigin: "top left" },
           ],
-          { duration: 260, easing: "cubic-bezier(0.16, 1, 0.3, 1)" },
+          { duration: SEND_MS, easing: SPRING },
         );
+        continue;
       }
+      if (message.role === "user") {
+        bubble.animate(
+          [
+            { opacity: 0, transform: "translateY(12px) scale(0.96)" },
+            { opacity: 1, transform: "none" },
+          ],
+          { duration: SEND_MS, easing: SPRING },
+        );
+        continue;
+      }
+      // A reply rises into place; a burst of replies lands one after another.
+      bubble.animate(
+        [
+          { opacity: 0, transform: "translateY(8px) scale(0.94)" },
+          { opacity: 1, transform: "none" },
+        ],
+        {
+          duration: REPLY_MS,
+          easing: SPRING,
+          delay: replyIndex * REPLY_STAGGER_MS,
+          fill: "backwards",
+        },
+      );
+      replyIndex += 1;
     }
+    for (const request of appendedRequests) {
+      rowFor(request.id)?.animate(
+        reduced
+          ? [{ opacity: 0 }, { opacity: 1 }]
+          : [
+              { opacity: 0, transform: "translateY(8px)" },
+              { opacity: 1, transform: "none" },
+            ],
+        { duration: REPLY_MS, easing: SPRING },
+      );
+    }
+    // Streaming text grows its bubble smoothly rather than in steps.
+    const heights = bubbleHeights.current;
+    const live = new Set<string>();
+    for (const message of messages) {
+      if (!message.streaming) continue;
+      live.add(message.id);
+      const bubble = rowFor(message.id)?.querySelector<HTMLElement>(".agent-bubble");
+      if (!bubble) continue;
+      const height = bubble.offsetHeight;
+      const last = heights.get(message.id);
+      heights.set(message.id, height);
+      if (!reduced && last !== undefined && last !== height && !keep?.has(message.id))
+        bubble.animate([{ height: `${last}px` }, { height: `${height}px` }], {
+          duration: GROW_MS,
+          easing: SPRING,
+        });
+    }
+    for (const id of heights.keys()) if (!live.has(id)) heights.delete(id);
     const prepended =
       !reset &&
       before?.hydrated &&
@@ -96,7 +196,7 @@ export function useMessageMotion(
       busy,
       trailing,
     };
-  }, [key, messages, requests, hasMoreMessages, busy, trailing]);
+  }, [key, messages, requests, hasMoreMessages, busy, trailing, keep, sendOrigin]);
   useLayoutEffect(() => {
     const element = scroll.current;
     if (!element) return;
@@ -104,7 +204,7 @@ export function useMessageMotion(
     return observeResize(element, () => {
       viewportHeight.current = element.clientHeight;
       if (!atBottom.current) return;
-      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const reduced = window.matchMedia(REDUCED).matches;
       following.current = !reduced;
       element.scrollTo({ top: element.scrollHeight, behavior: reduced ? "instant" : "smooth" });
     });

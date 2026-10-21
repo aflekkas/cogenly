@@ -10,6 +10,8 @@ import {
   modelDisplayName,
   resolveAgentModelStatus,
   agentStatusLabel,
+  INITIAL_TYPING_SLOT,
+  stepTypingSlot,
 } from "./agents.logic";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -227,5 +229,34 @@ describe("agentStatusLabel", () => {
   it("asks for approval while the agent waits on an owner decision", () => {
     const approval = { id: "approval-1" } as AgentContact["approvals"][number];
     expect(status({ approvals: [approval] })).toBe("Needs approval");
+  });
+});
+
+describe("typing slot", () => {
+  const user = (id: string) => ({ id, role: "user" as const, streaming: false });
+  const reply = (id: string, streaming = false) => ({ id, role: "assistant" as const, streaming });
+
+  it("shows while the agent works and hands its key to the reply that arrives", () => {
+    let step = stepTypingSlot(INITIAL_TYPING_SLOT, [user("u1")], false);
+    expect(step.typingKey).toBeNull();
+    step = stepTypingSlot(step.state, [user("u1")], true);
+    expect(step.typingKey).toBe("typing-0");
+    // The reply streams in: it takes the slot's key and the bubble is gone.
+    step = stepTypingSlot(step.state, [user("u1"), reply("a1", true)], true);
+    expect(step.typingKey).toBeNull();
+    expect(step.state.claimed.get("a1")).toBe("typing-0");
+    // Still working after the reply (a tool call): a fresh slot.
+    step = stepTypingSlot(step.state, [user("u1"), reply("a1")], true);
+    expect(step.typingKey).toBe("typing-1");
+    step = stepTypingSlot(step.state, [user("u1"), reply("a1"), reply("a2")], false);
+    expect(step.typingKey).toBeNull();
+    expect(step.state.claimed.get("a2")).toBe("typing-1");
+    expect(step.state.claimed.get("a1")).toBe("typing-0");
+  });
+
+  it("never claims history loaded while nothing was showing", () => {
+    const step = stepTypingSlot(INITIAL_TYPING_SLOT, [reply("old")], false);
+    expect(step.state.claimed.size).toBe(0);
+    expect(step.typingKey).toBeNull();
   });
 });

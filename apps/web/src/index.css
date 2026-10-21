@@ -233,6 +233,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* Overlays (popup-motion, dialogs, sheets) enter on drawer and leave on
      popup-exit, a quicker, simpler ease-in-out. */
   --ease-popup-exit: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Messaging motion: a critically damped spring for bubbles that travel
+     (a sent text rising out of the composer, a reply growing out of the typing
+     bubble). Quick to leave, no overshoot, a soft settle; pair with ~300ms. */
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
   /* The composer's elevation: a soft drop pulled in under the surface, shared
      by the composer, its context strip and attached banners. */
   --shadow-composer: 0 12px 28px -18px rgb(0 0 0 / 40%);
@@ -891,6 +895,19 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
 
 @utility animate-message-send-label {
   animation: message-send-fade var(--motion-duration-fast) --theme(--ease-out) 90ms both;
+}
+
+/* One message bubble for every transcript: regular chats' user messages and
+   both sides of an agent conversation. Body size, 9px by 14px inside, a radius
+   scaled to that, and no more than ~70% of the lane. Grouping and colours are
+   the caller's. */
+@utility message-bubble {
+  max-width: 72%;
+  padding: 0.5625rem 0.875rem;
+  border-radius: 1.125rem;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 /* Enter motion for disclosure content that mounts when opened (inline

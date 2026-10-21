@@ -2777,7 +2777,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       ) : null}
       <div
         className={cn(
-          "corner-glow relative max-w-[80%] rounded-2xl [--corner-glow:4%] border border-(--surface-edge,rgb(255_255_255/4%)) bg-message shadow-(--surface-halo,none) px-4.5 py-3.5 text-message-foreground transition-opacity duration-200 ease-out",
+          "message-bubble corner-glow relative [--corner-glow:4%] border border-(--surface-edge,rgb(255_255_255/4%)) bg-message shadow-(--surface-halo,none) text-message-foreground transition-opacity duration-200 ease-out",
           unconfirmed && "opacity-80",
         )}
         data-message-pending={unconfirmed ? "true" : undefined}
