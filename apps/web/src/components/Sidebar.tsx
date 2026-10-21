@@ -931,8 +931,8 @@ function ChatListRevealSentinel(props: { onReveal: () => void }) {
  * with a status slot at its end. A running
  * turn shows a small spinner, a reply you have not seen shows a blue dot, a
  * chat waiting on you an amber one; an unread reply also makes the title
- * heavier. Everything else (rename, pin, archive, Start Work) lives in the
- * context menu.
+ * heavier. A pinned chat carries a small muted pin before the status slot.
+ * Everything else (rename, pin, archive, Start Work) lives in the context menu.
  */
 const SidebarChatRow = memo(function SidebarChatRow(props: {
   thread: SidebarThreadSummary;
@@ -994,7 +994,9 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
             ? "Needs input"
             : isUnread
               ? "Unread"
-              : null;
+              : thread.pinnedAt != null
+                ? "Pinned"
+                : null;
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
     statusLabel,
@@ -1135,6 +1137,12 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
           )}
           <SidebarChatProjectLine project={props.folder} animate={props.animateFolder} />
         </span>
+        {thread.pinnedAt != null ? (
+          <PinIcon
+            aria-hidden
+            className="swap-motion size-3 shrink-0 text-sidebar-muted-foreground/60"
+          />
+        ) : null}
         <SidebarChatStatusSlot
           isRunning={isRunning}
           dot={needsYou ? "warning" : isUnread ? "info" : null}
@@ -4839,18 +4847,7 @@ export default function Sidebar() {
                         item.section === "active" ? chatDateGroupOf?.(thread) : null;
                       if (dateGroup) {
                         items.push(
-                          <SidebarModeGroupLabel
-                            key={`chat-date:${dateGroup}`}
-                            // Pinned is marked with a filled pin in the unread blue.
-                            icon={
-                              dateGroup === "pinned" ? (
-                                <PinIcon
-                                  aria-hidden
-                                  className="-mr-1 size-3 shrink-0 fill-current text-info"
-                                />
-                              ) : undefined
-                            }
-                          >
+                          <SidebarModeGroupLabel key={`chat-date:${dateGroup}`}>
                             {CHAT_DATE_GROUP_LABELS[dateGroup]}
                           </SidebarModeGroupLabel>,
                         );
