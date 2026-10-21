@@ -32,10 +32,10 @@ import { ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
 import {
-  DEFAULT_PREVIEW_APPEARANCE,
+  BrowserAppearanceSetting,
+  DEFAULT_BROWSER_APPEARANCE_SETTING,
   DEFAULT_PREVIEW_ZOOM_FACTOR,
   FILL_PREVIEW_VIEWPORT,
-  PreviewAppearancePreference,
   PreviewViewportSetting,
   PreviewZoomFactor,
 } from "./preview.ts";
@@ -235,8 +235,8 @@ export const ClientSettingsSchema = Schema.Struct({
   browserDefaultZoomFactor: PreviewZoomFactor.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PREVIEW_ZOOM_FACTOR)),
   ),
-  browserDefaultAppearance: PreviewAppearancePreference.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PREVIEW_APPEARANCE)),
+  browserDefaultAppearance: BrowserAppearanceSetting.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_APPEARANCE_SETTING)),
   ),
   browserRecordingFrameRate: BrowserRecordingFrameRate.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_RECORDING_FRAME_RATE)),
@@ -1480,7 +1480,7 @@ export const ClientSettingsPatch = Schema.Struct({
   panelAnimationDurationMs: Schema.optionalKey(PanelAnimationDurationMs),
   browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),
   browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),
-  browserDefaultAppearance: Schema.optionalKey(PreviewAppearancePreference),
+  browserDefaultAppearance: Schema.optionalKey(BrowserAppearanceSetting),
   browserRecordingFrameRate: Schema.optionalKey(BrowserRecordingFrameRate),
   browserRecordingShowKeyPresses: Schema.optionalKey(Schema.Boolean),
   browserRecordingShowMousePresses: Schema.optionalKey(Schema.Boolean),

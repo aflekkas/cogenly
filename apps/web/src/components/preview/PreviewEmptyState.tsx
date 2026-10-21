@@ -41,7 +41,7 @@ export function PreviewEmptyState({
       <div
         // Fills the surface body outright: it sits beside an absolutely placed
         // page surface, so it takes the same box rather than a percentage height.
-        className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 pb-(--workspace-topbar-height) text-center"
+        className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 pb-20 text-center"
         data-preview-empty-state
       >
         <Globe className="mb-1 size-4 text-muted-foreground" />

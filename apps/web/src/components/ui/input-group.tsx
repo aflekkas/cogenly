@@ -26,6 +26,11 @@ const inputGroupVariants = cva(
           "dropdown-glass rounded-2xl has-[input:focus-visible,textarea:focus-visible]:ring-0 has-[input:focus-visible,textarea:focus-visible]:border-[color-mix(in_srgb,var(--contrast-foreground)_18%,transparent)]",
         ghost:
           "border-transparent bg-transparent shadow-none hover:bg-muted/40 has-[input:focus-visible,textarea:focus-visible]:bg-background",
+        // A toolbar field (an address bar): invisible at rest, a soft fill on
+        // hover, and on focus the same fill with a hairline and a 1px ring
+        // rather than the form field's heavier ring.
+        toolbar:
+          "border-transparent bg-transparent shadow-none hover:bg-muted/40 has-[input:focus-visible,textarea:focus-visible]:border-border/60 has-[input:focus-visible,textarea:focus-visible]:bg-muted/40 has-[input:focus-visible,textarea:focus-visible]:ring-1 has-[input:focus-visible,textarea:focus-visible]:ring-ring/30",
       },
     },
   },

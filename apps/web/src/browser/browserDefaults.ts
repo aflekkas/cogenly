@@ -18,6 +18,7 @@ import {
   resolveBrowserProfiles,
   type BrowserProfile,
   type DesktopPreviewTabDefaults,
+  type BrowserAppearanceSetting,
   type PreviewAppearancePreference,
   type PreviewViewportSetting,
 } from "@t3tools/contracts";
@@ -33,7 +34,7 @@ import { resolveResponsiveBrowserViewportSize } from "./browserViewportLayout";
 export interface BrowserDefaults {
   readonly viewport: PreviewViewportSetting;
   readonly zoomFactor: number;
-  readonly appearance: PreviewAppearancePreference;
+  readonly appearance: BrowserAppearanceSetting;
   readonly autoShowFloatingPreview: boolean;
   readonly profiles: ReadonlyArray<BrowserProfile>;
   readonly profileId: string;
@@ -42,7 +43,7 @@ export interface BrowserDefaults {
 const toBrowserDefaults = (settings: {
   readonly browserDefaultViewport: PreviewViewportSetting;
   readonly browserDefaultZoomFactor: number;
-  readonly browserDefaultAppearance: PreviewAppearancePreference;
+  readonly browserDefaultAppearance: BrowserAppearanceSetting;
   readonly browserAutoShowFloatingPreview: boolean;
   readonly browserProfiles: ReadonlyArray<BrowserProfile>;
   readonly browserDefaultProfileId: string;
@@ -98,7 +99,24 @@ export function useBrowserDefaults(): BrowserDefaults {
 export function browserDefaultTabState(
   defaults: BrowserDefaults = getBrowserDefaults(),
 ): DesktopPreviewTabDefaults {
-  return { zoomFactor: defaults.zoomFactor, colorScheme: defaults.appearance };
+  return {
+    zoomFactor: defaults.zoomFactor,
+    colorScheme: resolveBrowserAppearance(defaults.appearance),
+  };
+}
+
+/**
+ * What a tab is actually told to prefer. "Match Cogenly" becomes the app's
+ * resolved theme (read off the document when no theme is passed, for the
+ * imperative open paths); the rest pass through.
+ */
+export function resolveBrowserAppearance(
+  appearance: BrowserAppearanceSetting,
+  appTheme: "light" | "dark" = document.documentElement.classList.contains("dark")
+    ? "dark"
+    : "light",
+): PreviewAppearancePreference {
+  return appearance === "match" ? appTheme : appearance;
 }
 
 /**

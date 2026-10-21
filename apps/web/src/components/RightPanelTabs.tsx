@@ -37,6 +37,7 @@ import {
   useEffect,
   useEffectEvent,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -44,7 +45,11 @@ import {
 
 import { isElectron } from "~/env";
 import type { DesktopPreviewOverlay } from "~/previewStateStore";
-import { surfaceGroupOf, type RightPanelSurface } from "~/rightPanelStore";
+import {
+  surfaceGroupOf,
+  type RightPanelSurface,
+  type RightPanelSurfaceGroup,
+} from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { resolveShortcutCommand, type ShortcutMatchContext } from "~/keybindings";
 import { readLocalApi } from "~/localApi";
@@ -64,6 +69,8 @@ import {
 } from "~/components/ui/menu";
 import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { ScrollArea } from "~/components/ui/scroll-area";
+import { PanOnHoverText } from "~/components/sidebar/PanOnHoverText";
+import { resolveTabWidths, TAB_ICON_WIDTH } from "./rightPanelTabWidths";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { useTheme } from "~/hooks/useTheme";
 import { useDeviceState } from "~/state/device";
@@ -346,6 +353,7 @@ function SortableTab({
   surfaceId,
   disabled,
   className,
+  style,
   ...props
 }: ComponentProps<"div"> & { surfaceId: string; disabled: boolean }) {
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -357,10 +365,54 @@ function SortableTab({
       {...props}
       {...listeners}
       ref={setNodeRef}
-      style={{ transform: CSS.Translate.toString(transform), transition }}
+      // The strip sizes the tab (width); the drag adds its own translate.
+      style={{ ...style, transform: CSS.Translate.toString(transform), transition }}
       className={cn(className, isDragging && "relative z-10")}
     />
   );
+}
+
+/** The tab strip's own motion: widths, arrivals and departures, on the base token. */
+const TAB_MOTION_MS = 220;
+const TAB_MOTION_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
+const reducedMotion = () =>
+  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** The "+" button, its gap and its margin: what a strip keeps clear of its tabs. */
+const NEW_TAB_ALLOWANCE = 24 + 2 + 2;
+
+interface LeavingTab {
+  readonly surface: RightPanelSurface;
+  /** The tab it followed, so it folds shut in its old place. */
+  readonly afterId: string | null;
+  readonly width: number;
+}
+
+/**
+ * A closed tab's place, folding shut over the strip's motion so the tabs
+ * after it slide over rather than jump. Inert: it is only geometry.
+ */
+function LeavingTabSlot({ width, onDone }: { width: number; onDone: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || reducedMotion()) {
+      onDone();
+      return;
+    }
+    const animation = element.animate(
+      [
+        { width: `${width}px`, opacity: 1 },
+        { width: "0px", opacity: 0 },
+      ],
+      { duration: TAB_MOTION_MS, easing: TAB_MOTION_EASING, fill: "forwards" },
+    );
+    animation.onfinish = onDone;
+    return () => animation.cancel();
+    // Plays once, for the width it closed at.
+    // eslint-disable-next-line react/exhaustive-effect-dependencies -- a mount-only animation
+  }, []);
+  return <div ref={ref} aria-hidden className="h-9 shrink-0 overflow-hidden" />;
 }
 
 /** Shown only when an open panel has nothing in it: the same choices as "+", as buttons. */
@@ -417,6 +469,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const tabIdPrefix = useId();
   const [renamingDevice, setRenamingDevice] = useState<string | null>(null);
   const [hasOverflow, setHasOverflow] = useState(false);
+  const [stripWidth, setStripWidth] = useState<number | null>(null);
+  const [leavingTabs, setLeavingTabs] = useState<readonly LeavingTab[]>([]);
 
   // The row only lists the active group's surfaces: the header switches groups.
   const activeSurface =
@@ -435,6 +489,107 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const browserOption = offeredOptions.find((option) => option.kind === "browser") ?? null;
   const canAdd = offeredOptions.length > 0;
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+
+  // Tabs are sized from the strip's measured width, not from how many there
+  // are: every tab keeps its title until the strip runs out of room, then all
+  // shrink evenly, and only below a readable width do the inactive ones become
+  // icons (rightPanelTabWidths). Width changes transition; a strip that still
+  // does not fit scrolls.
+  useEffect(() => {
+    const viewport = tabScrollViewport(tabListRef.current);
+    if (!viewport) return;
+    const update = () => setStripWidth(viewport.clientWidth);
+    update();
+    return observeResize(viewport, update);
+  }, []);
+  const activeIndex = groupSurfaces.findIndex((surface) => surface.id === props.activeSurfaceId);
+  const tabWidths =
+    stripWidth === null
+      ? null
+      : resolveTabWidths(
+          groupSurfaces.length,
+          activeIndex,
+          stripWidth - (canAdd && props.open !== false ? NEW_TAB_ALLOWANCE : 0),
+        );
+
+  // Arrivals grow from nothing and departures fold shut in place, so the
+  // tabs beside them slide rather than jump. A switch to another group of
+  // tabs is a different strip, not an arrival, and plays nothing.
+  const seenTabsRef = useRef<{ group: RightPanelSurfaceGroup | null; ids: string[] } | null>(null);
+  const lastTabWidthsRef = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    const ids = groupSurfaces.map((surface) => surface.id);
+    const seen = seenTabsRef.current;
+    seenTabsRef.current = { group: activeGroup, ids };
+    const list = tabListRef.current;
+    const sameGroup = seen !== null && seen.group === activeGroup;
+    if (sameGroup && list && !reducedMotion()) {
+      const previous = new Set<string>(seen.ids);
+      for (const id of ids) {
+        if (previous.has(id)) continue;
+        const element = list.querySelector<HTMLElement>(
+          `[data-surface-id="${window.CSS.escape(id)}"]`,
+        );
+        if (!element) continue;
+        const width = element.getBoundingClientRect().width;
+        element.animate(
+          [
+            { width: "0px", opacity: 0 },
+            { width: `${width}px`, opacity: 1 },
+          ],
+          { duration: TAB_MOTION_MS, easing: TAB_MOTION_EASING },
+        );
+      }
+      const current = new Set<string>(ids);
+      const gone = seen.ids
+        .map((id, index) => ({ id, afterId: seen.ids[index - 1] ?? null }))
+        .filter(({ id }) => !current.has(id));
+      if (gone.length > 0) {
+        setLeavingTabs((leaving) => [
+          ...leaving,
+          ...gone.flatMap(({ id, afterId }) => {
+            const width = lastTabWidthsRef.current.get(id);
+            const surface = props.surfaces.find((entry) => (entry.id as string) === id);
+            return width && surface ? [{ surface, afterId, width }] : [];
+          }),
+        ]);
+      }
+    }
+    if (list) {
+      for (const element of list.querySelectorAll<HTMLElement>("[data-surface-id]")) {
+        const id = element.dataset.surfaceId;
+        if (id) lastTabWidthsRef.current.set(id, element.getBoundingClientRect().width);
+      }
+    }
+  });
+  const dismissLeaving = useCallback(
+    (id: string) => setLeavingTabs((leaving) => leaving.filter((entry) => entry.surface.id !== id)),
+    [],
+  );
+  // The strip in order: current tabs, with each leaving slot after the tab it followed.
+  const tabItems = useMemo(() => {
+    const items: Array<
+      | { kind: "tab"; surface: RightPanelSurface; index: number }
+      | { kind: "leaving"; entry: LeavingTab }
+    > = [];
+    const placed = new Set<LeavingTab>();
+    const place = (afterId: string | null) => {
+      for (const entry of leavingTabs) {
+        if (placed.has(entry) || entry.afterId !== afterId) continue;
+        placed.add(entry);
+        items.push({ kind: "leaving", entry });
+      }
+    };
+    place(null);
+    groupSurfaces.forEach((surface, index) => {
+      items.push({ kind: "tab", surface, index });
+      place(surface.id);
+    });
+    for (const entry of leavingTabs) {
+      if (!placed.has(entry)) items.push({ kind: "leaving", entry });
+    }
+    return items;
+  }, [groupSurfaces, leavingTabs]);
 
   // rightPanel.new opens a browser tab, the common case; a thread without a
   // browser gets the "+" menu instead so the shortcut still adds something.
@@ -818,10 +973,24 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               className="flex h-full w-full items-center gap-0.5"
               onKeyDown={handleTabListKeyDown}
             >
-              {groupSurfaces.map((surface, index) => {
+              {tabItems.map((item) => {
+                if (item.kind === "leaving") {
+                  const { entry } = item;
+                  return (
+                    <LeavingTabSlot
+                      key={`leaving:${entry.surface.id}`}
+                      width={entry.width}
+                      onDone={() => dismissLeaving(entry.surface.id)}
+                    />
+                  );
+                }
+                const { surface, index } = item;
                 const active = surface.id === props.activeSurfaceId;
                 const pending = props.pendingSurfaceIds.has(surface.id);
                 const title = surfaceTitle(surface, props.previewSessions);
+                const width = tabWidths?.[index];
+                // Icon-only: the strip is out of room and this tab is not the selected one.
+                const compact = width === TAB_ICON_WIDTH;
                 const previewTabId = previewTabIdOf(surface, props.previewSessions);
                 // Desktop state is keyed by the session id, but desktop actions
                 // must be addressed with the runtime id.
@@ -834,6 +1003,22 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 // One tab stop for the whole strip: the selected tab, or the
                 // first one while nothing is selected.
                 const tabStop = active || (props.activeSurfaceId === null && index === 0);
+                const icon = (
+                  <span className="relative flex size-3 shrink-0 items-center justify-center">
+                    <SurfaceIcon
+                      surface={surface}
+                      sessions={props.previewSessions}
+                      desktopByTabId={props.desktopByTabId}
+                      theme={resolvedTheme}
+                    />
+                    {pending ? (
+                      <span
+                        className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
+                        aria-hidden
+                      />
+                    ) : null}
+                  </span>
+                );
                 return (
                   <SortableTab
                     key={surface.id}
@@ -843,9 +1028,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     id={`${tabIdPrefix}-tab-${index}`}
                     aria-selected={active}
                     aria-controls={active ? `${tabIdPrefix}-panel` : undefined}
+                    aria-label={title}
                     tabIndex={tabStop ? 0 : -1}
                     data-surface-id={surface.id}
                     data-active-tab={active}
+                    data-compact={compact ? "" : undefined}
                     onClick={(event) => {
                       // The close and mute buttons inside the tab act on their own.
                       if (event.target instanceof Element && event.target.closest("button")) return;
@@ -858,34 +1045,41 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     onMouseDown={handleTabMouseDown}
                     onAuxClick={(event) => handleTabAuxClick(event, surface)}
                     onContextMenu={(event) => handleTabContextMenu(event, surface)}
+                    style={width === undefined ? undefined : { width: `${width}px` }}
                     className={cn(
-                      // Sized to its title up to a cap, like a browser tab; the
-                      // label folds away before a tab gets narrower than its
-                      // icon. The selected tab keeps its name, stands on the
-                      // strip's bottom edge in the panel's own background, and
-                      // is the only one with an outline. h-9 is TAB_HEIGHT.
-                      "group/tab @container/tab h-9 max-w-44 shrink basis-auto cursor-pointer rounded-t-xl border border-b-0 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                      // Sized by the strip (see tabWidths), like a browser tab; its
+                      // width eases between sizes. The selected tab keeps its name,
+                      // stands on the strip's bottom edge in the panel's own
+                      // background, and is the only one with an outline. h-9 is
+                      // TAB_HEIGHT.
+                      "group/tab h-9 shrink-0 cursor-pointer overflow-hidden rounded-t-xl border border-b-0 text-xs outline-none transition-[width] duration-(--motion-duration-base) ease-standard focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset motion-reduce:transition-none",
+                      width === undefined && "max-w-44",
                       active
-                        ? "min-w-28 border-border/60 bg-background text-foreground"
-                        : "min-w-9 border-transparent text-muted-foreground state-hover",
+                        ? "border-border/60 bg-background text-foreground"
+                        : "border-transparent text-muted-foreground state-hover",
                       ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
                     )}
                   >
-                    <div className="flex h-full items-center gap-1.5 pr-1.5 pl-3 @max-[4.5rem]/tab:justify-center @max-[4.5rem]/tab:px-0">
-                      <span className="relative flex size-3 shrink-0 items-center justify-center">
-                        <SurfaceIcon
-                          surface={surface}
-                          sessions={props.previewSessions}
-                          desktopByTabId={props.desktopByTabId}
-                          theme={resolvedTheme}
-                        />
-                        {pending ? (
-                          <span
-                            className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
-                            aria-hidden
-                          />
-                        ) : null}
-                      </span>
+                    <div className="flex h-full items-center gap-1.5 pr-1.5 pl-3 group-data-[compact]/tab:justify-center group-data-[compact]/tab:px-0">
+                      {compact ? (
+                        // Icon-only is the one case that needs the full title as a tooltip.
+                        <Tooltip>
+                          <TooltipTrigger render={<span className="flex" />}>{icon}</TooltipTrigger>
+                          <TooltipPopup>
+                            {surface.kind === "device" ? (
+                              <DeviceTabTooltip
+                                surface={surface}
+                                environmentId={props.environmentId}
+                                title={title}
+                              />
+                            ) : (
+                              title
+                            )}
+                          </TooltipPopup>
+                        </Tooltip>
+                      ) : (
+                        icon
+                      )}
                       {renamingDevice === surface.id ? (
                         <input
                           aria-label="Device tab name"
@@ -909,39 +1103,23 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           }}
                         />
                       ) : (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <span className="min-w-0 flex-1 truncate text-left @max-[4.5rem]/tab:hidden" />
-                            }
-                          >
-                            {title}
-                            {surface.kind === "terminal" &&
-                            (props.terminalLiveRunCount ?? 0) > 0 ? (
-                              // The live count rides in the title, with the strip's
-                              // own status dot, so the surface needs no header row.
-                              <span className="text-muted-foreground">
-                                {" · "}
-                                <span
-                                  aria-hidden
-                                  className="mb-px inline-block size-1.5 rounded-full bg-success align-middle"
-                                />{" "}
-                                {props.terminalLiveRunCount} running
-                              </span>
-                            ) : null}
-                          </TooltipTrigger>
-                          <TooltipPopup>
-                            {surface.kind === "device" ? (
-                              <DeviceTabTooltip
-                                surface={surface}
-                                environmentId={props.environmentId}
-                                title={title}
-                              />
-                            ) : (
-                              title
-                            )}
-                          </TooltipPopup>
-                        </Tooltip>
+                        // A truncated title pans on hover so it can be read in
+                        // place, like a sidebar row; no tooltip repeats it.
+                        <PanOnHoverText className="min-w-0 flex-1 text-left group-data-[compact]/tab:hidden">
+                          {title}
+                          {surface.kind === "terminal" && (props.terminalLiveRunCount ?? 0) > 0 ? (
+                            // The live count rides in the title, with the strip's
+                            // own status dot, so the surface needs no header row.
+                            <span className="text-muted-foreground">
+                              {" · "}
+                              <span
+                                aria-hidden
+                                className="mb-px inline-block size-1.5 rounded-full bg-success align-middle"
+                              />{" "}
+                              {props.terminalLiveRunCount} running
+                            </span>
+                          ) : null}
+                        </PanOnHoverText>
                       )}
                       {audio === "none" || !audioRuntimeTabId ? null : (
                         <Tooltip>
@@ -950,7 +1128,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                               <button
                                 type="button"
                                 tabIndex={-1}
-                                className="flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-muted @max-[4.5rem]/tab:hidden"
+                                className="flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-muted group-data-[compact]/tab:hidden"
                                 aria-label={audio === "muted" ? `Unmute ${title}` : `Mute ${title}`}
                                 onClick={() => {
                                   void previewBridge
@@ -970,15 +1148,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           </TooltipPopup>
                         </Tooltip>
                       )}
-                      {/* Shown on the selected tab and on hover, as in a browser;
-                          not a tab stop, since Delete closes the focused tab. */}
+                      {/* Shown on the selected tab and on hover, fading in; not a
+                          tab stop, since Delete closes the focused tab. */}
                       <button
                         type="button"
                         tabIndex={-1}
                         aria-label={`Close ${title}`}
                         onClick={() => props.onCloseSurface(surface)}
                         className={cn(
-                          "flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-opacity duration-(--motion-duration-fast) ease-out hover:bg-muted hover:text-foreground focus-visible:opacity-100 @max-[4.5rem]/tab:hidden",
+                          "flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-opacity duration-(--motion-duration-fast) ease-out hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-data-[compact]/tab:hidden",
                           !active && "opacity-0 group-hover/tab:opacity-100",
                         )}
                       >

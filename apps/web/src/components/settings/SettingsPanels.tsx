@@ -50,6 +50,7 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useTheme } from "../../hooks/useTheme";
+import { BrowserAppearanceSettingRow } from "./IntegrationsSettings";
 import { DEFAULT_APPEARANCE_MODE } from "../../theme";
 import {
   useScopedSettings,
@@ -1005,6 +1006,9 @@ export function AppearanceSettingsPanel() {
             ))}
           </div>
         </SettingsRow>
+        {/* Browser tabs follow this theme by default; the row is the same one
+            Integrations shows among the browser defaults. */}
+        <BrowserAppearanceSettingRow disabled={false} />
       </SettingsSection>
     </SettingsPageContainer>
   );

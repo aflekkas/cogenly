@@ -1,6 +1,6 @@
 "use client";
 
-import type { DesktopPreviewColorScheme } from "@t3tools/contracts";
+import type { BrowserAppearanceSetting, DesktopPreviewColorScheme } from "@t3tools/contracts";
 import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
 
 import { Button } from "~/components/ui/button";
@@ -21,9 +21,10 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
 const COLOR_SCHEME_OPTIONS: ReadonlyArray<{
-  value: DesktopPreviewColorScheme;
+  value: BrowserAppearanceSetting;
   label: string;
 }> = [
+  { value: "match", label: "Match Cogenly" },
   { value: "system", label: "System" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
@@ -54,8 +55,9 @@ interface Props {
   actions: PreviewMoreMenuActions;
   /** Current zoom factor as a number (1.0 = 100%). */
   zoomFactor: number;
-  /** Emulated `prefers-color-scheme` for the page. */
-  colorScheme: DesktopPreviewColorScheme;
+  /** The tab's appearance choice: "match" follows the app's theme, the rest emulate `prefers-color-scheme`. */
+  appearance: BrowserAppearanceSetting;
+  onAppearanceChange: (appearance: BrowserAppearanceSetting) => void;
   /** Fixed viewport modes expose the device toolbar and resize rails. */
   deviceToolbarVisible: boolean;
   /** Switches between fill-panel mode and a fixed responsive viewport. */
@@ -88,7 +90,8 @@ export function PreviewMoreMenu({
   enabled,
   actions,
   zoomFactor,
-  colorScheme,
+  appearance,
+  onAppearanceChange,
   deviceToolbarVisible,
   onToggleDeviceToolbar,
   nativePictureInPicture,
@@ -124,8 +127,8 @@ export function PreviewMoreMenu({
           <MenuSubTrigger disabled={disabled}>Appearance</MenuSubTrigger>
           <MenuSubPopup>
             <MenuRadioGroup
-              value={colorScheme}
-              onValueChange={(value) => actions.setColorScheme(value as DesktopPreviewColorScheme)}
+              value={appearance}
+              onValueChange={(value) => onAppearanceChange(value as BrowserAppearanceSetting)}
             >
               {COLOR_SCHEME_OPTIONS.map((option) => (
                 <MenuRadioItem key={option.value} value={option.value}>

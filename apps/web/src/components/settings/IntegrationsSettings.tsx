@@ -26,7 +26,7 @@ import {
   DEFAULT_BROWSER_LINK_TARGET,
   DEFAULT_BROWSER_RECORDING_FRAME_RATE,
   DEFAULT_BROWSER_VIEWPORT,
-  DEFAULT_PREVIEW_APPEARANCE,
+  DEFAULT_BROWSER_APPEARANCE_SETTING,
   DEFAULT_PREVIEW_ZOOM_FACTOR,
   FILL_PREVIEW_VIEWPORT,
   PREVIEW_VIEWPORT_MAX_AREA,
@@ -37,7 +37,7 @@ import {
   isBuiltInBrowserProfileId,
   resolveBrowserProfiles,
   type BrowserImportSource,
-  type PreviewAppearancePreference,
+  type BrowserAppearanceSetting,
   type PreviewViewportSetting,
 } from "@t3tools/contracts";
 import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
@@ -176,7 +176,8 @@ const RESPONSIVE_SEED_SIZE = { width: 1280, height: 800 } as const;
 
 const NO_GROUPING: Intl.NumberFormatOptions = { useGrouping: false };
 
-const APPEARANCE_LABELS: Readonly<Record<PreviewAppearancePreference, string>> = {
+export const APPEARANCE_LABELS: Readonly<Record<BrowserAppearanceSetting, string>> = {
+  match: "Match Cogenly",
   system: "System",
   light: "Light",
   dark: "Dark",
@@ -444,19 +445,21 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
   );
 }
 
-function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) {
+export function BrowserAppearanceSettingRow({ disabled }: { readonly disabled: boolean }) {
   const appearance = useClientSettings((settings) => settings.browserDefaultAppearance);
   const updateSettings = useUpdatePrimarySettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-default-appearance")}
-      description="The color scheme pages are told to prefer. System follows your OS setting."
+      description="The color scheme new tabs are told to prefer. Match Cogenly follows the app's theme; System follows your OS setting."
       resetAction={
-        !disabled && appearance !== DEFAULT_PREVIEW_APPEARANCE ? (
+        !disabled && appearance !== DEFAULT_BROWSER_APPEARANCE_SETTING ? (
           <SettingResetButton
             label="default browser appearance"
-            onClick={() => updateSettings({ browserDefaultAppearance: DEFAULT_PREVIEW_APPEARANCE })}
+            onClick={() =>
+              updateSettings({ browserDefaultAppearance: DEFAULT_BROWSER_APPEARANCE_SETTING })
+            }
           />
         ) : null
       }
@@ -465,7 +468,7 @@ function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) 
           disabled={disabled}
           value={appearance}
           onValueChange={(value) => {
-            if (value === "system" || value === "light" || value === "dark") {
+            if (value === "match" || value === "system" || value === "light" || value === "dark") {
               updateSettings({ browserDefaultAppearance: value });
             }
           }}
@@ -1534,7 +1537,7 @@ export function IntegrationsSettingsPanel() {
       <BrowserProfilesSetting disabled={previewDefaultsDisabled} />
       <BrowserViewportSetting disabled={previewDefaultsDisabled} />
       <BrowserZoomSetting disabled={previewDefaultsDisabled} />
-      <BrowserAppearanceSetting disabled={previewDefaultsDisabled} />
+      <BrowserAppearanceSettingRow disabled={previewDefaultsDisabled} />
       <BrowserRecordingFrameRateSetting disabled={previewDefaultsDisabled} />
       <BrowserRecordingInputSettings disabled={previewDefaultsDisabled} />
       <BrowserLinkTargetSetting disabled={previewDefaultsDisabled} />

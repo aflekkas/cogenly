@@ -66,6 +66,8 @@ import {
   subscribeBrowserViewportChange,
 } from "~/browser/browserViewportActions";
 import { browserResponsiveViewportForToggle, useBrowserDefaults } from "~/browser/browserDefaults";
+import { previewAppearanceKey, usePreviewAppearanceStore } from "~/browser/previewAppearanceStore";
+import { useTheme } from "~/hooks/useTheme";
 import { BrowserDeviceToolbar } from "~/browser/BrowserDeviceToolbar";
 import { BROWSER_DEVICE_TOOLBAR_HEIGHT } from "~/browser/browserViewportLayout";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
@@ -375,6 +377,38 @@ export function PreviewView({
     },
     [adjustServerTab, serverZoomFactor],
   );
+
+  // "Match Cogenly": the tab follows the app's resolved theme. Only this
+  // client knows that theme, so the tab is told light or dark outright and
+  // told again whenever the theme changes. A tab with no choice of its own
+  // follows the browser default appearance setting.
+  const { resolvedTheme } = useTheme();
+  const appearanceKey = tabId ? previewAppearanceKey(threadRef.environmentId, tabId) : null;
+  const storedAppearanceMode = usePreviewAppearanceStore((state) =>
+    appearanceKey ? state.byTab[appearanceKey] : undefined,
+  );
+  const appearanceMode =
+    storedAppearanceMode ?? (browserDefaults.appearance === "match" ? "match" : "explicit");
+  const currentColorScheme = serverOwnsRendering
+    ? (snapshot?.colorScheme ?? "system")
+    : (desktopOverlay?.colorScheme ?? "system");
+  const canAdjustAppearance =
+    runtimeTabId !== null && (serverOwnsRendering || (desktopOverlay?.hasWebContents ?? false));
+  useEffect(() => {
+    if (appearanceMode !== "match" || !canAdjustAppearance || currentColorScheme === resolvedTheme)
+      return;
+    if (serverOwnsRendering) void adjustServerTab({ colorScheme: resolvedTheme });
+    else if (runtimeTabId)
+      void previewBridge?.setColorScheme(runtimeTabId, resolvedTheme).catch(() => undefined);
+  }, [
+    adjustServerTab,
+    appearanceMode,
+    canAdjustAppearance,
+    currentColorScheme,
+    resolvedTheme,
+    runtimeTabId,
+    serverOwnsRendering,
+  ]);
 
   const handleZoomIn = useCallback(() => {
     if (serverOwnsRendering) stepServerZoom(1);
@@ -1053,11 +1087,19 @@ export function PreviewView({
               zoomFactor={
                 serverOwnsRendering ? serverZoomFactor : (desktopOverlay?.zoomFactor ?? 1)
               }
-              colorScheme={
-                serverOwnsRendering
-                  ? (snapshot?.colorScheme ?? "system")
-                  : (desktopOverlay?.colorScheme ?? "system")
-              }
+              appearance={appearanceMode === "match" ? "match" : currentColorScheme}
+              onAppearanceChange={(next) => {
+                if (!appearanceKey) return;
+                const store = usePreviewAppearanceStore.getState();
+                if (next === "match") {
+                  store.setMode(appearanceKey, "match");
+                  if (currentColorScheme !== resolvedTheme)
+                    moreMenuActions.setColorScheme(resolvedTheme);
+                } else {
+                  store.setMode(appearanceKey, "explicit");
+                  moreMenuActions.setColorScheme(next);
+                }
+              }}
               deviceToolbarVisible={viewport._tag !== "fill"}
               onToggleDeviceToolbar={handleToggleDeviceToolbar}
               nativePictureInPicture={desktopOverlay?.pictureInPicture ?? false}

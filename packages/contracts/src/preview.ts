@@ -143,6 +143,15 @@ export type PreviewAppearancePreference = typeof PreviewAppearancePreference.Typ
 
 export const DEFAULT_PREVIEW_APPEARANCE: PreviewAppearancePreference = "system";
 
+/**
+ * The user's default appearance for new browser tabs. "match" follows the
+ * app's own resolved theme; only the client knows that theme, so it resolves
+ * "match" to light or dark before anything reaches a tab.
+ */
+export const BrowserAppearanceSetting = Schema.Literals(["match", "system", "light", "dark"]);
+export type BrowserAppearanceSetting = typeof BrowserAppearanceSetting.Type;
+export const DEFAULT_BROWSER_APPEARANCE_SETTING: BrowserAppearanceSetting = "match";
+
 /** A file a server tab downloaded, served by the tab's download route by this id. */
 const PreviewFileDownload = Schema.Struct({ id: Schema.String, fileName: Schema.String });
 

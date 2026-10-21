@@ -2,6 +2,7 @@ import { RefreshIcon } from "~/components/ui/refresh-icon";
 import {
   ArrowLeft,
   ArrowRight,
+  Bot,
   Camera,
   ExternalLink,
   Eye,
@@ -34,19 +35,30 @@ export interface PreviewControlState {
 }
 
 const CONTROL_PRESENTATION = {
-  you: { Icon: MousePointer2, hint: "You have control · click to hand it back" },
-  agent: { Icon: MousePointer2, hint: "Agent has control · click to take over" },
-  "another-viewer": { Icon: Eye, hint: "Another viewer has control" },
-  unclaimed: { Icon: Eye, hint: "Nobody has control · click to take it" },
+  you: {
+    Icon: MousePointer2,
+    hint: "You have control · click to hand the page to the agent",
+    handedOver: false,
+  },
+  agent: { Icon: Bot, hint: "Agent has control · click to take over", handedOver: true },
+  "another-viewer": { Icon: Eye, hint: "Another viewer has control", handedOver: false },
+  unclaimed: {
+    Icon: MousePointer2,
+    hint: "Handed to the agent · click to take control back",
+    handedOver: true,
+  },
 } as const;
 
 /**
- * The cursor alone says who drives the page: pressed while this viewer does,
- * with a small accent dot while the agent does. The words live in the tooltip
- * and the accessible name.
+ * One cursor says who drives the page. At rest (you drive) it is a plain
+ * ghost button; it is pressed, with an accent dot, while the page is handed
+ * over, whether the agent is driving right now or may take it. The words live
+ * in the tooltip and the accessible name. Releasing hands the page over
+ * without the agent having to be mid-action, so the server reports it as
+ * unclaimed until the agent acts.
  */
 function PreviewControlToggle({ control }: { control: PreviewControlState }) {
-  const { Icon, hint } = CONTROL_PRESENTATION[control.controller];
+  const { Icon, hint, handedOver } = CONTROL_PRESENTATION[control.controller];
   if (!control.canOperate) {
     return (
       <span role="status" className="shrink-0 px-1 text-xs text-muted-foreground">
@@ -60,14 +72,14 @@ function PreviewControlToggle({ control }: { control: PreviewControlState }) {
         <Toggle
           size="sm"
           variant="ghost"
-          pressed={control.controller === "you"}
+          pressed={handedOver}
           onPressedChange={control.onToggle}
           disabled={control.controller === "another-viewer"}
           aria-label={hint}
           data-preview-control={control.controller}
         >
           <Icon />
-          {control.controller === "agent" ? (
+          {handedOver ? (
             <span
               aria-hidden
               className="absolute top-1 right-1 size-1.5 rounded-full bg-primary ring-2 ring-background"
@@ -252,7 +264,7 @@ export function PreviewChromeRow({
 
         {leadingActions}
 
-        <InputGroup variant="ghost" className="group/address relative h-7 min-w-0 flex-1">
+        <InputGroup variant="toolbar" className="group/address relative h-7 min-w-0 flex-1">
           <InputGroupInput
             ref={inputRef}
             value={resting ? "" : inputFocused ? draft : url}
@@ -283,7 +295,7 @@ export function PreviewChromeRow({
           {resting ? (
             <div
               aria-hidden
-              className="pointer-events-none absolute inset-y-0 left-0 right-0 flex items-center gap-1.5 px-2 text-sm"
+              className="pointer-events-none absolute inset-y-0 left-0 right-0 flex items-center gap-1.5 px-2.5 text-sm"
             >
               {address ? (
                 <>
