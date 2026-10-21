@@ -3,6 +3,7 @@ import {
   useEffect,
   useState,
   useSyncExternalStore,
+  type ComponentProps,
   type CSSProperties,
   type ReactNode,
 } from "react";
@@ -41,6 +42,12 @@ import {
   useListColumnLayoutStore,
 } from "./sidebar/listColumnLayoutStore";
 import { modeSwitchCrossfadeRunning } from "./sidebar/modes/modeSwitchMotion";
+import {
+  ListColumnPeekController,
+  listColumnPeekPanelProps,
+  useListColumnPeekSurface,
+} from "./sidebar/ListColumnPeek";
+import { listColumnPeekAvailable } from "./sidebar/listColumnPeek.logic";
 import { useProjects } from "../state/entities";
 import {
   clampThreadSidebarWidth,
@@ -235,6 +242,16 @@ function ListColumnAutoCollapse({
   return null;
 }
 
+/**
+ * The list column, which on a narrow window floats out over the page while the
+ * pointer is on the rail (see ListColumnPeek). Its own component, so a hover
+ * re-renders this frame and not the layout or the thread list.
+ */
+function ListColumnSidebar(props: ComponentProps<typeof Sidebar>) {
+  const peek = useListColumnPeekSurface();
+  return <Sidebar {...props} {...listColumnPeekPanelProps} peek={peek} />;
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
@@ -319,6 +336,15 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     listColumnWidth,
     rightPanelWidth: inlineRightPanelWidth,
   });
+  const peekAvailable = listColumnPeekAvailable({
+    navRailVisible,
+    listColumnOpen,
+    listColumnHidden: listSidebarHidden,
+    viewportWidth,
+    navRailWidth: titlebarLayout.navRailWidthPx,
+    listColumnWidth,
+    rightPanelWidth: inlineRightPanelWidth,
+  });
   const onListColumnOpenChange = (open: boolean) =>
     useListColumnLayoutStore.getState().applyOpenChange(sidebarMode, open);
   const sidebarProviderStyle = {
@@ -379,6 +405,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         cramped={mainColumnCramped && !listSidebarHidden}
         preferredOpen={preferredOpen}
       />
+      <ListColumnPeekController available={peekAvailable} pathname={pathname} />
       <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
       <ProjectProjectionRetention />
       {navRailVisible ? (
@@ -387,7 +414,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       {/* Stays mounted on full-width pages, hidden by data-list-column-hidden
             (index.css), so a return shows the list in place, without a remount
             or a slide. */}
-      <Sidebar
+      <ListColumnSidebar
         side="left"
         collapsible="offcanvas"
         data-app-sidebar=""
@@ -419,7 +446,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
             <ThreadSidebar />
           )}
         </div>
-      </Sidebar>
+      </ListColumnSidebar>
       {children}
       {/* Without the rail, or after the macOS traffic lights beside it. A page
             without the list column keeps the button in place, disabled. */}

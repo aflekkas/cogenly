@@ -2,6 +2,7 @@ import type { ConfirmDialogOptions, ContextMenuItem, LocalApi } from "@t3tools/c
 
 import { requestConfirmDialog } from "./confirmDialog";
 import { dismissContextMenu, showContextMenuFallback } from "./contextMenuFallback";
+import { trackContextMenu } from "./contextMenuOpen";
 import { readBrowserClientSettings, writeBrowserClientSettings } from "./clientPersistenceStorage";
 
 let cachedApi: LocalApi | undefined;
@@ -47,9 +48,11 @@ function createBrowserLocalApi(): LocalApi {
         position?: { x: number; y: number },
       ): Promise<T | null> => {
         if (window.desktopBridge) {
-          return window.desktopBridge.showContextMenu(items, position) as Promise<T | null>;
+          return trackContextMenu(
+            window.desktopBridge.showContextMenu(items, position) as Promise<T | null>,
+          );
         }
-        return showContextMenuFallback(items, position);
+        return trackContextMenu(showContextMenuFallback(items, position));
       },
       // A native desktop menu blocks keyboard input and closes on outside
       // interaction, so nothing to do there; the DOM fallback needs an explicit

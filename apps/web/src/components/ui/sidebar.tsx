@@ -231,6 +231,7 @@ function Sidebar({
   variant = "sidebar",
   collapsible = "offcanvas",
   resizable = false,
+  peek,
   className,
   children,
   ...props
@@ -239,6 +240,14 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
   resizable?: boolean | SidebarResizableOptions;
+  /**
+   * A collapsed offcanvas sidebar floating over the page without taking room:
+   * "open" shows it raised above the main pane, "closed" is its hidden state
+   * with the same transition. Pass it from just before opening until the close
+   * has settled, and leave it undefined otherwise so the toggle's own glide
+   * runs alone.
+   */
+  peek?: "open" | "closed" | undefined;
 }) {
   const { isMobile, state, openMobile, setOpenMobile, setMobileSheetElement } = useSidebar();
   const resolvedResizable = React.useMemo<SidebarResolvedResizableOptions | null>(() => {
@@ -318,6 +327,8 @@ function Sidebar({
     );
   }
 
+  const peeking = peek !== undefined && collapsible === "offcanvas" && state === "collapsed";
+
   return (
     <SidebarInstanceContext value={instanceContextValue}>
       <div
@@ -327,6 +338,7 @@ function Sidebar({
         data-slot="sidebar"
         data-state={state}
         data-variant={variant}
+        data-peek={peeking ? peek : undefined}
       >
         {/* This is what handles the sidebar gap on desktop */}
         <div
@@ -356,10 +368,25 @@ function Sidebar({
             // pane's content (SidebarProvider, panelFlip), so its edge is the
             // pane's moving edge. A closed panel is invisible, out of the tab
             // order; the flip keeps it visible until it is out of sight.
-            side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:-translate-x-full"
-              : "right-0 group-data-[collapsible=offcanvas]:translate-x-full",
-            "group-data-[collapsible=offcanvas]:invisible",
+            side === "left" ? "left-0" : "right-0",
+            peeking
+              ? cn(
+                  // Over the main pane and its raised controls; the nav rail
+                  // lifts above it so the column slides out from under it.
+                  "z-[45] shadow-(--surface-raised-shadow-floating) transition-[translate,visibility] motion-reduce:translate-x-0 motion-reduce:transition-[opacity,visibility]",
+                  peek === "open"
+                    ? "visible translate-x-0 duration-(--motion-duration-base) ease-drawer"
+                    : cn(
+                        "invisible duration-(--motion-duration-fast) ease-popup-exit motion-reduce:opacity-0",
+                        side === "left" ? "-translate-x-full" : "translate-x-full",
+                      ),
+                )
+              : cn(
+                  side === "left"
+                    ? "group-data-[collapsible=offcanvas]:-translate-x-full"
+                    : "group-data-[collapsible=offcanvas]:translate-x-full",
+                  "group-data-[collapsible=offcanvas]:invisible",
+                ),
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"

@@ -43,6 +43,11 @@ import { useSelectSidebarMode } from "./modes/useSelectSidebarMode";
 import { resolveVerticalTabIndex } from "./navRail.logic";
 import { useNavRailBadgeStore } from "./navRailState";
 import { decisionsWaitingLabel } from "../../agents/agentWorkspace.logic";
+import {
+  listColumnPeekRailHandlers,
+  useListColumnPeekOpen,
+  useListColumnPeekStore,
+} from "./ListColumnPeek";
 
 const RAIL_BUTTON_CLASS =
   "relative flex size-[42px] shrink-0 cursor-pointer items-center justify-center rounded-tile outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:size-4.5 [&_svg]:shrink-0";
@@ -107,13 +112,17 @@ export function SidebarNavRail({
   });
   const searchShortcut = shortcutLabelForCommand(keybindings, "commandPalette.toggle");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  // On a narrow window, hovering the rail floats the collapsed list column out
+  // (ListColumnPeek); a click while it is out switches it there without pinning it.
+  const peekAvailable = useListColumnPeekStore((store) => store.available);
+  const peekOpen = useListColumnPeekOpen();
 
   const selectMode = (next: SidebarMode) => {
     // A utility page hands the column back to the thread list.
     selectSidebarMode(next, { leaveUtilityPage: true });
     // Another mode restores its own remembered list column (see
     // listColumnLayoutStore); picking the current mode again opens a collapsed one.
-    if (next === mode && !open) setOpen(true);
+    if (next === mode && !open && !peekOpen) setOpen(true);
   };
 
   const handleTabsKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -163,7 +172,10 @@ export function SidebarNavRail({
       data-nav-rail=""
       className={cn(
         "relative z-20 hidden h-full w-(--nav-rail-width) shrink-0 flex-col items-center bg-nav-rail pb-2 text-sidebar-foreground md:flex",
+        // Above the floating list column, which slides out from under it.
+        peekAvailable && "z-[46]",
       )}
+      {...listColumnPeekRailHandlers}
     >
       {/* The titlebar row. It holds the sidebar toggle, sized and centred like
           the mode buttons. Where the macOS traffic lights own the row, it stays
@@ -272,11 +284,11 @@ export function SidebarNavRail({
             aria-current={onSettings ? "page" : undefined}
             onClick={() => {
               if (onSettings) {
-                if (!open) setOpen(true);
+                if (!open && !peekOpen) setOpen(true);
                 return;
               }
               crossfadeModeSwitch(() => {
-                if (!open) setOpen(true);
+                if (!open && !peekOpen) setOpen(true);
                 void navigate({ to: "/settings" });
                 return true;
               });
