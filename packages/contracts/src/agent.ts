@@ -11,6 +11,7 @@ import {
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { ProjectLabelId } from "./projectLabel.ts";
 import { RuntimeMode } from "./providerPolicy.ts";
 
 export const AgentId = TrimmedNonEmptyString.pipe(Schema.brand("AgentId"));
@@ -72,6 +73,11 @@ export const Agent = Schema.Struct({
   ...AgentFields,
   ...AgentPolicyFields,
   conversationThreadId: ThreadId,
+  /**
+   * The project folder the agent's conversation is filed in, read from the
+   * conversation thread's folder membership; it is never stored on the agent.
+   */
+  projectFolderId: Schema.NullOr(ProjectLabelId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   consecutiveFailures: Schema.Int,
@@ -86,6 +92,8 @@ export const AgentUpsertInput = Schema.Struct({
   responsibility: Schema.optional(AgentPolicyFields.responsibility),
   permissions: Schema.optional(AgentPermissions),
   notifyPolicy: Schema.optional(AgentPolicyFields.notifyPolicy),
+  /** Files the conversation in a project folder. Omit to keep it; null unfiles it. */
+  projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   /**
    * On create, the server opens with a hidden first turn from the agent
    * itself, so no fake owner greeting is needed. Ignored on edits.
@@ -104,6 +112,15 @@ export const AgentOwnProfileUpdateInput = Schema.Struct({
 });
 export type AgentOwnProfileUpdateInput = typeof AgentOwnProfileUpdateInput.Type;
 export const AgentKey = Schema.Struct({ id: AgentId });
+/**
+ * Re-file an agent's conversation in a project folder, or null for none. An
+ * agent has one ongoing conversation, so it moves instead of forking.
+ */
+export const AgentSetProjectInput = Schema.Struct({
+  id: AgentId,
+  projectFolderId: Schema.NullOr(ProjectLabelId),
+});
+export type AgentSetProjectInput = typeof AgentSetProjectInput.Type;
 export const AgentListItem = Schema.Struct({
   ...Agent.fields,
   unreadCount: Schema.Int,

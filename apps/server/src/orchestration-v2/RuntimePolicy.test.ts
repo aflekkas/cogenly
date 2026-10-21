@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import {
   type ModelSelection,
+  AgentId,
   type OrchestrationV2AppThread,
   ProjectId,
   ProjectLabelId,
@@ -283,6 +284,20 @@ it.layer(layerWithFiles)("RuntimePolicyV2 project manifest", (it) => {
         modelSelection,
       });
       assert.equal(resolved.cwd, "/projects/Manifest");
+    }),
+  );
+
+  it.effect("runs a filed agent conversation with the project dir as cwd", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const thread = makeThread({ now, worktreePath: "/scratch/agent" });
+      const resolved = yield* policy.resolve({
+        thread: { ...thread, agent: { id: AgentId.make("agent:filed"), role: "conversation" } },
+        modelSelection,
+      });
+      assert.equal(resolved.cwd, "/projects/Manifest");
+      assert.include(resolved.projectManifest ?? "", "<project_manifest>");
     }),
   );
 

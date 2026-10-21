@@ -31,6 +31,7 @@ interface Row {
   consecutive_failures: number;
   backoff_until: string | null;
   daily_run_cap: number;
+  project_folder_id?: string | null;
   unread_count: number;
   latest_message_json?: string | null;
 }
@@ -105,19 +106,19 @@ const make = Effect.gen(function* () {
       Effect.mapError(storeError),
     );
   const get = (id: AgentId) =>
-    sql<Row>`SELECT a.*, (SELECT json_object('id', m.message_id, 'role', m.role, 'text', substr(json_extract(m.payload_json, '$.text'), 1, 240), 'createdAt', m.created_at, 'updatedAt', m.updated_at) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role IN ('user', 'assistant') AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' ORDER BY m.created_at DESC, m.message_id DESC LIMIT 1) AS latest_message_json, (SELECT COUNT(*) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role = 'assistant' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' AND (m.updated_at, m.message_id) > (a.last_read_at, a.last_read_message_id)) AS unread_count FROM agents a WHERE a.agent_id = ${id}`.pipe(
+    sql<Row>`SELECT a.*, (SELECT f.folder_id FROM effective_thread_project_folders f WHERE f.thread_id = a.conversation_thread_id) AS project_folder_id, (SELECT json_object('id', m.message_id, 'role', m.role, 'text', substr(json_extract(m.payload_json, '$.text'), 1, 240), 'createdAt', m.created_at, 'updatedAt', m.updated_at) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role IN ('user', 'assistant') AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' ORDER BY m.created_at DESC, m.message_id DESC LIMIT 1) AS latest_message_json, (SELECT COUNT(*) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role = 'assistant' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' AND (m.updated_at, m.message_id) > (a.last_read_at, a.last_read_message_id)) AS unread_count FROM agents a WHERE a.agent_id = ${id}`.pipe(
       Effect.mapError(storeError),
       Effect.flatMap((rows) =>
         rows[0] ? fromRow(rows[0]) : Effect.fail(new AgentError({ message: "Agent not found." })),
       ),
     );
   const list = () =>
-    sql<Row>`SELECT a.*, (SELECT json_object('id', m.message_id, 'role', m.role, 'text', substr(json_extract(m.payload_json, '$.text'), 1, 240), 'createdAt', m.created_at, 'updatedAt', m.updated_at) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role IN ('user', 'assistant') AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' ORDER BY m.created_at DESC, m.message_id DESC LIMIT 1) AS latest_message_json, (SELECT COUNT(*) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role = 'assistant' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' AND (m.updated_at, m.message_id) > (a.last_read_at, a.last_read_message_id)) AS unread_count FROM agents a ORDER BY a.agent_id`.pipe(
+    sql<Row>`SELECT a.*, (SELECT f.folder_id FROM effective_thread_project_folders f WHERE f.thread_id = a.conversation_thread_id) AS project_folder_id, (SELECT json_object('id', m.message_id, 'role', m.role, 'text', substr(json_extract(m.payload_json, '$.text'), 1, 240), 'createdAt', m.created_at, 'updatedAt', m.updated_at) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role IN ('user', 'assistant') AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' ORDER BY m.created_at DESC, m.message_id DESC LIMIT 1) AS latest_message_json, (SELECT COUNT(*) FROM orchestration_v2_projection_messages m WHERE m.thread_id = a.conversation_thread_id AND m.role = 'assistant' AND m.streaming = 0 AND trim(json_extract(m.payload_json, '$.text')) <> '' AND (m.updated_at, m.message_id) > (a.last_read_at, a.last_read_message_id)) AS unread_count FROM agents a ORDER BY a.agent_id`.pipe(
       Effect.flatMap((rows) => Effect.forEach(rows, fromRow)),
       Effect.mapError(storeError),
     );
   const forThread = (id: ThreadId) =>
-    sql<Row>`SELECT a.* FROM agents a WHERE a.conversation_thread_id = ${id} OR EXISTS (SELECT 1 FROM agent_work_runs r WHERE r.agent_id = a.agent_id AND r.work_thread_id = ${id}) OR EXISTS (SELECT 1 FROM agent_run_threads r WHERE r.agent_id = a.agent_id AND r.thread_id = ${id}) LIMIT 1`.pipe(
+    sql<Row>`SELECT a.*, (SELECT f.folder_id FROM effective_thread_project_folders f WHERE f.thread_id = a.conversation_thread_id) AS project_folder_id FROM agents a WHERE a.conversation_thread_id = ${id} OR EXISTS (SELECT 1 FROM agent_work_runs r WHERE r.agent_id = a.agent_id AND r.work_thread_id = ${id}) OR EXISTS (SELECT 1 FROM agent_run_threads r WHERE r.agent_id = a.agent_id AND r.thread_id = ${id}) LIMIT 1`.pipe(
       Effect.flatMap((rows) => (rows[0] ? fromRow(rows[0]) : Effect.succeed(null))),
       Effect.mapError(storeError),
     );
@@ -215,7 +216,7 @@ const make = Effect.gen(function* () {
         return yield* get(agent.id);
       }).pipe(Effect.mapError(storeError)),
     save: (agent) =>
-      sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, ${encodeAgent(agent)}, 1, ${agent.dailyRunCap}) ON CONFLICT(agent_id) DO UPDATE SET payload_json = excluded.payload_json, daily_run_cap = excluded.daily_run_cap`.pipe(
+      sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, json_remove(${encodeAgent(agent)}, '$.projectFolderId'), 1, ${agent.dailyRunCap}) ON CONFLICT(agent_id) DO UPDATE SET payload_json = excluded.payload_json, daily_run_cap = excluded.daily_run_cap`.pipe(
         Effect.andThen(get(agent.id)),
         Effect.mapError(storeError),
       ),

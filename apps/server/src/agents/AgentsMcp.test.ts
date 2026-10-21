@@ -1,44 +1,121 @@
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  AgentId,
+  EnvironmentId,
+  ProjectId,
+  ProjectLabelId,
+  ProviderInstanceId,
+  ThreadId,
+  type Agent,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as Context from "effect/Context";
+import { Tool } from "effect/ai";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Invocation from "../mcp/McpInvocationContext.ts";
 import * as Access from "../mcp/McpToolAccess.ts";
 import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
+import * as Labels from "../projectLabels/ProjectLabelService.ts";
 import * as Service from "./AgentService.ts";
 import * as AgentsMcp from "./AgentsMcp.ts";
+import { agentFixture } from "./agent.testkit.ts";
 
 const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" };
 
-it.effect("lists agents even for a read-only client", () =>
+const folderId = ProjectLabelId.make("label:spawn");
+const filed: Agent = { ...agentFixture("filed"), projectFolderId: folderId };
+const listItem = (agent: Agent) => ({ ...agent, unreadCount: 0, latestMessage: null });
+const clientScope = (access: "read-only" | "full-access") =>
+  Layer.succeed(Invocation.McpInvocationContext, {
+    environmentId: EnvironmentId.make("environment"),
+    capabilities: new Set(["orchestration" as const]),
+    requestNamespace: "test",
+    issuedAt: 0,
+    thread: undefined,
+    client: { sessionId: "session", label: "Agent", access },
+  });
+const organizer = (access: "read-only" | "full-access", moves: Array<unknown>) =>
+  Layer.mergeAll(
+    clientScope(access),
+    Layer.mock(Threads.ThreadManagementService)({
+      getThreadShell: (id) => Effect.succeed(liveThreadShell(id)),
+    }),
+    Layer.mock(Labels.ProjectLabelService)({
+      list: () =>
+        Effect.succeed({
+          labels: [
+            {
+              id: folderId,
+              name: "Spawn Partners",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+              repositoryIds: [],
+              sourceLinks: [],
+              threadCount: 0,
+            },
+          ],
+        }),
+    }),
+    Layer.mock(Service.AgentService)({
+      list: () => Effect.succeed({ agents: [listItem(filed), listItem(agentFixture("loose"))] }),
+      setProject: (input) =>
+        Effect.sync(() => {
+          moves.push(input);
+          return { agent: { ...filed, projectFolderId: input.projectFolderId } };
+        }),
+    }),
+  );
+const run = (
+  dependencies: ReturnType<typeof organizer>,
+  name: "list_agents" | "update_agent_project",
+  args: object,
+) =>
   Effect.gen(function* () {
-    const dependencies = Layer.mergeAll(
-      Layer.succeed(Invocation.McpInvocationContext, {
-        environmentId: EnvironmentId.make("environment"),
-        capabilities: new Set(["orchestration" as const]),
-        requestNamespace: "test",
-        issuedAt: 0,
-        thread: undefined,
-        client: { sessionId: "session", label: "Agent", access: "read-only" as const },
-      }),
-      Layer.mock(Threads.ThreadManagementService)({
-        getThreadShell: (id) => Effect.succeed(liveThreadShell(id)),
-      }),
-      Layer.mock(Service.AgentService)({
-        list: () => Effect.succeed({ agents: [] }),
-      }),
-    );
     const toolkit = yield* AgentsMcp.toolkit.pipe(
       Effect.provide(
         Access.HandlersLayer.layer(AgentsMcp.handlers).pipe(Layer.provide(dependencies)),
       ),
     );
     const results = yield* toolkit
-      .handle("list_agents", {})
+      .handle(name, args as never)
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
-    expect(results.at(-1)?.result).toMatchObject({ agents: [] });
+    return results.at(-1)?.result;
+  });
+
+it.effect("lists agents with their project names, even for a read-only client", () =>
+  Effect.gen(function* () {
+    const result = yield* run(organizer("read-only", []), "list_agents", {});
+    expect(result).toMatchObject({
+      agents: [
+        { id: filed.id, projectFolderId: folderId, projectName: "Spawn Partners" },
+        { id: AgentId.make("agent:loose"), projectFolderId: null, projectName: null },
+      ],
+    });
+  }),
+);
+
+it.effect("moves an agent between projects as a mutating tool, refusing read-only clients", () =>
+  Effect.gen(function* () {
+    const refused: Array<unknown> = [];
+    expect(
+      yield* run(organizer("read-only", refused), "update_agent_project", {
+        id: filed.id,
+        projectFolderId: null,
+      }),
+    ).toMatchObject({ code: "capability_denied" });
+    expect(refused).toEqual([]);
+    const moves: Array<unknown> = [];
+    expect(
+      yield* run(organizer("full-access", moves), "update_agent_project", {
+        id: filed.id,
+        projectFolderId: null,
+      }),
+    ).toMatchObject({ agent: { id: filed.id, projectFolderId: null } });
+    expect(moves).toEqual([{ id: filed.id, projectFolderId: null }]);
+    const tool = AgentsMcp.toolkit.tools.update_agent_project;
+    expect(Context.get(tool.annotations, Tool.Readonly)).toBe(false);
   }),
 );
 

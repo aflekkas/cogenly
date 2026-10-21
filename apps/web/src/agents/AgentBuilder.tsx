@@ -1,9 +1,15 @@
 import { useNavigate } from "@tanstack/react-router";
-import type { EnvironmentId, ModelSelection, ProjectId, ThreadId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ModelSelection,
+  ProjectId,
+  ProjectLabelId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
-import { XIcon } from "lucide-react";
+import { FolderIcon, XIcon } from "lucide-react";
 import {
   Fragment,
   useCallback,
@@ -12,6 +18,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -26,6 +33,7 @@ import { SidebarInset } from "~/components/ui/sidebar";
 import { toastManager } from "~/components/ui/toast";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { cn, newMessageId, randomUUID } from "~/lib/utils";
+import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import { agentsRpc } from "~/rpc/agents";
 import { useThreadShells } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
@@ -39,11 +47,13 @@ import {
   canCreateProposal,
   proposalFromMessages,
   proposalFromTurnItems,
+  proposalProjectFolderId,
   proposalToDraft,
   proposalTriggers,
   stripProposal,
 } from "./agentBuilder.logic";
 import { AgentIdentity } from "./AgentIdentity";
+import { AgentProjectPicker, useAgentProjectFolders } from "./AgentProjectPicker";
 import { AgentProposalCard } from "./AgentProposalCard";
 import { AgentTypingDots } from "./AgentTypingBubble";
 import {
@@ -79,6 +89,8 @@ interface BuilderThread {
   environmentId: EnvironmentId;
   projectId: ProjectId;
   threadId: ThreadId;
+  /** The project folder the builder conversation was filed in. */
+  projectFolderId: ProjectLabelId | null;
 }
 
 /**
@@ -88,8 +100,17 @@ interface BuilderThread {
  * thread the server starts; once the agent exists the thread is removed. The page is
  * laid out like an agent's conversation, with the builder pinned at the top; its
  * neutral accent crossfades to the proposed agent's colour as the card assembles.
+ * Started from a project (`projectFolderId`), the conversation and the agent it
+ * proposes are filed there; the owner can change that before the first message, and
+ * on the card before creating.
  */
-export function AgentBuilder({ environmentId: requested }: { environmentId?: EnvironmentId }) {
+export function AgentBuilder({
+  environmentId: requested,
+  projectFolderId: requestedFolderId,
+}: {
+  environmentId?: EnvironmentId;
+  projectFolderId?: ProjectLabelId;
+}) {
   const navigate = useNavigate();
   const client = useAgentsClient();
   const { agents, models } = useAgents();
@@ -116,6 +137,13 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
   const [chosenModel, setChosenModel] = useState<ModelSelection | null>(null);
   const modelSelection = chosenModel ?? defaultModel;
   const cardRef = useRef<HTMLDivElement>(null);
+  // Where the builder is filed when it starts, and the owner's pick on the card.
+  const [startFolderId, setStartFolderId] = useState<ProjectLabelId | null>(
+    requestedFolderId ?? null,
+  );
+  const [cardFolderId, setCardFolderId] = useState<ProjectLabelId | null | undefined>(undefined);
+  const { folders } = useAgentProjectFolders(thread?.environmentId ?? environmentId, null);
+  const folderExists = (id: ProjectLabelId) => folders.some((entry) => entry.label.id === id);
   useEffect(() => setSidebarMode("agents"), [setSidebarMode]);
 
   const state = useEnvironmentThread(thread?.environmentId ?? null, thread?.threadId ?? null);
@@ -150,6 +178,14 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
   const face: AgentFaceProps = proposal?.face
     ? avatarFaceProps({ seed, ...proposal.face })
     : BUILDER_FACE;
+  const proposalFolderId = proposalProjectFolderId({
+    chosen: cardFolderId,
+    proposed: proposal?.projectFolderId,
+    builder: thread?.projectFolderId ?? null,
+    exists: folderExists,
+  });
+  // Only a folder still on the machine files the builder.
+  const startFolder = startFolderId !== null && folderExists(startFolderId) ? startFolderId : null;
 
   const send = useCallback(
     async (text: string) => {
@@ -173,13 +209,19 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
           if (!project) throw new Error("This machine can't start a conversation right now.");
           const result = await builderStart({
             environmentId,
-            input: { projectId: project.id, modelSelection, text },
+            input: {
+              projectId: project.id,
+              modelSelection,
+              text,
+              ...(startFolder ? { projectFolderId: startFolder } : {}),
+            },
           });
           if (result._tag === "Failure") throw squashAtomCommandFailure(result);
           setThread({
             environmentId,
             projectId: result.value.projectId,
             threadId: result.value.threadId,
+            projectFolderId: startFolder,
           });
           return;
         }
@@ -202,7 +244,16 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
         setSending(false);
       }
     },
-    [builderStart, environmentId, modelSelection, openScratchProject, sending, startTurn, thread],
+    [
+      builderStart,
+      environmentId,
+      modelSelection,
+      openScratchProject,
+      sending,
+      startFolder,
+      startTurn,
+      thread,
+    ],
   );
 
   const create = useCallback(async () => {
@@ -216,6 +267,7 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
           seed,
           modelSelection,
           projectId: thread.projectId,
+          projectFolderId: proposalFolderId,
         }),
         kickoff: true,
       };
@@ -249,7 +301,7 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
       // The server opens the agent's own first turn; nothing visible to send.
       setCreated(contact);
     }
-  }, [client, creating, modelSelection, proposal, seed, thread]);
+  }, [client, creating, modelSelection, proposal, proposalFolderId, seed, thread]);
 
   // The save returns before the live lists carry the agent; wait so the route can't
   // mistake the conversation for a missing thread, then leave and drop the builder thread.
@@ -308,6 +360,16 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
           seed={seed}
           proposal={proposal}
           modelName={modelName}
+          project={
+            // Nothing to pick on a machine without projects.
+            thread && folders.length > 0
+              ? {
+                  environmentId: thread.environmentId,
+                  value: proposalFolderId,
+                  onChange: setCardFolderId,
+                }
+              : null
+          }
           creating={creating}
           cardRef={cardRef}
           onCreate={() => void create()}
@@ -330,6 +392,12 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
                 projectId={thread?.projectId ?? null}
                 modelSelection={modelSelection}
                 onModelChange={setChosenModel}
+                // Filing is picked before the conversation starts; the card takes over after.
+                project={
+                  thread === null
+                    ? { value: startFolder, onChange: setStartFolderId, shown: folders.length > 0 }
+                    : null
+                }
                 placeholder={
                   thread
                     ? "Adjust anything, or ask for something else"
@@ -355,6 +423,7 @@ function Transcript({
   seed,
   proposal,
   modelName,
+  project,
   creating,
   cardRef,
   onCreate,
@@ -368,6 +437,7 @@ function Transcript({
   seed: string;
   proposal: ReturnType<typeof proposalFromMessages>;
   modelName: string | null;
+  project: ComponentProps<typeof AgentProposalCard>["project"];
   creating: boolean;
   cardRef: RefObject<HTMLDivElement | null>;
   onCreate: () => void;
@@ -456,6 +526,7 @@ function Transcript({
                           proposal={proposal}
                           seed={seed}
                           modelName={modelName}
+                          project={project}
                           creating={creating}
                           onCreate={onCreate}
                         />
@@ -522,6 +593,7 @@ function BuilderComposer({
   projectId,
   modelSelection,
   onModelChange,
+  project,
   placeholder,
   disabled,
   sending,
@@ -531,6 +603,12 @@ function BuilderComposer({
   projectId: ProjectId | null;
   modelSelection: ModelSelection | null;
   onModelChange: (selection: ModelSelection) => void;
+  /** The project the builder starts filed in, until its first message. */
+  project: {
+    value: ProjectLabelId | null;
+    onChange: (projectFolderId: ProjectLabelId | null) => void;
+    shown: boolean;
+  } | null;
   placeholder: string;
   disabled: boolean;
   sending: boolean;
@@ -603,6 +681,14 @@ function BuilderComposer({
                       onChange={onModelChange}
                     />
                   )}
+                  {project?.shown ? (
+                    <BuilderProjectPicker
+                      environmentId={environmentId}
+                      value={project.value}
+                      disabled={disabled}
+                      onChange={project.onChange}
+                    />
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1">
                   <ComposerPrimaryActions
@@ -630,6 +716,35 @@ function BuilderComposer({
         </ComposerSurface.Host>
       </ComposerSurface.Shell>
     </form>
+  );
+}
+
+/** The composer's project chip: where the builder and the agent it proposes are filed. */
+function BuilderProjectPicker(props: {
+  environmentId: EnvironmentId;
+  value: ProjectLabelId | null;
+  disabled: boolean;
+  onChange: (projectFolderId: ProjectLabelId | null) => void;
+}) {
+  const { current } = useAgentProjectFolders(props.environmentId, props.value);
+  return (
+    <AgentProjectPicker
+      environmentId={props.environmentId}
+      value={props.value}
+      onChange={props.onChange}
+      disabled={props.disabled}
+      aria-label={current ? `File in ${current.label.name}` : "File in a project"}
+      trigger={<Button type="button" variant="ghost-muted" size="xs" />}
+    >
+      <span key={current?.key ?? "none"} className="swap-motion flex min-w-0 items-center gap-1">
+        {current ? (
+          <ProjectFolderIcon color={current.label.color} className="size-3.5" />
+        ) : (
+          <FolderIcon />
+        )}
+        <span className="min-w-0 truncate">{current ? current.label.name : "No project"}</span>
+      </span>
+    </AgentProjectPicker>
   );
 }
 

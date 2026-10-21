@@ -223,6 +223,7 @@ describe("command permissions", () => {
     WS_METHODS.agentsDelete,
     WS_METHODS.agentsSend,
     WS_METHODS.agentsMarkRead,
+    WS_METHODS.agentsSetProject,
     WS_METHODS.agentsMemoryWrite,
     WS_METHODS.agentsMemoryForget,
     WS_METHODS.visualStateSet,

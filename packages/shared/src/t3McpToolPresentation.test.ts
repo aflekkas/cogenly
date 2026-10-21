@@ -65,6 +65,10 @@ describe("resolveT3McpToolPresentation", () => {
       displayName: "Start an agent builder",
       logo: "t3-code",
     });
+    expect(resolveT3McpToolPresentation("mcp__cogenly__update_agent_project")).toEqual({
+      displayName: "Move an agent to a project",
+      logo: "t3-code",
+    });
   });
 
   it("pretty prints project file tools", () => {

@@ -123,12 +123,13 @@ export const layerFromProjectStore: Layer.Layer<
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         const project = yield* projectFor(input.thread);
-        // A chat filed in a project runs with the project dir as its working
-        // directory, even when the thread keeps a scratch worktree path from
-        // before it was filed. Chats without a project keep scratch, and Work
-        // in a repo still runs in that repo's worktree.
+        // A chat or an agent's conversation filed in a project runs with the
+        // project dir as its working directory, even when the thread keeps a
+        // scratch worktree path from before it was filed. Unfiled ones keep
+        // scratch, and Work in a repo still runs in that repo's worktree.
         const cwd =
-          input.thread.surface === "chat" && project !== undefined
+          (input.thread.surface === "chat" || input.thread.agent?.role === "conversation") &&
+          project !== undefined
             ? project.dir
             : (input.thread.worktreePath ??
               (yield* projects.get(input.thread.projectId).pipe(

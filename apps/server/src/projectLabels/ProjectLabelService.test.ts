@@ -197,6 +197,50 @@ describe("project labels", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("re-files an agent's conversation with turns instead of requiring a fork", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const service = yield* Labels.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const first = (yield* service.create({ name: "First" })).label.id;
+      const second = (yield* service.create({ name: "Second" })).label.id;
+      const at = "2026-01-01T00:00:00.000Z";
+      // One annotated conversation, and one migrated shell that only the
+      // agents row identifies.
+      for (const [id, payload] of [
+        ["annotated-conversation", { agent: { id: "agent:annotated", role: "conversation" } }],
+        ["migrated-conversation", {}],
+      ] as const) {
+        yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES (${id},${repoA},${id},'codex','full-access','default',${at},${at},${JSON.stringify(payload)})`;
+        yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json) VALUES (${`${id}:run`},${id},1,'codex','completed',${at},'{}')`;
+      }
+      yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled) VALUES ('agent:migrated', 'migrated-conversation', '{}', 1)`;
+      for (const id of ["annotated-conversation", "migrated-conversation"]) {
+        const conversation = ThreadId.make(id);
+        expect(yield* service.moveThread({ threadId: conversation, folderId: first })).toEqual({
+          threadId: conversation,
+          projectFolderId: first,
+        });
+        // Moving between projects re-files the same thread, never a fork.
+        expect(yield* service.moveThread({ threadId: conversation, folderId: second })).toEqual({
+          threadId: conversation,
+          projectFolderId: second,
+        });
+        expect(yield* service.moveThread({ threadId: conversation, folderId: null })).toEqual({
+          threadId: conversation,
+          projectFolderId: null,
+        });
+      }
+      // The gate still holds for an ordinary chat with turns.
+      yield* sql`DELETE FROM agents WHERE agent_id = 'agent:migrated'`;
+      expect(
+        (yield* service
+          .moveThread({ threadId: ThreadId.make("migrated-conversation"), folderId: first })
+          .pipe(Effect.flip)).reason,
+      ).toBe("fork_required");
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect(
     "cascades label and thread deletion while preserving tags across projection repair",
     () =>

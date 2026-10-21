@@ -21,6 +21,7 @@ export const agentFixture = (suffix = "one"): Agent => ({
   notifyPolicy: "all",
   dailyRunCap: 2,
   conversationThreadId: ThreadId.make(`conversation:${suffix}`),
+  projectFolderId: null,
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
   consecutiveFailures: 0,

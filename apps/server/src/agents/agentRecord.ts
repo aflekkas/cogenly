@@ -7,12 +7,17 @@ const decodePayload = Schema.decodeUnknownEffect(
 );
 const decode = Schema.decodeUnknownEffect(Agent);
 
-/** Runtime columns override the saved configuration. */
+/**
+ * Runtime columns override the saved configuration. The project folder is the
+ * conversation thread's folder membership; queries that select it pass
+ * `project_folder_id`, and the rest read it as unfiled.
+ */
 export const decodeAgentRow = (row: {
   readonly payload_json: string;
   readonly consecutive_failures: number;
   readonly backoff_until: string | null;
   readonly daily_run_cap: number;
+  readonly project_folder_id?: string | null;
 }): Effect.Effect<Agent, Schema.SchemaError> =>
   Effect.gen(function* () {
     const data = yield* decodePayload(row.payload_json);
@@ -34,5 +39,6 @@ export const decodeAgentRow = (row: {
       consecutiveFailures: row.consecutive_failures,
       backoffUntil: row.backoff_until,
       dailyRunCap: row.daily_run_cap,
+      projectFolderId: row.project_folder_id ?? null,
     });
   });

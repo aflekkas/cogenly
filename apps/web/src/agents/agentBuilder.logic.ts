@@ -16,6 +16,7 @@ import {
   type ModelSelection,
   type OrchestrationV2TurnItem,
   type ProjectId,
+  type ProjectLabelId,
   type ScheduledTaskSchedule,
   type ScheduledTaskUpsertSchedule,
 } from "@t3tools/contracts";
@@ -62,6 +63,8 @@ export interface AgentProposal {
   needs: ReadonlyArray<string>;
   /** High-impact grants the builder asked for on top of the defaults. */
   permissions: ReadonlyArray<keyof AgentPermissions>;
+  /** The project folder the builder filed the agent in, if it named one. */
+  projectFolderId?: ProjectLabelId;
   /** The block closed, so the builder finished this version. */
   complete: boolean;
 }
@@ -206,6 +209,7 @@ export function structuredProposal(proposal: AgentBuilderProposal): AgentProposa
     permissions: (Object.keys(proposal.permissions) as Array<keyof AgentPermissions>).filter(
       (grant) => proposal.permissions[grant] === true && GRANTABLE.has(grant),
     ),
+    ...(proposal.projectFolderId ? { projectFolderId: proposal.projectFolderId } : {}),
     complete: true,
   };
 }
@@ -370,10 +374,35 @@ export function canCreateProposal(proposal: AgentProposal | null): proposal is A
   return Boolean(proposal?.name?.trim() && proposal?.responsibility?.trim());
 }
 
+/**
+ * The project a proposed agent is created in: the owner's pick on the card
+ * (null being No project), else the folder the builder named, else the one the
+ * builder conversation is filed in. A folder that no longer exists counts as
+ * none named.
+ */
+export function proposalProjectFolderId(input: {
+  /** Undefined until the owner picks on the card. */
+  readonly chosen: ProjectLabelId | null | undefined;
+  readonly proposed: ProjectLabelId | undefined;
+  readonly builder: ProjectLabelId | null;
+  readonly exists: (id: ProjectLabelId) => boolean;
+}): ProjectLabelId | null {
+  const known = (id: ProjectLabelId | null | undefined) =>
+    id !== null && id !== undefined && input.exists(id) ? id : null;
+  if (input.chosen !== undefined) return known(input.chosen);
+  return known(input.proposed) ?? known(input.builder);
+}
+
 /** The create payload for a proposal: the owner's default model, defaults for the rest. */
 export function proposalToDraft(
   proposal: AgentProposal & { name: string },
-  context: { seed: string; modelSelection: ModelSelection; projectId: ProjectId },
+  context: {
+    seed: string;
+    modelSelection: ModelSelection;
+    projectId: ProjectId;
+    /** Files the new agent's conversation in this folder; null in none. Omit for the server's default. */
+    projectFolderId?: ProjectLabelId | null;
+  },
 ): AgentDraft {
   const permissions = { ...defaultAgentPermissions };
   for (const grant of proposal.permissions) permissions[grant] = true;
@@ -390,6 +419,7 @@ export function proposalToDraft(
     modelSelection: context.modelSelection,
     runtimeMode: "full-access",
     projectId: context.projectId,
+    ...(context.projectFolderId !== undefined ? { projectFolderId: context.projectFolderId } : {}),
     dailyRunCap: 24,
     permissions,
   };

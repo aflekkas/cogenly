@@ -1676,6 +1676,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.agentsDelete]: (input) => agents.delete(input.id),
       [WS_METHODS.agentsSend]: (input) => agents.send(input),
       [WS_METHODS.agentsMarkRead]: (input) => agents.markRead(input),
+      [WS_METHODS.agentsSetProject]: (input) => agents.setProject(input),
       [WS_METHODS.agentsMemoryList]: (input) =>
         agentStore.memory(input.agentId).pipe(Effect.map((notes) => ({ notes }))),
       [WS_METHODS.agentsMemoryWrite]: (input) =>

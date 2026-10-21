@@ -1,5 +1,7 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
+import type { ContextMenuItem, EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
+import * as Schema from "effect/Schema";
 import { BellDotIcon, EllipsisIcon, PlusIcon } from "lucide-react";
 import {
   useMemo,
@@ -31,13 +33,23 @@ import { showCopiedToast, showCopyFailedToast } from "~/components/ui/copiedToas
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
+import {
+  projectLabelColorValue,
+  type EnvironmentProjectLabel,
+} from "~/projectLabels/projectLabels.logic";
+import { toggleCollapsedGroup } from "~/projectLabels/projectMeta.logic";
+import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { deriveProviderInstanceEntries } from "~/providerInstances";
+import { agentsRpc } from "~/rpc/agents";
 import { useServerConfigs } from "~/state/entities";
 import { formatRelativeTime } from "~/timestampFormat";
 import { SIDEBAR_MODE_ICONS } from "~/components/sidebar/modes/SidebarModeSwitcher";
 import { takeAgentArrival } from "./agentArrivals";
+import { groupAgentsByProject } from "./agentGroups.logic";
+import { AgentProjectGroup } from "./AgentProjectGroup";
 import { requestAgentCreation } from "./AgentsCreateHost";
 import { useAgentListFilter } from "./agentListFilter";
 import { AgentAvatarPicker } from "./AgentAvatarPicker";
@@ -46,20 +58,34 @@ import { agentContactKey, agentDraft, agentStatusLabel } from "./agents.logic";
 import { agentAttentionCount } from "./agentWorkspace.logic";
 import { useAgentUnread, useAgents, useAgentsClient } from "./agentsClient";
 import type { AgentContact } from "./agents.types";
+import { useAgentGroupFlip } from "./useAgentGroupFlip";
 
 type AgentMenuAction =
   | "open"
   | "details"
   | "rename"
   | "face"
+  | "move-project"
+  | `move-project:${string}`
+  | "move-project-none"
   | "mark-read"
   | "copy-link"
   | "delete";
 
+// Project groups the user collapsed in the Agents list, kept per device.
+const COLLAPSED_GROUPS_STORAGE_KEY = "cogenly:agents:collapsed-projects";
+const CollapsedGroupKeys = Schema.mutable(Schema.Array(Schema.String));
+const EMPTY_GROUP_KEYS: string[] = [];
+const EMPTY_FOLDERS: ReadonlyArray<EnvironmentProjectLabel> = [];
+
+const flipKey = (agent: AgentContact) => `agent:${agentContactKey(agent)}`;
+
 /**
  * The Agents list: one card per agent, with Work's card geometry and surfaces. Like
  * Chats and Work it stacks up from the bottom of the column against the search dock.
- * The Needs attention filter keeps only agents waiting on you.
+ * Once any agent is filed in a project, cards group under their project folders (in
+ * name order, No project last), each group collapsible. The Needs attention filter
+ * keeps only agents waiting on you, inside their groups.
  */
 export function AgentContacts({
   activeKey,
@@ -71,9 +97,44 @@ export function AgentContacts({
   onCreate: () => void;
 }) {
   const { agents, loading, reconnecting, error } = useAgents();
+  const client = useAgentsClient();
   const filter = useAgentListFilter();
-  const shown =
-    filter === "attention" ? agents.filter((agent) => agentAttentionCount(agent) > 0) : agents;
+  const environmentKey = [...new Set(agents.map((agent) => agent.environmentId))].join("\0");
+  const environmentIds = useMemo(
+    () => (environmentKey === "" ? [] : (environmentKey.split("\0") as EnvironmentId[])),
+    [environmentKey],
+  );
+  const directory = useProjectLabelDirectory(environmentIds);
+  const foldersByEnvironment = useMemo(() => {
+    const map = new Map<EnvironmentId, EnvironmentProjectLabel[]>();
+    for (const entry of directory.labels) {
+      const list = map.get(entry.environmentId);
+      if (list) list.push(entry);
+      else map.set(entry.environmentId, [entry]);
+    }
+    return map;
+  }, [directory.labels]);
+  const { grouped, groups } = useMemo(
+    () =>
+      groupAgentsByProject({
+        agents,
+        folders: directory.labels,
+        include: filter === "attention" ? (agent) => agentAttentionCount(agent) > 0 : undefined,
+      }),
+    [agents, directory.labels, filter],
+  );
+  const [collapsedGroupKeys, setCollapsedGroupKeys] = useLocalStorage(
+    COLLAPSED_GROUPS_STORAGE_KEY,
+    EMPTY_GROUP_KEYS,
+    CollapsedGroupKeys,
+  );
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const flipFolders = useMemo(
+    () => new Map(agents.map((agent) => [flipKey(agent), agent.projectFolderId] as const)),
+    [agents],
+  );
+  const { onTransitionEnd } = useAgentGroupFlip(listRef, flipFolders);
+  const shownCount = groups.reduce((count, group) => count + group.agents.length, 0);
   return (
     <>
       {error && (
@@ -97,16 +158,19 @@ export function AgentContacts({
       {/* With no agents at all the list column is hidden and the index route shows
           the one empty state; only the attention filter can be empty here. */}
       <ul
+        ref={listRef}
         key={filter}
         aria-label={filter === "attention" ? "Agents needing attention" : "Agents"}
         data-agents-list
         className={cn(
-          "reveal-motion relative flex flex-col gap-0.5",
+          "reveal-motion relative flex flex-col",
+          grouped ? "gap-1" : "gap-0.5",
           // The list stacks up from the bottom, against the search dock.
-          (shown.length > 0 || !loading) && "flex-1 justify-end",
+          (shownCount > 0 || !loading) && "flex-1 justify-end",
         )}
+        onTransitionEnd={onTransitionEnd}
       >
-        {shown.length === 0 && !loading && !reconnecting ? (
+        {shownCount === 0 && !loading && !reconnecting ? (
           <li className="flex flex-1 list-none">
             {filter === "attention" ? (
               <SidebarListEmptyState icon={BellDotIcon} label="No agent needs you right now" />
@@ -124,13 +188,33 @@ export function AgentContacts({
             )}
           </li>
         ) : null}
-        {shown.map((agent) => (
-          <AgentCard
-            key={agentContactKey(agent)}
-            agent={agent}
-            active={activeKey === agentContactKey(agent)}
-            onOpen={onOpen}
-          />
+        {groups.map((group) => (
+          <AgentProjectGroup
+            key={group.key}
+            groupKey={group.key}
+            folder={group.folder}
+            heading={grouped}
+            open={!collapsedGroupKeys.includes(group.key)}
+            onToggle={() => setCollapsedGroupKeys((keys) => toggleCollapsedGroup(keys, group.key))}
+            onCreate={
+              group.folder && (client.canWrite?.(group.folder.environmentId) ?? true)
+                ? () => {
+                    const { environmentId, label } = group.folder!;
+                    requestAgentCreation(environmentId, { projectFolderId: label.id });
+                  }
+                : undefined
+            }
+          >
+            {group.agents.map((agent) => (
+              <AgentCard
+                key={agentContactKey(agent)}
+                agent={agent}
+                active={activeKey === agentContactKey(agent)}
+                folders={foldersByEnvironment.get(agent.environmentId) ?? EMPTY_FOLDERS}
+                onOpen={onOpen}
+              />
+            ))}
+          </AgentProjectGroup>
         ))}
       </ul>
     </>
@@ -146,14 +230,21 @@ function summaryLine(agent: AgentContact): string {
 function AgentCard({
   agent,
   active,
+  folders,
   onOpen,
 }: {
   agent: AgentContact;
   active: boolean;
+  /** The project folders on the agent's environment, for Move to project. */
+  folders: ReadonlyArray<EnvironmentProjectLabel>;
   onOpen: (agent: AgentContact) => void;
 }) {
   const client = useAgentsClient();
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
+  const canMoveProject = useAtomValue(agentsRpc.setProject.permissionAtom(agent.environmentId));
+  const currentFolderId = folders.some((entry) => entry.label.id === agent.projectFolderId)
+    ? agent.projectFolderId
+    : null;
   const unread = useAgentUnread(agent);
   const status = agentStatusLabel(agent);
   // Only decisions waiting on the owner earn a count; unread replies get a dot.
@@ -214,6 +305,12 @@ function AgentCard({
       case "face":
         setFacePicker(true);
         return;
+      case "move-project":
+        return;
+      case "move-project-none":
+        if (currentFolderId !== null)
+          void mutate(() => client.setProject(agent, null), "Could not move the agent");
+        return;
       case "mark-read":
         if (latestReply)
           void mutate(() => client.markRead(agent, latestReply.id), "Could not mark as read");
@@ -226,6 +323,11 @@ function AgentCard({
       case "delete":
         setConfirmingDelete(true);
         return;
+      default: {
+        const folderId = action.slice("move-project:".length) as ProjectLabelId;
+        if (folderId !== currentFolderId)
+          void mutate(() => client.setProject(agent, folderId), "Could not move the agent");
+      }
     }
   };
   // The same menu as a thread row: the desktop's native menu, or the web fallback.
@@ -237,6 +339,33 @@ function AgentCard({
       { id: "details", label: "Open details", icon: "settings" },
       { id: "rename", label: "Rename", icon: "pencil", disabled: !canWrite },
       { id: "face", label: "Change face…", disabled: !canWrite },
+      ...(folders.length > 0 || currentFolderId !== null
+        ? [
+            {
+              id: "move-project" as const,
+              label: "Move to project",
+              icon: "folder",
+              disabled: !canMoveProject,
+              children: [
+                ...folders.map((entry) => ({
+                  id: `move-project:${entry.label.id}` as const,
+                  label: entry.label.name,
+                  icon: "folder",
+                  iconColor: projectLabelColorValue(entry.label.color),
+                  checked: entry.label.id === currentFolderId,
+                  disabled: entry.label.id === currentFolderId,
+                })),
+                {
+                  id: "move-project-none" as const,
+                  label: "No project",
+                  checked: currentFolderId === null,
+                  disabled: currentFolderId === null,
+                  separatorBefore: folders.length > 0,
+                },
+              ],
+            },
+          ]
+        : []),
       ...(unread > 0 && latestReply
         ? [{ id: "mark-read" as const, label: "Mark as read", icon: "check" }]
         : []),
@@ -285,7 +414,10 @@ function AgentCard({
     : agent.modelSelection.model;
 
   return (
-    <li className="list-none py-1 [content-visibility:auto] [contain-intrinsic-size:auto_64px]">
+    <li
+      data-agent-flip={flipKey(agent)}
+      className="relative list-none py-1 [content-visibility:auto] [contain-intrinsic-size:auto_64px]"
+    >
       <div
         ref={(node) => {
           rowRef.current = node;

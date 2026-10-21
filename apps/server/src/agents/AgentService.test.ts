@@ -21,6 +21,7 @@ import {
   CommandId,
   EventId,
   ProjectId,
+  ProjectLabelId,
   CheckpointId,
   CheckpointScopeId,
   CheckpointRef,
@@ -212,14 +213,16 @@ const makeHarness = Effect.sync(() => {
   );
   const database = Sqlite.layerMemory;
   const store = Store.layer.pipe(Layer.provide(database));
-  const agents = Agents.layer.pipe(Layer.provide(Layer.mergeAll(boundaries, store, database)));
+  const labels = Labels.layer.pipe(
+    Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))),
+  );
+  const agents = Agents.layer.pipe(
+    Layer.provide(Layer.mergeAll(boundaries, store, labels, database)),
+  );
   const schedules = Schedules.layer.pipe(
     Layer.provide(Layer.mergeAll(boundaries, agents, store, database)),
   );
   const work = Work.layer.pipe(Layer.provide(Layer.mergeAll(store, boundaries)));
-  const labels = Labels.layer.pipe(
-    Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))),
-  );
   const workspace = Workspace.layer.pipe(
     Layer.provide(Layer.mergeAll(store, agents, schedules, work, boundaries, database)),
   );
@@ -492,6 +495,64 @@ it.effect("creates a conversation without a provider turn and edits the agent in
         "thread.runtime-mode.set",
         "thread.metadata.update",
       ]);
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
+it.effect("files an agent's conversation in a project and moves it between projects in place", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const agents = yield* Agents.AgentService;
+      const labels = yield* Labels.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const conversation = h.fixture.conversationThreadId;
+      const at = h.fixture.createdAt;
+      // An ongoing conversation with turns, which an ordinary chat could only fork.
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES (${conversation},${h.fixture.projectId},'Juniper','codex','full-access','default',${at},${at},${JSON.stringify({ agent: { id: h.fixture.id, role: "conversation" } })})`;
+      yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json) VALUES ('conversation:run',${conversation},1,'codex','completed',${at},'{}')`;
+      yield* store.save(h.fixture);
+      const spawn = (yield* labels.create({ name: "Spawn Partners" })).label.id;
+      const health = (yield* labels.create({ name: "Health" })).label.id;
+      expect((yield* store.get(h.fixture.id)).projectFolderId).toBeNull();
+
+      const moved = yield* agents.setProject({ id: h.fixture.id, projectFolderId: spawn });
+      expect(moved.agent.projectFolderId).toBe(spawn);
+      expect((yield* labels.getThreadLabels(conversation)).labels.map((l) => l.labelId)).toEqual([
+        spawn,
+      ]);
+      // Saving the profile keeps the derived project out of the stored payload.
+      const { name, avatar, instructions, modelSelection, runtimeMode, projectId, dailyRunCap } =
+        h.fixture;
+      const profile = { name, avatar, instructions, modelSelection, runtimeMode, projectId };
+      const edited = yield* agents.upsert({ ...profile, dailyRunCap, id: h.fixture.id });
+      expect(edited.agent.projectFolderId).toBe(spawn);
+      const payload = yield* sql<{
+        payload_json: string;
+      }>`SELECT payload_json FROM agents WHERE agent_id = ${h.fixture.id}`;
+      expect(JSON.parse(payload[0]!.payload_json)).not.toHaveProperty("projectFolderId");
+
+      const rehomed = yield* agents.upsert({
+        ...profile,
+        dailyRunCap,
+        id: h.fixture.id,
+        projectFolderId: health,
+      });
+      expect(rehomed.agent.projectFolderId).toBe(health);
+      expect(rehomed.agent.conversationThreadId).toBe(conversation);
+      expect((yield* agents.list()).agents.map((agent) => agent.projectFolderId)).toEqual([health]);
+      expect(
+        (yield* agents.setProject({ id: h.fixture.id, projectFolderId: null })).agent
+          .projectFolderId,
+      ).toBeNull();
+      // No fork and no new thread: the agent keeps its one conversation.
+      expect(h.launches).toHaveLength(0);
+      expect(h.commands.some((command) => command.type === "thread.fork")).toBe(false);
+      const missing = yield* agents
+        .setProject({ id: h.fixture.id, projectFolderId: ProjectLabelId.make("label:gone") })
+        .pipe(Effect.flip);
+      expect(missing.message).toBe("That project no longer exists.");
     }).pipe(Effect.provide(h.layer));
   }),
 );

@@ -106,6 +106,10 @@ const make = Effect.gen(function* () {
           return yield* denied(
             "Persistent agents cannot start agent builders; only the owner creates agents.",
           );
+        if (name === "update_agent_project" && params.id !== agent.id)
+          return yield* denied(
+            "An agent can only move its own conversation between projects. Ask the owner to move other agents.",
+          );
         if (typeof params.threadId === "string" && params.threadId !== actor.threadId) {
           const targetAgent = yield* store.forThread(params.threadId as typeof actor.threadId);
           if (targetAgent?.id !== agent.id)

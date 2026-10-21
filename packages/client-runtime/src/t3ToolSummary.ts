@@ -374,6 +374,13 @@ export function summarizeT3ToolCalls(
     case "agent-builder-start":
       label = phrase("Started", "start", quantity(countEntities(threadIds), "agent builder"));
       break;
+    case "agent-project-move":
+      label = phrase(
+        "Moved",
+        "move",
+        `${quantity(countEntities(selected.map((call) => id(call.input?.id))), "agent")} to a project`,
+      );
+      break;
     case "environment-read":
       label = phrase("Checked", "check", `environment preferences ${times}`);
       break;

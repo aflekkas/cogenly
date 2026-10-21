@@ -57,6 +57,7 @@ export type T3McpToolSummaryAction =
   | "project-label-file-thread"
   | "agent-list"
   | "agent-builder-start"
+  | "agent-project-move"
   | "environment-read"
   | "environment-update"
   | "attachment-prepare"
@@ -384,6 +385,10 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "thread-organize",
   ),
   list_agents: tool(["List", "Listing", "Listed", "agents"], "agent-list"),
+  update_agent_project: tool(
+    ["Move", "Moving", "Moved", "an agent to a project"],
+    "agent-project-move",
+  ),
   start_agent_builder: tool(
     ["Start", "Starting", "Started", "an agent builder"],
     "agent-builder-start",

@@ -19,6 +19,8 @@ import {
   type AgentBuilderStartResult,
   type AgentListItem,
   type AgentMarkReadInput,
+  type AgentSetProjectInput,
+  type ProjectLabelId,
   type AgentUpsertInput,
   type AgentSendInput,
   type AgentWorkRun,
@@ -35,6 +37,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Store from "./AgentStore.ts";
 import * as Folders from "../project/ManagedProjectFolders.ts";
+import * as Labels from "../projectLabels/ProjectLabelService.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -58,6 +61,10 @@ export class AgentService extends Context.Service<
       input: AgentMarkReadInput,
     ) => Effect.Effect<{ agent: AgentListItem }, AgentError>;
     readonly upsert: (input: AgentUpsertInput) => Effect.Effect<{ agent: Agent }, AgentError>;
+    /** Re-file the agent's conversation in a project folder, or unfile it with null. */
+    readonly setProject: (
+      input: AgentSetProjectInput,
+    ) => Effect.Effect<{ agent: Agent }, AgentError>;
     readonly builderStart: (
       input: AgentBuilderStartInput,
     ) => Effect.Effect<AgentBuilderStartResult, AgentError>;
@@ -96,10 +103,27 @@ const make = Effect.gen(function* () {
   const scheduler = yield* Scheduler.Scheduler;
   const sql = yield* SqlClient.SqlClient;
   const folders = yield* Folders.ManagedProjectFolders;
+  const labels = yield* Labels.ProjectLabelService;
   const access = yield* Access.AgentAccessScope;
   const changes = yield* PubSub.sliding<void>(1);
   const changed = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
   const list = () => store.list().pipe(Effect.map((agents) => ({ agents })));
+  // The conversation's folder membership is the agent's project, so it also
+  // decides the conversation's cwd and project manifest. The re-parenting
+  // gate exempts agent conversations; they move instead of forking.
+  const fileConversation = (threadId: ThreadId, folderId: ProjectLabelId | null) =>
+    labels.moveThread({ threadId, folderId }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new AgentError({
+            message:
+              cause.reason === "not_found"
+                ? "That project no longer exists."
+                : "Could not move the agent to that project.",
+            cause,
+          }),
+      ),
+    );
   const workspace = (agent: Agent) =>
     projections.getThread(agent.conversationThreadId).pipe(Effect.map((t) => t.projectId));
   // This is a passive assistant message: no message.dispatch and no provider effect.
@@ -277,6 +301,9 @@ const make = Effect.gen(function* () {
       Stream.unwrap(
         Effect.gen(function* () {
           const subscription = yield* PubSub.subscribe(changes);
+          // Filing changes from any surface (a thread move, a deleted folder)
+          // change an agent's project.
+          const folderChanges = yield* labels.subscribeChanges;
           const afterSequence = yield* events.latestSequence().pipe(Effect.mapError(failure));
           const messages = events
             .stream({ afterSequence, eventType: "message.updated", bounded: true })
@@ -299,9 +326,9 @@ const make = Effect.gen(function* () {
             );
           return Stream.concat(
             Stream.fromEffect(list()),
-            Stream.merge(Stream.fromSubscription(subscription), messages).pipe(
-              Stream.mapEffect(list),
-            ),
+            Stream.mergeAll([Stream.fromSubscription(subscription), folderChanges, messages], {
+              concurrency: "unbounded",
+            }).pipe(Stream.mapEffect(list)),
           );
         }),
       ),
@@ -329,9 +356,17 @@ const make = Effect.gen(function* () {
             creationSource: "web",
           });
         }
-        const { kickoff: _kickoff, ...profile } = input;
+        if (
+          input.projectFolderId !== undefined &&
+          (existing === null
+            ? input.projectFolderId !== null
+            : input.projectFolderId !== existing.projectFolderId)
+        )
+          yield* fileConversation(conversationThreadId, input.projectFolderId);
+        const { kickoff: _kickoff, projectFolderId: _projectFolderId, ...profile } = input;
         const agent = yield* store.save({
           ...profile,
+          projectFolderId: null,
           responsibility: input.responsibility ?? existing?.responsibility ?? "",
           permissions: input.permissions ?? existing?.permissions ?? defaultAgentPermissions,
           notifyPolicy: input.notifyPolicy ?? existing?.notifyPolicy ?? "meaningful_changes",
@@ -382,6 +417,14 @@ const make = Effect.gen(function* () {
         yield* changed;
         return { agent };
       }).pipe(Effect.mapError(failure)),
+    setProject: (input) =>
+      Effect.gen(function* () {
+        const existing = yield* store.get(input.id);
+        if (existing.projectFolderId !== input.projectFolderId)
+          yield* fileConversation(existing.conversationThreadId, input.projectFolderId);
+        yield* changed;
+        return { agent: yield* store.get(input.id) };
+      }).pipe(Effect.mapError(failure)),
     builderStart: (input) =>
       Effect.gen(function* () {
         const projectId =
@@ -393,6 +436,14 @@ const make = Effect.gen(function* () {
               onSuccess: (scratch) => scratch.projectId,
             }),
           ));
+        if (input.projectFolderId !== undefined)
+          yield* labels
+            .read(input.projectFolderId)
+            .pipe(
+              Effect.mapError(
+                (cause) => new AgentError({ message: "That project no longer exists.", cause }),
+              ),
+            );
         const key = yield* crypto.randomUUIDv4();
         const threadId = ThreadId.make(`agent-builder:${key}`);
         yield* launch.launch({
@@ -413,6 +464,10 @@ const make = Effect.gen(function* () {
             attachments: [],
           },
         });
+        // Builder threads are not gated, so filing after launch is direct; the
+        // proposed agent defaults to this project.
+        if (input.projectFolderId !== undefined)
+          yield* fileConversation(threadId, input.projectFolderId);
         return { threadId, projectId };
       }).pipe(Effect.mapError(failure)),
     recordProposal: (input) =>

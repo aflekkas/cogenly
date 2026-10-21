@@ -2,6 +2,7 @@ import { AgentPermissions } from "./agent.ts";
 import * as Schema from "effect/Schema";
 import { ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { ProjectLabelId } from "./projectLabel.ts";
 import { ScheduledTaskUpsertSchedule } from "./scheduledTaskSchedule.ts";
 
 /**
@@ -54,12 +55,19 @@ export const AgentBuilderProposal = Schema.Struct({
   permissions: AgentBuilderProposalPermissions,
   /** The new agent's model; absent means the owner's default. */
   model: Schema.optional(ModelSelection),
+  /** Project folder to file the agent's conversation in; absent means the builder's own project. */
+  projectFolderId: Schema.optional(ProjectLabelId),
 });
 export type AgentBuilderProposal = typeof AgentBuilderProposal.Type;
 
-/** Start a builder conversation. Without a project the server uses Scratch. */
+/**
+ * Start a builder conversation. Without a project the server uses Scratch.
+ * A project folder files the builder thread there, and the agent it proposes
+ * lands in that folder unless the proposal names another.
+ */
 export const AgentBuilderStartInput = Schema.Struct({
   projectId: Schema.optional(ProjectId),
+  projectFolderId: Schema.optional(ProjectLabelId),
   modelSelection: ModelSelection,
   text: TrimmedNonEmptyString.check(Schema.isMaxLength(32000)),
 });

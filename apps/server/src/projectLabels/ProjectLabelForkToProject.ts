@@ -63,6 +63,12 @@ export const forkThreadToProject: (
     );
   const source = records.thread;
   if (source.deletedAt !== null) return yield* forkFailure("This chat was deleted.");
+  // An agent's conversation is its single ongoing thread: forking would split
+  // the agent from its history, so it re-files in place instead.
+  if (source.agent?.role === "conversation") {
+    yield* deps.labels.moveThread({ threadId: source.id, folderId: input.labelId });
+    return { threadId: source.id };
+  }
   if (!isForkableChat(source))
     return yield* forkFailure(
       "Only chats move into a project by forking; Work threads keep their repository's project.",

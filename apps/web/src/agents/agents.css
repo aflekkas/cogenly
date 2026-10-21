@@ -574,3 +574,32 @@
   cursor: default;
   opacity: 0.5;
 }
+
+/* An Agents list project group's cards (AgentProjectGroup), growing and fading
+   open or shut while staying mounted. Clipped only while moving or shut, so a
+   card gliding in from another group is not cut off. Reduced motion keeps the
+   fade only. */
+.agent-group-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--motion-duration-base) --theme(--ease-standard),
+    opacity var(--motion-duration-base) --theme(--ease-standard),
+    visibility var(--motion-duration-base);
+}
+.agent-group-collapse[data-closed] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+}
+.agent-group-collapse > * {
+  min-height: 0;
+}
+.agent-group-collapse:is([data-closed], [data-moving]) > * {
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-group-collapse {
+    transition-property: opacity, visibility;
+  }
+}

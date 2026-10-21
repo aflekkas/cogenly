@@ -1,5 +1,7 @@
+import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
 import {
   FlagIcon,
+  FolderIcon,
   PlugIcon,
   ShieldCheckIcon,
   SparklesIcon,
@@ -12,7 +14,9 @@ import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
 import { WorkLogCollapse } from "~/components/chat/WorkLog";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
+import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import { canCreateProposal, scheduleInWords, type AgentProposal } from "./agentBuilder.logic";
+import { AgentProjectPicker, useAgentProjectFolders } from "./AgentProjectPicker";
 import { PERMISSION_OPTIONS } from "./agentWorkspace.logic";
 
 /** Swaps its text with a short rise-and-fade whenever the value changes. */
@@ -53,12 +57,14 @@ function Row({
 /**
  * The agent as the builder proposes it, assembling a field at a time while the reply
  * streams: the face first, then the name, responsibility, schedule, tools and model.
- * Fields morph in place when the owner asks for a change.
+ * Fields morph in place when the owner asks for a change. The project it will be
+ * filed in can be changed here before creating.
  */
 export function AgentProposalCard({
   proposal,
   seed,
   modelName,
+  project,
   creating,
   onCreate,
   ref,
@@ -66,6 +72,12 @@ export function AgentProposalCard({
   proposal: AgentProposal;
   seed: string;
   modelName: string | null;
+  /** Where the agent will be filed; null until the builder thread exists. */
+  project: {
+    environmentId: EnvironmentId;
+    value: ProjectLabelId | null;
+    onChange: (projectFolderId: ProjectLabelId | null) => void;
+  } | null;
   creating: boolean;
   onCreate: () => void;
   ref?: Ref<HTMLDivElement>;
@@ -136,6 +148,9 @@ export function AgentProposalCard({
         <Row icon={ShieldCheckIcon} label="Can also" present={grants.length > 0}>
           <Morph value={grants.join(", ")} />
         </Row>
+        <Row icon={FolderIcon} label="Project" present={project !== null && creatable}>
+          {project ? <ProposalProject {...project} disabled={creating} /> : null}
+        </Row>
         <Row icon={SparklesIcon} label="Model" present={modelName !== null && creatable}>
           <Morph value={modelName ?? ""} />
           <span className="text-xs text-muted-foreground">
@@ -153,6 +168,33 @@ export function AgentProposalCard({
           <span className="text-xs text-muted-foreground">or keep talking to adjust it</span>
         </div>
       </WorkLogCollapse>
+    </div>
+  );
+}
+
+/** The card's project, a picker the owner can change before creating. */
+function ProposalProject(props: {
+  environmentId: EnvironmentId;
+  value: ProjectLabelId | null;
+  onChange: (projectFolderId: ProjectLabelId | null) => void;
+  disabled: boolean;
+}) {
+  const { current } = useAgentProjectFolders(props.environmentId, props.value);
+  return (
+    <div className="-mx-2 flex">
+      <AgentProjectPicker
+        environmentId={props.environmentId}
+        value={props.value}
+        onChange={props.onChange}
+        disabled={props.disabled}
+        aria-label={current ? `Project: ${current.label.name}. Change` : "No project. Change"}
+        trigger={<Button type="button" variant="ghost-muted" size="xs" />}
+      >
+        <span key={current?.key ?? "none"} className="swap-motion flex min-w-0 items-center gap-1">
+          {current ? <ProjectFolderIcon color={current.label.color} className="size-3.5" /> : null}
+          <span className="min-w-0 truncate">{current ? current.label.name : "No project"}</span>
+        </span>
+      </AgentProjectPicker>
     </div>
   );
 }

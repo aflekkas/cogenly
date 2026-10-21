@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
 import {
   ProjectId,
+  ProjectLabelId,
   ProviderInstanceId,
   ThreadId,
   TurnItemId,
@@ -16,6 +17,7 @@ import {
   parseTimeOfDay,
   proposalFromMessages,
   proposalFromTurnItems,
+  proposalProjectFolderId,
   proposalToDraft,
   proposalTriggers,
   scheduleInWords,
@@ -296,5 +298,34 @@ describe("creating from a proposal", () => {
         enabled: true,
       },
     ]);
+  });
+
+  it("files the agent in the card's pick, else the builder's named folder, else its own", () => {
+    const web = ProjectLabelId.make("web");
+    const ops = ProjectLabelId.make("ops");
+    const gone = ProjectLabelId.make("gone");
+    const exists = (id: ProjectLabelId) => id === web || id === ops;
+    const pick = (input: {
+      chosen?: ProjectLabelId | null;
+      proposed?: ProjectLabelId;
+      builder?: ProjectLabelId | null;
+    }) =>
+      proposalProjectFolderId({
+        chosen: input.chosen,
+        proposed: input.proposed,
+        builder: input.builder ?? null,
+        exists,
+      });
+    expect(pick({ chosen: ops, proposed: web, builder: web })).toBe(ops);
+    // No project on the card wins over everything else.
+    expect(pick({ chosen: null, proposed: web, builder: web })).toBeNull();
+    expect(pick({ proposed: web, builder: ops })).toBe(web);
+    expect(pick({ proposed: gone, builder: ops })).toBe(ops);
+    expect(pick({})).toBeNull();
+    const proposal = parseProposal(block("name: Filed\nresponsibility: Do it."))!;
+    expect(
+      proposalToDraft({ ...proposal, name: "Filed" }, { ...context, projectFolderId: web })
+        .projectFolderId,
+    ).toBe(web);
   });
 });

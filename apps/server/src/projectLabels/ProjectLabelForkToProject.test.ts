@@ -140,6 +140,22 @@ describe("forkThreadToProject", () => {
     }),
   );
 
+  it.effect("re-files an agent's conversation in place instead of forking it", () =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const { deps, dispatched, moved } = setup({
+        thread: {
+          ...makeThread({ now }),
+          agent: { id: AgentId.make("agent:owner"), role: "conversation" },
+        },
+        runs: [turnedRun],
+      });
+      expect(yield* forkThreadToProject(input, deps)).toEqual({ threadId: input.threadId });
+      expect(dispatched).toHaveLength(0);
+      expect(moved).toEqual([{ threadId: input.threadId, folderId: labelId }]);
+    }),
+  );
+
   it.effect("refuses Work threads, which keep their repository project", () =>
     Effect.gen(function* () {
       const now = yield* DateTime.now;

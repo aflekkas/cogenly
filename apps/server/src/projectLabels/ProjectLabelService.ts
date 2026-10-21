@@ -321,11 +321,14 @@ const make = Effect.gen(function* () {
           // the history moves to a new chat through a context transfer
           // instead (forkThreadToProject). Turnless chats still assign
           // directly, unfiling stays allowed, and Work threads keep following
-          // their repo.
+          // their repo. A persistent agent's conversation is its one ongoing
+          // thread, so it re-files in place: the agents row identifies it
+          // even when a migrated shell lacks the agent annotation.
           const turned = yield* sql`SELECT 1 AS one FROM orchestration_v2_projection_threads t
               WHERE t.thread_id = ${input.threadId} AND t.deleted_at IS NULL
               AND COALESCE(json_extract(t.payload_json, '$.surface'), 'chat') = 'chat'
-              AND COALESCE(json_extract(t.payload_json, '$.agent.role'), '') <> 'work'
+              AND COALESCE(json_extract(t.payload_json, '$.agent.role'), '') NOT IN ('work', 'conversation')
+              AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.conversation_thread_id = t.thread_id)
               AND EXISTS (SELECT 1 FROM orchestration_v2_projection_runs r WHERE r.thread_id = t.thread_id) LIMIT 1`;
           if (turned.length > 0)
             return yield* new ProjectLabelError({

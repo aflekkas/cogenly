@@ -46,6 +46,11 @@ export const agentsRpc = {
     label: "agents:markRead",
     tag: "agents.markRead",
   }),
+  /** Files an agent's conversation in a project folder, or null for none. */
+  setProject: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "agents:setProject",
+    tag: "agents.setProject",
+  }),
   builderStart: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "agents:builderStart",
     tag: "agents.builderStart",

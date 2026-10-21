@@ -527,6 +527,7 @@ export const WS_METHODS = {
   agentsDelete: "agents.delete",
   agentsSend: "agents.send",
   agentsMarkRead: "agents.markRead",
+  agentsSetProject: "agents.setProject",
   agentsMemoryList: "agents.memoryList",
   agentsMemoryWrite: "agents.memoryWrite",
   agentsMemoryForget: "agents.memoryForget",
@@ -2088,6 +2089,11 @@ const WsAgentsMarkReadRpc = Rpc.make(WS_METHODS.agentsMarkRead, {
   success: Agents.AgentMarkReadResult,
   error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
 });
+const WsAgentsSetProjectRpc = Rpc.make(WS_METHODS.agentsSetProject, {
+  payload: Agents.AgentSetProjectInput,
+  success: Agents.AgentMutationResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+});
 const WsAgentsMemoryListRpc = Rpc.make(WS_METHODS.agentsMemoryList, {
   payload: Agents.AgentMemoryListInput,
   success: Agents.AgentMemoryListResult,
@@ -2311,6 +2317,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAgentsDeleteRpc,
   WsAgentsSendRpc,
   WsAgentsMarkReadRpc,
+  WsAgentsSetProjectRpc,
   WsAgentsMemoryListRpc,
   WsAgentsMemoryWriteRpc,
   WsAgentsMemoryForgetRpc,

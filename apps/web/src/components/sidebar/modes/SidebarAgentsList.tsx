@@ -4,7 +4,7 @@ import { AgentContacts } from "../../../agents/AgentContacts";
 import { useAgents } from "../../../agents/agentsClient";
 import { agentContactKey } from "../../../agents/agents.logic";
 
-/** Every agent in one list: agents reach all projects, so none belongs under one. */
+/** Every agent, grouped by the project its conversation is filed in (see `AgentContacts`). */
 export function SidebarAgentsList(props: {
   activeThreadKey: string | null;
   onOpenThread: (threadRef: ScopedThreadRef) => void;

@@ -30,6 +30,10 @@ it does not own a copy.
   The original chat is left where it was. Chats with turns are never
   re-parented; a brand-new chat with no turns yet may still be filed
   directly, and unfiling stays allowed.
+- A persistent agent's project is its conversation's folder membership, not a
+  field on the agent. That conversation is the agent's single ongoing thread,
+  so it is exempt from the fork rule: moving an agent re-files the same
+  thread, which then runs in the new project dir with its manifest.
 - Agents reach resources through the `cogenly` MCP server: list, read (paged
   text), and recall (search across the project's files). Threads in a project
   get a short manifest of its resources in their context.

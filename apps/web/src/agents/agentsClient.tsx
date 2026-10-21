@@ -8,6 +8,7 @@ import type {
   EnvironmentId,
   ModelSelection,
   ProjectId,
+  ProjectLabelId,
   ProviderApprovalDecision,
   ThreadId,
 } from "@t3tools/contracts";
@@ -64,6 +65,8 @@ export interface AgentsClient {
   ) => Promise<AgentContact>;
   remove: (agent: AgentContact) => Promise<void>;
   markRead: (agent: AgentContact, messageId: string) => Promise<void>;
+  /** Files the agent's conversation in a project folder; null takes it out of any. */
+  setProject: (agent: AgentContact, projectFolderId: ProjectLabelId | null) => Promise<void>;
   /** `onMessageId` learns the optimistic message's id before it renders, for send motion. */
   send: (
     agent: AgentContact,
@@ -299,6 +302,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   const remove = useOrchestrationCommand(agentsRpc.remove, { reportFailure: false });
   const sendAgent = useOrchestrationCommand(agentsRpc.send, { reportFailure: false });
   const markRead = useOrchestrationCommand(agentsRpc.markRead, { reportFailure: false });
+  const setProject = useOrchestrationCommand(agentsRpc.setProject, { reportFailure: false });
   const approval = useOrchestrationCommand(threadEnvironment.respondToApproval, {
     reportFailure: false,
   });
@@ -548,6 +552,14 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           }),
         );
       },
+      setProject: async (agent, projectFolderId) => {
+        commandValue(
+          await setProject({
+            environmentId: agent.environmentId,
+            input: { id: agent.id, projectFolderId },
+          }),
+        );
+      },
       send: async (agent, text, onMessageId) => {
         const key = agentContactKey(agent);
         const existing = pendingSends.current.get(key);
@@ -732,6 +744,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       remove,
       sendAgent,
       markRead,
+      setProject,
       approval,
       answer,
       saveMemory,

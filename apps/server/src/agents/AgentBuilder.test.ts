@@ -6,6 +6,7 @@ import {
   EnvironmentId,
   MessageId,
   ProjectId,
+  ProjectLabelId,
   ProviderInstanceId,
   RunId,
   ThreadId,
@@ -23,6 +24,8 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import { McpSchema, McpServer } from "effect/ai";
 import * as Folders from "../project/ManagedProjectFolders.ts";
+import * as Labels from "../projectLabels/ProjectLabelService.ts";
+import * as LabelEvents from "../persistence/OrchestrationEventStore.ts";
 import * as Launch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
@@ -179,8 +182,13 @@ const makeHarness = Effect.sync(() => {
   );
   const database = Sqlite.layerMemory;
   const store = Store.layer.pipe(Layer.provide(database));
-  const agents = Agents.layer.pipe(Layer.provide(Layer.mergeAll(boundaries, store, database)));
-  const layer = Layer.mergeAll(store, agents, database, boundaries).pipe(
+  const labels = Labels.layer.pipe(
+    Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))),
+  );
+  const agents = Agents.layer.pipe(
+    Layer.provide(Layer.mergeAll(boundaries, store, labels, database)),
+  );
+  const layer = Layer.mergeAll(store, agents, labels, database, boundaries).pipe(
     Layer.provide(NodeServices.layer),
   );
   return { launches, sends, posts, projections, seedThread, runFor, layer };
@@ -233,6 +241,24 @@ describe("builderStart", () => {
         const result = yield* agents.builderStart({ modelSelection, text: "Help me plan" });
         expect(result.projectId).toBe(scratchProjectId);
         expect(h.launches[0]?.projectId).toBe(scratchProjectId);
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+
+  it.effect("refuses a project folder that no longer exists before launching", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const agents = yield* Agents.AgentService;
+        const failure = yield* agents
+          .builderStart({
+            modelSelection,
+            text: "Help me plan",
+            projectFolderId: ProjectLabelId.make("label:gone"),
+          })
+          .pipe(Effect.flip);
+        expect(failure.message).toBe("That project no longer exists.");
+        expect(h.launches).toHaveLength(0);
       }).pipe(Effect.provide(h.layer));
     }),
   );

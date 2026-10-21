@@ -61,6 +61,20 @@ describe("summarizeT3ToolCalls for project folders and agents", () => {
       ]).label,
     ).toBe("Started 1 agent builder");
     expect(
+      summarizeT3ToolCalls("agent-project-move", [
+        {
+          input: { id: "agent:one", projectFolderId: "label:one" },
+          output: { agent: { id: "agent:one" } },
+          outcome: "completed",
+        },
+        {
+          input: { id: "agent:one", projectFolderId: null },
+          output: { agent: { id: "agent:one" } },
+          outcome: "completed",
+        },
+      ]).label,
+    ).toBe("Moved 1 agent to a project");
+    expect(
       summarizeT3ToolCalls("project-label-file-thread", [
         {
           input: { threadId: "thread:chat", labelId: "label:one" },
