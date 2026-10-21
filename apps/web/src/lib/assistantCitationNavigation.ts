@@ -21,11 +21,16 @@ export function assistantCitationHash(citation: AssistantCitation) {
   return `${CITATION_HASH_PREFIX}${Base64Url.encode(formatAssistantCitationHref(citation))}`;
 }
 
-export function assistantCitationFromLocation(href: string) {
+/** Cheap pre-check for `assistantCitationFromLocation`, fit for a per-navigation selector. */
+export function hasAssistantCitationHash(href: string): boolean {
   const hashIndex = href.indexOf("#");
-  if (hashIndex === -1) return null;
-  const hash = href.slice(hashIndex + 1);
-  if (!hash.startsWith(CITATION_HASH_PREFIX) || hash.length > 140_000) return null;
+  return hashIndex !== -1 && href.startsWith(CITATION_HASH_PREFIX, hashIndex + 1);
+}
+
+export function assistantCitationFromLocation(href: string) {
+  if (!hasAssistantCitationHash(href)) return null;
+  const hash = href.slice(href.indexOf("#") + 1);
+  if (hash.length > 140_000) return null;
   try {
     return parseAssistantCitationHref(
       Result.getOrThrow(Base64Url.decodeString(hash.slice(CITATION_HASH_PREFIX.length))),

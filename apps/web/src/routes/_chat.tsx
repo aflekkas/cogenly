@@ -1,16 +1,26 @@
 import { AuthPreviewOperateScope } from "@t3tools/contracts";
 import { Outlet, createFileRoute, redirect, useParams } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Activity, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
+import {
+  EMPTY_THREAD_VIEW_SLOTS,
+  placeThreadRouteTarget,
+  slotHolding,
+  THREAD_VIEW_SLOTS,
+  threadRouteTargetKey,
+  threadViewSlotFor,
+  type ThreadViewSlot,
+  type ThreadViewSlots,
+} from "../threadRouteSlots";
 import { settleModeSwitchMainPane } from "../components/sidebar/modes/modeSwitchMotion";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
-import { useProjects } from "../state/entities";
+import { readThreadShell, useProjects } from "../state/entities";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useEnvironmentScope } from "../state/session";
@@ -18,8 +28,8 @@ import { selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
-import { useReadRouteThreadKind } from "../hooks/useThreadKind";
-import { threadCapabilities } from "../threadCapabilities";
+import { useReadRouteThreadKind, useThreadKindResolver } from "../hooks/useThreadKind";
+import { sidebarModeForThreadKind, threadCapabilities } from "../threadCapabilities";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { isPreviewFocused } from "../lib/previewFocus";
@@ -29,6 +39,7 @@ import { isModelPickerOpen } from "../modelPickerVisibility";
 import { undoLatestThreadAction } from "../hooks/showThreadUndoNotice";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
+import { useComposerDraftStore } from "../composerDraftStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useUiStateStore } from "../uiStateStore";
 import { newThreadShortcutTarget } from "../components/sidebar/modes/sidebarModes.logic";
@@ -232,12 +243,6 @@ function ChatRouteGlobalShortcuts() {
   return null;
 }
 
-function threadRouteTargetKey(target: ThreadRouteTarget): string {
-  return target.kind === "server"
-    ? `server:${target.threadRef.environmentId}:${target.threadRef.threadId}`
-    : `draft:${target.draftId}`;
-}
-
 /** The longest the previous thread stands in for a route with nothing to show yet. */
 const RETAINED_THREAD_VIEW_MAX_MS = 1000;
 
@@ -248,19 +253,27 @@ function ChatRouteLayout() {
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
   });
+  const threadTargetKey = threadTarget ? threadRouteTargetKey(threadTarget) : null;
+  // Chats, Work and Agents each keep their last thread and draft views mounted, hidden
+  // with its effects (listeners, subscriptions) torn down, so a mode switch
+  // reveals it instead of mounting a new ChatView. See threadRouteSlots.ts.
+  const resolveThreadKind = useThreadKindResolver();
+  const [slots, setSlots] = useState<ThreadViewSlots>(EMPTY_THREAD_VIEW_SLOTS);
+  if (threadTarget && threadTargetKey !== null) {
+    const placed = placeThreadRouteTarget(
+      slots,
+      { key: threadTargetKey, target: threadTarget },
+      () => slotForThreadRouteTarget(threadTarget, slots, resolveThreadKind),
+    );
+    if (placed !== slots) setSlots(placed);
+  }
   // Leaving a thread for a route that shows nothing yet (the index while it
   // lands on the picked mode's thread, a route chunk still loading) keeps the
-  // thread on screen, inert, instead of a blank frame. The same instance takes
-  // the next thread, and index.css hides it as soon as the outlet has content.
-  const threadTargetKey = threadTarget ? threadRouteTargetKey(threadTarget) : null;
-  const [retained, setRetained] = useState<{
-    readonly key: string;
-    readonly target: ThreadRouteTarget;
-  } | null>(null);
-  if (threadTarget && threadTargetKey !== null && retained?.key !== threadTargetKey) {
-    setRetained({ key: threadTargetKey, target: threadTarget });
-  }
-  const shownTarget = threadTarget ?? retained?.target ?? null;
+  // thread on screen, inert, instead of a blank frame. The next thread of the
+  // same mode reuses that view, and index.css hides it as soon as the outlet
+  // has content.
+  const [retainedHidden, setRetainedHidden] = useState(false);
+  if (threadTarget && retainedHidden) setRetainedHidden(false);
   const outletRef = useRef<HTMLDivElement | null>(null);
   const outletRendered = threadTarget === null;
   useLayoutEffect(() => {
@@ -269,7 +282,7 @@ function ChatRouteLayout() {
     const settle = () => {
       if (outlet.firstElementChild === null) return false;
       settleModeSwitchMainPane();
-      setRetained(null);
+      setRetainedHidden(true);
       return true;
     };
     if (settle()) return;
@@ -278,7 +291,7 @@ function ChatRouteLayout() {
       if (settle()) observer.disconnect();
     });
     observer.observe(outlet, { childList: true });
-    const timeout = window.setTimeout(() => setRetained(null), RETAINED_THREAD_VIEW_MAX_MS);
+    const timeout = window.setTimeout(() => setRetainedHidden(true), RETAINED_THREAD_VIEW_MAX_MS);
     return () => {
       observer.disconnect();
       window.clearTimeout(timeout);
@@ -290,7 +303,19 @@ function ChatRouteLayout() {
       {threadTarget?.kind === "server" ? (
         <ThreadLinkPrompt threadRef={threadTarget.threadRef} />
       ) : null}
-      {shownTarget ? <ThreadRouteView target={shownTarget} retained={!threadTarget} /> : null}
+      {THREAD_VIEW_SLOTS.map((slot) => {
+        const entry = slots.entries[slot];
+        if (!entry) return null;
+        const shown = slot === slots.active;
+        return (
+          <Activity
+            key={slot}
+            mode={shown && (threadTarget !== null || !retainedHidden) ? "visible" : "hidden"}
+          >
+            <ThreadRouteView target={entry.target} retained={!shown || threadTarget === null} />
+          </Activity>
+        );
+      })}
       {outletRendered ? (
         <div ref={outletRef} className="contents" data-chat-outlet="">
           <Outlet />
@@ -298,6 +323,30 @@ function ChatRouteLayout() {
       ) : null}
     </>
   );
+}
+
+/**
+ * The slot a newly opened thread goes to: the one holding the draft it was
+ * promoted from, else its mode's; null while its mode is unknown.
+ */
+function slotForThreadRouteTarget(
+  target: ThreadRouteTarget,
+  slots: ThreadViewSlots,
+  resolveThreadKind: ReturnType<typeof useThreadKindResolver>,
+): ThreadViewSlot | null {
+  const drafts = useComposerDraftStore.getState();
+  if (target.kind === "server") {
+    const promotedFrom = drafts.getDraftIdByRef(target.threadRef);
+    const promotedSlot = promotedFrom === null ? null : slotHolding(slots, `draft:${promotedFrom}`);
+    if (promotedSlot !== null) return promotedSlot;
+  }
+  const thread =
+    target.kind === "server"
+      ? readThreadShell(target.threadRef)
+      : drafts.getDraftSession(target.draftId);
+  return thread
+    ? threadViewSlotFor(sidebarModeForThreadKind(resolveThreadKind(thread)), target)
+    : null;
 }
 
 export const Route = createFileRoute("/_chat")({

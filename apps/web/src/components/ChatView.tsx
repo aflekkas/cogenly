@@ -163,7 +163,10 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
+import {
+  assistantCitationFromLocation,
+  hasAssistantCitationHash,
+} from "../lib/assistantCitationNavigation";
 import { isMacPlatform } from "../lib/utils";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { useShallow } from "zustand/react/shallow";
@@ -1197,18 +1200,27 @@ export default function ChatView(props: ChatViewProps) {
   );
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
+  // Selects nothing unless the URL carries a citation, so ordinary navigations
+  // (every mode switch, every thread open) do not re-render this view.
   const citationLocation = useLocation({
-    select: (location) => ({
-      href: location.href,
-      key: location.state.assistantCitationActivation ?? location.state.__TSR_key,
-    }),
+    select: (location) =>
+      hasAssistantCitationHash(location.href)
+        ? {
+            href: location.href,
+            key: location.state.assistantCitationActivation ?? location.state.__TSR_key,
+          }
+        : null,
+    structuralSharing: true,
   });
+  const citationHref = citationLocation?.href ?? null;
+  const citationKey = citationLocation?.key;
   const citationRequest = useMemo<AssistantCitationRequest | null>(() => {
-    const citation = assistantCitationFromLocation(citationLocation.href);
+    if (citationHref === null) return null;
+    const citation = assistantCitationFromLocation(citationHref);
     return citation && citation.environmentId === environmentId && citation.threadId === threadId
-      ? { citation, key: citationLocation.key ?? citationLocation.href }
+      ? { citation, key: citationKey ?? citationHref }
       : null;
-  }, [citationLocation.href, citationLocation.key, environmentId, threadId]);
+  }, [citationHref, citationKey, environmentId, threadId]);
   const { resolvedTheme } = useTheme();
   // Granular store selectors — avoid subscribing to prompt changes.
   const composerInteractionMode = useComposerDraftStore(
