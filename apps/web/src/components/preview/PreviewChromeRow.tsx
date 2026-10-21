@@ -117,6 +117,8 @@ interface Props {
   pickDisabled?: boolean | undefined;
   /** Optional reason string surfaced in the disabled tooltip. */
   pickDisabledReason?: string | undefined;
+  /** A quiet line beside the annotate toggle, e.g. a pick that captured nothing. */
+  pickNotice?: { readonly message: string; readonly leaving: boolean } | null | undefined;
   /** Present on a streamed tab once its control state is known. */
   control?: PreviewControlState | null | undefined;
   /**
@@ -196,6 +198,7 @@ export function PreviewChromeRow({
   pickActive,
   pickDisabled,
   pickDisabledReason,
+  pickNotice,
   control,
   trailingActions,
   leadingActions,
@@ -327,6 +330,17 @@ export function PreviewChromeRow({
         {/* Everything that acts on the page rather than the address, as one
             quiet group of ghost controls ending in the overflow menu. */}
         <div className="flex shrink-0 items-center gap-0.5">
+          {pickNotice ? (
+            <span
+              role="status"
+              className={cn(
+                "reveal-motion max-w-56 truncate px-1 text-xs text-muted-foreground transition-opacity duration-(--motion-duration-base) ease-out",
+                pickNotice.leaving && "opacity-0",
+              )}
+            >
+              {pickNotice.message}
+            </span>
+          ) : null}
           {control ? <PreviewControlToggle control={control} /> : null}
           {onPickElement ? (
             <ToolbarButton

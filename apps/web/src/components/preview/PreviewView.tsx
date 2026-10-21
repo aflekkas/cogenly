@@ -11,6 +11,7 @@ import {
   DEFAULT_BROWSER_PROFILE_ID,
   FILL_PREVIEW_VIEWPORT,
   type PreviewAnnotationPayload,
+  type PreviewAnnotationSubmission,
   type PreviewViewportSetting,
   type ScopedThreadRef,
   DEFAULT_PREVIEW_ZOOM_FACTOR,
@@ -18,7 +19,7 @@ import {
   type PreviewAdjustInput,
 } from "@t3tools/contracts";
 import { normalizePreviewUrl, resolveAddressBarInput } from "@t3tools/shared/preview";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   BROWSER_HISTORY_MAX_ENTRIES_PER_PROJECT,
@@ -27,7 +28,11 @@ import {
   setTitleForThreadUrl,
   useThreadRecentHistory,
 } from "~/browserHistoryStore";
-import { type ComposerImageAttachment, useComposerDraftStore } from "~/composerDraftStore";
+import {
+  type ComposerImageAttachment,
+  useComposerDraftStore,
+  useComposerPreviewAnnotations,
+} from "~/composerDraftStore";
 import { capturePreviewAnnotationScreenshot } from "~/lib/previewAnnotation";
 import { ensureLocalApi } from "~/localApi";
 import {
@@ -80,6 +85,7 @@ import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { alternatePreviewRuntime, useRendersServerTabNatively } from "~/browser/previewRuntime";
 import type { PreviewStreamControl } from "@t3tools/client-runtime/preview/server-browser-stream";
 import { ServerBrowserSurface, type ServerBrowserHandle } from "~/browser/ServerBrowserSurface";
+import { pickMarkers } from "~/browser/serverBrowserPick";
 import { cn } from "~/lib/utils";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
 import { usePreviewSession } from "./usePreviewSession";
@@ -234,6 +240,35 @@ export function PreviewView({
     serverControl?.control.controller === "you" ? serverControl.tabId : null;
   const serverInputDisabled = isServerTab && serverControlledTabId !== runtimeTabId;
   const [serverFrameTabId, setServerFrameTabId] = useState<string | null>(null);
+  const serverTabControl =
+    isServerTab && serverControl?.tabId === runtimeTabId ? serverControl.control : null;
+  // Picking reads the page without driving it, so it needs operate rights, not control.
+  const serverPickBlocker = !isServerTab
+    ? null
+    : !serverTabControl
+      ? "Connecting to the browser…"
+      : !serverTabControl.canOperate
+        ? "You can watch this tab but not annotate it"
+        : serverTabControl.capabilities?.pick !== true
+          ? `${environmentLabel}'s browser can't annotate pages yet`
+          : null;
+  /** The server tab in pick mode; mode belongs to one tab and ends when it stops being pickable. */
+  const [serverPickTabId, setServerPickTabId] = useState<string | null>(null);
+  const [pickNotice, setPickNotice] = useState<{
+    readonly message: string;
+    readonly leaving: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (!pickNotice) return;
+    // Reads, then fades out over the base motion duration before it unmounts.
+    const timer = setTimeout(
+      () =>
+        pickNotice.leaving ? setPickNotice(null) : setPickNotice({ ...pickNotice, leaving: true }),
+      pickNotice.leaving ? 220 : 4_000,
+    );
+    return () => clearTimeout(timer);
+  }, [pickNotice]);
+  const previewAnnotations = useComposerPreviewAnnotations(threadRef);
   const desktopOverlay = tabId ? (previewState.desktopByTabId[tabId] ?? null) : null;
   const navStatus = snapshot?.navStatus ?? { _tag: "Idle" as const };
   const url = navStatus._tag === "Idle" ? "" : navStatus.url;
@@ -246,6 +281,13 @@ export function PreviewView({
   const serverStreamPending =
     isServerTab && !showEmptyState && !isUnreachable && serverFrameTabId !== runtimeTabId;
   const controller = desktopOverlay?.controller ?? "none";
+  const serverPickMarkers = useMemo(
+    () => (isServerTab ? pickMarkers(previewAnnotations, url) : []),
+    [isServerTab, previewAnnotations, url],
+  );
+  const serverPickAvailable = serverPickBlocker === null && !isUnreachable && !showEmptyState;
+  const serverPickActive =
+    serverPickAvailable && runtimeTabId !== null && serverPickTabId === runtimeTabId;
   const viewport = snapshot?.viewport ?? FILL_PREVIEW_VIEWPORT;
   const browserDefaults = useBrowserDefaults();
   // A tab created before profiles existed carries no profile of its own. It
@@ -850,6 +892,65 @@ export function PreviewView({
     [recordingRuntimeTabId, runtimeTabId, tabId, threadRef],
   );
 
+  /**
+   * Puts a finished annotation in the composer as context, with its crop as an
+   * image, and sends it now when the picker asked to. Desktop and server picks
+   * share it, so both land as the same chip.
+   */
+  const deliverAnnotation = useCallback(
+    (
+      picked: PreviewAnnotationPayload,
+      submission: PreviewAnnotationSubmission,
+      screenshotFailed: boolean,
+    ) => {
+      // The structured annotation is still sendable when its optional crop
+      // stalls or fails, so tell the user what they lost and keep going
+      // instead of holding the composer for an attachment that never lands.
+      // The stored copy drops the screenshot on failure, otherwise the prompt
+      // would tell the agent a crop is attached when none was sent.
+      const capture = capturePreviewAnnotationScreenshot(picked);
+      // Main reports a crop that failed or timed out on its side; the local
+      // conversion can fail too. Either way the user should hear about it.
+      const cropDropped = screenshotFailed || capture.status === "failed";
+      const annotation = capture.status === "failed" ? { ...picked, screenshot: null } : picked;
+      addPreviewAnnotation(threadRef, annotation);
+      if (cropDropped) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not capture the picked element",
+            // The send path reports its own outcome, so only say what this
+            // handler knows: the crop was dropped.
+            description: "The annotation was kept without the screenshot.",
+          }),
+        );
+      }
+      const screenshotFile = capture.status === "captured" ? capture.file : null;
+      const image =
+        screenshotFile && annotation.screenshot
+          ? ({
+              type: "image",
+              id: annotation.id,
+              name: screenshotFile.name,
+              mimeType: screenshotFile.type,
+              sizeBytes: screenshotFile.size,
+              previewUrl: annotation.screenshot.dataUrl,
+              file: screenshotFile,
+            } satisfies ComposerImageAttachment)
+          : null;
+      if (image) {
+        addImage(threadRef, image);
+      }
+      if (
+        submission === "send" &&
+        readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)
+      ) {
+        onSendAnnotation?.(annotation, image);
+      }
+    },
+    [addImage, addPreviewAnnotation, onSendAnnotation, threadRef],
+  );
+
   const handlePickElement = useCallback(() => {
     if (!previewBridge || !runtimeTabId) return;
     if (pickActiveRef.current) {
@@ -887,50 +988,7 @@ export function PreviewView({
           submitted = true;
         }
         const { annotation: picked, submission, screenshotFailed = false } = result;
-        // The structured annotation is still sendable when its optional crop
-        // stalls or fails, so tell the user what they lost and keep going
-        // instead of holding the composer for an attachment that never lands.
-        // The stored copy drops the screenshot on failure, otherwise the prompt
-        // would tell the agent a crop is attached when none was sent.
-        const capture = capturePreviewAnnotationScreenshot(picked);
-        // Main reports a crop that failed or timed out on its side; the local
-        // conversion can fail too. Either way the user should hear about it.
-        const cropDropped = screenshotFailed || capture.status === "failed";
-        const annotation = capture.status === "failed" ? { ...picked, screenshot: null } : picked;
-        addPreviewAnnotation(threadRef, annotation);
-        if (cropDropped) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Could not capture the picked element",
-              // The send path reports its own outcome, so only say what this
-              // handler knows: the crop was dropped.
-              description: "The annotation was kept without the screenshot.",
-            }),
-          );
-        }
-        const screenshotFile = capture.status === "captured" ? capture.file : null;
-        const image =
-          screenshotFile && annotation.screenshot
-            ? ({
-                type: "image",
-                id: annotation.id,
-                name: screenshotFile.name,
-                mimeType: screenshotFile.type,
-                sizeBytes: screenshotFile.size,
-                previewUrl: annotation.screenshot.dataUrl,
-                file: screenshotFile,
-              } satisfies ComposerImageAttachment)
-            : null;
-        if (image) {
-          addImage(threadRef, image);
-        }
-        if (
-          submission === "send" &&
-          readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)
-        ) {
-          onSendAnnotation?.(annotation, image);
-        }
+        deliverAnnotation(picked, submission, screenshotFailed);
       } catch {
         // Picker failed (e.g. webview navigated). Treat as silent cancel.
       } finally {
@@ -959,7 +1017,7 @@ export function PreviewView({
         }
       }
     })();
-  }, [addImage, addPreviewAnnotation, onSendAnnotation, runtimeTabId, threadRef]);
+  }, [deliverAnnotation, onSendAnnotation, runtimeTabId, threadRef]);
 
   useEffect(() => {
     if (!pickActive || !previewBridge || !runtimeTabId) return;
@@ -1028,8 +1086,8 @@ export function PreviewView({
         onRefresh={handleRefresh}
         onSubmit={(next) => void handleSubmitUrl(next)}
         onOpenInBrowser={tabId ? handleOpenInBrowser : undefined}
-        // Capture, annotation, and the more menu drive the desktop webview, so
-        // server tabs leave them out. Floating works for both.
+        // Capture drives the desktop webview, so server tabs leave it out.
+        // Annotation and floating work for both.
         onCapture={previewBridge && tabId && !isServerTab ? handleCapture : undefined}
         captureDisabled={!desktopOverlay || isUnreachable}
         recording={recordingRuntimeTabId !== null}
@@ -1040,15 +1098,24 @@ export function PreviewView({
         pictureInPictureDisabled={
           isUnreachable || (!isServerTab && !desktopOverlay?.hasWebContents)
         }
-        onPickElement={previewBridge && tabId && !isServerTab ? handlePickElement : undefined}
-        pickActive={pickActive}
+        onPickElement={
+          tabId && isServerTab
+            ? () => setServerPickTabId(serverPickActive ? null : runtimeTabId)
+            : previewBridge && tabId
+              ? handlePickElement
+              : undefined
+        }
+        pickActive={isServerTab ? serverPickActive : pickActive}
         // Disable when there's no tab (nothing to pick on) OR the page
         // failed to load (a React overlay covers the webview, so the
         // user wouldn't be able to actually click anything underneath).
-        pickDisabled={!tabId || isUnreachable}
+        pickDisabled={!tabId || isUnreachable || (isServerTab && !serverPickAvailable)}
         pickDisabledReason={
-          isUnreachable ? "Page didn't load — pick unavailable until the page renders" : undefined
+          isUnreachable
+            ? "Page didn't load — pick unavailable until the page renders"
+            : (serverPickBlocker ?? undefined)
         }
+        pickNotice={pickNotice}
         control={
           isServerTab && serverControl && serverControl.tabId === runtimeTabId
             ? {
@@ -1145,6 +1212,17 @@ export function PreviewView({
                   setServerControl(control ? { tabId: runtimeTabId, control } : null)
                 }
                 onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId, "panel")}
+                pick={{
+                  active: serverPickActive,
+                  markers: serverPickMarkers,
+                  // Added picks stay in pick mode so several can stack before sending.
+                  onAdd: (annotation) => {
+                    setPickNotice(null);
+                    deliverAnnotation(annotation, "attach", false);
+                  },
+                  onError: (message) => setPickNotice({ message, leaving: false }),
+                  onExit: () => setServerPickTabId(null),
+                }}
                 // Stays connected under the empty state so a URL picked there reaches the page.
                 className={cn(
                   "absolute inset-0 h-full w-full",

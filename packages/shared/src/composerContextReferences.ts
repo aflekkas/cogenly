@@ -226,8 +226,18 @@ function formatElementDetails(element: ElementContextDetails): string[] {
   if (element.pageTitle) lines.push(`title: ${element.pageTitle}`);
   if (element.selector) lines.push(`selector: ${element.selector}`);
   if (element.componentName) lines.push(`component: ${element.componentName}`);
+  if (element.role) lines.push(`role: ${element.role}`);
+  if (element.accessibleName) lines.push(`name: ${element.accessibleName}`);
+  if (element.domPath) lines.push(`path: ${element.domPath}`);
   const location = element.source ? formatSourceLocation(element.source) : null;
   if (location) lines.push(`source: ${location}`);
+  const attributes = Object.entries(element.attributes ?? {});
+  if (attributes.length > 0)
+    lines.push(
+      "attributes:",
+      indent(attributes.map(([name, value]) => `${name}=${JSON.stringify(value)}`).join("\n")),
+    );
+  if (element.textContent?.trim()) lines.push("text:", indent(element.textContent.trim()));
   if (element.htmlPreview.trim()) lines.push("html:", indent(element.htmlPreview.trim()));
   if (element.styles.trim()) lines.push("styles:", indent(element.styles.trim()));
   return lines;

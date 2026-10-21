@@ -4498,6 +4498,16 @@ export function useComposerThreadDraft(threadRef: ComposerThreadTarget): Compose
   });
 }
 
+/** The preview annotations stacked in a thread's composer; stable across keystrokes. */
+export function useComposerPreviewAnnotations(
+  threadRef: ComposerThreadTarget,
+): ReadonlyArray<PreviewAnnotationPayload> {
+  return useComposerDraftStore(
+    (state) =>
+      getComposerDraftState(state, threadRef)?.previewAnnotations ?? EMPTY_PREVIEW_ANNOTATIONS,
+  );
+}
+
 /**
  * True when a real thread's composer holds unsent user content. Selects a
  * boolean so the sidebar row that reads it re-renders only when the draft

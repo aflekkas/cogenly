@@ -180,6 +180,45 @@ describe("provider projection", () => {
     expect(projected).toContain("- font-size: 12px → 20px");
   });
 
+  it("gives the agent a server pick's role, name, attributes, and text", () => {
+    const annotation: ComposerContextRecord = {
+      version: 1,
+      contextId: ctx("ctx_q"),
+      kind: "preview-annotation",
+      label: "Product",
+      annotationId: "ann_2",
+      pageUrl: "https://shop.example/item",
+      pageTitle: null,
+      comment: "Make it green",
+      targetSummary: "1 selected element",
+      styleChanges: [],
+      elements: [
+        {
+          pageUrl: "https://shop.example/item",
+          pageTitle: null,
+          tagName: "button",
+          selector: null,
+          htmlPreview: "",
+          componentName: null,
+          source: null,
+          styles: "",
+          role: "button",
+          accessibleName: "Buy It Now",
+          attributes: { id: "buy", "data-testid": "buy" },
+          domPath: "body > main > button",
+          textContent: "Buy It Now",
+        },
+      ],
+    };
+    const projected = projectComposerContextForProvider({
+      text: "[Product](t3-context://v1/preview-annotation/ctx_q)",
+      records: [annotation],
+    });
+    expect(projected).toContain("  role: button\n  name: Buy It Now\n  path: body > main > button");
+    expect(projected).toContain('  attributes:\n    id="buy"\n    data-testid="buy"');
+    expect(projected).toContain("  text:\n    Buy It Now");
+  });
+
   it("returns text unchanged when there are no references", () => {
     expect(projectComposerContextForProvider({ text: "plain", records: [terminal] })).toBe("plain");
   });

@@ -100,6 +100,8 @@ function renderElementDetailsEntry(record: ElementContextDetails): string {
   const lines: string[] = [];
   if (record.pageUrl) lines.push(`url: ${record.pageUrl}`);
   if (record.selector) lines.push(`selector: ${record.selector}`);
+  if (record.role) lines.push(`role: ${record.role}`);
+  if (record.accessibleName) lines.push(`name: ${record.accessibleName}`);
   const source = record.source;
   if (source?.fileName) {
     const position = [source.lineNumber, source.columnNumber].filter(

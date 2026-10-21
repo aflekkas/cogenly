@@ -45,6 +45,10 @@ const COMPOSER_CONTEXT_ELEMENT_STYLES_MAX_CHARS = 8_000;
 export const COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS = 16_000;
 export const COMPOSER_CONTEXT_REVIEW_DIFF_MAX_CHARS = 32_000;
 const COMPOSER_CONTEXT_PREVIEW_COMMENT_MAX_CHARS = 8_000;
+/** Exported so the web normalizer clamps picked-element extras to what the schema accepts. */
+export const COMPOSER_CONTEXT_ELEMENT_TEXT_MAX_CHARS = 2_000;
+export const COMPOSER_CONTEXT_ELEMENT_ATTRIBUTES_MAX_COUNT = 40;
+export const COMPOSER_CONTEXT_ELEMENT_ATTRIBUTE_MAX_CHARS = 512;
 
 /** Durable identity of one payload. Shared by every chip that points at it. */
 export const ComposerContextId = TrimmedNonEmptyString.check(
@@ -145,6 +149,16 @@ export const ElementContextDetails = Schema.Struct({
   componentName: NullableShortString,
   source: Schema.NullOr(ElementContextSource),
   styles: BoundedString(COMPOSER_CONTEXT_ELEMENT_STYLES_MAX_CHARS),
+  /** Accessibility and DOM detail from server-browser picks; absent on desktop picks. */
+  role: Schema.optionalKey(NullableShortString),
+  accessibleName: Schema.optionalKey(NullableShortString),
+  attributes: Schema.optionalKey(
+    Schema.Record(ShortString, BoundedString(COMPOSER_CONTEXT_ELEMENT_ATTRIBUTE_MAX_CHARS)).check(
+      Schema.isMaxProperties(COMPOSER_CONTEXT_ELEMENT_ATTRIBUTES_MAX_COUNT),
+    ),
+  ),
+  domPath: Schema.optionalKey(NullableShortString),
+  textContent: Schema.optionalKey(BoundedString(COMPOSER_CONTEXT_ELEMENT_TEXT_MAX_CHARS)),
 });
 export type ElementContextDetails = typeof ElementContextDetails.Type;
 

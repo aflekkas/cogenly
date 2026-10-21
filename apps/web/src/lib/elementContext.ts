@@ -1,11 +1,17 @@
-import type {
-  PickedElementPayload,
-  PickedElementStackFrame,
-  PreviewAnnotationPayload,
+import {
+  COMPOSER_CONTEXT_ELEMENT_ATTRIBUTE_MAX_CHARS,
+  COMPOSER_CONTEXT_ELEMENT_ATTRIBUTES_MAX_COUNT,
+  COMPOSER_CONTEXT_ELEMENT_TEXT_MAX_CHARS,
+  type PickedElementPayload,
+  type PickedElementStackFrame,
+  type PreviewAnnotationPayload,
 } from "@t3tools/contracts";
 
 const ELEMENT_CONTEXT_HTML_PREVIEW_LIMIT = 4000;
 const ELEMENT_CONTEXT_STYLES_LIMIT = 4000;
+const ELEMENT_CONTEXT_SHORT_LIMIT = 300;
+const ELEMENT_CONTEXT_PATH_LIMIT = 1000;
+const ELEMENT_CONTEXT_ATTRIBUTE_NAME_LIMIT = 100;
 
 /**
  * Stable, persistable element selection captured from the in-app preview
@@ -30,6 +36,15 @@ export interface ElementContextSelection {
   source: PickedElementStackFrame | null;
   /** Author CSS (no UA defaults). May be empty. */
   styles: string;
+  /**
+   * Server-browser picks add these; desktop picks leave them out. Optional
+   * keys rather than `undefined` values, so the record still encodes as JSON.
+   */
+  role?: string | null;
+  accessibleName?: string | null;
+  attributes?: Readonly<Record<string, string>>;
+  domPath?: string | null;
+  textContent?: string;
 }
 
 function truncateString(value: string, limit: number): string {
@@ -71,7 +86,45 @@ export function normalizeElementContextSelection(
         }
       : null,
     styles: truncateString(normalizeText(raw.styles), ELEMENT_CONTEXT_STYLES_LIMIT),
+    ...optionalText("role", raw.role, ELEMENT_CONTEXT_SHORT_LIMIT),
+    ...optionalText("accessibleName", raw.accessibleName, ELEMENT_CONTEXT_SHORT_LIMIT),
+    ...optionalText("domPath", raw.domPath, ELEMENT_CONTEXT_PATH_LIMIT),
+    ...normalizeAttributes(raw.attributes),
+    ...normalizeTextContent(raw.textContent),
   };
+}
+
+function optionalText<K extends "role" | "accessibleName" | "domPath">(
+  key: K,
+  value: string | null | undefined,
+  limit: number,
+): Partial<Record<K, string>> {
+  const trimmed = value?.trim();
+  return trimmed ? ({ [key]: truncateString(trimmed, limit) } as Record<K, string>) : {};
+}
+
+/** Keeps the first attributes by name, each clamped, so one huge `class` cannot crowd out the rest. */
+function normalizeAttributes(attributes: Readonly<Record<string, string>> | undefined): {
+  attributes?: Record<string, string>;
+} {
+  if (!attributes) return {};
+  const entries = Object.entries(attributes)
+    .map(([name, value]) => [name.trim(), value.trim()] as const)
+    .filter(
+      ([name, value]) =>
+        name.length > 0 && name.length <= ELEMENT_CONTEXT_ATTRIBUTE_NAME_LIMIT && value.length > 0,
+    )
+    .slice(0, COMPOSER_CONTEXT_ELEMENT_ATTRIBUTES_MAX_COUNT)
+    .map(([name, value]) => [
+      name,
+      truncateString(value, COMPOSER_CONTEXT_ELEMENT_ATTRIBUTE_MAX_CHARS),
+    ]);
+  return entries.length > 0 ? { attributes: Object.fromEntries(entries) } : {};
+}
+
+function normalizeTextContent(value: string | undefined): { textContent?: string } {
+  const text = value?.replace(/\s+/g, " ").trim();
+  return text ? { textContent: truncateString(text, COMPOSER_CONTEXT_ELEMENT_TEXT_MAX_CHARS) } : {};
 }
 
 /** Converts a saved element pick into the annotation shape used by current drafts. */

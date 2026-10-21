@@ -18,6 +18,8 @@ import {
 } from "@t3tools/client-runtime/preview/server-browser-stream";
 import type {
   EnvironmentId,
+  PreviewAnnotationPayload,
+  PreviewAnnotationRect,
   PreviewStreamHostSetup,
   PreviewViewportSetting,
 } from "@t3tools/contracts";
@@ -44,6 +46,21 @@ import { toastManager } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
 import { refreshPreviewStreamAccess, usePreviewStreamAccess } from "~/state/previewStream";
 import { observeResize } from "~/lib/observeResize";
+
+import {
+  annotationAnchorRect,
+  clientToPagePoint,
+  type PagePoint,
+  type PickMarker,
+  resolvePickGesture,
+  dragRect,
+  PICK_DRAG_SLOP_PX,
+} from "./serverBrowserPick";
+import {
+  type PickDraft,
+  type PickHoverTarget,
+  ServerBrowserPickLayer,
+} from "./ServerBrowserPickLayer";
 
 /** Chrome-row controls for a server tab; commands require current ownership. */
 export interface ServerBrowserHandle {
@@ -72,16 +89,34 @@ const TAP_SLOP_PX = 8;
 const MULTI_CLICK_MS = 500;
 const MULTI_CLICK_SLOP_PX = 4;
 const WHEEL_LINE_PX = 16;
+/** A commit the server never answers stops blocking new picks after this long. */
+const PICK_COMMIT_TIMEOUT_MS = 10_000;
+
+/**
+ * Element picking on this tab. While active the canvas sends no input to the
+ * page: moves probe the element under the pointer, a click commits it, a drag
+ * commits a region, and the committed pick opens a comment popover.
+ */
+export interface ServerBrowserPickOptions {
+  readonly active: boolean;
+  /** Annotations already stacked in the composer for this page. */
+  readonly markers: ReadonlyArray<PickMarker>;
+  /** The user added a comment to a pick; the annotation carries it. */
+  readonly onAdd: (annotation: PreviewAnnotationPayload) => void;
+  readonly onError: (message: string) => void;
+  /** Escape outside the popover leaves pick mode. */
+  readonly onExit: () => void;
+}
+
+interface PickDrag {
+  readonly pointerId: number;
+  readonly startClient: { readonly x: number; readonly y: number };
+  readonly startPage: { readonly x: number; readonly y: number };
+  dragging: boolean;
+}
 
 type MouseInput = Extract<PreviewStreamInput, { type: "mouse" }>;
 type WheelInput = Extract<PreviewStreamInput, { type: "wheel" }>;
-
-interface PagePoint {
-  readonly x: number;
-  readonly y: number;
-  /** Page CSS px per client px. */
-  readonly scale: number;
-}
 
 interface TouchGesture {
   readonly pointerId: number;
@@ -163,6 +198,7 @@ export function ServerBrowserSurface(props: {
   readonly onControl?: (control: PreviewStreamControl | null) => void;
   /** The page opened a new tab from this viewer's click; the viewer should switch to it. */
   readonly onPopup?: (tabId: string) => void;
+  readonly pick?: ServerBrowserPickOptions | undefined;
   readonly className?: string;
   readonly ref?: Ref<ServerBrowserHandle>;
 }) {
@@ -177,9 +213,11 @@ export function ServerBrowserSurface(props: {
     onViewport,
     onControl,
     onPopup,
+    pick,
     className,
     ref,
   } = props;
+  const pickActive = pick?.active === true;
   const access = usePreviewStreamAccess(environmentId);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -224,6 +262,36 @@ export function ServerBrowserSurface(props: {
   const touchRef = useRef<TouchGesture | null>(null);
   const probeRef = useRef<TouchProbe | null>(null);
   const lastProbeRef = useRef<{ x: number; y: number; editable: boolean; at: number } | null>(null);
+  const wellRef = useRef<HTMLDivElement | null>(null);
+  // Pick mode. Refs gate the socket callbacks; state draws the layer.
+  const pickActiveRef = useRef(pickActive);
+  const [pageSize, setPageSize] = useState<PreviewStreamViewport | null>(null);
+  const [wellSize, setWellSize] = useState<{ width: number; height: number } | null>(null);
+  const [pickHover, setPickHover] = useState<PickHoverTarget | null>(null);
+  const [pickMarquee, setPickMarquee] = useState<PreviewAnnotationRect | null>(null);
+  const [pickPending, setPickPending] = useState<PreviewAnnotationRect | null>(null);
+  const [pickDraft, setPickDraft] = useState<PickDraft | null>(null);
+  const [pickDraftOpen, setPickDraftOpenState] = useState(false);
+  const pickDraftOpenRef = useRef(false);
+  const setPickDraftOpen = useCallback((open: boolean) => {
+    pickDraftOpenRef.current = open;
+    setPickDraftOpenState(open);
+  }, []);
+  /** Hover replies count only while the pointer is over the page and nothing is committing. */
+  const pickArmedRef = useRef(false);
+  const pickHoverRef = useRef<PickHoverTarget | null>(null);
+  const pickDragRef = useRef<PickDrag | null>(null);
+  const pickCommitRef = useRef<{
+    readonly label: string | null;
+    readonly timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  const pickHitTestRef = useRef<{ x: number; y: number } | null>(null);
+  const pickFrameRef = useRef<number | null>(null);
+  const pickAdded = useEffectEvent((annotation: PreviewAnnotationPayload) =>
+    pick?.onAdd(annotation),
+  );
+  const pickFailed = useEffectEvent((message: string) => pick?.onError(message));
+  const pickExited = useEffectEvent(() => pick?.onExit());
   const firstFrame = useEffectEvent(() => onFirstFrame?.());
   const viewportChanged = useEffectEvent((viewport: PreviewStreamViewport) =>
     onViewport?.(viewport),
@@ -283,31 +351,171 @@ export function ServerBrowserSurface(props: {
     [scheduleFlush],
   );
 
-  const pagePoint = useCallback(
+  /** Client point to page CSS px, whoever drives; picking needs it without control. */
+  const framePoint = useCallback(
     (clientX: number, clientY: number, clamp: boolean): PagePoint | null => {
       const canvas = canvasRef.current;
       const viewport = viewportRef.current;
-      if (!canvas || !viewport || !hasFrameRef.current || controlRef.current?.controller !== "you")
-        return null;
+      if (!canvas || !viewport || !hasFrameRef.current) return null;
       const rect = canvas.getBoundingClientRect();
-      // `object-contain` letterboxes the frame inside the canvas box.
-      const fit = Math.min(rect.width / canvas.width, rect.height / canvas.height);
-      const width = canvas.width * fit;
-      const height = canvas.height * fit;
-      if (!(width > 0 && height > 0)) return null;
-      const scale = viewport.width / width;
-      const x = (clientX - rect.left - (rect.width - width) / 2) * scale;
-      const y = (clientY - rect.top - (rect.height - height) / 2) * (viewport.height / height);
-      const inside = x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height;
-      if (!inside && !clamp) return null;
-      return {
-        x: Math.min(Math.max(x, 0), viewport.width),
-        y: Math.min(Math.max(y, 0), viewport.height),
-        scale,
-      };
+      return clientToPagePoint(
+        {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          frameWidth: canvas.width,
+          frameHeight: canvas.height,
+        },
+        viewport,
+        clientX,
+        clientY,
+        clamp,
+      );
     },
     [],
   );
+
+  const pagePoint = useCallback(
+    (clientX: number, clientY: number, clamp: boolean): PagePoint | null =>
+      controlRef.current?.controller === "you" ? framePoint(clientX, clientY, clamp) : null,
+    [framePoint],
+  );
+
+  const showPickHover = useCallback((next: PickHoverTarget | null) => {
+    pickHoverRef.current = next;
+    setPickHover(next);
+  }, []);
+
+  const endPickCommit = useCallback(() => {
+    const commit = pickCommitRef.current;
+    if (commit) clearTimeout(commit.timer);
+    pickCommitRef.current = null;
+    setPickPending(null);
+    return commit;
+  }, []);
+
+  /** Drops every in-flight pick gesture, commit, and draft. */
+  const resetPick = useCallback(() => {
+    if (pickFrameRef.current !== null) cancelAnimationFrame(pickFrameRef.current);
+    pickFrameRef.current = null;
+    pickHitTestRef.current = null;
+    pickArmedRef.current = false;
+    pickDragRef.current = null;
+    endPickCommit();
+    showPickHover(null);
+    setPickMarquee(null);
+    setPickDraftOpen(false);
+  }, [endPickCommit, setPickDraftOpen, showPickHover]);
+
+  // One hover probe per animation frame; the server throttles further and answers the latest.
+  const queuePickHitTest = useCallback((point: { x: number; y: number }) => {
+    pickHitTestRef.current = point;
+    pickFrameRef.current ??= requestAnimationFrame(() => {
+      pickFrameRef.current = null;
+      const next = pickHitTestRef.current;
+      pickHitTestRef.current = null;
+      if (next && pickArmedRef.current)
+        clientRef.current?.send({ type: "pickHitTest", x: next.x, y: next.y });
+    });
+  }, []);
+
+  const commitPick = (
+    request:
+      | { readonly type: "pickCommit"; readonly x: number; readonly y: number }
+      | ({ readonly type: "pickCommitRegion" } & PreviewAnnotationRect),
+    pending: PreviewAnnotationRect | null,
+    label: string | null,
+  ) => {
+    pickArmedRef.current = false;
+    showPickHover(null);
+    if (!clientRef.current?.send(request)) {
+      pickFailed("The browser isn't connected. Try again in a moment.");
+      return;
+    }
+    setPickPending(pending);
+    pickCommitRef.current = {
+      label,
+      timer: setTimeout(() => {
+        endPickCommit();
+        pickFailed("The page didn't answer. Try picking again.");
+      }, PICK_COMMIT_TIMEOUT_MS),
+    };
+  };
+
+  const handlePickPointer = (event: PointerEvent<HTMLCanvasElement>) => {
+    const { type, pointerId, clientX, clientY } = event;
+    const viewport = viewportRef.current;
+    const drag = pickDragRef.current;
+    if (type === "pointercancel") {
+      if (drag?.pointerId === pointerId) pickDragRef.current = null;
+      setPickMarquee(null);
+      return;
+    }
+    // A commit in flight or an open comment owns the pick; the popover handles outside clicks.
+    const busy = pickCommitRef.current !== null || pickDraftOpenRef.current;
+    if (type === "pointerdown") {
+      if (busy || event.button !== 0 || !event.isPrimary) return;
+      const point = framePoint(clientX, clientY, false);
+      if (!point) return;
+      event.currentTarget.setPointerCapture(pointerId);
+      pickDragRef.current = {
+        pointerId,
+        startClient: { x: clientX, y: clientY },
+        startPage: { x: point.x, y: point.y },
+        dragging: false,
+      };
+      return;
+    }
+    if (drag && drag.pointerId === pointerId && viewport) {
+      const point = framePoint(clientX, clientY, true);
+      if (!point) return;
+      if (type === "pointermove") {
+        if (
+          !drag.dragging &&
+          Math.hypot(clientX - drag.startClient.x, clientY - drag.startClient.y) < PICK_DRAG_SLOP_PX
+        )
+          return;
+        if (!drag.dragging) {
+          drag.dragging = true;
+          pickArmedRef.current = false;
+          showPickHover(null);
+        }
+        setPickMarquee(dragRect(drag.startPage, point, viewport));
+        return;
+      }
+      pickDragRef.current = null;
+      setPickMarquee(null);
+      const gesture = resolvePickGesture({
+        startClient: drag.startClient,
+        endClient: { x: clientX, y: clientY },
+        startPage: drag.startPage,
+        endPage: point,
+        page: viewport,
+      });
+      if (!gesture) return;
+      if (gesture.kind === "element") {
+        const hovered = pickHoverRef.current;
+        commitPick(
+          { type: "pickCommit", x: gesture.x, y: gesture.y },
+          hovered?.rect ?? null,
+          hovered?.label ?? null,
+        );
+      } else {
+        commitPick({ type: "pickCommitRegion", ...gesture.rect }, gesture.rect, null);
+      }
+      return;
+    }
+    if (type !== "pointermove" || busy || event.buttons !== 0) return;
+    const point = framePoint(clientX, clientY, false);
+    if (!point) {
+      pickArmedRef.current = false;
+      showPickHover(null);
+      return;
+    }
+    pickArmedRef.current = true;
+    queuePickHitTest(point);
+  };
 
   const countClick = (button: PreviewStreamMouseButton, x: number, y: number, time: number) => {
     const last = lastClickRef.current;
@@ -416,6 +624,20 @@ export function ServerBrowserSurface(props: {
           if (result.editable) inputRef.current?.focus({ preventScroll: true });
           else inputRef.current?.blur();
         },
+        onPickHover: (hover) => {
+          if (!pickActiveRef.current || !pickArmedRef.current) return;
+          showPickHover(hover.box ? { rect: hover.box, label: hover.label } : null);
+        },
+        onPickResult: (annotation) => {
+          const commit = pickActiveRef.current ? endPickCommit() : null;
+          if (!commit) return;
+          setPickDraft({ annotation, rect: annotationAnchorRect(annotation), label: commit.label });
+          setPickDraftOpen(true);
+        },
+        onPickError: (message) => {
+          if (!pickActiveRef.current || !endPickCommit()) return;
+          pickFailed(message);
+        },
         onPointer: (pointer) => {
           const placed = placeAgentCursor(pointer, canvasRef.current, viewportRef.current);
           if (placed) setAgentCursor(placed);
@@ -426,6 +648,7 @@ export function ServerBrowserSurface(props: {
         onFileChooser: setFileChooser,
         onViewport: (viewport) => {
           viewportRef.current = viewport;
+          setPageSize(viewport);
           viewportChanged(viewport);
         },
         onControl: (next) => {
@@ -452,6 +675,7 @@ export function ServerBrowserSurface(props: {
           setControl(null);
           controlChanged(null);
           clearInput();
+          resetPick();
         },
         onHostSetup: setHostSetup,
         onUnauthorized: () => {
@@ -479,12 +703,17 @@ export function ServerBrowserSurface(props: {
       setControl(null);
       controlChanged(null);
       clearInput();
+      resetPick();
     };
   }, [
     access,
     accessDenied,
     cap,
     clearInput,
+    endPickCommit,
+    resetPick,
+    setPickDraftOpen,
+    showPickHover,
     environmentId,
     followSize,
     hostSetup,
@@ -505,6 +734,11 @@ export function ServerBrowserSurface(props: {
     if (!canvas) return;
     // Registered natively: React's wheel listener is passive and cannot stop the panel scrolling.
     const onWheel = (event: WheelEvent) => {
+      // Picking reads the page as it stands; scrolling would move every box under the pointer.
+      if (pickActiveRef.current) {
+        event.preventDefault();
+        return;
+      }
       const point = pagePoint(event.clientX, event.clientY, false);
       if (!point) return;
       event.preventDefault();
@@ -523,11 +757,58 @@ export function ServerBrowserSurface(props: {
   useEffect(
     () => () => {
       if (inputFrameRef.current !== null) cancelAnimationFrame(inputFrameRef.current);
+      if (pickFrameRef.current !== null) cancelAnimationFrame(pickFrameRef.current);
+      if (pickCommitRef.current) clearTimeout(pickCommitRef.current.timer);
     },
     [],
   );
 
+  // Entering pick mode hands the keyboard back to the app and drops a half-sent
+  // gesture; leaving it drops whatever pick was in progress.
+  useEffect(() => {
+    pickActiveRef.current = pickActive;
+    if (pickActive) {
+      flushInput();
+      mouseButtonsRef.current = 0;
+      touchRef.current = probeRef.current = null;
+      inputRef.current?.blur();
+      return;
+    }
+    resetPick();
+  }, [flushInput, pickActive, resetPick]);
+
+  useEffect(() => {
+    if (!pickActive) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      // The open popover closes itself on Escape and keeps pick mode on.
+      if (event.key !== "Escape" || event.defaultPrevented || pickDraftOpenRef.current) return;
+      event.preventDefault();
+      if (pickDragRef.current?.dragging) {
+        pickDragRef.current = null;
+        setPickMarquee(null);
+        return;
+      }
+      pickExited();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [pickActive]);
+
+  // The layer lays page boxes over the letterboxed frame, so it follows the canvas box.
+  useEffect(() => {
+    const element = wellRef.current;
+    if (!element || !pickActive) return;
+    return observeResize(element, ([entry]) => {
+      const rect = entry?.contentRect;
+      if (rect) setWellSize({ width: rect.width, height: rect.height });
+    });
+  }, [pickActive]);
+
   const handlePointer = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (pickActiveRef.current) {
+      handlePickPointer(event);
+      return;
+    }
     if (controlRef.current?.controller !== "you") return;
     const { type, pointerId, clientX, clientY } = event;
     const cancelled = type === "pointercancel";
@@ -774,18 +1055,49 @@ export function ServerBrowserSurface(props: {
       )}
       {/* The page well. The floating player sizes itself so the page fills it; while that
           size settles (a viewport change mid-stream) the page letterboxes onto this fill. */}
-      <div className="relative min-h-0 flex-1 bg-muted">
+      <div ref={wellRef} className="relative min-h-0 flex-1 bg-muted">
         <canvas
           ref={canvasRef}
-          className="block size-full touch-none object-contain"
+          className={cn(
+            "block size-full touch-none object-contain",
+            pickActive && "cursor-crosshair",
+          )}
           onPointerDown={handlePointer}
           onPointerMove={handlePointer}
           onPointerUp={handlePointer}
           onPointerCancel={handlePointer}
+          onPointerLeave={() => {
+            if (!pickActiveRef.current || pickDragRef.current) return;
+            pickArmedRef.current = false;
+            showPickHover(null);
+          }}
           // Keeps focus in the page input below and stops native text selection.
           onMouseDown={(event) => event.preventDefault()}
           onContextMenu={(event) => event.preventDefault()}
         />
+        {pick ? (
+          <ServerBrowserPickLayer
+            active={pickActive}
+            page={pageSize}
+            box={wellSize}
+            hover={pickHover}
+            marquee={pickMarquee}
+            pending={pickPending}
+            draft={pickDraft}
+            draftOpen={pickDraftOpen}
+            markers={pick.markers}
+            onAdd={(comment) => {
+              const draft = pickDraft;
+              setPickDraftOpen(false);
+              if (draft) pickAdded({ ...draft.annotation, comment });
+            }}
+            onCancel={() => setPickDraftOpen(false)}
+            onClosed={() => {
+              // A pick committed during the fade-out owns the draft now.
+              if (!pickDraftOpenRef.current) setPickDraft(null);
+            }}
+          />
+        ) : null}
         {agentCursor && control?.controller !== "you" ? (
           <AgentCursorMark
             {...agentCursor}

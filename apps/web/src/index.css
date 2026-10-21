@@ -918,6 +918,20 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   }
 }
 
+/* The server-browser pick highlight. It always fades; with `data-glide` it also glides
+   between targets, so it moves rather than re-popping. Reduced motion keeps the fade. */
+@utility pick-glide {
+  transition-property: opacity;
+  transition-duration: var(--motion-duration-fast);
+  transition-timing-function: --theme(--ease-out);
+
+  @media (prefers-reduced-motion: no-preference) {
+    &[data-glide] {
+      transition-property: opacity, translate, width, height;
+    }
+  }
+}
+
 /* Status icons and labels that swap with state (sidebar row chips, pending
    markers): key the element by its state so the new one mounts and fades
    in place. Enter only, once per mount. */
