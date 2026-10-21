@@ -143,7 +143,12 @@ export interface PickMarker {
   /** 1-based, in the order the annotations were added to the composer. */
   readonly number: number;
   readonly rect: PreviewAnnotationRect;
+  /** How many earlier markers share this corner; their badges fan out so none hides another. */
+  readonly stack: number;
 }
+
+/** Corners this close (page px) count as the same spot. */
+const MARKER_SAME_CORNER_PX = 4;
 
 /**
  * Numbered markers for the annotations stacked in the composer that belong to
@@ -155,11 +160,19 @@ export function pickMarkers(
   pageUrl: string,
 ): PickMarker[] {
   if (!pageUrl) return [];
-  return annotations.flatMap((annotation, index) => {
-    if (annotation.pageUrl !== pageUrl) return [];
+  const markers: PickMarker[] = [];
+  annotations.forEach((annotation, index) => {
+    if (annotation.pageUrl !== pageUrl) return;
     const rect = annotationAnchorRect(annotation);
-    return rect ? [{ id: annotation.id, number: index + 1, rect }] : [];
+    if (!rect) return;
+    const stack = markers.filter(
+      (marker) =>
+        Math.abs(marker.rect.x - rect.x) <= MARKER_SAME_CORNER_PX &&
+        Math.abs(marker.rect.y - rect.y) <= MARKER_SAME_CORNER_PX,
+    ).length;
+    markers.push({ id: annotation.id, number: index + 1, rect, stack });
   });
+  return markers;
 }
 
 /** The comment popover's submit chord: Cmd/Ctrl+Enter, never mid-composition. */

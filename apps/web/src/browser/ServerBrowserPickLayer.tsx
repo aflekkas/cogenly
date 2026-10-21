@@ -89,6 +89,10 @@ export function ServerBrowserPickLayer(props: {
     return () => clearTimeout(timer);
   }, [hover]);
 
+  const placedMarkers = markers.flatMap((marker) => {
+    const markerBox = place(marker.rect);
+    return markerBox ? [{ marker, box: markerBox }] : [];
+  });
   const hoverBox = shown ? place(shown.rect) : null;
   const marqueeBox = marquee ? place(marquee) : null;
   // The committed target outlives its popover so the popover can fade out on it.
@@ -100,6 +104,7 @@ export function ServerBrowserPickLayer(props: {
   const targetRef = useRef<HTMLDivElement | null>(null);
   // Read by the popover's outside-press guard; written by the form.
   const commentRef = useRef("");
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const setComment = useCallback((comment: string) => {
     commentRef.current = comment;
   }, []);
@@ -112,25 +117,18 @@ export function ServerBrowserPickLayer(props: {
         active ? "opacity-100" : "opacity-0",
       )}
     >
-      {markers.map((marker) => {
-        const markerBox = place(marker.rect);
-        if (!markerBox) return null;
-        return (
-          <div
-            key={marker.id}
-            className="reveal-motion absolute top-0 left-0 rounded-sm border border-primary/60"
-            style={boxStyle(markerBox)}
-            data-pick-marker={marker.number}
-          >
-            <span className="absolute -top-2.5 -left-2.5 flex size-5 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground tabular-nums shadow-sm">
-              {marker.number}
-            </span>
-          </div>
-        );
-      })}
+      {/* Badges render last of the boxes, so no outline or highlight crosses a number. */}
+      {placedMarkers.map(({ marker, box: markerBox }) => (
+        <div
+          key={marker.id}
+          className="reveal-motion absolute top-0 left-0 rounded-sm border border-primary/70 ring-1 ring-background/60"
+          style={boxStyle(markerBox)}
+          data-pick-marker={marker.number}
+        />
+      ))}
       {hoverBox && shown ? (
         <div
-          className="pick-glide absolute top-0 left-0 rounded-sm border border-primary bg-primary/10"
+          className="pick-glide absolute top-0 left-0 rounded-sm border border-primary bg-primary/10 ring-1 ring-background/60"
           data-glide={shown.glide ? "" : undefined}
           data-pick-hover
           style={{
@@ -141,7 +139,7 @@ export function ServerBrowserPickLayer(props: {
           {shown.label ? (
             <span
               className={cn(
-                "absolute left-0 max-w-64 truncate rounded-sm bg-primary px-1.5 py-0.5 text-xs font-medium text-primary-foreground shadow-sm",
+                "absolute left-0 max-w-64 truncate rounded-sm bg-primary px-1.5 py-0.5 text-xs font-medium text-primary-foreground shadow-sm ring-1 ring-background/60",
                 shown.rect.y < LABEL_CHIP_ROOM_PX ? "top-0.5 left-0.5" : "bottom-full mb-1",
               )}
             >
@@ -160,11 +158,23 @@ export function ServerBrowserPickLayer(props: {
       {targetBox ? (
         <div
           ref={targetRef}
-          className="pick-glide absolute top-0 left-0 rounded-sm border-2 border-primary bg-primary/10"
+          className="pick-glide absolute top-0 left-0 rounded-sm border-2 border-primary bg-primary/10 ring-1 ring-background/60"
           style={{ ...boxStyle(targetBox), opacity: targetRect ? 1 : 0 }}
           data-pick-target
         />
       ) : null}
+      {placedMarkers.map(({ marker, box: markerBox }) => (
+        <span
+          key={marker.id}
+          // Each earlier badge on this corner pushes this one a badge-width and a gap right.
+          style={{
+            translate: `calc(${markerBox.left}px - 0.625rem + ${marker.stack * 1.5}rem) calc(${markerBox.top}px - 0.625rem)`,
+          }}
+          className="reveal-motion absolute top-0 left-0 flex size-5 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground tabular-nums shadow-sm ring-1 ring-background/60"
+        >
+          {marker.number}
+        </span>
+      ))}
       <Popover
         open={draftOpen && draft !== null}
         onOpenChange={(open, details) => {
@@ -185,12 +195,14 @@ export function ServerBrowserPickLayer(props: {
           width="sm"
           padding="compact"
           aria-label="Annotation comment"
+          initialFocus={textareaRef}
         >
           {draft ? (
             <PickCommentForm
               key={draft.annotation.id}
               draft={draft}
               onCommentChange={setComment}
+              textareaRef={textareaRef}
               onAdd={props.onAdd}
               onCancel={props.onCancel}
             />
@@ -204,6 +216,7 @@ export function ServerBrowserPickLayer(props: {
 function PickCommentForm(props: {
   readonly draft: PickDraft;
   readonly onCommentChange: (comment: string) => void;
+  readonly textareaRef: { current: HTMLTextAreaElement | null };
   readonly onAdd: (comment: string) => void;
   readonly onCancel: () => void;
 }) {
@@ -231,7 +244,7 @@ function PickCommentForm(props: {
       ) : null}
       <Textarea
         size="sm"
-        autoFocus
+        ref={props.textareaRef}
         aria-label="Comment"
         placeholder="What should change here?"
         value={comment}

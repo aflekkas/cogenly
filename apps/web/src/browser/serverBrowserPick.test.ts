@@ -140,8 +140,8 @@ describe("stacked annotation markers", () => {
       annotation("c", url, { rect: { x: 1, y: 2, width: 3, height: 4 } }),
     ];
     expect(pickMarkers(stacked, url)).toEqual([
-      { id: "a", number: 1, rect },
-      { id: "c", number: 3, rect: { x: 1, y: 2, width: 3, height: 4 } },
+      { id: "a", number: 1, rect, stack: 0 },
+      { id: "c", number: 3, rect: { x: 1, y: 2, width: 3, height: 4 }, stack: 0 },
     ]);
   });
 
@@ -151,7 +151,16 @@ describe("stacked annotation markers", () => {
       annotation("fresh", url, { element: true, rect }),
     ];
     expect(annotationAnchorRect(stacked[0]!)).toBeNull();
-    expect(pickMarkers(stacked, url)).toEqual([{ id: "fresh", number: 2, rect }]);
+    expect(pickMarkers(stacked, url)).toEqual([{ id: "fresh", number: 2, rect, stack: 0 }]);
+  });
+
+  it("fans out badges for picks of the same spot so each number stays readable", () => {
+    const stacked = [
+      annotation("a", url, { element: true, rect }),
+      annotation("b", url, { element: true, rect: { ...rect, x: rect.x + 2 } }),
+      annotation("c", url, { element: true, rect: { ...rect, y: rect.y + 200 } }),
+    ];
+    expect(pickMarkers(stacked, url).map((marker) => marker.stack)).toEqual([0, 1, 0]);
   });
 
   it("shows nothing on a blank tab", () => {
