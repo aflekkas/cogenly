@@ -475,6 +475,11 @@ const FIRST_LAYOUT_HOLD_MAX_MS = 150;
 /** The longest an opened thread stays hidden, positioned or not. */
 const FIRST_LAYOUT_HOLD_LIMIT_MS = 600;
 const FIRST_LAYOUT_HOLD_STYLE = { opacity: 0 } as const;
+// The opened thread's one fade in, once its first layout has settled. Opacity
+// only, so it stays under reduced motion.
+const FIRST_LAYOUT_REVEAL_STYLE = {
+  transition: "opacity var(--motion-duration-base) var(--ease-standard)",
+} as const;
 /** The most frames an opened thread prompts the list to finish its scroll. */
 const SCROLL_SETTLE_PROMPT_FRAMES = 30;
 
@@ -580,6 +585,11 @@ interface MessagesTimelineProps {
   findOpen?: boolean;
   cancelPositionRestoreRef?: React.RefObject<(() => void) | null> | undefined;
   hideEmptyPlaceholder?: boolean;
+  /**
+   * The thread's messages are still loading. Until its first row arrives the
+   * column stays empty, with a spinner only if the wait outlasts ~150ms.
+   */
+  loadingThread?: boolean;
   topFadeEnabled?: boolean;
   historyControls?: MessagesTimelineHistoryControls | undefined;
   /** Non-null when older turns exist beyond the loaded window. */
@@ -674,6 +684,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onManualNavigation,
   cancelPositionRestoreRef,
   hideEmptyPlaceholder = false,
+  loadingThread = false,
   topFadeEnabled = false,
   historyControls,
   loadEarlier = null,
@@ -1775,6 +1786,22 @@ const ConversationTimeline = memo(function ConversationTimeline({
     [listRef],
   );
 
+  if (rows.length === 0 && loadingThread) {
+    // Nothing of the thread shows until its rows do: no status line, history
+    // control or working row ahead of the messages they belong to.
+    return (
+      <div
+        className="flex h-full min-h-0 items-center justify-center bg-background"
+        style={{ paddingBottom: contentInsetEndAdjustment }}
+        data-timeline-loading="true"
+      >
+        <span className="animate-loading-indicator">
+          <Spinner size="md" tone="muted" />
+        </span>
+      </div>
+    );
+  }
+
   if (
     rows.length === 0 &&
     !isWorking &&
@@ -1809,7 +1836,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
               <TooltipScrollDismissArea
                 ref={setTimelineViewportElement}
                 className="relative h-full min-h-0"
-                style={holdingFirstLayout ? FIRST_LAYOUT_HOLD_STYLE : undefined}
+                // Held at opacity 0 while the opened thread settles, then one
+                // fade in. Entering the hold drops it at once: a thread switch
+                // never fades the previous thread out.
+                style={holdingFirstLayout ? FIRST_LAYOUT_HOLD_STYLE : FIRST_LAYOUT_REVEAL_STYLE}
                 data-assistant-citation-viewport="true"
                 data-timeline-hold={holdingFirstLayout ? "true" : undefined}
               >

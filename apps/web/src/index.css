@@ -880,6 +880,12 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   animation: message-send-fade var(--motion-duration-base) --theme(--ease-out) 120ms both;
 }
 
+/* A thread still loading shows its spinner only past 150ms, fading in, so a
+   fast load never flashes one. */
+@utility animate-loading-indicator {
+  animation: message-send-fade var(--motion-duration-base) --theme(--ease-out) 150ms both;
+}
+
 /* One message bubble for every transcript: regular chats' user messages and
    both sides of an agent conversation. Body size, 9px by 14px inside, a radius
    scaled to that, and no more than ~70% of the lane. Grouping and colours are

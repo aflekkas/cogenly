@@ -9486,6 +9486,7 @@ export default function ChatView(props: ChatViewProps) {
                   onManualNavigation={cancelTimelineLiveFollowForUserNavigationStable}
                   cancelPositionRestoreRef={cancelPositionRestoreRef}
                   hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
+                  loadingThread={threadDetailLoading && !isDraftHeroState}
                   topFadeEnabled={!hasTimelineTopBanner}
                   {...(paintOnlyDisplayedTimeline || threadHistoryControls === undefined
                     ? {}

@@ -27,7 +27,6 @@ import {
 } from "@t3tools/contracts";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import * as DateTime from "effect/DateTime";
-import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import {
   squashAtomCommandFailure,
@@ -272,15 +271,6 @@ export function resetHeldThreadTimeline(): void {
   lastReadyThreadKey = null;
 }
 
-export function threadKeysShareEnvironment(left: string | null, right: string | null): boolean {
-  if (left === null || right === null) {
-    return false;
-  }
-  const leftRef = parseScopedThreadKey(left);
-  const rightRef = parseScopedThreadKey(right);
-  return leftRef !== null && rightRef !== null && leftRef.environmentId === rightRef.environmentId;
-}
-
 /** True while we still paint another thread's last snapshot. */
 export function isPaintOnlyThreadTimeline(
   displayThreadKey: string | null,
@@ -291,12 +281,17 @@ export function isPaintOnlyThreadTimeline(
   );
 }
 
+/**
+ * What the timeline shows while a thread opens. A thread seen earlier this
+ * session paints its remembered entries at once. Any other thread shows
+ * nothing until its own entries arrive: never the previous thread's, which
+ * would flash on screen and then be replaced.
+ */
 export function resolveThreadSwitchTimeline<T extends readonly unknown[]>(input: {
   loading: boolean;
   activeThreadKey: string | null;
   nextEntries: T;
   rememberedForActive?: T | null;
-  lastReady?: HeldThreadTimeline<T> | null;
 }): { entries: T; displayThreadKey: string | null } {
   if (input.nextEntries.length > 0) {
     return { entries: input.nextEntries, displayThreadKey: input.activeThreadKey };
@@ -306,18 +301,6 @@ export function resolveThreadSwitchTimeline<T extends readonly unknown[]>(input:
     input.rememberedForActive ?? peekRememberedThreadTimeline<T>(input.activeThreadKey);
   if (input.loading && rememberedForActive !== null && rememberedForActive.length > 0) {
     return { entries: rememberedForActive, displayThreadKey: input.activeThreadKey };
-  }
-
-  const lastReady = input.lastReady ?? peekHeldThreadTimeline<T>();
-  if (
-    input.loading &&
-    lastReady !== null &&
-    lastReady.threadKey !== null &&
-    lastReady.threadKey !== input.activeThreadKey &&
-    lastReady.entries.length > 0 &&
-    threadKeysShareEnvironment(lastReady.threadKey, input.activeThreadKey)
-  ) {
-    return { entries: lastReady.entries, displayThreadKey: lastReady.threadKey };
   }
   return { entries: input.nextEntries, displayThreadKey: input.activeThreadKey };
 }

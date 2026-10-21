@@ -13,7 +13,6 @@ import {
   rememberReadyThreadTimeline,
   resetHeldThreadTimeline,
   resolveThreadSwitchTimeline,
-  threadKeysShareEnvironment,
   timelineHasEphemeralPreviewUrls,
   scheduleEnvironmentReconnectWarning,
   codexArtifactTemplatePromptToAppend,
@@ -940,15 +939,15 @@ describe("resolveThreadSwitchTimeline", () => {
 
   const held = { threadKey: "env-1:thread-a", entries: ["a1", "a2"] };
 
-  it("keeps the previous thread's entries while the next thread is loading", () => {
+  it("never paints the previous thread's entries while the next thread is loading", () => {
+    rememberReadyThreadTimeline(held);
     expect(
       resolveThreadSwitchTimeline({
         loading: true,
         activeThreadKey: "env-1:thread-b",
         nextEntries: [],
-        lastReady: held,
       }),
-    ).toEqual({ entries: ["a1", "a2"], displayThreadKey: "env-1:thread-a" });
+    ).toEqual({ entries: [], displayThreadKey: "env-1:thread-b" });
   });
 
   it("shows the new thread once its detail is ready", () => {
@@ -957,7 +956,6 @@ describe("resolveThreadSwitchTimeline", () => {
         loading: false,
         activeThreadKey: "env-1:thread-b",
         nextEntries: ["b1"],
-        lastReady: held,
       }),
     ).toEqual({ entries: ["b1"], displayThreadKey: "env-1:thread-b" });
   });
@@ -968,7 +966,6 @@ describe("resolveThreadSwitchTimeline", () => {
         loading: true,
         activeThreadKey: "env-1:thread-a",
         nextEntries: [],
-        lastReady: null,
       }),
     ).toEqual({ entries: [], displayThreadKey: "env-1:thread-a" });
   });
@@ -992,7 +989,7 @@ describe("resolveThreadSwitchTimeline", () => {
     expect(
       resolveThreadSwitchTimeline({
         loading: true,
-        activeThreadKey: "env-1:thread-b",
+        activeThreadKey: "env-1:thread-a",
         nextEntries: [],
       }),
     ).toEqual({ entries: ["a1", "a2"], displayThreadKey: "env-1:thread-a" });
@@ -1031,18 +1028,6 @@ describe("resolveThreadSwitchTimeline", () => {
         nextEntries: [],
       }),
     ).toEqual({ entries: [], displayThreadKey: "env-1:thread-a" });
-  });
-
-  it("does not hold another environment's timeline across a jump", () => {
-    expect(threadKeysShareEnvironment("env-1:thread-a", "env-2:thread-b")).toBe(false);
-    expect(
-      resolveThreadSwitchTimeline({
-        loading: true,
-        activeThreadKey: "env-2:thread-b",
-        nextEntries: [],
-        lastReady: held,
-      }),
-    ).toEqual({ entries: [], displayThreadKey: "env-2:thread-b" });
   });
 
   it("treats a foreign held timeline as paint-only", () => {
