@@ -14,6 +14,7 @@ import {
   TrimmedString,
   type UnknownUnionMember,
 } from "./baseSchemas.ts";
+import { ProjectLabelId } from "./projectLabel.ts";
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_SEARCH_CONTENTS_MAX_LIMIT = 500;
@@ -533,6 +534,12 @@ export type ProjectEnsureScratchResult = typeof ProjectEnsureScratchResult.Type;
 /** A project started from just a name, in a new folder the server makes. */
 export const ProjectCreateNewInput = Schema.Struct({
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  /**
+   * File the new repository in this project: it is created in the project's
+   * folder under the projects root instead of Repositories. Absent for an
+   * unfiled repository.
+   */
+  labelId: Schema.optional(ProjectLabelId),
 });
 export type ProjectCreateNewInput = typeof ProjectCreateNewInput.Type;
 

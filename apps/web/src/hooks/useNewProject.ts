@@ -29,7 +29,9 @@ function errorMessage(error: unknown): string {
  * `newProjectsRoot` with a README, an icon, and a first commit; this then
  * opens a new thread draft in it. With `publishTo`, it also publishes the
  * repository as private on that host, without holding up the draft. With
- * `projectLabelId`, the new repository is filed in that project.
+ * `projectLabelId`, the new repository is created in that project's folder
+ * and filed in it (older servers ignore the folder and the filing below
+ * still applies).
  *
  * Resolves to whether the project was created.
  */
@@ -91,7 +93,10 @@ export function useNewProject() {
     }): Promise<boolean> => {
       const result = await createNew({
         environmentId: input.environmentId,
-        input: { name: input.name },
+        input: {
+          name: input.name,
+          ...(input.projectLabelId !== undefined ? { labelId: input.projectLabelId } : {}),
+        },
       });
       if (result._tag === "Failure") {
         if (!isAtomCommandInterrupted(result)) {

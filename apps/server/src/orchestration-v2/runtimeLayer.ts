@@ -274,8 +274,16 @@ const layerThreadManagementProvided = ThreadManagementService.layerWithLegacyImp
 export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe(
   Layer.provide(layerProjectService),
 );
+// Built once and shared: named projects file into labels through the same
+// instance direct consumers use, so filing notifications reach every
+// subscriber. Layers memoize by identity, so providing this twice below
+// still constructs one service.
+const layerProjectLabelsProvided = ProjectLabels.layer.pipe(
+  Layer.provide(layerEventInfrastructure),
+);
 const layerManagedProjectFoldersProvided = ManagedProjectFolders.layer.pipe(
   Layer.provide(layerProjectService),
+  Layer.provide(layerProjectLabelsProvided),
 );
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
   Layer.provide(
@@ -436,7 +444,7 @@ const layerProductionBase = Layer.mergeAll(
   layerAgentsProvided,
   GlobalSearch.layer.pipe(Layer.provide(AgentStore.layer)),
   Exports.layer,
-  ProjectLabels.layer,
+  layerProjectLabelsProvided,
   layerAgentWorkspaceProvided,
   layerAgentEventReactorProvided,
   layerAgentMcpPolicyProvided,

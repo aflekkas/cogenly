@@ -5,7 +5,8 @@
  * - `<baseDir>/scratch`: the Scratch project ("No project"), with a folder of
  *   its own for each thread;
  * - `<projectsRoot>/Repositories/<slug>`: projects started from just a name,
- *   each a new Git repository with a README, an icon, and a first commit.
+ *   each a new Git repository with a README, an icon, and a first commit;
+ * - `<projectsRoot>/<Project>/<slug>`: the same, filed in a project.
  *
  * @module ManagedProjectFolders
  */
@@ -13,6 +14,8 @@ import {
   CommandId,
   type GitManagerServiceError,
   ProjectId,
+  type ProjectLabelError,
+  type ProjectLabelId,
   type ThreadId,
   VcsProcessSpawnError,
 } from "@t3tools/contracts";
@@ -35,9 +38,14 @@ import * as ServerConfig from "../config.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ProjectService from "./ProjectService.ts";
-import { UNFILED_REPOSITORIES_SEGMENT, resolveProjectsRootDirectory } from "./ProjectsRoot.ts";
+import {
+  UNFILED_REPOSITORIES_SEGMENT,
+  resolveProjectsRootDirectory,
+  resolveRepositoryDirectory,
+} from "./ProjectsRoot.ts";
 
 export class ScratchUnavailableError extends Schema.TaggedError<ScratchUnavailableError>()(
   "ScratchUnavailableError",
@@ -119,20 +127,26 @@ export class ManagedProjectFolders extends Context.Service<
     /** The folder that holds projects started from just a name, under the projects root. */
     readonly namedProjectsRoot: Effect.Effect<string, NamedProjectFolderError>;
     /**
-     * Starts a project from just a name: claims `<namedProjectsRoot>/<slug>`
-     * (adding `-2`, `-3`, ... when taken), makes it a Git repository with a
-     * README, an icon, and a first commit, then creates the project. A failed
-     * commit (no Git identity, a signing prompt) keeps the project and returns
-     * why in `commitError`. The folder is removed when the create fails or is
-     * cancelled before the project exists, never once another project owns it.
+     * Starts a project from just a name: claims `<parent>/<slug>` (adding
+     * `-2`, `-3`, ... when taken), makes it a Git repository with a README,
+     * an icon, and a first commit, then creates the project. The parent is
+     * the label's folder under the projects root when `labelId` is set, filed
+     * there afterwards, and the unfiled repositories folder otherwise. A
+     * failed commit (no Git identity, a signing prompt) keeps the project and
+     * returns why in `commitError`. The folder is removed when the create
+     * fails or is cancelled before the project exists, never once another
+     * project owns it.
      */
-    readonly createNamedProject: (input: { readonly name: string }) => Effect.Effect<
+    readonly createNamedProject: (input: {
+      readonly name: string;
+      readonly labelId?: ProjectLabelId | undefined;
+    }) => Effect.Effect<
       {
         readonly projectId: ProjectId;
         readonly workspaceRoot: string;
         readonly commitError?: string;
       },
-      NamedProjectError
+      NamedProjectError | ProjectLabelError
     >;
   }
 >()("t3/project/ManagedProjectFolders") {}
@@ -246,6 +260,7 @@ const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const projects = yield* ProjectService.ProjectService;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const labels = yield* ProjectLabelService.ProjectLabelService;
   const home = yield* HostProcess.HomeDirectory;
   const crypto = yield* Crypto.Crypto;
 
@@ -408,24 +423,32 @@ const make = Effect.gen(function* () {
 
   const claimNamedFolder = Effect.fn("ManagedProjectFolders.claimNamedFolder")(function* (
     name: string,
+    projectName: string | null,
   ) {
-    const root = yield* namedProjectsRoot;
-    yield* fileSystem
-      .makeDirectory(root, { recursive: true })
-      .pipe(Effect.mapError((cause) => new NamedProjectFolderError({ folder: root, cause })));
+    const projectsRoot = yield* serverSettings.getSettings.pipe(
+      Effect.map((settings) => resolveProjectsRootDirectory(settings.projectsRoot, home, path)),
+      Effect.mapError((cause) => new NamedProjectFolderError({ folder: "<projects root>", cause })),
+    );
+    // The same destination resolver as clone-into-project: `<root>/<Project>/
+    // <slug>`, or `<root>/Repositories/<slug>` when unfiled.
     const folderName = newProjectFolderName(name);
+    const base = resolveRepositoryDirectory(projectsRoot, projectName, folderName, path);
+    const parent = path.dirname(base);
+    yield* fileSystem
+      .makeDirectory(parent, { recursive: true })
+      .pipe(Effect.mapError((cause) => new NamedProjectFolderError({ folder: parent, cause })));
     const claimed = yield* claimFreeFolder(
       (attempt) =>
         Effect.succeed(
           attempt > MAX_NAMED_FOLDER_ATTEMPTS
             ? Option.none()
-            : Option.some(path.join(root, attempt === 1 ? folderName : `${folderName}-${attempt}`)),
+            : Option.some(attempt === 1 ? base : path.join(parent, `${folderName}-${attempt}`)),
         ),
       (folder, cause) => new NamedProjectFolderError({ folder, cause }),
     );
     if (Option.isSome(claimed)) return claimed.value;
     return yield* new NamedProjectFolderError({
-      folder: path.join(root, folderName),
+      folder: base,
       cause: `Every folder name for "${folderName}" is taken.`,
     });
   });
@@ -478,7 +501,10 @@ const make = Effect.gen(function* () {
   const createNamedProject: ManagedProjectFolders["Service"]["createNamedProject"] = Effect.fn(
     "ManagedProjectFolders.createNamedProject",
   )(function* (input) {
-    const workspaceRoot = yield* claimNamedFolder(input.name);
+    // Read before claiming anything, so an unknown label fails with no folder left behind.
+    const projectName =
+      input.labelId === undefined ? null : (yield* labels.read(input.labelId)).label.name;
+    const workspaceRoot = yield* claimNamedFolder(input.name, projectName);
     const removeFolder = fileSystem.remove(workspaceRoot, { recursive: true }).pipe(Effect.ignore);
     // Until the create is dispatched nothing else can use the folder, so any
     // exit but success removes it, an interrupt included.
@@ -514,6 +540,13 @@ const make = Effect.gen(function* () {
         ),
         Effect.mapError((cause) => new NamedProjectCreateError({ workspaceRoot, cause })),
       );
+    if (input.labelId !== undefined) {
+      // Best-effort like clone-into-project: the repository exists either way,
+      // so a filing failure must not report it as uncreated.
+      yield* labels
+        .linkRepository({ labelId: input.labelId, repositoryId: project.id })
+        .pipe(Effect.ignoreCause({ log: true }));
+    }
     return {
       projectId: project.id,
       workspaceRoot,
