@@ -358,8 +358,10 @@
       // deeper frame on its tick and is gone after, revealing the app. The glyph pixelates
       // first: on the opening ticks it is redrawn as ever chunkier white blocks, up to the
       // mosaic's own block size (a pre-sized device-resolution canvas), then those blocks step out the
-      // same way. Nothing fades. The loop stops when
-      // the canvas is removed. Reduced motion draws one static frame.
+      // same way. Nothing fades. One rAF chain drives it; stop() (or removing the canvas) ends
+      // it. src/bootSplash.ts never waits on these frames alone: a stalled renderer would
+      // otherwise freeze the dissolve mid-way over the live app. Reduced motion draws one
+      // static frame.
       (() => {
         const shell = document.getElementById("boot-shell");
         const canvas = document.getElementById("boot-shell-pixels");
@@ -402,6 +404,20 @@
         let blocks = [];
         let exit = null;
         let lastFrame = -Infinity;
+        let frame = 0;
+        let stopped = false;
+
+        // Keeps a single rAF chain: the loading loop and the exit share it.
+        function schedule() {
+          if (!frame && !stopped) frame = requestAnimationFrame(tick);
+        }
+
+        function stop() {
+          stopped = true;
+          if (frame) cancelAnimationFrame(frame);
+          frame = 0;
+          removeEventListener("resize", onResize);
+        }
 
         function resize() {
           // About 25 columns, never finer than 38px or coarser than 72px blocks.
@@ -604,9 +620,11 @@
         }
 
         function tick(time) {
+          frame = 0;
+          if (stopped) return;
           if (!canvas.isConnected) {
             // The splash was removed, or the boot error replaced it: stop and restore the fallback.
-            removeEventListener("resize", onResize);
+            stop();
             delete shell.dataset.pixels;
             return;
           }
@@ -616,7 +634,7 @@
             lastFrame = time;
             draw(time);
           }
-          if (!reduceMotion || exit) requestAnimationFrame(tick);
+          if (!reduceMotion || exit) schedule();
         }
 
         function onResize() {
@@ -631,12 +649,14 @@
         sampleGlyph();
         shell.dataset.pixels = "ready";
         addEventListener("resize", onResize);
-        if (!reduceMotion) requestAnimationFrame(tick);
+        if (!reduceMotion) schedule();
 
         window.cogenlyBootSplash = {
+          stop,
           // Runs the exit dissolve; resolves after its last tick with the blocks cleared per
           // tick and a log of when each tick and glyph step drew.
           dissolve(duration) {
+            if (stopped || exit) return Promise.resolve(null);
             const ticks = Math.max(2, Math.round(duration / TICK_MS));
             const ordered = blocks.slice().sort((a, b) => a.order - b.order);
             const counts = new Array(ticks).fill(0);
@@ -675,7 +695,7 @@
                 counts,
                 done: resolve,
               };
-              requestAnimationFrame(tick);
+              schedule();
             });
           },
         };

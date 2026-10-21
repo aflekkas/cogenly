@@ -10,6 +10,8 @@ export function showBootError(error: unknown) {
   console.error("Cogenly failed to start.", error);
   const bootShell = document.getElementById("boot-shell");
   if (!bootShell) return;
+  // The error replaces the mosaic: stop its canvas loop rather than wait for it to notice.
+  window.cogenlyBootSplash?.stop();
   bootShell.dataset.state = "error";
   bootShell.style.pointerEvents = "";
   bootShell.setAttribute("role", "alert");
