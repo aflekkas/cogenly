@@ -7,9 +7,9 @@ import { isElectron } from "~/env";
 
 /**
  * The person at the top of a conversation, as a messaging app pins them: the face
- * (which follows the pointer and blinks on its own), the name in a pill that opens
- * Details, and a quiet status line. It floats over the transcript, which scrolls up
- * under it and fades out across its height; the header controls sit at the corners.
+ * (which follows the pointer and blinks on its own) and the name in a pill that opens
+ * Details, with the status inline while there is one. It floats over the transcript
+ * on a frosted band; the header controls sit at the corners.
  */
 export function AgentIdentity({
   face,
@@ -21,6 +21,7 @@ export function AgentIdentity({
 }: {
   face: AgentFaceProps;
   name: string;
+  /** Shown inline after the name; pass nothing while idle. */
   status?: string | null;
   onBack?: (() => void) | undefined;
   /** Opens Details; without it the name pill is plain text. */
@@ -28,6 +29,11 @@ export function AgentIdentity({
   /** The header controls at the top right, such as the Details popover's icon. */
   trailing?: ReactNode;
 }) {
+  const statusLine = status ? (
+    <span key={status} className="agent-identity-status agent-morph" role="status">
+      {status}
+    </span>
+  ) : null;
   return (
     <header className={cn("agent-identity", isElectron && "drag-region")}>
       <span aria-hidden className="agent-identity-backdrop" />
@@ -39,22 +45,19 @@ export function AgentIdentity({
         ) : null}
       </div>
       <div className="agent-identity-person">
-        <AgentFace {...face} size={44} />
+        <AgentFace {...face} size={36} />
         {onDetails ? (
           <button type="button" className="agent-identity-name" onClick={onDetails}>
             <span>{name}</span>
+            {statusLine}
             <ChevronRightIcon className="size-3" aria-hidden />
           </button>
         ) : (
           <span className="agent-identity-name">
             <span>{name}</span>
+            {statusLine}
           </span>
         )}
-        {status ? (
-          <span key={status} className="agent-identity-status agent-morph" role="status">
-            {status}
-          </span>
-        ) : null}
       </div>
       <div className="flex items-center justify-end gap-1 [-webkit-app-region:no-drag]">
         {trailing}

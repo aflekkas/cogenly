@@ -127,7 +127,7 @@ function AgentView({
           state: agent.requests.length ? "blocked" : agent.state,
         }}
         name={agent.name}
-        status={busy ? "Working…" : status}
+        status={busy ? "Working…" : status === "Idle" ? null : status}
         onBack={onBack}
         onDetails={() => setDetails("responsibility")}
         trailing={
