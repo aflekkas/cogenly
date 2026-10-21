@@ -32,10 +32,12 @@ import {
   priorFiling,
   projectLabelKey,
   threadFolderState,
+  threadForksIntoProjects,
   threadProjectFolderId,
 } from "./projectLabels.logic";
 import { composerProjectFolderId } from "./projectMeta.logic";
 import { HeroProjectSuffixText } from "./HeroProjectSuffix";
+import { ForkHint } from "./ForkHint";
 import { ProjectFolderIcon } from "./ProjectFolderMark";
 import { reportProjectFolderFailure, useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
@@ -157,6 +159,8 @@ export function ComposerProjectPicker(props: {
   const isChat = surface !== "work" && surface !== "builder" && thread?.source.agent === undefined;
 
   if (!canMove || !isChat) return null;
+  // A chat with turns goes into another project as a fork; the picker says so.
+  const forks = thread !== null && threadForksIntoProjects(thread);
 
   const assign = async (folder: { id: ProjectLabelId; name: string } | null) => {
     if (thread === null) {
@@ -165,12 +169,15 @@ export function ComposerProjectPicker(props: {
     }
     setPendingProjectFolder(threadId, null);
     if ((folder?.id ?? null) === threadProjectFolderId(thread)) return;
-    await moveThread({
-      environmentId,
-      threadId,
+    const moved = moveThread({
+      thread,
       folder,
       previous: priorFiling(threadFolderState(thread, directory)),
     });
+    // A fork may wait for a running turn; its toast reports it, so the
+    // picker closes now rather than staying open for the whole turn.
+    if (folder !== null && threadForksIntoProjects(thread)) return;
+    await moved;
   };
 
   const choose = async (option: ProjectOption) => {
@@ -280,7 +287,9 @@ export function ComposerProjectPicker(props: {
               {current ? current.label.name : "No project"}
             </span>
           </TooltipTrigger>
-          <TooltipPopup side="top">{current ? "Change project" : "Add to a project"}</TooltipPopup>
+          <TooltipPopup side="top">
+            {forks ? "Fork into a project" : current ? "Change project" : "Add to a project"}
+          </TooltipPopup>
         </Tooltip>
       )}
       <ComboboxPopup
@@ -322,7 +331,11 @@ export function ComposerProjectPicker(props: {
                     <ProjectFolderIcon color={option.color} className="size-4" />
                   </ComboboxItemIcon>
                   <span className="min-w-0 flex-1 truncate">{option.name}</span>
-                  {option.id === current?.label.id ? <CheckIcon className="ml-auto" /> : null}
+                  {option.id === current?.label.id ? (
+                    <CheckIcon className="ml-auto" />
+                  ) : forks ? (
+                    <ForkHint />
+                  ) : null}
                 </>
               ) : option.kind === "new" ? (
                 <>

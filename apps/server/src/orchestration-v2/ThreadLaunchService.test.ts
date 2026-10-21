@@ -1,0 +1,163 @@
+import { describe, expect, it } from "@effect/vitest";
+import {
+  CommandId,
+  MessageId,
+  ProjectId,
+  ProjectLabelError,
+  ProjectLabelId,
+  ProviderInstanceId,
+  RunId,
+  RuntimeMode,
+  ThreadId,
+  type OrchestrationV2ThreadProjection,
+} from "@t3tools/contracts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
+
+import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
+import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
+import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
+import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as TerminalManager from "../terminal/Manager.ts";
+import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import * as CommandReceiptStore from "./CommandReceiptStore.ts";
+import * as ThreadLaunch from "./ThreadLaunchService.ts";
+import * as ThreadManagement from "./ThreadManagementService.ts";
+
+const projectId = ProjectId.make("project:scratch");
+const threadId = ThreadId.make("thread:draft");
+const folderId = ProjectLabelId.make("label:spawn-partners");
+const runId = RunId.make("run:first");
+const providerInstanceId = ProviderInstanceId.make("codex");
+
+type Step =
+  | { readonly kind: "dispatch"; readonly type: string }
+  | { readonly kind: "read-label"; readonly id: ProjectLabelId }
+  | { readonly kind: "file"; readonly threadId: ThreadId; readonly folderId: string | null };
+
+function harness(options: { readonly labelMissing?: boolean } = {}) {
+  const steps: Step[] = [];
+  const projection = {
+    thread: { id: threadId, projectId, worktreePath: "/scratch/draft" },
+    runs: [{ id: runId, status: "running" }],
+    messages: [],
+  } as unknown as OrchestrationV2ThreadProjection;
+  const layer = ThreadLaunch.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ProjectService.ProjectService)({
+          getById: () => Effect.succeedSome({ id: projectId, workspaceRoot: "/scratch" } as never),
+        }),
+        Layer.mock(WorktreeSetupTracker.WorktreeSetupTracker)({}),
+        Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({ get: () => Effect.succeed(null) }),
+        Layer.mock(TerminalManager.TerminalManager)({}),
+        Layer.mock(GitWorkflow.GitWorkflowService)({}),
+        Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+        Layer.mock(ServerSettings.ServerSettingsService)({}),
+        Layer.mock(TextGeneration.TextGeneration)({}),
+        Layer.mock(CommandReceiptStore.CommandReceiptStoreV2)({
+          getByCommandId: () => Effect.succeedNone,
+        }),
+        // Ids come from the input; nothing is allocated.
+        Layer.succeed(IdAllocator.IdAllocatorV2, {} as IdAllocator.IdAllocatorV2["Service"]),
+        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+          folderForThread: () => Effect.succeedSome("/scratch/draft"),
+        }),
+        Layer.mock(ThreadManagement.ThreadManagementService)({
+          assertProviderInstanceEnabled: () => Effect.void,
+          dispatch: (command) =>
+            Effect.sync(() => {
+              steps.push({ kind: "dispatch", type: command.type });
+              const event =
+                command.type === "message.dispatch"
+                  ? { type: "run.created", threadId, payload: { id: runId } }
+                  : { type: "thread.created", threadId };
+              return { storedEvents: [{ event }] } as never;
+            }),
+          getThreadProjection: () => Effect.succeed(projection),
+        }),
+        Layer.mock(ProjectLabelService.ProjectLabelService)({
+          read: (id) =>
+            Effect.suspend(() => {
+              steps.push({ kind: "read-label", id });
+              return options.labelMissing === true
+                ? Effect.fail(new ProjectLabelError({ operation: "read", reason: "not_found" }))
+                : Effect.succeed({ label: { id } as never });
+            }),
+          moveThread: (input) =>
+            Effect.sync(() => {
+              steps.push({ kind: "file", threadId: input.threadId, folderId: input.folderId });
+              return { threadId: input.threadId, projectFolderId: input.folderId } as never;
+            }),
+        }),
+      ),
+    ),
+  );
+  return { steps, layer };
+}
+
+const launchInput = (overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {}) =>
+  ({
+    commandId: CommandId.make("command:first-send"),
+    threadId,
+    projectId,
+    title: "Plan the offsite",
+    modelSelection: { instanceId: providerInstanceId, model: "gpt-5.5" },
+    runtimeMode: Schema.decodeSync(RuntimeMode)("full-access"),
+    interactionMode: "default",
+    workspaceStrategy: { type: "root" },
+    initialMessage: {
+      messageId: MessageId.make("message:first"),
+      text: "Plan the offsite",
+      attachments: [],
+    },
+    createdBy: "user",
+    creationSource: "web",
+    ...overrides,
+  }) satisfies ThreadLaunch.ThreadLaunchInput;
+
+describe("ThreadLaunchService project filing", () => {
+  it.effect("files a chat in its project while it is turnless, before the first message", () => {
+    const { steps, layer } = harness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      yield* launches.launch(launchInput({ projectFolderId: folderId }));
+      expect(steps).toEqual([
+        { kind: "read-label", id: folderId },
+        { kind: "dispatch", type: "thread.create" },
+        { kind: "file", threadId, folderId },
+        { kind: "dispatch", type: "message.dispatch" },
+      ]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("files nothing when no project was picked", () => {
+    const { steps, layer } = harness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      yield* launches.launch(launchInput());
+      expect(steps).toEqual([
+        { kind: "dispatch", type: "thread.create" },
+        { kind: "dispatch", type: "message.dispatch" },
+      ]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("refuses a missing project before creating the thread", () => {
+    const { steps, layer } = harness({ labelMissing: true });
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const error = yield* Effect.flip(launches.launch(launchInput({ projectFolderId: folderId })));
+      expect(error._tag).toBe("ThreadLaunchError");
+      expect(steps).toEqual([{ kind: "read-label", id: folderId }]);
+    }).pipe(Effect.provide(layer));
+  });
+});

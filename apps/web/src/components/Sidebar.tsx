@@ -233,6 +233,7 @@ import {
   projectLabelKey,
   priorFiling,
   threadFolderState,
+  threadForksIntoProjects,
   threadProjectFolderId,
   type ProjectLabelKey,
 } from "../projectLabels/projectLabels.logic";
@@ -4178,6 +4179,7 @@ export default function Sidebar() {
                 canMove: appAtomRegistry.get(
                   serverEnvironment.moveThreadProjectFolder.permissionAtom(thread.environmentId),
                 ),
+                forks: threadForksIntoProjects(thread),
               },
             }),
             position,
@@ -4206,8 +4208,7 @@ export default function Sidebar() {
                 ) ?? null);
           if (clickedId !== "remove-folder" && target === null) return;
           await moveThreadToFolder({
-            environmentId: thread.environmentId,
-            threadId: thread.id,
+            thread,
             folder: target && { id: target.label.id, name: target.label.name },
             previous: priorFiling(folderState),
           });

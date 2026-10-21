@@ -8,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   priorFiling,
+  projectFolderChangeKind,
   projectLabelKey,
   repositoryFolderMove,
   scopedRepositoryKey,
@@ -101,5 +102,45 @@ describe("repositoryFolderMove", () => {
     expect(repositoryFolderMove(bartr.key, undefined)).toEqual({ from: null, needsConfirm: false });
     expect(repositoryFolderMove(spawn.key, spawn)).toEqual({ from: spawn, needsConfirm: false });
     expect(repositoryFolderMove(bartr.key, spawn)).toEqual({ from: spawn, needsConfirm: true });
+  });
+});
+
+describe("projectFolderChangeKind", () => {
+  const folder = ProjectLabelId.make("label:spawn");
+  const run = { runId: "run:1", status: "completed" };
+  const chat = (overrides: { surface?: string; role?: string; latestRun?: unknown } = {}) => ({
+    source: {
+      ...(overrides.surface === undefined ? {} : { surface: overrides.surface }),
+      ...(overrides.role === undefined ? {} : { agent: { role: overrides.role } }),
+    },
+    latestRun: "latestRun" in overrides ? overrides.latestRun : null,
+  });
+
+  it("files a turnless chat in place", () => {
+    expect(projectFolderChangeKind(chat({ surface: "chat" }), folder)).toBe("move");
+  });
+
+  it("forks a chat with turns, including one mid-turn", () => {
+    expect(projectFolderChangeKind(chat({ surface: "chat", latestRun: run }), folder)).toBe("fork");
+    expect(
+      projectFolderChangeKind(
+        chat({ surface: "chat", latestRun: { ...run, status: "running" } }),
+        folder,
+      ),
+    ).toBe("fork");
+    // Older shells omit the surface; the server treats them as chats too.
+    expect(projectFolderChangeKind(chat({ latestRun: run }), folder)).toBe("fork");
+  });
+
+  it("always moves when taking a chat out of a project", () => {
+    expect(projectFolderChangeKind(chat({ surface: "chat", latestRun: run }), null)).toBe("move");
+  });
+
+  it("moves Work, an agent's Work thread, and the builder, turns or not", () => {
+    expect(projectFolderChangeKind(chat({ surface: "work", latestRun: run }), folder)).toBe("move");
+    expect(projectFolderChangeKind(chat({ role: "work", latestRun: run }), folder)).toBe("move");
+    expect(projectFolderChangeKind(chat({ surface: "builder", latestRun: run }), folder)).toBe(
+      "move",
+    );
   });
 });

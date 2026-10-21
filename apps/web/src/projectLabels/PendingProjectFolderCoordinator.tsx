@@ -6,11 +6,20 @@ import { useEffect, useMemo, useRef } from "react";
 import { useThreadShell } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
-import { usePendingProjectFolderStore, type PendingProjectFolder } from "./pendingProjectFolders";
+import {
+  pendingProjectFolderStep,
+  usePendingProjectFolderStore,
+  type PendingProjectFolder,
+} from "./pendingProjectFolders";
 import { threadProjectFolderId } from "./projectLabels.logic";
 import { reportProjectFolderFailure } from "./useMoveThreadToFolder";
 
-/** Waits for one draft's thread, then files it where the draft said. */
+/**
+ * Waits for one draft's thread, then files it where the draft said, but only
+ * while it is turnless. A first send creates the chat already filed (or, on a
+ * server too old for that, with a turn), and a chat with turns never moves:
+ * it would need a fork the user did not ask for.
+ */
 function PendingProjectFolderApplier(props: {
   readonly threadId: ThreadId;
   readonly pending: PendingProjectFolder;
@@ -28,10 +37,15 @@ function PendingProjectFolderApplier(props: {
     reportFailure: false,
   });
   const sentRef = useRef(false);
-  const filed = thread !== null && threadProjectFolderId(thread) === pending.folderId;
+  const step = pendingProjectFolderStep(
+    pending,
+    thread === null
+      ? null
+      : { folderId: threadProjectFolderId(thread), hasTurns: thread.latestRun !== null },
+  );
   useEffect(() => {
-    if (thread === null) return;
-    if (filed) {
+    if (step === "wait") return;
+    if (step === "clear") {
       clearPending(threadId);
       return;
     }
@@ -46,13 +60,14 @@ function PendingProjectFolderApplier(props: {
       }
       clearPending(threadId);
     });
-  }, [clearPending, filed, move, pending, thread, threadId]);
+  }, [clearPending, move, pending, step, threadId]);
   return null;
 }
 
 /**
- * Files threads created from drafts that had a project picked. Mounted once
- * at the root so a send followed by navigating away still lands the move.
+ * Fallback filing for threads that came to exist turnless from a draft that
+ * had a project picked, without the launch filing them. Mounted once at the
+ * root so a navigation away still lands the move.
  */
 export function PendingProjectFolderCoordinator() {
   const byThreadId = usePendingProjectFolderStore((state) => state.byThreadId);

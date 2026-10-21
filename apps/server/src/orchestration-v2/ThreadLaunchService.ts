@@ -14,6 +14,7 @@ import {
   type ProviderDriverKind,
   type ProviderInteractionMode,
   ProjectId,
+  type ProjectLabelId,
   type RunId,
   type RuntimeMode,
   type ScheduledTaskId,
@@ -40,6 +41,7 @@ import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -93,6 +95,12 @@ export interface ThreadLaunchInput {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
+  /**
+   * The project the new thread is filed in before its first message, so a
+   * chat starts in its project (and its project dir) rather than being moved
+   * there once it has turns, which the re-parenting gate refuses.
+   */
+  readonly projectFolderId?: ProjectLabelId;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   readonly importedNativeThread?: {
     readonly ref: {
@@ -226,6 +234,9 @@ const make = Effect.gen(function* () {
   const ids = yield* IdAllocator.IdAllocatorV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+  // Optional so launch-only test layers still resolve; production provides
+  // it, and a launch that names a project fails without it.
+  const projectLabels = yield* Effect.serviceOption(ProjectLabelService.ProjectLabelService);
   const preparationScope = yield* Scope.make("sequential");
   const scheduledLaunches = yield* Ref.make<ReadonlySet<CommandId>>(new Set());
   yield* Effect.addFinalizer(() => Scope.close(preparationScope, Exit.void));
@@ -864,6 +875,27 @@ const make = Effect.gen(function* () {
         )("Reusing an existing thread requires a thread id.");
       }
 
+      // Resolve the project before anything is created, so a bad pick fails
+      // the launch instead of leaving an unfiled thread behind.
+      const fileInProject =
+        input.projectFolderId === undefined
+          ? null
+          : yield* Option.match(projectLabels, {
+              onNone: () =>
+                Effect.fail(mapError(input, "resolve-project")("Projects are unavailable.")),
+              onSome: (labels) => {
+                const folderId = input.projectFolderId!;
+                return labels.read(folderId).pipe(
+                  Effect.mapError(mapError(input, "resolve-project")),
+                  Effect.as((threadId: ThreadId) =>
+                    labels
+                      .moveThread({ threadId, folderId })
+                      .pipe(Effect.mapError(mapError(input, "create-thread", threadId))),
+                  ),
+                );
+              },
+            });
+
       const launchReceipt = yield* readReceipt(input, input.commandId);
       yield* threads.assertProviderInstanceEnabled({
         projectId: input.projectId,
@@ -983,10 +1015,21 @@ const make = Effect.gen(function* () {
           return yield* mapError(input, "resolve-project", threadId)("Project identity changed.");
         }
 
+        const messageCommandId = CommandId.make(`${input.commandId}:initial-message`);
+        // File it while it is still turnless: the first turn then resolves
+        // the project dir as its cwd. A retry whose message already landed
+        // was filed by its first attempt.
+        if (
+          fileInProject !== null &&
+          (input.initialMessage === undefined ||
+            Option.isNone(yield* readReceipt(input, messageCommandId)))
+        ) {
+          yield* fileInProject(threadId);
+        }
+
         let runId: RunId | null = null;
         let messageWasAlreadyAccepted = false;
         if (input.initialMessage !== undefined) {
-          const messageCommandId = CommandId.make(`${input.commandId}:initial-message`);
           const messageReceipt = yield* readReceipt(input, messageCommandId);
           messageWasAlreadyAccepted = Option.isSome(messageReceipt);
           const messageId =

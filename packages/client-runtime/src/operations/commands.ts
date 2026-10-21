@@ -15,6 +15,7 @@ import {
   type OrchestrationV2CreationSource,
   type PlanId,
   type ProjectId,
+  type ProjectLabelId,
   type ProjectIconOverride,
   type ProjectScript,
   type ProviderApprovalDecision,
@@ -159,6 +160,8 @@ interface StartThreadBootstrap {
     readonly branch: string | null;
     readonly worktreePath: string | null;
     readonly createdAt: string;
+    /** The project picked for the draft: the chat is created filed in it. */
+    readonly projectFolderId?: ProjectLabelId;
   };
   readonly prepareWorktree?: {
     /** V2 worktree launches always fail rather than falling back to the project checkout. */
@@ -690,6 +693,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       workspaceStrategy,
+      ...(bootstrap?.projectFolderId === undefined
+        ? {}
+        : { projectFolderId: bootstrap.projectFolderId }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,

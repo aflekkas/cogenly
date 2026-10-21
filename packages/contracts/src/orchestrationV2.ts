@@ -3517,6 +3517,12 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
+  /**
+   * Files the new chat in this project before its first message, so it never
+   * needs a move (chats with turns can only fork into a project). Older
+   * servers ignore it.
+   */
+  projectFolderId: Schema.optional(ProjectLabelId),
   initialMessage: Schema.optional(
     Schema.Struct({
       messageId: Schema.optional(MessageId),

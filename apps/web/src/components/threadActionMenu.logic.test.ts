@@ -219,6 +219,13 @@ describe("Move to folder in the thread action menu", () => {
     expect(readOnly?.children?.find((child) => child.id === "remove-folder")?.disabled).toBe(true);
   });
 
+  it("names the submenu for what picking does: a chat with turns forks", () => {
+    expect(folderItems(stateFor("chat"))[0]?.label).toBe("Move to folder");
+    expect(folderItems(stateFor("chat", { folder: { ...base, forks: true } }))[0]?.label).toBe(
+      "Fork into project",
+    );
+  });
+
   it("leaves folders off agent conversations", () => {
     expect(folderItems(stateFor("agentConversation"))).toEqual([]);
   });

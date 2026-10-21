@@ -146,3 +146,35 @@ export function priorFiling(state: ThreadFolderState): PriorFiling | null {
     ? { id: state.current.label.id, name: state.current.label.name, source: state.source }
     : null;
 }
+
+/** The parts of a thread that decide how it goes into a project. */
+export interface ProjectFolderChangeThread {
+  readonly source: {
+    readonly surface?: string | undefined;
+    readonly agent?: { readonly role: string } | undefined;
+  };
+  /** Null until the thread's first turn. */
+  readonly latestRun: unknown;
+}
+
+/** True for a chat with turns: the server refuses to re-parent it, so it forks. */
+export function threadForksIntoProjects(thread: ProjectFolderChangeThread): boolean {
+  return (
+    (thread.source.surface ?? "chat") === "chat" &&
+    thread.source.agent?.role !== "work" &&
+    thread.latestRun !== null
+  );
+}
+
+/**
+ * How putting a thread in `folderId` happens. A chat with turns is forked
+ * into the project (the original stays where it is) because its history ran
+ * in another directory; a turnless chat or Work files in place, and taking a
+ * thread out of a project is always a move.
+ */
+export function projectFolderChangeKind(
+  thread: ProjectFolderChangeThread,
+  folderId: ProjectLabelId | null,
+): "move" | "fork" {
+  return folderId !== null && threadForksIntoProjects(thread) ? "fork" : "move";
+}

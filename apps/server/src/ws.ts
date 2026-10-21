@@ -1501,6 +1501,9 @@ const makeWsRpcHandlers = (
                   runtimeMode: input.runtimeMode,
                   interactionMode: input.interactionMode,
                   workspaceStrategy: input.workspaceStrategy,
+                  ...(input.projectFolderId === undefined
+                    ? {}
+                    : { projectFolderId: input.projectFolderId }),
                   ...(input.initialMessage === undefined
                     ? {}
                     : {

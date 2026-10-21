@@ -9,6 +9,7 @@ import {
   ORCHESTRATION_V2_WS_METHODS,
   PlanId,
   ProjectId,
+  ProjectLabelId,
   ProviderInstanceId,
   ProviderDriverKind,
   RunId,
@@ -361,6 +362,51 @@ describe("V2 environment commands", () => {
           branch: "feature",
         },
       });
+    }).pipe(Effect.provide(layerTestCrypto)),
+  );
+
+  it.effect("creates a draft's chat already filed in its picked project, with no move", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const launches: OrchestrationV2ThreadLaunchInput[] = [];
+      const supervisor = yield* makeSupervisor({ commands, projects: [], launches });
+
+      yield* startThreadTurn({
+        commandId: CommandId.make("launch-in-project"),
+        threadId: v2ThreadId,
+        message: {
+          messageId: MessageId.make("message-in-project"),
+          role: "user",
+          text: "Plan the offsite",
+          attachments: [],
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        titleSeed: "Plan the offsite",
+        bootstrap: {
+          createThread: {
+            surface: "chat",
+            projectId: ProjectId.make("project-1"),
+            title: "Thread",
+            modelSelection: v2Projection.thread.modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: "2026-06-20T00:00:00.000Z",
+            projectFolderId: ProjectLabelId.make("label-spawn-partners"),
+          },
+        },
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(launches).toHaveLength(1);
+      expect(launches[0]).toMatchObject({
+        threadId: v2ThreadId,
+        surface: "chat",
+        projectFolderId: "label-spawn-partners",
+      });
+      // Filed by the launch itself: nothing else is dispatched to move it.
+      expect(commands).toEqual([]);
     }).pipe(Effect.provide(layerTestCrypto)),
   );
 

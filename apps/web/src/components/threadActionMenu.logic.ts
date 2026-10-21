@@ -138,6 +138,8 @@ export interface ThreadActionMenuFolder {
   }>;
   /** The move command's permission on the thread's environment. */
   readonly canMove: boolean;
+  /** A chat with turns: picking a project forks it there instead of moving it. */
+  readonly forks?: boolean;
 }
 
 /** Local navigation, read markers, and copying remain available to read-only clients. */
@@ -156,7 +158,8 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
 }
 
 /**
- * "Move to folder" with "Open <folder>" first when filed, then every folder
+ * "Move to folder" ("Fork into project" for a chat with turns, which goes
+ * into a project as a fork) with "Open <folder>" first when filed, then every folder
  * (the current one checked), "Remove from folder", and "New project…".
  */
 function folderMenuItems(
@@ -197,7 +200,8 @@ function folderMenuItems(
     label: "New project…",
     separatorBefore: children.length > 0,
   });
-  return [{ id: "move-folder", label: "Move to folder", icon: "folder", children }];
+  const label = folder.forks === true ? "Fork into project" : "Move to folder";
+  return [{ id: "move-folder", label, icon: "folder", children }];
 }
 
 type MenuItems = ReadonlyArray<ContextMenuItem<ThreadActionMenuId>>;

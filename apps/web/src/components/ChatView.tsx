@@ -574,6 +574,10 @@ import { useAssetUrls } from "../assets/assetUrls";
 import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@t3tools/shared/composerContextReferences";
 import { recallableComposerPrompt } from "./chat/composerPromptHistory";
 import { observeResize } from "~/lib/observeResize";
+import {
+  beginPendingProjectFolderLaunch,
+  readPendingProjectFolderId,
+} from "../projectLabels/pendingProjectFolders";
 import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
@@ -7613,6 +7617,8 @@ export default function ChatView(props: ChatViewProps) {
               clearedDraftSnapshot &&
             multipleModelSelectionsRef.current === submittedSelections;
           setThreadError(threadIdForSend, null);
+          // Each model's chat starts in the project picked on the draft.
+          const draftProjectFolderId = readPendingProjectFolderId(threadIdForSend, environmentId);
           const starts = Promise.all(
             multipleTargets.map(async (target) => {
               const retryKey = JSON.stringify([
@@ -7666,6 +7672,9 @@ export default function ChatView(props: ChatViewProps) {
                           branch: activeThreadBranch,
                           worktreePath: null,
                           createdAt: messageCreatedAt,
+                          ...(draftProjectFolderId === null
+                            ? {}
+                            : { projectFolderId: draftProjectFolderId }),
                         },
                         prepareWorktree: {
                           projectCwd: activeProject.workspaceRoot,
@@ -8002,6 +8011,10 @@ export default function ChatView(props: ChatViewProps) {
     let backgroundDraftOpened = false;
     let turnStartSucceeded = false;
     if (failure === null && turnAttachmentsResult._tag === "Success") {
+      // A project picked on the draft: the chat is created already in it.
+      const draftProjectFolderId = isLocalDraftThread
+        ? readPendingProjectFolderId(threadIdForSend, environmentId)
+        : null;
       const bootstrap =
         isLocalDraftThread || baseBranchForWorktree
           ? {
@@ -8017,6 +8030,9 @@ export default function ChatView(props: ChatViewProps) {
                       branch: activeThreadBranch,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
+                      ...(draftProjectFolderId === null
+                        ? {}
+                        : { projectFolderId: draftProjectFolderId }),
                     },
                   }
                 : {}),
@@ -8037,6 +8053,8 @@ export default function ChatView(props: ChatViewProps) {
           ? scopeThreadRef(environmentId, threadIdForSend)
           : null;
       if (backgroundThreadRef) beginBackgroundDraftSubmissionByRef(backgroundThreadRef);
+      const settleProjectFolderLaunch =
+        draftProjectFolderId === null ? null : beginPendingProjectFolderLaunch(threadIdForSend);
       const startPromise = startThreadTurn({
         environmentId,
         input: {
@@ -8107,6 +8125,7 @@ export default function ChatView(props: ChatViewProps) {
         }
       }
       const startResult = await startPromise;
+      settleProjectFolderLaunch?.(startResult._tag === "Success");
       if (startResult._tag === "Failure") {
         failure = startResult;
       } else {

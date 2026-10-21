@@ -89,7 +89,11 @@ import {
   usageLimitStopForThread,
 } from "./chat/usageLimitRecovery.logic";
 import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
-import { priorFiling, threadFolderState } from "../projectLabels/projectLabels.logic";
+import {
+  priorFiling,
+  threadFolderState,
+  threadForksIntoProjects,
+} from "../projectLabels/projectLabels.logic";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import {
   useEnvironmentProjectLabels,
@@ -2052,12 +2056,21 @@ function OpenCommandPaletteDialog(props: {
     const folderState = threadFolderState(activeThread, activeFolderDirectory);
     const thread = activeThread;
     const previous = priorFiling(folderState);
+    // A chat with turns goes into a project as a fork, not a move.
+    const forks = threadForksIntoProjects(thread);
     if (folderState.options.length > 0) {
       actionItems.push({
         kind: "submenu",
         value: "action:move-thread-to-folder",
-        searchTerms: ["move to folder", "move to project", "file", "folder", "project"],
-        title: "Move to folder…",
+        searchTerms: [
+          "move to folder",
+          "move to project",
+          "fork into project",
+          "file",
+          "folder",
+          "project",
+        ],
+        title: forks ? "Fork into project…" : "Move to folder…",
         icon: <FolderIcon className={ITEM_ICON_CLASS} />,
         addonIcon: <FolderIcon className={ADDON_ICON_CLASS} />,
         disabled: !canMoveActiveThread,
@@ -2081,8 +2094,7 @@ function OpenCommandPaletteDialog(props: {
                 : {}),
               run: async () => {
                 await moveThreadToFolder({
-                  environmentId: thread.environmentId,
-                  threadId: thread.id,
+                  thread,
                   folder: { id: entry.label.id, name: entry.label.name },
                   previous,
                 });
@@ -2102,8 +2114,7 @@ function OpenCommandPaletteDialog(props: {
         disabled: !canMoveActiveThread,
         run: async () => {
           await moveThreadToFolder({
-            environmentId: thread.environmentId,
-            threadId: thread.id,
+            thread,
             folder: null,
             previous,
           });

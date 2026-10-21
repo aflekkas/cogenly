@@ -20,7 +20,12 @@ import { ProjectContextToggle } from "../context/ThreadContext";
 import { useThreadShell } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
-import { PROJECT_LABEL_COLORS, priorFiling, threadFolderState } from "./projectLabels.logic";
+import {
+  PROJECT_LABEL_COLORS,
+  priorFiling,
+  threadFolderState,
+  threadForksIntoProjects,
+} from "./projectLabels.logic";
 import { ProjectFolderIcon } from "./ProjectFolderMark";
 import { reportProjectFolderFailure, useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
@@ -112,13 +117,12 @@ export function ThreadFolderPicker(props: {
         const target = state.options.find((entry) => entry.key === option.key);
         if (!target) return;
         await moveThread({
-          environmentId,
-          threadId,
+          thread,
           folder: { id: target.label.id, name: target.label.name },
           previous,
         });
       } else if (option.kind === "remove") {
-        await moveThread({ environmentId, threadId, folder: null, previous });
+        await moveThread({ thread, folder: null, previous });
       } else {
         const color =
           PROJECT_LABEL_COLORS[state.options.length % PROJECT_LABEL_COLORS.length]?.value;
@@ -132,8 +136,7 @@ export function ThreadFolderPicker(props: {
           return;
         }
         await moveThread({
-          environmentId,
-          threadId,
+          thread,
           folder: { id: created.value.label.id, name: created.value.label.name },
           previous,
         });
@@ -145,7 +148,10 @@ export function ThreadFolderPicker(props: {
     }
   };
 
-  const triggerLabel = current ? `In ${current.label.name}. Move to folder` : "Move to folder";
+  // A chat with turns goes into a project as a fork, so say so.
+  const forks = threadForksIntoProjects(thread);
+  const action = forks ? "Fork into project" : "Move to folder";
+  const triggerLabel = current ? `In ${current.label.name}. ${action}` : action;
 
   return (
     <Combobox
@@ -173,7 +179,7 @@ export function ThreadFolderPicker(props: {
             <span className="min-w-0 truncate">{current.label.name}</span>
           </>
         ) : (
-          "Move to folder…"
+          `${action}…`
         )}
       </ComboboxTrigger>
       <ComboboxPopup align="start" className="w-64">
@@ -187,6 +193,8 @@ export function ThreadFolderPicker(props: {
           <ComboboxStatus>You can see this thread's folder but not move it.</ComboboxStatus>
         ) : state.viaRepository && query === "" ? (
           <ComboboxStatus>In {current?.label.name} through its repository.</ComboboxStatus>
+        ) : forks && query === "" ? (
+          <ComboboxStatus>Opens a copy in the project. This chat stays put.</ComboboxStatus>
         ) : null}
         <ComboboxList>
           {(option: FolderOption) => (

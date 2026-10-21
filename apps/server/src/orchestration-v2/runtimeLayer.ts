@@ -300,6 +300,7 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
       layerProjectService,
       layerProjectSetupScriptRunner,
       layerManagedProjectFoldersProvided,
+      layerProjectLabelsProvided,
       layerThreadManagementProvided,
       layerCommandReceiptStoreProvided,
       IdAllocator.layer,
