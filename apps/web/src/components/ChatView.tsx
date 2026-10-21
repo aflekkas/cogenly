@@ -1104,7 +1104,7 @@ export default function ChatView(props: ChatViewProps) {
   const canReadTerminal = useEnvironmentScope(environmentId, AuthTerminalReadScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
-  const { settleThread } = useThreadActions();
+  const { settleThread, pinThread, unpinThread } = useThreadActions();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -5347,6 +5347,29 @@ export default function ChatView(props: ChatViewProps) {
   });
   const activeThreadSettled =
     supportsSettlement && activeThreadShell?.settledOverride === "settled";
+  // mod+shift+p: pins or unpins the open chat, the same as the sidebar menu.
+  // False when the open thread can't be pinned, so the key stays unclaimed.
+  const canPinActiveThreadStable = useStableCallback(
+    () =>
+      activeThreadCapabilities.pin &&
+      serverConfig?.environment.capabilities.threadPinning === true &&
+      readEnvironmentScope(environmentId, AuthOrchestrationOperateScope),
+  );
+  const toggleActiveThreadPinStable = useStableCallback(() => {
+    if (!isServerThread || !activeThreadRef || !activeThreadShell) return;
+    const pinned = activeThreadShell.pinnedAt != null;
+    void (pinned ? unpinThread(activeThreadRef) : pinThread(activeThreadRef)).then((result) => {
+      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: pinned ? "Failed to unpin thread" : "Failed to pin thread",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    });
+  });
   const unsettleThreadMutation = useOrchestrationCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   });
@@ -6217,6 +6240,14 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "thread.pin") {
+        if (!canPinActiveThreadStable()) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) toggleActiveThreadPinStable();
+        return;
+      }
+
       if (command === "thread.startWork") {
         // Only a chat hands off to Work; agent conversations start Work through the agent.
         if (!activeThreadCapabilities.startWork) return;
@@ -6388,6 +6419,8 @@ export default function ChatView(props: ChatViewProps) {
     settleThread,
     supportsSettlement,
     copyActiveThreadReferenceStable,
+    canPinActiveThreadStable,
+    toggleActiveThreadPinStable,
     getShortcutContextStable,
     openThreadFindStable,
     closeThreadFindStable,

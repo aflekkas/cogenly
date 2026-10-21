@@ -11,6 +11,10 @@ const rowTravel = (height: number) => Math.min(height, 40);
 // so only the fade count decides whether an update animates.
 const MAX_FADED_ROWS_PER_UPDATE = 40;
 
+// Section labels (Today, Pinned…) appear and leave in place with an opacity
+// fade: they travel only when they ride a block of rows that actually moves.
+const fadesInPlace = (node: HTMLElement) => node.hasAttribute("data-sidebar-group-label");
+
 type RowPosition = { top: number; left: number; width: number; height: number };
 
 function progress(animation: Animation) {
@@ -151,11 +155,9 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
           if (!positions.has(node) && position.height > 0) fadeCount++;
         }
       }
-      const shouldAnimate =
-        animate &&
-        positions !== null &&
-        !reducedMotion?.matches &&
-        fadeCount <= MAX_FADED_ROWS_PER_UPDATE;
+      // Reduced motion keeps the fades and drops every translate.
+      const reduced = reducedMotion?.matches === true;
+      const shouldAnimate = animate && positions !== null && fadeCount <= MAX_FADED_ROWS_PER_UPDATE;
       const movedDelta = new Map<HTMLElement, number>();
       const nextOrder = [...next.keys()];
       const oldOrder = positions === null ? [] : [...positions.keys()];
@@ -186,7 +188,17 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         for (const [node, position] of positions!) {
           if (next.has(node)) continue;
           const delta = ridingDelta(oldOrder, oldOrder.indexOf(node), (n) => next.has(n));
-          fadeOut(node, position, delta === undefined ? rowTravel(position.height) : -delta);
+          fadeOut(
+            node,
+            position,
+            reduced
+              ? 0
+              : delta !== undefined
+                ? -delta
+                : fadesInPlace(node)
+                  ? 0
+                  : rowTravel(position.height),
+          );
         }
       }
       for (const [node, entry] of entering) {
@@ -205,7 +217,13 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
           if (previousTop === undefined) {
             if (position.height > 0) {
               const delta = ridingDelta(nextOrder, index, (n) => positions!.has(n));
-              const travel = delta === undefined ? -rowTravel(position.height) : delta;
+              const travel = reduced
+                ? 0
+                : delta !== undefined
+                  ? delta
+                  : fadesInPlace(node)
+                    ? 0
+                    : -rowTravel(position.height);
               const animation = node.animate(
                 [
                   { opacity: 0, transform: `translateY(${travel}px)` },
@@ -227,7 +245,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
           const delta = movedDelta.get(node);
           // Computed progress includes the effect's easing. Only our own
           // translate is carried forward.
-          if (delta !== undefined) move(node, delta);
+          if (delta !== undefined && !reduced) move(node, delta);
         }
       }
       positions = next;

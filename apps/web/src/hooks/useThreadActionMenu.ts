@@ -38,6 +38,7 @@ import {
   readEnvironmentSupportsAutoSettleOptOut,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
+  readEnvironmentSupportsPinning,
   readEnvironmentSupportsTitleRegeneration,
   readThreadShell,
   useProjects,
@@ -106,6 +107,8 @@ export function useThreadActionMenu(input: {
     unsettleThread,
     snoozeThread,
     unsnoozeThread,
+    pinThread,
+    unpinThread,
     setThreadAutoSettle,
     archiveThread,
     deleteThread,
@@ -170,6 +173,7 @@ export function useThreadActionMenu(input: {
           settlement: readEnvironmentSupportsSettlement(threadRef.environmentId),
           autoSettleOptOut: readEnvironmentSupportsAutoSettleOptOut(threadRef.environmentId),
           snooze: readEnvironmentSupportsSnooze(threadRef.environmentId),
+          pinning: readEnvironmentSupportsPinning(threadRef.environmentId),
           titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
@@ -189,6 +193,7 @@ export function useThreadActionMenu(input: {
           canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
           branch: thread.branch ?? null,
           isUnread,
+          isPinned: thread.pinnedAt != null,
           isSettled: supports.settlement && thread.settledOverride === "settled",
           autoSettleEnabled: thread.autoSettleDisabledAt == null,
           isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
@@ -323,6 +328,12 @@ export function useThreadActionMenu(input: {
           case "unsettle":
             await reportFailure("Failed to un-settle thread", () => unsettleThread(threadRef));
             return;
+          case "pin":
+            await reportFailure("Failed to pin thread", () => pinThread(threadRef));
+            return;
+          case "unpin":
+            await reportFailure("Failed to unpin thread", () => unpinThread(threadRef));
+            return;
           case "unsnooze":
             await reportFailure("Failed to wake thread", () => unsnoozeThread(threadRef));
             return;
@@ -456,6 +467,7 @@ export function useThreadActionMenu(input: {
       markThreadUnread,
       moveThreadToFolder,
       onStartRename,
+      pinThread,
       projectCwd,
       projectGroupingSettings,
       projects,
@@ -466,6 +478,7 @@ export function useThreadActionMenu(input: {
       snoozeThread,
       threadRef,
       timestampFormat,
+      unpinThread,
       unsettleThread,
       unsnoozeThread,
       updateThreadMetadata,

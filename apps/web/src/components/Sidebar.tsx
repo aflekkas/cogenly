@@ -26,6 +26,7 @@ import {
 import { createInboxReturnTracker } from "@t3tools/client-runtime/state/thread-inbox";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import {
+  planPinnedReorder,
   resolveSettledThreadTimestamp,
   sortSettledThreads,
 } from "@t3tools/client-runtime/state/thread-sort";
@@ -65,6 +66,8 @@ import {
   FolderIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
+  PinIcon,
+  PinOffIcon,
   PlusIcon,
   SettingsIcon,
   ShieldQuestionIcon,
@@ -243,8 +246,10 @@ import {
   SidebarModeSwitcher,
   SidebarProjectsList,
   CHAT_LIST_PAGE_SIZE,
+  applyPinnedDragOrder,
   createChatDateGrouper,
-  sortChatsByActivity,
+  orderChatsWithPins,
+  pinnedDragOrder,
   useSidebarModeActions,
   useSidebarModeState,
   windowChatList,
@@ -927,8 +932,8 @@ function ChatListRevealSentinel(props: { onReveal: () => void }) {
  * with a status slot at its end. A running
  * turn shows a small spinner, a reply you have not seen shows a blue dot, a
  * chat waiting on you an amber one; an unread reply also makes the title
- * heavier. Everything else (rename, archive, Start Work) lives in the context
- * menu.
+ * heavier. Hovering swaps the status for a Pin (or Unpin) button; everything
+ * else (rename, archive, Start Work) lives in the context menu.
  */
 const SidebarChatRow = memo(function SidebarChatRow(props: {
   thread: SidebarThreadSummary;
@@ -948,9 +953,12 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
   onCancelRename: () => void;
   onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
   onContextDragStart: (threadRef: ScopedThreadRef, event: PointerEvent) => void;
+  // Null where the thread's server can't pin.
+  onTogglePin: ((threadRef: ScopedThreadRef, pinned: boolean) => void) | null;
 }) {
   const {
     isRenaming,
+    onTogglePin,
     onCancelRename,
     onCommitRename,
     onContextDragStart,
@@ -976,6 +984,7 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const isContextMenuOpen = useSidebarContextMenuTarget((state) => state.threadKey === threadKey);
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
+  const isPinned = thread.pinnedAt != null;
   const status = resolveSidebarThreadStatus(thread);
   const needsYou = status === "approval" || status === "input";
   const isRunning = status === "working" || status === "waiting";
@@ -1131,10 +1140,43 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
           )}
           <SidebarChatProjectLine project={props.folder} animate={props.animateFolder} />
         </span>
-        <SidebarChatStatusSlot
-          isRunning={isRunning}
-          dot={needsYou ? "warning" : isUnread ? "info" : null}
-        />
+        {onTogglePin !== null && canOperateThread && !isRenaming ? (
+          // The Pin button takes the status slot's place on hover; it
+          // overhangs the slot into the row's padding so the title never moves.
+          <span className="relative size-3 shrink-0">
+            <span className="flex transition-opacity duration-(--motion-duration-base) ease-standard group-any-hover/sidebar-chat:opacity-0 group-has-[:focus-visible]/sidebar-chat:opacity-0">
+              <SidebarChatStatusSlot
+                isRunning={isRunning}
+                dot={needsYou ? "warning" : isUnread ? "info" : null}
+              />
+            </span>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={isPinned ? "Unpin thread" : "Pin thread"}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onTogglePin(threadRef, isPinned);
+                    }}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    className="pointer-events-none absolute -inset-1.5 inline-flex cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard outline-none hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-chat:pointer-events-auto group-any-hover/sidebar-chat:opacity-100"
+                  />
+                }
+              >
+                {isPinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
+              </TooltipTrigger>
+              <TooltipPopup side="top">{isPinned ? "Unpin" : "Pin"}</TooltipPopup>
+            </Tooltip>
+          </span>
+        ) : (
+          <SidebarChatStatusSlot
+            isRunning={isRunning}
+            dot={needsYou ? "warning" : isUnread ? "info" : null}
+          />
+        )}
         {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
       </div>
     </li>
@@ -2268,6 +2310,9 @@ export default function Sidebar() {
     unsettleThread,
     snoozeThread,
     unsnoozeThread,
+    pinThread,
+    unpinThread,
+    reorderPinnedThread,
     setThreadAutoSettle,
     markThreadUnread,
     markThreadRead,
@@ -2633,7 +2678,6 @@ export default function Sidebar() {
         // a tail with no working affordances.
         const supportsSettlement = capabilities?.threadSettlement === true;
         const supportsSnooze = capabilities?.threadSnooze === true;
-        // Pinning is gone: a stored pin no longer lifts a thread out of its place.
         const section = resolveSidebarThreadSection({
           snoozed: supportsSnooze && effectiveSnoozed(thread, { now: preciseNow }),
           settled: supportsSettlement && thread.settledOverride === "settled",
@@ -2642,11 +2686,12 @@ export default function Sidebar() {
           thread,
         );
       }
-      // Chats read newest first under date headings. Work is one flat list
-      // in inbox order; each row names its repository and projects itself.
+      // Chats lead with their pins, then read newest first under date
+      // headings. Work is one flat list in inbox order; each row names its
+      // repository and projects itself.
       const sortedActive =
         sidebarMode === "chats"
-          ? sortChatsByActivity(active)
+          ? orderChatsWithPins(active)
           : workingShelfEnabled
             ? sortInboxThreadsByReturn(active, inboxReturns.returnedAt)
             : sortThreadsForSidebar(active);
@@ -2684,18 +2729,25 @@ export default function Sidebar() {
   });
   const chatVisibleCount =
     chatWindowState.resetKey === chatWindowResetKey ? chatWindowState.count : CHAT_LIST_PAGE_SIZE;
+  // While a pinned chat is dragged, Pinned previews the drop order; the list
+  // motion glides rows between slots as the order changes.
+  const [pinDrag, setPinDrag] = useState<{ key: string; order: readonly string[] } | null>(null);
   const chatWindow = useMemo(
     () =>
       sidebarMode === "chats"
         ? windowChatList(
-            activeThreads,
+            pinDrag
+              ? applyPinnedDragOrder(activeThreads, pinDrag.order, (thread) =>
+                  scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                )
+              : activeThreads,
             chatVisibleCount,
             (thread) =>
               routeThreadKey !== null &&
               scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
           )
         : null,
-    [activeThreads, chatVisibleCount, routeThreadKey, sidebarMode],
+    [activeThreads, chatVisibleCount, pinDrag, routeThreadKey, sidebarMode],
   );
   const renderedActiveThreads = chatWindow?.visible ?? activeThreads;
   const revealMoreChats = useCallback(
@@ -3332,10 +3384,64 @@ export default function Sidebar() {
     },
     [contextDragThreads, pointerOutsideThreadList],
   );
+  /** Pinned chat keys in list order, when `key` is a pinned chat that can be dragged to reorder. */
+  const pinnedReorderOrder = (key: string): string[] | null => {
+    if (sidebarMode !== "chats") return null;
+    const thread = threadByKeyRef.current.get(key);
+    if (
+      thread?.pinnedAt == null ||
+      serverConfigs.get(thread.environmentId)?.environment.capabilities.threadPinReorder !== true ||
+      !readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope)
+    ) {
+      return null;
+    }
+    const order = activeThreads
+      .filter((candidate) => candidate.pinnedAt != null)
+      .map((candidate) => scopedThreadKey(scopeThreadRef(candidate.environmentId, candidate.id)));
+    return order.length > 1 ? order : null;
+  };
+  const commitPinDrag = (key: string, order: readonly string[]) => {
+    const keysById = new Map(
+      order.map((id) => [id, threadByKeyRef.current.get(id)?.pinOrderKey ?? null]),
+    );
+    const writes = planPinnedReorder({ orderedIds: order, keysById, movedId: key });
+    if (writes.length === 0) {
+      setPinDrag(null);
+      return;
+    }
+    // The preview holds until the writes land, so the row never jumps back.
+    void Promise.all(
+      writes.flatMap(({ id, orderKey }) => {
+        const ref = parseScopedThreadKey(id);
+        return ref ? [reorderPinnedThread(ref, orderKey)] : [];
+      }),
+    ).then((results) => {
+      setPinDrag((current) => (current?.key === key ? null : current));
+      for (const result of results) {
+        if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) continue;
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to reorder pinned threads",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+        return;
+      }
+    });
+  };
   const startThreadContextDrag = useStableCallback(
     (threadRef: ScopedThreadRef, event: PointerEvent) => {
       if (dragSensorRef.current !== null) return;
       const key = scopedThreadKey(threadRef);
+      // A pinned chat also drags within Pinned to reorder it. Positions are
+      // read once at the start, against the list, so the preview's own
+      // motion and scrolling never feed back into the drop slot.
+      const pinOrder = pinnedReorderOrder(key);
+      let pinStart: { pointerY: number; center: number; midpoints: number[] } | null = null;
+      let pinPreview: readonly string[] | null = null;
+      const listY = (y: number) => y - (threadListRef.current?.getBoundingClientRect().top ?? 0);
       dragSensorRef.current = new SidebarPointerSensor({
         active: key,
         event,
@@ -3351,12 +3457,45 @@ export default function Sidebar() {
           onDrop: dropThreadContextDrag,
         },
         onPending: () => {},
-        onStart: () => {
+        onStart: ({ y }) => {
           contextDragKeyRef.current = key;
+          const list = threadListRef.current;
+          if (pinOrder === null || list === null) return;
+          const layout = new Map<string, { top: number; height: number }>();
+          for (const row of list.querySelectorAll<HTMLElement>(":scope > [data-thread-item]")) {
+            layout.set(row.dataset.threadItem!, { top: row.offsetTop, height: row.offsetHeight });
+          }
+          const moved = layout.get(key);
+          if (moved === undefined) return;
+          pinStart = {
+            pointerY: listY(y),
+            center: moved.top + moved.height / 2,
+            midpoints: pinOrder.flatMap((candidate) => {
+              const row = candidate === key ? undefined : layout.get(candidate);
+              return row ? [row.top + row.height / 2] : [];
+            }),
+          };
         },
-        onMove: () => {},
-        onEnd: () => {},
-        onCancel: () => {},
+        onMove: ({ y }) => {
+          if (pinOrder === null || pinStart === null) return;
+          const next = pinnedDragOrder(
+            pinOrder,
+            key,
+            pinStart.midpoints,
+            pinStart.center + listY(y) - pinStart.pointerY,
+          );
+          if (pinPreview !== null && next.join("\0") === pinPreview.join("\0")) return;
+          pinPreview = next;
+          setPinDrag({ key, order: next });
+        },
+        onEnd: () => {
+          if (pinPreview === null) return;
+          if (pinPreview.join("\0") === pinOrder?.join("\0")) setPinDrag(null);
+          else commitPinDrag(key, pinPreview);
+        },
+        onCancel: () => {
+          if (pinPreview !== null) setPinDrag(null);
+        },
         onAbort: () => {},
       });
     },
@@ -3928,6 +4067,19 @@ export default function Sidebar() {
     },
   );
 
+  const togglePin = useStableCallback((threadRef: ScopedThreadRef, pinned: boolean) => {
+    void (pinned ? unpinThread(threadRef) : pinThread(threadRef)).then((result) => {
+      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: pinned ? "Failed to unpin thread" : "Failed to pin thread",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    });
+  });
   const handleThreadContextMenu = useStableCallback(
     (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
       void (async () => {
@@ -3993,6 +4145,7 @@ export default function Sidebar() {
                   useUiStateStore.getState().threadLastVisitedAtById[threadKey],
                 ),
               }),
+              isPinned: thread.pinnedAt != null,
               isSettled,
               autoSettleEnabled: thread.autoSettleDisabledAt == null,
               isSnoozed,
@@ -4003,6 +4156,9 @@ export default function Sidebar() {
                 settlement: supportsSettlement,
                 autoSettleOptOut: supportsAutoSettleOptOut,
                 snooze: supportsSnooze,
+                pinning:
+                  serverConfigs.get(thread.environmentId)?.environment.capabilities
+                    .threadPinning === true,
                 titleRegeneration: supportsTitleRegeneration,
               },
               snoozePresets,
@@ -4098,6 +4254,10 @@ export default function Sidebar() {
           }
           case "start-work":
             openCommandPalette({ open: "start-work", threadRef });
+            return;
+          case "pin":
+          case "unpin":
+            togglePin(threadRef, clicked.value === "unpin");
             return;
           case "settle":
             attemptSettle(threadRef);
@@ -4557,6 +4717,12 @@ export default function Sidebar() {
                           onCancelRename={cancelThreadRename}
                           onContextMenu={handleThreadContextMenu}
                           onContextDragStart={startThreadContextDrag}
+                          onTogglePin={
+                            serverConfigs.get(thread.environmentId)?.environment.capabilities
+                              .threadPinning === true
+                              ? togglePin
+                              : null
+                          }
                         />
                       );
                     }

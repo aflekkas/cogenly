@@ -1391,12 +1391,20 @@ describe("composer and thread shortcuts", () => {
     );
   }
 
-  it("no longer binds mod+shift+p to pinning", () => {
+  it("binds mod+shift+p to pinning, outside the terminal", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "p", shiftKey: true, metaKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        { platform: "MacIntel", context: { terminalFocus: false } },
+      ),
+      "thread.pin",
+    );
     assert.isNull(
       resolveShortcutCommand(
         event({ key: "p", shiftKey: true, metaKey: true }),
         DEFAULT_RESOLVED_KEYBINDINGS,
-        { platform: "MacIntel" },
+        { platform: "MacIntel", context: { terminalFocus: true } },
       ),
     );
   });

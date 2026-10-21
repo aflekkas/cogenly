@@ -30,6 +30,8 @@ export interface ThreadCapabilities {
   readonly settle: boolean;
   /** Snooze, and wake. */
   readonly snooze: boolean;
+  /** Pin to the top of its list, unpin, and reorder the pins. */
+  readonly pin: boolean;
   readonly autoSettle: boolean;
   /** Archive, and unarchive from Settings → Archived threads. */
   readonly archive: boolean;
@@ -67,6 +69,7 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     projectFolder: true,
     settle: false,
     snooze: false,
+    pin: true,
     autoSettle: false,
     archive: false,
     delete: "always-confirm",
@@ -91,6 +94,7 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     projectFolder: true,
     settle: true,
     snooze: true,
+    pin: false,
     autoSettle: true,
     archive: true,
     delete: "setting",
@@ -115,6 +119,7 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     projectFolder: false,
     settle: false,
     snooze: false,
+    pin: false,
     autoSettle: false,
     archive: false,
     delete: false,

@@ -318,10 +318,9 @@ export function buildWhenVariableOptions(): ReadonlyArray<WhenVariableOption> {
   });
 }
 
-// Still decodable so stored keybindings load, but no longer offered: pinning, the
+// Still decodable so stored keybindings load, but no longer offered: the
 // terminal drawer and the diff panel were removed.
 export const RETIRED_KEYBINDING_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
-  "thread.pin",
   "diff.toggle",
   "terminal.toggle",
   "terminal.split",

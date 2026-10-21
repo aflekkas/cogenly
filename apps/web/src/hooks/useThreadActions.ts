@@ -11,6 +11,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
+import { pinOrderKeyBetween } from "@t3tools/client-runtime/state/thread-sort";
 import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
@@ -44,10 +45,13 @@ import {
   readEnvironmentSupportsAutoSettleOptOut,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
+  readEnvironmentSupportsPinning,
+  readEnvironmentSupportsPinReorder,
   readEnvironmentSupportsVisitedTracking,
   readEnvironmentThreadRefs,
   readProject,
   readThreadShell,
+  readThreadShells,
 } from "../state/entities";
 import { useUiStateStore } from "../uiStateStore";
 import { holdThreadUnread, releaseThreadUnreadHold } from "../lib/threadReadState";
@@ -120,6 +124,41 @@ export class ThreadAutoSettleOptOutUnsupportedError extends Schema.TaggedError<T
   override get message(): string {
     return "This environment's server does not support turning auto-settle off per thread yet. Update the server to use it.";
   }
+}
+
+export class ThreadPinningUnsupportedError extends Schema.TaggedError<ThreadPinningUnsupportedError>()(
+  "ThreadPinningUnsupportedError",
+  {
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+  },
+) {
+  override get message(): string {
+    return "This environment's server does not support pinning yet. Update the server to use Pin.";
+  }
+}
+
+/** Key that sorts before every arranged pinned thread, so a fresh pin lands
+    at the top of Pinned. Undefined (keyless, sorts after the arranged pins)
+    when key math can't produce one: pinning must never fail on placement. */
+function topOfPinnedRunOrderKey(): string | undefined {
+  let firstKey: string | null = null;
+  for (const shell of readThreadShells()) {
+    if (shell.pinnedAt == null || shell.pinOrderKey == null) continue;
+    if (firstKey === null || shell.pinOrderKey < firstKey) firstKey = shell.pinOrderKey;
+  }
+  return pinOrderKeyBetween(null, firstKey) ?? undefined;
+}
+
+function pinningUnsupported(target: ScopedThreadRef) {
+  return AsyncResult.failure(
+    Cause.fail(
+      new ThreadPinningUnsupportedError({
+        environmentId: target.environmentId,
+        threadId: target.threadId,
+      }),
+    ),
+  );
 }
 
 /** Report navigation separately so a completed deletion can still finish worktree cleanup. */
@@ -270,6 +309,15 @@ export function useThreadActions() {
     reportFailure: false,
   });
   const setThreadAutoSettleMutation = useOrchestrationCommand(threadEnvironment.setAutoSettle, {
+    reportFailure: false,
+  });
+  const pinThreadMutation = useOrchestrationCommand(threadEnvironment.pin, {
+    reportFailure: false,
+  });
+  const unpinThreadMutation = useOrchestrationCommand(threadEnvironment.unpin, {
+    reportFailure: false,
+  });
+  const reorderPinnedThreadMutation = useOrchestrationCommand(threadEnvironment.reorderPin, {
     reportFailure: false,
   });
   const snoozeThreadMutation = useOrchestrationCommand(threadEnvironment.snooze, {
@@ -732,6 +780,66 @@ export function useThreadActions() {
     ],
   );
 
+  const pinThread = useCallback(
+    async (target: ScopedThreadRef, opts: { orderKey?: string } = {}) => {
+      // Version skew: never send the command to a server that predates it.
+      if (!readEnvironmentSupportsPinning(target.environmentId)) return pinningUnsupported(target);
+      // A fresh pin lands at the top of Pinned unless the caller (an Undo)
+      // restores its old slot. Pre-reorder servers get the bare pin.
+      const orderKey = readEnvironmentSupportsPinReorder(target.environmentId)
+        ? (opts.orderKey ?? topOfPinnedRunOrderKey())
+        : undefined;
+      ThreadUndo.invalidate("pin", scopedThreadKey(target));
+      return pinThreadMutation({
+        environmentId: target.environmentId,
+        input: {
+          threadId: target.threadId,
+          ...(orderKey !== undefined ? { orderKey } : {}),
+        },
+      });
+    },
+    [pinThreadMutation],
+  );
+
+  const unpinThread = useCallback(
+    async (target: ScopedThreadRef) => {
+      if (!readEnvironmentSupportsPinning(target.environmentId)) return pinningUnsupported(target);
+      const orderKey = readThreadShell(target)?.pinOrderKey ?? undefined;
+      const action = ThreadUndo.begin("pin", scopedThreadKey(target));
+      const result = await unpinThreadMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId },
+      });
+      if (result._tag === "Success" && action.isCurrent()) {
+        showThreadUndoNotice({
+          action: "Unpinned",
+          claim: action,
+          undo: () => pinThread(target, orderKey === undefined ? {} : { orderKey }),
+          failureTitle: "Failed to undo unpin",
+        });
+      } else {
+        action.finish();
+      }
+      return result;
+    },
+    [pinThread, unpinThreadMutation],
+  );
+
+  /** Moves a pinned thread to `orderKey`, a key between its new neighbours. */
+  const reorderPinnedThread = useCallback(
+    async (target: ScopedThreadRef, orderKey: string) => {
+      if (!readEnvironmentSupportsPinReorder(target.environmentId)) {
+        return pinningUnsupported(target);
+      }
+      ThreadUndo.invalidate("pin", scopedThreadKey(target));
+      return reorderPinnedThreadMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId, orderKey },
+      });
+    },
+    [reorderPinnedThreadMutation],
+  );
+
   const unsnoozeThread = useCallback(
     async (target: ScopedThreadRef) => {
       if (!readEnvironmentSupportsSnooze(target.environmentId)) {
@@ -842,6 +950,9 @@ export function useThreadActions() {
       unsettleThread,
       snoozeThread,
       unsnoozeThread,
+      pinThread,
+      unpinThread,
+      reorderPinnedThread,
       markThreadUnread,
       markThreadRead,
       setThreadAutoSettle,
@@ -852,10 +963,13 @@ export function useThreadActions() {
       deleteThread,
       markThreadRead,
       markThreadUnread,
+      pinThread,
+      reorderPinnedThread,
       setThreadAutoSettle,
       settleThread,
       snoozeThread,
       unarchiveThread,
+      unpinThread,
       unsettleThread,
       unsnoozeThread,
     ],

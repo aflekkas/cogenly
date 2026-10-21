@@ -18,6 +18,8 @@ export type ThreadActionMenuId =
   | `move-folder:${string}`
   | "remove-folder"
   | "new-folder"
+  | "pin"
+  | "unpin"
   | "settle"
   | "unsettle"
   | "auto-settle"
@@ -81,6 +83,7 @@ export interface ThreadActionMenuState {
   readonly capabilities: ThreadCapabilities;
   readonly canOperate: boolean;
   readonly branch: string | null;
+  readonly isPinned: boolean;
   readonly isSettled: boolean;
   /** False while the user has turned automatic settlement off for this thread. */
   readonly autoSettleEnabled: boolean;
@@ -97,6 +100,8 @@ export interface ThreadActionMenuState {
     /** Server understands thread.auto-settle.set. */
     readonly autoSettleOptOut: boolean;
     readonly snooze: boolean;
+    /** Server understands thread.pin / thread.unpin. */
+    readonly pinning: boolean;
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
@@ -202,6 +207,13 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
         ]
       : []),
     ...(can.startWork ? [{ id: "start-work" as const, label: "Start Work…", icon: "hammer" }] : []),
+    ...(can.pin && state.supports.pinning
+      ? [
+          state.isPinned
+            ? { id: "unpin" as const, label: "Unpin thread", icon: "pin-off" }
+            : { id: "pin" as const, label: "Pin thread", icon: "pin" },
+        ]
+      : []),
     ...(can.settle && state.supports.settlement
       ? [
           state.isSettled

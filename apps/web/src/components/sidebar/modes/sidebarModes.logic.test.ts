@@ -4,6 +4,9 @@ import {
   chatDateGroup,
   classifySidebarThreadMode,
   createChatDateGrouper,
+  orderChatsWithPins,
+  applyPinnedDragOrder,
+  pinnedDragOrder,
   filterThreadsForSidebarMode,
   isSidebarMode,
   newThreadShortcutTarget,
@@ -220,6 +223,79 @@ describe("sortChatsByActivity and createChatDateGrouper", () => {
   it("labels only the first row of each date group", () => {
     const groupOf = createChatDateGrouper(now);
     expect(sortChatsByActivity(chats).map(groupOf)).toEqual(["today", null, "yesterday", "older"]);
+  });
+});
+
+describe("orderChatsWithPins", () => {
+  const now = new Date(2026, 9, 15, 14, 30);
+  const chat = (
+    id: string,
+    updatedAt: Date,
+    pin: { at: string; key: string | null } | null = null,
+  ) => ({
+    id,
+    createdAt: updatedAt.toISOString(),
+    latestUserMessageAt: null,
+    updatedAt: updatedAt.toISOString(),
+    pinnedAt: pin?.at ?? null,
+    pinOrderKey: pin?.key ?? null,
+  });
+  const pinnedAt = new Date(2026, 9, 15, 10).toISOString();
+  const chats = [
+    chat("today", new Date(2026, 9, 15, 12)),
+    chat("pinned-second", new Date(2026, 9, 15, 13), { at: pinnedAt, key: "t" }),
+    chat("old", new Date(2026, 8, 1)),
+    chat("pinned-first", new Date(2026, 8, 2), { at: pinnedAt, key: "f" }),
+    chat("pinned-keyless", new Date(2026, 9, 14, 9), { at: pinnedAt, key: null }),
+  ];
+
+  it("leads with pinned chats by order key, keyless pins after, then the rest newest first", () => {
+    expect(orderChatsWithPins(chats).map((entry) => entry.id)).toEqual([
+      "pinned-first",
+      "pinned-second",
+      "pinned-keyless",
+      "today",
+      "old",
+    ]);
+  });
+
+  it("groups pinned chats under Pinned only, whatever their date", () => {
+    const groupOf = createChatDateGrouper(now);
+    expect(orderChatsWithPins(chats).map(groupOf)).toEqual([
+      "pinned",
+      null,
+      null,
+      "today",
+      "older",
+    ]);
+  });
+
+  it("shows no Pinned group when nothing is pinned", () => {
+    const groupOf = createChatDateGrouper(now);
+    const unpinned = chats.map((entry) => ({ ...entry, pinnedAt: null, pinOrderKey: null }));
+    expect(orderChatsWithPins(unpinned).map(groupOf)).not.toContain("pinned");
+  });
+});
+
+describe("dragging a pinned chat", () => {
+  it("moves the pin to the slot whose midpoint the pointer passed", () => {
+    // Other rows' midpoints, top to bottom: b at 50, c at 90.
+    expect(pinnedDragOrder(["a", "b", "c"], "a", [50, 90], 10)).toEqual(["a", "b", "c"]);
+    expect(pinnedDragOrder(["a", "b", "c"], "a", [50, 90], 60)).toEqual(["b", "a", "c"]);
+    expect(pinnedDragOrder(["a", "b", "c"], "a", [50, 90], 120)).toEqual(["b", "c", "a"]);
+    expect(pinnedDragOrder(["a", "b", "c"], "c", [10, 50], 30)).toEqual(["a", "c", "b"]);
+  });
+
+  it("leaves the order alone for a key that is not pinned", () => {
+    expect(pinnedDragOrder(["a", "b"], "z", [10], 100)).toEqual(["a", "b"]);
+  });
+
+  it("previews the drag order on the pins only, keeping unknown pins after", () => {
+    const chat = (id: string, pinned: boolean) => ({ id, pinnedAt: pinned ? "t" : null });
+    const chats = [chat("a", true), chat("b", true), chat("new", true), chat("x", false)];
+    expect(
+      applyPinnedDragOrder(chats, ["b", "a"], (entry) => entry.id).map((entry) => entry.id),
+    ).toEqual(["b", "a", "new", "x"]);
   });
 });
 

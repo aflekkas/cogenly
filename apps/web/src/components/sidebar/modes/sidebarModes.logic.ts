@@ -14,6 +14,7 @@
  * opening one from anywhere (search, a notification, a link) can switch the
  * sidebar to the mode that lists it.
  */
+import { sortPinnedThreadsByOrderKey } from "@t3tools/client-runtime/state/thread-sort";
 import type { EnvironmentId, ThreadId, ThreadSurface } from "@t3tools/contracts";
 
 export type SidebarMode = "chats" | "tasks" | "agents" | "projects";
@@ -110,7 +111,11 @@ export function filterThreadsForSidebarMode<
 
 export type ChatDateGroup = "today" | "yesterday" | "previous7Days" | "older";
 
-export const CHAT_DATE_GROUP_LABELS: Record<ChatDateGroup, string> = {
+/** The headings a Chats list shows: Pinned on top, then the date groups. */
+export type ChatListGroup = "pinned" | ChatDateGroup;
+
+export const CHAT_DATE_GROUP_LABELS: Record<ChatListGroup, string> = {
+  pinned: "Pinned",
   today: "Today",
   yesterday: "Yesterday",
   previous7Days: "Previous 7 days",
@@ -143,6 +148,65 @@ export function chatDateGroup(timestamp: string, now: Date): ChatDateGroup {
   return "older";
 }
 
+/**
+ * The Chats list order: pinned chats first in their arranged order
+ * (`pinOrderKey`), then every other chat newest first. A pinned chat is
+ * listed only once, under Pinned.
+ */
+export function orderChatsWithPins<
+  T extends {
+    readonly id: string;
+    readonly createdAt: string;
+    readonly latestUserMessageAt: string | null;
+    readonly updatedAt: string;
+    readonly pinnedAt: string | null;
+    readonly pinOrderKey: string | null;
+    readonly environmentId?: string | undefined;
+  },
+>(threads: ReadonlyArray<T>): T[] {
+  const pinned: T[] = [];
+  const rest: T[] = [];
+  for (const thread of threads) (thread.pinnedAt != null ? pinned : rest).push(thread);
+  return [...sortPinnedThreadsByOrderKey(pinned), ...sortChatsByActivity(rest)];
+}
+
+/**
+ * The Chats list while a pinned chat is being dragged: pinned chats follow
+ * `pinnedOrder` (keys), with any pin the drag didn't know about (pinned
+ * from another device mid-drag) after them in their existing order. The
+ * unpinned rest is untouched.
+ */
+export function applyPinnedDragOrder<T extends { readonly pinnedAt: string | null }>(
+  chats: ReadonlyArray<T>,
+  pinnedOrder: ReadonlyArray<string>,
+  keyOf: (chat: T) => string,
+): ReadonlyArray<T> {
+  const rank = new Map(pinnedOrder.map((key, index) => [key, index]));
+  const pinned = chats.filter((chat) => chat.pinnedAt != null);
+  const ranked = pinned
+    .map((chat, index) => ({ chat, rank: rank.get(keyOf(chat)) ?? pinnedOrder.length + index }))
+    .toSorted((left, right) => left.rank - right.rank)
+    .map((entry) => entry.chat);
+  return [...ranked, ...chats.filter((chat) => chat.pinnedAt == null)];
+}
+
+/**
+ * Where a dragged pin lands: `order` with `movedKey` moved to the slot the
+ * pointer is over. `midpoints` are the layout midpoints of the other pinned
+ * rows, top to bottom; the pointer passes a row once it crosses its middle.
+ */
+export function pinnedDragOrder(
+  order: ReadonlyArray<string>,
+  movedKey: string,
+  midpoints: ReadonlyArray<number>,
+  pointerY: number,
+): string[] {
+  const rest = order.filter((key) => key !== movedKey);
+  if (rest.length === order.length) return [...order];
+  const index = midpoints.filter((midpoint) => midpoint < pointerY).length;
+  return [...rest.slice(0, index), movedKey, ...rest.slice(index)];
+}
+
 /** Newest first, so the date groups read top-down in order. */
 export function sortChatsByActivity<
   T extends { readonly latestUserMessageAt: string | null; readonly updatedAt: string },
@@ -155,16 +219,19 @@ export function sortChatsByActivity<
 }
 
 /**
- * Feed rows in render order; returns a group label for the first row of each
- * new date group and null otherwise. Fresh per render.
+ * Feed rows in render order (see `orderChatsWithPins`); returns a group label
+ * for the first row of each new group and null otherwise. Pinned chats group
+ * under Pinned whatever their date. Fresh per render.
  */
 export function createChatDateGrouper(now: Date) {
-  let previous: ChatDateGroup | null = null;
+  let previous: ChatListGroup | null = null;
   return (thread: {
     readonly latestUserMessageAt: string | null;
     readonly updatedAt: string;
-  }): ChatDateGroup | null => {
-    const group = chatDateGroup(chatActivityAt(thread), now);
+    readonly pinnedAt?: string | null;
+  }): ChatListGroup | null => {
+    const group: ChatListGroup =
+      thread.pinnedAt != null ? "pinned" : chatDateGroup(chatActivityAt(thread), now);
     if (group === previous) return null;
     previous = group;
     return group;
@@ -176,9 +243,9 @@ export const CHAT_LIST_PAGE_SIZE = 50;
 
 /**
  * The chats the list renders: the newest `visibleCount`, plus the open chat
- * when it sits further down, so its highlight never hides. The open chat is
- * older than every windowed row, so appending it keeps the date groups in
- * order. Search reads the full list, not this window.
+ * when it sits further down, so its highlight never hides. Pinned chats
+ * lead the list, so they always render. The open chat is older than every
+ * windowed row, so appending it keeps the date groups in order. Search reads the full list, not this window.
  */
 export function windowChatList<T>(
   chats: ReadonlyArray<T>,

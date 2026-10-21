@@ -15,13 +15,20 @@ function stateFor(kind: ThreadKind, overrides: Partial<ThreadActionMenuState> = 
     capabilities: threadCapabilities(kind),
     canOperate: true,
     branch: "feature/x",
+    isPinned: false,
     isSettled: false,
     autoSettleEnabled: true,
     isSnoozed: false,
     canSnoozeNow: true,
     isRegeneratingTitle: false,
     isRunning: false,
-    supports: { settlement: true, autoSettleOptOut: true, snooze: true, titleRegeneration: true },
+    supports: {
+      settlement: true,
+      autoSettleOptOut: true,
+      snooze: true,
+      pinning: true,
+      titleRegeneration: true,
+    },
     snoozePresets: [],
     folder: {
       current: { key: "env:spawn", id: "spawn", name: "Spawn" },
@@ -47,6 +54,7 @@ describe("buildThreadActionMenuItems per thread kind", () => {
   it("offers a chat only conversation actions", () => {
     expect(ids(buildThreadActionMenuItems(stateFor("chat")))).toEqual([
       "start-work",
+      "pin",
       "rename",
       "regenerate-title",
       "mark-unread",
@@ -124,6 +132,9 @@ describe("buildThreadActionMenuItems per thread kind", () => {
     expect(ids(buildThreadActionMenuItems(stateFor("chat", { isUnread: true })))).toContain(
       "mark-read",
     );
+    const pinnedChat = ids(buildThreadActionMenuItems(stateFor("chat", { isPinned: true })));
+    expect(pinnedChat).toContain("unpin");
+    expect(pinnedChat).not.toContain("pin");
   });
 
   it("disables archive with its reason while the thread runs, rather than hiding it", () => {
@@ -141,6 +152,7 @@ describe("buildThreadActionMenuItems per thread kind", () => {
             settlement: false,
             autoSettleOptOut: false,
             snooze: false,
+            pinning: false,
             titleRegeneration: false,
           },
         }),
@@ -150,6 +162,20 @@ describe("buildThreadActionMenuItems per thread kind", () => {
     expect(items).not.toContain("snooze");
     expect(items).not.toContain("auto-settle");
     expect(items).not.toContain("regenerate-title");
+  });
+
+  it("offers pinning on chats only, and only when the server supports it", () => {
+    expect(ids(buildThreadActionMenuItems(stateFor("work")))).not.toContain("pin");
+    expect(ids(buildThreadActionMenuItems(stateFor("agentConversation")))).not.toContain("pin");
+    const unsupported = stateFor("chat");
+    expect(
+      ids(
+        buildThreadActionMenuItems({
+          ...unsupported,
+          supports: { ...unsupported.supports, pinning: false },
+        }),
+      ),
+    ).not.toContain("pin");
   });
 
   it("drops the branch items without a branch", () => {
