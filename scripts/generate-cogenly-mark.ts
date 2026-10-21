@@ -11,9 +11,11 @@
 // Run `node scripts/generate-cogenly-mark.ts`, then `vp run icons:mark` to
 // re-render the tracked icons.
 
-import * as NodeFs from "node:fs";
-import * as NodePath from "node:path";
-import * as NodeUrl from "node:url";
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 
 const EMBER_FROM = [0xff, 0x7b, 0x3a] as const;
 const EMBER_TO = [0xe6, 0x3e, 0x22] as const;
@@ -81,12 +83,18 @@ const RIM =
 export const COGENLY_MARK = svg(`${pixelTile("cogenly-tile", 16, 3)}\n  ${RIM}\n  ${GLYPH}`);
 export const COGENLY_MARK_SMALL = svg(`${pixelTile("cogenly-tile-small", 8, 3)}\n  ${SMALL_GLYPH}`);
 
-if (import.meta.main) {
-  const repoRoot = NodePath.join(NodePath.dirname(NodeUrl.fileURLToPath(import.meta.url)), "..");
-  NodeFs.writeFileSync(NodePath.join(repoRoot, "assets/brand/cogenly-mark.svg"), COGENLY_MARK);
-  NodeFs.writeFileSync(
-    NodePath.join(repoRoot, "assets/brand/cogenly-mark-small.svg"),
+const writeCogenlyMarks = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const repoRoot = yield* path.fromFileUrl(new URL("..", import.meta.url));
+  yield* fs.writeFileString(path.join(repoRoot, "assets/brand/cogenly-mark.svg"), COGENLY_MARK);
+  yield* fs.writeFileString(
+    path.join(repoRoot, "assets/brand/cogenly-mark-small.svg"),
     COGENLY_MARK_SMALL,
   );
-  console.log("Wrote assets/brand/cogenly-mark.svg and cogenly-mark-small.svg.");
+  yield* Effect.log("Wrote assets/brand/cogenly-mark.svg and cogenly-mark-small.svg.");
+});
+
+if (import.meta.main) {
+  writeCogenlyMarks.pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain);
 }
