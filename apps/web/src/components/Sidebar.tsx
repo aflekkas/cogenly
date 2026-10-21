@@ -931,7 +931,7 @@ function ChatListRevealSentinel(props: { onReveal: () => void }) {
  * with a status slot at its end. A running
  * turn shows a small spinner, a reply you have not seen shows a blue dot, a
  * chat waiting on you an amber one; an unread reply also makes the title
- * heavier. A pinned chat carries a small muted pin before the status slot.
+ * heavier. A pinned chat carries a small muted pin before its title.
  * Everything else (rename, pin, archive, Start Work) lives in the context menu.
  */
 const SidebarChatRow = memo(function SidebarChatRow(props: {
@@ -1104,6 +1104,18 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
         onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
       >
+        {/* The pin's slot opens from nothing, so pinning eases the title over
+            instead of jumping it. Its negative margin cancels the row gap
+            while empty; open, the pin sits 4px before the title. */}
+        <span
+          aria-hidden
+          className={cn(
+            "-mr-2 flex shrink-0 items-center overflow-hidden transition-[width,opacity] duration-(--motion-duration-base) ease-standard motion-reduce:transition-opacity",
+            thread.pinnedAt != null ? "w-4 opacity-100" : "w-0 opacity-0",
+          )}
+        >
+          <PinIcon className="size-3 shrink-0 text-sidebar-muted-foreground/60" />
+        </span>
         <span className="flex min-w-0 flex-1 flex-col justify-center">
           {isRenaming && canOperateThread ? (
             <input
@@ -1137,12 +1149,6 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
           )}
           <SidebarChatProjectLine project={props.folder} animate={props.animateFolder} />
         </span>
-        {thread.pinnedAt != null ? (
-          <PinIcon
-            aria-hidden
-            className="swap-motion size-3 shrink-0 text-sidebar-muted-foreground/60"
-          />
-        ) : null}
         <SidebarChatStatusSlot
           isRunning={isRunning}
           dot={needsYou ? "warning" : isUnread ? "info" : null}
