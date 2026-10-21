@@ -47,6 +47,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
+  DEFAULT_SERVER_SETTINGS,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
   type ThreadId,
@@ -199,6 +200,11 @@ import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
+import {
+  usageLimitAutoResumeUpdate,
+  usageLimitMenuState,
+  usageLimitStopForThread,
+} from "./chat/usageLimitRecovery.logic";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
 import {
   deriveProviderEntriesByEnvironment,
@@ -4149,6 +4155,14 @@ export default function Sidebar() {
                     .threadPinning === true,
               },
               snoozePresets,
+              limitResume: usageLimitMenuState(
+                thread,
+                (
+                  appAtomRegistry.get(serverEnvironment.settingsValueAtom(thread.environmentId)) ??
+                  DEFAULT_SERVER_SETTINGS
+                ).autoResumeLimitedThreads,
+                Date.now(),
+              ),
               folder: {
                 current: folderState.current && {
                   key: folderState.current.key,
@@ -4225,6 +4239,28 @@ export default function Sidebar() {
           case "unsnooze":
             attemptUnsnooze(threadRef);
             return;
+          case "limit-resume:on":
+          case "limit-resume:off": {
+            const stop = usageLimitStopForThread(thread);
+            const autoResume = clicked.value === "limit-resume:on";
+            const limitRecovery = stop && usageLimitAutoResumeUpdate(stop, autoResume);
+            if (!limitRecovery) return;
+            const result = await updateThreadMetadata({
+              environmentId: threadRef.environmentId,
+              input: { threadId: threadRef.threadId, limitRecovery },
+            });
+            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: autoResume ? "Could not schedule resume" : "Could not cancel resume",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+            }
+            return;
+          }
           case "rename":
             startThreadRename(threadRef, thread.title);
             return;

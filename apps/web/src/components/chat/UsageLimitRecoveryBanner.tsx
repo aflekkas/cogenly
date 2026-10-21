@@ -1,98 +1,129 @@
-import {
-  type OrchestrationV2LimitRecovery,
-  type OrchestrationV2LimitRecoveryUpdate,
-  type RunId,
-} from "@t3tools/contracts";
-import { GaugeIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import type { OrchestrationV2LimitRecoveryUpdate } from "@t3tools/contracts";
+import type { TimestampFormat } from "@t3tools/contracts/settings";
+import { ClockIcon, GaugeIcon, PlayIcon, TimerOffIcon } from "lucide-react";
+import { useState } from "react";
+
 import { Button } from "../ui/button";
+import { toastManager } from "../ui/toast";
 import type { ComposerBannerStackItem } from "./ComposerBannerStack";
+import {
+  resolveUsageLimitRecovery,
+  usageLimitAutoResumeUpdate,
+  usageLimitRecoveryCopy,
+  type UsageLimitRecoveryState,
+  type UsageLimitStop,
+} from "./usageLimitRecovery.logic";
 
 type RecoveryProps = {
-  runId: RunId;
-  resetAt: string | null;
-  stoppedAt: string;
-  snoozedUntil: string | null;
-  recovery: OrchestrationV2LimitRecovery | null;
+  stop: UsageLimitStop;
+  /** The environment's Auto-resume limited threads setting. */
+  autoResumeByDefault: boolean;
+  /** Minute-quantized clock, so the countdown repaints at most once a minute. */
+  nowMs: number;
+  timestampFormat: TimestampFormat;
+  /** The composer's manual continuation; the banner offers it once waiting stops making sense. */
+  onResumeNow: (() => void) | null;
   onChange: (recovery: OrchestrationV2LimitRecoveryUpdate) => Promise<void>;
 };
 
+const STATE_ICONS: Record<UsageLimitRecoveryState["kind"], typeof ClockIcon> = {
+  scheduled: ClockIcon,
+  cancelled: TimerOffIcon,
+  resuming: PlayIcon,
+  "reset-passed": GaugeIcon,
+  "no-reset": GaugeIcon,
+};
+
+/**
+ * The usage-limit notice above the composer. The title states what will
+ * happen; each state offers the action that moves to its opposite, keyed by
+ * state so a change fades in instead of a label flipping under the pointer.
+ */
 export function usageLimitRecoveryBannerItem(props: RecoveryProps): ComposerBannerStackItem {
-  const { runId, resetAt, stoppedAt } = props;
-  const canSchedule = resetAt !== null && Date.parse(resetAt) > Date.parse(stoppedAt);
+  const state = resolveUsageLimitRecovery(props.stop, props.autoResumeByDefault, props.nowMs);
+  const copy = usageLimitRecoveryCopy(state, props.timestampFormat, props.nowMs);
+  const Icon = STATE_ICONS[state.kind];
   return {
-    id: `usage-limit-recovery:${runId}`,
+    id: `usage-limit-recovery:${props.stop.runId}`,
     variant: "warning",
     priority: "urgent",
-    icon: <GaugeIcon />,
-    title: "Usage limit reached",
-    description: resetAt
-      ? `Resets ${new Date(resetAt).toLocaleString()}`
-      : "Reset time unavailable; retry manually",
-    actions: canSchedule ? <RecoveryActions key={`${runId}:${resetAt}`} {...props} /> : null,
+    icon: <Icon key={state.kind} className="swap-motion" aria-hidden="true" />,
+    title: (
+      <span key={copy.title} className="swap-motion">
+        {copy.title}
+      </span>
+    ),
+    description: (
+      <span key={state.kind} className="swap-motion">
+        {copy.description}
+      </span>
+    ),
+    actions: <RecoveryActions key={state.kind} state={state} {...props} />,
   };
 }
 
-function RecoveryActions({ runId, resetAt, recovery, snoozedUntil, onChange }: RecoveryProps) {
+function RecoveryActions({
+  state,
+  stop,
+  onResumeNow,
+  onChange,
+}: RecoveryProps & { state: UsageLimitRecoveryState }) {
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const delay = Date.parse(resetAt ?? "") - Math.max(nowMs, Date.now());
-    if (!Number.isFinite(delay) || delay <= 0) return;
-    const timer = window.setTimeout(() => setNowMs(Date.now()), Math.min(delay + 1, 2_147_483_647));
-    return () => window.clearTimeout(timer);
-  }, [resetAt, nowMs]);
-
-  const scheduled =
-    recovery?.runId === runId && recovery.resetAt === resetAt && recovery.autoResume;
-  const snoozed =
-    recovery?.snooze === true &&
-    recovery.runId === runId &&
-    recovery.resetAt === resetAt &&
-    resetAt !== null &&
-    snoozedUntil !== null &&
-    Date.parse(snoozedUntil) === Date.parse(resetAt);
-  async function toggle(action: "resume" | "snooze") {
-    if (resetAt === null) return;
-    if (action === "snooze" && !snoozed && Date.parse(resetAt) <= Date.now()) {
-      setError("The reset time has passed. Retry the thread manually.");
-      setNowMs(Date.now());
-      return;
-    }
+  async function setAutoResume(autoResume: boolean) {
+    const update = usageLimitAutoResumeUpdate(stop, autoResume);
+    if (update === null) return;
     setPending(true);
-    setError(null);
     try {
-      await onChange({
-        runId,
-        resetAt,
-        ...(action === "resume" ? { autoResume: !scheduled } : { snooze: !snoozed }),
-      });
+      await onChange(update);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not change limit recovery.");
+      toastManager.add({
+        type: "error",
+        title: autoResume ? "Could not schedule resume" : "Could not cancel resume",
+        description: cause instanceof Error ? cause.message : "An error occurred.",
+      });
     }
     setPending(false);
   }
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button size="xs" variant="ghost" disabled={pending} onClick={() => void toggle("resume")}>
-        {pending ? "Saving..." : scheduled ? "Cancel auto-resume" : "Resume at reset"}
-      </Button>
-      {!snoozed ? (
-        <Button
-          size="xs"
-          variant="ghost"
-          disabled={pending || Date.parse(resetAt!) <= nowMs}
-          onClick={() => void toggle("snooze")}
-        >
-          {pending ? "Saving..." : "Snooze until reset"}
-        </Button>
-      ) : null}
-      {error ? (
-        <p role="alert" className="basis-full text-xs text-destructive">
-          {error}
-        </p>
-      ) : null}
-    </div>
-  );
+  switch (state.kind) {
+    case "scheduled":
+      return (
+        <span className="swap-motion">
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => void setAutoResume(false)}
+          >
+            <TimerOffIcon aria-hidden="true" />
+            Don't resume
+          </Button>
+        </span>
+      );
+    case "cancelled":
+      return (
+        <span className="swap-motion">
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => void setAutoResume(true)}
+          >
+            <ClockIcon aria-hidden="true" />
+            Resume at reset
+          </Button>
+        </span>
+      );
+    case "reset-passed":
+    case "no-reset":
+      return onResumeNow === null ? null : (
+        <span className="swap-motion">
+          <Button size="xs" variant="ghost" onClick={onResumeNow}>
+            <PlayIcon aria-hidden="true" />
+            Resume now
+          </Button>
+        </span>
+      );
+    case "resuming":
+      return null;
+  }
 }

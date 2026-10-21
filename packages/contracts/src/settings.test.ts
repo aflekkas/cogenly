@@ -163,6 +163,15 @@ describe("ClientSettings rich text composer", () => {
   });
 });
 
+describe("ServerSettings usage-limit recovery", () => {
+  it("auto-resumes limited threads unless the user opts out", () => {
+    expect(decodeServerSettings({}).autoResumeLimitedThreads).toBe(true);
+    expect(decodeServerSettings({ autoResumeLimitedThreads: false }).autoResumeLimitedThreads).toBe(
+      false,
+    );
+  });
+});
+
 describe("ServerSettings default permissions", () => {
   it("keeps full access for settings saved before a default was configured", () => {
     expect(decodeServerSettings({}).defaultRuntimeMode).toBe("full-access");

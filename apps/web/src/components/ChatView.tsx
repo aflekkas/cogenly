@@ -6035,16 +6035,25 @@ export default function ChatView(props: ChatViewProps) {
       }),
     [feedbackSubmissions, routeThreadKey],
   );
+  // onResume is declared below and published here after commit; the banner only calls it from a click.
+  const onResumeNowRef = useRef<(() => Promise<void>) | null>(null);
+  const onResumeNowStable = useStableCallback(() => void onResumeNowRef.current?.());
   const limitRecoveryBanner =
     serverRuntime?.status === "failed" &&
     serverRuntime.lastErrorClass === "usage_limit" &&
     activeThreadShell?.latestRun
       ? usageLimitRecoveryBannerItem({
-          runId: activeThreadShell.latestRun.runId,
-          resetAt: serverRuntime.usageLimitResetAt ?? null,
-          stoppedAt: activeThreadShell.latestRun.completedAt ?? activeThreadShell.updatedAt,
-          recovery: activeThreadShell.limitRecovery ?? null,
-          snoozedUntil: activeThreadShell.snoozedUntil,
+          stop: {
+            runId: activeThreadShell.latestRun.runId,
+            resetAt: serverRuntime.usageLimitResetAt ?? null,
+            stoppedAt: activeThreadShell.latestRun.completedAt ?? activeThreadShell.updatedAt,
+            recovery: activeThreadShell.limitRecovery ?? null,
+            snoozedUntil: activeThreadShell.snoozedUntil,
+          },
+          autoResumeByDefault: settings.autoResumeLimitedThreads,
+          nowMs: Date.parse(`${nowMinute}:00.000Z`),
+          timestampFormat,
+          onResumeNow: resumableRunId === null ? null : onResumeNowStable,
           onChange: async (limitRecovery) => {
             const result = await updateThreadMetadata({
               environmentId,
@@ -6810,6 +6819,9 @@ export default function ChatView(props: ChatViewProps) {
       },
     );
   };
+  useLayoutEffect(() => {
+    onResumeNowRef.current = onResume;
+  });
 
   const onSend = async (
     e?: { preventDefault: () => void },

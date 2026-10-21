@@ -354,18 +354,20 @@ or interrupted turn manually.
 Queued messages stay saved while the limit blocks the thread. They run after
 the continuation finishes. If the queue was held by a restart, resume it then.
 
-When the provider reports a reset time, choose **Resume at reset** to schedule a
-continuation. You can cancel it from the thread. Enable **Auto-resume limited
-threads** in **Settings → General** on web and desktop, to schedule limit stops by default.
-The environment must be running when the reset arrives; it resumes overdue
-continuations after a restart. Sending a new message, archiving, or settling the
-thread prevents a pending continuation from starting.
+When the provider reports a reset time, the thread continues on its own at the
+reset. Choose **Don't resume** in the thread's banner, its sidebar menu, or the
+command palette to opt this stop out, and **Resume at reset** to schedule it
+again. Turn off **Auto-resume limited threads** in **Settings → General** to
+make opting in the default instead. A stop whose reset already passed waits for
+you to resume it. The environment must be running when the reset arrives; it
+resumes overdue continuations after a restart. Sending a new message, archiving,
+or settling the thread prevents a pending continuation from starting.
 
-Choose **Snooze until reset** to hide the thread until its allowance returns.
-Snooze and auto-resume are independent: snooze alone wakes the thread without
-sending a message; enabling both wakes and continues it. **Wake now** cancels
-the snooze. Enable **Snooze limited threads** in thread behavior settings to
-snooze limit stops by default. Providers without a reset time offer manual
+To hide a limited thread until its allowance returns, snooze it like any other
+thread, or enable **Snooze limited threads** in thread behavior settings to
+snooze limit stops until their reset by default. Snoozing does not change
+whether the thread resumes; a snooze that outlasts the reset delays the
+continuation until the thread wakes. Providers without a reset time offer manual
 retry and the normal snooze choices.
 
 On web and desktop, use **Agents** to follow work delegated to subagents.

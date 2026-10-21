@@ -23,6 +23,8 @@ export type ThreadActionMenuId =
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
+  | "limit-resume:on"
+  | "limit-resume:off"
   | "rename"
   | "mark-unread"
   | "mark-read"
@@ -117,6 +119,8 @@ export interface ThreadActionMenuState {
     readonly pinning: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  /** A usage-limit stop whose reset is ahead: whether it resumes then. Omitted otherwise. */
+  readonly limitResume?: "scheduled" | "cancelled" | null;
   /** The thread's project folder and where it can move; omitted where folders are unknown. */
   readonly folder?: ThreadActionMenuFolder;
 }
@@ -245,6 +249,11 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
               },
         ]
       : []),
+    ...(state.limitResume === "scheduled"
+      ? [{ id: "limit-resume:off" as const, label: "Don't resume at reset", icon: "timer-off" }]
+      : state.limitResume === "cancelled"
+        ? [{ id: "limit-resume:on" as const, label: "Resume at reset", icon: "clock" }]
+        : []),
     ...(can.markUnread
       ? [
           state.isUnread

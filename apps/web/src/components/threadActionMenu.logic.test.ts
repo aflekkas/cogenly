@@ -236,6 +236,21 @@ describe("Start Work in the thread action menu", () => {
   });
 });
 
+describe("Resume at reset in the thread action menu", () => {
+  const limitIds = (menuState: ThreadActionMenuState) =>
+    ids(buildThreadActionMenuItems(menuState)).filter((id) => id.startsWith("limit-resume"));
+
+  it("offers the way out of a scheduled resume and the way back in", () => {
+    expect(limitIds(stateFor("work", { limitResume: "scheduled" }))).toEqual(["limit-resume:off"]);
+    expect(limitIds(stateFor("work", { limitResume: "cancelled" }))).toEqual(["limit-resume:on"]);
+  });
+
+  it("is absent when the thread has no usage-limit reset ahead", () => {
+    expect(limitIds(stateFor("work"))).toEqual([]);
+    expect(limitIds(stateFor("work", { limitResume: null }))).toEqual([]);
+  });
+});
+
 describe("buildDraftActionMenuItems", () => {
   it("gives a chat draft only Discard, with nothing to copy", () => {
     expect(ids(buildDraftActionMenuItems({ hasPath: false, hasBranch: false }))).toEqual([

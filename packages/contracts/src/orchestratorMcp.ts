@@ -318,6 +318,14 @@ export const OrchestratorMcpThreadListInput = Schema.Struct({
 });
 export type OrchestratorMcpThreadListInput = typeof OrchestratorMcpThreadListInput.Type;
 
+/** A thread stopped on a usage limit: when the limit resets and whether it continues then. */
+export const OrchestratorMcpThreadUsageLimit = Schema.Struct({
+  resetAt: IsoDateTime,
+  /** Continues on its own at resetAt; change with t3_thread_organize resume_at_reset / dont_resume. */
+  autoResume: Schema.Boolean,
+});
+export type OrchestratorMcpThreadUsageLimit = typeof OrchestratorMcpThreadUsageLimit.Type;
+
 export const OrchestratorMcpThreadListItem = Schema.Struct({
   threadId: ThreadId,
   title: Schema.String,
@@ -337,6 +345,8 @@ export const OrchestratorMcpThreadListItem = Schema.Struct({
   snoozed: Schema.Boolean,
   /** When a snoozed thread wakes; null when it is not snoozed. */
   snoozedUntil: Schema.NullOr(IsoDateTime),
+  /** Null unless the thread is stopped on a usage limit with a reset time. */
+  usageLimit: Schema.NullOr(OrchestratorMcpThreadUsageLimit),
   parentThreadId: Schema.NullOr(ThreadId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   itemCount: NonNegativeInt,
@@ -397,6 +407,8 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   snoozed: Schema.Boolean,
   /** When a snoozed thread wakes; null when it is not snoozed. */
   snoozedUntil: Schema.NullOr(IsoDateTime),
+  /** Null unless the thread is stopped on a usage limit with a reset time. */
+  usageLimit: Schema.NullOr(OrchestratorMcpThreadUsageLimit),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

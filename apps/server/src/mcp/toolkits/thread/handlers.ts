@@ -22,6 +22,7 @@ import {
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ScheduledTasks from "../../../scheduledTasks/ScheduledTaskService.ts";
 import { queuedRunsInDeliveryOrder } from "../../../orchestration-v2/QueuedRunOrder.ts";
+import { limitAutoResumeUpdate } from "../../../orchestration-v2/UsageLimitRecoveryWorker.ts";
 import { ThreadToolkit } from "./tools.ts";
 
 function queueEntry(
@@ -295,7 +296,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   ),
   t3_thread_organize: writesThread((input) =>
     Effect.gen(function* () {
-      const { threads, projection, caller } = yield* readThread(input.threadId);
+      const { threads, projection, caller, shell } = yield* readThread(input.threadId);
       const common = { commandId: yield* newCommandId(), threadId: projection.thread.id };
       if (input.action === "settle") {
         return yield* threads
@@ -320,6 +321,18 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         case "mark_unread":
           command = { ...common, type: "thread.mark-unread" };
           break;
+        case "resume_at_reset":
+        case "dont_resume": {
+          const limitRecovery = limitAutoResumeUpdate(shell, input.action === "resume_at_reset");
+          if (limitRecovery === null) {
+            return yield* new OrchestratorMcpFailure({
+              code: "invalid_request",
+              message: "The thread is not stopped on a usage limit with a reset time.",
+            });
+          }
+          command = { ...common, type: "thread.metadata.update", limitRecovery };
+          break;
+        }
         default:
           command = { ...common, type: `thread.${input.action}` };
       }

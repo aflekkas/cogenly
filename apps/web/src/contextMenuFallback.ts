@@ -30,6 +30,13 @@ const ICON_PATHS: Record<string, ReadonlyArray<{ tag: string; attrs: Record<stri
     { tag: "line", attrs: { x1: "12", x2: "15", y1: "14", y2: "11" } },
     { tag: "circle", attrs: { cx: "12", cy: "14", r: "8" } },
   ],
+  "timer-off": [
+    { tag: "path", attrs: { d: "M10 2h4" } },
+    { tag: "path", attrs: { d: "M4.6 11a8 8 0 0 0 1.7 8.7 8 8 0 0 0 8.7 1.7" } },
+    { tag: "path", attrs: { d: "M7.4 7.4a8 8 0 0 1 10.3 1 8 8 0 0 1 .9 10.2" } },
+    { tag: "path", attrs: { d: "m2 2 20 20" } },
+    { tag: "path", attrs: { d: "M12 12v-2" } },
+  ],
   "chevron-right": [{ tag: "path", attrs: { d: "m9 19 7-7-7-7" } }],
   "circle-check": [
     { tag: "circle", attrs: { cx: "12", cy: "12", r: "10" } },

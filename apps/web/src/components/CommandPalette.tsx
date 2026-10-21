@@ -40,6 +40,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
   AuthFilesystemReadScope,
+  DEFAULT_SERVER_SETTINGS,
   type DesktopWslState,
   type EnvironmentId,
   type EnvironmentMachineKind,
@@ -59,6 +60,7 @@ import {
   ChartNoAxesColumnIcon,
   CheckIcon,
   ChevronRightIcon,
+  ClockIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderGit2Icon,
@@ -78,8 +80,14 @@ import {
   SunIcon,
   FolderMinusIcon,
   TextSearchIcon,
+  TimerOffIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
+import {
+  usageLimitAutoResumeUpdate,
+  usageLimitMenuState,
+  usageLimitStopForThread,
+} from "./chat/usageLimitRecovery.logic";
 import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
 import { priorFiling, threadFolderState } from "../projectLabels/projectLabels.logic";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
@@ -123,6 +131,7 @@ import {
   promptLinkRepositoryOf,
 } from "./promptLinks/copyPromptLink";
 import { useClientSettings } from "../hooks/useSettings";
+import { useNowMinute } from "../hooks/useNowMinute";
 import { useTheme } from "../hooks/useTheme";
 import { readLocalApi } from "../localApi";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
@@ -646,6 +655,9 @@ function OpenCommandPaletteDialog(props: {
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
+  const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
+    reportFailure: false,
+  });
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -666,6 +678,12 @@ function OpenCommandPaletteDialog(props: {
   const canStartWork = useAtomValue(
     serverEnvironment.startWork.permissionAtom(activeThread?.environmentId ?? null),
   );
+  const nowMinuteMs = Date.parse(`${useNowMinute()}:00.000Z`);
+  const autoResumeLimitedThreads = (
+    useAtomValue(
+      serverEnvironment.settingsValueAtom(activeThread?.environmentId ?? ("" as EnvironmentId)),
+    ) ?? DEFAULT_SERVER_SETTINGS
+  ).autoResumeLimitedThreads;
   // With nothing open every action stays; an open thread or draft offers what its kind does.
   const activeThreadKind = useThreadKind(activeThread ?? activeDraftThread ?? null);
   const activeCapabilities =
@@ -2201,6 +2219,36 @@ function OpenCommandPaletteDialog(props: {
       addonIcon: <HammerIcon className={ADDON_ICON_CLASS} />,
       shortcutCommand: "thread.startWork",
       groups: [{ value: "projects", label: "Repositories", items: startWorkItems(threadRef) }],
+    });
+  }
+
+  const limitResume =
+    activeThread === null
+      ? null
+      : usageLimitMenuState(activeThread, autoResumeLimitedThreads, nowMinuteMs);
+  if (activeThread !== null && limitResume !== null) {
+    const thread = activeThread;
+    const autoResume = limitResume === "cancelled";
+    actionItems.push({
+      kind: "action",
+      value: "action:limit-resume",
+      searchTerms: ["usage limit", "rate limit", "resume", "reset", "auto-resume", "continue"],
+      title: autoResume ? "Resume at reset" : "Don't resume at reset",
+      icon: autoResume ? (
+        <ClockIcon className={ITEM_ICON_CLASS} />
+      ) : (
+        <TimerOffIcon className={ITEM_ICON_CLASS} />
+      ),
+      run: async () => {
+        const stop = usageLimitStopForThread(thread);
+        const limitRecovery = stop && usageLimitAutoResumeUpdate(stop, autoResume);
+        if (!limitRecovery) return;
+        const result = await updateThreadMetadata({
+          environmentId: thread.environmentId,
+          input: { threadId: thread.id, limitRecovery },
+        });
+        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      },
     });
   }
 

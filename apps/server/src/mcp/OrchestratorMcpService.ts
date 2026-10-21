@@ -90,6 +90,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { limitRecoveryStatus } from "../orchestration-v2/UsageLimitRecoveryWorker.ts";
 import {
   clientRuntimeModeCeiling,
   type McpInvocationScope,
@@ -679,6 +680,7 @@ function threadSnooze(
 function listItemFromShell(
   shell: OrchestrationV2ThreadShell,
   nowMs: number,
+  autoResumeByDefault: boolean,
 ): OrchestratorMcpThreadListItem {
   return {
     threadId: shell.id,
@@ -695,6 +697,7 @@ function listItemFromShell(
     linkedPullRequest: shell.linkedPullRequest ?? null,
     ...threadSettlement(shell),
     ...threadSnooze(shell, nowMs),
+    usageLimit: limitRecoveryStatus(shell, autoResumeByDefault, nowMs),
     parentThreadId: shell.lineage.parentThreadId,
     relationshipToParent: shell.lineage.relationshipToParent,
     itemCount: shell.visibleItemCount,
@@ -708,6 +711,7 @@ function threadDetail(
   itemCount: number,
   shell: OrchestrationV2ThreadShell,
   nowMs: number,
+  autoResumeByDefault: boolean,
 ): OrchestratorMcpThreadDetail {
   const latest = ThreadManagementService.latestRun(projection);
   const active = ThreadManagementService.latestActiveRun(projection);
@@ -747,6 +751,7 @@ function threadDetail(
     ...threadSettlement(projection.thread),
     // From the shell, like the list, so read and list agree on snooze state.
     ...threadSnooze(shell, nowMs),
+    usageLimit: limitRecoveryStatus(shell, autoResumeByDefault, nowMs),
     createdAt: DateTime.formatIso(projection.thread.createdAt),
     updatedAt: DateTime.formatIso(projection.thread.updatedAt),
   };
@@ -886,6 +891,10 @@ const make = Effect.gen(function* () {
   const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
   const gitDriver = yield* GitVcsDriver.GitVcsDriver;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const readAutoResumeByDefault = serverSettings.getSettings.pipe(
+    Effect.map((settings) => settings.autoResumeLimitedThreads),
+    Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
+  );
 
   /** A caller-named project, which must exist before anything is recorded against it. */
   const requireProject = (projectId: ProjectId) =>
@@ -2443,6 +2452,7 @@ const make = Effect.gen(function* () {
             ),
           );
         const nowMs = yield* Clock.currentTimeMillis;
+        const autoResumeByDefault = yield* readAutoResumeByDefault;
         const statuses = input.statuses === undefined ? null : new Set(input.statuses);
         const titleContains = input.titleContains?.toLocaleLowerCase();
         const filtered = projectThreads
@@ -2469,7 +2479,7 @@ const make = Effect.gen(function* () {
         return {
           projectId,
           currentThreadId: parent?.thread.id ?? null,
-          threads: page.map((shell) => listItemFromShell(shell, nowMs)),
+          threads: page.map((shell) => listItemFromShell(shell, nowMs, autoResumeByDefault)),
           nextCursor,
           total: filtered.length,
         } satisfies OrchestratorMcpThreadListResult;
@@ -2552,7 +2562,13 @@ const make = Effect.gen(function* () {
           }
         }
         return {
-          thread: threadDetail(target, timeline.totalItems, shell, yield* Clock.currentTimeMillis),
+          thread: threadDetail(
+            target,
+            timeline.totalItems,
+            shell,
+            yield* Clock.currentTimeMillis,
+            yield* readAutoResumeByDefault,
+          ),
           recentRuns: target.runs
             .toSorted((left, right) => right.ordinal - left.ordinal)
             .slice(0, input.runLimit ?? DEFAULT_THREAD_RUN_LIMIT)
