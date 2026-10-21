@@ -37,6 +37,8 @@ import {
 import { AgentCursorMark } from "~/components/preview/AgentBrowserCursor";
 import { CommandBlock } from "~/components/CommandBlock";
 import { Button } from "~/components/ui/button";
+import { Spinner } from "~/components/ui/spinner";
+import { Bot, Eye, MousePointer2 } from "lucide-react";
 import { Input } from "~/components/ui/input";
 import { toastManager } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
@@ -747,14 +749,19 @@ export function ServerBrowserSurface(props: {
       data-server-browser-surface={tabId}
     >
       {controlPosition === "none" ? null : (
+        // One compact row of chrome: who drives the page, and the handoff button.
         <div
           className={cn(
-            "visible relative z-20 flex shrink-0 items-center justify-between gap-2 border-border bg-background px-2 py-1",
+            "visible relative z-20 flex h-8 shrink-0 items-center justify-between gap-2 border-border bg-card pr-1.5 pl-2.5",
             controlPosition === "bottom" ? "order-last border-t" : "border-b",
           )}
         >
-          <span role="status" className="text-xs text-muted-foreground">
-            {previewStreamControlLabel(control)}
+          <span
+            role="status"
+            className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+          >
+            <ControlGlyph control={control} />
+            <span className="truncate">{previewStreamControlLabel(control)}</span>
           </span>
           {control?.canOperate ? (
             <Button
@@ -770,7 +777,9 @@ export function ServerBrowserSurface(props: {
           ) : null}
         </div>
       )}
-      <div className="relative min-h-0 flex-1">
+      {/* The page well: a frame that is narrower than the page's aspect (the floating player
+          keeps the page's ratio for the whole card, chrome included) letterboxes onto this fill. */}
+      <div className="relative min-h-0 flex-1 bg-muted">
         <canvas
           ref={canvasRef}
           className="block size-full touch-none object-contain"
@@ -927,6 +936,19 @@ export function ServerBrowserSurface(props: {
       ) : null}
     </div>
   );
+}
+
+/** The glyph beside the control label: the same cursor-or-bot language as the panel's toggle. */
+function ControlGlyph({ control }: { readonly control: PreviewStreamControl | null }) {
+  if (!control) return <Spinner size="sm" tone="muted" />;
+  const Icon = !control.canOperate
+    ? Eye
+    : control.controller === "you"
+      ? MousePointer2
+      : control.controller === "another-viewer"
+        ? Eye
+        : Bot;
+  return <Icon aria-hidden className="size-3.5 shrink-0" />;
 }
 
 interface AgentCursorPlacement {

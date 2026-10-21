@@ -161,7 +161,7 @@ function MiniPlayerPlaceholder({
     // The webview's band: over the shell's backdrop, under its pill and handles.
     <div
       className={cn(
-        "pointer-events-none absolute inset-0 flex items-center justify-center gap-2 rounded-[inherit] bg-background text-xs text-muted-foreground transition-opacity duration-(--motion-duration-base) ease-out",
+        "pointer-events-none absolute inset-0 flex items-center justify-center gap-2 rounded-[inherit] bg-card text-xs text-muted-foreground transition-opacity duration-(--motion-duration-base) ease-out",
         !visible && "opacity-0",
       )}
       style={{ zIndex: PREVIEW_MINI_PLAYER_WEBVIEW_Z_INDEX }}
@@ -582,7 +582,8 @@ function MiniPlayerShell({
           data-preview-mini-player={sourceKey}
           // Glides from its old place when a panel toggle moves it.
           data-panel-flip="start"
-          className="pointer-events-none absolute select-none"
+          // The pill fades in while the pointer is anywhere over the player.
+          className="group/player pointer-events-none absolute select-none"
           style={{
             left: frame.x,
             top: frame.y,
@@ -606,11 +607,16 @@ function MiniPlayerShell({
               setPillOpen((open) => !open);
             }}
           >
+            {/* The recording light; on touch, where nothing can hover the pill
+                into view, an idle dot marks the handle instead. */}
             <div
               role={recording ? "status" : undefined}
               aria-label={recording ? "Recording preview" : undefined}
               aria-hidden={!recording}
-              className="absolute right-0 top-0 size-2 transition-opacity duration-(--motion-duration-fast) ease-out group-hover:opacity-0 group-focus-within:opacity-0 group-data-pill-open:opacity-0 pointer-coarse:right-2.5 pointer-coarse:top-2.5"
+              className={cn(
+                "absolute right-0 top-0 size-2 transition-opacity duration-(--motion-duration-fast) ease-out group-hover/player:opacity-0 group-focus-within:opacity-0 group-data-pill-open:opacity-0 pointer-coarse:right-2.5 pointer-coarse:top-2.5",
+                !recording && "hidden pointer-coarse:block",
+              )}
             >
               <span
                 className={cn(
@@ -622,7 +628,7 @@ function MiniPlayerShell({
               />
             </div>
             {/* Fades in on the fast token as the pointer arrives. */}
-            <div className="pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover p-0.5 opacity-0 shadow-lg/20 transition-opacity duration-(--motion-duration-fast) ease-out motion-reduce:transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-data-pill-open:pointer-events-auto group-data-pill-open:opacity-100 active:cursor-grabbing pointer-coarse:right-2.5 pointer-coarse:top-2.5">
+            <div className="pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover p-0.5 opacity-0 shadow-lg/20 transition-opacity duration-(--motion-duration-fast) ease-out motion-reduce:transition-opacity group-hover/player:pointer-events-auto group-hover/player:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-data-pill-open:pointer-events-auto group-data-pill-open:opacity-100 active:cursor-grabbing pointer-coarse:right-2.5 pointer-coarse:top-2.5">
               {recording ? (
                 <span aria-hidden className="flex size-6 shrink-0 items-center justify-center">
                   <span className="size-2 rounded-full bg-destructive motion-safe:animate-status-pulse" />
@@ -664,7 +670,7 @@ function MiniPlayerShell({
             </div>
           </div>
 
-          <div className="absolute inset-0 z-[47] rounded-[inherit] bg-muted shadow-2xl/35" />
+          <div className="absolute inset-0 z-[47] rounded-[inherit] bg-card shadow-2xl/35" />
           {children(frame)}
           <div className="pointer-events-none absolute inset-0 z-[49] rounded-[inherit] ring-1 ring-inset ring-border/80" />
           {RESIZE_HANDLES.map(({ direction, className }) => (
