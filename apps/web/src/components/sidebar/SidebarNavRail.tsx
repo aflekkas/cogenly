@@ -44,9 +44,8 @@ import { resolveVerticalTabIndex } from "./navRail.logic";
 import { useNavRailBadgeStore } from "./navRailState";
 import { decisionsWaitingLabel } from "../../agents/agentWorkspace.logic";
 import {
-  showListColumnFromRail,
+  listColumnPeekToggleHandlers,
   toggleListColumn,
-  useListColumnPeekOpen,
   useListColumnPeekStore,
 } from "./ListColumnPeek";
 
@@ -113,17 +112,13 @@ export function SidebarNavRail({
   });
   const searchShortcut = shortcutLabelForCommand(keybindings, "commandPalette.toggle");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  // On a narrow window, a mode click floats the collapsed list column out over
-  // the page (ListColumnPeek) rather than pinning it open; the same icon again
-  // closes it.
+  // Hovering the toggle floats the collapsed list column out from under the
+  // rail (ListColumnPeek); clicking it docks the column.
   const peekAvailable = useListColumnPeekStore((store) => store.available);
-  const peekOpen = useListColumnPeekOpen();
 
   const selectMode = (next: SidebarMode) => {
-    const current = next === mode && !onUtilityPage;
     // A utility page hands the column back to the thread list.
     selectSidebarMode(next, { leaveUtilityPage: true });
-    if (showListColumnFromRail(current)) return;
     // Another mode restores its own remembered list column (see
     // listColumnLayoutStore); picking the current mode again opens a collapsed one.
     if (next === mode && !open) setOpen(true);
@@ -150,22 +145,21 @@ export function SidebarNavRail({
       <button
         type="button"
         aria-label="Toggle main sidebar"
-        aria-pressed={(sidebarVisible || peekOpen) && !listColumnHidden}
+        aria-pressed={sidebarVisible && !listColumnHidden}
         aria-disabled={listColumnHidden || undefined}
         data-sidebar="trigger"
         onClick={listColumnHidden ? undefined : () => toggleListColumn(toggleSidebar)}
         // Chrome, like a native toolbar button: a click toggles the column
         // and leaves focus (and its ring) where it was, in the composer.
         onPointerDown={(event) => event.preventDefault()}
+        {...listColumnPeekToggleHandlers}
         className={cn(
           RAIL_BUTTON_CLASS,
           RAIL_TOGGLE_TONE,
           "[-webkit-app-region:no-drag] aria-disabled:cursor-not-allowed aria-disabled:opacity-64 aria-disabled:hover:text-sidebar-muted-foreground",
         )}
       >
-        <MorphIcon
-          icon={(sidebarVisible || peekOpen) && !listColumnHidden ? PanelLeftClose : PanelLeft}
-        />
+        <MorphIcon icon={sidebarVisible && !listColumnHidden ? PanelLeftClose : PanelLeft} />
       </button>
     </RailTooltip>
   );
@@ -289,11 +283,11 @@ export function SidebarNavRail({
             aria-current={onSettings ? "page" : undefined}
             onClick={() => {
               if (onSettings) {
-                if (!showListColumnFromRail(true) && !open) setOpen(true);
+                if (!open) setOpen(true);
                 return;
               }
               crossfadeModeSwitch(() => {
-                if (!showListColumnFromRail(false) && !open) setOpen(true);
+                if (!open) setOpen(true);
                 void navigate({ to: "/settings" });
                 return true;
               });

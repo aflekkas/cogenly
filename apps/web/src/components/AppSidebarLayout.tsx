@@ -45,6 +45,7 @@ import { modeSwitchCrossfadeRunning } from "./sidebar/modes/modeSwitchMotion";
 import {
   ListColumnPeekController,
   listColumnPeekPanelProps,
+  listColumnPeekToggleHandlers,
   toggleListColumn,
   useListColumnPeekSurface,
 } from "./sidebar/ListColumnPeek";
@@ -146,7 +147,8 @@ function SidebarControl({
               className="pointer-events-auto"
               aria-label="Toggle main sidebar"
               aria-disabled={disabled || undefined}
-              // On a narrow window the toggle floats the column out instead.
+              // Hovering floats the collapsed column out; a click docks it.
+              {...listColumnPeekToggleHandlers}
               onClick={(event) => {
                 if (disabled) return;
                 event.preventDefault();
@@ -250,9 +252,34 @@ function ListColumnAutoCollapse({
 }
 
 /**
- * The list column, which on a narrow window floats out over the page from a
- * rail click or the toggle (see ListColumnPeek). Its own component, so opening
- * it re-renders this frame and not the layout or the thread list.
+ * Closes the open inline right panel beside the main column: the project
+ * panel in Projects mode, otherwise the routed thread's panel (browser,
+ * preview, files).
+ */
+function useCloseInlineRightPanel() {
+  const navigate = useNavigate();
+  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
+  const routeThreadRef = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteRef(params),
+  });
+  const projectPanelOpen = useParams({
+    strict: false,
+    select: (params) => "labelId" in params && Boolean(params.labelId),
+  });
+  return () => {
+    if (sidebarMode === "projects" && projectPanelOpen) {
+      void navigate({ to: "/project" });
+    } else if (routeThreadRef) {
+      useRightPanelStore.getState().close(routeThreadRef);
+    }
+  };
+}
+
+/**
+ * The list column, which while collapsed floats out over the page as the
+ * pointer rests on the sidebar toggle (see ListColumnPeek). Its own component,
+ * so a hover re-renders this frame and not the layout or the thread list.
  */
 function ListColumnSidebar(props: ComponentProps<typeof Sidebar>) {
   const peek = useListColumnPeekSurface();
@@ -347,11 +374,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     navRailVisible,
     listColumnOpen,
     listColumnHidden: listSidebarHidden,
-    viewportWidth,
-    navRailWidth: titlebarLayout.navRailWidthPx,
-    listColumnWidth,
-    rightPanelWidth: inlineRightPanelWidth,
   });
+  // Docking the column beside the right panel would cramp the main column:
+  // the toggle closes the panel to make room.
+  const closeRightPanel = useCloseInlineRightPanel();
+  const makeRoomToDock = mainColumnCramped && !listSidebarHidden ? closeRightPanel : null;
   const onListColumnOpenChange = (open: boolean) =>
     useListColumnLayoutStore.getState().applyOpenChange(sidebarMode, open);
   const sidebarProviderStyle = {
@@ -412,7 +439,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         cramped={mainColumnCramped && !listSidebarHidden}
         preferredOpen={preferredOpen}
       />
-      <ListColumnPeekController available={peekAvailable} pathname={pathname} />
+      <ListColumnPeekController
+        available={peekAvailable}
+        pathname={pathname}
+        makeRoom={makeRoomToDock}
+      />
       <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
       <ProjectProjectionRetention />
       {navRailVisible ? (

@@ -1,10 +1,15 @@
-import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { create } from "zustand";
 
 import { isContextMenuOpen, subscribeContextMenuOpen } from "../../contextMenuOpen";
 import {
   LIST_COLUMN_PEEK_IDLE,
-  LIST_COLUMN_PEEK_SETTLE_MS,
+  listColumnPeekDelayMs,
   listColumnPeekDismissedByNavigation,
   reduceListColumnPeek,
   resolveListColumnPeekSurface,
@@ -13,9 +18,9 @@ import {
 } from "./listColumnPeek.logic";
 
 /**
- * The list column's overlay (see listColumnPeek.logic). A store rather than
- * layout state, so opening it re-renders the rail and the column's frame, not
- * the thread list inside it.
+ * The list column's peek (see listColumnPeek.logic). A store rather than
+ * layout state, so hover changes re-render the toggle and the column's frame,
+ * not the thread list inside it.
  */
 export const useListColumnPeekStore = create<{
   readonly available: boolean;
@@ -44,26 +49,34 @@ const dispatchPeek = (event: ListColumnPeekEvent) =>
 
 let peekPanel: HTMLDivElement | null = null;
 let lastPanelActivationAt: number | null = null;
+/** Set by the controller while docking beside the right panel would cramp the main column. */
+let makeRoomToDock: (() => void) | null = null;
 
-/**
- * The sidebar toggle and its shortcut: on a narrow window they float the
- * collapsed column out (or back), elsewhere they toggle it inline.
- */
-export function toggleListColumn(toggleSidebar: () => void) {
-  if (useListColumnPeekStore.getState().available) dispatchPeek({ type: "toggle" });
-  else toggleSidebar();
+// Hover only: touch keeps tapping the toggle.
+function onPeekPointerEnter(event: ReactPointerEvent) {
+  if (event.pointerType === "mouse") dispatchPeek({ type: "pointer-enter" });
 }
 
+function onPeekPointerLeave(event: ReactPointerEvent) {
+  if (event.pointerType === "mouse") dispatchPeek({ type: "pointer-leave" });
+}
+
+/** Spread on the sidebar toggle: hovering it floats the collapsed column out. */
+export const listColumnPeekToggleHandlers = {
+  onPointerEnter: onPeekPointerEnter,
+  onPointerLeave: onPeekPointerLeave,
+};
+
 /**
- * A rail click that shows the list column (a mode, Settings). On a narrow
- * window it floats the column out, and the icon already showing closes it
- * again. Returns false where the overlay is not offered.
+ * The sidebar toggle's click and shortcut: docks the collapsed column inline,
+ * closing the right panel first where the main column would be cramped
+ * beside it, or collapses a docked one. A peek showing at the time becomes
+ * the docked column in place: the layout drops the overlay styles in the
+ * same commit that docks it, so the panel never slides back out in between.
  */
-export function showListColumnFromRail(current: boolean): boolean {
-  const { available, peek } = useListColumnPeekStore.getState();
-  if (!available) return false;
-  dispatchPeek(current && peek.phase === "open" ? { type: "dismiss" } : { type: "open" });
-  return true;
+export function toggleListColumn(toggleSidebar: () => void) {
+  if (useListColumnPeekStore.getState().available) makeRoomToDock?.();
+  toggleSidebar();
 }
 
 /** Spread on the list column's Sidebar, with `peek` from useListColumnPeekSurface. */
@@ -71,6 +84,8 @@ export const listColumnPeekPanelProps = {
   ref: (element: HTMLDivElement | null) => {
     peekPanel = element;
   },
+  onPointerEnter: onPeekPointerEnter,
+  onPointerLeave: onPeekPointerLeave,
   // A click or Enter that navigates (a thread, a new chat) closes the overlay;
   // the route change arrives a moment later.
   onPointerDownCapture: () => {
@@ -89,7 +104,7 @@ export const listColumnPeekPanelProps = {
 function dismissPeek() {
   lastPanelActivationAt = null;
   dispatchPeek({ type: "dismiss" });
-  // Focus left in the hidden column would land keystrokes in it.
+  // Focus left in the hidden column would hold the next peek open.
   const active = document.activeElement;
   if (active instanceof HTMLElement && peekPanel?.contains(active)) active.blur();
 }
@@ -98,9 +113,10 @@ function menuOpenFromPanel(): boolean {
   return isContextMenuOpen() || peekPanel?.querySelector("[data-popup-open]") != null;
 }
 
-// A text field (the search) or an open menu, popover or context menu from the
-// column keeps it open against an outside click; that click closes the menu
-// or leaves the field first. Focus a mouse click leaves on a row does not.
+// Keyboard focus, a text field (the search), or an open menu, popover or
+// context menu from the column keep it open after the pointer leaves, and
+// against an outside click (which closes the menu or leaves the field first).
+// Focus a mouse click leaves on a row does not.
 function readPeekHold(): boolean {
   if (menuOpenFromPanel()) return true;
   const active = document.activeElement;
@@ -116,8 +132,9 @@ function syncPeekHold() {
   dispatchPeek({ type: "hold", held: readPeekHold() });
 }
 
-// The rail and the sidebar toggle drive the overlay themselves.
-const PEEK_OWN_CONTROLS = "nav[data-nav-rail], [data-sidebar-control]";
+// The sidebar toggles (the rail's, or the one after the macOS traffic lights)
+// drive the peek themselves.
+const PEEK_OWN_CONTROLS = '[data-sidebar="trigger"]';
 
 function onDocumentPointerDown(event: PointerEvent) {
   const target = event.target;
@@ -128,10 +145,13 @@ function onDocumentPointerDown(event: PointerEvent) {
   dispatchPeek({ type: "outside-press" });
 }
 
+// Captured, since the focused composer consumes Escape; an open menu or
+// popover (from the column or elsewhere) takes it first. The toggle's own
+// tooltip, up while the pointer rests on it, does not count.
 function onDocumentKeyDown(event: KeyboardEvent) {
-  if (event.key !== "Escape" || event.defaultPrevented) return;
-  // A menu from the column takes its own Escape first.
-  if (menuOpenFromPanel()) return;
+  if (event.key !== "Escape" || event.isComposing) return;
+  if (isContextMenuOpen()) return;
+  if (document.querySelector(`[data-popup-open]:not(${PEEK_OWN_CONTROLS})`)) return;
   dismissPeek();
 }
 
@@ -142,21 +162,26 @@ export function useListColumnPeekSurface() {
   );
 }
 
-/** Whether the column is floating out right now. */
-export function useListColumnPeekOpen() {
-  return useListColumnPeekStore((store) => store.available && store.peek.phase === "open");
-}
-
-/** Runs the overlay's motion steps, holds and outside-press listeners. Renders nothing. */
+/** Runs the peek's timers, holds and outside-press listeners. Renders nothing. */
 export function ListColumnPeekController({
   available,
   pathname,
+  makeRoom,
 }: {
   available: boolean;
   pathname: string;
+  /** Closes the right panel; passed while docking beside it would cramp the main column. */
+  makeRoom: (() => void) | null;
 }) {
   const pending = useListColumnPeekStore((store) => store.peek.pending);
   const phase = useListColumnPeekStore((store) => store.peek.phase);
+
+  useEffect(() => {
+    makeRoomToDock = makeRoom;
+    return () => {
+      makeRoomToDock = null;
+    };
+  }, [makeRoom]);
 
   useEffect(() => {
     useListColumnPeekStore.getState().setAvailable(available);
@@ -164,18 +189,11 @@ export function ListColumnPeekController({
 
   useEffect(() => {
     if (pending === null) return;
-    if (pending === "settle") {
-      const timeout = window.setTimeout(
-        () => dispatchPeek({ type: "timer" }),
-        LIST_COLUMN_PEEK_SETTLE_MS,
-      );
-      return () => window.clearTimeout(timeout);
-    }
-    // Opening: one painted frame of the hidden state, then the slide.
-    let frame = window.requestAnimationFrame(() => {
-      frame = window.requestAnimationFrame(() => dispatchPeek({ type: "timer" }));
-    });
-    return () => window.cancelAnimationFrame(frame);
+    const timeout = window.setTimeout(
+      () => dispatchPeek({ type: "timer" }),
+      listColumnPeekDelayMs(pending),
+    );
+    return () => window.clearTimeout(timeout);
   }, [pending]);
 
   const previousPathname = useRef(pathname);
@@ -202,12 +220,12 @@ export function ListColumnPeekController({
     }
     const unsubscribe = subscribeContextMenuOpen(syncPeekHold);
     document.addEventListener("pointerdown", onDocumentPointerDown, true);
-    window.addEventListener("keydown", onDocumentKeyDown);
+    window.addEventListener("keydown", onDocumentKeyDown, true);
     return () => {
       observer.disconnect();
       unsubscribe();
       document.removeEventListener("pointerdown", onDocumentPointerDown, true);
-      window.removeEventListener("keydown", onDocumentKeyDown);
+      window.removeEventListener("keydown", onDocumentKeyDown, true);
     };
   }, [phase]);
 
