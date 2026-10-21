@@ -109,12 +109,9 @@ export function AgentContacts({
         {shown.length === 0 && !loading && !reconnecting ? (
           <li className="flex flex-1 list-none">
             {filter === "attention" ? (
-              <SidebarListEmptyState icon={BellDotIcon}>
-                No agent needs you right now
-              </SidebarListEmptyState>
+              <SidebarListEmptyState icon={BellDotIcon} label="No agent needs you right now" />
             ) : (
-              <SidebarListEmptyState icon={SIDEBAR_MODE_ICONS.agents}>
-                No agents yet
+              <SidebarListEmptyState icon={SIDEBAR_MODE_ICONS.agents} label="No agents yet">
                 <Button
                   variant="outline"
                   size="xs"

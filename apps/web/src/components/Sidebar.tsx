@@ -4983,13 +4983,16 @@ export default function Sidebar() {
                           // Fills the bottom-anchored list, so it sits centred in the column.
                           className="flex flex-1 list-none"
                         >
-                          <SidebarListEmptyState icon={SIDEBAR_SHELF_ICONS[shownSection]}>
-                            {shownSection === "attention"
-                              ? "Nothing needs you right now"
-                              : shownSection === "snoozed"
-                                ? "Nothing snoozed"
-                                : "Nothing settled yet"}
-                          </SidebarListEmptyState>
+                          <SidebarListEmptyState
+                            icon={SIDEBAR_SHELF_ICONS[shownSection]}
+                            label={
+                              shownSection === "attention"
+                                ? "Nothing needs you right now"
+                                : shownSection === "snoozed"
+                                  ? "Nothing snoozed"
+                                  : "Nothing settled yet"
+                            }
+                          />
                         </li>,
                       );
                     }
@@ -5024,35 +5027,36 @@ export default function Sidebar() {
             snoozedThreads.length +
             settledThreads.length ===
             0 ? (
-            <SidebarListEmptyState icon={SIDEBAR_MODE_ICONS[sidebarMode]}>
+            <SidebarListEmptyState
+              icon={SIDEBAR_MODE_ICONS[sidebarMode]}
+              label={
+                sidebarMode === "chats"
+                  ? "No chats yet"
+                  : projects.length === 0
+                    ? "No repositories yet"
+                    : "No work yet"
+              }
+            >
               {sidebarMode === "chats" ? (
                 // Chats need no repository, so the empty list offers a chat.
-                <>
-                  <span>No chats yet</span>
-                  <button
-                    type="button"
-                    onClick={sidebarModeActions.startChat}
-                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
-                  >
-                    <SquarePenIcon className="-mx-0.5 size-3" />
-                    New chat
-                  </button>
-                </>
+                <button
+                  type="button"
+                  onClick={sidebarModeActions.startChat}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
+                >
+                  <SquarePenIcon className="-mx-0.5 size-3" />
+                  New chat
+                </button>
               ) : projects.length === 0 ? (
-                <>
-                  <span>No repositories yet</span>
-                  <button
-                    type="button"
-                    onClick={openAddProjectCommandPalette}
-                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
-                  >
-                    <PlusIcon className="-mx-0.5 size-3" />
-                    Add repository
-                  </button>
-                </>
-              ) : (
-                "No work yet"
-              )}
+                <button
+                  type="button"
+                  onClick={openAddProjectCommandPalette}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
+                >
+                  <PlusIcon className="-mx-0.5 size-3" />
+                  Add repository
+                </button>
+              ) : null}
             </SidebarListEmptyState>
           ) : null}
         </SidebarGroup>

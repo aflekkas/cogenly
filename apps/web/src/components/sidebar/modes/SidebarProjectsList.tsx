@@ -9,6 +9,8 @@ import type {
 import { ProjectFolderIcon } from "../../../projectLabels/ProjectFolderMark";
 import { useProjectLabelDirectory } from "../../../projectLabels/useProjectLabels";
 import { useConnectedEnvironmentIds } from "../../../state/environments";
+import { SidebarListEmptyState } from "../SidebarListEmptyState";
+import { SIDEBAR_MODE_ICONS } from "./SidebarModeSwitcher";
 
 /**
  * The Projects mode list: every project folder across connected machines,
@@ -24,8 +26,7 @@ export function SidebarProjectsList(props: {
   const directory = useProjectLabelDirectory(useConnectedEnvironmentIds());
   if (directory.labels.length === 0) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground">
-        <span>No projects yet</span>
+      <SidebarListEmptyState icon={SIDEBAR_MODE_ICONS.projects} label="No projects yet">
         <button
           type="button"
           onClick={props.onCreateProject}
@@ -34,7 +35,7 @@ export function SidebarProjectsList(props: {
           <FolderPlusIcon className="-mx-0.5 size-3" />
           New project
         </button>
-      </div>
+      </SidebarListEmptyState>
     );
   }
   return (

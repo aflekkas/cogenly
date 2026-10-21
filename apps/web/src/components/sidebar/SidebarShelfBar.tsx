@@ -1,5 +1,4 @@
 import { BellDotIcon, CircleCheckIcon, ClockIcon, type LucideIcon } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -45,56 +44,36 @@ export interface SidebarSegment {
 }
 
 /**
- * The count bar itself, with one highlight sliding between its segments. Work's
- * shelves fill it with equal-width segments; `compact` sizes each segment to its
- * content instead, for bars with only a couple of filters.
+ * The count bar above the search dock, shared by every mode's filters (Work's
+ * four, Agents' two). It spans the dock's width like the search field under
+ * it, splits that width into equal segments, and slides one highlight between
+ * them.
  */
 export function SidebarSegmentBar({
   segments,
   selectedIndex,
   onSelect,
   ariaLabel = "Sidebar lists",
-  compact = false,
 }: {
   segments: ReadonlyArray<SidebarSegment>;
   selectedIndex: number;
   onSelect: (index: number) => void;
   ariaLabel?: string;
-  compact?: boolean;
 }) {
-  // Compact segments differ in width, so the highlight takes the selected one's measure.
-  const buttons = useRef<Array<HTMLButtonElement | null>>([]);
-  const [measure, setMeasure] = useState<{ left: number; width: number } | null>(null);
-  useLayoutEffect(() => {
-    if (!compact) return;
-    const button = buttons.current[selectedIndex];
-    if (!button) return;
-    setMeasure({ left: button.offsetLeft, width: button.offsetWidth });
-  }, [compact, selectedIndex, segments]);
   return (
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={cn(
-        "relative isolate mb-2.5 flex h-9 rounded-rail bg-(--sidebar-shelf-bar) p-0.5",
-        compact && "w-fit gap-0.5",
-      )}
+      className="relative isolate mb-2.5 flex h-9 w-full rounded-rail bg-(--sidebar-shelf-bar) p-0.5"
     >
-      {/* One highlight slides between the segments. */}
+      {/* One highlight, one segment wide, glides to the selected segment. */}
       <span
         aria-hidden
-        className="corner-glow absolute inset-y-0.5 left-0 -z-10 rounded-lg [--corner-glow:0%] [--corner-glow-top:0.8%] [--surface-edge:rgb(255_255_255/1.2%)] border border-(--surface-edge,transparent) bg-(--sidebar-shelf-selected) shadow-(--surface-halo,none) transition-[transform,width] duration-(--motion-duration-slow) ease-standard motion-reduce:transition-none"
-        style={
-          compact
-            ? {
-                width: measure ? `${measure.width}px` : 0,
-                transform: `translateX(${measure?.left ?? 0}px)`,
-              }
-            : {
-                width: `calc((100% - 0.25rem) / ${segments.length})`,
-                transform: `translateX(calc(0.125rem + ${selectedIndex * 100}%))`,
-              }
-        }
+        className="corner-glow absolute inset-y-0.5 left-0.5 -z-10 rounded-lg [--corner-glow:0%] [--corner-glow-top:0.8%] [--surface-edge:rgb(255_255_255/1.2%)] border border-(--surface-edge,transparent) bg-(--sidebar-shelf-selected) shadow-(--surface-halo,none) transition-transform duration-(--motion-duration-base) ease-out motion-reduce:transition-none"
+        style={{
+          width: `calc((100% - 0.25rem) / ${segments.length})`,
+          transform: `translateX(${selectedIndex * 100}%)`,
+        }}
       />
       {segments.map((segment, index) => {
         const selected = index === selectedIndex;
@@ -105,9 +84,6 @@ export function SidebarSegmentBar({
             <TooltipTrigger
               render={
                 <button
-                  ref={(node) => {
-                    buttons.current[index] = node;
-                  }}
                   type="button"
                   role="tab"
                   aria-selected={selected}
@@ -120,9 +96,8 @@ export function SidebarSegmentBar({
                   onClick={() => onSelect(index)}
                   className={cn(
                     "flex min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg text-xs tabular-nums outline-none transition-colors duration-(--motion-duration-base) focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-3.5 [&_svg]:shrink-0",
-                    // Equal-width segments, so a count changing length never shifts the row;
-                    // compact ones take their content's width.
-                    compact ? "px-2.5" : "flex-1 basis-0",
+                    // Equal-width segments, so a count changing length never shifts the row.
+                    "flex-1 basis-0",
                     selected
                       ? "text-sidebar-foreground"
                       : "text-(--sidebar-shelf-muted,var(--nav-rail-muted)) hover:text-sidebar-foreground",

@@ -14,7 +14,6 @@ export function AgentsShelfBar() {
   const pending = (loading || reconnecting) && agents.length === 0;
   return (
     <SidebarSegmentBar
-      compact
       ariaLabel="Agent lists"
       segments={[
         { icon: SIDEBAR_MODE_ICONS.agents, label: "All agents", count: agents.length, pending },
