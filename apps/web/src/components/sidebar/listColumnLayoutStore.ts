@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { create } from "zustand";
 
 import type { SidebarMode } from "./modes/sidebarModes.logic";
@@ -82,10 +82,30 @@ export function mainColumnCrampedBesidePanel(input: {
   return mainWidth < MAIN_COLUMN_COMFORTABLE_MIN_WIDTH_PX;
 }
 
-/** Reports the thread's open inline right panel, so the list column can make room. */
+// The publisher whose width is current. Several surfaces publish (a chat's
+// browser panel, the project panel beside a chat's hero); one that has no
+// open panel publishes null, which must not clear another's width.
+let inlineRightPanelOwner: object | null = null;
+
+/** Reports an open inline right panel, so the list column can make room. */
 export function usePublishInlineRightPanelWidth(width: number | null): void {
+  const [owner] = useState(() => ({}));
   useEffect(() => {
-    useListColumnLayoutStore.getState().setInlineRightPanelWidth(width);
-  }, [width]);
-  useEffect(() => () => useListColumnLayoutStore.getState().setInlineRightPanelWidth(null), []);
+    const store = useListColumnLayoutStore.getState();
+    if (width !== null) {
+      inlineRightPanelOwner = owner;
+      store.setInlineRightPanelWidth(width);
+    } else if (inlineRightPanelOwner === owner) {
+      inlineRightPanelOwner = null;
+      store.setInlineRightPanelWidth(null);
+    }
+  }, [owner, width]);
+  useEffect(
+    () => () => {
+      if (inlineRightPanelOwner !== owner) return;
+      inlineRightPanelOwner = null;
+      useListColumnLayoutStore.getState().setInlineRightPanelWidth(null);
+    },
+    [owner],
+  );
 }

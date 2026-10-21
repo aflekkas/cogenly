@@ -6,8 +6,8 @@ import { ProjectPanelEmptyRow, ProjectPanelSection } from "./ProjectPanelSection
 
 /**
  * The project's files. The file backend is still being built: this renders
- * the empty state today and is the seam it plugs into. "Open folder" shows
- * once a caller can reveal the project's folder on disk.
+ * one short dropzone line today and is the seam it plugs into. "Open folder"
+ * shows once a caller can reveal the project's folder on disk.
  */
 export function ProjectFilesSection(props: {
   readonly environmentId: EnvironmentId;
@@ -29,8 +29,8 @@ export function ProjectFilesSection(props: {
       }
     >
       <ProjectPanelEmptyRow>
-        <span className="text-pretty" data-project={`${props.environmentId}:${props.labelId}`}>
-          Files you add to this project, or drop into its folder, show up here.
+        <span className="truncate" data-project={`${props.environmentId}:${props.labelId}`}>
+          Drop files here to add them.
         </span>
       </ProjectPanelEmptyRow>
     </ProjectPanelSection>

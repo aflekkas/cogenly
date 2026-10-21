@@ -51,8 +51,8 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { cn } from "../../lib/utils";
 import { AnimatedHeight } from "../AnimatedHeight";
-import { GitHubIcon } from "../Icons";
 import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -70,7 +70,7 @@ import {
 } from "../ui/menu";
 import { OverlayPresence } from "../ui/overlay-presence";
 import { ProjectFilesSection } from "./ProjectFilesSection";
-import { ProjectPanelEmptyRow, ProjectPanelRow, ProjectPanelSection } from "./ProjectPanelSection";
+import { ProjectPanelRow, ProjectPanelSection } from "./ProjectPanelSection";
 import { projectPanelSummary, sortRecentFirst } from "./projectPanel.logic";
 
 const NO_PERMISSION = "You don't have permission to change projects here.";
@@ -415,18 +415,28 @@ export function ProjectDetail(props: {
             </Button>
           }
         >
-          {chats.length > 0 ? (
-            chats.map((thread) => threadRow(thread, false))
-          ) : (
-            <ProjectPanelEmptyRow>No chats yet.</ProjectPanelEmptyRow>
-          )}
+          {chats.map((thread) => threadRow(thread, false))}
         </ProjectPanelSection>
-        <ProjectPanelSection title="Work" count={work.length}>
-          {work.length > 0 ? (
-            work.map((thread) => threadRow(thread, true))
-          ) : (
-            <ProjectPanelEmptyRow>No Work yet.</ProjectPanelEmptyRow>
-          )}
+        <ProjectPanelSection
+          title="Work"
+          count={work.length}
+          action={
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              onClick={() =>
+                void startScratchThread(environmentId, {
+                  surface: "work",
+                  projectFolderId: labelId,
+                })
+              }
+            >
+              <PlusIcon />
+              New Work
+            </Button>
+          }
+        >
+          {work.map((thread) => threadRow(thread, true))}
         </ProjectPanelSection>
         <ProjectPanelSection
           title="Repositories"
@@ -441,39 +451,35 @@ export function ProjectDetail(props: {
             />
           }
         >
-          {linkedRepositories.length > 0 ? (
-            linkedRepositories.map((repository) => (
-              <ProjectPanelRow
-                key={repository.id}
-                icon={<FolderGit2Icon />}
-                title={repository.title}
-                actions={
-                  <>
-                    <Button
-                      size="icon-xs"
-                      variant="ghost-muted"
-                      aria-label={`Repository settings for ${repository.title}`}
-                      onClick={() => openRepositorySettings(repository.id)}
-                    >
-                      <SettingsIcon />
-                    </Button>
-                    <Button
-                      size="icon-xs"
-                      variant="ghost-muted"
-                      aria-label={`Remove ${repository.title} from ${label.name}`}
-                      title={canUnlink ? "Remove from project" : NO_PERMISSION}
-                      disabled={!canUnlink}
-                      onClick={() => void removeRepository(repository.id, repository.title)}
-                    >
-                      <FolderMinusIcon />
-                    </Button>
-                  </>
-                }
-              />
-            ))
-          ) : (
-            <ProjectPanelEmptyRow>No repositories yet.</ProjectPanelEmptyRow>
-          )}
+          {linkedRepositories.map((repository) => (
+            <ProjectPanelRow
+              key={repository.id}
+              icon={<FolderGit2Icon />}
+              title={repository.title}
+              actions={
+                <>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost-muted"
+                    aria-label={`Repository settings for ${repository.title}`}
+                    onClick={() => openRepositorySettings(repository.id)}
+                  >
+                    <SettingsIcon />
+                  </Button>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost-muted"
+                    aria-label={`Remove ${repository.title} from ${label.name}`}
+                    title={canUnlink ? "Remove from project" : NO_PERMISSION}
+                    disabled={!canUnlink}
+                    onClick={() => void removeRepository(repository.id, repository.title)}
+                  >
+                    <FolderMinusIcon />
+                  </Button>
+                </>
+              }
+            />
+          ))}
         </ProjectPanelSection>
         <ProjectFilesSection environmentId={environmentId} labelId={labelId} />
         <ProjectPanelSection
@@ -492,21 +498,22 @@ export function ProjectDetail(props: {
                 "Done"
               ) : (
                 <>
-                  <GitHubIcon aria-hidden />
-                  Link GitHub…
+                  <PlusIcon />
+                  Link GitHub
                 </>
               )}
             </Button>
           }
         >
           <AnimatedHeight>
-            <div className="flex flex-col gap-2 px-2.5 py-1">
+            <div
+              className={cn(
+                "flex flex-col gap-2 px-2.5",
+                (label.sourceLinks.length > 0 || linkingSource) && "py-1",
+              )}
+            >
               {label.sourceLinks.length > 0 ? (
                 <ProjectSourceLinkChips environmentId={environmentId} label={label} />
-              ) : !linkingSource ? (
-                <p className="flex h-7 items-center text-sm text-muted-foreground">
-                  No GitHub orgs or repositories linked.
-                </p>
               ) : null}
               {linkingSource ? (
                 <div className="reveal-motion">
