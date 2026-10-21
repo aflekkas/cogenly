@@ -410,6 +410,15 @@ export function PreviewView({
     serverOwnsRendering,
   ]);
 
+  // The panel showing a tab is where that tab lives: a floating entry left
+  // over from an earlier undock would keep "Float" pressed while nothing
+  // floats, and would float the tab again the moment the panel closed.
+  useEffect(() => {
+    if (visible && tabId && miniPlayerTabId === tabId) {
+      usePreviewMiniPlayerStore.getState().close(threadRef);
+    }
+  }, [miniPlayerTabId, tabId, threadRef, visible]);
+
   const handleZoomIn = useCallback(() => {
     if (serverOwnsRendering) stepServerZoom(1);
     else if (previewBridge && runtimeTabId) void previewBridge.zoomIn(runtimeTabId);

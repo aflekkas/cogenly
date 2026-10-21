@@ -27,6 +27,8 @@ import { Toggle } from "~/components/ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
 
+import { resolvePreviewControlToggle } from "./previewControlToggle";
+
 /** Who drives a streamed (server) tab; the chrome shows it as one quiet toggle. */
 export interface PreviewControlState {
   readonly controller: "agent" | "you" | "another-viewer" | "unclaimed";
@@ -34,31 +36,14 @@ export interface PreviewControlState {
   readonly onToggle: () => void;
 }
 
-const CONTROL_PRESENTATION = {
-  you: {
-    Icon: MousePointer2,
-    hint: "You have control · click to hand the page to the agent",
-    handedOver: false,
-  },
-  agent: { Icon: Bot, hint: "Agent has control · click to take over", handedOver: true },
-  "another-viewer": { Icon: Eye, hint: "Another viewer has control", handedOver: false },
-  unclaimed: {
-    Icon: MousePointer2,
-    hint: "Handed to the agent · click to take control back",
-    handedOver: true,
-  },
-} as const;
-
 /**
- * One cursor says who drives the page. At rest (you drive) it is a plain
- * ghost button; it is pressed, with an accent dot, while the page is handed
- * over, whether the agent is driving right now or may take it. The words live
- * in the tooltip and the accessible name. Releasing hands the page over
- * without the agent having to be mid-action, so the server reports it as
- * unclaimed until the agent acts.
+ * One cursor says who drives the page (previewControlToggle): a plain ghost
+ * button while you do, pressed while the agent does (or nobody, on a tab a
+ * person opened and let go). The words live in the tooltip and the
+ * accessible name; a click always flips who drives.
  */
 function PreviewControlToggle({ control }: { control: PreviewControlState }) {
-  const { Icon, hint, handedOver } = CONTROL_PRESENTATION[control.controller];
+  const state = resolvePreviewControlToggle(control.controller);
   if (!control.canOperate) {
     return (
       <span role="status" className="shrink-0 px-1 text-xs text-muted-foreground">
@@ -72,22 +57,22 @@ function PreviewControlToggle({ control }: { control: PreviewControlState }) {
         <Toggle
           size="sm"
           variant="ghost"
-          pressed={handedOver}
+          pressed={state.pressed}
           onPressedChange={control.onToggle}
-          disabled={control.controller === "another-viewer"}
-          aria-label={hint}
+          disabled={state.disabled}
+          aria-label={state.hint}
           data-preview-control={control.controller}
         >
-          <Icon />
-          {handedOver ? (
-            <span
-              aria-hidden
-              className="absolute top-1 right-1 size-1.5 rounded-full bg-primary ring-2 ring-background"
-            />
-          ) : null}
+          {control.controller === "agent" ? (
+            <Bot />
+          ) : control.controller === "another-viewer" ? (
+            <Eye />
+          ) : (
+            <MousePointer2 />
+          )}
         </Toggle>
       </TooltipTrigger>
-      <TooltipPopup>{hint}</TooltipPopup>
+      <TooltipPopup>{state.hint}</TooltipPopup>
     </Tooltip>
   );
 }
