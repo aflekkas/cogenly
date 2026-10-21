@@ -17,27 +17,12 @@
   --chat-header-overlap: 6.5rem;
   --agent-accent: var(--primary);
   --agent-accent-foreground: var(--primary-foreground);
-  --agent-accent-soft: color-mix(in srgb, var(--agent-accent) 28%, transparent);
-  --color-send-top: var(--agent-accent);
-  --color-send-bottom: color-mix(in srgb, var(--agent-accent) 82%, black);
-  --color-send-top-hover: color-mix(in srgb, var(--agent-accent) 90%, white);
-  --color-send-bottom-hover: var(--agent-accent);
-  --color-send-foreground: var(--agent-accent-foreground);
-}
-/* The composer keeps its glow, tinted with the agent: a soft ring at rest and a
-   fuller one while writing. */
-.agent-conversation [data-slot="composer-shell"] {
-  --chat-composer-outline: color-mix(in srgb, var(--agent-accent) 30%, var(--border));
-  --surface-raised-shadow:
-    0 0 0 1px color-mix(in srgb, var(--agent-accent) 14%, transparent),
-    0 10px 28px -14px color-mix(in srgb, var(--agent-accent) 55%, transparent);
-  transition: --surface-raised-shadow var(--motion-duration-base) --theme(--ease-standard);
-}
-.agent-conversation [data-slot="composer-shell"]:focus-within {
-  --surface-raised-shadow:
-    0 0 0 1px color-mix(in srgb, var(--agent-accent) 30%, transparent),
-    0 0 0 4px color-mix(in srgb, var(--agent-accent) 12%, transparent),
-    0 12px 32px -14px color-mix(in srgb, var(--agent-accent) 65%, transparent);
+  /* The send button's ember gradient (theme: --color-send-*, inlined from these)
+     runs in the agent's colour while something can be sent; idle stays grey. */
+  --brand-accent-fill: var(--agent-accent);
+  --brand-accent-fill-deep: color-mix(in srgb, var(--agent-accent) 78%, black);
+  --brand-accent-fill-hover: color-mix(in srgb, var(--agent-accent) 88%, white);
+  --brand-accent-fill-foreground: var(--agent-accent-foreground);
 }
 /* The pinned identity: the face centred at the top, the name in a pill under it
    and a quiet status line, floating over the transcript with no bar of its own.
@@ -56,6 +41,27 @@
 }
 .agent-identity > * {
   pointer-events: auto;
+  position: relative;
+}
+/* The frosted band behind the identity: what scrolls under it blurs and dims
+   from the page background to clear, so the face, name and status stay legible
+   over any bubble. The mask lets the blur itself fade out at the bottom. */
+@utility agent-identity-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  background: linear-gradient(
+    to bottom,
+    var(--background) 0%,
+    color-mix(in srgb, var(--background) 92%, transparent) 55%,
+    color-mix(in srgb, var(--background) 55%, transparent) 85%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
 }
 @utility agent-identity-person {
   display: flex;
@@ -127,8 +133,8 @@
   min-height: 100%;
   justify-content: flex-end;
 }
-/* A row: the agent's bubbles on the left with a gutter for its face, which
-   shows beside the first bubble of a group; the owner's on the right. */
+/* A row: the agent's bubbles on the left, the owner's on the right. No faces in
+   the transcript, as in a one-to-one thread: the person is pinned at the top. */
 @utility agent-message-row {
   position: relative;
   display: flex;
@@ -136,19 +142,12 @@
   align-items: flex-start;
   margin-top: 10px;
   min-width: 0;
-  padding-left: 30px;
 }
 .agent-message-row[data-grouped="true"] {
   margin-top: 2px;
 }
 .agent-message-row[data-owner="true"] {
   align-items: flex-end;
-  padding-left: 0;
-}
-@utility agent-message-face {
-  position: absolute;
-  left: 0;
-  bottom: 1px;
 }
 @utility agent-separator {
   align-self: stretch;

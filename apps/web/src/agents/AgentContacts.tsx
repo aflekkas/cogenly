@@ -1,6 +1,6 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
-import { BellDotIcon, EllipsisIcon } from "lucide-react";
+import { BellDotIcon, EllipsisIcon, PlusIcon } from "lucide-react";
 import {
   useMemo,
   useRef,
@@ -35,7 +35,9 @@ import { readLocalApi } from "~/localApi";
 import { deriveProviderInstanceEntries } from "~/providerInstances";
 import { useServerConfigs } from "~/state/entities";
 import { formatRelativeTime } from "~/timestampFormat";
+import { SIDEBAR_MODE_ICONS } from "~/components/sidebar/modes/SidebarModeSwitcher";
 import { takeAgentArrival } from "./agentArrivals";
+import { requestAgentCreation } from "./AgentsCreateHost";
 import { useAgentListFilter } from "./agentListFilter";
 import { AgentAvatarPicker } from "./AgentAvatarPicker";
 import { agentViewKey, requestAgentView } from "./agentViewIntent";
@@ -67,7 +69,7 @@ export function AgentContacts({
   /** Unused since the empty state moved to the index route; kept so callers stay stable. */
   onCreate: () => void;
 }) {
-  const { agents, loading, error } = useAgents();
+  const { agents, loading, reconnecting, error } = useAgents();
   const filter = useAgentListFilter();
   const shown =
     filter === "attention" ? agents.filter((agent) => agentAttentionCount(agent) > 0) : agents;
@@ -86,6 +88,11 @@ export function AgentContacts({
           Connecting to your agents…
         </p>
       )}
+      {reconnecting && !loading && (
+        <p role="status" className="px-2.5 py-1 text-2xs text-muted-foreground reveal-motion">
+          Reconnecting…
+        </p>
+      )}
       {/* With no agents at all the list column is hidden and the index route shows
           the one empty state; only the attention filter can be empty here. */}
       <ul
@@ -98,11 +105,25 @@ export function AgentContacts({
           (shown.length > 0 || !loading) && "flex-1 justify-end",
         )}
       >
-        {shown.length === 0 && !loading && filter === "attention" ? (
+        {shown.length === 0 && !loading && !reconnecting ? (
           <li className="flex flex-1 list-none">
-            <SidebarListEmptyState icon={BellDotIcon}>
-              No agent needs you right now
-            </SidebarListEmptyState>
+            {filter === "attention" ? (
+              <SidebarListEmptyState icon={BellDotIcon}>
+                No agent needs you right now
+              </SidebarListEmptyState>
+            ) : (
+              <SidebarListEmptyState icon={SIDEBAR_MODE_ICONS.agents}>
+                No agents yet
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => requestAgentCreation(agents[0]?.environmentId ?? null)}
+                >
+                  <PlusIcon />
+                  New agent
+                </Button>
+              </SidebarListEmptyState>
+            )}
           </li>
         ) : null}
         {shown.map((agent) => (

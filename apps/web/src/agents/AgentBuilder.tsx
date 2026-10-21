@@ -17,7 +17,7 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AgentFace, type AgentFaceProps } from "~/components/agents/face";
+import type { AgentFaceProps } from "~/components/agents/face";
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
 import { ComposerPrimaryActions } from "~/components/chat/ComposerPrimaryActions";
 import { ComposerSurface } from "~/components/chat/ComposerSurface";
@@ -306,7 +306,6 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
           messages={messages}
           busy={busy}
           workingOn={workingOn}
-          face={face}
           seed={seed}
           proposal={proposal}
           modelName={modelName}
@@ -362,7 +361,6 @@ function Transcript({
   messages,
   busy,
   workingOn,
-  face,
   seed,
   proposal,
   modelName,
@@ -376,7 +374,6 @@ function Transcript({
   messages: ReadonlyArray<AgentMessage>;
   busy: boolean;
   workingOn: string | null;
-  face: AgentFaceProps;
   seed: string;
   proposal: ReturnType<typeof proposalFromMessages>;
   modelName: string | null;
@@ -448,11 +445,6 @@ function Transcript({
                         <time dateTime={message.createdAt}>{separator}</time>
                       </div>
                     )}
-                    {message.role === "assistant" && !grouped && (
-                      <span className="agent-message-face" aria-hidden>
-                        <AgentFace {...face} size={22} />
-                      </span>
-                    )}
                     {text && (
                       <div
                         className="agent-bubble"
@@ -493,11 +485,6 @@ function Transcript({
               data-owner={false}
               data-grouped={messages.at(-1)?.role === "assistant"}
             >
-              {messages.at(-1)?.role !== "assistant" && (
-                <span className="agent-message-face" aria-hidden>
-                  <AgentFace {...face} state="thinking" size={22} />
-                </span>
-              )}
               <div className="agent-bubble" data-owner={false}>
                 <AgentTypingDots />
               </div>

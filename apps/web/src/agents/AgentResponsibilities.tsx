@@ -2,6 +2,8 @@ import { cn } from "~/lib/utils";
 import {
   BellIcon,
   BookmarkIcon,
+  ChevronDownIcon,
+  ShieldCheckIcon,
   FlagIcon,
   FolderGit2Icon,
   PlayIcon,
@@ -19,7 +21,17 @@ import type { AgentAvatar, AgentPermissions } from "@t3tools/contracts";
 import { PopoverTrigger } from "~/components/ui/popover";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import { ThreadDetailsSection } from "~/components/chat/ThreadDetailsSection";
-import { THREAD_DETAILS_PANEL_ICON_CLASS } from "~/components/chat/threadDetailsPanelStyles";
+import {
+  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+  THREAD_DETAILS_PANEL_ICON_CLASS,
+} from "~/components/chat/threadDetailsPanelStyles";
+import {
+  Dialog,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "~/components/ui/dialog";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "~/components/ui/collapsible";
 import { CollapsibleSectionHeader } from "~/components/ui/collapsible-section-header";
 import { AgentActivity } from "./AgentActivity";
@@ -150,6 +162,12 @@ export function AgentResponsibilities({
   const [itemsOpen, setItemsOpen] = useState(section === "items");
   const [activityOpen, setActivityOpen] = useState(section === "activity");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [highImpactOpen, setHighImpactOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const grantedLabels = PERMISSION_OPTIONS.filter(
+    (option) => !option.highImpact && agent.permissions[option.key],
+  ).map((option) => option.label);
   const openItems = agent.approvals.length + countOpenCommitments(workspace.commitments);
   const labelsById = new Map(workspace.labels.map((label) => [label.id as string, label]));
   const workStart = agentWorkStartPolicy(agent);
@@ -261,7 +279,7 @@ export function AgentResponsibilities({
           </ThreadDetailsControl>
         }
       >
-        {agent.triggers.length === 0 && !isEditing("trigger:new") && (
+        {agent.triggers.length === 0 && (
           <DetailRow
             icon={ZapIcon}
             label="Only when you message it"
@@ -271,124 +289,167 @@ export function AgentResponsibilities({
             onClick={() => setEditing({ kind: "trigger:new" })}
           />
         )}
-        {agent.triggers.map((trigger) =>
-          isEditing("trigger", trigger.id) ? (
-            <TriggerForm
-              key={trigger.id}
-              {...triggerFormProps}
-              initial={trigger}
-              pending={pending}
-              onCancel={close}
-              onSave={saveTrigger}
+        {agent.triggers.map((trigger) => (
+          <div key={trigger.id} className="flex items-center">
+            <DetailRow
+              icon={ZapIcon}
+              label={
+                trigger.schedule.type === "event"
+                  ? describeSchedule(trigger.schedule, filterNames)
+                  : scheduleInWords(trigger.schedule)
+              }
+              detail={`${trigger.title}${trigger.enabled ? "" : " · Paused"}`}
+              className="flex-1"
+              disabled={!canWrite}
+              onClick={() => setEditing({ kind: "trigger", id: trigger.id })}
             />
-          ) : (
-            <div key={trigger.id} className="flex items-center">
-              <DetailRow
-                icon={ZapIcon}
-                label={
-                  trigger.schedule.type === "event"
-                    ? describeSchedule(trigger.schedule, filterNames)
-                    : scheduleInWords(trigger.schedule)
-                }
-                detail={`${trigger.title}${trigger.enabled ? "" : " · Paused"}`}
-                className="flex-1"
-                disabled={!canWrite}
-                onClick={() => setEditing({ kind: "trigger", id: trigger.id })}
-              />
-              <Switch
-                size="sm"
-                className="mx-1"
-                checked={trigger.enabled}
-                aria-label={`Enable ${trigger.title}`}
-                disabled={disabled}
-                onCheckedChange={(enabled) =>
-                  void mutate(() => client.setTriggerEnabled(agent, trigger.id, enabled))
-                }
-              />
-              {trigger.schedule.type === "event" ? (
-                // The server refuses manual runs: an event run needs a real source event.
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <ThreadDetailsControl
-                        part="icon"
-                        aria-label={`Run ${trigger.title} now`}
-                        aria-disabled
-                      />
-                    }
-                  >
-                    <PlayIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-                  </TooltipTrigger>
-                  <TooltipPopup>{EVENT_RUN_NOW_UNSUPPORTED_MESSAGE}</TooltipPopup>
-                </Tooltip>
-              ) : (
-                <ThreadDetailsControl
-                  part="icon"
-                  aria-label={`Run ${trigger.title} now`}
-                  title="Run now"
-                  disabled={disabled}
-                  onClick={() => void mutate(() => client.runTrigger(agent, trigger.id))}
+            <Switch
+              size="sm"
+              className="mx-1"
+              checked={trigger.enabled}
+              aria-label={`Enable ${trigger.title}`}
+              disabled={disabled}
+              onCheckedChange={(enabled) =>
+                void mutate(() => client.setTriggerEnabled(agent, trigger.id, enabled))
+              }
+            />
+            {trigger.schedule.type === "event" ? (
+              // The server refuses manual runs: an event run needs a real source event.
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <ThreadDetailsControl
+                      part="icon"
+                      aria-label={`Run ${trigger.title} now`}
+                      aria-disabled
+                    />
+                  }
                 >
                   <PlayIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-                </ThreadDetailsControl>
-              )}
+                </TooltipTrigger>
+                <TooltipPopup>{EVENT_RUN_NOW_UNSUPPORTED_MESSAGE}</TooltipPopup>
+              </Tooltip>
+            ) : (
               <ThreadDetailsControl
                 part="icon"
-                aria-label={`Delete trigger ${trigger.title}`}
-                title="Delete"
+                aria-label={`Run ${trigger.title} now`}
+                title="Run now"
                 disabled={disabled}
-                onClick={() => void mutate(() => client.deleteTrigger(agent, trigger.id))}
+                onClick={() => void mutate(() => client.runTrigger(agent, trigger.id))}
               >
-                <Trash2Icon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+                <PlayIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
               </ThreadDetailsControl>
-            </div>
-          ),
-        )}
-        {isEditing("trigger:new") && (
-          <TriggerForm
-            {...triggerFormProps}
-            pending={pending}
-            onCancel={close}
-            onSave={saveTrigger}
-          />
-        )}
+            )}
+            <ThreadDetailsControl
+              part="icon"
+              aria-label={`Delete trigger ${trigger.title}`}
+              title="Delete"
+              disabled={disabled}
+              onClick={() => void mutate(() => client.deleteTrigger(agent, trigger.id))}
+            >
+              <Trash2Icon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+            </ThreadDetailsControl>
+          </div>
+        ))}
+        {/* The full trigger editor, every schedule kind and filter, as a dialog. */}
+        <Dialog
+          open={isEditing("trigger:new") || isEditing("trigger")}
+          onOpenChange={(open) => !open && close()}
+        >
+          <DialogPopup>
+            <DialogHeader>
+              <DialogTitle>
+                {isEditing("trigger:new") ? "Add a trigger" : "Edit trigger"}
+              </DialogTitle>
+            </DialogHeader>
+            <DialogPanel>
+              <TriggerForm
+                {...triggerFormProps}
+                {...(editing?.kind === "trigger"
+                  ? { initial: agent.triggers.find((trigger) => trigger.id === editing.id) }
+                  : {})}
+                pending={pending}
+                onCancel={close}
+                onSave={saveTrigger}
+              />
+            </DialogPanel>
+          </DialogPopup>
+        </Dialog>
       </ThreadDetailsSection>
 
       <ThreadDetailsSection headingId="agent-permissions" title="Tools & permissions">
-        {PERMISSION_OPTIONS.filter((option) => !option.highImpact).map((option) => (
-          <PermissionRow
-            key={option.key}
-            label={option.label}
-            description={option.description}
-            checked={agent.permissions[option.key]}
-            disabled={disabled}
-            onChange={(value) => setPermission(option.key, value)}
+        {/* One line says what it may do; the switches unfold under it. */}
+        <Collapsible open={permissionsOpen} onOpenChange={setPermissionsOpen}>
+          <CollapsibleTrigger
+            render={
+              <DetailRow
+                icon={ShieldCheckIcon}
+                label={grantedLabels.length > 0 ? grantedLabels.join(" · ") : "Nothing yet"}
+                detail={workStart.text}
+                trailing={
+                  <ChevronDownIcon
+                    className={cn(
+                      THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+                      "transition-transform ease-standard",
+                      permissionsOpen && "rotate-180",
+                    )}
+                  />
+                }
+              />
+            }
           />
-        ))}
-        <div className="mx-1 mt-2 rounded-xl border border-warning/25 py-1">
-          <div className="flex items-center gap-1.5 px-2.5 pt-1 pb-1 text-2xs font-medium text-warning-foreground">
-            <ShieldAlertIcon className="size-3.5" />
-            High impact · off unless you need them
-          </div>
-          {PERMISSION_OPTIONS.filter((option) => option.highImpact).map((option) => (
-            <PermissionRow
-              key={option.key}
-              label={option.label}
-              description={option.description}
-              checked={agent.permissions[option.key]}
-              disabled={disabled}
-              onChange={(value) => setPermission(option.key, value)}
-            />
-          ))}
-        </div>
-        <p
-          className={cn(
-            "mx-2.5 mt-1.5 text-xs",
-            workStart.outcome === "starts" ? "text-foreground/70" : "text-muted-foreground",
-          )}
-        >
-          Work: {workStart.text}
-        </p>
+          <CollapsiblePanel>
+            {PERMISSION_OPTIONS.filter((option) => !option.highImpact).map((option) => (
+              <PermissionRow
+                key={option.key}
+                label={option.label}
+                description={option.description}
+                checked={agent.permissions[option.key]}
+                disabled={disabled}
+                onChange={(value) => setPermission(option.key, value)}
+              />
+            ))}
+            <Collapsible open={highImpactOpen} onOpenChange={setHighImpactOpen}>
+              <CollapsibleTrigger
+                render={
+                  <DetailRow
+                    icon={ShieldAlertIcon}
+                    label="High impact"
+                    value={
+                      PERMISSION_OPTIONS.filter(
+                        (option) => option.highImpact && agent.permissions[option.key],
+                      )
+                        .map((option) => option.label)
+                        .join(", ") || "off"
+                    }
+                    tone="muted"
+                    trailing={
+                      <ChevronDownIcon
+                        className={cn(
+                          THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+                          "transition-transform ease-standard",
+                          highImpactOpen && "rotate-180",
+                        )}
+                      />
+                    }
+                  />
+                }
+              />
+              <CollapsiblePanel>
+                {PERMISSION_OPTIONS.filter((option) => option.highImpact).map((option) => (
+                  <PermissionRow
+                    key={option.key}
+                    label={option.label}
+                    description={option.description}
+                    checked={agent.permissions[option.key]}
+                    disabled={disabled}
+                    onChange={(value) => setPermission(option.key, value)}
+                  />
+                ))}
+              </CollapsiblePanel>
+            </Collapsible>
+          </CollapsiblePanel>
+        </Collapsible>
       </ThreadDetailsSection>
 
       <CollapsibleDetails
@@ -416,22 +477,29 @@ export function AgentResponsibilities({
       </CollapsibleDetails>
 
       {client.MemorySection ? (
-        <client.MemorySection agent={agent} labels={workspace.labels} />
-      ) : (
-        <ThreadDetailsSection
-          headingId="agent-memory"
+        <CollapsibleDetails
+          id="agent-memory"
           title="Memory"
-          actions={
-            <ThreadDetailsControl
-              part="icon"
-              aria-label="Add a memory note"
-              disabled={!canWrite}
-              onClick={() => setEditing({ kind: "memory:new" })}
-            >
-              <PlusIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-            </ThreadDetailsControl>
-          }
+          open={memoryOpen}
+          onOpenChange={setMemoryOpen}
         >
+          <client.MemorySection agent={agent} labels={workspace.labels} />
+        </CollapsibleDetails>
+      ) : (
+        <CollapsibleDetails
+          id="agent-memory"
+          title="Memory"
+          count={agent.memory.length}
+          open={memoryOpen}
+          onOpenChange={setMemoryOpen}
+        >
+          <DetailRow
+            icon={PlusIcon}
+            label="Add a note"
+            tone="muted"
+            disabled={!canWrite}
+            onClick={() => setEditing({ kind: "memory:new" })}
+          />
           {isEditing("memory:new") && (
             <InlineEditor
               label="New memory note"
@@ -499,7 +567,7 @@ export function AgentResponsibilities({
               />
             ),
           )}
-        </ThreadDetailsSection>
+        </CollapsibleDetails>
       )}
 
       <CollapsibleDetails

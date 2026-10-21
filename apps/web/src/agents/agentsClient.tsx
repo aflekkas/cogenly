@@ -1,6 +1,7 @@
 import { useContext, useSyncExternalStore, useCallback, useRef, type ComponentType } from "react";
 import type {
   AgentApproval,
+  AgentListItem,
   Commitment,
   CommitmentCreateInput,
   CommitmentStatusInput,
@@ -49,6 +50,8 @@ export interface AgentsSnapshot {
   agents: ReadonlyArray<AgentContact>;
   models: ReadonlyArray<AgentModelOption>;
   loading: boolean;
+  /** A machine's list is being re-fetched; `agents` still holds what it last sent. */
+  reconnecting: boolean;
   error: string | null;
 }
 export interface AgentsClient {
@@ -134,7 +137,13 @@ export function useAgentsClient() {
   if (!client) throw new Error("AgentsClientProvider is required");
   return client;
 }
-const NO_AGENTS: AgentsSnapshot = { agents: [], models: [], loading: false, error: null };
+const NO_AGENTS: AgentsSnapshot = {
+  agents: [],
+  models: [],
+  loading: false,
+  reconnecting: false,
+  error: null,
+};
 const subscribeToNothing = () => () => {};
 const readNoAgents = () => NO_AGENTS;
 /**
@@ -354,10 +363,15 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       ),
     [configs],
   );
+  // A machine that drops and reconnects restarts its stream; its last list stays
+  // on screen meanwhile instead of flashing to empty.
+  const lastKnown = useRef(new Map<EnvironmentId, ReadonlyArray<AgentListItem>>());
   const agents = useMemo(
     () =>
       results.flatMap(({ environmentId, result, approvals: approvalsResult }) => {
-        const records = Option.getOrNull(AsyncResult.value(result))?.agents ?? [];
+        const received = Option.getOrNull(AsyncResult.value(result))?.agents;
+        if (received) lastKnown.current.set(environmentId, received);
+        const records = received ?? lastKnown.current.get(environmentId) ?? [];
         const pendingApprovals =
           Option.getOrNull(AsyncResult.value(approvalsResult))?.approvals ?? [];
         return records.map((record): AgentContact => {
@@ -438,7 +452,14 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
     () => ({
       agents,
       models,
-      loading: results.some(({ result }) => result._tag === "Initial"),
+      loading: results.some(
+        ({ environmentId, result }) =>
+          result._tag === "Initial" && !lastKnown.current.has(environmentId),
+      ),
+      reconnecting: results.some(
+        ({ environmentId, result }) =>
+          Option.isNone(AsyncResult.value(result)) && lastKnown.current.has(environmentId),
+      ),
       error: agents.length
         ? null
         : results.some(({ result }) => result._tag === "Failure")

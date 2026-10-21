@@ -1,8 +1,7 @@
-import { ChevronRightIcon, SlidersHorizontalIcon, ChevronLeftIcon } from "lucide-react";
+import { ChevronRightIcon, ChevronLeftIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { AgentFace, type AgentFaceProps } from "~/components/agents/face";
 import { Button } from "~/components/ui/button";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
 import { isElectron } from "~/env";
 
@@ -26,11 +25,12 @@ export function AgentIdentity({
   onBack?: (() => void) | undefined;
   /** Opens Details; without it the name pill is plain text. */
   onDetails?: (() => void) | undefined;
-  /** Extra header controls beside Details, at the top right. */
+  /** The header controls at the top right, such as the Details popover's icon. */
   trailing?: ReactNode;
 }) {
   return (
     <header className={cn("agent-identity", isElectron && "drag-region")}>
+      <span aria-hidden className="agent-identity-backdrop" />
       <div className="flex items-center [-webkit-app-region:no-drag]">
         {onBack ? (
           <Button size="icon-sm" variant="ghost-muted" aria-label="Back to agents" onClick={onBack}>
@@ -58,24 +58,6 @@ export function AgentIdentity({
       </div>
       <div className="flex items-center justify-end gap-1 [-webkit-app-region:no-drag]">
         {trailing}
-        {onDetails ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost-muted"
-                  size="icon-sm"
-                  aria-label="Agent details"
-                  className="shrink-0"
-                  onClick={onDetails}
-                />
-              }
-            >
-              <SlidersHorizontalIcon className="size-4.5" />
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">Agent details</TooltipPopup>
-          </Tooltip>
-        ) : null}
       </div>
     </header>
   );

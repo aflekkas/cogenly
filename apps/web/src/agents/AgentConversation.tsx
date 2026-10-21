@@ -3,7 +3,6 @@ import { ArrowUpRightIcon } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AgentFace } from "~/components/agents/face";
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
 import { useMessageMotion, type SendOrigin } from "./useMessageMotion";
 import { accentStyle, agentAccent } from "./agentAccent.logic";
@@ -30,7 +29,7 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { ApprovalDecision } from "./AgentOpenItems";
-import { AgentDetailsSheet } from "./AgentDetailsSheet";
+import { AgentDetailsMenu } from "./AgentDetailsMenu";
 import { AgentStartWork } from "./AgentStartWork";
 import {
   agentViewKey,
@@ -131,24 +130,20 @@ function AgentView({
         status={busy ? "Working…" : status}
         onBack={onBack}
         onDetails={() => setDetails("responsibility")}
-      />
-      <ChatPane agent={agent} workspace={workspace} focusMessage={focusMessage} />
-      <OverlayPresence when={details}>
-        {(section) => (
-          <AgentDetailsSheet
+        trailing={
+          <AgentDetailsMenu
             agent={agent}
             workspace={workspace}
-            section={section}
-            onClose={() => setDetails(null)}
+            open={details !== null}
+            section={details ?? "responsibility"}
+            onOpenChange={(open) => setDetails(open ? (details ?? "responsibility") : null)}
             onOpenChat={openChat}
-            onStartWork={() => {
-              setDetails(null);
-              setStartingWork(true);
-            }}
+            onStartWork={() => setStartingWork(true)}
             onDeleted={onDeleted}
           />
-        )}
-      </OverlayPresence>
+        }
+      />
+      <ChatPane agent={agent} workspace={workspace} focusMessage={focusMessage} />
       <OverlayPresence when={startingWork}>
         {() => (
           <AgentStartWork
@@ -216,7 +211,6 @@ function ChatPane({
       (switches.trailing && `${switches.trailing.instanceId}:${switches.trailing.model}`),
     { keep, sendOrigin },
   );
-  const face = avatarFaceProps(agent.avatar);
   // An open item's source message opens here; bring it into view once.
   useEffect(() => {
     if (!focusMessage) return;
@@ -354,11 +348,6 @@ function ChatPane({
                     <time dateTime={message.createdAt}>{separator}</time>
                   </div>
                 )}
-                {message.role === "assistant" && !grouped && (
-                  <span className="agent-message-face" aria-hidden>
-                    <AgentFace {...face} size={22} />
-                  </span>
-                )}
                 <div
                   className="agent-bubble"
                   data-owner={message.role === "user"}
@@ -440,11 +429,6 @@ function ChatPane({
               data-owner={false}
               data-grouped={agent.messages.at(-1)?.role === "assistant"}
             >
-              {agent.messages.at(-1)?.role !== "assistant" && (
-                <span className="agent-message-face" aria-hidden>
-                  <AgentFace {...face} state="thinking" size={22} />
-                </span>
-              )}
               <div className="agent-bubble" data-owner={false}>
                 <AgentTypingDots />
               </div>
