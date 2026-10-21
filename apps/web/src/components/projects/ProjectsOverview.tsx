@@ -27,6 +27,7 @@ import { SidebarInset } from "../ui/sidebar";
 import { WORKSPACE_PAGE_HEADER_INSET_CLASS, WorkspacePageHeader } from "../WorkspacePageHeader";
 import type { EnvironmentProjectLabel } from "../../projectLabels/projectLabels.logic";
 import { ProjectFolderList } from "./ProjectFolderList";
+import { ProjectSourceLinksDialog } from "../../projectLabels/ProjectSourceLinks";
 
 export interface ProjectsOverviewSearch {
   readonly create?: true | undefined;
@@ -78,6 +79,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
   );
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState<EnvironmentProjectLabel | null>(null);
+  const [linking, setLinking] = useState<EnvironmentProjectLabel | null>(null);
   const openedCreate = useRef(false);
   useEffect(() => {
     if (!props.create || openedCreate.current || !canCreate || createEnvironmentId === null) return;
@@ -158,6 +160,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                   })
                 }
                 onRename={setRenaming}
+                onLinkSources={setLinking}
               />
             </div>
           )}
@@ -169,6 +172,15 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
             environmentId={entry.environmentId}
             label={entry.label}
             onClose={() => setRenaming(null)}
+          />
+        )}
+      </OverlayPresence>
+      <OverlayPresence when={linking}>
+        {(entry) => (
+          <ProjectSourceLinksDialog
+            environmentId={entry.environmentId}
+            label={entry.label}
+            onClose={() => setLinking(null)}
           />
         )}
       </OverlayPresence>

@@ -26,6 +26,7 @@ import {
 } from "../../projectLabels/ProjectLabelEditorDialog";
 import { projectLabelKey } from "../../projectLabels/projectLabels.logic";
 import { ProjectRepositoryPicker } from "../../projectLabels/ProjectRepositoryPicker";
+import { ProjectSourceLinks } from "../../projectLabels/ProjectSourceLinks";
 import { ProjectColorDot } from "../../projectLabels/ProjectTag";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
@@ -36,6 +37,7 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { GitHubIcon } from "../Icons";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
@@ -340,6 +342,16 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
                 )}
               </SettingsSection>
             ) : null}
+            <SettingsSection title="Sources" icon={<GitHubIcon className="size-3.5" />}>
+              <SettingsRow
+                title="GitHub"
+                description="Orgs, users and repositories this project draws code from."
+              >
+                <div className="pt-2 pb-2">
+                  <ProjectSourceLinks environmentId={environmentId} label={label} />
+                </div>
+              </SettingsRow>
+            </SettingsSection>
             {!isEmpty ? (
               <SettingsSection title="Chats" icon={<MessageCircleIcon className="size-3.5" />}>
                 {chats.length > 0 ? (

@@ -24,7 +24,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
 import { gridNeighbor } from "./projectGrid.logic";
 
-type FolderMenuId = "open" | "rename" | "recolor" | `color:${string}` | "delete";
+type FolderMenuId = "open" | "rename" | "recolor" | `color:${string}` | "link-github" | "delete";
 
 const MAX_BADGES = 4;
 
@@ -36,6 +36,7 @@ function FolderRow(props: {
   readonly tabIndex: number;
   readonly onOpen: () => void;
   readonly onRename: () => void;
+  readonly onLinkSources: () => void;
   readonly onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => void;
   readonly onFocus: () => void;
 }) {
@@ -73,6 +74,7 @@ function FolderRow(props: {
           checked: (label.color ?? "gray") === color.value,
         })),
       },
+      { id: "link-github", label: "Link GitHub…", icon: "link", disabled: !canUpdate },
       {
         id: "delete",
         label: "Delete…",
@@ -89,6 +91,7 @@ function FolderRow(props: {
     const id = clicked.value;
     if (id === "open") props.onOpen();
     else if (id === "rename") props.onRename();
+    else if (id === "link-github") props.onLinkSources();
     else if (id === "delete") await deleteFolder(environmentId, label);
     else if (id.startsWith("color:")) {
       const result = await updateLabel({
@@ -185,7 +188,7 @@ function FolderRow(props: {
  * Folders as compact rows: color, name, what each holds, its repositories,
  * and its latest activity. Arrow keys move between rows, Enter opens one, and
  * the context-menu key (or Shift+F10) opens its menu: Open, Rename, Color,
- * Delete.
+ * Link GitHub, Delete.
  */
 export function ProjectFolderList(props: {
   readonly folders: ReadonlyArray<EnvironmentProjectLabel>;
@@ -193,6 +196,7 @@ export function ProjectFolderList(props: {
   readonly activityLabel: (entry: EnvironmentProjectLabel) => string | null;
   readonly onOpen: (entry: EnvironmentProjectLabel) => void;
   readonly onRename: (entry: EnvironmentProjectLabel) => void;
+  readonly onLinkSources: (entry: EnvironmentProjectLabel) => void;
 }) {
   const projects = useProjects();
   const count = props.folders.length;
@@ -230,6 +234,7 @@ export function ProjectFolderList(props: {
           onFocus={() => setActiveIndex(index)}
           onOpen={() => props.onOpen(entry)}
           onRename={() => props.onRename(entry)}
+          onLinkSources={() => props.onLinkSources(entry)}
           onKeyDown={(event) => moveFocus(index, event)}
         />
       ))}
