@@ -18,6 +18,7 @@ import {
   getCloneDestinationPath,
   getCloneDirectoryName,
   getDefaultCloneUrl,
+  getNewProjectPathPreview,
   getNewProjectPublishTarget,
   getNewProjectPublishTargets,
   normalizePastedCloneUrl,
@@ -290,5 +291,32 @@ describe("new project publish targets", () => {
     expect(
       getNewProjectPublishTarget(targets, SourceControlProviderKind.make("github"))?.owner,
     ).toBe("me");
+  });
+});
+
+describe("getNewProjectPathPreview", () => {
+  it("keeps unfiled repositories in the unfiled folder", () => {
+    expect(getNewProjectPathPreview("/home/me/Cogenly/Repositories", "Pinball Stats")).toBe(
+      "/home/me/Cogenly/Repositories/pinball-stats",
+    );
+    expect(getNewProjectPathPreview("/home/me/Cogenly/Repositories", "Pinball", null)).toBe(
+      "/home/me/Cogenly/Repositories/pinball",
+    );
+  });
+
+  it("files a project repository under the project folder", () => {
+    expect(
+      getNewProjectPathPreview("/home/me/Cogenly/Repositories", "Pinball Stats", "Spawn Partners"),
+    ).toBe("/home/me/Cogenly/Spawn Partners/pinball-stats");
+  });
+
+  it("sanitizes the project name like the server and keeps Windows separators", () => {
+    expect(getNewProjectPathPreview("C:\\Cogenly\\Repositories\\", "App", "a/b: c.")).toBe(
+      "C:\\Cogenly\\a-b- c\\app",
+    );
+  });
+
+  it("falls back to the given root when it is not the unfiled folder", () => {
+    expect(getNewProjectPathPreview("/data/projects", "App", "Spawn")).toBe("/data/projects/app");
   });
 });

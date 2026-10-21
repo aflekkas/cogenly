@@ -9,7 +9,11 @@ import type {
   SourceControlRepositoryInfo,
 } from "@t3tools/contracts";
 import { SourceControlProviderKind } from "@t3tools/contracts";
-import { newProjectFolderName } from "@t3tools/shared/path";
+import {
+  UNFILED_REPOSITORIES_SEGMENT,
+  newProjectFolderName,
+  sanitizePathSegment,
+} from "@t3tools/shared/path";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
@@ -221,9 +225,31 @@ export function getCloneDestinationPath(
 /**
  * Where `projects.createNew` will put a project named `name`. The server adds
  * `-2`, `-3`, ... when that folder is taken, so this is a preview.
+ *
+ * `newProjectsRoot` is the unfiled folder (`<root>/Repositories`). With a
+ * `projectName` the repository goes in `<root>/<Project Name>/<slug>` instead,
+ * mirroring the server's `resolveRepositoryDirectory`.
  */
-export function getNewProjectPathPreview(newProjectsRoot: string, name: string): string {
-  return getCloneDestinationPath(newProjectsRoot, newProjectFolderName(name));
+export function getNewProjectPathPreview(
+  newProjectsRoot: string,
+  name: string,
+  projectName?: string | null,
+): string {
+  const folderName = newProjectFolderName(name);
+  if (projectName == null) {
+    return getCloneDestinationPath(newProjectsRoot, folderName);
+  }
+  const trimmedRoot = newProjectsRoot.replace(/[\\/]+$/, "");
+  const unfiledMatch = new RegExp(`^(.*)([\\\\/])${UNFILED_REPOSITORIES_SEGMENT}$`).exec(
+    trimmedRoot,
+  );
+  // Without the unfiled suffix the root is not one we can reason about.
+  if (unfiledMatch === null) {
+    return getCloneDestinationPath(newProjectsRoot, folderName);
+  }
+  const projectsRoot = unfiledMatch[1] ?? "";
+  const separator = unfiledMatch[2] ?? "/";
+  return [projectsRoot, sanitizePathSegment(projectName, "project"), folderName].join(separator);
 }
 
 /** A host a new project can be published to, and who the repository goes under there. */

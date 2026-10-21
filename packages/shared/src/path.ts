@@ -75,6 +75,29 @@ export function newProjectFolderName(name: string): string {
   return WINDOWS_RESERVED_NAME.test(slug) ? `${slug}-project` : slug;
 }
 
+/** Folder for repositories no project holds: `<root>/Repositories/<repo>`. */
+export const UNFILED_REPOSITORIES_SEGMENT = "Repositories";
+
+const MAX_PATH_SEGMENT_LENGTH = 128;
+
+/**
+ * One safe path segment from a display name. Spaces and case survive, so
+ * `<root>/<Project Name>/<repo>` stays readable; separators, control
+ * characters and Windows-forbidden punctuation become dashes, trailing dots
+ * and spaces go (Windows refuses them), and the result is capped. Falls back
+ * when nothing remains.
+ */
+export function sanitizePathSegment(name: string, fallback: string): string {
+  const segment = name
+    // eslint-disable-next-line no-control-regex -- removing control characters is the point.
+    .replace(/[<>:"|?*\0-\x1F\x7F\\/]+/g, "-")
+    .trim()
+    .replace(/[. ]+$/, "")
+    .slice(0, MAX_PATH_SEGMENT_LENGTH)
+    .replace(/[. ]+$/, "");
+  return segment.length > 0 ? segment : fallback;
+}
+
 const SLASH_PREFIXED_WINDOWS_DRIVE_PATTERN = /^\/[A-Za-z]:[\\/]/;
 
 /** Browser URL parsers write `C:/foo` as `/C:/foo` for file URLs. */

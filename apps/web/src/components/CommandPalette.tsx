@@ -82,7 +82,10 @@ import { requestThreadFindOpen } from "./chat/threadFindActionBus";
 import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
 import { priorFiling, threadFolderState } from "../projectLabels/projectLabels.logic";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
-import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
+import {
+  useEnvironmentProjectLabels,
+  useProjectLabelDirectory,
+} from "../projectLabels/useProjectLabels";
 import { requestAgentCreation } from "../agents/AgentsCreateHost";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { useStartWork, WorkPickerChoiceIcon } from "./work/StartWork";
@@ -3043,8 +3046,28 @@ function OpenCommandPaletteDialog(props: {
   }, [addProjectCloneFlow]);
 
   const newProjectsRoot = newProjectFlow ? newProjectsRootFor(newProjectFlow.environmentId) : null;
+  // The project the flow was opened from, when it is on the machine being created on.
+  const newProjectParentLabelId =
+    addProjectInto !== null && addProjectInto.environmentId === newProjectFlow?.environmentId
+      ? addProjectInto.labelId
+      : null;
+  const newProjectParentLabels = useEnvironmentProjectLabels(
+    newProjectParentLabelId === null ? null : (newProjectFlow?.environmentId ?? null),
+  );
+  const newProjectParentName =
+    newProjectParentLabels.labels.find((label) => label.id === newProjectParentLabelId)?.name ??
+    null;
+  const newProjectFolderPreview =
+    newProjectsRoot === null || newProjectParentName === null
+      ? newProjectsRoot
+      : getNewProjectPathPreview(newProjectsRoot, "x", newProjectParentName).replace(
+          /[\\/][^\\/]+$/,
+          "",
+        );
   const newProjectPathPreview =
-    newProjectsRoot === null ? null : getNewProjectPathPreview(newProjectsRoot, newProjectName);
+    newProjectsRoot === null
+      ? null
+      : getNewProjectPathPreview(newProjectsRoot, newProjectName, newProjectParentName);
   const newProjectPublishToggleValue = "new-project:publish";
   // The name step's way out to folders and clones, for the selected machine.
   // It replaces the name step (and a sources view for another machine under
@@ -3796,7 +3819,7 @@ function OpenCommandPaletteDialog(props: {
               <span className="truncate text-muted-foreground/85 text-xs">
                 {newProjectName.length > 0
                   ? `Creates ${newProjectPathPreview}`
-                  : `Goes in ${newProjectsRoot}`}
+                  : `Goes in ${newProjectFolderPreview}`}
                 {newProjectEnvironmentLabel === null ? null : ` on ${newProjectEnvironmentLabel}`}
               </span>
             </span>
