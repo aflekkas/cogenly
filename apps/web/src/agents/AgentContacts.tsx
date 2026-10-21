@@ -27,6 +27,7 @@ import {
 import { Button } from "~/components/ui/button";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { PopoverTrigger } from "~/components/ui/popover";
+import { showCopiedToast, showCopyFailedToast } from "~/components/ui/copiedToast";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -179,10 +180,8 @@ function AgentCard({
     [configs, agent.environmentId, agent.modelSelection.instanceId],
   );
   const { copyToClipboard } = useCopyToClipboard<{ link: string }>({
-    onCopy: ({ link }) =>
-      toastManager.add({ type: "success", title: "Agent link copied", description: link }),
-    onError: (cause) =>
-      toastManager.add({ type: "error", title: "Could not copy", description: cause.message }),
+    onCopy: ({ link }) => showCopiedToast({ kind: "thread-link", link, threadTitle: agent.name }),
+    onError: (cause) => showCopyFailedToast(cause),
   });
   const fail = (cause: unknown, fallback: string) =>
     toastManager.add({
