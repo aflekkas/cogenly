@@ -4,7 +4,6 @@ import {
   type AuthEnvironmentScope,
   type AuthSessionState,
   type EnvironmentId,
-  sessionGrantsScope,
 } from "@t3tools/contracts";
 import { useMemo } from "react";
 import * as Option from "effect/Option";
@@ -12,30 +11,39 @@ import { AsyncResult, Atom } from "effect/reactivity";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { resolveScopeAccess, type ScopeAccess, sessionHasScope } from "./scopeAccess";
 
 export const environmentSession = createEnvironmentSessionAtoms(connectionAtomRuntime);
 
 const EMPTY_SESSION_STATE_ATOM = Atom.make(AsyncResult.initial<AuthSessionState>());
 
-/** Uses the selected environment's grant, including cached scopes during a refresh. */
+/**
+ * Uses the selected environment's grant, including cached scopes during a
+ * refresh. False until the grant is known: an action gate. A gate that renders
+ * a message instead uses {@link useEnvironmentScopeAccess}.
+ */
 export function useEnvironmentScope(
   environmentId: EnvironmentId | null,
   scope: AuthEnvironmentScope,
 ): boolean {
+  return useEnvironmentScopeAccess(environmentId, scope) === "granted";
+}
+
+/**
+ * The selected environment's grant with "not known yet" kept apart from
+ * "denied", for gates that tell the user which one it is. No environment is
+ * `unreachable`.
+ */
+export function useEnvironmentScopeAccess(
+  environmentId: EnvironmentId | null,
+  scope: AuthEnvironmentScope,
+): ScopeAccess {
   const result = useAtomValue(
     environmentId === null
       ? EMPTY_SESSION_STATE_ATOM
       : environmentSession.sessionStateAtom(environmentId),
   );
-  return sessionHasScope(result, scope);
-}
-
-function sessionHasScope(
-  result: AsyncResult.AsyncResult<AuthSessionState, unknown>,
-  scope: AuthEnvironmentScope,
-): boolean {
-  const session = Option.getOrNull(AsyncResult.value(result));
-  return result._tag !== "Failure" && session !== null && sessionGrantsScope(session, scope);
+  return environmentId === null ? "unreachable" : resolveScopeAccess(result, scope);
 }
 
 /** Subscribe to the grants of every selected environment. */

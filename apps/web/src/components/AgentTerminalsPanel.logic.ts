@@ -3,6 +3,8 @@ import type { TerminalSessionStatus, TerminalSummary } from "@t3tools/contracts"
 import { commandDisplayText } from "@t3tools/client-runtime/work-log/command-label";
 import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 
+import type { ScopeAccess } from "../state/scopeAccess";
+
 const AGENT_LABEL_PREFIX = "agent · ";
 
 export function isAgentTerminalId(terminalId: string): boolean {
@@ -330,4 +332,34 @@ export function runDurationMs(
   if (isAgentTerminalRunning(entry) || entry.startedAt === null) return null;
   const elapsed = Date.parse(entry.updatedAt) - Date.parse(entry.startedAt);
   return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null;
+}
+
+/**
+ * What the Terminal panel shows before (or instead of) the run list. A draft
+ * has no server thread, so no agent can have run anything yet; a grant that is
+ * not known yet is a connecting state, never a denial.
+ */
+export type AgentTerminalsPanelState =
+  | "not-started"
+  | "connecting"
+  | "unreachable"
+  | "denied"
+  | "runs";
+
+export function agentTerminalsPanelState(input: {
+  readonly threadStarted: boolean;
+  readonly readAccess: ScopeAccess;
+  readonly sessionsLoaded: boolean;
+}): AgentTerminalsPanelState {
+  if (!input.threadStarted) return "not-started";
+  switch (input.readAccess) {
+    case "pending":
+      return "connecting";
+    case "unreachable":
+      return "unreachable";
+    case "denied":
+      return "denied";
+    case "granted":
+      return input.sessionsLoaded ? "runs" : "connecting";
+  }
 }

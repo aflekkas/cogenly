@@ -7,12 +7,17 @@ import { TerminalSquare } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { type TerminalContextSelection } from "~/lib/terminalContext";
-import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
+import {
+  readEnvironmentScope,
+  useEnvironmentScope,
+  useEnvironmentScopeAccess,
+} from "../state/session";
 import { terminalEnvironment } from "../state/terminal";
 import { useKnownTerminalSessions } from "../state/terminalSessions";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
   agentTerminalEntries,
+  agentTerminalsPanelState,
   resolveSelected,
   terminalSections,
   type AgentTerminalEntry,
@@ -34,6 +39,8 @@ function PanelMessage({ title, detail }: { title: string; detail?: string }) {
 
 export interface AgentTerminalsPanelProps {
   readonly threadRef: ScopedThreadRef;
+  /** False on a draft: no server thread exists yet, so nothing has run. */
+  readonly threadStarted: boolean;
   readonly visible: boolean;
   /** Bumped when the user asks for the terminal, so keyboard focus may move into it. */
   readonly focusRequestId: number;
@@ -51,6 +58,7 @@ export interface AgentTerminalsPanelProps {
  */
 export function AgentTerminalsPanel({
   threadRef,
+  threadStarted,
   visible,
   focusRequestId,
   activeTerminalId,
@@ -59,8 +67,11 @@ export function AgentTerminalsPanel({
 }: AgentTerminalsPanelProps) {
   const environmentId = threadRef.environmentId;
   const canOperate = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
-  const canRead = useEnvironmentScope(environmentId, AuthTerminalReadScope);
-  const sessions = useKnownTerminalSessions({ environmentId, threadId: threadRef.threadId });
+  const readAccess = useEnvironmentScopeAccess(environmentId, AuthTerminalReadScope);
+  const sessions = useKnownTerminalSessions({
+    environmentId: threadStarted ? environmentId : null,
+    threadId: threadRef.threadId,
+  });
   const entries = useMemo(() => agentTerminalEntries(sessions ?? []), [sessions]);
   const { runs, liveRunCount } = useMemo(() => terminalSections(entries), [entries]);
   const killTerminal = useAtomCommand(terminalEnvironment.kill, "terminal kill");
@@ -98,17 +109,37 @@ export function AgentTerminalsPanel({
     });
   };
 
-  if (!canRead) {
-    return (
-      <PanelMessage
-        title="Terminals unavailable"
-        detail="This connection is not allowed to view terminals in this environment."
-      />
-    );
-  }
-
-  if (sessions === null) {
-    return <PanelMessage title="Connecting to terminals…" />;
+  const panelState = agentTerminalsPanelState({
+    threadStarted,
+    readAccess,
+    sessionsLoaded: sessions !== null,
+  });
+  switch (panelState) {
+    case "not-started":
+      return (
+        <PanelMessage
+          title="No agent runs yet"
+          detail="Commands the agent runs show up here once the thread starts."
+        />
+      );
+    case "connecting":
+      return <PanelMessage title="Connecting to terminals…" />;
+    case "unreachable":
+      return (
+        <PanelMessage
+          title="Terminals unavailable"
+          detail="Couldn’t reach this environment to check terminal access."
+        />
+      );
+    case "denied":
+      return (
+        <PanelMessage
+          title="Terminals unavailable"
+          detail="This connection is not allowed to view terminals in this environment."
+        />
+      );
+    case "runs":
+      break;
   }
 
   return (

@@ -9064,6 +9064,7 @@ export default function ChatView(props: ChatViewProps) {
         key={activeThreadKey}
         visible={rightPanelOpen}
         threadRef={activeThreadRef}
+        threadStarted={isServerThread}
         activeTerminalId={renderedRightPanelSurface.activeTerminalId}
         focusRequestId={terminalFocusRequestId}
         onSelectTerminal={selectPanelTerminalStable}

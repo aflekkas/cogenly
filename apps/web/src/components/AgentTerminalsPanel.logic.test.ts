@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   adjacentTerminalId,
   agentTerminalEntries,
+  agentTerminalsPanelState,
   commandTitle,
   detectLocalServerUrl,
   formatRunDuration,
@@ -273,5 +274,56 @@ describe("run durations", () => {
     expect(runDurationMs({ ...base, status: "exited" })).toBe(4_500);
     expect(runDurationMs({ ...base, status: "running" })).toBeNull();
     expect(runDurationMs({ ...base, startedAt: null, status: "exited" })).toBeNull();
+  });
+});
+
+describe("agentTerminalsPanelState", () => {
+  it("shows a draft as not started, whatever the grant", () => {
+    for (const readAccess of ["granted", "denied", "pending", "unreachable"] as const) {
+      expect(
+        agentTerminalsPanelState({ threadStarted: false, readAccess, sessionsLoaded: false }),
+      ).toBe("not-started");
+    }
+  });
+
+  it("connects while the grant or the runs are still loading", () => {
+    expect(
+      agentTerminalsPanelState({
+        threadStarted: true,
+        readAccess: "pending",
+        sessionsLoaded: false,
+      }),
+    ).toBe("connecting");
+    expect(
+      agentTerminalsPanelState({
+        threadStarted: true,
+        readAccess: "granted",
+        sessionsLoaded: false,
+      }),
+    ).toBe("connecting");
+  });
+
+  it("reports a denial only when the grant says so", () => {
+    expect(
+      agentTerminalsPanelState({
+        threadStarted: true,
+        readAccess: "denied",
+        sessionsLoaded: false,
+      }),
+    ).toBe("denied");
+    expect(
+      agentTerminalsPanelState({
+        threadStarted: true,
+        readAccess: "unreachable",
+        sessionsLoaded: false,
+      }),
+    ).toBe("unreachable");
+    expect(
+      agentTerminalsPanelState({
+        threadStarted: true,
+        readAccess: "granted",
+        sessionsLoaded: true,
+      }),
+    ).toBe("runs");
   });
 });
