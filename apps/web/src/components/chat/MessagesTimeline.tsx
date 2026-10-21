@@ -13,6 +13,11 @@ import {
   WorkLogChevron,
   WorkLogExpansion,
 } from "./WorkLog";
+import {
+  isViewportAtRestoreTarget,
+  waitForRestoreTarget,
+  type TimelineRestoreTarget,
+} from "./timelineRestoreWait";
 import { PullRequestGlyph } from "../changeRequestIcons";
 import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
@@ -470,6 +475,8 @@ const FIRST_LAYOUT_HOLD_MAX_MS = 150;
 /** The longest an opened thread stays hidden, positioned or not. */
 const FIRST_LAYOUT_HOLD_LIMIT_MS = 600;
 const FIRST_LAYOUT_HOLD_STYLE = { opacity: 0 } as const;
+/** The most frames an opened thread prompts the list to finish its scroll. */
+const SCROLL_SETTLE_PROMPT_FRAMES = 30;
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -1077,14 +1084,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
             })
           : list.scrollToOffset({ offset: position.scrollOffset, animated: false })
         : list.scrollToEnd({ animated: false });
-    void Promise.resolve(scrolling).then(() => {
-      if (cancelled) return;
-      if (position?.atEnd !== false || index < 0) {
-        setPositionedThreadKey(listIdentityKey);
-        return;
-      }
-      // Index scrolling starts from estimates. Keep the saved row mounted
-      // until its measured position and the DOM agree for two layout frames.
+    // Index scrolling starts from estimates. Keep the saved row mounted
+    // until its measured position and the DOM agree for two layout frames.
+    const reconcileSavedRow = (position: NonNullable<typeof rememberedPosition>) => {
       let stableFrames = 0;
       const reconcile = () => {
         if (cancelled) return;
@@ -1117,9 +1119,53 @@ const ConversationTimeline = memo(function ConversationTimeline({
         }
       };
       settleFrame = requestAnimationFrame(reconcile);
+    };
+    let promptFrame = 0;
+    const restoreTarget: TimelineRestoreTarget | null =
+      position?.atEnd !== false
+        ? { kind: "end" }
+        : index < 0
+          ? { kind: "offset", offset: position.scrollOffset }
+          : null;
+    // A saved row reconciles once the list has finished its index scroll.
+    const cancelRestoreWait = waitForRestoreTarget({
+      scrolling,
+      isAtTarget: () =>
+        restoreTarget !== null &&
+        viewport !== null &&
+        isViewportAtRestoreTarget(viewport, restoreTarget),
+      onReached: (via) => {
+        if (cancelled) return;
+        if (restoreTarget === null && position) {
+          reconcileSavedRow(position);
+          return;
+        }
+        if (via === "list" || !viewport) {
+          setPositionedThreadKey(listIdentityKey);
+          return;
+        }
+        // The viewport is in place but the list is still settling the scroll.
+        // Retarget it to where the viewport is and send the scroll event the
+        // browser skipped, so the list finishes (and re-lays its rows) now,
+        // still under the hold, instead of on its timer after the reveal.
+        const settled = list.scrollToOffset({ offset: viewport.scrollTop, animated: false });
+        let prompts = 0;
+        const prompt = () => {
+          if (cancelled || ++prompts > SCROLL_SETTLE_PROMPT_FRAMES) return;
+          viewport.dispatchEvent(new Event("scroll"));
+          promptFrame = requestAnimationFrame(prompt);
+        };
+        promptFrame = requestAnimationFrame(prompt);
+        void settled.then(() => {
+          cancelAnimationFrame(promptFrame);
+          if (!cancelled) setPositionedThreadKey(listIdentityKey);
+        });
+      },
     });
     return () => {
       cancelled = true;
+      cancelRestoreWait();
+      cancelAnimationFrame(promptFrame);
       if (cancelPositionRestoreRef?.current === cancelRestoration) {
         cancelPositionRestoreRef.current = null;
       }
