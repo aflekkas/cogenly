@@ -78,9 +78,31 @@ export function isModelSelectionProviderEnabled(
   return isUnconfiguredDefaultInstanceEnabled(selection.instanceId);
 }
 
+/**
+ * One entry of the text-generation fallback chain: the driver kind in
+ * preference order plus the cheap model to run on it. Callers with registry
+ * access derive this from their startup registry
+ * (`textGenerationFallbackDriverKinds`); the default below covers callers
+ * without it and matches the registry for the built-in drivers.
+ */
+export interface TextGenerationFallbackDriver {
+  readonly driver: ProviderDriverKind;
+  readonly textGenerationModel: string;
+}
+
 const TEXT_GENERATION_FALLBACK_DRIVERS = ["codex", "claudeAgent", "muse"].map((driver) =>
   ProviderDriverKind.make(driver),
 );
+
+function defaultFallbackDrivers(): ReadonlyArray<TextGenerationFallbackDriver> {
+  return TEXT_GENERATION_FALLBACK_DRIVERS.map((driver) => ({
+    driver,
+    textGenerationModel:
+      DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[driver] ??
+      DEFAULT_MODEL_BY_PROVIDER[driver] ??
+      DEFAULT_TEXT_GENERATION_MODEL,
+  }));
+}
 
 /**
  * The text generation model on the first instance `isEnabled` accepts: the
@@ -105,15 +127,16 @@ export function fallbackTextGenerationModelSelection(
   options?: {
     readonly includeConfiguredInstances?: boolean;
     readonly defaultModelSelection?: ModelSelection | null;
+    readonly fallbackDrivers?: ReadonlyArray<TextGenerationFallbackDriver>;
   },
 ): ModelSelection | null {
+  const fallbackDrivers = options?.fallbackDrivers ?? defaultFallbackDrivers();
+  const fallbackKinds = fallbackDrivers.map((entry) => entry.driver);
   const candidates = [
-    ...TEXT_GENERATION_FALLBACK_DRIVERS.map(
-      (driver) => [defaultInstanceIdForDriver(driver), driver] as const,
-    ),
+    ...fallbackKinds.map((driver) => [defaultInstanceIdForDriver(driver), driver] as const),
     ...(options?.includeConfiguredInstances === true
       ? Object.entries(providerInstances).flatMap(([instanceId, instance]) =>
-          TEXT_GENERATION_FALLBACK_DRIVERS.includes(instance.driver)
+          fallbackKinds.includes(instance.driver)
             ? [[ProviderInstanceId.make(instanceId), instance.driver] as const]
             : [],
         )
@@ -133,8 +156,7 @@ export function fallbackTextGenerationModelSelection(
   return {
     instanceId,
     model:
-      DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[driver] ??
-      DEFAULT_MODEL_BY_PROVIDER[driver] ??
+      fallbackDrivers.find((entry) => entry.driver === driver)?.textGenerationModel ??
       DEFAULT_TEXT_GENERATION_MODEL,
   };
 }

@@ -6,8 +6,10 @@ import {
   type ServerProviderCompatibilityAdvisory,
 } from "@t3tools/contracts";
 import { satisfiesSemverRange } from "@t3tools/shared/semver";
+import { normalizeDriverVersion } from "@t3tools/provider-core/server/driver";
 import * as Schema from "effect/Schema";
 import packageJson from "../../package.json" with { type: "json" };
+import { BUILT_IN_DRIVERS } from "./builtInDrivers.ts";
 
 // Deliberately uses the shared CLI gate syntax: comparator groups joined by ||.
 // Prereleases and unrecognized release tags remain unknown.
@@ -67,8 +69,10 @@ export function resolveProviderCompatibility(
   );
   if (!policy) return undefined;
   const unprefixed = version?.replace(/^v/, "");
-  // Muse prints a release revision after its semantic version.
-  const stable = driver === "muse" ? unprefixed?.replace(/-R\d+(?:\.\d+)?$/, "") : unprefixed;
+  const stable =
+    unprefixed === undefined
+      ? undefined
+      : normalizeDriverVersion(BUILT_IN_DRIVERS, driver, unprefixed);
   const status =
     stable && /^\d+\.\d+\.\d+$/.test(stable)
       ? (policy.ranges.find((entry) => satisfiesSemverRange(stable, entry.range))?.status ??

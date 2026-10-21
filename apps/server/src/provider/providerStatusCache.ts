@@ -11,6 +11,8 @@ import * as Schema from "effect/Schema";
 
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 
+import { BUILT_IN_DRIVERS } from "./builtInDrivers.ts";
+
 const decodeProviderStatusCache = Schema.decodeUnknownEffect(
   Schema.fromJsonString(ServerProviderSchema),
 );
@@ -30,9 +32,12 @@ const mergeProviderModels = (
 };
 
 /**
- * Built-in drivers in presentation order. Codex and Claude lead; historical drivers sort after both.
+ * Built-in drivers in presentation order, from the startup registry.
+ * Historical drivers sort after every registered driver.
  */
-const BUILT_IN_DRIVER_ORDER: ReadonlyArray<string> = ["codex", "claudeAgent", "muse"];
+const BUILT_IN_DRIVER_ORDER: ReadonlyArray<string> = BUILT_IN_DRIVERS.map(
+  (driver) => driver.driverKind,
+);
 
 const driverRank = (driver: string): number => {
   const index = BUILT_IN_DRIVER_ORDER.indexOf(driver);

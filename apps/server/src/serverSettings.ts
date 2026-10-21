@@ -12,6 +12,7 @@
  */
 import {
   DEFAULT_SERVER_SETTINGS,
+  DEFAULT_TEXT_GENERATION_MODEL,
   ModelSelection,
   ProjectId,
   ProjectScript,
@@ -60,6 +61,13 @@ import {
   isModelSelectionProviderEnabled,
 } from "@t3tools/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import { BUILT_IN_DRIVERS } from "./provider/builtInDrivers.ts";
+import {
+  defaultModelForDriver,
+  defaultTextGenerationModelForDriver,
+  isRegisteredDriverKind,
+  textGenerationFallbackDriverKinds,
+} from "@t3tools/provider-core/server/driver";
 import {
   readSecretFieldValues,
   sourceControlHostSecretName,
@@ -448,8 +456,9 @@ function selectionSupportsTextGeneration(
   settings: ServerSettings,
   selection: ModelSelection,
 ): boolean {
+  // An unconfigured default instance id literally is its driver slug.
   const driver = settings.providerInstances[selection.instanceId]?.driver ?? selection.instanceId;
-  return driver === "codex" || driver === "claudeAgent" || driver === "muse";
+  return isRegisteredDriverKind(BUILT_IN_DRIVERS, driver as ProviderDriverKind);
 }
 
 function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {
@@ -467,7 +476,16 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
       resolveProviderInstanceEnabled(
         settings.providerInstances[instanceId] ?? { driver, config: {} },
       ),
-    { defaultModelSelection: settings.defaultModelSelection },
+    {
+      defaultModelSelection: settings.defaultModelSelection,
+      fallbackDrivers: textGenerationFallbackDriverKinds(BUILT_IN_DRIVERS).map((driver) => ({
+        driver,
+        textGenerationModel:
+          defaultTextGenerationModelForDriver(BUILT_IN_DRIVERS, driver) ??
+          defaultModelForDriver(BUILT_IN_DRIVERS, driver) ??
+          DEFAULT_TEXT_GENERATION_MODEL,
+      })),
+    },
   );
   return fallback === null ? settings : { ...settings, textGenerationModelSelection: fallback };
 }
