@@ -12,8 +12,10 @@ import {
   groupRepositoriesByProject,
   heroProjectKey,
   heroProjectSuffix,
+  isRepositoryGroupOpen,
   soleRepositoryOf,
   threadProjectMeta,
+  toggleCollapsedGroup,
 } from "./projectMeta.logic";
 
 const env = "env" as EnvironmentId;
@@ -171,5 +173,26 @@ describe("heroProjectKey", () => {
         projects,
       }),
     ).toBeNull();
+  });
+});
+
+describe("repository picker groups", () => {
+  const open = (collapsedKeys: string[], searching = false, hasMatches = true) =>
+    isRepositoryGroupOpen({ groupKey: "env:spawn", collapsedKeys, searching, hasMatches });
+
+  it("starts open and remembers a collapse", () => {
+    expect(open([])).toBe(true);
+    expect(open(["env:spawn"])).toBe(false);
+    expect(open(["env:bartr"])).toBe(true);
+  });
+
+  it("opens a collapsed group while a search matches inside it", () => {
+    expect(open(["env:spawn"], true, true)).toBe(true);
+    expect(open([], true, false)).toBe(false);
+  });
+
+  it("toggles one group without touching the others", () => {
+    expect(toggleCollapsedGroup(["env:bartr"], "env:spawn")).toEqual(["env:bartr", "env:spawn"]);
+    expect(toggleCollapsedGroup(["env:bartr", "env:spawn"], "env:spawn")).toEqual(["env:bartr"]);
   });
 });

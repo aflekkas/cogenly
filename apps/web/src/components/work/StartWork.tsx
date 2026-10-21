@@ -11,7 +11,7 @@ import {
   WorkHandoffError,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderPlusIcon, MessageSquareDashedIcon } from "lucide-react";
+import { FolderGit2Icon, FolderPlusIcon, MessageSquareDashedIcon } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { type ReactElement, type ReactNode, useCallback, useMemo, useState } from "react";
 import { create } from "zustand";
@@ -31,7 +31,6 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { threadCapabilities } from "~/threadCapabilities";
 import { buildThreadRouteParams } from "~/threadRoutes";
 import { useUiStateStore } from "~/uiStateStore";
-import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
 import {
   Combobox,
   ComboboxEmpty,
@@ -295,7 +294,7 @@ export function StartWorkPicker(props: {
   );
 }
 
-/** A picker row's leading mark: the repository badge, or the no-repository and add icons. */
+/** A picker row's leading mark: the repository icon, or the no-repository and add icons. */
 export function WorkPickerChoiceIcon({
   choice,
   className,
@@ -307,5 +306,5 @@ export function WorkPickerChoiceIcon({
   if (choice.value === NO_REPOSITORY) {
     return <MessageSquareDashedIcon className={className ?? "size-4"} />;
   }
-  return <RepositoryBadge name={choice.label} />;
+  return <FolderGit2Icon className={className ?? "size-4"} />;
 }

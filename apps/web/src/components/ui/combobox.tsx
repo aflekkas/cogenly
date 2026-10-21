@@ -1,7 +1,7 @@
 "use client";
 
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
-import { ChevronsUpDownIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "~/lib/utils";
@@ -330,6 +330,73 @@ function ComboboxGroupLabel({ className, ...props }: ComboboxPrimitive.GroupLabe
 
 const ComboboxCollection = ComboboxPrimitive.Collection;
 
+/**
+ * A collapsible group's header: a full-width button that names the group and
+ * turns its chevron. A real button, so Tab reaches it from the search and
+ * Enter or Space toggles it. Pair with `ComboboxGroupCollapse`.
+ */
+function ComboboxGroupToggle({
+  open,
+  icon,
+  className,
+  children,
+  ...props
+}: Omit<React.ComponentProps<"button">, "type"> & {
+  open: boolean;
+  /** The group's leading mark, on the row-icon column. */
+  icon?: React.ReactNode;
+}) {
+  return (
+    <ComboboxPrimitive.GroupLabel
+      render={
+        <button
+          type="button"
+          aria-expanded={open}
+          className={cn(
+            "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-2 pt-1 pb-1 text-left font-medium text-muted-foreground text-xs outline-none state-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+            className,
+          )}
+          {...props}
+        />
+      }
+      data-slot="combobox-group-toggle"
+    >
+      {icon ? (
+        <span className="flex size-4 shrink-0 items-center justify-center">{icon}</span>
+      ) : null}
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      <ChevronRightIcon
+        aria-hidden
+        className={cn(
+          "size-3 shrink-0 opacity-70 transition-[rotate] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
+          open && "rotate-90",
+        )}
+      />
+    </ComboboxPrimitive.GroupLabel>
+  );
+}
+
+/**
+ * A group's rows, growing and fading open or shut while staying mounted, so
+ * the list keeps its items and the popup's height follows the motion. Shut
+ * rows go `invisible` once the motion ends, which takes them out of keyboard
+ * navigation, and `inert`. Reduced motion keeps the fade only.
+ */
+function ComboboxGroupCollapse({ open, children }: { open: boolean; children: React.ReactNode }) {
+  return (
+    <div
+      inert={!open}
+      className={cn(
+        "grid transition-[grid-template-rows,opacity,visibility] duration-(--motion-duration-base) ease-standard motion-reduce:transition-[opacity,visibility]",
+        open ? "visible grid-rows-[1fr] opacity-100" : "invisible grid-rows-[0fr] opacity-0",
+      )}
+      data-slot="combobox-group-collapse"
+    >
+      <div className="min-h-0 overflow-hidden">{children}</div>
+    </div>
+  );
+}
+
 const useComboboxFilter = ComboboxPrimitive.useFilter;
 
 export {
@@ -348,5 +415,7 @@ export {
   ComboboxGroup,
   ComboboxGroupLabel,
   ComboboxCollection,
+  ComboboxGroupToggle,
+  ComboboxGroupCollapse,
   useComboboxFilter,
 };

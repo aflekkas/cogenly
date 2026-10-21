@@ -155,3 +155,28 @@ export function heroProjectKey(input: {
   if (chosen && holdsRepository(chosen, input.repository)) return chosen.key;
   return input.projects.find((project) => holdsRepository(project, input.repository))?.key ?? null;
 }
+
+/**
+ * Whether a repository-picker group shows its repositories. Groups start
+ * open; one the user collapsed stays shut until a search matches inside it.
+ */
+export function isRepositoryGroupOpen(input: {
+  readonly groupKey: string;
+  readonly collapsedKeys: ReadonlyArray<string>;
+  /** True while the search has text; a matching group then opens on its own. */
+  readonly searching: boolean;
+  readonly hasMatches: boolean;
+}): boolean {
+  if (input.searching) return input.hasMatches;
+  return !input.collapsedKeys.includes(input.groupKey);
+}
+
+/** The collapsed groups after toggling `groupKey`. */
+export function toggleCollapsedGroup(
+  collapsedKeys: ReadonlyArray<string>,
+  groupKey: string,
+): string[] {
+  return collapsedKeys.includes(groupKey)
+    ? collapsedKeys.filter((key) => key !== groupKey)
+    : [...collapsedKeys, groupKey];
+}

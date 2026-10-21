@@ -8,9 +8,9 @@ import {
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import { FolderGit2Icon, FolderPlusIcon, ListIcon } from "lucide-react";
+import { FolderGit2Icon, FolderIcon, FolderPlusIcon, ListIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { shortcutLabelForCommand } from "~/keybindings";
@@ -31,7 +31,6 @@ import {
 import { useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
-import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
 import { HERO_INLINE_ICON_STYLE, HeroProjectPicker } from "~/projectLabels/HeroProjectPicker";
 import { usePendingProjectFolderStore } from "~/projectLabels/pendingProjectFolders";
 import {
@@ -43,10 +42,14 @@ import {
   groupRepositoriesByProject,
   heroProjectKey,
   heroProjectSuffix,
+  isRepositoryGroupOpen,
   OTHER_REPOSITORIES_GROUP_KEY,
   soleRepositoryOf,
+  toggleCollapsedGroup,
 } from "~/projectLabels/projectMeta.logic";
-import { ProjectColorDot } from "~/projectLabels/ProjectTag";
+import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
+import { useLocalStorage } from "~/hooks/useLocalStorage";
+import * as Schema from "effect/Schema";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { chatGreeting } from "./chatGreeting";
 import { FadeSwap } from "./StateTransition";
@@ -56,7 +59,8 @@ import {
   ComboboxCollection,
   ComboboxEmpty,
   ComboboxGroup,
-  ComboboxGroupLabel,
+  ComboboxGroupCollapse,
+  ComboboxGroupToggle,
   ComboboxItem,
   ComboboxItemIcon,
   ComboboxList,
@@ -74,6 +78,9 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 const ADD_PROJECT_VALUE = "add-project";
 const ALL_REPOSITORIES_VALUE = "all-repositories";
 const ACTIONS_GROUP_KEY = "actions";
+const COLLAPSED_GROUPS_STORAGE_KEY = "cogenly:repository-picker:collapsed-projects";
+const CollapsedGroupKeys = Schema.mutable(Schema.Array(Schema.String));
+const EMPTY_GROUP_KEYS: string[] = [];
 
 interface PickerItem {
   readonly value: string;
@@ -318,6 +325,12 @@ export function DraftHeroHeadline({
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const keepPickerOpenRef = useRef(false);
+  // Project groups the user collapsed, kept per device.
+  const [collapsedGroupKeys, setCollapsedGroupKeys] = useLocalStorage(
+    COLLAPSED_GROUPS_STORAGE_KEY,
+    EMPTY_GROUP_KEYS,
+    CollapsedGroupKeys,
+  );
   const [pickerQuery, setPickerQuery] = useState("");
   const pickerFilter = useComboboxFilter();
   // Search runs across every repository, whatever project the list was narrowed to.
@@ -439,7 +452,7 @@ export function DraftHeroHeadline({
           ) : item.value === ALL_REPOSITORIES_VALUE ? (
             <ListIcon className="size-4" />
           ) : entry ? (
-            <RepositoryBadge name={item.label} />
+            <FolderGit2Icon className="size-4" />
           ) : null}
         </ComboboxItemIcon>
         <Tooltip>
@@ -550,14 +563,24 @@ export function DraftHeroHeadline({
           {(group: PickerGroup) => (
             <ComboboxGroup key={group.value} items={group.items}>
               {group.label !== null ? (
-                <ComboboxGroupLabel>
-                  {group.isProject ? <ProjectColorDot color={group.color} /> : null}
-                  <span className="min-w-0 truncate">{group.label}</span>
-                </ComboboxGroupLabel>
-              ) : null}
-              <ComboboxCollection>
-                {(item: PickerItem) => renderPickerItem(item)}
-              </ComboboxCollection>
+                <RepositoryPickerGroupBody
+                  group={group}
+                  open={isRepositoryGroupOpen({
+                    groupKey: group.value,
+                    collapsedKeys: collapsedGroupKeys,
+                    searching: pickerQuery.trim().length > 0,
+                    hasMatches: group.items.length > 0,
+                  })}
+                  onToggle={() =>
+                    setCollapsedGroupKeys((keys) => toggleCollapsedGroup(keys, group.value))
+                  }
+                  renderItem={renderPickerItem}
+                />
+              ) : (
+                <ComboboxCollection>
+                  {(item: PickerItem) => renderPickerItem(item)}
+                </ComboboxCollection>
+              )}
             </ComboboxGroup>
           )}
         </ComboboxList>
@@ -714,5 +737,38 @@ export function DraftHeroHeadline({
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * A titled group of the repository picker: its project's folder in color (a
+ * plain folder for "Other repositories"), collapsible from the header.
+ */
+function RepositoryPickerGroupBody(props: {
+  readonly group: PickerGroup;
+  readonly open: boolean;
+  readonly onToggle: () => void;
+  readonly renderItem: (item: PickerItem) => ReactNode;
+}) {
+  const { group } = props;
+  return (
+    <>
+      <ComboboxGroupToggle
+        open={props.open}
+        onClick={props.onToggle}
+        icon={
+          group.isProject ? (
+            <ProjectFolderIcon color={group.color} className="size-3.5" />
+          ) : (
+            <FolderIcon aria-hidden className="size-3.5" />
+          )
+        }
+      >
+        {group.label}
+      </ComboboxGroupToggle>
+      <ComboboxGroupCollapse open={props.open}>
+        <ComboboxCollection>{(item: PickerItem) => props.renderItem(item)}</ComboboxCollection>
+      </ComboboxGroupCollapse>
+    </>
   );
 }
