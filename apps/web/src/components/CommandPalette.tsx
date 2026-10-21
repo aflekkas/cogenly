@@ -64,6 +64,7 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
+  GitBranchIcon,
   HammerIcon,
   MessageSquareDashedIcon,
   LinkIcon,
@@ -1928,6 +1929,31 @@ function OpenCommandPaletteDialog(props: {
             activeThread: activeThread ?? undefined,
             defaultProjectRef,
             handleNewThread,
+          });
+        },
+      });
+    }
+
+    // Carries the open thread's branch over: its worktree when it has one,
+    // otherwise the branch on the local checkout.
+    if (activeThread?.branch && (activeCapabilities?.git ?? false)) {
+      const { branch, environmentId, projectId, worktreePath } = activeThread;
+      actionItems.push({
+        kind: "action",
+        value: "action:new-thread-on-branch",
+        searchTerms: ["new thread", "branch", "worktree", "same branch", branch],
+        title: (
+          <>
+            New thread on <span className="font-semibold">{branch}</span>
+          </>
+        ),
+        icon: <GitBranchIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          await handleNewThread(scopeProjectRef(environmentId, projectId), {
+            branch,
+            worktreePath,
+            envMode: worktreePath ? "worktree" : "local",
+            startFromOrigin: false,
           });
         },
       });

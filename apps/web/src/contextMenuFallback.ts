@@ -1,5 +1,11 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 
+import {
+  MENU_VIEWPORT_MARGIN_PX,
+  SUBMENU_ALIGN_OFFSET_PX,
+  SUBMENU_SIDE_OFFSET_PX,
+} from "./components/ui/menu-metrics";
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 // Inline Lucide-style icon paths (stroke-based, viewBox 0 0 24 24, strokeWidth 2).
@@ -183,8 +189,8 @@ function createIconElement(name: string, tone: "neutral" | "destructive"): SVGSV
   svg.setAttribute(
     "class",
     tone === "destructive"
-      ? "size-4.5 shrink-0 sm:size-4"
-      : "size-4.5 shrink-0 text-muted-foreground sm:size-4",
+      ? "size-4.5 shrink-0 sm:size-3.5"
+      : "size-4.5 shrink-0 text-muted-foreground sm:size-3.5",
   );
   for (const node of paths) {
     const child = document.createElementNS(SVG_NS, node.tag);
@@ -247,18 +253,54 @@ function removeMenuAnimated(menu: HTMLElement) {
   );
 }
 
-function clampMenuPosition(menu: HTMLDivElement, preferredLeft: number, preferredTop: number) {
-  const rect = menu.getBoundingClientRect();
-  const left = Math.min(
-    Math.max(4, preferredLeft),
-    Math.max(4, window.innerWidth - rect.width - 4),
-  );
-  const top = Math.min(
-    Math.max(4, preferredTop),
-    Math.max(4, window.innerHeight - rect.height - 4),
-  );
+/**
+ * Where a menu opens, and where it goes instead when that would cross the
+ * viewport's right or bottom edge: a right-click menu opens left of or above
+ * the cursor, a submenu on the parent's other side or rising from its trigger.
+ */
+export interface MenuPlacement {
+  readonly left: number;
+  readonly top: number;
+  readonly flippedLeft: (width: number) => number;
+  readonly flippedTop: (height: number) => number;
+}
+
+function clampToViewport(value: number, size: number, viewport: number): number {
+  const margin = MENU_VIEWPORT_MARGIN_PX;
+  return Math.min(Math.max(margin, value), Math.max(margin, viewport - size - margin));
+}
+
+/**
+ * Where a menu of `size` lands in `viewport`: on its flipped side when it
+ * would cross an edge and fits there, then kept clear of every edge.
+ */
+export function resolveMenuPosition(
+  placement: MenuPlacement,
+  size: { readonly width: number; readonly height: number },
+  viewport: { readonly width: number; readonly height: number },
+): { left: number; top: number } {
+  const margin = MENU_VIEWPORT_MARGIN_PX;
+  // Flip only to a side the menu fits on; otherwise stay and shift inward.
+  const axis = (preferred: number, flipped: number, extent: number, limit: number) =>
+    preferred + extent <= limit - margin || flipped < margin ? preferred : flipped;
+  const left = axis(placement.left, placement.flippedLeft(size.width), size.width, viewport.width);
+  const top = axis(placement.top, placement.flippedTop(size.height), size.height, viewport.height);
+  return {
+    left: clampToViewport(left, size.width, viewport.width),
+    top: clampToViewport(top, size.height, viewport.height),
+  };
+}
+
+function placeMenu(menu: HTMLDivElement, placement: MenuPlacement) {
+  // Layout size, not getBoundingClientRect: the opening scale would shrink it.
+  const size = { width: menu.offsetWidth, height: menu.offsetHeight };
+  const { left, top } = resolveMenuPosition(placement, size, {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
   menu.style.left = `${left}px`;
   menu.style.top = `${top}px`;
+  return { left, top, ...size };
 }
 
 function isNodeWithinMenuStack(target: EventTarget | null, menuStack: readonly HTMLDivElement[]) {
@@ -369,12 +411,11 @@ export function showContextMenuFallback<T extends string>(
 
     const openMenu = (
       entries: readonly ContextMenuItem<T>[],
-      preferredLeft: number,
-      preferredTop: number,
+      placement: MenuPlacement,
       level: number,
-      parentTrigger?: HTMLButtonElement,
       /** Where the menu grows from: the cursor for a right-click, the trigger for a submenu. */
-      anchor: { x: number; y: number } = { x: preferredLeft, y: preferredTop },
+      anchor: { x: number; y: number },
+      parentTrigger?: HTMLButtonElement,
     ) => {
       closeMenusFromLevel(level);
 
@@ -383,17 +424,14 @@ export function showContextMenuFallback<T extends string>(
         "dropdown-glass surface-raised surface-raised-floating fixed z-[10000] min-w-32 max-w-sm overflow-hidden rounded-lg bg-clip-padding text-popover-foreground outline-none";
       menu.style.cssText =
         "position:fixed;z-index:10000;min-width:8rem;max-width:24rem;overflow:hidden;border-radius:var(--radius-lg);background-clip:padding-box;color:var(--contrast-popover-foreground);outline:none;pointer-events:auto;";
-      menu.style.left = `${preferredLeft}px`;
-      menu.style.top = `${preferredTop}px`;
       menu.dataset.level = String(level);
 
       const inner = document.createElement("div");
-      // Fit the viewport (minus clampMenuPosition's 4px margins) so menus only
-      // scroll when the window is shorter than the menu itself.
-      inner.className =
-        "max-h-[calc(100vh-0.5rem)] min-w-0 max-w-sm overflow-y-auto overflow-x-hidden p-1";
-      inner.style.cssText =
-        "max-height:calc(100vh - 0.5rem);min-width:0;max-width:24rem;overflow-x:hidden;overflow-y:auto;padding:0.25rem;";
+      // Fit the viewport minus its margins, so a menu only scrolls when the
+      // window is shorter than the menu itself.
+      const maxHeight = `calc(100vh - ${MENU_VIEWPORT_MARGIN_PX * 2}px)`;
+      inner.className = "min-w-0 max-w-sm overflow-y-auto overflow-x-hidden p-1";
+      inner.style.cssText = `max-height:${maxHeight};min-width:0;max-width:24rem;overflow-x:hidden;overflow-y:auto;padding:0.25rem;`;
 
       for (const item of entries) {
         if (item.separatorBefore === true && inner.children.length > 0) {
@@ -423,14 +461,14 @@ export function showContextMenuFallback<T extends string>(
         const isDisabled = item.disabled === true;
         button.disabled = isDisabled;
         const rowBase =
-          "flex w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-left outline-none transition-colors sm:min-h-7 sm:text-sm min-h-8 text-base";
+          "flex w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-left outline-none transition-colors sm:min-h-6.5 sm:text-menu min-h-8 text-base";
         button.className = isDisabled
           ? `${rowBase} pointer-events-none cursor-not-allowed text-muted-foreground opacity-64`
           : isLeafDestructive
             ? `${rowBase} text-destructive-foreground hover:bg-destructive/10 hover:text-destructive-foreground`
             : `${rowBase} text-foreground state-hover`;
         button.style.cssText =
-          "display:flex;width:100%;min-height:1.75rem;align-items:center;gap:0.5rem;border:0;border-radius:var(--radius-sm);background:transparent;padding:0.25rem 0.5rem;color:var(--contrast-foreground);font-family:var(--font-sans,system-ui,sans-serif);font-size:0.875rem;line-height:1.25rem;text-align:left;cursor:default;";
+          "display:flex;width:100%;min-height:1.625rem;align-items:center;gap:0.5rem;border:0;border-radius:var(--radius-sm);background:transparent;padding:0.25rem 0.5rem;color:var(--contrast-foreground);font-family:var(--font-sans,system-ui,sans-serif);font-size:0.8125rem;line-height:1.125rem;text-align:left;cursor:default;";
         if (isLeafDestructive) {
           button.style.color = "var(--destructive-foreground)";
         } else if (!isDisabled) {
@@ -465,8 +503,9 @@ export function showContextMenuFallback<T extends string>(
             button.appendChild(check);
           } else {
             const spacer = document.createElement("span");
-            spacer.className = "size-4.5 shrink-0 sm:size-4";
-            spacer.style.cssText = "display:inline-block;width:1rem;height:1rem;flex-shrink:0;";
+            spacer.className = "size-4.5 shrink-0 sm:size-3.5";
+            spacer.style.cssText =
+              "display:inline-block;width:0.875rem;height:0.875rem;flex-shrink:0;";
             spacer.setAttribute("aria-hidden", "true");
             button.appendChild(spacer);
           }
@@ -487,7 +526,7 @@ export function showContextMenuFallback<T extends string>(
           if (check) {
             check.setAttribute(
               "class",
-              "ms-auto size-4.5 shrink-0 text-muted-foreground sm:size-4",
+              "ms-auto size-4.5 shrink-0 text-muted-foreground sm:size-3.5",
             );
             button.appendChild(check);
           }
@@ -500,7 +539,7 @@ export function showContextMenuFallback<T extends string>(
           if (chevron) {
             chevron.setAttribute(
               "class",
-              "-me-0.5 ms-auto size-4.5 shrink-0 text-muted-foreground opacity-80 sm:size-4",
+              "-me-0.5 ms-auto size-4.5 shrink-0 text-muted-foreground opacity-80 sm:size-3.5",
             );
             chevron.setAttribute("aria-hidden", "true");
             chevron.dataset.contextMenuChevron = "true";
@@ -541,21 +580,26 @@ export function showContextMenuFallback<T extends string>(
           if (hasChildren) {
             const openSubmenu = (focusFirstItem = false) => {
               const rect = button.getBoundingClientRect();
-              const nextLeft = rect.right + 4;
-              const nextTop = rect.top;
-              openMenu(item.children!, nextLeft, nextTop, level + 1, button, {
-                x: rect.right,
-                y: rect.top + rect.height / 2,
-              });
+              // The first item lines up with the trigger row and the submenu
+              // tucks over the parent's edge; near the bottom it rises from
+              // the trigger instead, its last item level with the row.
+              openMenu(
+                item.children!,
+                {
+                  left: rect.right + SUBMENU_SIDE_OFFSET_PX,
+                  top: rect.top + SUBMENU_ALIGN_OFFSET_PX,
+                  flippedLeft: (width) => rect.left - width - SUBMENU_SIDE_OFFSET_PX,
+                  flippedTop: (height) => rect.bottom - height - SUBMENU_ALIGN_OFFSET_PX,
+                },
+                level + 1,
+                { x: rect.right, y: rect.top + rect.height / 2 },
+                button,
+              );
               button.setAttribute("aria-expanded", "true");
 
               const childMenu = menuStack[level + 1];
               if (!childMenu) {
                 return;
-              }
-              const childRect = childMenu.getBoundingClientRect();
-              if (childRect.right > window.innerWidth) {
-                clampMenuPosition(childMenu, rect.left - childRect.width - 4, rect.top);
               }
               if (focusFirstItem) {
                 [...childMenu.querySelectorAll<HTMLButtonElement>("button")]
@@ -593,20 +637,24 @@ export function showContextMenuFallback<T extends string>(
       menuStack[level] = menu;
       submenuTriggerStack[level] = parentTrigger;
 
+      const placed = placeMenu(menu, placement);
+      const originX = Math.min(Math.max(anchor.x - placed.left, 0), placed.width);
+      const originY = Math.min(Math.max(anchor.y - placed.top, 0), placed.height);
+      menu.style.transformOrigin = `${originX}px ${originY}px`;
       animateMenuIn(menu);
-      requestAnimationFrame(() => {
-        clampMenuPosition(menu, preferredLeft, preferredTop);
-        const placed = menu.getBoundingClientRect();
-        const originX = Math.min(Math.max(anchor.x - placed.left, 0), placed.width);
-        const originY = Math.min(Math.max(anchor.y - placed.top, 0), placed.height);
-        menu.style.transformOrigin = `${originX}px ${originY}px`;
-      });
     };
 
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("contextmenu", onContextMenu, true);
-    openMenu(items, position?.x ?? 0, position?.y ?? 0, 0);
+    const x = position?.x ?? 0;
+    const y = position?.y ?? 0;
+    openMenu(
+      items,
+      { left: x, top: y, flippedLeft: (width) => x - width, flippedTop: (height) => y - height },
+      0,
+      { x, y },
+    );
     // Only one fallback menu can be open at a time: a new show must dismiss
     // any prior one, or its DOM and listeners leak and close() can only ever
     // reach the newest menu.

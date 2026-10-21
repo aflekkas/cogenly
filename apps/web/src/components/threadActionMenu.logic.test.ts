@@ -4,9 +4,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { threadCapabilities, type ThreadKind } from "../threadCapabilities";
 import {
   buildDraftActionMenuItems,
+  buildRepositoryActionMenuItems,
   buildThreadActionMenuItems,
-  type DraftActionMenuId,
-  type ThreadActionMenuId,
   type ThreadActionMenuState,
 } from "./threadActionMenu.logic";
 
@@ -17,17 +16,13 @@ function stateFor(kind: ThreadKind, overrides: Partial<ThreadActionMenuState> = 
     branch: "feature/x",
     isPinned: false,
     isSettled: false,
-    autoSettleEnabled: true,
     isSnoozed: false,
     canSnoozeNow: true,
-    isRegeneratingTitle: false,
     isRunning: false,
     supports: {
       settlement: true,
-      autoSettleOptOut: true,
       snooze: true,
       pinning: true,
-      titleRegeneration: true,
     },
     snoozePresets: [],
     folder: {
@@ -44,9 +39,7 @@ function stateFor(kind: ThreadKind, overrides: Partial<ThreadActionMenuState> = 
   return state;
 }
 
-function ids(
-  items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId | DraftActionMenuId>>,
-): string[] {
+function ids(items: ReadonlyArray<ContextMenuItem<string>>): string[] {
   return items.flatMap((item) => [item.id, ...(item.children ? ids(item.children) : [])]);
 }
 
@@ -55,48 +48,46 @@ describe("buildThreadActionMenuItems per thread kind", () => {
     expect(ids(buildThreadActionMenuItems(stateFor("chat")))).toEqual([
       "start-work",
       "pin",
-      "rename",
-      "regenerate-title",
       "mark-unread",
-      "copy",
-      "copy-thread-link",
-      "copy-thread-id",
-      "open-project:env:spawn",
+      "rename",
       "move-folder",
+      "open-project:env:spawn",
       "move-folder:bartr",
       "move-folder:spawn",
       "remove-folder",
       "new-folder",
+      "copy",
+      "copy-thread-link",
+      "copy-thread-id",
       "delete",
     ]);
   });
 
-  it("offers Work its lifecycle and repository actions, without Start Work", () => {
-    expect(ids(buildThreadActionMenuItems(stateFor("work")))).toEqual([
-      "new-thread-on-branch",
+  it("offers Work its state, thread and removal actions, leaving repository actions to its heading", () => {
+    const items = buildThreadActionMenuItems(stateFor("work"));
+    expect(ids(items)).toEqual([
       "settle",
       "snooze",
       "snooze:custom",
-      "rename",
-      "regenerate-title",
       "mark-unread",
-      "auto-settle",
-      "auto-settle:enabled",
-      "auto-settle:disabled",
+      "rename",
+      "move-folder",
+      "open-project:env:spawn",
+      "move-folder:bartr",
+      "move-folder:spawn",
+      "remove-folder",
+      "new-folder",
       "copy",
       "copy-path",
       "copy-branch",
       "copy-thread-link",
       "copy-thread-id",
-      "project-settings",
-      "open-project:env:spawn",
-      "move-folder",
-      "move-folder:bartr",
-      "move-folder:spawn",
-      "remove-folder",
-      "new-folder",
       "archive",
       "delete",
+    ]);
+    expect(items.filter((item) => item.separatorBefore).map((item) => item.id)).toEqual([
+      "rename",
+      "archive",
     ]);
   });
 
@@ -150,18 +141,14 @@ describe("buildThreadActionMenuItems per thread kind", () => {
         stateFor("work", {
           supports: {
             settlement: false,
-            autoSettleOptOut: false,
             snooze: false,
             pinning: false,
-            titleRegeneration: false,
           },
         }),
       ),
     );
     expect(items).not.toContain("settle");
     expect(items).not.toContain("snooze");
-    expect(items).not.toContain("auto-settle");
-    expect(items).not.toContain("regenerate-title");
   });
 
   it("offers pinning on chats only, and only when the server supports it", () => {
@@ -180,16 +167,13 @@ describe("buildThreadActionMenuItems per thread kind", () => {
 
   it("drops the branch items without a branch", () => {
     const items = ids(buildThreadActionMenuItems(stateFor("work", { branch: null })));
-    expect(items).not.toContain("new-thread-on-branch");
     expect(items).not.toContain("copy-branch");
   });
 });
 
 describe("Move to folder in the thread action menu", () => {
   const folderItems = (menuState: ThreadActionMenuState) =>
-    buildThreadActionMenuItems(menuState).filter(
-      (item) => item.id.startsWith("open-project") || item.id === "move-folder",
-    );
+    buildThreadActionMenuItems(menuState).filter((item) => item.id === "move-folder");
   const base = stateFor("chat").folder!;
 
   it("offers an unfiled thread every folder and a new one, with no way out to show", () => {
@@ -222,11 +206,17 @@ describe("Move to folder in the thread action menu", () => {
     const items = folderItems(stateFor("chat", { folder: { ...base, canMove: false } }));
     const move = items.find((item) => item.id === "move-folder");
     expect(
-      move?.children?.filter((child) => child.id !== "new-folder").every((c) => c.disabled),
+      move?.children
+        ?.filter((child) => child.id.startsWith("move-folder:") || child.id === "remove-folder")
+        .every((c) => c.disabled),
     ).toBe(true);
-    const readOnly = folderItems(stateFor("chat", { canOperate: false }));
-    expect(readOnly.find((item) => item.id === "open-project:env:spawn")?.disabled).toBeUndefined();
-    expect(readOnly.find((item) => item.id === "move-folder")?.disabled).toBe(true);
+    const readOnly = folderItems(stateFor("chat", { canOperate: false }))[0];
+    // The submenu stays reachable for its local actions; only the moves lock.
+    expect(readOnly?.disabled).toBeUndefined();
+    expect(
+      readOnly?.children?.find((child) => child.id === "open-project:env:spawn")?.disabled,
+    ).toBeUndefined();
+    expect(readOnly?.children?.find((child) => child.id === "remove-folder")?.disabled).toBe(true);
   });
 
   it("leaves folders off agent conversations", () => {
@@ -247,16 +237,33 @@ describe("Start Work in the thread action menu", () => {
 });
 
 describe("buildDraftActionMenuItems", () => {
-  it("gives a chat draft only Discard, with nothing to copy or configure", () => {
-    expect(
-      ids(buildDraftActionMenuItems({ hasPath: false, hasBranch: false, hasProject: false })),
-    ).toEqual(["discard"]);
+  it("gives a chat draft only Discard, with nothing to copy", () => {
+    expect(ids(buildDraftActionMenuItems({ hasPath: false, hasBranch: false }))).toEqual([
+      "discard",
+    ]);
   });
 
-  it("gives a repository draft its copy and settings items", () => {
+  it("gives a repository draft its copy items", () => {
+    expect(ids(buildDraftActionMenuItems({ hasPath: true, hasBranch: true }))).toEqual([
+      "copy",
+      "copy-path",
+      "copy-branch",
+      "discard",
+    ]);
+  });
+});
+
+describe("buildRepositoryActionMenuItems", () => {
+  it("offers a new thread and the repository's settings, and its folder when filed", () => {
+    expect(ids(buildRepositoryActionMenuItems({ folder: null }))).toEqual([
+      "new-thread",
+      "project-settings",
+    ]);
     expect(
-      ids(buildDraftActionMenuItems({ hasPath: true, hasBranch: true, hasProject: true })),
-    ).toEqual(["copy", "copy-path", "copy-branch", "project-settings", "discard"]);
+      buildRepositoryActionMenuItems({ folder: { key: "env:spawn", name: "Spawn" } }).map(
+        (item) => item.label,
+      ),
+    ).toEqual(["New thread", "Open Spawn", "Repository settings"]);
   });
 });
 

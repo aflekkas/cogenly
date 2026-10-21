@@ -6,6 +6,11 @@ import type * as React from "react";
 
 import { cn } from "~/lib/utils";
 import { buttonVariants } from "./button";
+import {
+  MENU_VIEWPORT_MARGIN_PX,
+  SUBMENU_ALIGN_OFFSET_PX,
+  SUBMENU_SIDE_OFFSET_PX,
+} from "./menu-metrics";
 
 const Menu = MenuPrimitive.Root;
 
@@ -41,6 +46,9 @@ function MenuPopup({
         align={align}
         alignOffset={alignOffset}
         anchor={anchor}
+        // Every menu and submenu keeps clear of the viewport edge; without
+        // room below it flips above, and only then scrolls (--available-height).
+        collisionPadding={MENU_VIEWPORT_MARGIN_PX}
         className="z-[130]"
         data-slot="menu-positioner"
         side={side}
@@ -87,7 +95,7 @@ function MenuItem({
   return (
     <MenuPrimitive.Item
       className={cn(
-        "[&>svg]:-mx-0.5 flex min-h-8 cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed state-hover data-inset:ps-8 data-[variant=destructive]:text-destructive-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&>svg:not([class*='opacity-'])]:opacity-80 [&>svg:not([class*='size-'])]:size-4.5 sm:[&>svg:not([class*='size-'])]:size-4 [&>svg:not([class*='text-'])]:text-muted-foreground data-[variant=destructive]:[&>svg:not([class*='text-'])]:text-current [&>svg]:pointer-events-none [&>svg]:shrink-0",
+        "[&>svg]:-mx-0.5 flex min-h-8 cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed state-hover data-inset:ps-8 data-[variant=destructive]:text-destructive-foreground data-disabled:opacity-64 sm:min-h-6.5 sm:text-menu [&>svg:not([class*='opacity-'])]:opacity-80 [&>svg:not([class*='size-'])]:size-4.5 sm:[&>svg:not([class*='size-'])]:size-3.5 [&>svg:not([class*='text-'])]:text-muted-foreground data-[variant=destructive]:[&>svg:not([class*='text-'])]:text-current [&>svg]:pointer-events-none [&>svg]:shrink-0",
         variant === "ghost" &&
           buttonVariants({
             variant: "ghost",
@@ -134,7 +142,7 @@ function MenuCheckboxItem({
     <MenuPrimitive.CheckboxItem
       checked={checked}
       className={cn(
-        "grid min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center gap-2 rounded-sm py-1 ps-2 text-base text-foreground outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed state-hover data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "grid min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center gap-2 rounded-sm py-1 ps-2 text-base text-foreground outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed state-hover data-disabled:opacity-64 sm:min-h-6.5 sm:text-menu [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-3.5 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         variant === "switch"
           ? "grid-cols-[1fr_auto] gap-4 pe-1.5"
           : "grid-cols-[1rem_minmax(0,1fr)] pe-4",
@@ -192,7 +200,7 @@ function MenuRadioItem({
   return (
     <MenuPrimitive.RadioItem
       className={cn(
-        "[&_svg]:-mx-0.5 flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base text-foreground outline-none data-checked:state-selected data-disabled:pointer-events-none data-disabled:cursor-not-allowed state-hover data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "[&_svg]:-mx-0.5 flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base text-foreground outline-none data-checked:state-selected data-disabled:pointer-events-none data-disabled:cursor-not-allowed state-hover data-disabled:opacity-64 sm:min-h-6.5 sm:text-menu [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-3.5 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
       data-slot="menu-radio-item"
@@ -285,7 +293,7 @@ function MenuSubTrigger({
         // with theirs. Scoped away from the last child because the chevron is
         // also a direct svg — on a sub-trigger with no leading icon it is the
         // only one, and these rules would take away its `ms-auto` alignment.
-        "[&>svg:not(:last-child)]:-mx-0.5 flex min-h-8 cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:cursor-not-allowed data-disabled:pointer-events-none state-hover data-popup-open:bg-state-hover data-inset:ps-8 data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground [&>svg:not(:last-child):not([class*='opacity-'])]:opacity-80 [&_svg]:pointer-events-none [&>svg]:shrink-0",
+        "[&>svg:not(:last-child)]:-mx-0.5 flex min-h-8 cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:cursor-not-allowed data-disabled:pointer-events-none state-hover data-popup-open:bg-state-hover data-inset:ps-8 data-disabled:opacity-64 sm:min-h-6.5 sm:text-menu [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-muted-foreground [&>svg:not(:last-child):not([class*='opacity-'])]:opacity-80 [&_svg]:pointer-events-none [&>svg]:shrink-0",
         density === "touch" && "min-h-10 sm:min-h-10",
         className,
       )}
@@ -302,7 +310,7 @@ function MenuSubTrigger({
 
 function MenuSubPopup({
   className,
-  sideOffset = 0,
+  sideOffset = SUBMENU_SIDE_OFFSET_PX,
   alignOffset,
   align = "start",
   ...props
@@ -311,7 +319,7 @@ function MenuSubPopup({
   sideOffset?: MenuPrimitive.Positioner.Props["sideOffset"];
   alignOffset?: MenuPrimitive.Positioner.Props["alignOffset"];
 }) {
-  const defaultAlignOffset = align !== "center" ? -5 : undefined;
+  const defaultAlignOffset = align !== "center" ? SUBMENU_ALIGN_OFFSET_PX : undefined;
 
   return (
     <MenuPopup

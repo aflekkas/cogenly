@@ -213,9 +213,11 @@ If dragging is unavailable for one environment, update the Cogenly server runnin
 environment. Pinned and active reordering require server support. Threads from older servers keep
 their default order until the server is updated.
 
-To generate a fresh title from the conversation, open a thread's menu and choose
-**Regenerate title**. The action is unavailable while title generation is in progress
-or when the connected environment needs a server update.
+To generate a fresh title from the conversation, choose **Rename…** in a thread's menu
+and press the regenerate button at the end of the title field. To regenerate several at
+once, select them and choose **Regenerate titles** from the selection's menu. The button
+is missing while title generation is in progress or when the connected environment
+needs a server update.
 
 Agents connected through Cogenly can use the same server-owned metadata workflow to
 rename a thread, regenerate its title, or link and unlink a pull request. These changes
@@ -277,10 +279,9 @@ but an old closed or merged pull request does not settle work you
 resumed after it closed. Only your own messages count as resuming. A turn that
 finished background work or a pull request watch starts on its own does not.
 
-To keep one thread out of the settled shelf no matter how long it sits idle, open its menu,
-choose **Auto-settle behavior**, and pick **Disabled**. The current option is checked. Pick
-**Enabled** to return to the usual rules. Manual settle, snooze, and archive still work while it
-is disabled.
+To keep one thread out of the settled shelf no matter how long it sits idle, open the
+thread, open its details from the header, and turn off **Auto-settle**. Turn it back on to
+return to the usual rules. Manual settle, snooze, and archive still work while it is off.
 
 Change these rules in **Settings → General** on web and desktop.
 They continue to run when your apps are closed. On web and desktop, choose an environment at the
@@ -321,7 +322,10 @@ project. A filed chat also gets
 [project context](./memory-and-export.md#project-context-in-chats).
 
 **Chats** stays one list of titles by date. **Work** is one list, newest activity
-first. Hover a row to see its project, or right-click it to open that project.
+first. Hover a row to see its project, or right-click it and open the project from
+**Move to folder**. Right-click a repository heading in **Work** for a new thread in that
+repository, its project, and **Repository settings**. To start a thread on the open
+thread's branch, run **New thread on** _branch_ from the command palette.
 
 ## Find and reference work
 

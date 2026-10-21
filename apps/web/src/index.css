@@ -207,6 +207,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
      their smaller badges. Registered with tailwind-merge in
      lib/utils.ts so cn() treats them as font sizes, not colours. */
   --text-card: 0.9375rem;
+  /* Menu and context-menu rows on desktop: 13px on an 18px line. */
+  --text-menu: 0.8125rem;
+  --text-menu--line-height: calc(1.125 / 0.8125);
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: calc(1 / 0.6875);
   --text-3xs: 0.625rem;

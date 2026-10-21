@@ -10,9 +10,7 @@ import type { ThreadCapabilities } from "../threadCapabilities";
  * remains data-driven.
  */
 export type ThreadActionMenuId =
-  | "new-thread-on-branch"
   | "start-work"
-  | "project-settings"
   | `open-project:${string}`
   | "move-folder"
   | `move-folder:${string}`
@@ -22,14 +20,10 @@ export type ThreadActionMenuId =
   | "unpin"
   | "settle"
   | "unsettle"
-  | "auto-settle"
-  | "auto-settle:enabled"
-  | "auto-settle:disabled"
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
   | "rename"
-  | "regenerate-title"
   | "mark-unread"
   | "mark-read"
   | "agent-settings"
@@ -41,18 +35,15 @@ export type ThreadActionMenuId =
   | "archive"
   | "delete";
 
-export type DraftActionMenuId =
-  | "copy"
-  | "copy-path"
-  | "copy-branch"
-  | "project-settings"
-  | "discard";
+export type DraftActionMenuId = "copy" | "copy-path" | "copy-branch" | "discard";
 
-/** Right-click menu for an unsent draft row in the sidebar. */
+/**
+ * Right-click menu for an unsent draft row in the sidebar. Repository actions
+ * live on the Work list's repository heading, not on each row.
+ */
 export function buildDraftActionMenuItems(options: {
   readonly hasPath: boolean;
   readonly hasBranch: boolean;
-  readonly hasProject: boolean;
 }): ReadonlyArray<ContextMenuItem<DraftActionMenuId>> {
   const copyChildren: ReadonlyArray<ContextMenuItem<DraftActionMenuId>> = [
     ...(options.hasPath ? [{ id: "copy-path" as const, label: "Path", icon: "folder" }] : []),
@@ -65,15 +56,42 @@ export function buildDraftActionMenuItems(options: {
     ...(copyChildren.length > 0
       ? [{ id: "copy" as const, label: "Copy", icon: "copy", children: copyChildren }]
       : []),
-    ...(options.hasProject
-      ? [{ id: "project-settings" as const, label: "Repository settings", icon: "settings" }]
-      : []),
     {
       id: "discard",
       label: "Discard draft",
       icon: "trash",
       destructive: true,
-      separatorBefore: copyChildren.length > 0 || options.hasProject,
+      separatorBefore: copyChildren.length > 0,
+    },
+  ];
+}
+
+export type RepositoryActionMenuId = "new-thread" | `open-project:${string}` | "project-settings";
+
+/**
+ * Right-click menu for a repository heading in the Work list: the actions
+ * that belong to the repository rather than to one of its threads.
+ */
+export function buildRepositoryActionMenuItems(options: {
+  /** The project folder the repository is filed in, if any. */
+  readonly folder: { readonly key: string; readonly name: string } | null;
+}): ReadonlyArray<ContextMenuItem<RepositoryActionMenuId>> {
+  return [
+    { id: "new-thread", label: "New thread", icon: "message-square-plus" },
+    ...(options.folder
+      ? [
+          {
+            id: `open-project:${options.folder.key}` as const,
+            label: `Open ${options.folder.name}`,
+            icon: "folder",
+          },
+        ]
+      : []),
+    {
+      id: "project-settings",
+      label: "Repository settings",
+      icon: "settings",
+      separatorBefore: true,
     },
   ];
 }
@@ -85,24 +103,18 @@ export interface ThreadActionMenuState {
   readonly branch: string | null;
   readonly isPinned: boolean;
   readonly isSettled: boolean;
-  /** False while the user has turned automatic settlement off for this thread. */
-  readonly autoSettleEnabled: boolean;
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
   /** Offers "Mark read" in place of "Mark unread". */
   readonly isUnread?: boolean;
-  readonly isRegeneratingTitle: boolean;
   /** Archive rejects a thread with an attached provider, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
   /** What the thread's environment understands; a kind's action still needs its server. */
   readonly supports: {
     readonly settlement: boolean;
-    /** Server understands thread.auto-settle.set. */
-    readonly autoSettleOptOut: boolean;
     readonly snooze: boolean;
     /** Server understands thread.pin / thread.unpin. */
     readonly pinning: boolean;
-    readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
   /** The thread's project folder and where it can move; omitted where folders are unknown. */
@@ -128,8 +140,6 @@ export interface ThreadActionMenuFolder {
 export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean {
   if (action.startsWith("open-project") || action === "new-folder") return false;
   return ![
-    "new-thread-on-branch",
-    "project-settings",
     "agent-settings",
     "mark-unread",
     "mark-read",
@@ -142,8 +152,8 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
 }
 
 /**
- * "Open <folder>" when filed, then "Move to folder" with every folder (the
- * current one checked), "Remove from folder", and "New project…" at the end.
+ * "Move to folder" with "Open <folder>" first when filed, then every folder
+ * (the current one checked), "Remove from folder", and "New project…".
  */
 function folderMenuItems(
   folder: ThreadActionMenuFolder | undefined,
@@ -151,14 +161,25 @@ function folderMenuItems(
   if (folder === undefined) return [];
   const { current } = folder;
   const disabled = !folder.canMove;
-  const children: Array<ContextMenuItem<ThreadActionMenuId>> = folder.options.map((option) => ({
-    id: `move-folder:${option.id}` as const,
-    label: option.name,
-    icon: "folder",
-    iconColor: projectLabelColorValue(option.color),
-    checked: option.id === current?.id,
-    disabled: disabled || option.id === current?.id,
-  }));
+  const children: Array<ContextMenuItem<ThreadActionMenuId>> = [];
+  if (current !== null) {
+    children.push({
+      id: `open-project:${current.key}`,
+      label: `Open ${current.name}`,
+      icon: "folder",
+    });
+  }
+  folder.options.forEach((option, index) => {
+    children.push({
+      id: `move-folder:${option.id}`,
+      label: option.name,
+      icon: "folder",
+      iconColor: projectLabelColorValue(option.color),
+      checked: option.id === current?.id,
+      disabled: disabled || option.id === current?.id,
+      separatorBefore: index === 0 && children.length > 0,
+    });
+  });
   if (current !== null && folder.removable) {
     children.push({
       id: "remove-folder",
@@ -172,40 +193,24 @@ function folderMenuItems(
     label: "New project…",
     separatorBefore: children.length > 0,
   });
-  return [
-    ...(current !== null
-      ? [
-          {
-            id: `open-project:${current.key}` as const,
-            label: `Open ${current.name}`,
-            icon: "folder",
-          },
-        ]
-      : []),
-    { id: "move-folder", label: "Move to folder", icon: "folder", children },
-  ];
+  return [{ id: "move-folder", label: "Move to folder", icon: "folder", children }];
 }
 
 type MenuItems = ReadonlyArray<ContextMenuItem<ThreadActionMenuId>>;
 
 /**
- * Single source for the per-thread action menu: the sidebar row's right-click
- * menu and the chat header menu share labels, ordering, and gating. The
- * thread's kind decides which actions exist at all; the state decides each
+ * The sidebar row's right-click menu for one thread, in every mode (Chats,
+ * Work, Agents). The thread's kind decides which actions exist at all; the state decides each
  * one's current direction (settle or un-settle, snooze or wake).
+ *
+ * Three groups: the thread's state, the thread itself, and removal.
+ * Repository actions (new thread, settings, opening its folder) sit on the
+ * Work list's repository heading; title regeneration sits in the rename
+ * field; auto-settle sits in the thread details popover.
  */
 export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuItems {
   const can = state.capabilities;
-  const lifecycle: MenuItems = [
-    ...(can.git && state.branch
-      ? [
-          {
-            id: "new-thread-on-branch" as const,
-            label: `New thread on ${state.branch}`,
-            icon: "message-square-plus",
-          },
-        ]
-      : []),
+  const status: MenuItems = [
     ...(can.startWork ? [{ id: "start-work" as const, label: "Start Work…", icon: "hammer" }] : []),
     ...(can.pin && state.supports.pinning
       ? [
@@ -240,49 +245,11 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
               },
         ]
       : []),
-  ];
-  const identity: MenuItems = [
-    ...(can.rename ? [{ id: "rename" as const, label: "Rename thread", icon: "pencil" }] : []),
-    ...(can.regenerateTitle && state.supports.titleRegeneration
-      ? [
-          {
-            id: "regenerate-title" as const,
-            label: state.isRegeneratingTitle ? "Regenerating…" : "Regenerate title",
-            icon: "refresh-cw",
-            disabled: state.isRegeneratingTitle,
-          },
-        ]
-      : []),
     ...(can.markUnread
       ? [
           state.isUnread
             ? { id: "mark-read" as const, label: "Mark read", icon: "mail" }
             : { id: "mark-unread" as const, label: "Mark unread", icon: "mail-open" },
-        ]
-      : []),
-    // A submenu with the current option checked, not a one-shot action:
-    // this is a setting, and it sits with the other per-thread settings
-    // rather than the lifecycle verbs above. Disabled keeps long-running
-    // threads out of the settled shelf no matter how quiet they get.
-    ...(can.autoSettle && state.supports.autoSettleOptOut
-      ? [
-          {
-            id: "auto-settle" as const,
-            label: "Auto-settle behavior",
-            icon: "timer",
-            children: [
-              {
-                id: "auto-settle:enabled" as const,
-                label: "Enabled",
-                checked: state.autoSettleEnabled,
-              },
-              {
-                id: "auto-settle:disabled" as const,
-                label: "Disabled",
-                checked: !state.autoSettleEnabled,
-              },
-            ],
-          },
         ]
       : []),
   ];
@@ -298,14 +265,12 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
         ]
       : []),
   ];
-  const places: MenuItems = [
+  const thread: MenuItems = [
+    ...(can.rename ? [{ id: "rename" as const, label: "Rename…", icon: "pencil" }] : []),
+    ...(can.projectFolder ? folderMenuItems(state.folder) : []),
     ...(copyChildren.length > 0
       ? [{ id: "copy" as const, label: "Copy", icon: "copy", children: copyChildren }]
       : []),
-    ...(can.repositorySettings
-      ? [{ id: "project-settings" as const, label: "Repository settings", icon: "settings" }]
-      : []),
-    ...(can.projectFolder ? folderMenuItems(state.folder) : []),
     ...(can.agentSettings
       ? [{ id: "agent-settings" as const, label: "Agent settings", icon: "settings" }]
       : []),
@@ -331,22 +296,28 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
       ? [{ id: "delete" as const, label: "Delete", destructive: true, icon: "trash" }]
       : []),
   ];
-  const items = [lifecycle, identity, places, removal]
+  const items = [status, thread, removal]
     .filter((group) => group.length > 0)
     .flatMap((group, index) =>
       index === 0 ? group : [{ ...group[0]!, separatorBefore: true }, ...group.slice(1)],
     );
-  return state.canOperate
-    ? items
-    : items.map((item) =>
-        threadActionRequiresOperate(item.id)
-          ? {
-              ...item,
-              disabled: true,
-              ...(item.children
-                ? { children: item.children.map((child) => ({ ...child, disabled: true })) }
-                : {}),
-            }
-          : item,
-      );
+  return state.canOperate ? items : items.map(withoutOperateActions);
+}
+
+/**
+ * A read-only client keeps local actions (opening, copying, read markers);
+ * a submenu stays open while any of its children still works.
+ */
+function withoutOperateActions(
+  item: ContextMenuItem<ThreadActionMenuId>,
+): ContextMenuItem<ThreadActionMenuId> {
+  if (item.children) {
+    const children = item.children.map(withoutOperateActions);
+    return {
+      ...item,
+      children,
+      ...(children.every((child) => child.disabled === true) ? { disabled: true } : {}),
+    };
+  }
+  return threadActionRequiresOperate(item.id) ? { ...item, disabled: true } : item;
 }

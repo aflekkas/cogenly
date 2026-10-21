@@ -157,6 +157,7 @@ import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import {
   buildDraftActionMenuItems,
+  buildRepositoryActionMenuItems,
   buildThreadActionMenuItems,
   threadActionRequiresOperate,
 } from "./threadActionMenu.logic";
@@ -221,6 +222,7 @@ import { useSidebarRowActionsOverlap } from "./sidebar/useSidebarRowActionsOverl
 import { SIDEBAR_SHELF_ICONS, SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { RepositoryGroupHeading } from "./sidebar/modes/RepositoryGroupHeading";
+import { SidebarRenameField } from "./sidebar/SidebarRenameField";
 import {
   projectLabelKey,
   priorFiling,
@@ -949,6 +951,8 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
   onRenameTitleChange: (title: string) => void;
   onCommitRename: (threadRef: ScopedThreadRef, title: string, originalTitle: string) => void;
   onCancelRename: () => void;
+  /** Offered in the rename field while renaming, when the server can name the thread. */
+  onRegenerateTitle?: ((threadRef: ScopedThreadRef) => void) | undefined;
   onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
   onContextDragStart: (threadRef: ScopedThreadRef, event: PointerEvent) => void;
 }) {
@@ -1071,6 +1075,16 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
   const handleRenameBlur = useCallback(() => {
     if (!renameCommittedRef.current) onCommitRename(threadRef, renamingTitle, thread.title);
   }, [onCommitRename, renamingTitle, thread.title, threadRef]);
+  const { onRegenerateTitle } = props;
+  const handleRegenerateTitle = useMemo(
+    () =>
+      onRegenerateTitle &&
+      (() => {
+        renameCommittedRef.current = true;
+        onRegenerateTitle(threadRef);
+      }),
+    [onRegenerateTitle, threadRef],
+  );
 
   return (
     <li
@@ -1117,17 +1131,14 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
         </span>
         <span className="flex min-w-0 flex-1 flex-col justify-center">
           {isRenaming && canOperateThread ? (
-            <input
-              autoFocus
+            <SidebarRenameField
               value={renamingTitle}
-              aria-label="Chat title"
-              onChange={(event) => onRenameTitleChange(event.target.value)}
-              onFocus={(event) => event.currentTarget.select()}
+              ariaLabel="Chat title"
+              onChange={onRenameTitleChange}
               onKeyDown={handleRenameKeyDown}
               onBlur={handleRenameBlur}
-              onClick={(event) => event.stopPropagation()}
-              onDoubleClick={(event) => event.stopPropagation()}
-              className="min-w-0 rounded-sm border border-input bg-card px-1 text-sm text-card-foreground outline-none focus:border-foreground"
+              onRegenerate={handleRegenerateTitle}
+              inputClassName="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm text-card-foreground outline-none focus:border-foreground"
             />
           ) : (
             <PendingTitleSlot
@@ -1197,6 +1208,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onRenameTitleChange: (title: string) => void;
   onCommitRename: (threadRef: ScopedThreadRef, title: string, originalTitle: string) => void;
   onCancelRename: () => void;
+  /** Offered in the rename field while renaming, when the server can name the thread. */
+  onRegenerateTitle?: ((threadRef: ScopedThreadRef) => void) | undefined;
   isRenaming: boolean;
   renamingTitle: string;
   onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
@@ -1469,6 +1482,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onCommitRename(threadRef, renamingTitle, thread.title);
     }
   }, [onCommitRename, renamingTitle, thread.title, threadRef]);
+  const { onRegenerateTitle } = props;
+  const handleRegenerateTitle = useMemo(
+    () =>
+      onRegenerateTitle &&
+      (() => {
+        renameCommittedRef.current = true;
+        onRegenerateTitle(threadRef);
+      }),
+    [onRegenerateTitle, threadRef],
+  );
   const handleSettleClick = useCallback(
     (event: ReactMouseEvent) => {
       event.preventDefault();
@@ -1585,17 +1608,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   const title =
     isRenaming && canOperateThread ? (
-      <input
-        autoFocus
+      <SidebarRenameField
         value={renamingTitle}
-        aria-label="Thread title"
-        onChange={(event) => onRenameTitleChange(event.target.value)}
-        onFocus={(event) => event.currentTarget.select()}
+        ariaLabel="Thread title"
+        onChange={onRenameTitleChange}
         onKeyDown={handleRenameKeyDown}
         onBlur={handleRenameBlur}
-        onClick={(event) => event.stopPropagation()}
-        onDoubleClick={(event) => event.stopPropagation()}
-        className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm font-medium text-card-foreground outline-none focus:border-foreground"
+        onRegenerate={handleRegenerateTitle}
+        fill
+        inputClassName="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm font-medium text-card-foreground outline-none focus:border-foreground"
       />
     ) : (
       <PendingTitleSlot
@@ -2288,7 +2309,6 @@ export default function Sidebar() {
     pinThread,
     unpinThread,
     reorderPinnedThread,
-    setThreadAutoSettle,
     markThreadUnread,
     markThreadRead,
     archiveThread,
@@ -3152,6 +3172,31 @@ export default function Sidebar() {
     },
     [updateThreadMetadata],
   );
+  // The rename field's regenerate button: drop the typed title and let the
+  // agent name the thread again.
+  const regenerateThreadTitle = useCallback(
+    (threadRef: ScopedThreadRef) => {
+      void (async () => {
+        setRenamingThreadKey(null);
+        if (!readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope)) return;
+        const result = await updateThreadMetadata({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, regenerateTitle: true },
+        });
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to regenerate thread title",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+      })();
+    },
+    [updateThreadMetadata],
+  );
 
   const handleThreadClick = useCallback(
     (event: ReactMouseEvent, threadRef: ScopedThreadRef) => {
@@ -3984,12 +4029,6 @@ export default function Sidebar() {
         const api = readLocalApi();
         const session = useComposerDraftStore.getState().getDraftSession(draftId);
         if (!api || !session || session.promotedTo) return;
-        const projectGroup = projectGroupsRef.current.find((group) =>
-          group.memberProjectRefs.some(
-            (ref) =>
-              ref.environmentId === session.environmentId && ref.projectId === session.projectId,
-          ),
-        );
         const workspacePath =
           session.worktreePath ??
           projectByKey.get(`${session.environmentId}:${session.projectId}`)?.workspaceRoot;
@@ -4010,20 +4049,12 @@ export default function Sidebar() {
             buildDraftActionMenuItems({
               hasPath: draftCapabilities.copyWorkspace && Boolean(workspacePath),
               hasBranch: draftCapabilities.copyWorkspace && Boolean(session.branch),
-              hasProject: draftCapabilities.repositorySettings && projectGroup != null,
             }),
             position,
           ),
         );
         if (clicked._tag === "Failure") return;
         switch (clicked.value) {
-          case "project-settings":
-            if (projectGroup)
-              openProjectSettings(projectGroup, {
-                environmentId: session.environmentId,
-                projectId: session.projectId,
-              });
-            return;
           case "copy-path":
             if (workspacePath) copyPathToClipboard(workspacePath, { path: workspacePath });
             return;
@@ -4083,26 +4114,11 @@ export default function Sidebar() {
           true;
         const supportsSnooze =
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
-        const supportsAutoSettleOptOut =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities
-            .threadAutoSettleOptOut === true;
-        const supportsTitleRegeneration =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities
-            .threadTitleRegeneration === true;
-        const isRegeneratingTitle = thread.titleRegeneration != null;
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
         const folderState = threadFolderState(thread, projectLabelDirectory);
-        const threadProjectGroup =
-          projectGroupsRef.current.find((project) =>
-            project.memberProjectRefs.some(
-              (projectRef) =>
-                projectRef.environmentId === thread.environmentId &&
-                projectRef.projectId === thread.projectId,
-            ),
-          ) ?? null;
         setSidebarContextMenuTarget(threadKey);
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
@@ -4122,19 +4138,15 @@ export default function Sidebar() {
               }),
               isPinned: thread.pinnedAt != null,
               isSettled,
-              autoSettleEnabled: thread.autoSettleDisabledAt == null,
               isSnoozed,
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
-              isRegeneratingTitle,
               isRunning: !threadRuntimeCanArchive(thread.runtime),
               supports: {
                 settlement: supportsSettlement,
-                autoSettleOptOut: supportsAutoSettleOptOut,
                 snooze: supportsSnooze,
                 pinning:
                   serverConfigs.get(thread.environmentId)?.environment.capabilities
                     .threadPinning === true,
-                titleRegeneration: supportsTitleRegeneration,
               },
               snoozePresets,
               folder: {
@@ -4197,36 +4209,6 @@ export default function Sidebar() {
           return;
         }
         switch (clicked.value) {
-          case "project-settings":
-            if (threadProjectGroup)
-              openProjectSettings(threadProjectGroup, {
-                environmentId: threadRef.environmentId,
-                projectId: thread.projectId,
-              });
-            return;
-          case "new-thread-on-branch": {
-            // Explicit branch carry-over: reuse the thread's worktree when it
-            // has one, otherwise its branch on the local checkout.
-            const result = await settlePromise(() =>
-              handleNewThreadRef.current(scopeProjectRef(thread.environmentId, thread.projectId), {
-                branch: thread.branch,
-                worktreePath: thread.worktreePath,
-                envMode: thread.worktreePath ? "worktree" : "local",
-                startFromOrigin: false,
-              }),
-            );
-            if (result._tag === "Failure") {
-              const error = squashAtomCommandFailure(result);
-              toastManager.add(
-                stackedThreadToast({
-                  type: "error",
-                  title: "Could not create thread",
-                  description: error instanceof Error ? error.message : "An error occurred.",
-                }),
-              );
-            }
-            return;
-          }
           case "start-work":
             openCommandPalette({ open: "start-work", threadRef });
             return;
@@ -4243,45 +4225,9 @@ export default function Sidebar() {
           case "unsnooze":
             attemptUnsnooze(threadRef);
             return;
-          case "auto-settle:enabled":
-          case "auto-settle:disabled": {
-            const result = await setThreadAutoSettle(
-              threadRef,
-              clicked.value === "auto-settle:enabled",
-            );
-            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-              const error = squashAtomCommandFailure(result);
-              toastManager.add(
-                stackedThreadToast({
-                  type: "error",
-                  title: "Failed to update auto-settle",
-                  description: error instanceof Error ? error.message : "An error occurred.",
-                }),
-              );
-            }
-            return;
-          }
           case "rename":
             startThreadRename(threadRef, thread.title);
             return;
-          case "regenerate-title": {
-            if (isRegeneratingTitle) return;
-            const result = await updateThreadMetadata({
-              environmentId: threadRef.environmentId,
-              input: { threadId: threadRef.threadId, regenerateTitle: true },
-            });
-            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-              const error = squashAtomCommandFailure(result);
-              toastManager.add(
-                stackedThreadToast({
-                  type: "error",
-                  title: "Failed to regenerate thread title",
-                  description: error instanceof Error ? error.message : "An error occurred.",
-                }),
-              );
-            }
-            return;
-          }
           case "mark-unread":
             markThreadUnread(threadRef);
             return;
@@ -4383,6 +4329,58 @@ export default function Sidebar() {
           default:
             return;
         }
+      })();
+    },
+  );
+
+  // A Work repository heading's menu: what belongs to the repository rather
+  // than to one of its threads.
+  const handleRepositoryContextMenu = useStableCallback(
+    (projectRef: ScopedProjectRef, position: { x: number; y: number }) => {
+      void (async () => {
+        const api = readLocalApi();
+        if (!api) return;
+        const folder =
+          projectLabelDirectory.labels.find(
+            (entry) =>
+              entry.environmentId === projectRef.environmentId &&
+              entry.label.repositoryIds.includes(projectRef.projectId),
+          ) ?? null;
+        const clicked = await settlePromise(() =>
+          api.contextMenu.show(
+            buildRepositoryActionMenuItems({
+              folder: folder && { key: folder.key, name: folder.label.name },
+            }),
+            position,
+          ),
+        );
+        if (clicked._tag === "Failure" || clicked.value === null) return;
+        if (clicked.value === "project-settings") {
+          const projectGroup = projectGroupsRef.current.find((group) =>
+            group.memberProjectRefs.some(
+              (ref) =>
+                ref.environmentId === projectRef.environmentId &&
+                ref.projectId === projectRef.projectId,
+            ),
+          );
+          if (projectGroup) openProjectSettings(projectGroup, projectRef);
+          return;
+        }
+        if (clicked.value === "new-thread") {
+          const result = await settlePromise(() => handleNewThreadRef.current(projectRef));
+          if (result._tag === "Failure") {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Could not create thread",
+                description: error instanceof Error ? error.message : "An error occurred.",
+              }),
+            );
+          }
+          return;
+        }
+        if (folder) openProjectView(folder);
       })();
     },
   );
@@ -4661,6 +4659,15 @@ export default function Sidebar() {
                 )}
               >
                 {(() => {
+                  // Only the row being renamed gets the button, and only when
+                  // its server can regenerate and is not already doing so.
+                  const regenerateTitleFor = (thread: EnvironmentThreadShell, threadKey: string) =>
+                    renamingThreadKey === threadKey &&
+                    thread.titleRegeneration == null &&
+                    serverConfigs.get(thread.environmentId)?.environment.capabilities
+                      .threadTitleRegeneration === true
+                      ? regenerateThreadTitle
+                      : undefined;
                   const renderThreadRow = (
                     thread: EnvironmentThreadShell,
                     section: SidebarSection,
@@ -4690,6 +4697,7 @@ export default function Sidebar() {
                           onRenameTitleChange={setRenamingTitle}
                           onCommitRename={commitThreadRename}
                           onCancelRename={cancelThreadRename}
+                          onRegenerateTitle={regenerateTitleFor(thread, threadKey)}
                           onContextMenu={handleThreadContextMenu}
                           onContextDragStart={startThreadContextDrag}
                         />
@@ -4775,6 +4783,7 @@ export default function Sidebar() {
                         onRenameTitleChange={setRenamingTitle}
                         onCommitRename={commitThreadRename}
                         onCancelRename={cancelThreadRename}
+                        onRegenerateTitle={regenerateTitleFor(thread, threadKey)}
                         isRenaming={renamingThreadKey === threadKey}
                         renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
                         onContextMenu={handleThreadContextMenu}
@@ -4817,7 +4826,13 @@ export default function Sidebar() {
                     shownSection !== null && shownSection !== "settled"
                       ? new Map<
                           string,
-                          { name: string | null; rows: ReactNode[]; times: number[] }
+                          {
+                            name: string | null;
+                            /** The repository its heading's menu acts on. */
+                            projectRef: ScopedProjectRef;
+                            rows: ReactNode[];
+                            times: number[];
+                          }
                         >()
                       : null;
                   const flatShelfRows: ReactNode[] | null = shownSection === "settled" ? [] : null;
@@ -4840,6 +4855,7 @@ export default function Sidebar() {
                         const groupKey = name ?? "";
                         const group = repositoryGroups.get(groupKey) ?? {
                           name,
+                          projectRef: scopeProjectRef(thread.environmentId, thread.projectId),
                           rows: [],
                           times: [],
                         };
@@ -4947,6 +4963,7 @@ export default function Sidebar() {
                         repositoryGroups.clear();
                         repositoryGroups.set(groupKey, {
                           name,
+                          projectRef: scopeProjectRef(draft.environmentId, draft.projectId),
                           rows: [card],
                           times: [draft.createdAtMs],
                         });
@@ -4962,7 +4979,13 @@ export default function Sidebar() {
                   if (repositoryGroups) {
                     for (const [groupKey, group] of [...repositoryGroups].toReversed()) {
                       items.push(
-                        <RepositoryGroupHeading key={`repository:${groupKey}`} name={group.name} />,
+                        <RepositoryGroupHeading
+                          key={`repository:${groupKey}`}
+                          name={group.name}
+                          projectRef={group.projectRef}
+                          // Scratch Work has no repository to act on.
+                          onContextMenu={group.name ? handleRepositoryContextMenu : undefined}
+                        />,
                         ...group.rows.toReversed(),
                       );
                     }
