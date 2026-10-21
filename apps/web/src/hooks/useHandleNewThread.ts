@@ -92,11 +92,6 @@ export function useNewThreadHandler() {
          * pass "chat" explicitly. A project never decides this.
          */
         surface?: ThreadSurface;
-        /**
-         * False leaves the route alone: the caller renders the draft where it
-         * is (a project's page shows its new chat in place). Defaults to true.
-         */
-        navigate?: boolean;
       },
       // Which draft the thread ended up in, so a caller that has something to put in it — a
       // prepared checkout, a task to write — addresses that one rather than looking the project
@@ -377,9 +372,8 @@ export function useNewThreadHandler() {
           // again would push a duplicate history entry.
           const routeTargetAfterWrites = getCurrentRouteTarget();
           if (
-            options?.navigate === false ||
-            (routeTargetAfterWrites?.kind === "draft" &&
-              routeTargetAfterWrites.draftId === emptyStoredDraftThread.draftId)
+            routeTargetAfterWrites?.kind === "draft" &&
+            routeTargetAfterWrites.draftId === emptyStoredDraftThread.draftId
           ) {
             return opened;
           }
@@ -461,13 +455,11 @@ export function useNewThreadHandler() {
             interactionMode: racedDraft.interactionMode,
             ...pickExplicitWorkspaceOptions(options),
           });
-          if (options?.navigate !== false) {
-            await router.navigate({
-              to: "/draft/$draftId",
-              params: { draftId: racedDraft.draftId },
-              replace: options?.replace ?? false,
-            });
-          }
+          await router.navigate({
+            to: "/draft/$draftId",
+            params: { draftId: racedDraft.draftId },
+            replace: options?.replace ?? false,
+          });
           return { draftId: racedDraft.draftId, threadId: racedDraft.threadId };
         }
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
@@ -493,13 +485,11 @@ export function useNewThreadHandler() {
           // state. The project default wins when both are present.
           setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
         }
-        if (options?.navigate !== false) {
-          await router.navigate({
-            to: "/draft/$draftId",
-            params: { draftId },
-            replace: options?.replace ?? false,
-          });
-        }
+        await router.navigate({
+          to: "/draft/$draftId",
+          params: { draftId },
+          replace: options?.replace ?? false,
+        });
         return { draftId, threadId };
       })();
     },

@@ -1140,6 +1140,19 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:unlinkProjectLabelSource",
       tag: WS_METHODS.projectLabelsUnlinkSource,
     }),
+    /** A project's files on disk, live: the project directory minus git work trees. */
+    projectLabelResourcesLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:projectLabels:resourcesLive",
+      tag: WS_METHODS.projectLabelsSubscribeResources,
+    }),
+    addProjectLabelResource: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:addProjectLabelResource",
+      tag: WS_METHODS.projectLabelsAddResource,
+    }),
+    removeProjectLabelResource: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:removeProjectLabelResource",
+      tag: WS_METHODS.projectLabelsRemoveResource,
+    }),
     /** GitHub repositories under a project's linked owners; empty query lists recent pushes. */
     projectLabelOwnerRepositories: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:projectLabels:ownerRepositories",

@@ -21,15 +21,17 @@ import {
   PlusIcon,
   Settings2Icon,
   SettingsIcon,
+  SquarePenIcon,
   TrashIcon,
-  XIcon,
 } from "lucide-react";
 import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
+import { isElectron } from "../../env";
 import { useScratchProject } from "../../hooks/useScratchProject";
 import { useSidebarProjectGroups } from "../../hooks/useSidebarProjectGroups";
 import { useClientSettings } from "../../hooks/useSettings";
 import { selectProjectGroupingSettings } from "../../logicalProject";
+import { cn } from "../../lib/utils";
 import {
   ProjectLabelEditorDialog,
   useDeleteProjectFolder,
@@ -51,8 +53,8 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import { cn } from "../../lib/utils";
 import { AnimatedHeight } from "../AnimatedHeight";
+import { FadeSwap } from "../chat/StateTransition";
 import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -69,9 +71,13 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { OverlayPresence } from "../ui/overlay-presence";
+import { SidebarInset } from "../ui/sidebar";
+import { WorkspacePageContainer } from "../WorkspacePageContainer";
+import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { ProjectFilesSection } from "./ProjectFilesSection";
 import { ProjectPanelRow, ProjectPanelSection } from "./ProjectPanelSection";
 import { projectPanelSummary, sortRecentFirst } from "./projectPanel.logic";
+import { useProjectResources } from "./useProjectResources";
 
 const NO_PERMISSION = "You don't have permission to change projects here.";
 
@@ -121,7 +127,7 @@ function ProjectNameEditor(props: {
     );
   }
   return (
-    <h1 className="min-w-0 truncate text-base font-semibold tracking-tight">
+    <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">
       <button
         type="button"
         disabled={!props.canEdit}
@@ -151,7 +157,7 @@ function ProjectHeaderMenu(props: {
   return (
     <Menu>
       <MenuTrigger
-        render={<Button size="icon-xs" variant="ghost-muted" aria-label="Project actions" />}
+        render={<Button size="icon-sm" variant="ghost-muted" aria-label="Project actions" />}
       >
         <MoreHorizontalIcon />
       </MenuTrigger>
@@ -197,15 +203,52 @@ function ProjectHeaderMenu(props: {
   );
 }
 
+/** A page frame with a bare top bar; the page's own header sits in the content column. */
+function ProjectPageFrame(props: { readonly children: React.ReactNode }) {
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+        <WorkspacePageHeader electron={isElectron} />
+        <div className="scroll-fade-y min-h-0 flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable">
+          <WorkspacePageContainer width="readable" className="gap-4">
+            {props.children}
+          </WorkspacePageContainer>
+        </div>
+      </div>
+    </SidebarInset>
+  );
+}
+
 /**
- * One project folder in the panel: its header (folder, name, what it holds,
- * actions), then its chats, Work, repositories, files and sources as compact
- * sections. Opening a thread or a repository's settings leaves the panel.
+ * One project folder in the main area: its header (folder, name, what it
+ * holds, actions, and the way to a new chat in it), then its chats, Work,
+ * repositories, files and sources as compact sections. Picking another
+ * project crossfades the content in place.
  */
-export function ProjectDetail(props: {
+export function ProjectView(props: {
   readonly environmentId: EnvironmentId;
   readonly labelId: ProjectLabelId;
-  readonly onClose: () => void;
+}) {
+  return (
+    <ProjectPageFrame>
+      <FadeSwap
+        group="project-page"
+        swapKey={projectLabelKey(props.environmentId, props.labelId)}
+        className="block w-full"
+      >
+        <ProjectPage
+          key={projectLabelKey(props.environmentId, props.labelId)}
+          environmentId={props.environmentId}
+          labelId={props.labelId}
+        />
+      </FadeSwap>
+    </ProjectPageFrame>
+  );
+}
+
+function ProjectPage(props: {
+  readonly environmentId: EnvironmentId;
+  readonly labelId: ProjectLabelId;
 }) {
   const { environmentId, labelId } = props;
   const navigate = useNavigate();
@@ -215,6 +258,7 @@ export function ProjectDetail(props: {
   const entry = directory.byKey.get(projectLabelKey(environmentId, labelId)) ?? null;
   const contents = byProject.get(projectLabelKey(environmentId, labelId));
   const repositories = useEnvironmentRepositories(environmentId);
+  const files = useProjectResources(environmentId, labelId);
   const canEdit = useAtomValue(serverEnvironment.updateProjectLabel.permissionAtom(environmentId));
   const canDelete = useAtomValue(
     serverEnvironment.deleteProjectLabel.permissionAtom(environmentId),
@@ -297,16 +341,11 @@ export function ProjectDetail(props: {
       reportProjectFolderFailure(failure, result);
     }
   };
+  const leave = () => void navigate({ to: "/project" });
   const remove = async () => {
     if (label === null) return;
-    if (await deleteFolder(environmentId, label)) props.onClose();
+    if (await deleteFolder(environmentId, label)) leave();
   };
-
-  const closeButton = (
-    <Button size="icon-xs" variant="ghost-muted" aria-label="Close project" onClick={props.onClose}>
-      <XIcon />
-    </Button>
-  );
 
   if (error !== null || !isLoaded || label === null || entry === null) {
     const [title, description] =
@@ -319,16 +358,9 @@ export function ProjectDetail(props: {
               "It may have been deleted, or it lives on a machine that is not connected.",
             ];
     return (
-      <div className="flex h-full min-h-0 flex-col">
-        <div className="flex items-start gap-3 px-4 pt-4 pb-3">
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold tracking-tight">{title}</h1>
-            {description ? (
-              <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-            ) : null}
-          </div>
-          {closeButton}
-        </div>
+      <div className="flex flex-col gap-1 px-2.5">
+        <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
+        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
       </div>
     );
   }
@@ -337,7 +369,7 @@ export function ProjectDetail(props: {
     repositories: linkedRepositories.length,
     chats: chats.length,
     work: work.length,
-    files: 0,
+    files: files.resources.filter((resource) => resource.kind === "file").length,
   });
 
   const threadRow = (thread: EnvironmentThreadShell, showRepository: boolean) => {
@@ -357,10 +389,10 @@ export function ProjectDetail(props: {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-col gap-2 px-4 pt-4 pb-3">
-        <div className="flex items-start gap-3">
-          <ProjectFolderIcon color={label.color} className="mt-0.5 size-8" />
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2 px-2.5">
+        <div className="flex items-start gap-4">
+          <ProjectFolderIcon color={label.color} className="mt-0.5 size-10" />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <ProjectNameEditor
               key={label.name}
@@ -374,11 +406,24 @@ export function ProjectDetail(props: {
                 await update({ name }, `Could not rename ${label.name}`);
               }}
             />
-            <p className="truncate text-xs tabular-nums text-muted-foreground">
+            <p className="truncate text-sm tabular-nums text-muted-foreground">
               {summary ?? "Empty"}
             </p>
           </div>
-          <span className="flex shrink-0 items-center gap-0.5">
+          <span className="flex shrink-0 items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="brand"
+              onClick={() =>
+                void startScratchThread(environmentId, {
+                  surface: "chat",
+                  projectFolderId: labelId,
+                })
+              }
+            >
+              <SquarePenIcon />
+              New chat
+            </Button>
             <ProjectHeaderMenu
               label={label}
               canEdit={canEdit}
@@ -388,33 +433,14 @@ export function ProjectDetail(props: {
               onEditDetails={() => setEditingDetails(true)}
               onDelete={() => void remove()}
             />
-            {closeButton}
           </span>
         </div>
         {label.description ? (
           <p className="text-sm text-muted-foreground">{label.description}</p>
         ) : null}
       </div>
-      <div className="scroll-fade-y flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 pb-4 scrollbar-gutter-stable">
-        <ProjectPanelSection
-          title="Chats"
-          count={chats.length}
-          action={
-            <Button
-              size="xs"
-              variant="ghost-muted"
-              onClick={() =>
-                void startScratchThread(environmentId, {
-                  surface: "chat",
-                  projectFolderId: labelId,
-                })
-              }
-            >
-              <PlusIcon />
-              New chat
-            </Button>
-          }
-        >
+      <div className="flex flex-col gap-4">
+        <ProjectPanelSection title="Chats" count={chats.length}>
           {chats.map((thread) => threadRow(thread, false))}
         </ProjectPanelSection>
         <ProjectPanelSection
@@ -481,7 +507,13 @@ export function ProjectDetail(props: {
             />
           ))}
         </ProjectPanelSection>
-        <ProjectFilesSection environmentId={environmentId} labelId={labelId} />
+        <ProjectFilesSection
+          environmentId={environmentId}
+          labelId={labelId}
+          resources={files.resources}
+          loaded={files.isLoaded}
+          error={files.error}
+        />
         <ProjectPanelSection
           title="Sources"
           count={label.sourceLinks.length}
@@ -535,7 +567,7 @@ export function ProjectDetail(props: {
             environmentId={environmentId}
             label={label}
             onClose={() => setEditingDetails(false)}
-            onDeleted={props.onClose}
+            onDeleted={leave}
           />
         )}
       </OverlayPresence>

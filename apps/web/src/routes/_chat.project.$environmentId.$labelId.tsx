@@ -1,14 +1,12 @@
 import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { ProjectDraftView } from "../components/projects/ProjectDraftView";
+import { ProjectView } from "../components/projects/ProjectView";
 
-// The project's detail is the right panel, hosted by the `_chat` layout
-// (ProjectPanelHost); this route owns the main area: a new chat in the project.
 function ProjectRoute() {
   const { environmentId, labelId } = Route.useParams();
   return (
-    <ProjectDraftView
+    <ProjectView
       environmentId={environmentId as EnvironmentId}
       labelId={labelId as ProjectLabelId}
     />
