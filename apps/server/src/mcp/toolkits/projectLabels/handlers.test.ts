@@ -10,6 +10,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as Labels from "../../../projectLabels/ProjectLabelService.ts";
 import * as Clones from "../../../project/ProjectCloneTracker.ts";
@@ -302,12 +303,21 @@ it.effect.each([
     const { toolkit, dependencies, threadId, labelId, moved, dispatched } = yield* fileSetup({
       turned: true,
     });
-    const results = yield* (
+    const last =
       tool === "t3_thread_move_project_folder"
-        ? toolkit.handle(tool, { threadId, folderId: labelId })
-        : toolkit.handle(tool, { threadId, labelIds: [labelId] })
-    ).pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
-    expect(results.at(-1)?.result).toMatchObject({
+        ? yield* toolkit.handle(tool, { threadId, folderId: labelId }).pipe(
+            Stream.unwrap,
+            Stream.runLast,
+            Effect.map((last) => Option.getOrUndefined(last)?.result),
+            Effect.provide(dependencies),
+          )
+        : yield* toolkit.handle(tool, { threadId, labelIds: [labelId] }).pipe(
+            Stream.unwrap,
+            Stream.runLast,
+            Effect.map((last) => Option.getOrUndefined(last)?.result),
+            Effect.provide(dependencies),
+          );
+    expect(last).toMatchObject({
       code: "invalid_request",
       message: expect.stringContaining("t3_project_label_file_thread"),
     });

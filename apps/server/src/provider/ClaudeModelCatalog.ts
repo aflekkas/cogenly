@@ -59,8 +59,14 @@ function tryResolveClaudeModelCatalog(
   };
 }
 
-const BUNDLED_CLAUDE_PROVIDER_CATALOG =
-  resolveProviderCatalog(BUNDLED_MODEL_MANIFEST, CLAUDE) ?? undefined;
+/**
+ * Resolved on first use, not at import: ModelManifest reaches this module
+ * through the driver registry, so reading the manifest at load time sees it
+ * half-initialized whenever ModelManifest is imported first.
+ */
+let bundledProviderCatalog: ModelCatalog.ProviderCatalog | undefined;
+const bundledClaudeProviderCatalog = () =>
+  (bundledProviderCatalog ??= resolveProviderCatalog(BUNDLED_MODEL_MANIFEST, CLAUDE) ?? undefined);
 
 /**
  * Claude's built-in catalog from its manifest entry, falling back to the
@@ -71,15 +77,15 @@ export function resolveClaudeModelCatalog(
 ): ClaudeModelCatalog {
   return (
     tryResolveClaudeModelCatalog(catalog) ??
-    tryResolveClaudeModelCatalog(BUNDLED_CLAUDE_PROVIDER_CATALOG) ?? {
+    tryResolveClaudeModelCatalog(bundledClaudeProviderCatalog()) ?? {
       models: [],
     }
   );
 }
 
-export const BUNDLED_CLAUDE_MODEL_CATALOG = resolveClaudeModelCatalog(
-  BUNDLED_CLAUDE_PROVIDER_CATALOG,
-);
+let bundledModelCatalog: ClaudeModelCatalog | undefined;
+export const bundledClaudeModelCatalog = (): ClaudeModelCatalog =>
+  (bundledModelCatalog ??= resolveClaudeModelCatalog(bundledClaudeProviderCatalog()));
 
 /**
  * Scope the catalog to one instance's settings: custom model slugs stay opaque

@@ -7,7 +7,7 @@ import {
 } from "@t3tools/shared/model";
 
 import {
-  BUNDLED_CLAUDE_MODEL_CATALOG,
+  bundledClaudeModelCatalog,
   getClaudeCatalogModelCapabilities,
   isClaudeCatalogUltracodeEffort,
   normalizeClaudeCatalogEffort,
@@ -27,7 +27,7 @@ export interface CompiledClaudeModelSelection {
 /** Compile every Claude model option at the provider boundary. */
 export function compileClaudeModelSelection(
   selection: ModelSelection,
-  catalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
+  catalog: ClaudeModelCatalog = bundledClaudeModelCatalog(),
 ): CompiledClaudeModelSelection {
   const capabilities = getClaudeCatalogModelCapabilities(catalog, selection.model);
   const descriptors = getProviderOptionDescriptors({ caps: capabilities });

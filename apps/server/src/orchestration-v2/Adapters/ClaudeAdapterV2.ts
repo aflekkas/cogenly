@@ -124,7 +124,7 @@ import {
   makeClaudeEnvironment,
 } from "../../provider/Drivers/ClaudeHome.ts";
 import {
-  BUNDLED_CLAUDE_MODEL_CATALOG,
+  bundledClaudeModelCatalog,
   resolveClaudeCatalogContextWindowTokens,
   type ClaudeModelCatalog,
   getClaudeCatalogModelCapabilities,
@@ -182,7 +182,7 @@ export const CLAUDE_AGENT_SDK_QUERY_PROTOCOL = "claude-agent-sdk.query" as const
 
 function claudeContextWindow(modelSelection: ModelSelection): number | null {
   return (
-    resolveClaudeCatalogContextWindowTokens(BUNDLED_CLAUDE_MODEL_CATALOG, modelSelection) ?? null
+    resolveClaudeCatalogContextWindowTokens(bundledClaudeModelCatalog(), modelSelection) ?? null
   );
 }
 
@@ -3424,7 +3424,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   const { attachmentsDir, fileSystem, path, crypto, idAllocator, queryRunner } = adapterOptions;
   // Subagent model names and effort levels, including the instance's custom models.
   const subagentModelCatalog = scopeClaudeModelCatalog(
-    BUNDLED_CLAUDE_MODEL_CATALOG,
+    bundledClaudeModelCatalog(),
     adapterOptions.settings.customModels,
   );
   const continuationRequests = adapterOptions.continuationRequests ?? {
@@ -9157,7 +9157,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           providerSessionId: input.providerSessionId,
           providerSession: session,
           getModelContextWindow: (selection) =>
-            resolveClaudeCatalogContextWindowTokens(BUNDLED_CLAUDE_MODEL_CATALOG, selection),
+            resolveClaudeCatalogContextWindowTokens(bundledClaudeModelCatalog(), selection),
           events: Stream.fromEffectRepeat(Queue.take(events)),
           // Background shells, agents, monitors, and workflows end with the CLI.
           backgroundTasksEndWithProcess: true,

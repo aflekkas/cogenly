@@ -28,7 +28,7 @@ import {
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
 import {
-  BUNDLED_CLAUDE_MODEL_CATALOG,
+  bundledClaudeModelCatalog,
   type ClaudeModelCatalog,
   getClaudeCatalogModelCapabilities,
   isClaudeCatalogUltracodeEffort,
@@ -99,7 +99,7 @@ function claudeErrorResult(stdout: string): string | undefined {
 export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(function* (
   claudeSettings: ClaudeSettings,
   environment?: NodeJS.ProcessEnv,
-  modelCatalog: Effect.Effect<ClaudeModelCatalog> = Effect.succeed(BUNDLED_CLAUDE_MODEL_CATALOG),
+  modelCatalog: Effect.Effect<ClaudeModelCatalog> = Effect.succeed(bundledClaudeModelCatalog()),
 ) {
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fileSystem = yield* FileSystem.FileSystem;
