@@ -1,14 +1,11 @@
-import { memo, useRef } from "react";
+import { memo } from "react";
 import { Check, Copy } from "lucide";
 import { Button } from "../ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { cn } from "~/lib/utils";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import {
-  ANCHORED_COPY_TOAST_TIMEOUT_MS,
-  showAnchoredCopyErrorToast,
-  showAnchoredCopySuccessToast,
-} from "../ui/anchoredCopyToast";
+import { showCopiedToast, showCopyFailedToast } from "../ui/copiedToast";
+import { COPY_CONFIRMATION_MS } from "../ui/copiedToast.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export const MessageCopyButton = memo(function MessageCopyButton({
@@ -30,11 +27,11 @@ export const MessageCopyButton = memo(function MessageCopyButton({
   variant?: "outline" | "ghost";
   className?: string;
 }) {
-  const ref = useRef<HTMLButtonElement>(null);
+  // The icon morphs to a check for a moment and a toast confirms the copy.
   const { copyToClipboard, isCopied } = useCopyToClipboard<void>({
-    onCopy: () => showAnchoredCopySuccessToast(ref),
-    onError: (error: Error) => showAnchoredCopyErrorToast(ref, error),
-    timeout: ANCHORED_COPY_TOAST_TIMEOUT_MS,
+    onCopy: () => showCopiedToast({ kind: "clipboard" }),
+    onError: showCopyFailedToast,
+    timeout: COPY_CONFIRMATION_MS,
     ...(extraFlavors ? { extraFlavors } : {}),
   });
 
@@ -46,7 +43,6 @@ export const MessageCopyButton = memo(function MessageCopyButton({
             aria-label={label}
             disabled={isCopied}
             onClick={() => copyToClipboard(text)}
-            ref={ref}
             type="button"
             size={size}
             variant={variant === "ghost" ? "ghost-muted" : variant}

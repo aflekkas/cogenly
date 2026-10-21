@@ -32,18 +32,14 @@ import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepA
 import { DesktopUpdateLaunchNotice } from "../components/sidebar/updateEverythingRun";
 import { LegacyThreadMigrationToast } from "../components/LegacyThreadMigrationToast";
 import { ThreadNotificationCoordinator } from "../components/ThreadNotificationCoordinator";
+import { ThreadReadCoordinator } from "../components/ThreadReadCoordinator";
 import { ReopenClosedViewShortcut } from "../components/ReopenClosedViewShortcut";
 import { ProjectCloneToastCoordinator } from "../components/ProjectCloneToastCoordinator";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
 import { ChatGptWelcomeCoordinator } from "../components/settings/ChatGptWelcomeCoordinator";
 import { ProviderAuthCallbackCoordinator } from "../components/settings/ProviderAuthCallbackCoordinator";
 import { Button } from "../components/ui/button";
-import {
-  AnchoredToastProvider,
-  stackedThreadToast,
-  ToastProvider,
-  toastManager,
-} from "../components/ui/toast";
+import { stackedThreadToast, ToastProvider, toastManager } from "../components/ui/toast";
 import { isElectron } from "../env";
 import { useClientSettings } from "../hooks/useSettings";
 import {
@@ -169,18 +165,16 @@ function RootRouteView() {
   if (pathname === "/welcome") {
     return (
       <ToastProvider>
-        <AnchoredToastProvider>
-          <DocumentTitleSync />
-          <ContrastAppearanceSync />
+        <DocumentTitleSync />
+        <ContrastAppearanceSync />
 
-          <ProviderAuthCallbackCoordinator />
-          <CustomSnoozeDialogHost />
-          <CommandPalette>
-            <AppSidebarLayout>
-              <Outlet />
-            </AppSidebarLayout>
-          </CommandPalette>
-        </AnchoredToastProvider>
+        <ProviderAuthCallbackCoordinator />
+        <CustomSnoozeDialogHost />
+        <CommandPalette>
+          <AppSidebarLayout>
+            <Outlet />
+          </AppSidebarLayout>
+        </CommandPalette>
       </ToastProvider>
     );
   }
@@ -208,44 +202,43 @@ function RootRouteView() {
   // not a flash of threads) before landing on the welcome wizard.
   return (
     <ToastProvider>
-      <AnchoredToastProvider>
-        <DocumentTitleSync />
-        <ContrastAppearanceSync />
+      <DocumentTitleSync />
+      <ContrastAppearanceSync />
 
-        <ProviderAuthCallbackCoordinator />
-        <ChatGptWelcomeCoordinator />
-        <FirstRunGate
-          enabled={primaryEnvironmentAuthenticated}
-          hostedStatic={authGateState.status === "hosted-static"}
-        >
-          {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
-          {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
-          {primaryEnvironmentAuthenticated ? <DesktopWebLinkCoordinator /> : null}
-          {isElectron ? <RunningThreadKeepAlive /> : null}
-          <RelayClientInstallDialog />
-          <ConnectOnboardingDialog />
-          <SshPasswordPromptDialog />
-          <ThreadNotificationCoordinator />
-          <ReopenClosedViewShortcut />
-          <ConfirmDialogHost />
-          <CustomSnoozeDialogHost />
-          <SlowRpcRequestToastCoordinator />
-          <PermissionUpdateNotice />
-          {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}
-          <ProjectCloneToastCoordinator />
-          <HostedStaticEnvironmentBootstrap />
-          {primaryEnvironmentAuthenticated ? (
-            <EventRouter skipInitialBootstrapNavigation={returningFromWelcomeRef.current} />
-          ) : null}
-          {isElectron ? <DesktopUpdateLaunchNotice /> : null}
-          <LiveAgentsProvider>
-            {appShell}
-            <AgentsCreateHost />
-          </LiveAgentsProvider>
-          {/* Above the router: a theme draft is judged by walking the app, so the
+      <ProviderAuthCallbackCoordinator />
+      <ChatGptWelcomeCoordinator />
+      <FirstRunGate
+        enabled={primaryEnvironmentAuthenticated}
+        hostedStatic={authGateState.status === "hosted-static"}
+      >
+        {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
+        {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
+        {primaryEnvironmentAuthenticated ? <DesktopWebLinkCoordinator /> : null}
+        {isElectron ? <RunningThreadKeepAlive /> : null}
+        <RelayClientInstallDialog />
+        <ConnectOnboardingDialog />
+        <SshPasswordPromptDialog />
+        <ThreadNotificationCoordinator />
+        <ThreadReadCoordinator />
+        <ReopenClosedViewShortcut />
+        <ConfirmDialogHost />
+        <CustomSnoozeDialogHost />
+        <SlowRpcRequestToastCoordinator />
+        <PermissionUpdateNotice />
+        {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}
+        <ProjectCloneToastCoordinator />
+        <HostedStaticEnvironmentBootstrap />
+        {primaryEnvironmentAuthenticated ? (
+          <EventRouter skipInitialBootstrapNavigation={returningFromWelcomeRef.current} />
+        ) : null}
+        {isElectron ? <DesktopUpdateLaunchNotice /> : null}
+        <LiveAgentsProvider>
+          {appShell}
+          <AgentsCreateHost />
+        </LiveAgentsProvider>
+        {/* Above the router: a theme draft is judged by walking the app, so the
               editor has to survive navigation away from settings. */}
-        </FirstRunGate>
-      </AnchoredToastProvider>
+      </FirstRunGate>
     </ToastProvider>
   );
 }

@@ -29,6 +29,7 @@ import {
   threadActionRequiresOperate,
   type ThreadActionMenuId,
 } from "../components/threadActionMenu.logic";
+import { showCopiedToast } from "../components/ui/copiedToast";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
@@ -127,26 +128,29 @@ export function useThreadActionMenu(input: {
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
-      toastManager.add({ type: "success", title: "Path copied", description: path });
+      showCopiedToast({ kind: "path", path });
     },
     onError: (error) => failureToast("Failed to copy path", error),
   });
   const { copyToClipboard: copyBranchToClipboard } = useCopyToClipboard<{ branch: string }>({
     target: "branch name",
     onCopy: ({ branch }) => {
-      toastManager.add({ type: "success", title: "Branch copied", description: branch });
+      showCopiedToast({ kind: "branch", branch });
     },
     onError: (error) => failureToast("Failed to copy branch", error),
   });
   const { copyToClipboard: copyThreadLinkToClipboard } = useCopyToClipboard<{ link: string }>({
     onCopy: ({ link }) => {
-      toastManager.add({ type: "success", title: "Thread link copied", description: link });
+      showCopiedToast({ kind: "thread-link", link });
     },
     onError: (error) => failureToast("Failed to copy thread link", error),
   });
-  const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{ threadId: ThreadId }>({
-    onCopy: ({ threadId }) => {
-      toastManager.add({ type: "success", title: "Thread ID copied", description: threadId });
+  const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{
+    threadId: ThreadId;
+    threadTitle: string;
+  }>({
+    onCopy: ({ threadId, threadTitle }) => {
+      showCopiedToast({ kind: "thread-id", threadId, threadTitle });
     },
     onError: (error) => failureToast("Failed to copy thread ID", error),
   });
@@ -380,7 +384,7 @@ export function useThreadActionMenu(input: {
             }
             return;
           case "copy-thread-id":
-            copyThreadIdToClipboard(thread.id, { threadId: thread.id });
+            copyThreadIdToClipboard(thread.id, { threadId: thread.id, threadTitle: thread.title });
             return;
           case "archive": {
             if (confirmThreadArchive) {

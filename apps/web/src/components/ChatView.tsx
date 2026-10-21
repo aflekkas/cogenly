@@ -414,6 +414,7 @@ import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ScrollToEndButton } from "./chat/ScrollToEndButton";
+import { releaseThreadUnreadHold } from "../lib/threadReadState";
 import {
   PanelLayoutControls,
   type PanelLayoutControlsProps,
@@ -1286,6 +1287,18 @@ export default function ChatView(props: ChatViewProps) {
   };
   const citeAssistantTextStable = useStableCallback(citeAssistantText);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  // Scrolling back down to the end of the transcript reads it: release an
+  // unread hold the user placed on this open thread (lib/threadReadState).
+  const leftTranscriptEndRef = useRef(false);
+  useEffect(() => {
+    if (showScrollToBottom) {
+      leftTranscriptEndRef.current = true;
+      return;
+    }
+    if (!leftTranscriptEndRef.current) return;
+    leftTranscriptEndRef.current = false;
+    releaseThreadUnreadHold(routeThreadKey);
+  }, [routeThreadKey, showScrollToBottom]);
   const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   useEffect(() => {

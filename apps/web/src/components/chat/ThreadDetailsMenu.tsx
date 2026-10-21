@@ -49,6 +49,7 @@ import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
+import { showCopiedToast } from "../ui/copiedToast";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentElapsed } from "./AgentElapsed";
@@ -357,8 +358,7 @@ function ThreadAgentsSection(props: {
     reportFailure: false,
   });
   const { copyToClipboard } = useCopyToClipboard<{ link: string }>({
-    onCopy: ({ link }) =>
-      toastManager.add({ type: "success", title: "Thread link copied", description: link }),
+    onCopy: ({ link }) => showCopiedToast({ kind: "thread-link", link }),
     onError: () => toastManager.add({ type: "error", title: "Failed to copy thread link" }),
   });
   const { summary } = props;

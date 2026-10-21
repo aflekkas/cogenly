@@ -204,6 +204,13 @@ import {
 } from "../providerInstances";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useStableCallback } from "../hooks/useStableCallback";
+import { showCopiedToast } from "./ui/copiedToast";
+import { ScrambleText } from "./ui/scramble-text";
+import { Spinner } from "./ui/spinner";
+import {
+  setSidebarContextMenuTarget,
+  useSidebarContextMenuTarget,
+} from "./sidebar/sidebarContextMenuTarget";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
@@ -958,6 +965,7 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
   const localLastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const lastVisitedAt = resolveThreadLastVisitedAt(thread.lastVisitedAt, localLastVisitedAt);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
+  const isContextMenuOpen = useSidebarContextMenuTarget((state) => state.threadKey === threadKey);
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarThreadStatus(thread);
   const needsYou = status === "approval" || status === "input";
@@ -1066,7 +1074,8 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
         aria-busy={thread.titleRegeneration != null || undefined}
         className={cn(
           "relative flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          props.isActive || isSelected ? "state-selected" : "state-hover",
+          props.isActive || isSelected || isContextMenuOpen ? "state-selected" : "state-hover",
+          isContextMenuOpen && "focus-visible:ring-0",
         )}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
@@ -1092,14 +1101,16 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
               "min-w-0 flex-1 text-sm",
               isUnread || needsYou ? "font-medium text-foreground" : "font-normal",
               props.isActive ? "text-foreground" : !(isUnread || needsYou) && "text-foreground/80",
-              thread.titleRegeneration != null && "opacity-55",
             )}
           >
-            <span aria-hidden>{thread.title}</span>
+            <span aria-hidden>
+              <ScrambleText text={thread.title} scrambling={thread.titleRegeneration != null} />
+            </span>
           </PanOnHoverText>
         )}
         <SidebarChatStatusSlot
-          isRunning={isRunning}
+          // A title regeneration shows the same spinner in place of the dot.
+          isRunning={isRunning || thread.titleRegeneration != null}
           dot={needsYou ? "warning" : isUnread ? "info" : null}
         />
         {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
@@ -1201,6 +1212,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const localLastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const lastVisitedAt = resolveThreadLastVisitedAt(thread.lastVisitedAt, localLastVisitedAt);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
+  const isContextMenuOpen = useSidebarContextMenuTarget((state) => state.threadKey === threadKey);
   const openPrLink = useOpenPrLink();
   const runningTerminalIds = useThreadRunningTerminalIds({
     environmentId: thread.environmentId,
@@ -1500,7 +1512,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     // under the hover actions (useSidebarRowActionsOverlap).
     "group/sidebar-row sidebar-row-motion relative w-full cursor-pointer overflow-hidden rounded-rail text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
-    props.isActive || isSelected || props.sweepAction !== null
+    props.isActive || isSelected || isContextMenuOpen || props.sweepAction !== null
       ? "state-selected"
       : hasUnsentDraft
         ? "state-hover bg-(--sidebar-card) text-sidebar-foreground"
@@ -1512,6 +1524,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     shouldRecede && status === "working" && "opacity-70 hover:opacity-100 focus-within:opacity-100",
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
     isFileDragOver && !props.isActive && !isSelected && "bg-state-hover",
+    isContextMenuOpen && "focus-visible:ring-0",
   );
   const sweepBadge =
     props.sweepAction !== null ? (
@@ -1570,10 +1583,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       ? "text-muted-foreground"
                       : "text-secondary-label/70",
               ),
-          isRegeneratingTitle && "opacity-55",
         )}
       >
-        <span aria-hidden>{thread.title}</span>
+        <span aria-hidden>
+          <ScrambleText text={thread.title} scrambling={isRegeneratingTitle} />
+        </span>
       </PanOnHoverText>
     );
   const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
@@ -1687,8 +1701,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   />
                   <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
                 </Tooltip>
+              ) : isRegeneratingTitle ? (
+                // Same spinner as a running chat row, until the new title lands.
+                <span key="regenerating" className="swap-motion inline-flex h-4 items-center">
+                  <Spinner size="xs" tone="muted" />
+                </span>
               ) : (
-                <span className="text-xs">
+                <span key="time" className="swap-motion text-xs">
                   {variantAction === "unsettle"
                     ? settledTimeLabel(thread)
                     : threadTimeLabel(thread)}
@@ -1880,6 +1899,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       ) : null}
                     </span>
                   )
+                ) : isRegeneratingTitle ? (
+                  <span key="regenerating" className="swap-motion inline-flex h-4 items-center">
+                    <Spinner size="xs" tone="muted" />
+                  </span>
                 ) : (
                   <span key="time" className="swap-motion">
                     {variantAction === "unsettle"
@@ -2178,14 +2201,21 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
                   ? "font-normal text-secondary-label/70 group-hover/sidebar-row:text-foreground"
                   : "font-medium text-foreground",
                 (props.isHighlighted || props.isRouteActive) && "text-foreground",
-                thread.titleRegeneration != null && "opacity-55",
               )}
             >
-              {thread.title}
+              <ScrambleText text={thread.title} scrambling={thread.titleRegeneration != null} />
             </PanOnHoverText>
             <span id={`${props.resultId}-pr`} className="contents"></span>
-            <span className="w-8 shrink-0 text-right text-xs text-muted-foreground/55 tabular-nums">
-              {threadTimeLabel(thread)}
+            <span className="flex w-8 shrink-0 justify-end text-xs text-muted-foreground/55 tabular-nums">
+              {thread.titleRegeneration != null ? (
+                <span key="regenerating" className="swap-motion inline-flex h-4 items-center">
+                  <Spinner size="xs" tone="muted" />
+                </span>
+              ) : (
+                <span key="time" className="swap-motion">
+                  {threadTimeLabel(thread)}
+                </span>
+              )}
             </span>
           </span>
           {props.searchMatch ? (
@@ -2233,11 +2263,7 @@ export default function Sidebar() {
   });
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
-      toastManager.add({
-        type: "success",
-        title: "Path copied",
-        description: path,
-      });
+      showCopiedToast({ kind: "path", path });
     },
     onError: (error) => {
       toastManager.add(
@@ -2252,11 +2278,7 @@ export default function Sidebar() {
   const { copyToClipboard: copyBranchToClipboard } = useCopyToClipboard<{ branch: string }>({
     target: "branch name",
     onCopy: ({ branch }) => {
-      toastManager.add({
-        type: "success",
-        title: "Branch copied",
-        description: branch,
-      });
+      showCopiedToast({ kind: "branch", branch });
     },
     onError: (error) => {
       toastManager.add(
@@ -2270,7 +2292,7 @@ export default function Sidebar() {
   });
   const { copyToClipboard: copyThreadLinkToClipboard } = useCopyToClipboard<{ link: string }>({
     onCopy: ({ link }) => {
-      toastManager.add({ type: "success", title: "Thread link copied", description: link });
+      showCopiedToast({ kind: "thread-link", link });
     },
     onError: (error) => {
       toastManager.add(
@@ -2282,13 +2304,12 @@ export default function Sidebar() {
       );
     },
   });
-  const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{ threadId: ThreadId }>({
-    onCopy: ({ threadId }) => {
-      toastManager.add({
-        type: "success",
-        title: "Thread ID copied",
-        description: threadId,
-      });
+  const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{
+    threadId: ThreadId;
+    threadTitle: string;
+  }>({
+    onCopy: ({ threadId, threadTitle }) => {
+      showCopiedToast({ kind: "thread-id", threadId, threadTitle });
     },
     onError: (error) => {
       toastManager.add(
@@ -3938,6 +3959,7 @@ export default function Sidebar() {
                 projectRef.projectId === thread.projectId,
             ),
           ) ?? null;
+        setSidebarContextMenuTarget(threadKey);
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildThreadActionMenuItems({
@@ -3986,6 +4008,7 @@ export default function Sidebar() {
             position,
           ),
         );
+        setSidebarContextMenuTarget(null);
         if (clicked._tag === "Failure" || clicked.value === null) return;
         if (clicked.value.startsWith("open-project:")) {
           const entry = projectLabelDirectory.byKey.get(
@@ -4146,7 +4169,7 @@ export default function Sidebar() {
             }
             return;
           case "copy-thread-id":
-            copyThreadIdToClipboard(thread.id, { threadId: thread.id });
+            copyThreadIdToClipboard(thread.id, { threadId: thread.id, threadTitle: thread.title });
             return;
           case "archive": {
             if (confirmThreadArchive) {

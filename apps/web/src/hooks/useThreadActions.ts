@@ -4,7 +4,11 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
-import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  isAtomCommandInterrupted,
+  settlePromise,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import {
@@ -46,6 +50,7 @@ import {
   readThreadShell,
 } from "../state/entities";
 import { useUiStateStore } from "../uiStateStore";
+import { holdThreadUnread, releaseThreadUnreadHold } from "../lib/threadReadState";
 import { clearThreadPreviewState } from "../previewStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
@@ -133,41 +138,17 @@ export async function navigateAfterThreadDeletion(navigate: () => Promise<void>)
 }
 
 /**
- * Marks a thread unread. Servers with visited tracking own the unread marker
- * (thread.mark-unread rewinds the server-side visited watermark, syncing the
- * marker to every device); older servers keep the browser-local marker.
+ * Records a visit now: on the server when it tracks visits (synced to every
+ * device), in this browser otherwise. Releases any unread hold, since the
+ * thread has now been seen.
  */
-function useMarkThreadUnread() {
-  const markThreadUnreadMutation = useAtomCommand(threadEnvironment.markUnread, {
-    reportFailure: false,
-  });
-  const markThreadUnreadLocal = useUiStateStore((state) => state.markThreadUnread);
-  return useCallback(
-    (target: ScopedThreadRef) => {
-      if (readEnvironmentSupportsVisitedTracking(target.environmentId)) {
-        void markThreadUnreadMutation({
-          environmentId: target.environmentId,
-          input: { threadId: target.threadId },
-        });
-        return;
-      }
-      const thread = readThreadShell(target);
-      markThreadUnreadLocal(scopedThreadKey(target), thread?.latestRun?.completedAt);
-    },
-    [markThreadUnreadLocal, markThreadUnreadMutation],
-  );
-}
-
-/**
- * Marks a thread read, the reverse of mark unread: records a visit now, on
- * the server when it tracks visits and in this browser otherwise.
- */
-function useMarkThreadRead() {
+export function useRecordThreadVisit() {
   const visitThreadMutation = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
   return useCallback(
     (target: ScopedThreadRef) => {
       const visitedAt = new Date().toISOString();
+      releaseThreadUnreadHold(scopedThreadKey(target));
       if (readEnvironmentSupportsVisitedTracking(target.environmentId)) {
         void visitThreadMutation({
           environmentId: target.environmentId,
@@ -178,6 +159,60 @@ function useMarkThreadRead() {
       markThreadVisited(scopedThreadKey(target), visitedAt);
     },
     [markThreadVisited, visitThreadMutation],
+  );
+}
+
+/**
+ * Marks a thread unread. Servers with visited tracking own the unread marker
+ * (thread.mark-unread rewinds the server-side visited watermark, syncing the
+ * marker to every device); older servers keep the browser-local marker.
+ *
+ * The thread is held unread so the open thread does not read itself again
+ * while you stay on it, and a toast confirms the change with an Undo.
+ */
+function useMarkThreadUnread(recordVisit: (target: ScopedThreadRef) => void) {
+  const markThreadUnreadMutation = useAtomCommand(threadEnvironment.markUnread, {
+    reportFailure: false,
+  });
+  const markThreadUnreadLocal = useUiStateStore((state) => state.markThreadUnread);
+  return useCallback(
+    (target: ScopedThreadRef) => {
+      const completedAt = readThreadShell(target)?.latestRun?.completedAt ?? null;
+      const threadKey = scopedThreadKey(target);
+      holdThreadUnread(threadKey, completedAt);
+      if (readEnvironmentSupportsVisitedTracking(target.environmentId)) {
+        void markThreadUnreadMutation({
+          environmentId: target.environmentId,
+          input: { threadId: target.threadId },
+        }).then((result) => {
+          if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+          releaseThreadUnreadHold(threadKey);
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not mark as unread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        });
+      } else {
+        markThreadUnreadLocal(threadKey, completedAt);
+      }
+      const toastId = toastManager.add({
+        type: "success",
+        title: "Marked as unread",
+        timeout: 5_000,
+        actionProps: {
+          children: "Undo",
+          onClick: () => {
+            toastManager.close(toastId);
+            recordVisit(target);
+          },
+        },
+      });
+    },
+    [markThreadUnreadLocal, markThreadUnreadMutation, recordVisit],
   );
 }
 
@@ -243,8 +278,8 @@ export function useThreadActions() {
   const unsnoozeThreadMutation = useOrchestrationCommand(threadEnvironment.unsnooze, {
     reportFailure: false,
   });
-  const markThreadUnread = useMarkThreadUnread();
-  const markThreadRead = useMarkThreadRead();
+  const markThreadRead = useRecordThreadVisit();
+  const markThreadUnread = useMarkThreadUnread(markThreadRead);
   const stopThreadSession = useOrchestrationCommand(threadEnvironment.stopSession);
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
     reportFailure: false,

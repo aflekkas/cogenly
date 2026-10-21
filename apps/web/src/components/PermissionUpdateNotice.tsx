@@ -61,7 +61,6 @@ function EnvironmentPermissionNotice({
         },
       },
       data: {
-        actionLayout: "stacked-end",
         secondaryActionProps: { children: "Dismiss", onClick: dismiss },
         secondaryActionVariant: "ghost",
       },

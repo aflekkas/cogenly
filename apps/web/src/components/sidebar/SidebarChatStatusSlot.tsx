@@ -5,7 +5,7 @@ import { Spinner } from "../ui/spinner";
 
 const CHAT_STATUS_SPINNER_EXIT_MS = 220;
 const chatStatusLayerClassName =
-  "absolute inset-0 flex items-center justify-center transition-[opacity,scale] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none";
+  "absolute inset-0 flex items-center justify-center transition-[opacity,scale] duration-(--motion-duration-base) ease-standard motion-reduce:transition-opacity";
 
 /**
  * The fixed-size slot at the end of a Chats row. The spinner and the dot sit

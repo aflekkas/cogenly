@@ -7,12 +7,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import {
-  CircleAlertIcon,
-  CircleCheckIcon,
-  MessageCircleQuestionIcon,
-  ShieldQuestionIcon,
-} from "lucide-react";
+import { MessageCircleQuestionIcon, ShieldQuestionIcon } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
@@ -189,16 +184,18 @@ function EnvironmentNotifications({
           description: thread.title,
           data: {
             hideCopyButton: true,
-            leadingIcon:
-              kind === "completion" ? (
-                <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />
-              ) : status === "approval" ? (
-                <ShieldQuestionIcon aria-hidden className="size-4 text-warning-foreground" />
-              ) : status === "failed" ? (
-                <CircleAlertIcon aria-hidden className="size-4 text-destructive-foreground" />
-              ) : (
-                <MessageCircleQuestionIcon aria-hidden className="size-4 text-info-foreground" />
-              ),
+            // Completion and failure use the card's own type icon; asks get
+            // a question icon in the same slot and tone.
+            ...(kind === "completion" || status === "failed"
+              ? {}
+              : {
+                  leadingIcon:
+                    status === "approval" ? (
+                      <ShieldQuestionIcon aria-hidden className="text-warning" />
+                    ) : (
+                      <MessageCircleQuestionIcon aria-hidden className="text-warning" />
+                    ),
+                }),
           },
           actionProps: {
             children: "Open thread",
