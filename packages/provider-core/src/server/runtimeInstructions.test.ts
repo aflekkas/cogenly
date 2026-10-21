@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { buildRuntimeInstructions } from "./runtimeInstructions.ts";
+import { CONVERSATION_MODE_INSTRUCTIONS, buildRuntimeInstructions } from "./runtimeInstructions.ts";
 
 describe("buildRuntimeInstructions", () => {
   it("requires explicit registration of every PR and stack layer", () => {
@@ -33,5 +33,15 @@ describe("buildRuntimeInstructions", () => {
     const instructions = buildRuntimeInstructions({ harness: "Cursor", model });
     expect(instructions).toContain("through the Cursor harness.");
     expect(instructions).not.toContain("reasoning effort");
+  });
+});
+
+describe("CONVERSATION_MODE_INSTRUCTIONS", () => {
+  it("biases visual answers toward inline pictures from real sources", () => {
+    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("asks for pictures");
+    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("1-4 relevant images inline");
+    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("![alt](url)");
+    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("image_search");
+    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("never invent URLs");
   });
 });

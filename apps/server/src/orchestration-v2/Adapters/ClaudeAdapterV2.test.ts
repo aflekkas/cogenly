@@ -18,6 +18,7 @@ import { Tool } from "effect/ai";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools.ts";
 import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
+import { ImageToolkit } from "../../mcp/toolkits/images/tools.ts";
 import { EnvironmentToolkit } from "../../mcp/toolkits/environment/tools.ts";
 import { ProjectToolkit } from "../../mcp/toolkits/project/tools.ts";
 import { WorktreeToolkit } from "../../mcp/toolkits/worktree/tools.ts";
@@ -247,6 +248,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
           ? String(options.systemPrompt.append ?? "")
           : "";
       assert.notInclude(append, "<conversation_mode>");
+      assert.notInclude(append, "image_search");
     },
   );
 
@@ -265,6 +267,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
         : "";
     assert.include(append, "<conversation_mode>");
     assert.include(append, "Start Work");
+    assert.include(append, "image_search");
     assert.notInclude(append, "terminal_run");
   });
 });
@@ -488,6 +491,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       ...Object.values(EnvironmentToolkit.tools),
       ...Object.values(PreviewControlsToolkit.tools),
       ...Object.values(HtmlToolkit.tools),
+      ...Object.values(ImageToolkit.tools),
     ]
       .filter((tool) => Context.get(tool.annotations, Tool.Readonly))
       .map((tool) => `mcp__cogenly__${tool.name}`)

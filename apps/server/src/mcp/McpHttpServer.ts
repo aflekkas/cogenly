@@ -75,6 +75,9 @@ import {
   HtmlRenderToolkit,
   HtmlStateToolkit,
 } from "./toolkits/html/tools.ts";
+import * as ImageHandlers from "./toolkits/images/handlers.ts";
+import { ImageToolkit } from "./toolkits/images/tools.ts";
+import * as ImageSearchService from "../images/ImageSearchService.ts";
 
 /** Where an MCP client discovers how to sign in (RFC 9728), at this request's own origin. */
 const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
@@ -970,6 +973,9 @@ export const layer = Layer.mergeAll(
   toolkitRegistration(AgentMemoryMcp.toolkit, AgentMemoryMcp.handlers),
   toolkitRegistration(WorkMcp.toolkit, WorkMcp.handlers),
   toolkitRegistration(SearchMcp.toolkit, SearchMcp.handlers),
+  toolkitRegistration(ImageToolkit, ImageHandlers.layer).pipe(
+    Layer.provide(ImageSearchService.layer),
+  ),
   toolkitRegistration(AgentWorkspaceMcp.toolkit, AgentWorkspaceMcp.handlers),
   toolkitRegistration(AgentBuilderMcp.toolkit, AgentBuilderMcp.handlers),
   layerOrchestratorToolkit,

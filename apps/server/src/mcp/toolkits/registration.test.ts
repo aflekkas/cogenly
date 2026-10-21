@@ -29,7 +29,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import { idleThreadProjection, liveThreadShell } from "../McpToolAccess.testkit.ts";
-import { HttpBody, HttpClient, HttpRouter } from "effect/http";
+import { HttpBody, HttpClient, HttpClientResponse, HttpRouter } from "effect/http";
 
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
@@ -237,6 +237,13 @@ const smokeCases = [
     names: ["search"],
     tool: "search",
     args: { query: "quartz" },
+    expected: { results: [] },
+  },
+  {
+    toolkit: "images",
+    names: ["image_search"],
+    tool: "image_search",
+    args: { query: "red fox" },
     expected: { results: [] },
   },
   {
@@ -574,10 +581,30 @@ it.effect.each(smokeCases)(
     Effect.scoped(
       Effect.gen(function* () {
         const layerRoutes = McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer));
+        // The images toolkit reaches the real Commons API through HttpClient;
+        // the smoke run answers that host in-process so the suite stays
+        // hermetic. Everything else delegates to the ambient client.
+        const ambientClient = yield* HttpClient.HttpClient;
+        const smokeHttpClient: HttpClient.HttpClient = {
+          ...ambientClient,
+          execute: (request) =>
+            request.url.startsWith("https://commons.wikimedia.org")
+              ? Effect.succeed(
+                  HttpClientResponse.fromWeb(
+                    request,
+                    new Response(JSON.stringify({ batchcomplete: true }), {
+                      status: 200,
+                      headers: { "content-type": "application/json" },
+                    }),
+                  ),
+                )
+              : ambientClient.execute(request),
+        };
         yield* HttpRouter.serve(layerRoutes, {
           disableListenLog: true,
           disableLogger: true,
         }).pipe(
+          Layer.provide(Layer.succeed(HttpClient.HttpClient, smokeHttpClient)),
           Layer.provide(
             Layer.mock(ServerEnvironment.ServerEnvironment)({
               getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-scratch")),

@@ -74,6 +74,7 @@ export * from "./work.ts";
 export * from "./agentWorkspace.ts";
 
 export * from "./search.ts";
+export * from "./imageSearch.ts";
 export * from "./fact.ts";
 export * from "./visual.ts";
 export * from "./export.ts";

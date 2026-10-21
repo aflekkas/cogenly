@@ -561,6 +561,7 @@ describe("CodexAdapterV2 runtime policy", () => {
         "<conversation_mode>",
       );
       assert.include(params.additionalContext?.cogenly_conversation?.value ?? "", "Start Work");
+      assert.include(params.additionalContext?.cogenly_conversation?.value ?? "", "image_search");
       assert.notInclude(params.additionalContext?.cogenly_tools?.value ?? "", "terminal_run");
     }),
   );
@@ -610,6 +611,10 @@ describe("CodexAdapterV2 runtime policy", () => {
       assert.notInclude(
         params.collaborationMode?.settings.developer_instructions ?? "",
         "<conversation_mode>",
+      );
+      assert.notInclude(
+        params.collaborationMode?.settings.developer_instructions ?? "",
+        "image_search",
       );
     }),
   );

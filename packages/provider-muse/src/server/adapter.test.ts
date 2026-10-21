@@ -470,6 +470,7 @@ describe("MuseAdapterV2", () => {
       const text = JSON.stringify(call.params.input);
       assert.include(text, "<conversation_mode>");
       assert.include(text, "Start Work");
+      assert.include(text, "image_search");
       yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
@@ -509,6 +510,7 @@ describe("MuseAdapterV2", () => {
       yield* harness.runtime.startTurn(yield* turnInput(harness.providerThread, 1, runtimePolicy));
       const call = yield* fake.takeCall("turn/start");
       assert.notInclude(JSON.stringify(call.params.input), "<conversation_mode>");
+      assert.notInclude(JSON.stringify(call.params.input), "image_search");
       yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );

@@ -32,6 +32,7 @@ import * as ServerConfig from "./config.ts";
 import { HEALTH_PATH } from "./health.ts";
 import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
 import { githubMediaResponse } from "./assets/GitHubMediaFetch.ts";
+import { IMAGE_PROXY_PATH, imageProxyResponse } from "./assets/ImageProxyFetch.ts";
 import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
 import {
   ATTACHMENT_UPLOAD_ROUTE_PREFIX,
@@ -510,6 +511,33 @@ export const layerAttachmentUploadRoute = HttpRouter.add(
       ? HttpServerResponse.empty({ status: 204 })
       : HttpServerResponse.text(stored.detail, { status: stored.status });
   }),
+);
+
+// Serves third-party chat images through this origin so the web client never
+// hotlinks: `GET /api/image-proxy?url=<https-image-url>`. Https targets only,
+// images only, bounded in size and time; see ImageProxyFetch.
+export const layerImageProxyRoute = HttpRouter.add(
+  "GET",
+  IMAGE_PROXY_PATH,
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationReadScope);
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+    const target = url.value.searchParams.get("url");
+    if (!target) {
+      return HttpServerResponse.text("Missing url query parameter.", { status: 400 });
+    }
+    return yield* imageProxyResponse(target);
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+  ),
 );
 
 const decodeBuildManifest = Schema.decodeUnknownEffect(

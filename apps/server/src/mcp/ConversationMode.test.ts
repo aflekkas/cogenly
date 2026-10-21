@@ -25,6 +25,9 @@ import * as WorktreeMcpService from "./WorktreeMcpService.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import * as ThreadMetadataMcpService from "./ThreadMetadataMcpService.ts";
 import * as WorkHandoff from "../work/WorkHandoffService.ts";
+import * as ImageSearchService from "../images/ImageSearchService.ts";
+import { ImageToolkit } from "./toolkits/images/tools.ts";
+import { layer as ImageHandlers } from "./toolkits/images/handlers.ts";
 import { TerminalToolkit } from "./toolkits/terminal/tools.ts";
 import { layer as TerminalHandlers } from "./toolkits/terminal/handlers.ts";
 import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
@@ -64,6 +67,7 @@ const serverLayer = Layer.mergeAll(
   McpHttpServer.toolkitRegistration(OrchestratorToolkit, OrchestratorHandlers),
   McpHttpServer.toolkitRegistration(WorkToolkit, WorkHandlers),
   McpHttpServer.toolkitRegistration(ProjectToolkit, ProjectHandlers),
+  McpHttpServer.toolkitRegistration(ImageToolkit, ImageHandlers),
 ).pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
   Layer.provideMerge(threadLayers),
@@ -107,6 +111,19 @@ const serverLayer = Layer.mergeAll(
     }),
   ),
   Layer.provideMerge(Layer.mock(Project.ProjectService)({})),
+  Layer.provideMerge(
+    Layer.mock(ImageSearchService.ImageSearchService)({
+      search: () =>
+        Effect.succeed({
+          results: [
+            {
+              url: "https://upload.wikimedia.org/wikipedia/commons/1/2/Red_fox.jpg",
+              title: "Red fox",
+            },
+          ],
+        }),
+    }),
+  ),
   Layer.provideMerge(Layer.mock(ThreadLaunch.ThreadLaunchService)({})),
   Layer.provideMerge(
     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
@@ -211,6 +228,32 @@ describe("conversation-mode MCP boundary", () => {
     callText("work_propose_handoff", chatThreadId, {}).pipe(
       Effect.map((text) => {
         assert.equal((JSON.parse(text) as { title: string }).title, "Chat draft");
+      }),
+    ),
+  );
+
+  it.effect("image_search serves a chat-surface caller", () =>
+    callText("image_search", chatThreadId, { query: "red fox" }).pipe(
+      Effect.map((text) => {
+        assert.deepEqual(JSON.parse(text), {
+          results: [
+            {
+              url: "https://upload.wikimedia.org/wikipedia/commons/1/2/Red_fox.jpg",
+              title: "Red fox",
+            },
+          ],
+        });
+      }),
+    ),
+  );
+
+  it.effect("image_search serves a work-surface caller", () =>
+    callText("image_search", workThreadId, { query: "red fox" }).pipe(
+      Effect.map((text) => {
+        assert.equal(
+          (JSON.parse(text) as { results: Array<{ title?: string }> }).results[0]?.title,
+          "Red fox",
+        );
       }),
     ),
   );
