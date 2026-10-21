@@ -268,6 +268,7 @@ export const make = Effect.gen(function* () {
     const resolved = resolveDefaultCloneDestination({
       projectsRootSetting: settings.projectsRoot,
       home: yield* HostProcess.HomeDirectory,
+      cogenlyHome: config.baseDir,
       repository: input.repository,
       remoteUrl: input.remoteUrl,
       path,

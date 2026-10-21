@@ -1619,6 +1619,7 @@ const makeWsRpcHandlers = (
           crypto,
           path,
           home,
+          cogenlyHome: config.baseDir,
           refreshGitStatus,
         }),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),

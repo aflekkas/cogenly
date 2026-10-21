@@ -38,6 +38,7 @@ export interface ProjectLabelCloneDeps {
   readonly crypto: Crypto.Crypto;
   readonly path: Path.Path;
   readonly home: string;
+  readonly cogenlyHome: string;
   readonly refreshGitStatus: (cwd: string) => Effect.Effect<void>;
 }
 
@@ -67,7 +68,7 @@ export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.c
     ),
   );
   const destinationPath = resolveRepositoryDirectory(
-    resolveProjectsRootDirectory(settings.projectsRoot, deps.home, deps.path),
+    resolveProjectsRootDirectory(settings.projectsRoot, deps.home, deps.cogenlyHome, deps.path),
     label.name,
     folderName,
     deps.path,

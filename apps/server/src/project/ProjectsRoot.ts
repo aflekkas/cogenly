@@ -1,4 +1,3 @@
-import { DEFAULT_PROJECTS_ROOT } from "@t3tools/contracts";
 import type * as Path from "effect/Path";
 
 import { UNFILED_REPOSITORIES_SEGMENT, sanitizePathSegment } from "@t3tools/shared/path";
@@ -8,16 +7,19 @@ export { UNFILED_REPOSITORIES_SEGMENT, sanitizePathSegment };
 
 /**
  * The user-visible home for repositories Cogenly creates. Blank resolves to
- * the default (`~/Cogenly`); `~` expands to `home`; anything else resolves as
- * an absolute path, or against `home` when relative.
+ * `<cogenlyHome>/projects`, so dev servers land in their own home's
+ * `projects/`; `~` expands to `home`; anything else resolves as an absolute
+ * path, or against `home` when relative.
  */
 export function resolveProjectsRootDirectory(
   setting: string,
   home: string,
+  cogenlyHome: string,
   path: Path.Path,
 ): string {
   const trimmed = setting.trim();
-  const expanded = expandHomePath(trimmed === "" ? DEFAULT_PROJECTS_ROOT : trimmed, home);
+  if (trimmed === "") return path.join(path.resolve(cogenlyHome), "projects");
+  const expanded = expandHomePath(trimmed, home);
   return path.resolve(path.isAbsolute(expanded) ? expanded : path.join(home, expanded));
 }
 
@@ -85,6 +87,7 @@ export function repositoryDirectoryNameFromRemote(input: {
 export function resolveDefaultCloneDestination(input: {
   readonly projectsRootSetting: string;
   readonly home: string;
+  readonly cogenlyHome: string;
   readonly repository?: string | undefined;
   readonly remoteUrl?: string | undefined;
   readonly path: Path.Path;
@@ -92,7 +95,12 @@ export function resolveDefaultCloneDestination(input: {
   const name = repositoryDirectoryNameFromRemote(input);
   if (name === "") return null;
   return resolveRepositoryDirectory(
-    resolveProjectsRootDirectory(input.projectsRootSetting, input.home, input.path),
+    resolveProjectsRootDirectory(
+      input.projectsRootSetting,
+      input.home,
+      input.cogenlyHome,
+      input.path,
+    ),
     null,
     name,
     input.path,

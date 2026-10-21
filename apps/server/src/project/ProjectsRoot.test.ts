@@ -11,31 +11,39 @@ import {
   sanitizePathSegment,
 } from "./ProjectsRoot.ts";
 
-// A home that is never created: resolution is pure path computation.
+// Homes that are never created: resolution is pure path computation. They
+// differ so the default (Cogenly home) and `~` (user home) stay apart.
 const home = "/tmp/cogenly-projects-root-test-home";
+const cogenlyHome = "/tmp/cogenly-projects-root-test-cogenly-home";
 
 it.layer(NodePath.layer)("ProjectsRoot", (it) => {
   describe("resolveProjectsRootDirectory", () => {
-    it.effect("defaults to ~/Cogenly", () =>
+    it.effect("defaults to <Cogenly home>/projects", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
-        expect(resolveProjectsRootDirectory("", home, path)).toBe(path.join(home, "Cogenly"));
-        expect(resolveProjectsRootDirectory("   ", home, path)).toBe(path.join(home, "Cogenly"));
+        expect(resolveProjectsRootDirectory("", home, cogenlyHome, path)).toBe(
+          path.join(cogenlyHome, "projects"),
+        );
+        expect(resolveProjectsRootDirectory("   ", home, cogenlyHome, path)).toBe(
+          path.join(cogenlyHome, "projects"),
+        );
       }),
     );
 
     it.effect("expands a tilde setting", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
-        expect(resolveProjectsRootDirectory("~/Code", home, path)).toBe(path.join(home, "Code"));
-        expect(resolveProjectsRootDirectory("~", home, path)).toBe(home);
+        expect(resolveProjectsRootDirectory("~/Code", home, cogenlyHome, path)).toBe(
+          path.join(home, "Code"),
+        );
+        expect(resolveProjectsRootDirectory("~", home, cogenlyHome, path)).toBe(home);
       }),
     );
 
     it.effect("honours an absolute setting", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
-        expect(resolveProjectsRootDirectory("/Volumes/Data/Repos", home, path)).toBe(
+        expect(resolveProjectsRootDirectory("/Volumes/Data/Repos", home, cogenlyHome, path)).toBe(
           path.resolve("/Volumes/Data/Repos"),
         );
       }),
@@ -44,8 +52,17 @@ it.layer(NodePath.layer)("ProjectsRoot", (it) => {
     it.effect("resolves a relative setting against home", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
-        expect(resolveProjectsRootDirectory("work/repos", home, path)).toBe(
+        expect(resolveProjectsRootDirectory("work/repos", home, cogenlyHome, path)).toBe(
           path.join(home, "work/repos"),
+        );
+      }),
+    );
+
+    it.effect("keeps an explicit legacy default where it is", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        expect(resolveProjectsRootDirectory("~/Cogenly", home, cogenlyHome, path)).toBe(
+          path.join(home, "Cogenly"),
         );
       }),
     );
@@ -156,17 +173,20 @@ it.layer(NodePath.layer)("ProjectsRoot", (it) => {
           resolveDefaultCloneDestination({
             projectsRootSetting: "",
             home,
+            cogenlyHome,
             repository: "spawn-partners/acme",
             path,
           }),
-        ).toBe(path.join(home, "Cogenly", "Repositories", "acme"));
+        ).toBe(path.join(cogenlyHome, "projects", "Repositories", "acme"));
       }),
     );
 
     it.effect("returns null when no repository name is known", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
-        expect(resolveDefaultCloneDestination({ projectsRootSetting: "", home, path })).toBe(null);
+        expect(
+          resolveDefaultCloneDestination({ projectsRootSetting: "", home, cogenlyHome, path }),
+        ).toBe(null);
       }),
     );
   });

@@ -414,7 +414,7 @@ const make = Effect.gen(function* () {
   const namedProjectsRoot = serverSettings.getSettings.pipe(
     Effect.map((settings) =>
       path.join(
-        resolveProjectsRootDirectory(settings.projectsRoot, home, path),
+        resolveProjectsRootDirectory(settings.projectsRoot, home, config.baseDir, path),
         UNFILED_REPOSITORIES_SEGMENT,
       ),
     ),
@@ -426,7 +426,9 @@ const make = Effect.gen(function* () {
     projectName: string | null,
   ) {
     const projectsRoot = yield* serverSettings.getSettings.pipe(
-      Effect.map((settings) => resolveProjectsRootDirectory(settings.projectsRoot, home, path)),
+      Effect.map((settings) =>
+        resolveProjectsRootDirectory(settings.projectsRoot, home, config.baseDir, path),
+      ),
       Effect.mapError((cause) => new NamedProjectFolderError({ folder: "<projects root>", cause })),
     );
     // The same destination resolver as clone-into-project: `<root>/<Project>/

@@ -901,7 +901,11 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
-/** Home for repositories Cogenly creates, so clones and new repositories stay user-visible. */
+/**
+ * The projects-root default before project workspaces: `~/Cogenly`. Kept for
+ * clients to show as an example path. The live default is empty, which the
+ * server resolves to `<Cogenly home>/projects`.
+ */
 export const DEFAULT_PROJECTS_ROOT = "~/Cogenly";
 
 export const ServerSettings = Schema.Struct({
@@ -1061,11 +1065,9 @@ export const ServerSettings = Schema.Struct({
    * Home for repositories Cogenly creates: clones and new repositories land in
    * `<projectsRoot>/<Project>/<repo>`, or `<projectsRoot>/Repositories/<repo>`
    * when no project holds them. `~` expands to the server user's home; empty
-   * resolves to the default. Existing repositories never move.
+   * resolves to `<Cogenly home>/projects`. Existing repositories never move.
    */
-  projectsRoot: TrimmedString.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROJECTS_ROOT)),
-  ),
+  projectsRoot: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
