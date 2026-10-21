@@ -35,22 +35,23 @@ describe("resolvePanelFlipOffsets", () => {
     expect(offsets).toEqual([140, -140, 0]);
   });
 
-  it("contained, holds a column that resizes with the pane at its fixed edge", () => {
+  it("contained, glides a column that resizes with the pane by its start edge", () => {
     // The sidebar closes over a narrow window: the column fills the pane and
-    // widens with it. Gliding its center would start it 128px past the window.
+    // widens with it. Its text keeps its left edge, under the sidebar's
+    // moving edge, and the pane clips what reaches past the window meanwhile.
     expect(
       resolvePanelFlipOffsets(
         [{ anchor: "center", before: bounds(313, 960), after: bounds(57, 960), parent: null }],
         { contain: true },
       ),
-    ).toEqual([0]);
-    // Opening, it narrows: it stays at its new place while the panel covers the rest.
+    ).toEqual([256]);
+    // Opening, it narrows: the text keeps its left edge and is pushed along.
     expect(
       resolvePanelFlipOffsets(
         [{ anchor: "center", before: bounds(57, 960), after: bounds(313, 960), parent: null }],
         { contain: true },
       ),
-    ).toEqual([0]);
+    ).toEqual([-256]);
   });
 
   it("contained, still glides content of a fixed width by its anchor", () => {
@@ -60,13 +61,12 @@ describe("resolvePanelFlipOffsets", () => {
         { anchor: "center", before: bounds(405, 1173), after: bounds(270, 1038), parent: null },
         // A breadcrumb held to the pane's left edge.
         { anchor: "start", before: bounds(313, 400), after: bounds(57, 144), parent: null },
-        // A column that is capped only once the pane widens: it starts no
-        // further right than its old right edge.
+        // A column that is capped only once the pane widens keeps its left edge.
         { anchor: "center", before: bounds(379, 1199), after: bounds(228, 1081), parent: null },
       ],
       { contain: true },
     );
-    expect(offsets).toEqual([135, 256, 118]);
+    expect(offsets).toEqual([135, 256, 151]);
   });
 
   it("contained to the window, glides resized centred content by its center", () => {
@@ -115,18 +115,21 @@ describe("resolvePanelFlipOffsets", () => {
 interface FakeAnimation {
   id: string;
   currentTime: number | null;
-  cancelled: boolean;
+  playState: "idle" | "paused" | "running";
   readonly from: string;
+  readonly visible: boolean;
   cancel(): void;
+  pause(): void;
+  play(): void;
 }
 
 /** A start-anchored element whose layout left the test moves, as React would. */
-function fakeElement(left: number) {
+function fakeElement(left: number, dataset: Record<string, string> = { panelFlip: "start" }) {
   const animations: FakeAnimation[] = [];
   const fake = {
     left,
     isConnected: true,
-    dataset: { panelFlip: "start" },
+    dataset,
     matches: () => true,
     querySelector: () => null,
     parentElement: null,
@@ -136,15 +139,22 @@ function fakeElement(left: number) {
       width: 100,
       height: 20,
     }),
-    getAnimations: () => animations.filter((animation) => !animation.cancelled),
-    animate: (keyframes: ReadonlyArray<{ transform: string }>) => {
+    getAnimations: () => animations.filter((animation) => animation.playState !== "idle"),
+    animate: (keyframes: ReadonlyArray<{ transform: string; visibility?: string }>) => {
       const animation: FakeAnimation = {
         id: "",
         currentTime: 0,
-        cancelled: false,
+        playState: "running",
         from: keyframes[0]!.transform,
+        visible: keyframes.every((keyframe) => keyframe.visibility === "visible"),
         cancel() {
-          this.cancelled = true;
+          this.playState = "idle";
+        },
+        pause() {
+          this.playState = "paused";
+        },
+        play() {
+          this.playState = "running";
         },
       };
       animations.push(animation);
@@ -155,11 +165,16 @@ function fakeElement(left: number) {
 }
 
 describe("playPanelFlip", () => {
-  const documentElement = {};
+  const documentElement = { clientWidth: 1440 };
   const resizeCallbacks: Array<(entries: unknown[]) => void> = [];
+  const frameCallbacks: Array<() => void> = [];
+  const entering: HTMLElement[] = [];
 
   beforeAll(() => {
     vi.stubGlobal("document", { documentElement });
+    vi.stubGlobal("window", {
+      requestAnimationFrame: (callback: () => void) => frameCallbacks.push(callback),
+    });
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -183,29 +198,38 @@ describe("playPanelFlip", () => {
     await Promise.resolve();
   }
 
+  /** The next frame: glides waiting for it start together. */
+  function runNextFrame() {
+    const callbacks = frameCallbacks.splice(0);
+    for (const callback of callbacks) callback();
+  }
+
   const snapshotOf = (
     element: ReturnType<typeof fakeElement>,
     left: number,
   ): PanelFlipSnapshot => ({
+    root: { querySelectorAll: () => entering } as unknown as ParentNode,
     entries: [{ element: element as unknown as HTMLElement, bounds: { left, right: left + 100 } }],
   });
 
-  it("inverts in the committing task, so the first painted frame draws content where it was", async () => {
+  it("inverts in the committing task and starts the glide on the next frame", async () => {
     const element = fakeElement(56);
     playPanelFlip(snapshotOf(element, 336), 250);
-    // Nothing waits for a later callback: the glide already starts at the old place.
-    expect(element.getAnimations().map((animation) => animation.from)).toEqual([
-      "translateX(280px)",
-    ]);
+    // The commit frame paints content where it was, whatever that frame costs;
+    // the motion's first frame is the next one.
+    expect(
+      element.getAnimations().map((animation) => [animation.from, animation.playState]),
+    ).toEqual([["translateX(280px)", "paused"]]);
     await runResizeStep();
-    expect(element.getAnimations().map((animation) => animation.from)).toEqual([
-      "translateX(280px)",
-    ]);
+    expect(element.getAnimations().map((animation) => animation.playState)).toEqual(["paused"]);
+    runNextFrame();
+    expect(element.getAnimations().map((animation) => animation.playState)).toEqual(["running"]);
   });
 
   it("retargets content that size-derived state moves in the resize step", async () => {
     const element = fakeElement(56);
     playPanelFlip(snapshotOf(element, 336), 250);
+    runNextFrame();
     element.getAnimations()[0]!.currentTime = 16;
     // The resize step re-renders a measured position (the mini player).
     element.left = 100;
@@ -213,5 +237,36 @@ describe("playPanelFlip", () => {
     const [animation] = element.getAnimations();
     expect(animation?.from).toBe("translateX(236px)");
     expect(animation?.currentTime).toBe(16);
+    expect(animation?.playState).toBe("running");
+  });
+
+  it("keeps a retargeted glide waiting for the frame that starts the others", async () => {
+    const element = fakeElement(56);
+    playPanelFlip(snapshotOf(element, 336), 250);
+    element.left = 100;
+    await runResizeStep();
+    expect(element.getAnimations().map((animation) => animation.playState)).toEqual(["paused"]);
+    runNextFrame();
+    expect(element.getAnimations().map((animation) => animation.playState)).toEqual(["running"]);
+  });
+
+  it("brings an entering panel in from the window edge it names", () => {
+    const panel = fakeElement(1000, { panelFlip: "start", panelFlipEnter: "end" });
+    entering.push(panel as unknown as HTMLElement);
+    try {
+      playPanelFlip(
+        { root: { querySelectorAll: () => entering } as unknown as ParentNode, entries: [] },
+        250,
+      );
+    } finally {
+      entering.length = 0;
+    }
+    expect(panel.getAnimations().map((animation) => animation.from)).toEqual(["translateX(440px)"]);
+  });
+
+  it("keeps a panel whose final state hides it visible while it leaves", () => {
+    const sidebar = fakeElement(-280, { panelFlip: "start", panelFlipVisible: "" });
+    playPanelFlip(snapshotOf(sidebar, 0), 250);
+    expect(sidebar.getAnimations().map((animation) => animation.visible)).toEqual([true]);
   });
 });

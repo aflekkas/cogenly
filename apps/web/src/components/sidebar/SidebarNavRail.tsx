@@ -141,6 +141,9 @@ export function SidebarNavRail({
         aria-disabled={listColumnHidden || undefined}
         data-sidebar="trigger"
         onClick={listColumnHidden ? undefined : toggleSidebar}
+        // Chrome, like a native toolbar button: a click toggles the column
+        // and leaves focus (and its ring) where it was, in the composer.
+        onPointerDown={(event) => event.preventDefault()}
         className={cn(
           RAIL_BUTTON_CLASS,
           RAIL_TOGGLE_TONE,

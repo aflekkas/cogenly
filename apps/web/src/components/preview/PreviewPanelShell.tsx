@@ -82,15 +82,13 @@ function PreviewPanelShellFrame(
               "flex-1"
             : "shrink-0 border-l border-border"
           : "w-full",
-        // Open and close slide on translate, on the compositor. The row lays
-        // out once at its final size, the panel's content is laid out at that
-        // size from the first frame and clipped as it moves, and the chat's
-        // marked content glides beside the panel on the same duration
-        // (panelFlip). Closing reverses the slide: the panel leaves the row at
-        // once and slides out over the widened chat column.
-        collapsible &&
-          "[[data-panel-animations=true]_&]:transition-[translate] [[data-panel-animations=true]_&]:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:ease-standard",
-        collapsible && open && "[[data-panel-animations=true]_&]:starting:translate-x-full",
+        // Open and close slide on a transform, on the compositor, in the same
+        // flip as the chat's marked content (useRightPanelFlip, panelFlip):
+        // the row lays out once at its final size, the panel's content is laid
+        // out at that size from the first frame and clipped as it moves, and
+        // an opening panel comes in from the window's right edge. Closing
+        // reverses it: the panel leaves the row at once and slides out over
+        // the widened chat column.
         // Reduced motion: the layout is instant and the panel fades in briefly.
         collapsible &&
           open &&
@@ -107,6 +105,8 @@ function PreviewPanelShellFrame(
       }
       data-preview-panel-mode={props.mode}
       data-preview-panel-maximized={maximized ? "true" : "false"}
+      data-panel-flip={collapsible ? "start" : undefined}
+      data-panel-flip-enter={collapsible ? "end" : undefined}
     >
       {isInline && !maximized ? <RightPanelResizeHandle handlers={handlers} /> : null}
       <div className={cn("h-full min-h-0 w-full", collapsible && "overflow-clip")}>

@@ -4,12 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { PanelLeft, PanelLeftClose } from "lucide";
 import * as React from "react";
 import { cn } from "~/lib/utils";
-import {
-  capturePanelFlip,
-  PANEL_EXIT_DURATION_SCALE,
-  playPanelFlip,
-  type PanelFlipSnapshot,
-} from "~/lib/panelFlip";
+import { capturePanelFlip, playPanelFlip, type PanelFlipSnapshot } from "~/lib/panelFlip";
 import { Button } from "~/components/ui/button";
 import { Input, type InputProps } from "~/components/ui/input";
 import { MorphIcon } from "~/components/MorphIcon";
@@ -152,13 +147,11 @@ function SidebarProvider({
     [setOpenProp, open, isMobile],
   );
 
-  // The gap snaps to its new width in one layout. The panel slides on its
-  // translate transition (Sidebar) and the main pane's marked content glides
-  // from where it was; both start in the frame that paints the new layout, on
-  // the same curve and duration, so nothing lays out per frame or lags behind.
-  // Contained: a column that resizes with the pane holds its fixed edge while
-  // the panel covers or uncovers the other, instead of starting part
-  // off-screen. Closing is quicker than opening.
+  // The gap snaps to its new width in one layout. The panel (marked, see
+  // Sidebar) and the main pane's marked content then glide from where they
+  // were, in one flip on one curve and duration, open and close alike, so
+  // nothing lays out per frame or lags behind. Contained: a column that
+  // resizes with the pane reflows once and keeps its left edge.
   React.useLayoutEffect(() => {
     const snapshot = flipSnapshotRef.current;
     flipSnapshotRef.current = null;
@@ -167,11 +160,7 @@ function SidebarProvider({
     const duration =
       Number.parseFloat(getComputedStyle(wrapper).getPropertyValue("--panel-animation-duration")) ||
       0;
-    if (duration > 0) {
-      playPanelFlip(snapshot, open ? duration : Math.round(duration * PANEL_EXIT_DURATION_SCALE), {
-        contain: true,
-      });
-    }
+    if (duration > 0) playPanelFlip(snapshot, duration, { contain: true });
   }, [open]);
 
   // Helper to toggle the sidebar.
@@ -360,15 +349,13 @@ function Sidebar({
         <div
           className={cn(
             "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex",
-            // Offcanvas open/close is a transform only, so it runs on the
-            // compositor without relayout or repainting the grain. It sits
-            // above the main pane, so its edge is the pane's moving edge while
-            // the pane's content glides on the same curve (panelFlip). Closing
-            // takes the quicker exit duration, matching SidebarProvider.
-            // Visibility trails the move so a closed panel leaves the tab
-            // order once it is out of sight, and shows at once when it opens.
-            "[[data-panel-animations=true]_&]:transition-[translate,visibility] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-standard",
-            "[[data-panel-animations=true]_&]:group-data-[collapsible=offcanvas]:[transition-duration:calc(var(--panel-animation-duration)*0.7)]",
+            // Offcanvas open and close move the panel on a transform only, so
+            // it runs on the compositor without relayout or repainting the
+            // grain: the collapsed state puts it off-canvas, and a user toggle
+            // glides it there from where it was, in the same flip as the main
+            // pane's content (SidebarProvider, panelFlip), so its edge is the
+            // pane's moving edge. A closed panel is invisible, out of the tab
+            // order; the flip keeps it visible until it is out of sight.
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:-translate-x-full"
               : "right-0 group-data-[collapsible=offcanvas]:translate-x-full",
@@ -380,6 +367,8 @@ function Sidebar({
             className,
           )}
           data-slot="sidebar-container"
+          data-panel-flip="start"
+          data-panel-flip-visible=""
           {...props}
         >
           <div
@@ -416,6 +405,9 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
         onClick?.(event);
         if (!inert) toggleSidebar();
       }}
+      // Chrome, like a native toolbar button: a click toggles the sidebar and
+      // leaves focus (and its ring) where it was. Keyboard focus still rings.
+      onPointerDown={(event) => event.preventDefault()}
       size="icon"
       variant="ghost-muted"
       {...props}

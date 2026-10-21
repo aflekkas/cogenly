@@ -134,10 +134,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* Top-anchored toasts sit this far below the window's top edge. */
   --toast-top-offset: 0.75rem;
   /* Motion durations, tuned toward Apple's feel. fast: hover, press and color
-     feedback. base: selection, status swaps, popovers and toasts. slow: panels,
-     sheets and other large spatial moves (panels leave at 0.7x, see panelFlip).
-     Pair them with ease-standard; reduced motion zeroes the transitions that
-     use them. */
+     feedback. base: selection, status swaps, popovers and toasts, and the
+     sidebar and right panel (open and close alike, see panelFlip). slow:
+     sheets and other large spatial moves. Pair them with ease-standard;
+     reduced motion zeroes the transitions that use them. */
   --motion-duration-fast: 150ms;
   --motion-duration-base: 220ms;
   --motion-duration-slow: 400ms;

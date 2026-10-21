@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 
 import {
   capturePanelFlip,
+  PANEL_MOTION_SETTLE_MS,
   playPanelFlip,
   retargetPanelFlip,
   type PanelFlipSnapshot,
@@ -13,20 +14,20 @@ import { useRightPanelStore } from "../../rightPanelStore";
 import { useListColumnLayoutStore } from "../sidebar/listColumnLayoutStore";
 
 /**
- * Glides the chat's marked content when the inline right panel opens, closes
- * or maximizes. The store notifies synchronously, before React renders the
- * change, so the snapshot holds the old layout; the flip plays once the new
- * layout commits. Contained, like the sidebar's: the chat column keeps its
- * fixed edge while the panel covers or uncovers the other, so it never lays
- * out past the window. Open and close take the same time as the panel's own
- * slide, so the content and the panel settle together.
+ * Glides the chat's marked content and the panel itself when the inline right
+ * panel opens, closes or maximizes. The store notifies synchronously, before
+ * React renders the change, so the snapshot holds the old layout; the flip
+ * plays once the new layout commits. Contained, like the sidebar's: the chat
+ * column reflows once and keeps its left edge while the panel covers or
+ * uncovers it. The panel is marked too (PreviewPanelShell), so it slides in
+ * the same flip, on the same duration and curve as the content.
  *
  * The list column may step aside for the panel (or come back) in a second
  * commit of the same task. The sidebar then starts its own flip from that
- * never-painted in-between layout and at its own exit pace, cancelling this
- * one. This hook keeps the panel's snapshot for the motion's length and,
- * after that commit, re-aims its flip at the final layout: one glide, from
- * where the content was last drawn, on the panel's timeline.
+ * never-painted in-between layout, cancelling this one. This hook keeps the
+ * panel's snapshot for the motion's length and, after that commit, re-aims
+ * its flip at the final layout: one glide, from where the content was last
+ * drawn.
  */
 export function useRightPanelFlip(
   root: HTMLElement | null,
@@ -59,7 +60,10 @@ export function useRightPanelFlip(
     const snapshot = snapshotRef.current;
     snapshotRef.current = null;
     if (!snapshot) return;
-    motionRef.current = { snapshot, endsAt: performance.now() + durationMs };
+    motionRef.current = {
+      snapshot,
+      endsAt: performance.now() + durationMs + PANEL_MOTION_SETTLE_MS,
+    };
     playPanelFlip(snapshot, durationMs, { contain: true });
   }, [durationMs, open, maximized]);
 

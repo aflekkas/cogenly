@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { type PanelAnimationDurationMs } from "@t3tools/contracts/settings";
 
 import { useMediaQuery } from "./hooks/useMediaQuery";
+import { PANEL_MOTION_SETTLE_MS } from "./lib/panelFlip";
 
 /**
  * Panels, including the sidebar, always animate open and close at this
@@ -74,7 +75,9 @@ export function usePanelPresence<T>(
       return;
     }
 
-    const timeout = window.setTimeout(() => setPresent(false), durationMs);
+    // The glide starts a frame after the close commits (panelFlip); the panel
+    // stays until it has left.
+    const timeout = window.setTimeout(() => setPresent(false), durationMs + PANEL_MOTION_SETTLE_MS);
     return () => window.clearTimeout(timeout);
   }, [animated, durationMs, open]);
 
