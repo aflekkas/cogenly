@@ -14,7 +14,7 @@ export function ForkHint() {
       Fork
       <ArrowRightIcon
         aria-hidden
-        className="size-3 -translate-x-1 opacity-0 transition-[opacity,translate] duration-[180ms] ease-(--ease-out) in-data-highlighted:translate-x-0 in-data-highlighted:opacity-100 motion-reduce:translate-x-0 motion-reduce:transition-opacity"
+        className="size-3 -translate-x-1 opacity-0 transition-[opacity,translate] duration-(--motion-duration-fast) ease-(--ease-out) in-data-highlighted:translate-x-0 in-data-highlighted:opacity-100 motion-reduce:translate-x-0 motion-reduce:transition-opacity"
       />
     </span>
   );
