@@ -750,6 +750,7 @@ export function ServerBrowserSurface(props: {
     >
       {controlPosition === "none" ? null : (
         // One compact row of chrome: who drives the page, and the handoff button.
+        // h-8 is PREVIEW_MINI_PLAYER_CHROME_HEIGHT; the floating player adds it to its frame.
         <div
           className={cn(
             "visible relative z-20 flex h-8 shrink-0 items-center justify-between gap-2 border-border bg-card pr-1.5 pl-2.5",
@@ -772,13 +773,14 @@ export function ServerBrowserSurface(props: {
                 send({ type: control.controller === "you" ? "releaseControl" : "takeControl" })
               }
             >
-              {control.controller === "you" ? "Release control" : "Take control"}
+              {/* The label already says who drives; the short verb keeps the row on one line at the minimum width. */}
+              {control.controller === "you" ? "Release" : "Take control"}
             </Button>
           ) : null}
         </div>
       )}
-      {/* The page well: a frame that is narrower than the page's aspect (the floating player
-          keeps the page's ratio for the whole card, chrome included) letterboxes onto this fill. */}
+      {/* The page well. The floating player sizes itself so the page fills it; while that
+          size settles (a viewport change mid-stream) the page letterboxes onto this fill. */}
       <div className="relative min-h-0 flex-1 bg-muted">
         <canvas
           ref={canvasRef}

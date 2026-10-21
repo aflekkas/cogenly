@@ -56,10 +56,12 @@ import {
   clampPreviewMiniPlayerPosition,
   fitPreviewMiniPlayerFrameToBounds,
   NO_PREVIEW_MINI_PLAYER_OBSTACLES,
+  PREVIEW_MINI_PLAYER_CHROME_HEIGHT,
   PREVIEW_MINI_PLAYER_CORNER_RADIUS,
   PREVIEW_MINI_PLAYER_WEBVIEW_Z_INDEX,
   type PreviewMiniPlayerBounds,
   type PreviewMiniPlayerFrame,
+  type PreviewMiniPlayerSourceShape,
   resizePreviewMiniPlayer,
   resolveDeviceMiniPlayerCornerRadius,
   resolveDeviceMiniPlayerSourceSize,
@@ -219,7 +221,7 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
   const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
   const serverPictureInPicture =
     useServerPictureInPictureKey() === serverPictureInPictureKey(threadRef.threadId, tabId);
-  const sourceSize =
+  const pageSize =
     serverTab && streamViewport
       ? streamViewport
       : resolvePreviewMiniPlayerSourceSize(
@@ -227,6 +229,11 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
           fittedSourceContent,
           desktopOverlay?.zoomFactor ?? 1,
         );
+  // A streamed tab carries its control row under the page; the frame grows by
+  // it so the page fills the well instead of letterboxing above the row.
+  const sourceSize: PreviewMiniPlayerSourceShape = serverTab
+    ? { ...pageSize, chrome: PREVIEW_MINI_PLAYER_CHROME_HEIGHT }
+    : pageSize;
 
   const openInPanel = () => {
     usePreviewMiniPlayerStore.getState().close(threadRef);
@@ -417,7 +424,7 @@ function MiniPlayerShell({
 }: {
   readonly threadRef: ScopedThreadRef;
   readonly miniPlayer: PreviewMiniPlayerState;
-  readonly sourceSize: PreviewMiniPlayerSize;
+  readonly sourceSize: PreviewMiniPlayerSourceShape;
   readonly label: string;
   readonly onOpenInPanel: () => void;
   readonly pillActions?: ReactNode;
@@ -477,11 +484,11 @@ function MiniPlayerShell({
   const layoutFrame = canvas?.previewKey === sourceKey ? canvas.layout.frame : null;
   const frame =
     layoutFrame && visibleBounds
-      ? fitPreviewMiniPlayerFrameToBounds(layoutFrame, visibleBounds)
+      ? fitPreviewMiniPlayerFrameToBounds(layoutFrame, visibleBounds, sourceSize)
       : layoutFrame;
   const fitToVisible = (next: PreviewMiniPlayerFrame) =>
-    visibleBounds ? fitPreviewMiniPlayerFrameToBounds(next, visibleBounds) : next;
-  const { width: sourceWidth, height: sourceHeight } = sourceSize;
+    visibleBounds ? fitPreviewMiniPlayerFrameToBounds(next, visibleBounds, sourceSize) : next;
+  const { width: sourceWidth, height: sourceHeight, chrome: sourceChrome } = sourceSize;
   const reportPreview = canvas?.reportPreview;
   const clearPreview = canvas?.clearPreview;
   useLayoutEffect(() => {
@@ -490,7 +497,10 @@ function MiniPlayerShell({
       width: miniPlayer.width,
       position: miniPlayer.position,
       lastInteraction: miniPlayer.lastInteraction,
-      source: { width: sourceWidth, height: sourceHeight },
+      source:
+        sourceChrome === undefined
+          ? { width: sourceWidth, height: sourceHeight }
+          : { width: sourceWidth, height: sourceHeight, chrome: sourceChrome },
     });
   }, [
     reportPreview,
@@ -500,8 +510,24 @@ function MiniPlayerShell({
     miniPlayer.lastInteraction,
     sourceWidth,
     sourceHeight,
+    sourceChrome,
   ]);
   useLayoutEffect(() => () => clearPreview?.(sourceKey), [clearPreview, sourceKey]);
+  // A source that changes shape mid-session (the stream reports a new viewport)
+  // resizes the frame; the box eases there instead of snapping. The flag is
+  // raised in the render that sees the new shape, ahead of the frame it brings.
+  const sourceShape = `${sourceWidth}:${sourceHeight}:${sourceChrome ?? 0}`;
+  const [seenShape, setSeenShape] = useState(sourceShape);
+  const [settling, setSettling] = useState(false);
+  if (sourceShape !== seenShape) {
+    setSeenShape(sourceShape);
+    setSettling(true);
+  }
+  useEffect(() => {
+    if (!settling) return;
+    const timer = window.setTimeout(() => setSettling(false), PLACEHOLDER_FADE_MS);
+    return () => window.clearTimeout(timer);
+  }, [settling]);
 
   const radius = frame ? cornerRadius(frame) : PREVIEW_MINI_PLAYER_CORNER_RADIUS;
   // Inside a wide curve the default 8px inset would land on the clipped-away corner.
@@ -583,7 +609,11 @@ function MiniPlayerShell({
           // Glides from its old place when a panel toggle moves it.
           data-panel-flip="start"
           // The pill fades in while the pointer is anywhere over the player.
-          className="group/player pointer-events-none absolute select-none"
+          className={cn(
+            "group/player pointer-events-none absolute select-none",
+            settling &&
+              "transition-[width,height] duration-(--motion-duration-base) ease-out motion-reduce:transition-none",
+          )}
           style={{
             left: frame.x,
             top: frame.y,

@@ -17,7 +17,38 @@ export const PREVIEW_MINI_PLAYER_WEBVIEW_Z_INDEX = 48;
 const PREVIEW_MINI_PLAYER_DEFAULT_BOX = { width: 320, height: 320 } as const;
 const PREVIEW_MINI_PLAYER_MIN_SIZE = { width: 240, height: 150 } as const;
 
+// The streamed browser's control row (ServerBrowserSurface, h-8) under the page.
+export const PREVIEW_MINI_PLAYER_CHROME_HEIGHT = 32;
+
+/**
+ * What the player mirrors: the page's size, plus any fixed-height chrome the
+ * frame carries under it at every width. The page part scales with the width;
+ * the chrome does not, so the frame is `width / aspect + chrome` tall and the
+ * page fills its well edge to edge.
+ */
+export interface PreviewMiniPlayerSourceShape extends PreviewMiniPlayerSize {
+  readonly chrome?: number;
+}
+
 export interface PreviewMiniPlayerFrame extends PreviewMiniPlayerPosition, PreviewMiniPlayerSize {}
+
+const chromeOf = (source: PreviewMiniPlayerSourceShape) => Math.max(0, source.chrome ?? 0);
+
+/** The frame height a width gives: the page at the source aspect, plus the chrome. */
+export function previewMiniPlayerFrameHeight(
+  width: number,
+  source: PreviewMiniPlayerSourceShape,
+): number {
+  return Math.round((width * source.height) / source.width) + chromeOf(source);
+}
+
+/** The inverse: the width whose frame is this tall. */
+export function previewMiniPlayerWidthForHeight(
+  height: number,
+  source: PreviewMiniPlayerSourceShape,
+): number {
+  return ((height - chromeOf(source)) * source.width) / source.height;
+}
 
 /**
  * The rendered size of what the floating player mirrors: the device viewport
@@ -142,31 +173,33 @@ const availableArea = (
 
 /**
  * Width is the player's only free dimension; height always follows the source
- * aspect ratio so the webview fills the box without letterboxing. The player
- * may upscale the source, and a tight container wins over the minimum.
+ * aspect ratio (plus its chrome) so the page fills the box without
+ * letterboxing. The player may upscale the source, and a tight container wins
+ * over the minimum.
  */
 function fitPreviewMiniPlayerWidth(
   desiredWidth: number,
-  source: PreviewMiniPlayerSize,
+  source: PreviewMiniPlayerSourceShape,
   max: PreviewMiniPlayerSize,
 ): PreviewMiniPlayerSize {
-  const aspectRatio = source.width / source.height;
-  const width = Math.min(
-    Math.max(
-      desiredWidth,
-      PREVIEW_MINI_PLAYER_MIN_SIZE.width,
-      PREVIEW_MINI_PLAYER_MIN_SIZE.height * aspectRatio,
+  const width = Math.round(
+    Math.min(
+      Math.max(
+        desiredWidth,
+        PREVIEW_MINI_PLAYER_MIN_SIZE.width,
+        previewMiniPlayerWidthForHeight(PREVIEW_MINI_PLAYER_MIN_SIZE.height, source),
+      ),
+      Math.max(1, max.width),
+      Math.max(1, previewMiniPlayerWidthForHeight(max.height, source)),
     ),
-    Math.max(1, max.width),
-    Math.max(1, max.height * aspectRatio),
   );
-  return { width: Math.round(width), height: Math.round(width / aspectRatio) };
+  return { width, height: previewMiniPlayerFrameHeight(width, source) };
 }
 
-function defaultPreviewMiniPlayerWidth(source: PreviewMiniPlayerSize): number {
+function defaultPreviewMiniPlayerWidth(source: PreviewMiniPlayerSourceShape): number {
   return Math.min(
     PREVIEW_MINI_PLAYER_DEFAULT_BOX.width,
-    (PREVIEW_MINI_PLAYER_DEFAULT_BOX.height * source.width) / source.height,
+    previewMiniPlayerWidthForHeight(PREVIEW_MINI_PLAYER_DEFAULT_BOX.height, source),
   );
 }
 
@@ -280,7 +313,7 @@ export function clampPreviewMiniPlayerPosition(
 export function resolvePreviewMiniPlayerFrame(input: {
   readonly width: number | null;
   readonly position: PreviewMiniPlayerPosition | null;
-  readonly source: PreviewMiniPlayerSize;
+  readonly source: PreviewMiniPlayerSourceShape;
   readonly container: PreviewMiniPlayerSize;
   readonly obstacles?: PreviewMiniPlayerObstacles;
 }): PreviewMiniPlayerFrame {
@@ -326,7 +359,7 @@ export function resizePreviewMiniPlayer(input: {
   readonly start: PreviewMiniPlayerFrame;
   readonly direction: BrowserViewportResizeDirection;
   readonly delta: PreviewMiniPlayerPosition;
-  readonly source: PreviewMiniPlayerSize;
+  readonly source: PreviewMiniPlayerSourceShape;
   readonly container: PreviewMiniPlayerSize;
   readonly obstacles?: PreviewMiniPlayerObstacles;
 }): PreviewMiniPlayerFrame {
@@ -367,14 +400,16 @@ export function resizePreviewMiniPlayer(input: {
   const horizontal = east || west;
   const vertical = north || south;
   const aspectRatio = source.width / source.height;
-  // Project corner motion onto the aspect-ratio diagonal. Switching between
-  // dominant axes jumps when one axis grows while the other shrinks.
+  // Project corner motion onto the frame's size line, (w, w / aspect + chrome).
+  // Switching between dominant axes jumps when one axis grows while the other
+  // shrinks.
   const desired =
     horizontal && vertical
-      ? (desiredWidth + desiredHeight / aspectRatio) / (1 + 1 / aspectRatio ** 2)
+      ? (desiredWidth + (desiredHeight - chromeOf(source)) / aspectRatio) /
+        (1 + 1 / aspectRatio ** 2)
       : horizontal
         ? desiredWidth
-        : desiredHeight * aspectRatio;
+        : previewMiniPlayerWidthForHeight(desiredHeight, source);
   const size = fitPreviewMiniPlayerWidth(desired, source, max);
   const position = clampPreviewMiniPlayerPosition(
     { x: west ? right - size.width : start.x, y: north ? bottom - size.height : start.y },
@@ -414,18 +449,38 @@ export function resolvePreviewMiniPlayerVisibleBounds(
 /**
  * Keeps a resolved frame fully inside the visible bounds with the edge gap,
  * shrinking it at its aspect ratio only when the bounds are smaller than it.
- * Returns the same frame when it already fits.
+ * With the source given, the shrink keeps the chrome at full height and
+ * scales only the page. Returns the same frame when it already fits.
  */
 export function fitPreviewMiniPlayerFrameToBounds(
   frame: PreviewMiniPlayerFrame,
   bounds: PreviewMiniPlayerBounds,
+  source?: PreviewMiniPlayerSourceShape,
 ): PreviewMiniPlayerFrame {
   const gap = PREVIEW_MINI_PLAYER_EDGE_GAP;
   const availableWidth = Math.max(1, bounds.right - bounds.left - gap * 2);
   const availableHeight = Math.max(1, bounds.bottom - bounds.top - gap * 2);
-  const scale = Math.min(1, availableWidth / frame.width, availableHeight / frame.height);
-  const width = scale < 1 ? Math.max(1, Math.floor(frame.width * scale)) : frame.width;
-  const height = scale < 1 ? Math.max(1, Math.floor(frame.height * scale)) : frame.height;
+  let width = frame.width;
+  let height = frame.height;
+  if (source) {
+    if (frame.width > availableWidth || frame.height > availableHeight) {
+      width = Math.max(
+        1,
+        Math.floor(
+          Math.min(
+            frame.width,
+            availableWidth,
+            previewMiniPlayerWidthForHeight(availableHeight, source),
+          ),
+        ),
+      );
+      height = previewMiniPlayerFrameHeight(width, source);
+    }
+  } else {
+    const scale = Math.min(1, availableWidth / frame.width, availableHeight / frame.height);
+    width = scale < 1 ? Math.max(1, Math.floor(frame.width * scale)) : frame.width;
+    height = scale < 1 ? Math.max(1, Math.floor(frame.height * scale)) : frame.height;
+  }
   const x = Math.max(bounds.left + gap, Math.min(frame.x, bounds.right - gap - width));
   const y = Math.max(bounds.top + gap, Math.min(frame.y, bounds.bottom - gap - height));
   if (x === frame.x && y === frame.y && width === frame.width && height === frame.height) {

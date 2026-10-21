@@ -4,6 +4,7 @@ import {
   resolvePreviewMiniPlayerFrame,
   type PreviewMiniPlayerFrame,
   type PreviewMiniPlayerObstacles,
+  type PreviewMiniPlayerSourceShape,
 } from "../preview/previewMiniPlayerLayout";
 import type {
   PreviewMiniPlayerPosition,
@@ -15,7 +16,7 @@ export interface ChatCanvasPreview {
   readonly key: string;
   readonly width: number | null;
   readonly position: PreviewMiniPlayerPosition | null;
-  readonly source: PreviewMiniPlayerSize;
+  readonly source: PreviewMiniPlayerSourceShape;
   readonly lastInteraction?: PreviewMiniPlayerState["lastInteraction"];
 }
 
