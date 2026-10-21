@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "~/lib/utils";
 
+import { modeSwitchCrossfadeRunning } from "../sidebar/modes/modeSwitchMotion";
 import { useLastPresent } from "../ui/overlay-presence";
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
@@ -150,9 +151,19 @@ export function FadeSwap({
 // the old one unmounts, so it can start from the old state and animate to its own.
 const live = new Map<string, { readonly owner: object; readonly value: boolean }>();
 
+/**
+ * What the replaced screen showed in a slot, or undefined when this screen paints
+ * on its own. A mode switch (Chats to Work, say) crossfades whole frames, so the
+ * new mode opens in its final layout: its strip must not grow in from the Chats
+ * composer that had none.
+ */
+function replacedValue(key: string): boolean | undefined {
+  return modeSwitchCrossfadeRunning() ? undefined : live.get(key)?.value;
+}
+
 function useLiveValue(key: string, value: boolean): [object, boolean | undefined] {
   const [owner] = useState(() => ({}));
-  const [replaced] = useState(() => live.get(key)?.value);
+  const [replaced] = useState(() => replacedValue(key));
   useLayoutEffect(() => {
     live.set(key, { owner, value });
   }, [key, owner, value]);
@@ -171,7 +182,7 @@ function useLiveValue(key: string, value: boolean): [object, boolean | undefined
  * it replaces left off when a new draft takes its place.
  */
 export function useExtendedAfterFrame(visible: boolean): boolean {
-  const [extended, setExtended] = useState(() => live.get("composer-extension")?.value ?? visible);
+  const [extended, setExtended] = useState(() => replacedValue("composer-extension") ?? visible);
   useLiveValue("composer-extension", extended);
   useEffect(() => {
     const frame = requestAnimationFrame(() => setExtended(visible));
@@ -208,7 +219,7 @@ export function CollapsePresence({
   const [moving, setMoving] = useState(false);
   // Replacing a screen whose strip was closed: mount collapsed and grow.
   const [enteredOpen, setEnteredOpen] = useState(
-    () => open && live.get("composer-strip")?.value !== false,
+    () => open && replacedValue("composer-strip") !== false,
   );
   useLiveValue("composer-strip", open);
   const held = useLastPresent(open ? children : null);

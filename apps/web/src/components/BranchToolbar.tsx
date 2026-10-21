@@ -706,7 +706,24 @@ export const BranchToolbar = memo(function BranchToolbar({
   const [stripElement, setStripElement] = useState<HTMLDivElement | null>(null);
   const labelsOverflow = useLabelsOverflow(stripElement);
 
-  if (!hasActiveThread || !activeProject) return null;
+  if (!hasActiveThread || !activeProject) {
+    if (layout === "panel") return null;
+    // The thread or project is still loading. The strip keeps its full height
+    // from the first frame so the composer above it does not move when the
+    // controls arrive.
+    return (
+      <ComposerSurface.ContextStrip
+        aria-hidden
+        data-composer-context-skeleton=""
+        className={cn(
+          "gap-1",
+          !contextStripVisible && "pointer-events-none invisible absolute inset-x-0 top-full",
+        )}
+      >
+        <div className="min-h-7 flex-1 sm:min-h-6" />
+      </ComposerSurface.ContextStrip>
+    );
+  }
 
   if (layout === "panel") {
     return (
