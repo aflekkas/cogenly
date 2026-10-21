@@ -477,8 +477,6 @@ import {
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
   DRAFT_HERO_TRANSITION_EASING,
-  MOBILE_COMPOSER_VIEW_TRANSITION_NAME,
-  MOBILE_DRAFT_HEADLINE_VIEW_TRANSITION_NAME,
   runMobileComposerTransition,
 } from "./chat/draftHeroTransition";
 import type { ComposerDispatchMode } from "@t3tools/client-runtime/state/composer-dispatch";
@@ -9435,10 +9433,8 @@ export default function ChatView(props: ChatViewProps) {
                     <div className="absolute inset-x-0 bottom-full">
                       <div
                         className="pb-4 group-has-data-[composer-shoulder-tab]/composer-stack:pb-0"
-                        style={
-                          forceExpandedMobileComposer
-                            ? { viewTransitionName: MOBILE_DRAFT_HEADLINE_VIEW_TRANSITION_NAME }
-                            : undefined
+                        data-mobile-composer-transition={
+                          forceExpandedMobileComposer ? "headline" : undefined
                         }
                       >
                         <DraftHeroHeadline
@@ -9453,10 +9449,8 @@ export default function ChatView(props: ChatViewProps) {
                   <div
                     ref={attachDraftHeroComposerAnchor}
                     className="relative z-10"
-                    style={
-                      forceExpandedMobileComposer
-                        ? { viewTransitionName: MOBILE_COMPOSER_VIEW_TRANSITION_NAME }
-                        : undefined
+                    data-mobile-composer-transition={
+                      forceExpandedMobileComposer ? "composer" : undefined
                     }
                   >
                     <ComposerSurface.Shell

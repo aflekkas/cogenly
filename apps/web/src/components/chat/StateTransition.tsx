@@ -5,6 +5,7 @@ import { cn } from "~/lib/utils";
 
 import { modeSwitchCrossfadeRunning } from "../sidebar/modes/modeSwitchMotion";
 import { useLastPresent } from "../ui/overlay-presence";
+import { takeLeavingCopy } from "./StateTransition.logic";
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
@@ -58,10 +59,10 @@ function captureLeavingCopy(group: string, source: HTMLElement) {
 }
 
 function crossFade(group: string, incoming: HTMLElement) {
-  const entry = leaving.get(group);
   // Development's strict-mode remount of the same element is not a state change.
-  if (!entry || entry.source === incoming) return;
-  leaving.delete(group);
+  if (leaving.get(group)?.source === incoming) return;
+  const entry = takeLeavingCopy(leaving, group, modeSwitchCrossfadeRunning());
+  if (!entry) return;
   if (window.matchMedia(REDUCED_MOTION).matches) return;
   const duration = motionDurationMs();
   const easing = "cubic-bezier(0.2, 0, 0, 1)";
@@ -77,9 +78,8 @@ function crossFade(group: string, incoming: HTMLElement) {
 
 /** Fades the copy a removed item left behind, for a replacement that has nothing to show there. */
 function fadeOutLeaving(group: string) {
-  const entry = leaving.get(group);
+  const entry = takeLeavingCopy(leaving, group, modeSwitchCrossfadeRunning());
   if (!entry) return;
-  leaving.delete(group);
   if (window.matchMedia(REDUCED_MOTION).matches) return;
   document.body.append(entry.copy);
   const out = entry.copy.animate([{ opacity: 1 }, { opacity: 0 }], {

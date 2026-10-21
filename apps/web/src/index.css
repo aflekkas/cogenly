@@ -16,7 +16,20 @@
 }
 
 /* On mobile, morph the expanded hero composer into the compact docked
-   composer while it moves; the rest of the app remains visually stationary. */
+   composer while it moves; the rest of the app remains visually stationary.
+   The draft's headline and composer carry their view-transition names only
+   during that transition (data-mobile-composer-transition in ChatView). A
+   name that outlived it would lift them out of every other view transition,
+   such as the mode-switch crossfade, which would then paint the outgoing
+   draft's composer on top of the incoming screen. */
+html[data-mobile-composer-route-transition="true"] [data-mobile-composer-transition="composer"] {
+  view-transition-name: t3-mobile-composer;
+}
+
+html[data-mobile-composer-route-transition="true"] [data-mobile-composer-transition="headline"] {
+  view-transition-name: t3-mobile-draft-headline;
+}
+
 html[data-mobile-composer-route-transition="true"]::view-transition-old(root),
 html[data-mobile-composer-route-transition="true"]::view-transition-new(root) {
   animation: none;
