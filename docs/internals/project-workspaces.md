@@ -27,7 +27,9 @@ it does not own a copy.
   Work in a repository runs in that repository (its worktree), as today.
 - Moving a chat to a project forks it: the new chat is created in the project,
   carries the history (context handoff), and starts in the project directory.
-  The original chat is left where it was. Chats are never re-parented.
+  The original chat is left where it was. Chats with turns are never
+  re-parented; a brand-new chat with no turns yet may still be filed
+  directly, and unfiling stays allowed.
 - Agents reach resources through the `cogenly` MCP server: list, read (paged
   text), and recall (search across the project's files). Threads in a project
   get a short manifest of its resources in their context.
