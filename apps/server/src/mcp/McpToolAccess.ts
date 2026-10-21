@@ -176,20 +176,21 @@ export const actsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A,
 
 /**
  * Chat-surface threads stay conversational: they cannot change files, run
- * commands, or start work sessions. Handlers for those tools check this
- * after establishing the live caller, so a missing or ended caller still
- * reports itself first. Callers without a thread are unaffected. Reads,
- * proposals, and the handoff draft stay on the plain declarations.
+ * commands, or start work sessions. Builder threads are conversations too.
+ * Handlers for those tools check this after establishing the live caller, so
+ * a missing or ended caller still reports itself first. Callers without a
+ * thread are unaffected. Reads, proposals, and the handoff draft stay on the
+ * plain declarations.
  */
 export const assertWorkCaller = (
   thread: Caller["caller"],
 ): Effect.Effect<void, OrchestratorMcpFailure> =>
-  thread?.surface === "chat"
+  thread?.surface === "chat" || thread?.surface === "builder"
     ? Effect.fail(
         new OrchestratorMcpFailure({
           code: "capability_denied",
           message:
-            "This thread runs in conversation mode: chat threads cannot change files, run commands, or start work sessions. Suggest Start Work, or draft the handoff with work_propose_handoff.",
+            "This thread runs in conversation mode: it cannot change files, run commands, or start work sessions. Suggest Start Work, or draft the handoff with work_propose_handoff.",
         }),
       )
     : Effect.void;

@@ -91,6 +91,7 @@ const makeHarness = Effect.sync(() => {
     Layer.mock(Folders.ManagedProjectFolders)({
       namedProjectsRoot: "/unused",
       scratchRoot: Effect.succeed(Option.none()),
+      ensureScratchProject: Effect.succeed({ projectId: ProjectId.make("project:scratch") }),
     }),
     Layer.mock(Launch.ThreadLaunchService)({
       launch: (input) =>

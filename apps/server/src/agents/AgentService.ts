@@ -1,6 +1,8 @@
 import * as Access from "./AgentAccessScope.ts";
 import { canReceiveAgentEvent } from "./agentEventPolicy.ts";
+import { agentKickoffText } from "./builderPrompt.ts";
 import {
+  BUILDER_THREAD_TITLE,
   defaultAgentPermissions,
   AgentError,
   AgentId,
@@ -12,6 +14,9 @@ import {
   AgentEventContext,
   ScheduledTaskSchedule,
   type Agent,
+  type AgentBuilderProposal,
+  type AgentBuilderStartInput,
+  type AgentBuilderStartResult,
   type AgentListItem,
   type AgentMarkReadInput,
   type AgentUpsertInput,
@@ -29,6 +34,7 @@ import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Store from "./AgentStore.ts";
+import * as Folders from "../project/ManagedProjectFolders.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -52,6 +58,14 @@ export class AgentService extends Context.Service<
       input: AgentMarkReadInput,
     ) => Effect.Effect<{ agent: AgentListItem }, AgentError>;
     readonly upsert: (input: AgentUpsertInput) => Effect.Effect<{ agent: Agent }, AgentError>;
+    readonly builderStart: (
+      input: AgentBuilderStartInput,
+    ) => Effect.Effect<AgentBuilderStartResult, AgentError>;
+    /** Replace a builder thread's proposal item; latest call wins. */
+    readonly recordProposal: (input: {
+      readonly threadId: ThreadId;
+      readonly proposal: AgentBuilderProposal;
+    }) => Effect.Effect<{ proposal: AgentBuilderProposal }, AgentError>;
     readonly delete: (id: AgentId) => Effect.Effect<{ deleted: boolean }, AgentError>;
     readonly send: (input: AgentSendInput) => Effect.Effect<
       {
@@ -81,6 +95,7 @@ const make = Effect.gen(function* () {
   const events = yield* EventSink.EventSinkV2;
   const scheduler = yield* Scheduler.Scheduler;
   const sql = yield* SqlClient.SqlClient;
+  const folders = yield* Folders.ManagedProjectFolders;
   const access = yield* Access.AgentAccessScope;
   const changes = yield* PubSub.sliding<void>(1);
   const changed = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
@@ -314,8 +329,9 @@ const make = Effect.gen(function* () {
             creationSource: "web",
           });
         }
+        const { kickoff: _kickoff, ...profile } = input;
         const agent = yield* store.save({
-          ...input,
+          ...profile,
           responsibility: input.responsibility ?? existing?.responsibility ?? "",
           permissions: input.permissions ?? existing?.permissions ?? defaultAgentPermissions,
           notifyPolicy: input.notifyPolicy ?? existing?.notifyPolicy ?? "meaningful_changes",
@@ -340,8 +356,110 @@ const make = Effect.gen(function* () {
             title: agent.name,
           });
         }
+        if (existing === null && input.kickoff === true) {
+          // The agent opens with its own turn; clients hide a turn the owner
+          // did not write. The agent exists either way, so a lost greeting
+          // is a warning, not a failed create.
+          yield* threads
+            .sendToThread({
+              projectId: yield* workspace(agent),
+              commandId: CommandId.make(`agent-kickoff:${id}`),
+              messageId: MessageId.make(`agent-kickoff:${id}`),
+              threadId: conversationThreadId,
+              text: agentKickoffText,
+              attachments: [],
+              modelSelection: agent.modelSelection,
+              mode: "auto",
+              createdBy: "agent",
+              creationSource: "server",
+            })
+            .pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("Agent kickoff turn did not start", { agentId: id, cause }),
+              ),
+            );
+        }
         yield* changed;
         return { agent };
+      }).pipe(Effect.mapError(failure)),
+    builderStart: (input) =>
+      Effect.gen(function* () {
+        const projectId =
+          input.projectId ??
+          (yield* folders.ensureScratchProject.pipe(
+            Effect.mapBoth({
+              onFailure: () =>
+                new AgentError({ message: "This machine can't start a conversation right now." }),
+              onSuccess: (scratch) => scratch.projectId,
+            }),
+          ));
+        const key = yield* crypto.randomUUIDv4();
+        const threadId = ThreadId.make(`agent-builder:${key}`);
+        yield* launch.launch({
+          surface: "builder",
+          commandId: CommandId.make(`agent-builder:${key}`),
+          threadId,
+          projectId,
+          title: BUILDER_THREAD_TITLE,
+          modelSelection: input.modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          workspaceStrategy: { type: "root" },
+          createdBy: "user",
+          creationSource: "web",
+          initialMessage: {
+            messageId: MessageId.make(`agent-builder:${key}`),
+            text: input.text,
+            attachments: [],
+          },
+        });
+        return { threadId, projectId };
+      }).pipe(Effect.mapError(failure)),
+    recordProposal: (input) =>
+      Effect.gen(function* () {
+        const thread = yield* projections.getThread(input.threadId);
+        if (thread.surface !== "builder")
+          return yield* new AgentError({
+            message: "propose_agent only runs in a builder thread.",
+          });
+        const at = yield* DateTime.now;
+        // A stable item id keeps one proposal per thread: every call replaces
+        // the last. The command and event ids stay unique so each call commits.
+        const key = yield* crypto.randomUUIDv4();
+        yield* events.commitCommand({
+          commandId: CommandId.make(`agent-proposal:${key}`),
+          threadId: input.threadId,
+          commandType: "agent.propose",
+          acceptedAt: at,
+          effects: [],
+          events: [
+            {
+              id: EventId.make(`agent-proposal:${key}`),
+              type: "turn-item.updated",
+              threadId: input.threadId,
+              occurredAt: at,
+              payload: {
+                id: TurnItemId.make(`agent-proposal:${input.threadId}`),
+                type: "agent_proposal",
+                threadId: input.threadId,
+                runId: null,
+                nodeId: null,
+                providerThreadId: null,
+                providerTurnId: null,
+                nativeItemRef: null,
+                parentItemId: null,
+                ordinal: 0,
+                status: "completed",
+                title: input.proposal.name,
+                proposal: input.proposal,
+                startedAt: at,
+                completedAt: at,
+                updatedAt: at,
+              },
+            },
+          ],
+        });
+        return { proposal: input.proposal };
       }).pipe(Effect.mapError(failure)),
     delete: (id) =>
       Effect.gen(function* () {

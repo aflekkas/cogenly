@@ -7,6 +7,7 @@ import {
   RuntimeMode,
   type ServerProvider,
   ThreadId,
+  type ThreadSurface,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -33,7 +34,7 @@ function makeThread(input: {
   readonly now: DateTime.Utc;
   readonly worktreePath: string | null;
   readonly runtimeMode?: typeof RuntimeMode.Encoded;
-  readonly surface?: "chat" | "work";
+  readonly surface?: ThreadSurface;
 }): OrchestrationV2AppThread {
   const threadId = ThreadId.make("thread:runtime-policy");
   return {
@@ -185,11 +186,11 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
     }),
   );
 
-  it.effect("marks only chat-surface threads for conversation mode", () =>
+  it.effect("marks chat and builder threads for conversation mode", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicy.RuntimePolicyV2;
       const now = yield* DateTime.now;
-      const conversationFor = (surface?: "chat" | "work") =>
+      const conversationFor = (surface?: "chat" | "work" | "builder") =>
         policy
           .resolve({
             thread: makeThread({
@@ -202,6 +203,7 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
           .pipe(Effect.map((resolved) => resolved.conversationMode));
 
       assert.isTrue(yield* conversationFor("chat"));
+      assert.isTrue(yield* conversationFor("builder"));
       assert.isUndefined(yield* conversationFor("work"));
       assert.isUndefined(yield* conversationFor(undefined));
     }),

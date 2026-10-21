@@ -1631,6 +1631,7 @@ const makeWsRpcHandlers = (
         agentStore.forget(input.agentId, input.id).pipe(Effect.map((deleted) => ({ deleted }))),
       [WS_METHODS.agentsRuns]: (input) =>
         agentStore.runs(input.id).pipe(Effect.map((runs) => ({ runs }))),
+      [WS_METHODS.agentsBuilderStart]: (input) => agents.builderStart(input),
       [WS_METHODS.scheduledTasksList]: (_input) =>
         scheduledTasks.list().pipe(Effect.map(withVisibleWebhookUrls)),
       [WS_METHODS.scheduledTasksSubscribe]: (_input) =>

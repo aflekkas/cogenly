@@ -23,6 +23,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Facts from "../context/FactService.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
+import { builderSystemPrompt } from "./builderPrompt.ts";
 import { conversationCarryOver } from "./context.ts";
 
 interface Row {
@@ -253,6 +254,14 @@ const make = Effect.gen(function* () {
     context: (threadId, runId) =>
       Effect.gen(function* () {
         const agent = yield* forThread(threadId);
+        if (agent === null) {
+          // A builder thread is a fresh conversation: its whole brief is the
+          // builder prompt, with no agent identity and no retrieved facts.
+          const builder = yield* sql<{
+            found: number;
+          }>`SELECT 1 AS found FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId} AND json_extract(payload_json, '$.surface') = 'builder' LIMIT 1`;
+          if (builder.length > 0) return builderSystemPrompt;
+        }
         const context = yield* retrieval.forTurn({
           threadId,
           ...(runId === undefined ? {} : { runId }),

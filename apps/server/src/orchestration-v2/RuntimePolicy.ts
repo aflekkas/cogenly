@@ -61,12 +61,13 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
 /**
  * Chat-surface threads run in conversation mode: adapters offer
  * conversation-only tools (no file writes, no shell) plus a conversational
- * system prompt. Every other thread keeps the full work toolset.
+ * system prompt. Builder threads are conversations too. Every other thread
+ * keeps the full work toolset.
  */
 const conversationModeFor = (
   thread: OrchestrationV2AppThread,
 ): Pick<ProviderAdapter.ProviderAdapterV2RuntimePolicy, "conversationMode"> =>
-  thread.surface === "chat" ? { conversationMode: true } : {};
+  thread.surface === "chat" || thread.surface === "builder" ? { conversationMode: true } : {};
 
 export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
   resolve: (input) =>

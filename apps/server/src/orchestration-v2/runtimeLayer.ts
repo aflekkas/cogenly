@@ -310,6 +310,7 @@ const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       AgentStore.layer,
+      layerManagedProjectFoldersProvided,
       layerThreadLaunchProvided,
       layerThreadManagementProvided,
       ProjectionStore.layer,

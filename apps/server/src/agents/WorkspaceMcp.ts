@@ -1,7 +1,10 @@
 import {
   AgentApprovalAction,
+  AgentMutationResult,
+  AgentOwnProfileUpdateInput,
   ScheduledTaskEventSchedule,
   ScheduledTaskUpsertInput,
+  ScheduledTaskUpsertSchedule,
   AgentApprovalResult,
   AgentStartWorkInput,
   AgentStartWorkResult,
@@ -18,6 +21,7 @@ import { Tool, Toolkit } from "effect/ai";
 import * as Access from "../mcp/McpToolAccess.ts";
 import * as Invocation from "../mcp/McpInvocationContext.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
+import * as Service from "./AgentService.ts";
 import * as Store from "./AgentStore.ts";
 import * as Workspace from "./AgentWorkspaceService.ts";
 import { callingAgent } from "./MemoryMcp.ts";
@@ -25,6 +29,7 @@ const shared = {
   failure: OrchestratorMcpFailure,
   failureMode: "return" as const,
   dependencies: [
+    Service.AgentService,
     Workspace.AgentWorkspaceService,
     Store.AgentStore,
     Invocation.McpInvocationContext,
@@ -70,10 +75,21 @@ const Work = Tool.make("start_agent_work", {
   parameters: Schema.Struct(workFields),
   success: AgentStartWorkResult,
 });
+const Trigger = Tool.make("propose_trigger", {
+  ...shared,
+  description:
+    "Propose a trigger for your own agent: an interval, a fixed time, an event, or a webhook. The owner must approve it; this never creates or enables a trigger directly.",
+  parameters: Schema.Struct({
+    title: ScheduledTaskUpsertInput.fields.title,
+    prompt: ScheduledTaskUpsertInput.fields.prompt,
+    schedule: ScheduledTaskUpsertSchedule,
+  }),
+  success: AgentApprovalResult,
+});
 const EventTrigger = Tool.make("propose_event_trigger", {
   ...shared,
   description:
-    "Propose an event-driven trigger for your own agent. The owner must approve it; this never creates or enables a trigger directly.",
+    "Propose an event-driven trigger for your own agent (alias of propose_trigger). The owner must approve it; this never creates or enables a trigger directly.",
   parameters: Schema.Struct({
     title: ScheduledTaskUpsertInput.fields.title,
     prompt: ScheduledTaskUpsertInput.fields.prompt,
@@ -81,13 +97,61 @@ const EventTrigger = Tool.make("propose_event_trigger", {
   }),
   success: AgentApprovalResult,
 });
-export const toolkit = Toolkit.make(List, Propose, Update, Approval, Work, EventTrigger);
+const UpdateProfile = Tool.make("update_own_profile", {
+  ...shared,
+  description:
+    "Update your own agent profile: name, face, responsibility, or standing instructions. Applies immediately.",
+  parameters: AgentOwnProfileUpdateInput,
+  success: AgentMutationResult,
+});
+export const toolkit = Toolkit.make(
+  List,
+  Propose,
+  Update,
+  Approval,
+  Work,
+  Trigger,
+  EventTrigger,
+  UpdateProfile,
+);
 const hasMessage = Schema.is(Schema.Struct({ message: Schema.String }));
 const unavailable = (cause: unknown) =>
   new OrchestratorMcpFailure({
     code: "orchestration_error",
     message: hasMessage(cause) ? cause.message : "Could not access agent workspace state.",
   });
+const proposeTrigger = (input: {
+  readonly title: ScheduledTaskUpsertInput["title"];
+  readonly prompt: ScheduledTaskUpsertInput["prompt"];
+  readonly schedule: ScheduledTaskUpsertSchedule;
+}) =>
+  Effect.gen(function* () {
+    const actor = yield* callingAgent;
+    const agent = actor.agent;
+    if (agent.projectId === null)
+      return yield* new OrchestratorMcpFailure({
+        code: "orchestration_error",
+        message: "Choose an agent repository before proposing a trigger.",
+      });
+    return yield* (yield* Workspace.AgentWorkspaceService).requestApproval(
+      agent.id,
+      {
+        actionKind: "schedule_trigger",
+        payload: {
+          ...input,
+          agentId: agent.id,
+          enabled: true,
+          projectId: agent.projectId,
+          threadId: agent.conversationThreadId,
+          modelSelection: agent.modelSelection,
+          runtimeMode: agent.runtimeMode,
+          interactionMode: "default",
+          workspaceStrategy: { type: "root" },
+        },
+      },
+      actor,
+    );
+  }).pipe(Effect.mapError(unavailable));
 export const handlers = Access.toLayer(toolkit, {
   list_open_items: Access.readsAsCaller((input) =>
     Effect.gen(function* () {
@@ -121,33 +185,22 @@ export const handlers = Access.toLayer(toolkit, {
       );
     }).pipe(Effect.mapError(unavailable)),
   ),
-  propose_event_trigger: Access.actsAsCaller((input) =>
+  propose_trigger: Access.actsAsCaller(proposeTrigger),
+  propose_event_trigger: Access.actsAsCaller(proposeTrigger),
+  update_own_profile: Access.actsAsCaller((input) =>
     Effect.gen(function* () {
       const actor = yield* callingAgent;
       const agent = actor.agent;
-      if (agent.projectId === null)
-        return yield* new OrchestratorMcpFailure({
-          code: "orchestration_error",
-          message: "Choose an agent repository before proposing a trigger.",
-        });
-      return yield* (yield* Workspace.AgentWorkspaceService).requestApproval(
-        agent.id,
-        {
-          actionKind: "schedule_trigger",
-          payload: {
-            ...input,
-            agentId: agent.id,
-            enabled: true,
-            projectId: agent.projectId,
-            threadId: agent.conversationThreadId,
-            modelSelection: agent.modelSelection,
-            runtimeMode: agent.runtimeMode,
-            interactionMode: "default",
-            workspaceStrategy: { type: "root" },
-          },
-        },
-        actor,
-      );
+      const face = input.avatar;
+      return yield* (yield* Service.AgentService).upsert({
+        ...agent,
+        ...(input.name === undefined ? {} : { name: input.name }),
+        ...(face === undefined
+          ? {}
+          : { avatar: { ...agent.avatar, ...face, seed: face.seed ?? agent.avatar.seed } }),
+        ...(input.responsibility === undefined ? {} : { responsibility: input.responsibility }),
+        ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
+      });
     }).pipe(Effect.mapError(unavailable)),
   ),
   start_agent_work: Access.actsAsCaller((input) =>

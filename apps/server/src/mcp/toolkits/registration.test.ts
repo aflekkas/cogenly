@@ -2,6 +2,7 @@ import * as GlobalSearch from "../../search/GlobalSearch.ts";
 import * as FactService from "../../context/FactService.ts";
 import * as ProjectLabels from "../../projectLabels/ProjectLabelService.ts";
 import * as WorkHandoff from "../../work/WorkHandoffService.ts";
+import * as AgentService from "../../agents/AgentService.ts";
 import * as AgentWorkspace from "../../agents/AgentWorkspaceService.ts";
 import * as AgentMcpPolicy from "../../agents/AgentMcpPolicy.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
@@ -105,6 +106,9 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(AgentWorkspace.AgentWorkspaceService)({
     listOpenItems: () => Effect.succeed({ commitments: [] }),
+  }),
+  Layer.mock(AgentService.AgentService)({
+    recordProposal: (input) => Effect.succeed({ proposal: input.proposal }),
   }),
   Layer.mock(AgentMcpPolicy.AgentMcpPolicy)({
     beforeTool: (_scope, name) =>
@@ -251,14 +255,34 @@ const smokeCases = [
     names: [
       "list_open_items",
       "propose_commitment",
+      "propose_trigger",
       "propose_event_trigger",
       "update_commitment_status",
+      "update_own_profile",
       "request_agent_approval",
       "start_agent_work",
     ],
     tool: "list_open_items",
     args: {},
     expected: { commitments: [] },
+  },
+  {
+    toolkit: "builder",
+    names: ["propose_agent"],
+    tool: "propose_agent",
+    args: {
+      name: "PR Digest",
+      face: { shape: "nuage", color: "bleu", expression: "attentif" },
+      responsibility: "Watch my open pull requests and send me a morning summary.",
+      triggers: [],
+      needs: [],
+      permissions: {},
+    },
+    expected: {
+      name: "PR Digest",
+      face: { shape: "nuage", color: "bleu", expression: "attentif" },
+      responsibility: "Watch my open pull requests and send me a morning summary.",
+    },
   },
   {
     toolkit: "agentMemory",

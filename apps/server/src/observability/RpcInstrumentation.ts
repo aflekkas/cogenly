@@ -127,6 +127,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.commitmentsDelete]: "commitments",
   [WS_METHODS.commitmentsHistory]: "commitments",
   [WS_METHODS.agentsRuns]: "agents",
+  [WS_METHODS.agentsBuilderStart]: "agents",
   [WS_METHODS.scheduledTasksList]: "scheduledTasks",
   [WS_METHODS.scheduledTasksSubscribe]: "scheduledTasks",
   [WS_METHODS.scheduledTasksUpsert]: "scheduledTasks",

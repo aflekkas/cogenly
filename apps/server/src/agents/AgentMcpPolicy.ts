@@ -66,6 +66,16 @@ const make = Effect.gen(function* () {
   return AgentMcpPolicy.of({
     beforeTool: (scope, name, input, readonly) =>
       Effect.gen(function* () {
+        // Builder threads belong to no agent, so they fall through the actor
+        // check below; the proposal tool is gated on the thread surface here.
+        if (name === "propose_agent") {
+          if (scope.thread === undefined)
+            return yield* denied("propose_agent needs a builder thread.", "invalid_request");
+          const shell = yield* threads.getThreadShell(scope.thread.threadId);
+          if (shell?.surface !== "builder")
+            return yield* denied("propose_agent only runs in a builder thread.", "invalid_request");
+          return { handled: false };
+        }
         const actor = yield* actorFor(scope);
         if (!actor) return { handled: false };
         const resolved = yield* access.resolve(actor.agent.id);
@@ -119,6 +129,7 @@ const make = Effect.gen(function* () {
         if (
           [
             "request_agent_approval",
+            "propose_trigger",
             "propose_event_trigger",
             "propose_commitment",
             "update_commitment_status",
@@ -263,6 +274,7 @@ const make = Effect.gen(function* () {
           readonly ||
           [
             "request_agent_approval",
+            "propose_trigger",
             "propose_event_trigger",
             "propose_commitment",
             "update_commitment_status",
