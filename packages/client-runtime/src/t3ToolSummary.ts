@@ -440,6 +440,9 @@ export function summarizeT3ToolCalls(
     case "capabilities":
       label = phrase("Checked", "check", `orchestration capabilities ${times}`);
       break;
+    case "image-search":
+      label = phrase("Searched", "search", `the web for images ${times}`);
+      break;
   }
   return { label, failedCount };
 }
