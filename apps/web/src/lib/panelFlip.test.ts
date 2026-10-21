@@ -294,4 +294,26 @@ describe("playPanelFlip", () => {
     await Promise.resolve();
     expect(sidebar.style.visibility).toBe("");
   });
+
+  it("holds a hiding panel visible before it reads style or layout", () => {
+    const sidebar = fakeElement(-280, { panelFlip: "start", panelFlipVisible: "" });
+    const seen: string[] = [];
+    const { getAnimations, getBoundingClientRect } = sidebar;
+    sidebar.getAnimations = () => (seen.push(sidebar.style.visibility), getAnimations());
+    sidebar.getBoundingClientRect = () => (
+      seen.push(sidebar.style.visibility),
+      getBoundingClientRect()
+    );
+    playPanelFlip(snapshotOf(sidebar, 0), 250);
+    // Hidden and held land in one style pass, not a hidden pass and then a visible one.
+    expect(seen.length).toBeGreaterThan(0);
+    expect(new Set(seen)).toEqual(new Set(["visible"]));
+  });
+
+  it("lets a hiding panel that does not move snap hidden", () => {
+    const sidebar = fakeElement(0, { panelFlip: "start", panelFlipVisible: "" });
+    playPanelFlip(snapshotOf(sidebar, 0), 250);
+    expect(sidebar.getAnimations()).toEqual([]);
+    expect(sidebar.style.visibility).toBe("");
+  });
 });

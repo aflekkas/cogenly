@@ -260,6 +260,17 @@ function flipPanelContent(
   // still waiting for its first frame keeps waiting.
   const elapsedByElement = new Map<HTMLElement, number>();
   const waitingElements = new Set<HTMLElement>();
+  // Hold content that keeps visible before anything below reads style, so its
+  // hidden final state and the hold resolve in the same style pass instead of
+  // restyling its subtree hidden and then visible again (holdVisibleUntilDone).
+  const heldEarly: HTMLElement[] = [];
+  for (const { element } of snapshot.entries) {
+    if (element.dataset.panelFlipVisible === undefined || element.style.visibility === "visible") {
+      continue;
+    }
+    element.style.visibility = "visible";
+    heldEarly.push(element);
+  }
   for (const { element } of snapshot.entries) {
     for (const animation of element.getAnimations()) {
       if (animation.id !== PANEL_FLIP_ANIMATION_ID) continue;
@@ -322,6 +333,10 @@ function flipPanelContent(
       animation.currentTime = elapsed;
     }
   });
+  // Content that ended up not gliding (no offset) and has no glide holding it snaps.
+  for (const element of heldEarly) {
+    if (!visibilityHolds.has(element)) element.style.removeProperty("visibility");
+  }
 }
 
 /**

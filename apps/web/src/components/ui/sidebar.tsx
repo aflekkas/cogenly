@@ -157,9 +157,13 @@ function SidebarProvider({
     flipSnapshotRef.current = null;
     const wrapper = wrapperRef.current;
     if (!snapshot || !wrapper) return;
+    // The layout sets the duration inline; reading it there does not force
+    // this commit's style pass before the flip has held what it keeps visible.
     const duration =
-      Number.parseFloat(getComputedStyle(wrapper).getPropertyValue("--panel-animation-duration")) ||
-      0;
+      Number.parseFloat(
+        wrapper.style.getPropertyValue("--panel-animation-duration") ||
+          getComputedStyle(wrapper).getPropertyValue("--panel-animation-duration"),
+      ) || 0;
     if (duration > 0) playPanelFlip(snapshot, duration, { contain: true });
   }, [open]);
 
@@ -350,11 +354,11 @@ function Sidebar({
             // the full height: an empty block collapses to 0px tall and lets
             // the page backdrop show through the whole column.
             "relative h-full w-(--sidebar-width) bg-transparent group-data-[variant=sidebar]:bg-background",
-            "group-data-[collapsible=offcanvas]:w-0",
+            "[[data-collapsible=offcanvas]_&]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
-              ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]"
-              : "group-data-[collapsible=icon]:w-(--sidebar-width-icon)",
+              ? "[[data-collapsible=icon]_&]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]"
+              : "[[data-collapsible=icon]_&]:w-(--sidebar-width-icon)",
           )}
           data-slot="sidebar-gap"
         />
@@ -383,14 +387,14 @@ function Sidebar({
                 )
               : cn(
                   side === "left"
-                    ? "group-data-[collapsible=offcanvas]:-translate-x-full"
-                    : "group-data-[collapsible=offcanvas]:translate-x-full",
-                  "group-data-[collapsible=offcanvas]:invisible",
+                    ? "[[data-collapsible=offcanvas]_&]:-translate-x-full"
+                    : "[[data-collapsible=offcanvas]_&]:translate-x-full",
+                  "[[data-collapsible=offcanvas]_&]:invisible",
                 ),
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
-              ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
-              : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=right]:border-l",
+              ? "p-2 [[data-collapsible=icon]_&]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
+              : "[[data-collapsible=icon]_&]:w-(--sidebar-width-icon) group-data-[side=right]:border-l",
             className,
           )}
           data-slot="sidebar-container"
@@ -604,7 +608,7 @@ function SidebarRail({
               "transition-colors",
               "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
               "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
-              "group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:left-full",
+              "[[data-collapsible=offcanvas]_&]:translate-x-0 hover:[[data-collapsible=offcanvas]_&]:bg-sidebar [[data-collapsible=offcanvas]_&]:after:left-full",
               "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
               "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",
               className,
@@ -658,14 +662,16 @@ function SidebarInput({ className, ...props }: Omit<InputProps, "unstyled" | "va
   );
 }
 
+/**
+ * The main pane beside the sidebar. It takes no `peer-data-*` styles: a
+ * `.peer[data-state] ~ *` rule makes every sidebar state change (a toggle, or
+ * the list column stepping aside for the right panel) restyle the whole pane,
+ * the entire app, twice per toggle.
+ */
 function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
   return (
     <main
-      className={cn(
-        "relative flex min-w-0 w-full flex-1 flex-col bg-background",
-        "md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ms-2 md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ms-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm/5",
-        className,
-      )}
+      className={cn("relative flex min-w-0 w-full flex-1 flex-col bg-background", className)}
       data-slot="sidebar-inset"
       {...props}
     />
@@ -724,7 +730,7 @@ function SidebarContent({
           className={cn(
             // Stacked groups share one inset between them instead of doubling
             // it, including across the fixed header's boundary.
-            "flex w-full min-w-0 flex-col [overflow-anchor:none] group-data-[collapsible=icon]:overflow-hidden [&>[data-sidebar=group]+[data-sidebar=group]]:pt-0",
+            "flex w-full min-w-0 flex-col [overflow-anchor:none] [[data-collapsible=icon]_&]:overflow-hidden [&>[data-sidebar=group]+[data-sidebar=group]]:pt-0",
             fixedHeader && "[&>[data-sidebar=group]:first-child]:pt-0",
             className,
           )}
@@ -775,7 +781,7 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full cursor-pointer items-center gap-[var(--sidebar-control-gap)] overflow-hidden text-left outline-hidden ring-ring transition-[width,height,padding] state-hover focus-visible:ring-2 focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-64 aria-disabled:pointer-events-none aria-disabled:opacity-64 data-[active=true]:state-selected data-[active=true]:font-medium group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-[var(--sidebar-content-inset)]! [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-[var(--sidebar-icon-color)] hover:[&>svg]:text-sidebar-foreground active:[&>svg]:text-sidebar-foreground data-[active=true]:[&>svg]:text-sidebar-foreground",
+  "peer/menu-button flex w-full cursor-pointer items-center gap-[var(--sidebar-control-gap)] overflow-hidden text-left outline-hidden ring-ring transition-[width,height,padding] state-hover focus-visible:ring-2 focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-64 aria-disabled:pointer-events-none aria-disabled:opacity-64 data-[active=true]:state-selected data-[active=true]:font-medium [[data-collapsible=icon]_&]:size-8! [[data-collapsible=icon]_&]:p-[var(--sidebar-content-inset)]! [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-[var(--sidebar-icon-color)] hover:[&>svg]:text-sidebar-foreground active:[&>svg]:text-sidebar-foreground data-[active=true]:[&>svg]:text-sidebar-foreground",
   {
     defaultVariants: {
       size: "default",
@@ -786,7 +792,7 @@ const sidebarMenuButtonVariants = cva(
         default:
           "h-8 rounded-[var(--control-radius)] px-[var(--sidebar-row-content-inset)] py-1.5 text-sm",
         icon: "size-8 justify-center rounded-[var(--control-radius)] p-0",
-        lg: "h-12 rounded-lg p-2 text-sm group-data-[collapsible=icon]:p-0!",
+        lg: "h-12 rounded-lg p-2 text-sm [[data-collapsible=icon]_&]:p-0!",
         sm: "h-7 rounded-lg p-2 text-xs",
       },
       variant: {
@@ -855,7 +861,7 @@ function SidebarMenuSub({ className, ...props }: React.ComponentProps<"ul">) {
     <ul
       className={cn(
         "mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-sidebar-border border-l px-2.5 py-0.5",
-        "group-data-[collapsible=icon]:hidden",
+        "[[data-collapsible=icon]_&]:hidden",
         className,
       )}
       data-sidebar="menu-sub"
@@ -892,7 +898,7 @@ function SidebarMenuSubButton({
       "data-[active=true]:state-selected",
       size === "sm" && "text-xs",
       size === "md" && "text-sm",
-      "group-data-[collapsible=icon]:hidden",
+      "[[data-collapsible=icon]_&]:hidden",
       className,
     ),
     "data-active": isActive,

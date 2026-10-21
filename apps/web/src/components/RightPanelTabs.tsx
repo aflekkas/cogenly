@@ -531,9 +531,16 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   // Arrivals grow from nothing and departures fold shut in place, so the
   // tabs beside them slide rather than jump. A switch to another group of
   // tabs is a different strip, not an arrival, and plays nothing.
+  //
+  // This runs only when the strip's set of tabs changes, never per render: a
+  // read here would force the panel's whole first style pass early, inside
+  // the commit, and again on every re-render. The widths a closing tab folds
+  // from come from a resize observer instead (the tab's border box as last
+  // laid out), so no commit reads layout to keep them.
   const seenTabsRef = useRef<{ group: RightPanelSurfaceGroup | null; ids: string[] } | null>(null);
   const lastTabWidthsRef = useRef(new Map<string, number>());
-  useLayoutEffect(() => {
+  const tabSetKey = `${activeGroup ?? ""}\u0000${groupSurfaces.map((surface) => surface.id).join("\u0000")}`;
+  const syncTabSet = useEffectEvent(() => {
     const ids = groupSurfaces.map((surface) => surface.id);
     const seen = seenTabsRef.current;
     seenTabsRef.current = { group: activeGroup, ids };
@@ -541,13 +548,16 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     const sameGroup = seen !== null && seen.group === activeGroup;
     if (sameGroup && list && !reducedMotion()) {
       const previous = new Set<string>(seen.ids);
+      // Every read, then every write: one layout for all arrivals.
+      const arrivals: Array<{ element: HTMLElement; width: number }> = [];
       for (const id of ids) {
         if (previous.has(id)) continue;
         const element = list.querySelector<HTMLElement>(
           `[data-surface-id="${window.CSS.escape(id)}"]`,
         );
-        if (!element) continue;
-        const width = element.getBoundingClientRect().width;
+        if (element) arrivals.push({ element, width: element.getBoundingClientRect().width });
+      }
+      for (const { element, width } of arrivals) {
         element.animate(
           [
             { width: "0px", opacity: 0 },
@@ -570,14 +580,22 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           }),
         ]);
       }
+      for (const { id } of gone) lastTabWidthsRef.current.delete(id);
     }
-    if (list) {
-      for (const element of list.querySelectorAll<HTMLElement>("[data-surface-id]")) {
-        const id = element.dataset.surfaceId;
-        if (id) lastTabWidthsRef.current.set(id, element.getBoundingClientRect().width);
+    if (!list) return;
+    const tabs = Array.from(list.querySelectorAll<HTMLElement>("[data-surface-id]"));
+    return observeResize(tabs, (entries) => {
+      for (const entry of entries) {
+        const id = entry.target instanceof HTMLElement ? entry.target.dataset.surfaceId : undefined;
+        const width = entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+        if (id) lastTabWidthsRef.current.set(id, width);
       }
-    }
+    });
   });
+  // Keyed on the tab set: the strip's width reaches the tabs through
+  // tabWidths, and their observed sizes follow it on their own.
+  // eslint-disable-next-line react/exhaustive-effect-dependencies -- keyed on the tab set
+  useLayoutEffect(() => syncTabSet(), [tabSetKey]);
   const dismissLeaving = useCallback(
     (id: string) => setLeavingTabs((leaving) => leaving.filter((entry) => entry.surface.id !== id)),
     [],
