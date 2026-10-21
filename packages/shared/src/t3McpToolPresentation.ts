@@ -49,6 +49,13 @@ export type T3McpToolSummaryAction =
   | "project-update"
   | "project-delete"
   | "project-clone"
+  | "project-label-create"
+  | "project-label-update"
+  | "project-label-delete"
+  | "project-label-link"
+  | "project-label-clone"
+  | "agent-list"
+  | "agent-builder-start"
   | "environment-read"
   | "environment-update"
   | "attachment-prepare"
@@ -326,6 +333,53 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   t3_project_update: tool(["Update", "Updating", "Updated", "a project"], "project-update"),
   t3_project_delete: tool(["Delete", "Deleting", "Deleted", "a project"], "project-delete"),
   t3_project_clone: tool(["Clone", "Cloning", "Cloned", "a repository"], "project-clone"),
+  t3_project_label_list: tool(["List", "Listing", "Listed", "project folders"], "project-list"),
+  t3_project_label_read: tool(["Read", "Reading", "Read", "a project folder"], "project-read"),
+  t3_project_label_create: tool(
+    ["Create", "Creating", "Created", "a project folder"],
+    "project-label-create",
+  ),
+  t3_project_label_update: tool(
+    ["Update", "Updating", "Updated", "a project folder"],
+    "project-label-update",
+  ),
+  t3_project_label_delete: tool(
+    ["Delete", "Deleting", "Deleted", "a project folder"],
+    "project-label-delete",
+  ),
+  t3_project_label_link_source: tool(
+    ["Link", "Linking", "Linked", "a source to a project"],
+    "project-label-link",
+  ),
+  t3_project_label_unlink_source: tool(
+    ["Unlink", "Unlinking", "Unlinked", "a source from a project"],
+    "project-label-link",
+  ),
+  t3_project_label_link_repository: tool(
+    ["Add", "Adding", "Added", "a repository to a project"],
+    "project-label-link",
+  ),
+  t3_project_label_unlink_repository: tool(
+    ["Remove", "Removing", "Removed", "a repository from a project"],
+    "project-label-link",
+  ),
+  t3_project_label_clone_repository: tool(
+    ["Clone", "Cloning", "Started cloning", "a repository into a project"],
+    "project-label-clone",
+  ),
+  t3_thread_move_project_folder: tool(
+    ["File", "Filing", "Filed", "a thread into a project"],
+    "thread-organize",
+  ),
+  t3_thread_set_project_labels: tool(
+    ["File", "Filing", "Filed", "a thread into a project"],
+    "thread-organize",
+  ),
+  list_agents: tool(["List", "Listing", "Listed", "agents"], "agent-list"),
+  start_agent_builder: tool(
+    ["Start", "Starting", "Started", "an agent builder"],
+    "agent-builder-start",
+  ),
   t3_attachment_prepare_upload: tool(
     ["Prepare", "Preparing", "Prepared", "an attachment upload"],
     "attachment-prepare",

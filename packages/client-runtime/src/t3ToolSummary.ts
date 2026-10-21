@@ -104,6 +104,9 @@ export function summarizeT3ToolCalls(
   const projectIds = selected.map(
     (call) => id(call.output?.id) ?? id(call.output?.projectId) ?? id(call.input?.projectId),
   );
+  const projectLabelIds = selected.map(
+    (call) => id(asRecord(call.output?.label)?.id) ?? id(call.input?.id) ?? id(call.input?.labelId),
+  );
   const threadIds = selected.map(
     (call) =>
       id(call.output?.threadId) ??
@@ -329,6 +332,39 @@ export function summarizeT3ToolCalls(
         "clone",
         quantity(countEntities(entityIds("cwd")), "repository", "repositories"),
       );
+      break;
+    case "project-label-create":
+      label = phrase(
+        "Created",
+        "create",
+        quantity(countEntities(projectLabelIds), "project folder"),
+      );
+      break;
+    case "project-label-update":
+      label = phrase(
+        "Updated",
+        "update",
+        quantity(countEntities(projectLabelIds), "project folder"),
+      );
+      break;
+    case "project-label-delete":
+      label = phrase(
+        "Deleted",
+        "delete",
+        quantity(countEntities(projectLabelIds), "project folder"),
+      );
+      break;
+    case "project-label-link":
+      label = phrase("Updated", "update", `project links ${times}`);
+      break;
+    case "project-label-clone":
+      label = phrase("Started", "start", quantity(selected.length, "project clone"));
+      break;
+    case "agent-list":
+      label = phrase("Listed", "list", `agents ${times}`);
+      break;
+    case "agent-builder-start":
+      label = phrase("Started", "start", quantity(countEntities(threadIds), "agent builder"));
       break;
     case "environment-read":
       label = phrase("Checked", "check", `environment preferences ${times}`);

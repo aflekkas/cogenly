@@ -471,6 +471,7 @@ describe("MuseAdapterV2", () => {
       assert.include(text, "<conversation_mode>");
       assert.include(text, "Start Work");
       assert.include(text, "image_search");
+      assert.include(text, "<how_cogenly_works>");
       yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
@@ -511,6 +512,7 @@ describe("MuseAdapterV2", () => {
       const call = yield* fake.takeCall("turn/start");
       assert.notInclude(JSON.stringify(call.params.input), "<conversation_mode>");
       assert.notInclude(JSON.stringify(call.params.input), "image_search");
+      assert.include(JSON.stringify(call.params.input), "<how_cogenly_works>");
       yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );

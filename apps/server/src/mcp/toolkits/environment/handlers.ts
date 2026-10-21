@@ -14,6 +14,7 @@ export function preferences(settings: ServerSettings) {
     newWorktreesStartFromOrigin,
     enableAgentTerminals,
     enableProviderUpdateChecks,
+    projectsRoot,
     backgroundActivity,
     sourceControlWritingStyle,
   } = settings;
@@ -23,6 +24,7 @@ export function preferences(settings: ServerSettings) {
     newWorktreesStartFromOrigin,
     enableAgentTerminals,
     enableProviderUpdateChecks,
+    projectsRoot,
     backgroundActivity: { profile: backgroundActivity.profile },
     sourceControlWritingStyle: {
       ...sourceControlWritingStyle,

@@ -3,6 +3,13 @@ When the cogenly MCP server exposes link_pull_request, you must use it to regist
 </pull_request_linking>`;
 
 /**
+ * How Cogenly itself works, for every provider in chat and Work. The agent
+ * needs this to organize projects, file threads, and set agents up when the
+ * user asks in plain words.
+ */
+export const HOW_COGENLY_WORKS_INSTRUCTIONS = `<how_cogenly_works>Cogenly has three surfaces. Chats are conversations: they answer directly and never change files. Work sessions change code inside one repository. Agents are persistent assistants: each owns an ongoing conversation and can run on scheduled triggers. Projects organize everything. A project is a folder at \`<projectsRoot>/<Project>/\` holding git repositories alongside project files at the top level. A chat opened in a project runs with that folder as its working directory; Work runs inside its repository. Filing never moves history: moving a chat into a project forks it, carrying the conversation into the new project chat while the original stays where it was. When the user asks you to set things up, use the cogenly MCP tools: list and create projects, link repositories and GitHub owners, file threads, list agents, or start an agent builder for a new agent. Confirm first before bulk or destructive changes.</how_cogenly_works>`;
+
+/**
  * Shared runtime context; omit model and effort when the harness manages them dynamically.
  * `modelName` is the display name users see in the model picker; `model` is the slug.
  */
@@ -20,7 +27,7 @@ export function buildRuntimeInstructions(runtime: {
     modelName && modelName !== model ? `${modelName} (model slug: ${model})` : model;
   const modelInfo = model && model !== "auto" && model !== "default" ? `, as ${modelLabel}` : "";
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
-  return `<runtime_info>In case you're asked: you are running in Cogenly through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}`;
+  return `<runtime_info>In case you're asked: you are running in Cogenly through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${HOW_COGENLY_WORKS_INSTRUCTIONS}`;
 }
 
 function toSingleLine(value: string): string {

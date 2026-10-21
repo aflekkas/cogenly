@@ -3,6 +3,7 @@ import { ProjectLabelsToolkit } from "./toolkits/projectLabels/tools.ts";
 import * as ProjectLabelsHandlers from "./toolkits/projectLabels/handlers.ts";
 import * as WorkMcp from "../work/WorkMcp.ts";
 import * as AgentBuilderMcp from "../agents/BuilderMcp.ts";
+import * as AgentsMcp from "../agents/AgentsMcp.ts";
 import * as AgentWorkspaceMcp from "../agents/WorkspaceMcp.ts";
 import * as AgentMcpPolicy from "../agents/AgentMcpPolicy.ts";
 import * as AgentMemoryMcp from "../agents/MemoryMcp.ts";
@@ -978,6 +979,7 @@ export const layer = Layer.mergeAll(
   ),
   toolkitRegistration(AgentWorkspaceMcp.toolkit, AgentWorkspaceMcp.handlers),
   toolkitRegistration(AgentBuilderMcp.toolkit, AgentBuilderMcp.handlers),
+  toolkitRegistration(AgentsMcp.toolkit, AgentsMcp.handlers),
   layerOrchestratorToolkit,
   toolkitRegistration(TerminalToolkit, TerminalHandlers.layer).pipe(
     Layer.provide(TerminalMcpService.layer),

@@ -48,6 +48,21 @@ describe("resolveT3McpToolPresentation", () => {
     });
   });
 
+  it("pretty prints project folder and agent tools", () => {
+    expect(resolveT3McpToolPresentation("mcp__cogenly__t3_project_label_create")).toEqual({
+      displayName: "Create a project folder",
+      logo: "t3-code",
+    });
+    expect(resolveT3McpToolPresentation("mcp__cogenly__t3_thread_move_project_folder")).toEqual({
+      displayName: "File a thread into a project",
+      logo: "t3-code",
+    });
+    expect(resolveT3McpToolPresentation("t3-code.start_agent_builder")).toEqual({
+      displayName: "Start an agent builder",
+      logo: "t3-code",
+    });
+  });
+
   it("pretty prints bare T3 MCP toolkit names", () => {
     expect(resolveT3McpToolPresentation("list_scheduled_tasks")).toEqual({
       displayName: "List scheduled tasks",

@@ -249,6 +249,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
           : "";
       assert.notInclude(append, "<conversation_mode>");
       assert.notInclude(append, "image_search");
+      assert.include(append, "<how_cogenly_works>");
     },
   );
 
@@ -268,6 +269,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     assert.include(append, "<conversation_mode>");
     assert.include(append, "Start Work");
     assert.include(append, "image_search");
+    assert.include(append, "<how_cogenly_works>");
     assert.notInclude(append, "terminal_run");
   });
 });
@@ -380,7 +382,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     ]);
   });
 
-  it("adds the handoff draft and memory reads to conversation-mode tools", () => {
+  it("adds the handoff draft, memory reads, and project organizers to conversation-mode tools", () => {
     const threadId = ThreadId.make("thread-claude-mcp-conversation");
     const mcpSession = mcpSessionFor(threadId);
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
@@ -394,6 +396,18 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       "mcp__cogenly__work_propose_handoff",
       "mcp__cogenly__memory_read",
       "mcp__cogenly__fact_search",
+      "mcp__cogenly__t3_project_label_list",
+      "mcp__cogenly__t3_project_label_read",
+      "mcp__cogenly__t3_project_label_create",
+      "mcp__cogenly__t3_project_label_update",
+      "mcp__cogenly__t3_project_label_delete",
+      "mcp__cogenly__t3_project_label_link_source",
+      "mcp__cogenly__t3_project_label_unlink_source",
+      "mcp__cogenly__t3_project_label_link_repository",
+      "mcp__cogenly__t3_project_label_unlink_repository",
+      "mcp__cogenly__t3_thread_move_project_folder",
+      "mcp__cogenly__list_agents",
+      "mcp__cogenly__start_agent_builder",
     ]);
     assert.isFalse(overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD));
     for (const mutating of [
@@ -402,6 +416,8 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       "mcp__cogenly__work_start",
       "mcp__cogenly__t3_thread_launch",
       "mcp__cogenly__t3_worktree_handoff",
+      "mcp__cogenly__t3_project_clone",
+      "mcp__cogenly__t3_project_label_clone_repository",
     ]) {
       assert.isFalse(overrides.allowedTools?.includes(mutating), mutating);
     }

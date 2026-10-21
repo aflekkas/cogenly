@@ -102,6 +102,10 @@ const make = Effect.gen(function* () {
           return yield* denied(
             "Persistent agents must start governed Work with start_agent_work; untracked child threads require the owner.",
           );
+        if (name === "start_agent_builder")
+          return yield* denied(
+            "Persistent agents cannot start agent builders; only the owner creates agents.",
+          );
         if (typeof params.threadId === "string" && params.threadId !== actor.threadId) {
           const targetAgent = yield* store.forThread(params.threadId as typeof actor.threadId);
           if (targetAgent?.id !== agent.id)

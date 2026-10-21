@@ -1254,14 +1254,28 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__image_search",
 ];
 
-// Chat-surface turns get the read-only tools plus the handoff draft and the
-// read-only memory tools, so a conversation can propose Work and recall facts
-// without touching the workspace. Everything that mutates stays out.
+// Chat-surface turns get the read-only tools plus the handoff draft, the
+// read-only memory tools, and the project organizers, so a conversation can
+// propose Work, recall facts, and set up projects by talking. Project folders
+// are metadata only, so creating and filing them stays conversational; clones
+// and launches still need an approval.
 export const CLAUDE_CONVERSATION_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   ...CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
   "mcp__cogenly__work_propose_handoff",
   "mcp__cogenly__memory_read",
   "mcp__cogenly__fact_search",
+  "mcp__cogenly__t3_project_label_list",
+  "mcp__cogenly__t3_project_label_read",
+  "mcp__cogenly__t3_project_label_create",
+  "mcp__cogenly__t3_project_label_update",
+  "mcp__cogenly__t3_project_label_delete",
+  "mcp__cogenly__t3_project_label_link_source",
+  "mcp__cogenly__t3_project_label_unlink_source",
+  "mcp__cogenly__t3_project_label_link_repository",
+  "mcp__cogenly__t3_project_label_unlink_repository",
+  "mcp__cogenly__t3_thread_move_project_folder",
+  "mcp__cogenly__list_agents",
+  "mcp__cogenly__start_agent_builder",
 ];
 
 // Claude Code aborts an HTTP MCP call after 60 s ("The operation timed out.")

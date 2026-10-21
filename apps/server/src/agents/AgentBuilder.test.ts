@@ -457,6 +457,26 @@ describe("propose_agent policy", () => {
       }).pipe(Effect.provide(h.layer));
     }),
   );
+
+  it.effect("lets agents list agents but never start builders", () =>
+    Effect.gen(function* () {
+      const h = yield* makePolicyHarness;
+      yield* Effect.gen(function* () {
+        const policy = yield* Policy.AgentMcpPolicy;
+        const store = yield* Store.AgentStore;
+        const agent = yield* store.save(agentFixture());
+        h.shells.set(agent.conversationThreadId, "chat");
+        const scope = scopeFor(agent.conversationThreadId);
+        expect(yield* policy.beforeTool(scope, "list_agents", {}, true)).toEqual({
+          handled: false,
+        });
+        const denied = yield* Effect.result(
+          policy.beforeTool(scope, "start_agent_builder", { text: "Another me" }, false),
+        );
+        expect(denied._tag).toBe("Failure");
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
 });
 
 describe("agent thread tools", () => {

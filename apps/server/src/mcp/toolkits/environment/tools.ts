@@ -19,6 +19,7 @@ const PreferenceFields = {
   newWorktreesStartFromOrigin: ServerSettings.fields.newWorktreesStartFromOrigin,
   enableAgentTerminals: ServerSettings.fields.enableAgentTerminals,
   enableProviderUpdateChecks: ServerSettings.fields.enableProviderUpdateChecks,
+  projectsRoot: ServerSettings.fields.projectsRoot,
   backgroundActivity: Schema.Struct({ profile: BackgroundActivityProfileSelection }),
   sourceControlWritingStyle: Schema.Struct({
     mode: Schema.String,
@@ -41,7 +42,7 @@ const shared = {
 const EnvironmentReadTool = Tool.make("t3_environment_read", {
   ...shared,
   description:
-    "Read this server's identity and selected environment preferences. Provider/model availability is exposed by orchestrator_capabilities. Writing instructions are limited to 4,000 characters.",
+    "Read this server's identity and selected environment preferences, including the projects root. Provider/model availability is exposed by orchestrator_capabilities. Writing instructions are limited to 4,000 characters.",
   success: Schema.Struct({
     environmentId: ExecutionEnvironmentDescriptor.fields.environmentId,
     label: Schema.String,

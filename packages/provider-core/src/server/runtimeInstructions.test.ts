@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { CONVERSATION_MODE_INSTRUCTIONS, buildRuntimeInstructions } from "./runtimeInstructions.ts";
+import {
+  CONVERSATION_MODE_INSTRUCTIONS,
+  HOW_COGENLY_WORKS_INSTRUCTIONS,
+  buildRuntimeInstructions,
+} from "./runtimeInstructions.ts";
 
 describe("buildRuntimeInstructions", () => {
   it("requires explicit registration of every PR and stack layer", () => {
@@ -33,6 +37,33 @@ describe("buildRuntimeInstructions", () => {
     const instructions = buildRuntimeInstructions({ harness: "Cursor", model });
     expect(instructions).toContain("through the Cursor harness.");
     expect(instructions).not.toContain("reasoning effort");
+  });
+});
+
+describe("HOW_COGENLY_WORKS_INSTRUCTIONS", () => {
+  it("explains chats, Work, agents, projects, and filing", () => {
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("<how_cogenly_works>");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("Chats are conversations");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("Work sessions change code");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("persistent assistants");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("<projectsRoot>/<Project>/");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("moving a chat into a project forks it");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("cogenly MCP tools");
+    expect(HOW_COGENLY_WORKS_INSTRUCTIONS).toContain("Confirm first before bulk or destructive");
+  });
+
+  it("stays between 120 and 200 words", () => {
+    const words = HOW_COGENLY_WORKS_INSTRUCTIONS.replaceAll(/<[^>]+>/g, "")
+      .split(/\s+/)
+      .filter(Boolean);
+    expect(words.length).toBeGreaterThanOrEqual(120);
+    expect(words.length).toBeLessThanOrEqual(200);
+  });
+
+  it("is included in the runtime instructions for every harness", () => {
+    for (const harness of ["Claude Code", "Codex", "Muse Code"]) {
+      expect(buildRuntimeInstructions({ harness })).toContain("<how_cogenly_works>");
+    }
   });
 });
 

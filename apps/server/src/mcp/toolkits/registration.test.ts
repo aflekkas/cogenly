@@ -44,6 +44,8 @@ import * as ServerSettings from "../../serverSettings.ts";
 import * as VcsStatusBroadcaster from "../../vcs/VcsStatusBroadcaster.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
+import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
+import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import * as ThreadLaunchService from "../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadSearch from "../../orchestration-v2/ThreadSearch.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
@@ -109,6 +111,7 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(AgentService.AgentService)({
     recordProposal: (input) => Effect.succeed({ proposal: input.proposal }),
+    list: () => Effect.succeed({ agents: [] }),
   }),
   Layer.mock(AgentMcpPolicy.AgentMcpPolicy)({
     beforeTool: (_scope, name) =>
@@ -172,6 +175,8 @@ const layerStubServices = Layer.mergeAll(
     getOrCreateRandom: (_name, bytes) => Effect.succeed(new Uint8Array(bytes).fill(7)),
   }),
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
+  Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
+  Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({
     search: () =>
@@ -274,6 +279,13 @@ const smokeCases = [
     tool: "list_open_items",
     args: {},
     expected: { commitments: [] },
+  },
+  {
+    toolkit: "agents",
+    names: ["list_agents", "start_agent_builder"],
+    tool: "list_agents",
+    args: {},
+    expected: { agents: [] },
   },
   {
     toolkit: "builder",
@@ -400,6 +412,14 @@ const smokeCases = [
     names: [
       "t3_project_label_list",
       "t3_project_label_read",
+      "t3_project_label_create",
+      "t3_project_label_update",
+      "t3_project_label_delete",
+      "t3_project_label_link_source",
+      "t3_project_label_unlink_source",
+      "t3_project_label_link_repository",
+      "t3_project_label_unlink_repository",
+      "t3_project_label_clone_repository",
       "t3_thread_move_project_folder",
       "t3_thread_set_project_labels",
     ],
@@ -446,6 +466,7 @@ const smokeCases = [
     args: {},
     expected: {
       label: "MCP smoke",
+      preferences: { projectsRoot: expect.any(String) },
     },
   },
   {
