@@ -35,6 +35,7 @@ function folder(
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     repositoryIds: repositoryIds.map((repositoryId) => ProjectId.make(repositoryId)),
+    sourceLinks: [],
     threadCount: 0,
   };
   return { key: projectLabelKey(environmentId, id), environmentId, label };
