@@ -187,8 +187,10 @@ const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
 const RECENT_MODEL_COUNT = 5;
 const MODEL_LIST_ESTIMATED_ITEM_SIZE = 52;
 
+// Rows sit 4px apart, the rail's own rhythm, so a selected row and a hovered
+// neighbour read as two pills instead of one block.
 function ModelListSeparator() {
-  return <div className="h-0.5" />;
+  return <div className="h-1" />;
 }
 
 export const ModelPickerContent = memo(function ModelPickerContent(props: {

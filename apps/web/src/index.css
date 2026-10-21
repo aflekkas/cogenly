@@ -700,12 +700,13 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
 
    state-hover: put it on the element itself, not behind hover:. It applies on
    pointer hover and on keyboard/data-highlighted rows (menus, palettes).
-   state-selected: a darker-than-slab fill where the top highlight and faint
-   edge do the work. Apply it conditionally (or behind data-*: variants). It is
-   deliberately more specific, so it wins over state-hover and plain bg-* or
-   hover:bg-* utilities when both apply. Selection is the fill alone, with no
-   leading line. Everything is background layers and shadows: static, no
-   pseudo-elements, no layout. */
+   state-selected: a darker-than-slab fill. Apply it conditionally (or behind
+   data-*: variants). It is deliberately more specific, so it wins over
+   state-hover and plain bg-* or hover:bg-* utilities when both apply.
+   Selection, pressed and open states are the fill alone: no hairline edge
+   or ring, no leading line. Keyboard focus keeps its own focus-visible ring.
+   Everything is background layers and shadows: static, no pseudo-elements,
+   no layout. */
 @utility state-hover {
   &[data-highlighted] {
     background-color: var(--state-hover-fill);
@@ -749,9 +750,7 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
       var(--state-selected-sheen-bottom)
     );
     color: var(--state-selected-foreground);
-    --tw-shadow:
-      inset 0 1px 0 var(--state-selected-highlight), inset 0 0 0 1px var(--state-selected-edge),
-      var(--state-selected-shadow);
+    --tw-shadow: inset 0 1px 0 var(--state-selected-highlight), var(--state-selected-shadow);
     box-shadow:
       var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000),
       var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
@@ -766,14 +765,13 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     --state-selected-sheen-top: transparent;
     --state-selected-sheen-bottom: transparent;
     --state-selected-highlight: transparent;
-    --state-selected-edge: transparent;
     --state-selected-shadow: 0 0 #0000;
   }
 }
 
 /* Popup rows (menu, select, combobox, autocomplete and command items) show
-   hover, highlight and selection as a plain fill, without the selected edge,
-   top highlight or shadow. The highlighted row is the keyboard focus, so a
+   hover, highlight and selection as a plain fill, without the selected top
+   highlight or shadow. The highlighted row is the keyboard focus, so a
    selected row that is also highlighted steps up to a stronger fill. */
 :is(
   [data-slot="menu-item"],
@@ -791,7 +789,6 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   --state-selected-sheen-top: transparent;
   --state-selected-sheen-bottom: transparent;
   --state-selected-highlight: transparent;
-  --state-selected-edge: transparent;
   --state-selected-shadow: 0 0 #0000;
 
   &[data-highlighted]:is([data-selected], [data-checked]) {
@@ -866,9 +863,10 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   }
 }
 
-/* A user message just sent (or steered) rises out of the composer: a fade, a
-   12px rise and a settle from 98% scale. Its intent label ("Steer") follows a
-   beat later. Only messages sent while the thread is open play it, never
+/* A user message that arrives without a composer origin (a steer, a queued
+   turn starting) rises in place: a fade, a 12px rise and a settle from 98%
+   scale. One sent from the composer travels there instead (flyIntoLayout in
+   lib/sendMotion.ts). Its intent label ("Steer") follows once the bubble lands. Only messages sent while the thread is open play it, never
    history or remounts (MessagesTimeline's just-sent ids). Opacity only under
    reduced motion. */
 @keyframes message-send-enter {
@@ -894,7 +892,14 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
 }
 
 @utility animate-message-send-label {
-  animation: message-send-fade var(--motion-duration-fast) --theme(--ease-out) 90ms both;
+  animation: message-send-fade var(--motion-duration-fast) --theme(--ease-out) 180ms both;
+}
+
+/* A turn's live activity row ("Working for", "Thinking") fades in just after
+   the sent bubble lands instead of popping in. Only a turn sent while the
+   thread is open plays it. */
+@utility animate-activity-enter {
+  animation: message-send-fade var(--motion-duration-base) --theme(--ease-out) 120ms both;
 }
 
 /* One message bubble for every transcript: regular chats' user messages and
@@ -1823,7 +1828,6 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   --state-selected-sheen-top: transparent;
   --state-selected-sheen-bottom: transparent;
   --state-selected-highlight: transparent;
-  --state-selected-edge: transparent;
   --state-selected-shadow: 0 0 #0000;
   --state-selected-foreground: var(--contrast-foreground);
   --foreground: var(--color-zinc-800);
@@ -1951,9 +1955,10 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     /* The reference's details card drops about four rows of shade. */
     --surface-raised-shadow-floating:
       0 1px 2px rgb(0 0 0 / 30%), 0 10px 24px -14px rgb(0 0 0 / 60%);
-    /* Dark states are flat: a selected surface is one fill step brighter with
-       a faint hairline edge. No sheen, lit top edge or drop shadow; those stay
-       on floating surfaces (popovers, the details card). */
+    /* Dark states are flat: a selected, pressed or open surface is one fill
+       step brighter, and nothing else. No hairline edge, sheen, lit top edge
+       or drop shadow; those stay on floating surfaces (popovers, the details
+       card). */
     --state-hover-fill: rgb(255 255 255 / 3.5%);
     --state-hover-sheen-top: transparent;
     --state-hover-sheen-bottom: transparent;
@@ -1963,7 +1968,6 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     --state-selected-sheen-top: transparent;
     --state-selected-sheen-bottom: transparent;
     --state-selected-highlight: transparent;
-    --state-selected-edge: rgb(255 255 255 / 6%);
     --state-selected-shadow: 0 0 #0000;
     /* Reference text tones: titles and bubbles (242,244,247), muted labels,
        timestamps and composer controls (125,127,132). Muted sits at the AA
@@ -2064,7 +2068,6 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   --state-hover-fill: var(--sidebar-row-hover);
   --state-selected-fill: var(--sidebar-row-active);
   --state-selected-highlight: transparent;
-  --state-selected-edge: transparent;
   --state-selected-shadow: 0 0 #0000;
   --state-hover-foreground: var(--contrast-sidebar-foreground);
   --state-selected-foreground: var(--contrast-sidebar-foreground);
@@ -2113,7 +2116,6 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     /* Lit from above, as in the reference: a faint top and side edge, a soft
        glow just above the card and a short dark shadow under it, with no
        bright line along the bottom. */
-    --state-selected-edge: transparent;
     --state-selected-highlight: transparent;
     /* The rim comes from corner-glow; this is only the short dark shadow
        under the card: two rows about two levels below the canvas. */

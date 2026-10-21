@@ -602,7 +602,7 @@ function BuilderComposer({
                 />
               </div>
               <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 px-3 pb-3 sm:gap-0 sm:px-4 sm:pb-4">
-                <div className="relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="relative -m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {modelSelection && (
                     <LiveModelControls
                       environmentId={environmentId}
@@ -616,7 +616,7 @@ function BuilderComposer({
                     />
                   )}
                 </div>
-                <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
+                <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1">
                   <ComposerPrimaryActions
                     compact={false}
                     canOperateThread={!disabled}

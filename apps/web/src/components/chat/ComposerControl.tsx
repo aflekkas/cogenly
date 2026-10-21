@@ -101,7 +101,7 @@ export function ComposerControlSeparator({
   return (
     <Separator
       orientation="vertical"
-      className={cn("mx-0.5 hidden sm:block", size === "xs" ? "h-3.5!" : "h-4", className)}
+      className={cn("mx-1 hidden sm:block", size === "xs" ? "h-3.5!" : "h-4", className)}
       {...props}
     />
   );
