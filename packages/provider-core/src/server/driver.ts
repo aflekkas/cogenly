@@ -28,6 +28,7 @@ import type {
   ProviderInstanceId,
   ServerProvider,
   ServerProviderWorkspaceSnapshot,
+  UsageProviderKind,
 } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -61,6 +62,39 @@ export interface ProviderDriverMetadata {
    * need configuration before they can run opt out.
    */
   readonly hasDefaultInstance?: boolean;
+  /**
+   * Default chat model slug, used when the snapshot lists no models (a fresh
+   * install whose probe has not answered yet). Mirrors the client
+   * definition's `defaultModel`; a test keeps the two in sync.
+   */
+  readonly defaultModel?: string;
+  /**
+   * Cheap model for text generation (titles, commit messages, PR text).
+   * Mirrors the client definition's `defaultTextGenerationModel`.
+   */
+  readonly defaultTextGenerationModel?: string;
+  /**
+   * Usage-bucket slug this driver's history reads as. Usually the driver
+   * kind itself; `claudeAgent` reads as `claude` for historical buckets.
+   * Omitted when the driver keeps no usage history.
+   */
+  readonly usageKind?: UsageProviderKind;
+  /**
+   * Order in the text-generation fallback chain; lower sorts first.
+   * Omitted drivers never backstop text generation.
+   */
+  readonly textGenerationFallbackPriority?: number;
+  /**
+   * False hides the driver's instances from interactive pickers. Defaults
+   * to `true`; drivers omit it unless they must stay out of the picker.
+   */
+  readonly pickerVisible?: boolean;
+  /**
+   * Normalize a probed version before compatibility checks, after the
+   * generic leading-`v` strip. Muse uses this to drop its `-R…` release
+   * revision; other drivers omit it and compare the bare semver.
+   */
+  readonly normalizeVersion?: (version: string) => string;
 }
 
 export type ProviderWorkspaceSnapshot = ServerProvider &
@@ -203,3 +237,81 @@ export type AnyProviderDriver<R = never, UsageR = unknown> = ProviderDriver<any,
 /** The services a driver's usage reader needs. */
 export type ProviderUsageReaderEnv<Driver> =
   Driver extends ProviderDriver<any, any, infer UsageR> ? UsageR : never;
+
+/**
+ * Registry queries over driver metadata, so callers never hardcode a
+ * driver-kind union. `drivers` is the startup registry (`BUILT_IN_DRIVERS`
+ * in the server); unknown kinds get `undefined` / `false` and fall back to
+ * the caller's generic default.
+ */
+
+/** The registered driver for `kind`, or `undefined` for retired/fork drivers. */
+export function getDriverByKind<R, UsageR>(
+  drivers: ReadonlyArray<AnyProviderDriver<R, UsageR>>,
+  kind: ProviderDriverKind,
+): AnyProviderDriver<R, UsageR> | undefined {
+  return drivers.find((driver) => driver.driverKind === kind);
+}
+
+/** Whether `kind` is registered, i.e. can run new work (not retired history). */
+export function isRegisteredDriverKind<R, UsageR>(
+  drivers: ReadonlyArray<AnyProviderDriver<R, UsageR>>,
+  kind: ProviderDriverKind,
+): boolean {
+  return getDriverByKind(drivers, kind) !== undefined;
+}
+
+/** Default chat model for `kind`, or `undefined` when unknown. */
+export function defaultModelForDriver<R, UsageR>(
+  drivers: ReadonlyArray<AnyProviderDriver<R, UsageR>>,
+  kind: ProviderDriverKind,
+): string | undefined {
+  return getDriverByKind(drivers, kind)?.metadata.defaultModel;
+}
+
+/** Default text-generation model for `kind`, or `undefined` when unknown. */
+export function defaultTextGenerationModelForDriver<R, UsageR>(
+  drivers: ReadonlyArray<AnyProviderDriver<R, UsageR>>,
+  kind: ProviderDriverKind,
+): string | undefined {
+  return getDriverByKind(drivers, kind)?.metadata.defaultTextGenerationModel;
+}
+
+/**
+ * Driver kinds that backstop text generation, in fallback order (lowest
+ * `textGenerationFallbackPriority` first). Ties keep registry order.
+ */
+export function textGenerationFallbackDriverKinds<R, UsageR>(
+  drivers: ReadonlyArray<AnyProviderDriver<R, UsageR>>,
+): ReadonlyArray<ProviderDriverKind> {
+  return drivers
+    .map((driver, index) => ({ driver, index }))
+    .filter(({ driver }) => driver.metadata.textGenerationFallbackPriority !== undefined)
+    .toSorted(
+      (left, right) =>
+        left.driver.metadata.textGenerationFallbackPriority! -
+          right.driver.metadata.textGenerationFallbackPriority! || left.index - right.index,
+    )
+    .map(({ driver }) => driver.driverKind);
+}
+
+/** Normalize a probed version through the driver's hook, or return it as-is. */
+export function normalizeDriverVersion<R, UsageR>(
+  drivers: ReadonlyArray<AnyProviderDriver<R, UsageR>>,
+  kind: ProviderDriverKind,
+  version: string,
+): string {
+  return getDriverByKind(drivers, kind)?.metadata.normalizeVersion?.(version) ?? version;
+}
+
+/**
+ * Whether `kind`'s instances belong in interactive pickers: registered and
+ * not opted out via `pickerVisible: false`.
+ */
+export function isDriverPickerVisible<R, UsageR>(
+  drivers: ReadonlyArray<AnyProviderDriver<R, UsageR>>,
+  kind: ProviderDriverKind,
+): boolean {
+  const driver = getDriverByKind(drivers, kind);
+  return driver !== undefined && driver.metadata.pickerVisible !== false;
+}
