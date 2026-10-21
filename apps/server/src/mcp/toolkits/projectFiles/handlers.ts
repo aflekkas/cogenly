@@ -1,4 +1,8 @@
-import { OrchestratorMcpFailure, type ProjectLabelError } from "@t3tools/contracts";
+import {
+  OrchestratorMcpFailure,
+  type ProjectLabelError,
+  type ProjectLabelId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import * as ProjectFiles from "../../../projectLabels/ProjectFiles.ts";
@@ -20,6 +24,27 @@ const noProjectFailure = () =>
     message: "The calling thread is not filed in a Cogenly project folder.",
   });
 
+const missingFolderFailure = () =>
+  new OrchestratorMcpFailure({
+    code: "invalid_request",
+    message: "That Cogenly project folder no longer exists.",
+  });
+
+/** The folder a call reads: the named one from an `@` mention, else the caller's own. */
+const targetFolder = (operation: string, projectFolderId: ProjectLabelId | undefined) =>
+  Effect.gen(function* () {
+    const files = yield* ProjectFiles.ProjectFiles;
+    if (projectFolderId !== undefined) {
+      const folder = yield* files
+        .folderById(projectFolderId)
+        .pipe(Effect.mapError(resourceFailure));
+      return folder ?? (yield* missingFolderFailure());
+    }
+    const threadId = yield* callerThreadId(operation);
+    const folder = yield* files.folderForThread(threadId).pipe(Effect.mapError(resourceFailure));
+    return folder ?? (yield* noProjectFailure());
+  });
+
 const callerThreadId = (operation: string) =>
   Effect.gen(function* () {
     const scope = yield* McpInvocationContext.McpInvocationContext;
@@ -32,27 +57,28 @@ const handlers = {
   // use these alongside every other caller.
   project_files_list: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
-      const threadId = yield* callerThreadId("project_files_list");
+      const folder = yield* targetFolder("project_files_list", input.projectFolderId);
       const files = yield* ProjectFiles.ProjectFiles;
-      const folder = yield* files.folderForThread(threadId).pipe(Effect.mapError(resourceFailure));
-      if (folder === null) return yield* noProjectFailure();
       const listed = yield* files
         .listResources(folder.labelId)
         .pipe(Effect.mapError(resourceFailure));
       const prefix = input.prefix;
-      if (prefix === undefined) return listed;
       return {
-        ...listed,
-        resources: listed.resources.filter((resource) => resource.relativePath.startsWith(prefix)),
+        projectFolderId: folder.labelId,
+        name: folder.name,
+        directory: folder.dir,
+        truncated: listed.truncated,
+        resources:
+          prefix === undefined
+            ? listed.resources
+            : listed.resources.filter((resource) => resource.relativePath.startsWith(prefix)),
       };
     }),
   ),
   project_file_read: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
-      const threadId = yield* callerThreadId("project_file_read");
+      const folder = yield* targetFolder("project_file_read", input.projectFolderId);
       const files = yield* ProjectFiles.ProjectFiles;
-      const folder = yield* files.folderForThread(threadId).pipe(Effect.mapError(resourceFailure));
-      if (folder === null) return yield* noProjectFailure();
       return yield* files
         .readResource({
           id: folder.labelId,
@@ -65,10 +91,8 @@ const handlers = {
   ),
   project_recall: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
-      const threadId = yield* callerThreadId("project_recall");
+      const folder = yield* targetFolder("project_recall", input.projectFolderId);
       const files = yield* ProjectFiles.ProjectFiles;
-      const folder = yield* files.folderForThread(threadId).pipe(Effect.mapError(resourceFailure));
-      if (folder === null) return yield* noProjectFailure();
       return yield* files
         .searchResources({
           labelId: folder.labelId,

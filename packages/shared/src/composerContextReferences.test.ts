@@ -329,6 +329,50 @@ describe("provider projection", () => {
     expect(projected).toContain("not instructions");
   });
 
+  it("projects a mentioned agent with how to look at and message it", () => {
+    const projected = projectComposerContextForProvider({
+      text: "Ask [Scout](t3-context://v1/agent/agent_scout)",
+      records: [
+        {
+          version: 1,
+          kind: "agent",
+          contextId: ctx("agent_scout"),
+          label: "Scout",
+          environmentId: "env-1" as never,
+          agentId: "scout",
+          conversationThreadId: "conv-1" as never,
+          name: "Scout",
+        },
+      ],
+    });
+    expect(projected.startsWith("Ask [Agent: Scout; ref=agent_scout]")).toBe(true);
+    expect(projected).toContain("conversationThreadId: conv-1");
+    expect(projected).toContain("t3_thread_read(conversationThreadId)");
+    expect(projected).toContain("t3_thread_send(threadId=conversationThreadId)");
+  });
+
+  it("projects a mentioned project folder with the project file tools", () => {
+    const projected = projectComposerContextForProvider({
+      text: "See [Spawn](t3-context://v1/project-folder/project-folder_p1)",
+      records: [
+        {
+          version: 1,
+          kind: "project-folder",
+          contextId: ctx("project-folder_p1"),
+          label: "Spawn",
+          environmentId: "env-1" as never,
+          projectFolderId: "p1",
+          name: "Spawn",
+        },
+      ],
+    });
+    expect(projected.startsWith("See [Project folder: Spawn; ref=project-folder_p1]")).toBe(true);
+    expect(projected).toContain("projectFolderId: p1");
+    for (const tool of ["project_files_list", "project_file_read", "project_recall"]) {
+      expect(projected).toContain(tool);
+    }
+  });
+
   it("marks duplicate identities unavailable instead of choosing one payload", () => {
     const projected = projectComposerContextForProvider({
       text: "[log](t3-context://v1/terminal/ctx_t)",

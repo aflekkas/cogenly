@@ -136,11 +136,18 @@ const serverLayer = Layer.mergeAll(
           name: "Conversation",
           dir: "/projects/Conversation",
         }),
-      listResources: () =>
+      folderById: (labelId) =>
+        Effect.succeed(
+          labelId === "label:mentioned"
+            ? { labelId, name: "Mentioned", dir: "/projects/Mentioned" }
+            : null,
+        ),
+      listResources: (labelId) =>
         Effect.succeed({
           resources: [
             {
-              relativePath: "Resources/brief.md",
+              relativePath:
+                labelId === "label:mentioned" ? "Resources/mentioned.md" : "Resources/brief.md",
               kind: "file" as const,
               mimeType: "text/markdown",
               sizeBytes: 12,
@@ -300,6 +307,9 @@ describe("conversation-mode MCP boundary", () => {
     callText("project_files_list", chatThreadId, {}).pipe(
       Effect.map((text) => {
         assert.deepEqual(JSON.parse(text), {
+          projectFolderId: "label:conversation",
+          name: "Conversation",
+          directory: "/projects/Conversation",
           resources: [
             {
               relativePath: "Resources/brief.md",
@@ -311,6 +321,27 @@ describe("conversation-mode MCP boundary", () => {
           ],
           truncated: false,
         });
+      }),
+    ),
+  );
+
+  it.effect("project_files_list follows a mentioned project folder by id", () =>
+    callText("project_files_list", chatThreadId, { projectFolderId: "label:mentioned" }).pipe(
+      Effect.map((text) => {
+        const result = JSON.parse(text);
+        assert.equal(result.directory, "/projects/Mentioned");
+        assert.deepEqual(
+          result.resources.map((resource: { relativePath: string }) => resource.relativePath),
+          ["Resources/mentioned.md"],
+        );
+      }),
+    ),
+  );
+
+  it.effect("project_files_list reports a mentioned folder that no longer exists", () =>
+    callText("project_files_list", chatThreadId, { projectFolderId: "label:gone" }).pipe(
+      Effect.map((text) => {
+        assert.include(text, "no longer exists");
       }),
     ),
   );

@@ -9,6 +9,9 @@ import type {
   FileContextRecord,
   ImageContextRecord,
   KnownComposerContextRecord,
+  LinkContextRecord,
+  AgentContextRecord,
+  ProjectFolderContextRecord,
   MessageId,
   OrchestrationMessageContext,
   PreviewAnnotationContextRecord,
@@ -162,8 +165,46 @@ function threadContextId(threadId: ThreadId): ComposerContextId {
   return toKindScopedComposerContextId("thread", threadId);
 }
 
-export function threadContextReference(record: ThreadContextRecord): ComposerContextReference {
-  return { kind: "thread", contextId: record.contextId, label: record.label };
+export function linkContextReference(record: LinkContextRecord): ComposerContextReference {
+  return { kind: record.kind, contextId: record.contextId, label: record.label };
+}
+
+/** One record per agent: mentioning the same agent twice reuses the chip. */
+export function agentContextRecord(input: {
+  environmentId: EnvironmentId;
+  agentId: string;
+  conversationThreadId: ThreadId;
+  name: string;
+}): AgentContextRecord {
+  const label = sanitizeComposerContextLabel(input.name, "agent");
+  return {
+    version: 1,
+    kind: "agent",
+    contextId: toKindScopedComposerContextId("agent", input.agentId),
+    label,
+    environmentId: input.environmentId,
+    agentId: input.agentId,
+    conversationThreadId: input.conversationThreadId,
+    name: label,
+  };
+}
+
+/** One record per project folder: mentioning the same folder twice reuses the chip. */
+export function projectFolderContextRecord(input: {
+  environmentId: EnvironmentId;
+  projectFolderId: string;
+  name: string;
+}): ProjectFolderContextRecord {
+  const label = sanitizeComposerContextLabel(input.name, "project-folder");
+  return {
+    version: 1,
+    kind: "project-folder",
+    contextId: toKindScopedComposerContextId("project-folder", input.projectFolderId),
+    label,
+    environmentId: input.environmentId,
+    projectFolderId: input.projectFolderId,
+    name: label,
+  };
 }
 
 export function threadContextRecord(ref: ScopedThreadRef, title: string): ThreadContextRecord {
@@ -319,7 +360,7 @@ export function buildMessageContext(input: {
   terminalContexts: ReadonlyArray<TerminalContextDraft>;
   reviewComments: ReadonlyArray<ReviewCommentContext>;
   previewAnnotations: ReadonlyArray<PreviewAnnotationPayload>;
-  threadContexts?: ReadonlyArray<ThreadContextRecord>;
+  threadContexts?: ReadonlyArray<LinkContextRecord>;
   attachments?: ReadonlyArray<BoundComposerAttachment>;
 }): OrchestrationMessageContext | undefined {
   // An annotation's screenshot travels as the image attachment that reuses its id.

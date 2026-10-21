@@ -17,6 +17,7 @@ import {
 } from "~/components/ui/autocomplete";
 import { DIALOG_BACKDROP_CLASS, DIALOG_POPUP_CLASS } from "~/components/ui/dialog-styles";
 import { Button } from "~/components/ui/button";
+import { useAnimatedPanelHeight } from "~/components/ui/animated-panel-height";
 import { SearchField, searchFieldInputClassName } from "~/components/ui/search-input";
 
 /** Closes with its exit motion when an OverlayPresence around it empties. */
@@ -57,7 +58,7 @@ function CommandDialogViewport({ className, ...props }: CommandDialogPrimitive.V
   return (
     <CommandDialogPrimitive.Viewport
       className={cn(
-        "pointer-events-none fixed inset-0 z-50 flex flex-col items-center px-4 py-[max(--spacing(4),4vh)] sm:py-[10vh]",
+        "pointer-events-none fixed inset-0 z-50 flex flex-col items-center px-4 py-(--command-dialog-inset-y) [--command-dialog-inset-y:max(--spacing(4),4vh)] sm:[--command-dialog-inset-y:10vh]",
         className,
       )}
       data-slot="command-dialog-viewport"
@@ -66,14 +67,22 @@ function CommandDialogViewport({ className, ...props }: CommandDialogPrimitive.V
   );
 }
 
+/**
+ * The palette glides to its content's new height as results change (useAnimatedPanelHeight).
+ * `fullHeight` holds the tallest size instead, for a body that lays out its own fill; switching
+ * between the two glides too.
+ */
 function CommandDialogPopup({
   className,
   children,
   onBackdropPointerDown,
+  fullHeight = false,
   ...props
 }: CommandDialogPrimitive.Popup.Props & {
   onBackdropPointerDown?: React.PointerEventHandler<HTMLDivElement>;
+  fullHeight?: boolean;
 }) {
+  const { panelProps, contentRef } = useAnimatedPanelHeight();
   return (
     <CommandDialogPortal>
       <CommandDialogBackdrop onPointerDown={onBackdropPointerDown} />
@@ -81,13 +90,32 @@ function CommandDialogPopup({
         <CommandDialogPrimitive.Popup
           className={cn(
             DIALOG_POPUP_CLASS,
-            "pointer-events-auto max-h-105 max-w-xl text-foreground",
+            "pointer-events-auto max-w-xl text-foreground",
             className,
           )}
           data-slot="command-dialog-popup"
           {...props}
         >
-          {children}
+          {/* The popup's own transitions are its fade and scale, so the height animates here. */}
+          <div
+            className="panel-height-motion shrink-0"
+            data-slot="command-dialog-panel"
+            {...panelProps}
+          >
+            <div
+              ref={contentRef}
+              className={cn(
+                // 420px with the border, and never past the viewport's padding: the content
+                // clamps itself, since the panel around it only follows its height.
+                "flex min-h-0 flex-col [--command-dialog-max-height:min(--spacing(104.5),calc(100dvh-2*var(--command-dialog-inset-y)-2px))]",
+                fullHeight
+                  ? "h-(--command-dialog-max-height)"
+                  : "max-h-(--command-dialog-max-height)",
+              )}
+            >
+              {children}
+            </div>
+          </div>
         </CommandDialogPrimitive.Popup>
       </CommandDialogViewport>
     </CommandDialogPortal>

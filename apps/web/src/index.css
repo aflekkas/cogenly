@@ -947,6 +947,21 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   }
 }
 
+/* A floating panel (popover, menu, command palette, composer drawer) gliding to
+   its content's new height. useAnimatedPanelHeight (components/ui) measures
+   the content and sets the px height and data-panel-height; only changes after
+   the first measurement carry "animate", so an open never grows from 0. A
+   bottom-anchored panel grows upward. Reduced motion snaps to the new size. */
+@utility panel-height-motion {
+  @media (prefers-reduced-motion: no-preference) {
+    &[data-panel-height="animate"] {
+      transition-property: height;
+      transition-duration: var(--motion-duration-base);
+      transition-timing-function: --theme(--ease-out);
+    }
+  }
+}
+
 /* Sidebar rows (Work cards and slim rows). The hover actions overlay the
    status slot rather than taking its width; --sidebar-row-actions-overlap
    (measured by useSidebarRowActionsOverlap) is how far they reach over the

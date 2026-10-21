@@ -145,7 +145,11 @@ import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Root, RootContent } from "mdast";
-import { ThreadContextChip } from "../ThreadContextChip";
+import {
+  AgentContextChip,
+  ProjectFolderContextChip,
+  ThreadContextChip,
+} from "../ThreadContextChip";
 import {
   BellIcon,
   BookOpenIcon,
@@ -5180,6 +5184,26 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
       render: (record, context) =>
         record.kind === "thread" ? (
           <ThreadContextChip record={record} copyMarkdown={context.copyMarkdown} />
+        ) : (
+          <UnavailableUserMessageContextChip {...context} />
+        ),
+    },
+    {
+      kind: "agent",
+      canRender: (record) => record.kind === "agent",
+      render: (record, context) =>
+        record.kind === "agent" ? (
+          <AgentContextChip record={record} copyMarkdown={context.copyMarkdown} />
+        ) : (
+          <UnavailableUserMessageContextChip {...context} />
+        ),
+    },
+    {
+      kind: "project-folder",
+      canRender: (record) => record.kind === "project-folder",
+      render: (record, context) =>
+        record.kind === "project-folder" ? (
+          <ProjectFolderContextChip record={record} copyMarkdown={context.copyMarkdown} />
         ) : (
           <UnavailableUserMessageContextChip {...context} />
         ),

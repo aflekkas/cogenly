@@ -31,7 +31,7 @@ import type {
   PullRequestListInput,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
-  ThreadContextRecord,
+  LinkContextRecord,
   ProviderInteractionMode,
   RuntimeMode,
   ResolvedKeybindingsConfig,
@@ -224,9 +224,14 @@ import {
   terminalContextReference,
   terminalContextRecord,
   threadContextRecord,
-  threadContextReference,
+  linkContextReference,
+  agentContextRecord,
+  projectFolderContextRecord,
 } from "~/lib/composerContextRecords";
-import { matchComposerThreadItems } from "@t3tools/client-runtime/composerThreadItems";
+import { matchComposerMentionItems } from "@t3tools/client-runtime/composerThreadItems";
+import { useAgents } from "~/agents/agentsClient";
+import { useThreadKindResolver } from "~/hooks/useThreadKind";
+import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
 import { useThreadContextDrop, threadContextDropTargetProps } from "./threadContextDrag";
 import { readThreadShell, useThreadShells } from "~/state/entities";
 import { requestConfirmDialog } from "~/confirmDialog";
@@ -1335,7 +1340,7 @@ export interface ChatComposerHandle {
     terminalContexts: TerminalContextDraft[];
     previewAnnotations: PreviewAnnotationPayload[];
     reviewComments: ReviewCommentContext[];
-    threadContexts: ThreadContextRecord[];
+    threadContexts: LinkContextRecord[];
     selectedPromptEffort: string | null;
     selectedModelOptionsForDispatch: unknown;
     selectedModelSelection: ModelSelection;
@@ -2378,8 +2383,53 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const settledPullRequestTextQuery =
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
-  // Thread shells only feed `@` thread matches, so skip shell updates otherwise.
+  // Thread shells, agents and folders only feed `@` matches, so skip their updates otherwise.
   const environmentThreadShells = useThreadShells(isPathTrigger);
+  const resolveThreadKind = useThreadKindResolver();
+  const { agents: mentionAgents } = useAgents();
+  const { labels: mentionProjectFolders } = useEnvironmentProjectLabels(
+    isPathTrigger ? environmentId : null,
+  );
+  const mentionItems = useMemo(
+    () =>
+      composerTrigger?.kind !== "path"
+        ? []
+        : matchComposerMentionItems({
+            threads: environmentThreadShells.map((shell) => ({
+              environmentId: shell.environmentId,
+              id: shell.id,
+              title: shell.title,
+              updatedAt: shell.updatedAt,
+              archivedAt: shell.archivedAt,
+              kind: resolveThreadKind(shell),
+            })),
+            agents: mentionAgents.map((agent) => ({
+              environmentId: agent.environmentId,
+              id: agent.id,
+              name: agent.name,
+              conversationThreadId: agent.conversationThreadId,
+              activeAt: agent.latestMessage?.createdAt ?? agent.updatedAt,
+            })),
+            projectFolders: mentionProjectFolders.map((folder) => ({
+              environmentId,
+              id: folder.id,
+              name: folder.name,
+              updatedAt: folder.updatedAt,
+            })),
+            environmentId,
+            excludeThreadId: activeThreadId,
+            query: composerTrigger.query,
+          }),
+    [
+      activeThreadId,
+      composerTrigger,
+      environmentId,
+      environmentThreadShells,
+      mentionAgents,
+      mentionProjectFolders,
+      resolveThreadKind,
+    ],
+  );
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? gitCwd : null,
@@ -2469,20 +2519,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
-      // Threads only surface for a typed query so `@` alone stays a file picker. A title match
-      // is far more specific than a fuzzy path hit, so the few threads lead the list.
+      // A name match is far more specific than a fuzzy path hit, so the few tasks, chats,
+      // agents and projects lead, in their sections, ahead of files.
       return [
-        ...matchComposerThreadItems({
-          shells: environmentThreadShells,
-          environmentId,
-          excludeThreadId: activeThreadId,
-          query: composerTrigger.query,
-        }),
+        ...mentionItems,
         ...workspaceEntries.entries.map((entry) => ({
           id: `path:${entry.kind}:${entry.path}`,
           type: "path" as const,
           path: entry.path,
           pathKind: entry.kind,
+          group: "files" as const,
           label: basenameOfPath(entry.path),
           description: entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))),
         })),
@@ -2622,11 +2668,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     return [];
   }, [
-    activeThreadId,
     compactSlashCommandAvailable,
     composerTrigger,
-    environmentId,
-    environmentThreadShells,
     exactPullRequestLookup.data,
     linkedPullRequests,
     planModeUiEnabled,
@@ -2639,6 +2682,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedProviderSlashCommands,
     selectedProviderStatus,
     settings.showSkillsInSlashMenu,
+    mentionItems,
     workspaceEntries.entries,
   ]);
 
@@ -2736,7 +2780,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : "No pull requests found in this repository.";
     }
     return composerTriggerKind === "path"
-      ? "No matching files or folders."
+      ? "No matching tasks, chats, agents, projects or files."
       : "No matching command.";
   }, [
     composerTrigger,
@@ -3169,7 +3213,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             ? reviewCommentContextRecord(existing.record)
             : existing?.kind === "preview-annotation"
               ? previewAnnotationContextRecord(existing.record)
-              : existing?.kind === "thread"
+              : existing?.kind === "thread" ||
+                  existing?.kind === "agent" ||
+                  existing?.kind === "project-folder"
                 ? existing.record
                 : existing
                   ? (uploadedContextRecordFromDraft(existing) ?? undefined)
@@ -3218,8 +3264,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           rewritten.set(record.contextId, previewAnnotationContextId(annotation.id));
           break;
         }
-        case "thread": {
-          // The agent can only read threads on its own server; a pasted foreign one is dropped.
+        case "thread":
+        case "agent":
+        case "project-folder": {
+          // The agent can only follow links on its own server; a pasted foreign one is dropped.
           if (record.environmentId !== environmentId) break;
           addComposerDraftThreadContexts(attachmentDraftTarget, [record], {
             appendReference: false,
@@ -3512,7 +3560,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const removedContextPayloadsRef = useRef<{
     terminals: Map<string, TerminalContextDraft>;
     reviewComments: Map<string, ReviewCommentContext>;
-    threads: Map<string, ThreadContextRecord>;
+    threads: Map<string, LinkContextRecord>;
   }>({ terminals: new Map(), reviewComments: new Map(), threads: new Map() });
   const removedAttachmentContextPayloadsRef = useRef<RetainedAttachmentContextPayloads>({
     files: new Map(),
@@ -3882,7 +3930,34 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const shell = readThreadShell(item.thread);
       if (!shell) return;
       const record = threadContextRecord(item.thread, shell.title);
-      const replacement = `${formatInlineContextReference(threadContextReference(record))} `;
+      const replacement = `${formatInlineContextReference(linkContextReference(record))} `;
+      const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+        snapshot.value,
+        trigger.rangeEnd,
+        replacement,
+      );
+      const applied = applyPromptReplacement(trigger.rangeStart, replacementRangeEnd, replacement, {
+        expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd),
+      });
+      if (applied) {
+        addComposerDraftThreadContexts(attachmentDraftTarget, [record], {
+          appendReference: false,
+        });
+        setComposerHighlightedItemId(null);
+      }
+      return;
+    }
+    if (item.type === "agent" || item.type === "project-folder") {
+      if (trigger.kind !== "path") return;
+      const record =
+        item.type === "agent"
+          ? agentContextRecord({ ...item.agent, agentId: item.agent.id })
+          : projectFolderContextRecord({
+              environmentId: item.projectFolder.environmentId,
+              projectFolderId: item.projectFolder.id,
+              name: item.projectFolder.name,
+            });
+      const replacement = `${formatInlineContextReference(linkContextReference(record))} `;
       const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
         snapshot.value,
         trigger.rangeEnd,
@@ -5185,7 +5260,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         !activePendingIsResponding &&
         activePendingProgress?.activeQuestion?.allowCustomAnswer !== false;
       const text = `${records
-        .map((record) => formatInlineContextReference(threadContextReference(record)))
+        .map((record) => formatInlineContextReference(linkContextReference(record)))
         .join(" ")} `;
       const snapshot = readComposerSnapshotStable();
       const cursor = snapshot.expandedCursor;

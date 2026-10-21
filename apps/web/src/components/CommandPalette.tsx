@@ -173,7 +173,6 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import {
-  cn,
   getLocalFileManagerName,
   isMacPlatform,
   isWindowsPlatform,
@@ -571,7 +570,8 @@ function CommandPaletteDialog(props: {
             ? "Search repository contents"
             : "Command palette"
       }
-      className={cn("overflow-hidden", props.mode === "content" && "h-105")}
+      className="overflow-hidden"
+      fullHeight={props.mode === "content"}
       data-command-palette="true"
       data-palette-mode={props.mode}
       data-testid="command-palette"

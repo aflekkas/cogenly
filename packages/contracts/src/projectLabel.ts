@@ -339,14 +339,31 @@ export const ProjectRecallMatch = Schema.Struct({
 export type ProjectRecallMatch = typeof ProjectRecallMatch.Type;
 export const ProjectRecallResult = Schema.Struct({ matches: Schema.Array(ProjectRecallMatch) });
 export type ProjectRecallResult = typeof ProjectRecallResult.Type;
+/**
+ * Which folder the project file tools read: a mentioned folder by id, else the calling
+ * thread's own folder.
+ */
+const projectFolderTarget = {
+  projectFolderId: Schema.optional(ProjectLabelId),
+};
 /** Input for the `project_files_list` agent tool. */
 export const ProjectFilesListInput = Schema.Struct({
+  ...projectFolderTarget,
   /** Only resources under this path prefix, e.g. `Resources/`. */
   prefix: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
 });
 export type ProjectFilesListInput = typeof ProjectFilesListInput.Type;
+/** `project_files_list` result: the folder's name and directory on disk, then its files. */
+export const ProjectFilesListResult = Schema.Struct({
+  projectFolderId: ProjectLabelId,
+  name: Schema.String,
+  directory: Schema.String,
+  ...ProjectLabelListResourcesResult.fields,
+});
+export type ProjectFilesListResult = typeof ProjectFilesListResult.Type;
 /** Input for the `project_file_read` agent tool. */
 export const ProjectFileReadInput = Schema.Struct({
+  ...projectFolderTarget,
   /** Project-relative path, e.g. `Resources/brief.md`. */
   path: TrimmedNonEmptyString.check(Schema.isMaxLength(1000)),
   /** First line, zero-based. */
@@ -357,6 +374,7 @@ export const ProjectFileReadInput = Schema.Struct({
 export type ProjectFileReadInput = typeof ProjectFileReadInput.Type;
 /** Input for the `project_recall` agent tool. */
 export const ProjectRecallInput = Schema.Struct({
+  ...projectFolderTarget,
   query: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
   limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(50))),
 });

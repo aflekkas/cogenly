@@ -28,6 +28,8 @@ export const COMPOSER_CONTEXT_KINDS = [
   "mention",
   "skill",
   "thread",
+  "agent",
+  "project-folder",
 ] as const;
 export type KnownComposerContextKind = (typeof COMPOSER_CONTEXT_KINDS)[number];
 
@@ -248,6 +250,42 @@ export const ThreadContextRecord = Schema.Struct({
 });
 export type ThreadContextRecord = typeof ThreadContextRecord.Type;
 
+// Plain strings rather than the `AgentId` / `ProjectLabelId` brands: those modules sit
+// above orchestration, which imports this one.
+const LinkedEntityId = TrimmedNonEmptyString.check(Schema.isMaxLength(CONTEXT_ID_MAX_CHARS * 2));
+
+/**
+ * An always-on agent on the same server. The agent receiving the message can message it or
+ * read its conversation through the cogenly thread tools on `conversationThreadId`.
+ */
+export const AgentContextRecord = Schema.Struct({
+  ...recordBase,
+  kind: Schema.Literal("agent"),
+  environmentId: EnvironmentId,
+  agentId: LinkedEntityId,
+  conversationThreadId: ThreadId,
+  name: ContextLabel,
+});
+export type AgentContextRecord = typeof AgentContextRecord.Type;
+
+/** A Cogenly project folder, followed with the project file tools by `projectFolderId`. */
+export const ProjectFolderContextRecord = Schema.Struct({
+  ...recordBase,
+  kind: Schema.Literal("project-folder"),
+  environmentId: EnvironmentId,
+  projectFolderId: LinkedEntityId,
+  name: ContextLabel,
+});
+export type ProjectFolderContextRecord = typeof ProjectFolderContextRecord.Type;
+
+/** `@` picks that point at something on the server instead of carrying a payload. */
+export const LinkContextRecord = Schema.Union([
+  ThreadContextRecord,
+  AgentContextRecord,
+  ProjectFolderContextRecord,
+]);
+export type LinkContextRecord = typeof LinkContextRecord.Type;
+
 const isJson = Schema.is(Schema.Json);
 
 /**
@@ -285,6 +323,8 @@ export const KnownComposerContextRecord = Schema.Union([
   MentionContextRecord,
   SkillContextRecord,
   ThreadContextRecord,
+  AgentContextRecord,
+  ProjectFolderContextRecord,
 ]);
 export type KnownComposerContextRecord = typeof KnownComposerContextRecord.Type;
 

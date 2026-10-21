@@ -231,12 +231,20 @@ by any part of its pull request numbers. A complete number is also resolved dire
 pull request is older than the recent list. Type a single word after `#` to search pull requests in
 the repository by text. Choose a result to insert it as a chip.
 
-Another thread can be context too. Type `@` followed by part of its title to pick one from
-the same server, or on web and desktop drag a thread out of the sidebar and drop it on the
-composer; a multi-selection drops together. The chip shows the thread's current title and
+Typing `@` finds more than files. The menu groups Work tasks and chats by title, agents and
+project folders by name, and files and folders, closest matches first and then the most recent.
+`@` on its own shows a few recent ones from each group. Everything it offers is on the same
+server.
+
+Another thread can be context too. Pick it from the `@` menu, or on web and desktop drag a
+thread out of the sidebar and drop it on the composer; a multi-selection drops together. The chip shows the thread's current title and
 opens it when selected. Your prompt only carries a reference: the agent reads the thread's
 history on demand, so attaching a long thread costs nothing until the agent looks. Attaching a
 thread does not change it, and the agent cannot send messages to it unless you ask.
+
+An agent chip tells the agent how to read that agent's conversation and how to message it.
+It only sends a message when you ask. A project folder chip gives the folder's location, and
+the agent can list, read and search its files.
 
 Dropping a thread from another environment attaches a saved transcript file. The source
 environment must be connected and up to date. The transcript includes the visible history and

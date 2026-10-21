@@ -120,6 +120,23 @@ const knownRecords: Record<(typeof COMPOSER_CONTEXT_KINDS)[number], Record<strin
     threadId: "thread-1",
     title: "Fix login flow",
   },
+  agent: {
+    ...base,
+    kind: "agent",
+    label: "Scout",
+    environmentId: "environment-1",
+    agentId: "agent-1",
+    conversationThreadId: "thread-2",
+    name: "Scout",
+  },
+  "project-folder": {
+    ...base,
+    kind: "project-folder",
+    label: "Spawn Partners",
+    environmentId: "environment-1",
+    projectFolderId: "label-1",
+    name: "Spawn Partners",
+  },
 };
 
 describe("ComposerContextRecord", () => {

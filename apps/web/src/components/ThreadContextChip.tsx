@@ -1,7 +1,14 @@
-import type { ThreadContextRecord } from "@t3tools/contracts";
+import type {
+  AgentContextRecord,
+  ProjectFolderContextRecord,
+  ThreadContextRecord,
+} from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
-import { MessagesSquareIcon } from "lucide-react";
+import { BotIcon, MessagesSquareIcon } from "lucide-react";
 
+import { useAgents } from "~/agents/agentsClient";
+import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
+import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
 import { useThreadShell } from "~/state/entities";
 import { ContextChip, ContextChipLabel } from "./ContextChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -34,6 +41,80 @@ export function ThreadContextChip(props: {
         }
       />
       <TooltipPopup side="top">{shell ? "Open thread" : "Thread no longer available"}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** Inline chip for a mentioned agent. Shows its live name and opens its conversation. */
+export function AgentContextChip(props: {
+  record: Pick<AgentContextRecord, "environmentId" | "agentId" | "conversationThreadId" | "name">;
+  copyMarkdown?: string;
+}) {
+  const { environmentId, conversationThreadId } = props.record;
+  const agent = useAgents().agents.find(
+    (candidate) =>
+      candidate.environmentId === environmentId && candidate.id === props.record.agentId,
+  );
+  const name = agent?.name.trim() || props.record.name;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <ContextChip
+            kind="agent"
+            render={
+              <Link
+                to="/$environmentId/$threadId"
+                params={{ environmentId, threadId: conversationThreadId }}
+              />
+            }
+            aria-label={`Agent, ${name}`}
+            data-markdown-copy={props.copyMarkdown}
+            className="no-underline"
+          >
+            <BotIcon />
+            <ContextChipLabel>{name}</ContextChipLabel>
+          </ContextChip>
+        }
+      />
+      <TooltipPopup side="top">{agent ? "Open agent" : "Agent no longer available"}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** Inline chip for a mentioned project folder. Shows its live name and opens the project. */
+export function ProjectFolderContextChip(props: {
+  record: Pick<ProjectFolderContextRecord, "environmentId" | "projectFolderId" | "name">;
+  copyMarkdown?: string;
+}) {
+  const { environmentId, projectFolderId } = props.record;
+  const { labels } = useEnvironmentProjectLabels(environmentId);
+  const label = labels.find((candidate) => candidate.id === projectFolderId);
+  const name = label?.name.trim() || props.record.name;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <ContextChip
+            kind="project-folder"
+            render={
+              <Link
+                to="/project/$environmentId/$labelId"
+                params={{ environmentId, labelId: projectFolderId }}
+              />
+            }
+            aria-label={`Project folder, ${name}`}
+            data-markdown-copy={props.copyMarkdown}
+            className="no-underline"
+          >
+            <ProjectFolderIcon color={label?.color} />
+            <ContextChipLabel>{name}</ContextChipLabel>
+          </ContextChip>
+        }
+      />
+      <TooltipPopup side="top">
+        {label ? "Open project" : "Project no longer available"}
+      </TooltipPopup>
     </Tooltip>
   );
 }

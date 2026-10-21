@@ -55,6 +55,12 @@ import {
  * plus sha256; no absolute path crosses the wire. The SQLite index is
  * derived and rebuildable from disk.
  */
+export interface ProjectFolderLocation {
+  readonly labelId: ProjectLabelId;
+  readonly name: string;
+  readonly dir: string;
+}
+
 export class ProjectFiles extends Context.Service<
   ProjectFiles,
   {
@@ -79,14 +85,13 @@ export class ProjectFiles extends Context.Service<
       labelId: ProjectLabelId,
     ) => Stream.Stream<ProjectLabelListResourcesResult, ProjectLabelError>;
     /** The caller's effective project folder, if any, resolved at the edge. */
-    readonly folderForThread: (threadId: ThreadId) => Effect.Effect<
-      {
-        readonly labelId: ProjectLabelId;
-        readonly name: string;
-        readonly dir: string;
-      } | null,
-      ProjectLabelError
-    >;
+    readonly folderForThread: (
+      threadId: ThreadId,
+    ) => Effect.Effect<ProjectFolderLocation | null, ProjectLabelError>;
+    /** One folder by id, as `@` mentions name it; null when it no longer exists. */
+    readonly folderById: (
+      labelId: ProjectLabelId,
+    ) => Effect.Effect<ProjectFolderLocation | null, ProjectLabelError>;
     /** Fast index-only listing for turn manifests; never touches the disk. */
     readonly manifestEntries: (
       labelId: ProjectLabelId,
@@ -938,6 +943,20 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  const folderById: ProjectFiles["Service"]["folderById"] = Effect.fn("ProjectFiles.folderById")(
+    function* (labelId) {
+      const rows = yield* sql<{ name: string }>`
+        SELECT name FROM project_labels WHERE label_id = ${labelId}
+      `.pipe(Effect.mapError(storage("read")));
+      const name = rows[0]?.name;
+      if (name === undefined) return null;
+      const { dir } = yield* folders
+        .dirForLabel({ id: labelId, name })
+        .pipe(Effect.mapError(storage("read")));
+      return { labelId, name, dir };
+    },
+  );
+
   const folderForThread: ProjectFiles["Service"]["folderForThread"] = Effect.fn(
     "ProjectFiles.folderForThread",
   )(function* (threadId) {
@@ -946,16 +965,7 @@ const make = Effect.gen(function* () {
     `.pipe(Effect.mapError(storage("read")));
     const folderId = membership[0]?.folder_id;
     if (folderId === null || folderId === undefined) return null;
-    const labelId = ProjectLabelId.make(folderId);
-    const rows = yield* sql<{ name: string }>`
-      SELECT name FROM project_labels WHERE label_id = ${labelId}
-    `.pipe(Effect.mapError(storage("read")));
-    const name = rows[0]?.name;
-    if (name === undefined) return null;
-    const { dir } = yield* folders
-      .dirForLabel({ id: labelId, name })
-      .pipe(Effect.mapError(storage("read")));
-    return { labelId, name, dir };
+    return yield* folderById(ProjectLabelId.make(folderId));
   });
 
   const manifestEntries: ProjectFiles["Service"]["manifestEntries"] = Effect.fn(
@@ -982,6 +992,7 @@ const make = Effect.gen(function* () {
     searchResources,
     subscribeResources,
     folderForThread,
+    folderById,
     manifestEntries,
   });
 });

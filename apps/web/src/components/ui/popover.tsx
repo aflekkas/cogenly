@@ -3,6 +3,7 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 
 import { cn } from "~/lib/utils";
+import { useAnimatedPanelHeight } from "./animated-panel-height";
 
 const PopoverCreateHandle = PopoverPrimitive.createHandle;
 
@@ -50,6 +51,7 @@ function PopoverPopup({
   bubble = false,
   keepMounted = false,
   anchor,
+  animateHeight,
   ...props
 }: PopoverPrimitive.Popup.Props & {
   padding?: keyof typeof popoverViewportPaddingClassName;
@@ -70,10 +72,35 @@ function PopoverPopup({
   keepMounted?: PopoverPrimitive.Portal.Props["keepMounted"];
   anchor?: PopoverPrimitive.Positioner.Props["anchor"];
   width?: keyof typeof popoverPopupWidthClassName;
+  /**
+   * Glide to the content's new height when it changes while open (useAnimatedPanelHeight).
+   * On by default; panels, and pickers that hold a fixed size, pass false.
+   */
+  animateHeight?: boolean;
 }) {
+  const animatesHeight = animateHeight ?? variant !== "panel";
+  const { panelProps, contentRef } = useAnimatedPanelHeight(animatesHeight);
   // Viewport rekeys its children when the active trigger clears on close. Persistent
   // single-trigger forms need a stable container to retain drafts and submit guards.
   const Viewport = keepMounted ? "div" : PopoverPrimitive.Viewport;
+  const viewport = (
+    <Viewport
+      ref={animatesHeight ? contentRef : undefined}
+      className={cn(
+        // Animated, the viewport keeps its natural height inside the panel that animates.
+        animatesHeight ? "w-full" : "size-full",
+        "relative max-h-(--available-height) overflow-clip px-(--viewport-inline-padding) has-data-[slot=calendar]:p-2 data-instant:transition-none **:data-current:data-ending-style:opacity-0 **:data-current:data-starting-style:opacity-0 **:data-previous:data-ending-style:opacity-0 **:data-previous:data-starting-style:opacity-0 **:data-current:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-current:opacity-100 **:data-previous:opacity-100 **:data-current:transition-opacity **:data-previous:transition-opacity",
+        tooltipStyle && padding === "default"
+          ? "py-1 [--viewport-inline-padding:--spacing(2)]"
+          : popoverViewportPaddingClassName[padding],
+        !tooltipStyle && "scroll-fade-y not-data-transitioning:overflow-y-auto",
+        variant === "panel" && "overflow-visible py-2 [--viewport-inline-padding:--spacing(2)]",
+      )}
+      data-slot="popover-viewport"
+    >
+      {children}
+    </Viewport>
+  );
   return (
     <PopoverPrimitive.Portal keepMounted={keepMounted}>
       <PopoverPrimitive.Positioner
@@ -112,20 +139,14 @@ function PopoverPopup({
           data-slot="popover-popup"
           {...props}
         >
-          <Viewport
-            className={cn(
-              "relative size-full max-h-(--available-height) overflow-clip px-(--viewport-inline-padding) has-data-[slot=calendar]:p-2 data-instant:transition-none **:data-current:data-ending-style:opacity-0 **:data-current:data-starting-style:opacity-0 **:data-previous:data-ending-style:opacity-0 **:data-previous:data-starting-style:opacity-0 **:data-current:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-current:opacity-100 **:data-previous:opacity-100 **:data-current:transition-opacity **:data-previous:transition-opacity",
-              tooltipStyle && padding === "default"
-                ? "py-1 [--viewport-inline-padding:--spacing(2)]"
-                : popoverViewportPaddingClassName[padding],
-              !tooltipStyle && "scroll-fade-y not-data-transitioning:overflow-y-auto",
-              variant === "panel" &&
-                "overflow-visible py-2 [--viewport-inline-padding:--spacing(2)]",
-            )}
-            data-slot="popover-viewport"
-          >
-            {children}
-          </Viewport>
+          {animatesHeight ? (
+            // The panel animates to the viewport's height; the viewport still clamps and scrolls.
+            <div className="panel-height-motion w-full" data-slot="popover-panel" {...panelProps}>
+              {viewport}
+            </div>
+          ) : (
+            viewport
+          )}
         </PopoverPrimitive.Popup>
       </PopoverPrimitive.Positioner>
     </PopoverPrimitive.Portal>

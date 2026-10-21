@@ -5,6 +5,7 @@ import { CheckIcon, ChevronRightIcon } from "lucide-react";
 import type * as React from "react";
 
 import { cn } from "~/lib/utils";
+import { useAnimatedPanelHeight } from "./animated-panel-height";
 import { buttonVariants } from "./button";
 import {
   MENU_VIEWPORT_MARGIN_PX,
@@ -31,6 +32,7 @@ function MenuPopup({
   side = "bottom",
   anchor,
   keepMounted = false,
+  animateHeight = true,
   ...props
 }: MenuPrimitive.Popup.Props & {
   align?: MenuPrimitive.Positioner.Props["align"];
@@ -39,7 +41,10 @@ function MenuPopup({
   side?: MenuPrimitive.Positioner.Props["side"];
   anchor?: MenuPrimitive.Positioner.Props["anchor"];
   keepMounted?: boolean;
+  /** Glide to the items' new height when they change while open (useAnimatedPanelHeight). */
+  animateHeight?: boolean;
 }) {
+  const { panelProps, contentRef } = useAnimatedPanelHeight(animateHeight);
   return (
     <MenuPrimitive.Portal keepMounted={keepMounted}>
       <MenuPrimitive.Positioner
@@ -68,8 +73,14 @@ function MenuPopup({
           data-slot="menu-popup"
           {...props}
         >
-          <div className="scroll-fade-y max-h-(--available-height) w-full overflow-y-auto p-1">
-            {children}
+          {/* The panel animates to the list's height; the list still clamps and scrolls. */}
+          <div className="panel-height-motion w-full" data-slot="menu-panel" {...panelProps}>
+            <div
+              ref={contentRef}
+              className="scroll-fade-y max-h-(--available-height) w-full overflow-y-auto p-1"
+            >
+              {children}
+            </div>
           </div>
         </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>

@@ -20,7 +20,7 @@ import {
   type ServerProvider,
   type ScopedProjectRef,
   type ScopedThreadRef,
-  type ThreadContextRecord,
+  type LinkContextRecord,
   type ThreadId,
   type RunId,
   type WorktreeSetupSnapshot,
@@ -1134,7 +1134,7 @@ export interface PlanFollowUpComposerSnapshot {
   readonly terminalContexts: ReadonlyArray<TerminalContextDraft>;
   readonly reviewComments: ReadonlyArray<ReviewCommentContext>;
   readonly previewAnnotations: ReadonlyArray<PreviewAnnotationPayload>;
-  readonly threadContexts: ReadonlyArray<ThreadContextRecord>;
+  readonly threadContexts: ReadonlyArray<LinkContextRecord>;
 }
 
 /**
@@ -1148,7 +1148,7 @@ export function restorePlanFollowUpComposer(input: {
   readonly writeTerminalContexts: (contexts: ReadonlyArray<TerminalContextDraft>) => void;
   readonly writeReviewComments: (comments: ReadonlyArray<ReviewCommentContext>) => void;
   readonly writePreviewAnnotations: (annotations: ReadonlyArray<PreviewAnnotationPayload>) => void;
-  readonly writeThreadContexts: (records: ReadonlyArray<ThreadContextRecord>) => void;
+  readonly writeThreadContexts: (records: ReadonlyArray<LinkContextRecord>) => void;
   readonly resetCursor: (options: {
     cursor: number;
     prompt: string;

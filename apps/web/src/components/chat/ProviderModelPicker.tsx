@@ -285,6 +285,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <PopoverPopup
         {...(props.isComposerOwned ? composerFloatingLayerProps : {})}
         align="start"
+        // The picker holds its size while its lists filter and swap.
+        animateHeight={false}
         className="before:hidden"
         padding="none"
       >
