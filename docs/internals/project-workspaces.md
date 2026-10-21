@@ -1,0 +1,51 @@
+# Project workspaces
+
+## Model
+
+A project (the user-facing folder such as "Spawn Partners", `ProjectLabel` in
+contracts; not the per-repository workspace record) is a folder. The folder is the source of truth; Cogenly indexes it,
+it does not own a copy.
+
+```
+<projectsRoot>/                 default <COGENLY_HOME>/projects
+  Spawn Partners/               the project directory
+    platform/                   a repository (any git work tree)
+    server/                     another repository
+    Resources/                  project files: anything the user drops here
+      brief.pdf
+      notes/
+    .cogenly-project.json       project id, so a renamed folder keeps its identity
+```
+
+- Repositories are git work trees directly inside the project directory.
+  Everything else at the top level, and anything under `Resources/`, is a
+  project resource. Adding a file from the UI writes it into the folder; adding
+  it in Finder is equivalent. A watcher keeps the index current.
+- Links and notes are files too (`.url` / `.md`), so the folder stays complete
+  without the database.
+- A chat in a project runs with the project directory as its working directory.
+  Work in a repository runs in that repository (its worktree), as today.
+- Moving a chat to a project forks it: the new chat is created in the project,
+  carries the history (context handoff), and starts in the project directory.
+  The original chat is left where it was. Chats are never re-parented.
+- Agents reach resources through the `cogenly` MCP server: list, read (paged
+  text), and recall (search across the project's files). Threads in a project
+  get a short manifest of its resources in their context.
+
+## Rules that keep cross-environment projects possible
+
+Projects must eventually span environments (Mac, VPS, hosted). These rules hold
+now, while only one environment holds a project:
+
+1. Never persist absolute paths in shared state. Store project-relative paths;
+   resolve against the local `projectsRoot` at the edge.
+2. Project identity is the id in `.cogenly-project.json`, not the folder name
+   or path.
+3. Repositories are described portably by their source links (GitHub
+   owner/repo, remote URL). A local-only folder with no remote is marked
+   environment-local.
+4. Resource identity is a content hash plus a relative path, so two copies of a
+   project can be compared without trusting timestamps.
+5. File access goes through one project-files service (list, read, write,
+   watch, search). No caller touches the filesystem directly, so the service
+   can later be backed by a synced store.
