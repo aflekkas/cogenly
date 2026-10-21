@@ -4883,7 +4883,18 @@ export default function Sidebar() {
                         item.section === "active" ? chatDateGroupOf?.(thread) : null;
                       if (dateGroup) {
                         items.push(
-                          <SidebarModeGroupLabel key={`chat-date:${dateGroup}`}>
+                          <SidebarModeGroupLabel
+                            key={`chat-date:${dateGroup}`}
+                            // Pinned is marked with a filled pin in the unread blue.
+                            icon={
+                              dateGroup === "pinned" ? (
+                                <PinIcon
+                                  aria-hidden
+                                  className="-mr-1 size-3 shrink-0 fill-current text-info"
+                                />
+                              ) : undefined
+                            }
+                          >
                             {CHAT_DATE_GROUP_LABELS[dateGroup]}
                           </SidebarModeGroupLabel>,
                         );
