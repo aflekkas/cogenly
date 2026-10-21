@@ -10,12 +10,22 @@
 import { useAtomValue } from "@effect/atom-react";
 import { PanelLeft, PanelLeftClose } from "lucide";
 import { ChartNoAxesColumnIcon, SearchIcon, SettingsIcon } from "lucide-react";
-import { type KeyboardEvent as ReactKeyboardEvent, type ReactElement, useRef } from "react";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
+  useEffect,
+  useRef,
+} from "react";
+import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 
 import { useAgentsEmpty } from "../../agents/agentsClient";
 import { openCommandPalette } from "../../commandPaletteBus";
 import { isElectron } from "../../env";
+import {
+  preloadRailDestination,
+  scheduleIdleRailPreload,
+  type RailDestination,
+} from "../../routeChunkPreload";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { cn } from "../../lib/utils";
 import { MorphIcon } from "../MorphIcon";
@@ -73,6 +83,14 @@ export function SidebarNavRail({
   const { open, setOpen, toggleSidebar } = useSidebar();
   const sidebarVisible = useSidebarVisibility();
   const navigate = useNavigate();
+  const router = useRouter();
+  // The screens a rail button opens load their code while the app is idle,
+  // and at once on hover or focus, so the first visit does not wait on it.
+  useEffect(() => scheduleIdleRailPreload(router), [router]);
+  const preloadOnIntent = (destination: RailDestination) => {
+    const preload = () => preloadRailDestination(router, destination);
+    return { onPointerEnter: preload, onFocus: preload };
+  };
   const pathname = useLocation({ select: (location) => location.pathname });
   const onUtilityPage = isSidebarUtilityPage(pathname);
   const onSettings = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -195,6 +213,7 @@ export function SidebarNavRail({
                 tabIndex={segment === mode ? 0 : -1}
                 data-testid={`sidebar-mode-${segment}`}
                 onClick={() => selectMode(segment)}
+                {...preloadOnIntent(segment === "projects" ? "projects" : "threads")}
                 className={cn(RAIL_BUTTON_CLASS, railButtonTone(selected))}
               >
                 <Icon aria-hidden />
@@ -232,6 +251,7 @@ export function SidebarNavRail({
             aria-label="Usage"
             aria-current={onUsage ? "page" : undefined}
             onClick={() => void navigate({ to: "/usage" })}
+            {...preloadOnIntent("usage")}
             className={cn(RAIL_BUTTON_CLASS, railButtonTone(onUsage))}
           >
             <ChartNoAxesColumnIcon aria-hidden />
@@ -246,6 +266,7 @@ export function SidebarNavRail({
               if (!open) setOpen(true);
               if (!onSettings) void navigate({ to: "/settings" });
             }}
+            {...preloadOnIntent("settings")}
             className={cn(RAIL_BUTTON_CLASS, railButtonTone(onSettings))}
           >
             <SettingsIcon aria-hidden />
