@@ -19,7 +19,7 @@ import {
   useRef,
   type KeyboardEvent,
 } from "react";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, StarIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import {
   MODEL_PICKER_FAVORITES,
@@ -46,6 +46,7 @@ import {
   parseModelPickerLegacySectionKey,
   parseModelPickerModelKey,
 } from "./modelPickerKeys";
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { Combobox, ComboboxEmpty, ComboboxItem, ComboboxListVirtualized } from "../ui/combobox";
 import { ModelEsque } from "./providerIconUtils";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
@@ -1079,10 +1080,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   </div>
                 ))}
               </div>
+            ) : showsFavorites && filteredItemKeys.length === 0 ? (
+              <Empty size="sm">
+                <EmptyHeader>
+                  <EmptyMedia>
+                    <StarIcon />
+                  </EmptyMedia>
+                  <EmptyTitle>Star a model to keep it here</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
             ) : (
-              <ComboboxEmpty className="empty:h-0">
-                {showsFavorites ? "Star a model to keep it here" : "No models found"}
-              </ComboboxEmpty>
+              <ComboboxEmpty className="empty:h-0">No models found</ComboboxEmpty>
             )}
             {updateRequiredNotice ? (
               <p className="shrink-0 border-t border-border/70 px-3 py-2 text-xs leading-snug text-muted-foreground">
