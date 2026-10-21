@@ -35,6 +35,7 @@ import { ThreadNotificationCoordinator } from "../components/ThreadNotificationC
 import { ThreadReadCoordinator } from "../components/ThreadReadCoordinator";
 import { ReopenClosedViewShortcut } from "../components/ReopenClosedViewShortcut";
 import { ProjectCloneToastCoordinator } from "../components/ProjectCloneToastCoordinator";
+import { PendingProjectFolderCoordinator } from "../projectLabels/PendingProjectFolderCoordinator";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
 import { ChatGptWelcomeCoordinator } from "../components/settings/ChatGptWelcomeCoordinator";
 import { ProviderAuthCallbackCoordinator } from "../components/settings/ProviderAuthCallbackCoordinator";
@@ -227,6 +228,7 @@ function RootRouteView() {
         <PermissionUpdateNotice />
         {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}
         <ProjectCloneToastCoordinator />
+        <PendingProjectFolderCoordinator />
         <HostedStaticEnvironmentBootstrap />
         {primaryEnvironmentAuthenticated ? (
           <EventRouter skipInitialBootstrapNavigation={returningFromWelcomeRef.current} />

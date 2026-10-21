@@ -373,6 +373,7 @@ import { usePanelAnimationSettings } from "../../panelAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { readEnvironmentScope } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
+import { ComposerProjectPicker } from "../../projectLabels/ComposerProjectPicker";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
 function ComposerVideoThumbnail({ file }: { file: File }) {
@@ -4368,7 +4369,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ...providerTraitsPickerInput,
     size: composerControlsCollapsed ? "xs" : "sm",
     // Traits is the first block, so it hides once every block after it has.
-    hidden: composerControlsHidden || restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0),
+    hidden:
+      composerControlsHidden ||
+      restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0) + (activeThreadId !== null ? 1 : 0),
   });
   const restingBlockDefs = [
     ...(providerTraitsPicker
@@ -4398,10 +4401,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ]
       : []),
+    // Last, so a narrow toolbar drops it to its folder icon and then hides it
+    // before the model or effort controls give way.
+    ...(activeThreadId !== null
+      ? [
+          {
+            id: "project",
+            content: (
+              <ComposerProjectPicker
+                environmentId={routeThreadRef.environmentId}
+                threadId={activeThreadId}
+                draftId={routeKind === "draft" ? draftId : null}
+                size={composerControlsCollapsed ? "xs" : "sm"}
+                disabled={isSendBusy}
+              />
+            ),
+          },
+        ]
+      : []),
   ];
+  // The project picker has no overflow entry; it only hides.
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
-    .map((def) => def.id);
+    .map((def) => def.id)
+    .filter((id) => id !== "project");
   const composerControls = showProviderUnavailable ? (
     <ComposerControl
       type="button"

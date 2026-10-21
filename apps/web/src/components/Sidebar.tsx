@@ -228,6 +228,11 @@ import {
 } from "../projectLabels/projectLabels.logic";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
+import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
+import {
+  SidebarChatProjectLine,
+  useChatProjectMetaAnimates,
+} from "./sidebar/SidebarChatProjectLine";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { serverEnvironment } from "../state/server";
 import { useNavRailBadgeStore } from "./sidebar/navRailState";
@@ -272,7 +277,7 @@ import {
 // Settled-tail paging: recent history is the common lookup; the deep tail
 // stays behind an explicit Show more.
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new Map();
-/** The folder a row's hover card names; null when unfiled. */
+/** The folder a row names (chat subtext, Work meta line); null when unfiled. */
 interface SidebarRowFolder {
   readonly name: string;
   readonly color: string | undefined;
@@ -918,7 +923,8 @@ function ChatListRevealSentinel(props: { onReveal: () => void }) {
 }
 
 /**
- * A Chats row: the title on one line and a status slot at its end. A running
+ * A Chats row: the title, and under it the chat's project when it is in one,
+ * with a status slot at its end. A running
  * turn shows a small spinner, a reply you have not seen shows a blue dot, a
  * chat waiting on you an amber one; an unread reply also makes the title
  * heavier. Everything else (rename, archive, Start Work) lives in the context
@@ -926,6 +932,10 @@ function ChatListRevealSentinel(props: { onReveal: () => void }) {
  */
 const SidebarChatRow = memo(function SidebarChatRow(props: {
   thread: SidebarThreadSummary;
+  // The project named on the row's second line; null keeps it one line.
+  folder: SidebarRowFolder | null;
+  // False until the project list has painted, so only a move animates the row.
+  animateFolder: boolean;
   isActive: boolean;
   jumpLabel: string | null;
   isRenaming: boolean;
@@ -984,7 +994,7 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
     statusLabel,
-    projectDisplayName: null,
+    projectDisplayName: props.folder ? `in ${props.folder.name}` : null,
     isActive: props.isActive,
   });
 
@@ -1061,8 +1071,12 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
     <li
       data-thread-item={threadKey}
       onPointerDown={handleRowPointerDown}
-      // Matches the h-8 row so unrendered rows never shift the list when they paint.
-      className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_32px]"
+      // Matches the row's height (h-8, or h-11 with a project line) so
+      // unrendered rows never shift the list when they paint.
+      className={cn(
+        "list-none [content-visibility:auto]",
+        props.folder ? "[contain-intrinsic-size:auto_44px]" : "[contain-intrinsic-size:auto_32px]",
+      )}
     >
       <div
         role="button"
@@ -1072,7 +1086,10 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
         data-testid="sidebar-row-chat"
         aria-busy={thread.titleRegeneration != null || undefined}
         className={cn(
-          "relative flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          "group/sidebar-chat relative flex w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg px-2.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          props.folder ? "h-11" : "h-8",
+          props.animateFolder &&
+            "transition-[height] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
           props.isActive || isSelected || isContextMenuOpen ? "state-selected" : "state-hover",
           isContextMenuOpen && "focus-visible:ring-0",
         )}
@@ -1081,36 +1098,39 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
         onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
       >
-        {isRenaming && canOperateThread ? (
-          <input
-            autoFocus
-            value={renamingTitle}
-            aria-label="Chat title"
-            onChange={(event) => onRenameTitleChange(event.target.value)}
-            onFocus={(event) => event.currentTarget.select()}
-            onKeyDown={handleRenameKeyDown}
-            onBlur={handleRenameBlur}
-            onClick={(event) => event.stopPropagation()}
-            onDoubleClick={(event) => event.stopPropagation()}
-            className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm text-card-foreground outline-none focus:border-foreground"
-          />
-        ) : (
-          <PendingTitleSlot
-            pending={thread.titleRegeneration != null}
-            className="min-w-0 flex-1 text-sm"
-          >
-            <PanOnHoverText
-              className={cn(
-                isUnread || needsYou ? "font-medium text-foreground" : "font-normal",
-                props.isActive
-                  ? "text-foreground"
-                  : !(isUnread || needsYou) && "text-foreground/80",
-              )}
+        <span className="flex min-w-0 flex-1 flex-col justify-center">
+          {isRenaming && canOperateThread ? (
+            <input
+              autoFocus
+              value={renamingTitle}
+              aria-label="Chat title"
+              onChange={(event) => onRenameTitleChange(event.target.value)}
+              onFocus={(event) => event.currentTarget.select()}
+              onKeyDown={handleRenameKeyDown}
+              onBlur={handleRenameBlur}
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => event.stopPropagation()}
+              className="min-w-0 rounded-sm border border-input bg-card px-1 text-sm text-card-foreground outline-none focus:border-foreground"
+            />
+          ) : (
+            <PendingTitleSlot
+              pending={thread.titleRegeneration != null}
+              className="min-w-0 text-sm"
             >
-              <span aria-hidden>{thread.title}</span>
-            </PanOnHoverText>
-          </PendingTitleSlot>
-        )}
+              <PanOnHoverText
+                className={cn(
+                  isUnread || needsYou ? "font-medium text-foreground" : "font-normal",
+                  props.isActive
+                    ? "text-foreground"
+                    : !(isUnread || needsYou) && "text-foreground/80",
+                )}
+              >
+                <span aria-hidden>{thread.title}</span>
+              </PanOnHoverText>
+            </PendingTitleSlot>
+          )}
+          <SidebarChatProjectLine project={props.folder} animate={props.animateFolder} />
+        </span>
         <SidebarChatStatusSlot
           isRunning={isRunning}
           dot={needsYou ? "warning" : isUnread ? "info" : null}
@@ -1133,7 +1153,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   snoozeSupported: boolean;
   // The repository label on the meta line; null for scratch work.
   repositoryName: string | null;
-  // The folder the row is filed in, named in its hover card.
+  // The folder the row is filed in, leading its meta line.
   folder: SidebarRowFolder | null;
   // The action this row will take when the sweep is released.
   sweepAction: SidebarSweepAction | null;
@@ -2025,9 +2045,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   truncated to a half-sentence and dropped the branch, so the
                   row lost its most stable identifier. A worktree swaps the
                   folder for its own icon. */}
-            {props.repositoryName || thread.branch ? (
+            {/* Filed in a project, the line leads with it in its color
+                  ("Spawn Partners / platform · t3/fix"). */}
+            {props.folder || props.repositoryName || thread.branch ? (
               <>
-                {thread.worktreePath?.trim() ? (
+                {props.folder ? (
+                  <ProjectFolderIcon color={props.folder.color} />
+                ) : thread.worktreePath?.trim() ? (
                   <ThreadWorktreeIndicator thread={thread} />
                 ) : props.repositoryName ? (
                   <FolderIcon aria-hidden className="size-3 shrink-0" />
@@ -2035,10 +2059,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   <GitBranchIcon aria-hidden className="size-3 shrink-0" />
                 ) : null}
                 <span className="min-w-0 flex-1 fade-truncate">
+                  {props.folder ? <span>{props.folder.name}</span> : null}
+                  {props.folder && props.repositoryName ? " / " : null}
                   {props.repositoryName ? <span>{props.repositoryName}</span> : null}
-                  {props.repositoryName && thread.branch ? " · " : null}
+                  {(props.folder || props.repositoryName) && thread.branch ? " · " : null}
                   {thread.branch}
                 </span>
+                {props.folder && thread.worktreePath?.trim() ? (
+                  <ThreadWorktreeIndicator thread={thread} />
+                ) : null}
               </>
             ) : (
               <span className="flex-1" />
@@ -2457,6 +2486,9 @@ export default function Sidebar() {
         : (byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
     };
   }, [projectLabelDirectory]);
+  const chatProjectMetaAnimates = useChatProjectMetaAnimates(
+    projectLabelDirectory.labels.length > 0,
+  );
   const setNavRailDecisionsWaiting = useNavRailBadgeStore((store) => store.setDecisionsWaiting);
   useEffect(() => {
     setNavRailDecisionsWaiting(sidebarModes.decisionsWaiting);
@@ -4513,6 +4545,8 @@ export default function Sidebar() {
                         <SidebarChatRow
                           key={`${threadKey}`}
                           thread={thread}
+                          folder={folderFor(thread)}
+                          animateFolder={chatProjectMetaAnimates}
                           isActive={routeThreadKey === threadKey}
                           jumpLabel={showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
                           isRenaming={renamingThreadKey === threadKey}

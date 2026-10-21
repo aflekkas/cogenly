@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import { FolderPlusIcon } from "lucide-react";
+import { FolderGit2Icon, FolderPlusIcon, ListIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -32,12 +32,31 @@ import { useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
+import { HERO_INLINE_ICON_STYLE, HeroProjectPicker } from "~/projectLabels/HeroProjectPicker";
+import { usePendingProjectFolderStore } from "~/projectLabels/pendingProjectFolders";
+import {
+  projectLabelKey,
+  type EnvironmentProjectLabel,
+  type ProjectLabelKey,
+} from "~/projectLabels/projectLabels.logic";
+import {
+  groupRepositoriesByProject,
+  heroProjectKey,
+  heroProjectSuffix,
+  OTHER_REPOSITORIES_GROUP_KEY,
+  soleRepositoryOf,
+} from "~/projectLabels/projectMeta.logic";
+import { ProjectColorDot } from "~/projectLabels/ProjectTag";
+import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { chatGreeting } from "./chatGreeting";
 import { FadeSwap } from "./StateTransition";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
   Combobox,
+  ComboboxCollection,
   ComboboxEmpty,
+  ComboboxGroup,
+  ComboboxGroupLabel,
   ComboboxItem,
   ComboboxItemIcon,
   ComboboxList,
@@ -50,13 +69,28 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
-// Picker value for the "Add project" row; real entries are keyed by logical
-// project key.
+// Picker values for the action rows; repositories are keyed by their group
+// and logical project key, since one can show under several projects.
 const ADD_PROJECT_VALUE = "add-project";
+const ALL_REPOSITORIES_VALUE = "all-repositories";
+const ACTIONS_GROUP_KEY = "actions";
 
 interface PickerItem {
   readonly value: string;
   readonly label: string;
+  /** The logical project key; empty on action rows. */
+  readonly projectKey: string;
+  /** The project group the row is listed under. */
+  readonly groupKey: string;
+}
+
+interface PickerGroup {
+  readonly value: string;
+  /** The header; null on a list with no projects, and on the actions. */
+  readonly label: string | null;
+  readonly color: string | undefined;
+  readonly isProject: boolean;
+  readonly items: readonly PickerItem[];
 }
 
 interface DraftHeroHeadlineProps {
@@ -201,29 +235,121 @@ export function DraftHeroHeadline({
   // surface was recorded keep the old guess.
   const isChatDraft = surface === undefined ? isScratchDraft : surface === "chat";
 
-  // {value, label} items let Base UI drive the combobox selection while the
-  // popup search filters the same collection. "Add project" is an action, not
-  // a project, so it only trails the unfiltered list.
-  const pickerItems = useMemo<readonly PickerItem[]>(
-    () => [
-      ...menuEntries.map(({ group }) => ({ value: group.projectKey, label: group.displayName })),
-      { value: ADD_PROJECT_VALUE, label: "Add repository" },
-    ],
+  // Repositories are grouped under the projects (folders) that hold them,
+  // "Other repositories" last. Folders live per environment; every connected
+  // one contributes.
+  const environmentIds = useMemo(
+    () => environments.map((environment) => environment.environmentId),
+    [environments],
+  );
+  const projectDirectory = useProjectLabelDirectory(environmentIds);
+  // The project the repository was picked under, so the hero names it.
+  const [chosenProjectKey, setChosenProjectKey] = useState<ProjectLabelKey | null>(null);
+  // Picking a project with several repositories narrows the picker to them.
+  const [pickerProjectKey, setPickerProjectKey] = useState<ProjectLabelKey | null>(null);
+  const repositoryItems = useMemo(
+    () =>
+      menuEntries.map(({ group }) => ({
+        value: group.projectKey,
+        label: group.displayName,
+        projectKey: group.projectKey,
+        groupKey: "",
+      })),
     [menuEntries],
   );
+  const refsOfRepository = useCallback(
+    (item: PickerItem) => projectEntryByKey.get(item.projectKey)?.group.memberProjectRefs ?? [],
+    [projectEntryByKey],
+  );
+  const buildPickerGroups = useCallback(
+    (items: readonly PickerItem[], onlyProject: ProjectLabelKey | null, withActions: boolean) => {
+      const grouped = groupRepositoriesByProject({
+        items,
+        refsOf: refsOfRepository,
+        projects: projectDirectory.labels,
+        onlyProject,
+      });
+      // Without any project there is nothing to group by: one plain list.
+      const titled = grouped.some((group) => group.project !== null);
+      const groups: PickerGroup[] = grouped.map((group) => ({
+        value: group.key,
+        label: titled ? (group.project?.label.name ?? "Other repositories") : null,
+        color: group.project?.label.color,
+        isProject: group.project !== null,
+        items: group.items.map((item) => ({
+          ...item,
+          value: `${group.key}|${item.projectKey}`,
+          groupKey: group.key,
+        })),
+      }));
+      if (withActions) {
+        groups.push({
+          value: ACTIONS_GROUP_KEY,
+          label: null,
+          color: undefined,
+          isProject: false,
+          items: [
+            ...(onlyProject
+              ? [
+                  {
+                    value: ALL_REPOSITORIES_VALUE,
+                    label: "All repositories",
+                    projectKey: "",
+                    groupKey: ACTIONS_GROUP_KEY,
+                  },
+                ]
+              : []),
+            {
+              value: ADD_PROJECT_VALUE,
+              label: "Add repository",
+              projectKey: "",
+              groupKey: ACTIONS_GROUP_KEY,
+            },
+          ],
+        });
+      }
+      return groups;
+    },
+    [projectDirectory.labels, refsOfRepository],
+  );
+  const pickerGroups = useMemo(
+    () => buildPickerGroups(repositoryItems, null, true),
+    [buildPickerGroups, repositoryItems],
+  );
   const [pickerOpen, setPickerOpen] = useState(false);
+  const keepPickerOpenRef = useRef(false);
   const [pickerQuery, setPickerQuery] = useState("");
   const pickerFilter = useComboboxFilter();
-  const filteredPickerItems = useMemo(() => {
+  // Search runs across every repository, whatever project the list was narrowed to.
+  const filteredPickerGroups = useMemo(() => {
     const query = pickerQuery.trim();
-    if (query.length === 0) return pickerItems;
-    return pickerItems.filter(
-      (item) =>
-        item.value !== ADD_PROJECT_VALUE &&
+    if (query.length === 0) return buildPickerGroups(repositoryItems, pickerProjectKey, true);
+    return buildPickerGroups(
+      repositoryItems.filter((item) =>
         pickerFilter.contains(item, query, (candidate) => candidate.label),
+      ),
+      null,
+      false,
     );
-  }, [pickerFilter, pickerItems, pickerQuery]);
-  const selectedPickerItem = pickerItems.find((item) => item.value === activeProjectKey) ?? null;
+  }, [buildPickerGroups, pickerFilter, pickerProjectKey, pickerQuery, repositoryItems]);
+  const activeRepositoryRefs = activeProjectGroup?.memberProjectRefs;
+  const heroProject = useMemo(() => {
+    if (isScratchDraft || !activeRepositoryRefs) return null;
+    const key = heroProjectKey({
+      chosen: chosenProjectKey,
+      repository: activeRepositoryRefs,
+      projects: projectDirectory.labels,
+    });
+    return key === null ? null : (projectDirectory.byKey.get(key) ?? null);
+  }, [activeRepositoryRefs, chosenProjectKey, isScratchDraft, projectDirectory]);
+  const selectedPickerItem =
+    pickerGroups
+      .find((group) => group.value === (heroProject?.key ?? OTHER_REPOSITORIES_GROUP_KEY))
+      ?.items.find((item) => item.projectKey === activeProjectKey) ??
+    pickerGroups
+      .flatMap((group) => group.items)
+      .find((item) => item.projectKey === activeProjectKey) ??
+    null;
 
   // The picker can change the draft's target while the no-project home is
   // still being opened; a stale continuation must not retarget it again.
@@ -292,28 +418,87 @@ export function DraftHeroHeadline({
     return true;
   };
 
+  // The first action row carries the hairline that sets the actions apart.
+  const filteredActionsLead =
+    filteredPickerGroups.find((group) => group.value === ACTIONS_GROUP_KEY)?.items[0]?.value ??
+    null;
+  const renderPickerItem = (item: PickerItem) => {
+    const entry = projectEntryByKey.get(item.projectKey);
+    const isAction = item.groupKey === ACTIONS_GROUP_KEY;
+    return (
+      <ComboboxItem
+        key={item.value}
+        hideIndicator
+        value={item}
+        tone={isAction ? "action" : "default"}
+        divider={item.value === filteredActionsLead && menuEntries.length > 0}
+      >
+        <ComboboxItemIcon>
+          {item.value === ADD_PROJECT_VALUE ? (
+            <FolderPlusIcon className="size-4" />
+          ) : item.value === ALL_REPOSITORIES_VALUE ? (
+            <ListIcon className="size-4" />
+          ) : entry ? (
+            <RepositoryBadge name={item.label} />
+          ) : null}
+        </ComboboxItemIcon>
+        <Tooltip>
+          <TooltipTrigger render={<span className="min-w-0 flex-1 truncate text-sm" />}>
+            {item.label}
+          </TooltipTrigger>
+          <TooltipPopup side="top">{item.label}</TooltipPopup>
+        </Tooltip>
+        {entry && showProjectEnvironments ? (
+          <ProjectEnvironmentBadge
+            group={entry.group}
+            primaryEnvironmentId={primaryEnvironmentId}
+            machineByEnvironmentId={environmentMachineById}
+          />
+        ) : null}
+      </ComboboxItem>
+    );
+  };
+
   const projectSelector = shouldShowProjectMenu ? (
     <Combobox
-      items={pickerItems}
-      filteredItems={filteredPickerItems}
+      items={pickerGroups}
+      filteredItems={filteredPickerGroups}
       autoHighlight
-      itemToStringLabel={(item) => item.label}
-      isItemEqualToValue={(a, b) => a.value === b.value}
+      itemToStringLabel={(item: PickerItem) => item.label}
+      isItemEqualToValue={(a: PickerItem, b: PickerItem) => a.value === b.value}
       open={pickerOpen}
-      onOpenChange={(open) => {
+      onOpenChange={(open, details) => {
+        // "All repositories" widens the list in place.
+        if (!open && details.reason === "item-press" && keepPickerOpenRef.current) {
+          keepPickerOpenRef.current = false;
+          return;
+        }
         setPickerOpen(open);
         setPickerQuery("");
+        if (!open) setPickerProjectKey(null);
       }}
       value={selectedPickerItem}
-      onValueChange={(item) => {
+      onValueChange={(item: PickerItem | null) => {
         if (!item) return;
+        if (item.value === ALL_REPOSITORIES_VALUE) {
+          keepPickerOpenRef.current = true;
+          setPickerProjectKey(null);
+          return;
+        }
         setPickerOpen(false);
+        setPickerProjectKey(null);
         if (item.value === ADD_PROJECT_VALUE) {
           openAddProject();
           return;
         }
-        const entry = projectEntryByKey.get(item.value);
-        if (!entry || item.value === activeProjectKey) {
+        // Picking a repository under a project also picks that project.
+        setChosenProjectKey(
+          item.groupKey === OTHER_REPOSITORIES_GROUP_KEY
+            ? null
+            : (item.groupKey as ProjectLabelKey),
+        );
+        const entry = projectEntryByKey.get(item.projectKey);
+        if (!entry || item.projectKey === activeProjectKey) {
           return;
         }
         selectProject(entry.targetProject, entry.group.projectKey);
@@ -337,7 +522,11 @@ export function DraftHeroHeadline({
               atomic inline box and stays clear of the button's underline. */}
           <span className="block">
             {!isScratchDraft && activeProjectDisplayName ? (
-              <RepositoryBadge name={activeProjectDisplayName} size="inline" />
+              <FolderGit2Icon
+                aria-hidden
+                className="inline-block text-muted-foreground"
+                style={HERO_INLINE_ICON_STYLE}
+              />
             ) : null}
             {isScratchDraft
               ? "in a repository…"
@@ -358,40 +547,19 @@ export function DraftHeroHeadline({
         />
         <ComboboxEmpty>No matching repositories.</ComboboxEmpty>
         <ComboboxList>
-          {(item: PickerItem) => {
-            const entry = projectEntryByKey.get(item.value);
-            const isAddProject = item.value === ADD_PROJECT_VALUE;
-            return (
-              <ComboboxItem
-                key={item.value}
-                hideIndicator
-                value={item}
-                tone={isAddProject ? "action" : "default"}
-                divider={isAddProject && menuEntries.length > 0}
-              >
-                <ComboboxItemIcon>
-                  {isAddProject ? (
-                    <FolderPlusIcon className="size-4" />
-                  ) : entry ? (
-                    <RepositoryBadge name={item.label} />
-                  ) : null}
-                </ComboboxItemIcon>
-                <Tooltip>
-                  <TooltipTrigger render={<span className="min-w-0 flex-1 truncate text-sm" />}>
-                    {item.label}
-                  </TooltipTrigger>
-                  <TooltipPopup side="top">{item.label}</TooltipPopup>
-                </Tooltip>
-                {entry && showProjectEnvironments ? (
-                  <ProjectEnvironmentBadge
-                    group={entry.group}
-                    primaryEnvironmentId={primaryEnvironmentId}
-                    machineByEnvironmentId={environmentMachineById}
-                  />
-                ) : null}
-              </ComboboxItem>
-            );
-          }}
+          {(group: PickerGroup) => (
+            <ComboboxGroup key={group.value} items={group.items}>
+              {group.label !== null ? (
+                <ComboboxGroupLabel>
+                  {group.isProject ? <ProjectColorDot color={group.color} /> : null}
+                  <span className="min-w-0 truncate">{group.label}</span>
+                </ComboboxGroupLabel>
+              ) : null}
+              <ComboboxCollection>
+                {(item: PickerItem) => renderPickerItem(item)}
+              </ComboboxCollection>
+            </ComboboxGroup>
+          )}
         </ComboboxList>
       </ComboboxPopup>
     </Combobox>
@@ -411,12 +579,63 @@ export function DraftHeroHeadline({
   // announced phrase.
   // Fixed when the screen opens, so the line holds still while the user types.
   const [greeting] = useState(() => chatGreeting(new Date()));
+  // A chat picked into a project says so after the greeting, quietly.
+  const draftThread = useComposerDraftStore((store) =>
+    draftId ? store.draftThreadsByThreadKey[draftId] : undefined,
+  );
+  const pendingFolder = usePendingProjectFolderStore((store) =>
+    draftThread ? store.byThreadId[draftThread.threadId] : undefined,
+  );
+  const chatProjectName = pendingFolder
+    ? (projectDirectory.byKey.get(
+        projectLabelKey(pendingFolder.environmentId, pendingFolder.folderId),
+      )?.label.name ?? null)
+    : null;
+  const greetingSuffix = heroProjectSuffix(chatProjectName);
+  // Choosing a project in the hero: one repository is picked outright;
+  // several narrow the repository picker to that project's.
+  const chooseHeroProject = (project: EnvironmentProjectLabel) => {
+    setChosenProjectKey(project.key);
+    const narrowed = groupRepositoriesByProject({
+      items: repositoryItems,
+      refsOf: refsOfRepository,
+      projects: projectDirectory.labels,
+      onlyProject: project.key,
+    });
+    const sole = soleRepositoryOf(narrowed);
+    if (sole) {
+      const entry = projectEntryByKey.get(sole.projectKey);
+      if (entry && sole.projectKey !== activeProjectKey) {
+        selectProject(entry.targetProject, entry.group.projectKey);
+      }
+      return;
+    }
+    setPickerProjectKey(project.key);
+    setPickerOpen(true);
+  };
+  const heroProjectPart = heroProject ? (
+    <>
+      <HeroProjectPicker
+        projects={projectDirectory.labels.filter((entry) =>
+          groupRepositoriesByProject({
+            items: repositoryItems,
+            refsOf: refsOfRepository,
+            projects: [entry],
+            onlyProject: entry.key,
+          }).some((group) => group.items.length > 0),
+        )}
+        current={heroProject}
+        onChoose={chooseHeroProject}
+      />
+      <span className="text-muted-foreground/60"> / </span>
+    </>
+  ) : null;
   const headingLabel = isChatDraft
-    ? greeting
+    ? `${greeting}${greetingSuffix ?? ""}`
     : isScratchDraft
       ? "What should we build?"
       : hasResolvedProject
-        ? `What should we build in ${activeProjectDisplayName}?`
+        ? `What should we build in ${heroProject ? `${heroProject.label.name} / ` : ""}${activeProjectDisplayName}?`
         : canChooseProject
           ? `${activeProjectDisplayName ?? "Choose a repository"} to start`
           : "Add a repository to start";
@@ -458,18 +677,26 @@ export function DraftHeroHeadline({
           group="draft-heading"
           swapKey={
             isChatDraft
-              ? "chat"
+              ? `chat:${chatProjectName ?? ""}`
               : isScratchDraft
                 ? "no-repository"
-                : `repository:${activeProjectKey}`
+                : `repository:${heroProject?.key ?? ""}:${activeProjectKey}`
           }
         >
           {isChatDraft ? (
-            <>{greeting}</>
+            <>
+              {greeting}
+              {greetingSuffix ? (
+                <span className="text-muted-foreground/60">{greetingSuffix}</span>
+              ) : null}
+            </>
           ) : isScratchDraft ? (
             <>What should we build?</>
           ) : hasResolvedProject ? (
-            <>What should we build in {projectSelector}?</>
+            <>
+              What should we build in {heroProjectPart}
+              {projectSelector}?
+            </>
           ) : canChooseProject ? (
             <>{projectSelector} to start</>
           ) : (

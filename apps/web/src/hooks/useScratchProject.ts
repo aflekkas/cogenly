@@ -5,10 +5,12 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId, ThreadSurface } from "@t3tools/contracts";
+import { ProjectLabelId, type EnvironmentId, type ThreadSurface } from "@t3tools/contracts";
+import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
+import { setPendingProjectFolder } from "~/projectLabels/pendingProjectFolders";
 import { useEnvironments } from "~/state/environments";
 import { projectEnvironment } from "~/state/projects";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -34,6 +36,7 @@ export function useScratchProject() {
   const { environments } = useEnvironments();
   const openScratch = useAtomCommand(projectEnvironment.openScratch, { reportFailure: false });
   const handleNewThread = useNewThreadHandler();
+  const router = useRouter();
 
   /** The scratch folder of a connected environment, or null when it offers none. */
   const scratchWorkspaceRootFor = useCallback(
@@ -85,16 +88,28 @@ export function useScratchProject() {
   const startScratchThread = useCallback(
     async (
       environmentId: EnvironmentId,
-      options?: { readonly replace?: boolean; readonly surface?: ThreadSurface },
+      options?: {
+        readonly replace?: boolean;
+        readonly surface?: ThreadSurface;
+        /** The project (folder) the new thread is filed in once it is sent. */
+        readonly projectFolderId?: ProjectLabelId | null;
+      },
     ) => {
       const project = await openScratchProject(environmentId);
       if (project) {
-        await handleNewThread(scopeProjectRef(project.environmentId, project.id), {
+        const started = await handleNewThread(scopeProjectRef(project.environmentId, project.id), {
           replace: options?.replace ?? false,
           ...(options?.surface ? { surface: options.surface } : {}),
-        }).catch((error: unknown) =>
-          reportScratchFailure("Could not start without a repository", error),
-        );
+        }).catch((error: unknown) => {
+          reportScratchFailure("Could not start without a repository", error);
+          return null;
+        });
+        if (started && options?.projectFolderId) {
+          setPendingProjectFolder(started.threadId, {
+            environmentId: project.environmentId,
+            folderId: options.projectFolderId,
+          });
+        }
       }
     },
     [handleNewThread, openScratchProject],
@@ -102,7 +117,8 @@ export function useScratchProject() {
 
   /**
    * New chat from Chats mode: always a plain chat on the current machine,
-   * never a repository draft. Says so when that machine offers none.
+   * never a repository draft. Says so when that machine offers none. Started
+   * from a project's page, the chat belongs to that project.
    */
   const startNewChat = useCallback(
     (current: EnvironmentId | null) => {
@@ -117,9 +133,15 @@ export function useScratchProject() {
         );
         return;
       }
-      void startScratchThread(environmentId, { surface: "chat" });
+      const params: { environmentId?: string; labelId?: string } =
+        router.state.matches.at(-1)?.params ?? {};
+      const projectFolderId =
+        params.labelId !== undefined && params.environmentId === environmentId
+          ? ProjectLabelId.make(params.labelId)
+          : null;
+      void startScratchThread(environmentId, { surface: "chat", projectFolderId });
     },
-    [scratchEnvironmentId, startScratchThread],
+    [router, scratchEnvironmentId, startScratchThread],
   );
 
   return {

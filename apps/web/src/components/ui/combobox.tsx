@@ -303,6 +303,33 @@ function ComboboxStatus({ className, ...props }: ComboboxPrimitive.Status.Props)
   );
 }
 
+/** A titled run of rows; pass the group's `items` and render them through `ComboboxCollection`. */
+function ComboboxGroup({ className, ...props }: ComboboxPrimitive.Group.Props) {
+  return (
+    <ComboboxPrimitive.Group
+      className={cn("not-first:mt-1.5", className)}
+      data-slot="combobox-group"
+      {...props}
+    />
+  );
+}
+
+/** A group's header: a small muted line on the row-icon column, optionally led by a mark. */
+function ComboboxGroupLabel({ className, ...props }: ComboboxPrimitive.GroupLabel.Props) {
+  return (
+    <ComboboxPrimitive.GroupLabel
+      className={cn(
+        "flex min-w-0 items-center gap-2 px-2 pt-1 pb-1 font-medium text-muted-foreground text-xs",
+        className,
+      )}
+      data-slot="combobox-group-label"
+      {...props}
+    />
+  );
+}
+
+const ComboboxCollection = ComboboxPrimitive.Collection;
+
 const useComboboxFilter = ComboboxPrimitive.useFilter;
 
 export {
@@ -318,5 +345,8 @@ export {
   ComboboxListVirtualized,
   ComboboxClear,
   ComboboxStatus,
+  ComboboxGroup,
+  ComboboxGroupLabel,
+  ComboboxCollection,
   useComboboxFilter,
 };

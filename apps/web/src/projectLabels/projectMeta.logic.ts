@@ -1,0 +1,157 @@
+/**
+ * How a thread or repository names its project (folder) outside the Projects
+ * page: the sidebar row subtext, the composer's project picker, the hero line
+ * and the repository picker's project groups.
+ */
+import type { EnvironmentId, ProjectId, ProjectLabelId } from "@t3tools/contracts";
+
+import {
+  projectLabelKey,
+  threadProjectFolderId,
+  type EnvironmentProjectLabel,
+  type ProjectLabelKey,
+} from "./projectLabels.logic";
+
+/** The project a row names under its title. */
+export interface ThreadProjectMeta {
+  readonly key: ProjectLabelKey;
+  readonly name: string;
+  readonly color: string | undefined;
+}
+
+/** The thread's project for its subtext; null when unfiled or the folder is unknown here. */
+export function threadProjectMeta(
+  thread: {
+    readonly environmentId: EnvironmentId;
+    readonly source: { readonly projectFolderId?: ProjectLabelId | null | undefined };
+  },
+  byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>,
+): ThreadProjectMeta | null {
+  const folderId = threadProjectFolderId(thread);
+  if (folderId === null) return null;
+  const entry = byKey.get(projectLabelKey(thread.environmentId, folderId));
+  return entry ? { key: entry.key, name: entry.label.name, color: entry.label.color } : null;
+}
+
+/**
+ * The folder the composer shows for a thread or draft. A choice made on the
+ * draft wins until the created thread carries it, so the picker never flips
+ * back to "No project" between send and the move landing.
+ */
+export function composerProjectFolderId(input: {
+  readonly pendingFolderId: ProjectLabelId | null;
+  readonly threadFolderId: ProjectLabelId | null;
+}): ProjectLabelId | null {
+  return input.pendingFolderId ?? input.threadFolderId;
+}
+
+/** The muted tail of the chat hero greeting: " · in SOSC 14100 Mind", or nothing. */
+export function heroProjectSuffix(projectName: string | null | undefined): string | null {
+  const name = projectName?.trim();
+  return name ? ` · in ${name}` : null;
+}
+
+/** A repository-picker item and the Cogenly projects it stands for. */
+export interface RepositoryRef {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+}
+
+export interface RepositoryProjectGroup<Item> {
+  /** The folder key, or "other" for repositories in no project. */
+  readonly key: ProjectLabelKey | "other";
+  readonly project: EnvironmentProjectLabel | null;
+  readonly items: ReadonlyArray<Item>;
+}
+
+export const OTHER_REPOSITORIES_GROUP_KEY = "other" as const;
+
+/**
+ * Repositories grouped under the projects that hold them, alphabetically by
+ * project, with repositories in no project last. A repository in several
+ * projects shows under each. Items keep their incoming order within a group;
+ * projects holding none of the items are left out. `onlyProject` narrows to
+ * one project's group.
+ */
+export function groupRepositoriesByProject<Item>(input: {
+  readonly items: ReadonlyArray<Item>;
+  readonly refsOf: (item: Item) => ReadonlyArray<RepositoryRef>;
+  /** Folders, alphabetical (as the directory holds them). */
+  readonly projects: ReadonlyArray<EnvironmentProjectLabel>;
+  readonly onlyProject?: ProjectLabelKey | null;
+}): RepositoryProjectGroup<Item>[] {
+  const memberKeys = new Map<string, ProjectLabelKey[]>();
+  for (const project of input.projects) {
+    for (const repositoryId of project.label.repositoryIds) {
+      const key = `${project.environmentId}:${repositoryId}`;
+      const keys = memberKeys.get(key);
+      if (keys) keys.push(project.key);
+      else memberKeys.set(key, [project.key]);
+    }
+  }
+  const itemsByProject = new Map<ProjectLabelKey, Item[]>();
+  const other: Item[] = [];
+  for (const item of input.items) {
+    const projectKeys = new Set<ProjectLabelKey>();
+    for (const ref of input.refsOf(item)) {
+      for (const key of memberKeys.get(`${ref.environmentId}:${ref.projectId}`) ?? []) {
+        projectKeys.add(key);
+      }
+    }
+    if (projectKeys.size === 0) {
+      other.push(item);
+      continue;
+    }
+    for (const key of projectKeys) {
+      const items = itemsByProject.get(key);
+      if (items) items.push(item);
+      else itemsByProject.set(key, [item]);
+    }
+  }
+  if (input.onlyProject) {
+    const project = input.projects.find((entry) => entry.key === input.onlyProject);
+    return project
+      ? [{ key: project.key, project, items: itemsByProject.get(project.key) ?? [] }]
+      : [];
+  }
+  const groups: RepositoryProjectGroup<Item>[] = [];
+  for (const project of input.projects) {
+    const items = itemsByProject.get(project.key);
+    if (items) groups.push({ key: project.key, project, items });
+  }
+  if (other.length > 0) {
+    groups.push({ key: OTHER_REPOSITORIES_GROUP_KEY, project: null, items: other });
+  }
+  return groups;
+}
+
+/** The repository to select on its own when a project holds exactly one; else null. */
+export function soleRepositoryOf<Item>(groups: ReadonlyArray<RepositoryProjectGroup<Item>>) {
+  return groups.length === 1 && groups[0]?.items.length === 1 ? (groups[0].items[0] ?? null) : null;
+}
+
+function holdsRepository(project: EnvironmentProjectLabel, refs: ReadonlyArray<RepositoryRef>) {
+  return refs.some(
+    (ref) =>
+      ref.environmentId === project.environmentId &&
+      project.label.repositoryIds.includes(ref.projectId),
+  );
+}
+
+/**
+ * The project the Work hero names for its repository: the one the user picked
+ * the repository under, while it still holds the repository, else the first
+ * project that does. Null when no project holds it, which hides the project
+ * part.
+ */
+export function heroProjectKey(input: {
+  readonly chosen: ProjectLabelKey | null;
+  readonly repository: ReadonlyArray<RepositoryRef>;
+  readonly projects: ReadonlyArray<EnvironmentProjectLabel>;
+}): ProjectLabelKey | null {
+  const chosen = input.chosen
+    ? input.projects.find((entry) => entry.key === input.chosen)
+    : undefined;
+  if (chosen && holdsRepository(chosen, input.repository)) return chosen.key;
+  return input.projects.find((project) => holdsRepository(project, input.repository))?.key ?? null;
+}
