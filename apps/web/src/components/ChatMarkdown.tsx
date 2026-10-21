@@ -124,6 +124,8 @@ import {
   type InlineImageHastNode,
 } from "./chat/markdownInlineImages";
 import {
+  INLINE_IMAGE_FADE_CLASS_NAME,
+  inlineWebImageSource,
   MarkdownGalleryFigure,
   MarkdownGalleryImage,
   MarkdownImageGalleryRow,
@@ -1404,10 +1406,14 @@ function ChatMarkdownImage(props: {
     | undefined;
   readonly actionsSource: MediaActionSource;
   readonly originalUrl?: string | undefined;
+  /** Ease the image in once decoded instead of showing it at once (web images). */
+  readonly fadeIn?: boolean | undefined;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }) {
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  // A source already decoded when first attached (cache, remount) shows without the fade.
+  const [instantSrc, setInstantSrc] = useState<string | null>(null);
   const src = props.src ?? loadedSrc;
   const failed = props.sourceFailed === true || (src !== null && failedSrc === src);
   // A failure forgets the decoded image so the next URL loads behind the slot.
@@ -1416,7 +1422,10 @@ function ChatMarkdownImage(props: {
   const markLoadedIfComplete = useCallback(
     (image: HTMLImageElement | null) => {
       if (!image) return;
-      if (image.complete && image.naturalWidth > 0) setLoadedSrc(image.currentSrc || image.src);
+      if (image.complete && image.naturalWidth > 0) {
+        if (loadedSrc === null) setInstantSrc(src);
+        setLoadedSrc(image.currentSrc || image.src);
+      }
       markdownImageItems.set(image, {
         src,
         name: props.alt.trim() || "image",
@@ -1424,7 +1433,7 @@ function ChatMarkdownImage(props: {
         ...(props.originalUrl ? { originalUrl: props.originalUrl } : {}),
       });
     },
-    [props.actionsSource, props.alt, props.originalUrl, src],
+    [loadedSrc, props.actionsSource, props.alt, props.originalUrl, src],
   );
   const imageEvents = (loadingSrc: string) => ({
     onLoad: () => {
@@ -1452,6 +1461,13 @@ function ChatMarkdownImage(props: {
           className={cn(
             CHAT_MARKDOWN_IMAGE_SIZE_CLASS_NAME,
             props.className,
+            props.fadeIn &&
+              instantSrc !== src &&
+              cn(
+                INLINE_IMAGE_FADE_CLASS_NAME,
+                "starting:opacity-0",
+                loadedSrc !== src && "opacity-0",
+              ),
             props.onImageExpand && "cursor-zoom-in",
           )}
           style={props.style}
@@ -3165,7 +3181,13 @@ const CHAT_MARKDOWN_COMPONENTS = {
       return <ChatMarkdownImageFallback alt={altText} copyMarkdown={copyMarkdown} kind={kind} />;
     }
     if (imageSource._tag === "Direct") {
-      const mediaSrc = resolveProtocolRelativeMediaUrl(imageSource.uri);
+      // Third-party https images load through the server's image proxy; the authored URL stays
+      // the "open source" target.
+      const webImage = kind === "image" ? inlineWebImageSource(imageSource.uri) : null;
+      const mediaSrc =
+        webImage?.kind === "remote"
+          ? webImage.src
+          : resolveProtocolRelativeMediaUrl(imageSource.uri);
       const originalUrl =
         resolveExternalWebLinkHost(imageSource.uri) !== null ? imageSource.uri : undefined;
       const reference = mediaUrlReference(imageSource.uri);
@@ -3199,6 +3221,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
           imageProps={imageProps}
           actionsSource={actionsSource}
           originalUrl={originalUrl}
+          fadeIn={webImage !== null}
           onImageExpand={imageExpand}
         />
       );

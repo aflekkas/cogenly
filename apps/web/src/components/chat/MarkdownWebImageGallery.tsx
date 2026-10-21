@@ -7,51 +7,36 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
+import { ImageOffIcon } from "lucide-react";
 import { mediaUrlReference } from "@t3tools/client-runtime/media-reference";
 import { resolvePrimaryEnvironmentHttpUrl } from "../../environments/primary";
 import { cn } from "../../lib/utils";
 import { MediaActions, type MediaActionSource } from "../media/MediaActions";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { markdownImageGallery, markdownImageItems } from "./markdownImageGallery";
-import { inlineImageAspectRatio, resolveInlineImageSource } from "./markdownInlineImages";
-
-const IMAGE_PROXY_PATH = "/api/image-proxy";
+import {
+  IMAGE_PROXY_PATH,
+  inlineImageAspectRatio,
+  resolveInlineImageSource,
+  type InlineImageSource,
+} from "./markdownInlineImages";
 
 /**
- * Whether the server's image proxy has answered this session. Unknown until a
- * proxied image loads or fails; once a direct retry succeeds where the proxy
- * failed, later images skip it.
+ * Where a web image in assistant markdown loads from: third-party https
+ * images through the primary environment's image proxy (same base URL and
+ * session as the app's other API calls), the app's own origins directly.
+ * `url` stays the authored URL for "open source" links.
  */
-let imageProxyState: "unknown" | "available" | "missing" = "unknown";
-
-function imageProxyBase(): { readonly proxyUrl: string | null; readonly origins: string[] } {
+export function inlineWebImageSource(src: string): InlineImageSource | null {
   const origins = typeof window === "undefined" ? [] : [window.location.origin];
+  let proxyEndpoint: string | null = null;
   try {
-    const proxyUrl = resolvePrimaryEnvironmentHttpUrl(IMAGE_PROXY_PATH);
-    origins.push(new URL(proxyUrl).origin);
-    return { proxyUrl: imageProxyState === "missing" ? null : proxyUrl, origins };
+    proxyEndpoint = resolvePrimaryEnvironmentHttpUrl(IMAGE_PROXY_PATH);
+    origins.push(new URL(proxyEndpoint).origin);
   } catch {
-    return { proxyUrl: null, origins };
+    // No primary environment (desktop with its local environment disabled): load directly.
   }
-}
-
-function recordImageProxyResult(input: { proxied: boolean; retried: boolean }) {
-  if (input.proxied) imageProxyState = "available";
-  else if (input.retried && imageProxyState === "unknown") imageProxyState = "missing";
-}
-
-function inlineImageCandidates(src: string) {
-  const { proxyUrl, origins } = imageProxyBase();
-  return resolveInlineImageSource(src, {
-    firstPartyOrigins: origins,
-    proxyUrl: proxyUrl
-      ? (url) => {
-          const proxied = new URL(proxyUrl);
-          proxied.searchParams.set("url", url);
-          return proxied.toString();
-        }
-      : undefined,
-  });
+  return resolveInlineImageSource(src, { proxyEndpoint, firstPartyOrigins: origins });
 }
 
 const GalleryCountContext = createContext(0);
@@ -129,14 +114,16 @@ function expandProps(
   };
 }
 
-const MEDIA_MOTION_CLASS_NAME = "duration-(--motion-duration-base) ease-out";
+/** The fade a web image eases in on once decoded; opacity only, so reduced motion keeps it. */
+export const INLINE_IMAGE_FADE_CLASS_NAME =
+  "transition-opacity duration-(--motion-duration-base) ease-out";
 
 /**
  * A web image in a gallery row. Its slot holds the authored aspect ratio (else
  * 4:3) as a quiet skeleton until the bytes decode, then the image fades in.
  * Thumbnails keep that box and crop; a lone image eases to its natural ratio.
- * A failure tries the next source (the proxy, then direct) and, once none is
- * left, folds the slot away so only the caption and source link remain.
+ * A failed load (proxy error included) keeps the slot as a muted broken-image
+ * tile, so nothing around it moves; the caption and source link stay.
  */
 export function MarkdownGalleryImage(props: {
   src: string;
@@ -147,16 +134,14 @@ export function MarkdownGalleryImage(props: {
   onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }) {
   const single = use(GalleryCountContext) <= 1;
-  const [source] = useState(() => inlineImageCandidates(props.src));
-  const [attempt, setAttempt] = useState(0);
+  const [source] = useState(() => inlineWebImageSource(props.src));
+  const [failed, setFailed] = useState(source?.kind !== "remote");
   const [loaded, setLoaded] = useState<{
     ratio: number;
     width: number;
     instant: boolean;
   } | null>(null);
-  const candidates = source?.kind === "remote" ? source.candidates : [];
-  const current = candidates[attempt] ?? null;
-  const failed = current === null;
+  const current = source?.kind === "remote" && !failed ? source.src : null;
   const name = props.alt.trim() || "image";
   const originalUrl = source?.url ?? props.src;
   const reference = mediaUrlReference(originalUrl);
@@ -166,10 +151,8 @@ export function MarkdownGalleryImage(props: {
     src: current,
     ...(reference ? { reference } : {}),
   };
-  const proxied = candidates.length > 1 && attempt === 0;
 
   const settle = (image: HTMLImageElement, instant: boolean) => {
-    recordImageProxyResult({ proxied, retried: attempt > 0 });
     const ratio =
       image.naturalWidth > 0 && image.naturalHeight > 0
         ? image.naturalWidth / image.naturalHeight
@@ -200,60 +183,59 @@ export function MarkdownGalleryImage(props: {
 
   return (
     <div
-      aria-hidden={failed || undefined}
-      inert={failed}
+      style={slotStyle}
       className={cn(
-        "grid transition-[grid-template-rows,opacity] motion-reduce:transition-opacity",
-        MEDIA_MOTION_CLASS_NAME,
-        failed ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100",
+        "relative w-full overflow-hidden rounded-xl border border-border/50 bg-muted/60",
+        single &&
+          !loaded?.instant &&
+          "transition-[aspect-ratio,max-width] duration-(--motion-duration-base) ease-out motion-reduce:transition-none",
       )}
+      {...(failed
+        ? { role: "img", "aria-label": `${name} (unavailable)` }
+        : loaded
+          ? {}
+          : { role: "status", "aria-label": "Loading image" })}
     >
-      <div className="min-h-0 overflow-hidden">
-        <div
-          style={slotStyle}
+      {current !== null ? (
+        <MediaActions source={actionsSource}>
+          <img
+            ref={registerImage}
+            src={current}
+            alt={props.alt}
+            data-markdown-copy={props.copyMarkdown}
+            referrerPolicy="no-referrer"
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            className={cn(
+              "absolute inset-0 size-full object-cover",
+              !loaded?.instant && INLINE_IMAGE_FADE_CLASS_NAME,
+              single && "object-contain",
+              loaded ? "opacity-100" : "opacity-0",
+              props.onImageExpand && "cursor-zoom-in",
+            )}
+            {...expandProps(props.onImageExpand, name)}
+            onLoad={(event) => {
+              if (loaded === null) settle(event.currentTarget, false);
+            }}
+            onError={() => {
+              setLoaded(null);
+              setFailed(true);
+            }}
+          />
+        </MediaActions>
+      ) : (
+        <span
+          data-markdown-copy={props.copyMarkdown}
           className={cn(
-            "relative w-full overflow-hidden rounded-xl border border-border/50 bg-muted/60",
-            single &&
-              !loaded?.instant &&
-              cn(
-                "transition-[aspect-ratio,max-width] motion-reduce:transition-none",
-                MEDIA_MOTION_CLASS_NAME,
-              ),
+            "absolute inset-0 flex items-center justify-center text-muted-foreground/50",
+            INLINE_IMAGE_FADE_CLASS_NAME,
+            "starting:opacity-0",
           )}
-          {...(loaded || failed ? {} : { role: "status", "aria-label": "Loading image" })}
         >
-          {current !== null ? (
-            <MediaActions source={actionsSource}>
-              <img
-                key={current}
-                ref={registerImage}
-                src={current}
-                alt={props.alt}
-                data-markdown-copy={props.copyMarkdown}
-                referrerPolicy="no-referrer"
-                loading="lazy"
-                decoding="async"
-                draggable={false}
-                className={cn(
-                  "absolute inset-0 size-full object-cover",
-                  !loaded?.instant && cn("transition-opacity", MEDIA_MOTION_CLASS_NAME),
-                  single && "object-contain",
-                  loaded ? "opacity-100" : "opacity-0",
-                  props.onImageExpand && "cursor-zoom-in",
-                )}
-                {...expandProps(props.onImageExpand, name)}
-                onLoad={(event) => {
-                  if (loaded === null) settle(event.currentTarget, false);
-                }}
-                onError={() => {
-                  setLoaded(null);
-                  setAttempt((value) => value + 1);
-                }}
-              />
-            </MediaActions>
-          ) : null}
-        </div>
-      </div>
+          <ImageOffIcon aria-hidden className="size-4" />
+        </span>
+      )}
     </div>
   );
 }

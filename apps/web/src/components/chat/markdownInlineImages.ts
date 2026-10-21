@@ -14,8 +14,8 @@ export interface InlineImageHastNode {
 }
 
 export type InlineImageSource =
-  /** Load from these URLs in order; later ones are fallbacks for an earlier failure. */
-  | { readonly kind: "remote"; readonly url: string; readonly candidates: readonly string[] }
+  /** `url` is the authored image (for "open source"); `src` is what the `<img>` loads. */
+  | { readonly kind: "remote"; readonly url: string; readonly src: string }
   /** Plain `http:`: never loaded, so the message keeps only its caption and source. */
   | { readonly kind: "blocked"; readonly url: string };
 
@@ -36,16 +36,28 @@ export function isInlineWebImageSource(src: unknown): src is string {
   return typeof src === "string" && parseWebUrl(src) !== null;
 }
 
+/** The server's image proxy route, relative to the environment's HTTP base. */
+export const IMAGE_PROXY_PATH = "/api/image-proxy";
+
+/** Points the image proxy endpoint (`…/api/image-proxy`) at a third-party image URL. */
+export function imageProxyUrl(proxyEndpoint: string, url: string): string {
+  const proxied = new URL(proxyEndpoint);
+  proxied.search = "";
+  proxied.searchParams.set("url", url);
+  return proxied.toString();
+}
+
 /**
- * Resolves a web image's load order. Third-party https images go through the
- * server's image proxy first when one is known, then directly; images on the
- * app's own origins load directly. Plain http is never loaded.
+ * Resolves where a web image loads from. Third-party https images go through
+ * the server's image proxy when one is known, so the client never hotlinks;
+ * images on the app's own origins, or with no proxy available, load directly.
+ * Plain http is never loaded.
  */
 export function resolveInlineImageSource(
   src: string,
   options: {
-    /** Builds the proxy URL for a remote image, or null when no proxy is available. */
-    readonly proxyUrl?: ((url: string) => string | null) | undefined;
+    /** The image proxy endpoint, or null when no proxy is available. */
+    readonly proxyEndpoint?: string | null | undefined;
     /** Origins that serve the app itself; their images need no proxy. */
     readonly firstPartyOrigins?: readonly string[] | undefined;
   } = {},
@@ -55,12 +67,9 @@ export function resolveInlineImageSource(
   const href = url.toString();
   if (url.protocol === "http:") return { kind: "blocked", url: href };
   const firstParty = options.firstPartyOrigins?.includes(url.origin) ?? false;
-  const proxied = firstParty ? null : (options.proxyUrl?.(href) ?? null);
-  return {
-    kind: "remote",
-    url: href,
-    candidates: proxied && proxied !== href ? [proxied, href] : [href],
-  };
+  const proxied =
+    !firstParty && options.proxyEndpoint ? imageProxyUrl(options.proxyEndpoint, href) : null;
+  return { kind: "remote", url: href, src: proxied ?? href };
 }
 
 /** The pixel box an author gave an image, as an aspect ratio for its placeholder. */

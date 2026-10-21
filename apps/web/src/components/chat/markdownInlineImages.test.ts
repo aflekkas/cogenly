@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   groupInlineImageGalleries,
+  imageProxyUrl,
   inlineImageAspectRatio,
   resolveInlineImageSource,
   withoutPartialTrailingImage,
@@ -121,43 +122,56 @@ describe("groupInlineImageGalleries", () => {
   });
 });
 
-describe("resolveInlineImageSource", () => {
-  const proxyUrl = (url: string) =>
-    `https://app.test/api/image-proxy?url=${encodeURIComponent(url)}`;
+describe("imageProxyUrl", () => {
+  it("encodes the image URL as the proxy's only query parameter", () => {
+    expect(
+      imageProxyUrl(
+        "https://app.test/api/image-proxy",
+        "https://upload.wikimedia.org/a b.jpg?width=640&x=1#top",
+      ),
+    ).toBe(
+      "https://app.test/api/image-proxy?url=https%3A%2F%2Fupload.wikimedia.org%2Fa+b.jpg%3Fwidth%3D640%26x%3D1%23top",
+    );
+    expect(
+      imageProxyUrl("http://127.0.0.1:3773/api/image-proxy?stale=1", "https://a.test/1.png"),
+    ).toBe("http://127.0.0.1:3773/api/image-proxy?url=https%3A%2F%2Fa.test%2F1.png");
+  });
+});
 
-  it("loads third-party https images through the proxy, then directly", () => {
-    expect(resolveInlineImageSource("https://cdn.test/a.png", { proxyUrl })).toEqual({
+describe("resolveInlineImageSource", () => {
+  const proxyEndpoint = "https://app.test/api/image-proxy";
+
+  it("loads third-party https images through the proxy and keeps the original URL", () => {
+    expect(resolveInlineImageSource("https://cdn.test/a.png", { proxyEndpoint })).toEqual({
       kind: "remote",
       url: "https://cdn.test/a.png",
-      candidates: [
-        "https://app.test/api/image-proxy?url=https%3A%2F%2Fcdn.test%2Fa.png",
-        "https://cdn.test/a.png",
-      ],
+      src: "https://app.test/api/image-proxy?url=https%3A%2F%2Fcdn.test%2Fa.png",
+    });
+    expect(resolveInlineImageSource("//cdn.test/a.png", { proxyEndpoint })).toMatchObject({
+      url: "https://cdn.test/a.png",
+      src: "https://app.test/api/image-proxy?url=https%3A%2F%2Fcdn.test%2Fa.png",
     });
   });
 
   it("loads directly without a proxy or from the app's own origin", () => {
     expect(resolveInlineImageSource("https://cdn.test/a.png")).toMatchObject({
-      candidates: ["https://cdn.test/a.png"],
+      src: "https://cdn.test/a.png",
     });
     expect(
       resolveInlineImageSource("https://app.test/a.png", {
-        proxyUrl,
+        proxyEndpoint,
         firstPartyOrigins: ["https://app.test"],
       }),
-    ).toMatchObject({ candidates: ["https://app.test/a.png"] });
-    expect(resolveInlineImageSource("//cdn.test/a.png")).toMatchObject({
-      candidates: ["https://cdn.test/a.png"],
-    });
+    ).toMatchObject({ src: "https://app.test/a.png" });
   });
 
   it("never loads plain http and ignores non-web sources", () => {
-    expect(resolveInlineImageSource("http://cdn.test/a.png", { proxyUrl })).toEqual({
+    expect(resolveInlineImageSource("http://cdn.test/a.png", { proxyEndpoint })).toEqual({
       kind: "blocked",
       url: "http://cdn.test/a.png",
     });
-    expect(resolveInlineImageSource("data:image/png;base64,AAAA")).toBeNull();
-    expect(resolveInlineImageSource("./a.png")).toBeNull();
+    expect(resolveInlineImageSource("data:image/png;base64,AAAA", { proxyEndpoint })).toBeNull();
+    expect(resolveInlineImageSource("./a.png", { proxyEndpoint })).toBeNull();
   });
 });
 
