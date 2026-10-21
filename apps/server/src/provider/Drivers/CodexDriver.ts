@@ -21,7 +21,7 @@
  *
  * @module provider/Drivers/CodexDriver
  */
-import { CodexSettings, ProviderDriverKind } from "@t3tools/contracts";
+import { CodexSettings, ProviderDriverKind, UsageProviderKind } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -132,6 +132,11 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
   metadata: {
     displayName: "Codex",
     supportsMultipleInstances: true,
+    defaultModel: "gpt-6-astra",
+    defaultTextGenerationModel: "gpt-6-luna",
+    usageKind: UsageProviderKind.make("codex"),
+    textGenerationFallbackPriority: 0,
+    pickerVisible: true,
   },
   configSchema: CodexSettings,
   defaultConfig: (): CodexSettings => decodeCodexSettings({}),

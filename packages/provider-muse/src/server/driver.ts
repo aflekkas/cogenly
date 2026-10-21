@@ -1,4 +1,4 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind, UsageProviderKind } from "@t3tools/contracts";
 import { MuseSettings } from "../settings.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
@@ -58,7 +58,17 @@ export type MuseDriverEnv =
 
 export const MuseDriver: ProviderDriver<MuseSettings, MuseDriverEnv, MuseUsageReaderEnv> = {
   driverKind: DRIVER_KIND,
-  metadata: { displayName: "Muse Code", supportsMultipleInstances: true },
+  metadata: {
+    displayName: "Muse Code",
+    supportsMultipleInstances: true,
+    defaultModel: "default",
+    defaultTextGenerationModel: "default",
+    usageKind: UsageProviderKind.make("muse"),
+    textGenerationFallbackPriority: 2,
+    pickerVisible: true,
+    // Muse prints a release revision after its semantic version.
+    normalizeVersion: (version) => version.replace(/-R\d+(?:\.\d+)?$/, ""),
+  },
   configSchema: MuseSettings,
   defaultConfig: () => decodeMuseSettings({}),
   usage: museUsageReader,

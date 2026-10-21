@@ -12,7 +12,7 @@
  *
  * @module provider/Drivers/ClaudeDriver
  */
-import { ClaudeSettings, ProviderDriverKind } from "@t3tools/contracts";
+import { ClaudeSettings, ProviderDriverKind, UsageProviderKind } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
 import * as Crypto from "effect/Crypto";
@@ -114,6 +114,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
   metadata: {
     displayName: "Claude",
     supportsMultipleInstances: true,
+    defaultModel: "claude-fable-5-1",
+    defaultTextGenerationModel: "claude-haiku-5-5",
+    usageKind: UsageProviderKind.make("claude"),
+    textGenerationFallbackPriority: 1,
+    pickerVisible: true,
   },
   configSchema: ClaudeSettings,
   defaultConfig: (): ClaudeSettings => decodeClaudeSettings({}),
