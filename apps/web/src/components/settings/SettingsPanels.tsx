@@ -22,6 +22,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
+  DEFAULT_PROJECTS_ROOT,
   DEFAULT_UNIFIED_SETTINGS,
   type ChatWidth,
   type EnvironmentIdentificationMode,
@@ -62,6 +63,7 @@ import { useSettingsScope } from "./SettingsScopeContext";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
+import { usePrimaryEnvironmentId } from "../../state/environments";
 import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
@@ -571,6 +573,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add repository base directory"]
         : []),
+      ...(settings.projectsRoot !== DEFAULT_UNIFIED_SETTINGS.projectsRoot
+        ? ["Projects folder"]
+        : []),
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
         ? ["Archive confirmation"]
         : []),
@@ -605,6 +610,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sendShortcut,
       settings.followUpBehavior,
       settings.addProjectBaseDirectory,
+      settings.projectsRoot,
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
       settings.environmentIdentificationMode,
@@ -680,6 +686,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
+      projectsRoot: DEFAULT_UNIFIED_SETTINGS.projectsRoot,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
@@ -1232,6 +1239,26 @@ export function GeneralSettingsPanel() {
   const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
   const mixedBackgroundActivity = useScopedSettingsMixed(["backgroundActivity"]);
   const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
+  const mixedProjectsRoot = useScopedSettingsMixed(["projectsRoot"]);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  // The native folder picker browses this device, so it only offers a path
+  // when the settings being edited are this device's server.
+  const canPickProjectsRoot =
+    isEnvironmentScope &&
+    environmentId === primaryEnvironmentId &&
+    typeof window !== "undefined" &&
+    window.desktopBridge !== undefined;
+  const pickProjectsRoot = async () => {
+    const api = readLocalApi();
+    if (!api) return;
+    const current = settings.projectsRoot.trim();
+    const picked = await api.dialogs
+      .pickFolder(
+        current.length > 0 && !current.startsWith("~") ? { initialPath: current } : undefined,
+      )
+      .catch(() => null);
+    if (picked) updateSettings({ projectsRoot: picked });
+  };
   const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
   const backgroundActivityDescription =
     backgroundActivityProfileOption === "advanced"
@@ -1949,6 +1976,40 @@ export function GeneralSettingsPanel() {
               spellCheck={false}
               aria-label="Add repository base directory"
             />
+          }
+        />
+        <SettingsRow
+          serverScoped
+          settingKeys={["projectsRoot"]}
+          {...searchableSetting("projects-folder")}
+          description="Where new and cloned repositories go, in a folder per project. Existing repositories stay where they are."
+          resetAction={
+            settings.projectsRoot !== DEFAULT_UNIFIED_SETTINGS.projectsRoot ? (
+              <SettingResetButton
+                label="projects folder"
+                onClick={() =>
+                  updateSettings({ projectsRoot: DEFAULT_UNIFIED_SETTINGS.projectsRoot })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <DraftInput
+                size="sm"
+                className="w-full sm:w-56"
+                value={mixedProjectsRoot ? "" : settings.projectsRoot}
+                onCommit={(next) => updateSettings({ projectsRoot: next })}
+                placeholder={mixedProjectsRoot ? "Mixed" : DEFAULT_PROJECTS_ROOT}
+                spellCheck={false}
+                aria-label="Projects folder"
+              />
+              {canPickProjectsRoot ? (
+                <Button size="sm" variant="outline" onClick={() => void pickProjectsRoot()}>
+                  Change…
+                </Button>
+              ) : null}
+            </div>
           }
         />
       </SettingsSection>

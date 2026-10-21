@@ -7,12 +7,13 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
 import { useCallback } from "react";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { waitForProject } from "~/state/entities";
 import { projectEnvironment } from "~/state/projects";
+import { serverEnvironment } from "~/state/server";
 import { sourceControlEnvironment } from "~/state/sourceControl";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useNewThreadHandler } from "./useHandleNewThread";
@@ -27,13 +28,17 @@ function errorMessage(error: unknown): string {
  * Starts a project from just a name. The server makes a folder under its
  * `newProjectsRoot` with a README, an icon, and a first commit; this then
  * opens a new thread draft in it. With `publishTo`, it also publishes the
- * repository as private on that host, without holding up the draft.
+ * repository as private on that host, without holding up the draft. With
+ * `projectLabelId`, the new repository is filed in that project.
  *
  * Resolves to whether the project was created.
  */
 export function useNewProject() {
   const createNew = useAtomCommand(projectEnvironment.createNew, { reportFailure: false });
   const publishRepository = useAtomCommand(sourceControlEnvironment.publishRepository, {
+    reportFailure: false,
+  });
+  const fileInProjectLabel = useAtomCommand(serverEnvironment.linkProjectLabelRepository, {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
@@ -82,6 +87,7 @@ export function useNewProject() {
       readonly environmentId: EnvironmentId;
       readonly name: string;
       readonly publishTo: NewProjectPublishTarget | null;
+      readonly projectLabelId?: ProjectLabelId;
     }): Promise<boolean> => {
       const result = await createNew({
         environmentId: input.environmentId,
@@ -113,6 +119,21 @@ export function useNewProject() {
               },
         ),
       );
+      if (input.projectLabelId !== undefined) {
+        const filed = await fileInProjectLabel({
+          environmentId: input.environmentId,
+          input: { labelId: input.projectLabelId, repositoryId: projectId },
+        });
+        if (filed._tag === "Failure" && !isAtomCommandInterrupted(filed)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not add the repository to the project",
+              description: errorMessage(squashAtomCommandFailure(filed)),
+            }),
+          );
+        }
+      }
       if (input.publishTo) {
         void publishNewRepository({
           environmentId: input.environmentId,
@@ -146,6 +167,6 @@ export function useNewProject() {
       });
       return true;
     },
-    [createNew, handleNewThread, publishNewRepository],
+    [createNew, fileInProjectLabel, handleNewThread, publishNewRepository],
   );
 }

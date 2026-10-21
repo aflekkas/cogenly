@@ -406,6 +406,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["add project base directory folder browser path home"],
   },
   {
+    id: "projects-folder",
+    title: "Projects folder",
+    to: "/settings/general",
+    scope: "environment-defaults",
+    searchTerms: ["projects root cogenly clone new repository location directory path"],
+  },
+  {
     id: "archive-confirmation",
     title: "Archive confirmation",
     to: "/settings/general",

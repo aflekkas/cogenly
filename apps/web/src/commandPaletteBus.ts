@@ -1,5 +1,6 @@
 import type {
   EnvironmentId,
+  ProjectLabelId,
   PullRequestLinkedThreadsResult,
   ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -13,8 +14,20 @@ export interface CommandPaletteLinkedThreads {
 // without owning its React state.
 const COMMAND_PALETTE_OPEN_EVENT = "cogenly:open-command-palette";
 
+/** The project (folder) an Add repository flow files its new repository in. */
+export interface CommandPaletteAddProjectTarget {
+  readonly environmentId: EnvironmentId;
+  readonly labelId: ProjectLabelId;
+}
+
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in" | "start-work";
+  /**
+   * With `open: "add-project"`: add the repository into this project. Clones
+   * land in the project's folder under the projects root; new and local
+   * repositories are filed in it.
+   */
+  readonly into?: CommandPaletteAddProjectTarget;
   /** With `open: "start-work"`: the chat that hands off. */
   readonly threadRef?: ScopedThreadRef;
   readonly query?: string;

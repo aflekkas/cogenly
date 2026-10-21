@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProjectLabelId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import type { Project, Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
 import {
@@ -248,6 +254,16 @@ describe("reduceCommandPaletteUiState", () => {
       open: true,
       mode: "command",
       openIntent: { kind: "add-project" },
+    });
+    // Opened from a project group, the add flow carries the project to file into.
+    const into = {
+      environmentId: EnvironmentId.make("env"),
+      labelId: ProjectLabelId.make("spawn"),
+    };
+    expect(reduceCommandPaletteUiState(filesOpen, { _tag: "OpenAddProject", into })).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: { kind: "add-project", into },
     });
     expect(reduceCommandPaletteUiState(filesOpen, { _tag: "OpenNewThreadIn" })).toEqual({
       open: true,

@@ -47,6 +47,8 @@ export interface CreateProjectInput extends CommandMetadata {
   readonly title: string;
   readonly workspaceRoot: string;
   readonly createWorkspaceRootIfMissing?: boolean;
+  /** Run `git init` when the folder is not in a repository yet. */
+  readonly initRepository?: boolean;
   readonly defaultModelSelection?: ModelSelection | null;
   readonly scripts?: ReadonlyArray<ProjectScript>;
 }
@@ -357,6 +359,7 @@ export const createProject = Effect.fn("EnvironmentCommands.createProject")(func
     ...(input.createWorkspaceRootIfMissing === undefined
       ? {}
       : { createWorkspaceRootIfMissing: input.createWorkspaceRootIfMissing }),
+    ...(input.initRepository === undefined ? {} : { initRepository: input.initRepository }),
     ...(input.defaultModelSelection === undefined
       ? {}
       : { defaultModelSelection: input.defaultModelSelection }),

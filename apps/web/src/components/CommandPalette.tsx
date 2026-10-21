@@ -150,7 +150,11 @@ import {
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
-import { onOpenCommandPalette, openCommandPalette } from "../commandPaletteBus";
+import {
+  type CommandPaletteAddProjectTarget,
+  onOpenCommandPalette,
+  openCommandPalette,
+} from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -377,7 +381,11 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     (mode: SearchOverlayMode) => dispatch({ _tag: "ToggleMode", mode }),
     [],
   );
-  const openAddProject = useCallback(() => dispatch({ _tag: "OpenAddProject" }), []);
+  const openAddProject = useCallback(
+    (into?: CommandPaletteAddProjectTarget) =>
+      dispatch({ _tag: "OpenAddProject", ...(into ? { into } : {}) }),
+    [],
+  );
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -489,7 +497,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         } else if (detail.open === "start-work" && detail.threadRef) {
           dispatch({ _tag: "OpenStartWork", threadRef: detail.threadRef });
         } else if (detail.open === "add-project") {
-          openAddProject();
+          openAddProject(detail.into);
         } else if (detail.query !== undefined) {
           dispatch({
             _tag: "OpenSearch",
@@ -621,6 +629,13 @@ function OpenCommandPaletteDialog(props: {
   const startProjectClone = useAtomCommand(sourceControlEnvironment.startProjectClone, {
     reportFailure: false,
   });
+  const cloneIntoProjectLabel = useAtomCommand(serverEnvironment.cloneProjectLabelRepository, {
+    reportFailure: false,
+  });
+  const fileRepositoryInProjectLabel = useAtomCommand(
+    serverEnvironment.linkProjectLabelRepository,
+    { reportFailure: false },
+  );
   const stopThreadSession = useAtomCommand(threadEnvironment.stopSession, {
     reportFailure: false,
   });
@@ -780,6 +795,8 @@ function OpenCommandPaletteDialog(props: {
   );
   const [isPickingProjectFolder, setIsPickingProjectFolder] = useState(false);
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
+  // The project an Add repository flow opened from a project group files into.
+  const [addProjectInto, setAddProjectInto] = useState<CommandPaletteAddProjectTarget | null>(null);
   // The name step of New project: while set, the palette input is the name.
   const [newProjectFlow, setNewProjectFlow] = useState<{
     readonly environmentId: EnvironmentId;
@@ -1500,6 +1517,7 @@ function OpenCommandPaletteDialog(props: {
     setNewProjectFlow(null);
     if (viewStack.length <= 1) {
       setAddProjectEnvironmentId(null);
+      setAddProjectInto(null);
     } else if (newProjectFlow?.sourcesEnvironmentId) {
       // The machine switcher may have moved off the sources view's machine.
       setAddProjectEnvironmentId(newProjectFlow.sourcesEnvironmentId);
@@ -1602,7 +1620,7 @@ function OpenCommandPaletteDialog(props: {
           value: `action:add-project:${environmentId}:local`,
           searchTerms: ["local", "folder", "directory", "browse"],
           title: "Local folder",
-          description: "Browse a folder on disk",
+          description: "Use a folder on disk (made a Git repo if needed)",
           icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
           keepOpen: true,
           run: async () => {
@@ -1785,6 +1803,7 @@ function OpenCommandPaletteDialog(props: {
   );
 
   const openAddProjectFlow = useCallback(() => {
+    setAddProjectInto(null);
     // With no connected environment there is nothing to browse, so the only
     // useful next step is connecting one.
     if (addProjectEnvironmentOptions.length === 0) {
@@ -1837,8 +1856,15 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
     clearOpenIntent();
-    openAddProjectFlow();
-  }, [clearOpenIntent, openAddProjectFlow, openIntent]);
+    const into = openIntent.into ?? null;
+    if (into === null) {
+      openAddProjectFlow();
+      return;
+    }
+    // A project lives on one machine, so its repositories come from there.
+    setAddProjectInto(into);
+    startAddProjectSourceSelection(into.environmentId);
+  }, [clearOpenIntent, openAddProjectFlow, openIntent, startAddProjectSourceSelection]);
 
   useLayoutEffect(() => {
     if (openIntent?.kind !== "new-thread-in" || projectThreadItems.length === 0) {
@@ -2441,6 +2467,28 @@ function OpenCommandPaletteDialog(props: {
         : allThreadItems,
   });
 
+  // Files a repository the add flow brought in under the project it was
+  // opened from. The repository is in place either way, so a failure only says so.
+  const fileIntoAddProjectTarget = useCallback(
+    async (environmentId: EnvironmentId, repositoryId: ProjectId): Promise<void> => {
+      if (addProjectInto === null || addProjectInto.environmentId !== environmentId) return;
+      const result = await fileRepositoryInProjectLabel({
+        environmentId,
+        input: { labelId: addProjectInto.labelId, repositoryId },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not add the repository to the project",
+            description: errorMessage(squashAtomCommandFailure(result)),
+          }),
+        );
+      }
+    },
+    [addProjectInto, fileRepositoryInProjectLabel],
+  );
+
   const handleAddProjectForEnvironment = useCallback(
     async (input: {
       readonly environmentId: EnvironmentId;
@@ -2493,6 +2541,7 @@ function OpenCommandPaletteDialog(props: {
         cwd,
       );
       if (existing) {
+        await fileIntoAddProjectTarget(existing.environmentId, existing.id);
         const latestThread = getLatestThreadForProject(
           threads.filter((thread) => thread.environmentId === existing.environmentId),
           existing.id,
@@ -2543,6 +2592,8 @@ function OpenCommandPaletteDialog(props: {
           title: inferProjectTitleFromPath(cwd),
           workspaceRoot: cwd,
           createWorkspaceRootIfMissing: true,
+          // A picked folder that is not a repository yet becomes one.
+          initRepository: true,
           defaultModelSelection: null,
         },
       });
@@ -2559,6 +2610,7 @@ function OpenCommandPaletteDialog(props: {
         }
         return;
       }
+      await fileIntoAddProjectTarget(input.environmentId, projectId);
 
       const navigationResult = await settlePromise(() =>
         handleNewThread(scopeProjectRef(input.environmentId, projectId)),
@@ -2579,6 +2631,7 @@ function OpenCommandPaletteDialog(props: {
     [
       handleNewThread,
       createProject,
+      fileIntoAddProjectTarget,
       environments,
       navigate,
       primaryEnvironmentId,
@@ -2632,6 +2685,9 @@ function OpenCommandPaletteDialog(props: {
         environmentId: newProjectFlow.environmentId,
         name: newProjectName,
         publishTo: newProjectPublishes ? newProjectPublishTarget : null,
+        ...(addProjectInto !== null && addProjectInto.environmentId === newProjectFlow.environmentId
+          ? { projectLabelId: addProjectInto.labelId }
+          : {}),
       });
       if (created) setOpen(false);
     } finally {
@@ -2643,6 +2699,11 @@ function OpenCommandPaletteDialog(props: {
   function getDefaultCloneParentPath(environmentId: EnvironmentId): string {
     return getAddProjectInitialQueryForEnvironment(environmentId);
   }
+
+  // Servers that track clones also place them under the projects root, so
+  // there is no destination to ask for; older ones keep the folder step.
+  const clonesIntoProjectsRoot =
+    browseEnvironment?.serverConfig?.environment.capabilities.projectCloneTracking === true;
 
   async function submitAddProjectCloneFlow(destinationPathInput?: string): Promise<void> {
     if (!addProjectCloneFlow) {
@@ -2667,6 +2728,14 @@ function OpenCommandPaletteDialog(props: {
 
       const provider = addProjectRemoteSourceProvider(addProjectCloneFlow.source);
       if (!provider) {
+        if (clonesIntoProjectsRoot) {
+          await startTrackedClone({
+            environmentId: addProjectCloneFlow.environmentId,
+            remoteUrl: normalizePastedCloneUrl(rawRepository),
+            title: getCloneDirectoryName(rawRepository),
+          });
+          return;
+        }
         const destinationPath = getCloneDestinationPath(
           getDefaultCloneParentPath(addProjectCloneFlow.environmentId),
           getCloneDirectoryName(rawRepository),
@@ -2709,6 +2778,14 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
       const repository = lookupResult.value;
+      if (clonesIntoProjectsRoot) {
+        await startTrackedClone({
+          environmentId: addProjectCloneFlow.environmentId,
+          remoteUrl: getDefaultCloneUrl(repository),
+          title: getCloneDirectoryName(repository.nameWithOwner),
+        });
+        return;
+      }
       const destinationPath = getCloneDestinationPath(
         getDefaultCloneParentPath(addProjectCloneFlow.environmentId),
         getCloneDirectoryName(repository.nameWithOwner),
@@ -2774,50 +2851,79 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
 
-    // Older servers only offer the blocking clone: the palette has to wait
-    // for git so it can add the project afterwards.
-    if (browseEnvironment?.serverConfig?.environment.capabilities.projectCloneTracking !== true) {
-      setIsRemoteProjectCloning(true);
-      const cloneResult = await cloneRepository({
-        environmentId: addProjectCloneFlow.environmentId,
-        input: {
-          remoteUrl: addProjectCloneFlow.remoteUrl,
-          destinationPath,
-        },
-      });
-      setIsRemoteProjectCloning(false);
-      if (cloneResult._tag === "Failure") {
-        if (!isAtomCommandInterrupted(cloneResult)) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Clone failed",
-              description: errorMessage(squashAtomCommandFailure(cloneResult)),
-            }),
-          );
-        }
-        return;
-      }
-      await handleAddProject(cloneResult.value.cwd);
-      return;
-    }
-
-    // The server creates the project and clones in the background; progress
-    // shows in a toast and in the draft's composer banner, so the palette
-    // closes as soon as the clone is under way. Only problems found before
-    // git runs (bad destination, unknown repository) come back here.
-    const projectId = newProjectId();
+    // Only older servers reach the folder step, and they only offer the
+    // blocking clone: the palette has to wait for git so it can add the
+    // project afterwards.
     setIsRemoteProjectCloning(true);
-    const startResult = await startProjectClone({
+    const cloneResult = await cloneRepository({
       environmentId: addProjectCloneFlow.environmentId,
       input: {
-        projectId,
-        title: inferProjectTitleFromPath(destinationPath),
-        createdAt: new Date().toISOString(),
         remoteUrl: addProjectCloneFlow.remoteUrl,
         destinationPath,
       },
     });
+    setIsRemoteProjectCloning(false);
+    if (cloneResult._tag === "Failure") {
+      if (!isAtomCommandInterrupted(cloneResult)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Clone failed",
+            description: errorMessage(squashAtomCommandFailure(cloneResult)),
+          }),
+        );
+      }
+      return;
+    }
+    await handleAddProject(cloneResult.value.cwd);
+  }
+
+  // The server creates the project and clones in the background; progress
+  // shows in a toast and in the draft's composer banner, so the palette
+  // closes as soon as the clone is under way. Only problems found before git
+  // runs (bad destination, unknown repository) come back here. The server
+  // picks the folder under the projects root: the project's own folder when
+  // the flow was opened from a project.
+  async function startTrackedClone(input: {
+    readonly environmentId: EnvironmentId;
+    readonly remoteUrl: string;
+    readonly title: string;
+  }): Promise<void> {
+    if (isRemoteProjectCloning) return;
+    if (
+      !readEnvironmentScope(input.environmentId, AuthSourceControlWriteScope) ||
+      !readEnvironmentScope(input.environmentId, AuthOrchestrationOperateScope)
+    ) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Clone unavailable",
+          description:
+            "This connection needs permission to write source control and add repositories.",
+        }),
+      );
+      return;
+    }
+    const into =
+      addProjectInto !== null && addProjectInto.environmentId === input.environmentId
+        ? addProjectInto
+        : null;
+    setIsRemoteProjectCloning(true);
+    const startResult =
+      into !== null
+        ? await cloneIntoProjectLabel({
+            environmentId: input.environmentId,
+            input: { id: into.labelId, projectId: newProjectId(), remoteUrl: input.remoteUrl },
+          })
+        : await startProjectClone({
+            environmentId: input.environmentId,
+            input: {
+              projectId: newProjectId(),
+              title: input.title,
+              createdAt: new Date().toISOString(),
+              remoteUrl: input.remoteUrl,
+            },
+          });
     setIsRemoteProjectCloning(false);
     if (startResult._tag === "Failure") {
       if (!isAtomCommandInterrupted(startResult)) {
@@ -2831,8 +2937,9 @@ function OpenCommandPaletteDialog(props: {
       }
       return;
     }
+    const { projectId } = startResult.value;
     setOpen(false);
-    const projectRef = scopeProjectRef(addProjectCloneFlow.environmentId, projectId);
+    const projectRef = scopeProjectRef(input.environmentId, projectId);
     // The create event usually lands before this call returns; give the shell
     // stream a moment so the draft opens with its project resolved instead of
     // flashing the project picker.
@@ -3187,10 +3294,14 @@ function OpenCommandPaletteDialog(props: {
   const createShortcutLabel = hasHighlightedNewProjectItem
     ? `${submitModifierLabel} Enter`
     : "Enter";
+  // Clones skip the folder step when the server places them, so the first
+  // step is the clone itself.
   const remoteProjectButtonLabel = addProjectCloneFlow
-    ? addProjectCloneFlow.source === "url"
-      ? "Continue"
-      : "Lookup"
+    ? clonesIntoProjectsRoot
+      ? "Clone"
+      : addProjectCloneFlow.source === "url"
+        ? "Continue"
+        : "Lookup"
     : null;
   const isRemoteProjectPending = isRemoteProjectLookingUp || isRemoteProjectCloning;
   const canSubmitRemoteProjectFlow =
