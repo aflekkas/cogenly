@@ -44,6 +44,8 @@ export function ThreadCommandSubtitle(props: {
   isCurrent: boolean;
   driverKind?: ProviderDriverKind | null;
   providerDisplayName?: string | null;
+  /** The instance's mark color when its provider has several instances. */
+  providerAccentColor?: string | undefined;
   variant?: ThreadCommandSubtitleVariant;
   className?: string;
 }) {
@@ -97,6 +99,10 @@ export function ThreadCommandSubtitle(props: {
           <ProviderInstanceIcon
             driverKind={props.driverKind}
             displayName={props.providerDisplayName ?? props.driverKind}
+            accentColor={props.providerAccentColor}
+            showBadge={props.providerAccentColor !== undefined}
+            badgeClassName="size-1.5"
+            indicatorBackground="var(--popover)"
             iconClassName="size-3 shrink-0 opacity-70"
           />
         </>

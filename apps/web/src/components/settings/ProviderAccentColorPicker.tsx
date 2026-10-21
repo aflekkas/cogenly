@@ -67,10 +67,13 @@ function ProviderCustomColorPanel(props: {
 function ProviderCustomColorPicker(props: {
   readonly displayName: string;
   readonly value: string | undefined;
+  readonly automaticValue: string | undefined;
   readonly onCommit: (value: string) => void;
   readonly onClear: () => void;
 }) {
   const normalized = normalizeProviderAccentColor(props.value);
+  // Without its own color, an instance beside others of its provider shows the automatic one.
+  const shown = normalized ?? normalizeProviderAccentColor(props.automaticValue);
 
   return (
     <Popover>
@@ -80,10 +83,16 @@ function ProviderCustomColorPicker(props: {
             type="button"
             size="icon-sm"
             variant="ghost-muted"
-            style={normalized ? { backgroundColor: normalized } : undefined}
-            aria-label={`${normalized ? "Change" : "Add"} accent color for ${props.displayName}`}
+            style={shown ? { backgroundColor: shown } : undefined}
+            aria-label={
+              normalized
+                ? `Change accent color for ${props.displayName}`
+                : shown
+                  ? `Change automatic accent color for ${props.displayName}`
+                  : `Add accent color for ${props.displayName}`
+            }
           >
-            {normalized ? (
+            {shown ? (
               <span className="sr-only">Change accent color</span>
             ) : (
               <PlusIcon aria-hidden />
@@ -93,7 +102,7 @@ function ProviderCustomColorPicker(props: {
       />
       <PopoverPopup side="bottom" align="start" sideOffset={6} padding="none">
         <ProviderCustomColorPanel
-          value={normalized ?? FALLBACK_ACCENT_COLOR}
+          value={shown ?? FALLBACK_ACCENT_COLOR}
           onCommit={props.onCommit}
         />
         {normalized ? (
@@ -122,6 +131,8 @@ function ProviderCustomColorPicker(props: {
 export function ProviderAccentColorPicker(props: {
   readonly displayName: string;
   readonly value: string | undefined;
+  /** The color shown while `value` is unset, e.g. an instance's automatic mark. */
+  readonly automaticValue?: string | undefined;
   readonly onCommit: (value: string) => void;
   readonly description?: string;
   readonly commitDelayMs?: number;
@@ -198,6 +209,7 @@ export function ProviderAccentColorPicker(props: {
     <ProviderCustomColorPicker
       displayName={displayName}
       value={normalized}
+      automaticValue={props.automaticValue}
       onCommit={commitAccentColor}
       onClear={() => commitAccentColor("")}
     />

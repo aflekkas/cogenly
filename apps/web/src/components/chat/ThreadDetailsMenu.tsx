@@ -54,6 +54,7 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentElapsed } from "./AgentElapsed";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
+import { resolveProviderInstanceAccentColors } from "../../providerInstances";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import {
@@ -353,6 +354,10 @@ function ThreadAgentsSection(props: {
   const [showAll, setShowAll] = useState(false);
   const [stoppingKey, setStoppingKey] = useState<string | null>(null);
   const providers = useServerConfigs().get(props.environmentId)?.providers;
+  const markColorByInstanceId = useMemo(
+    () => resolveProviderInstanceAccentColors(providers ?? []),
+    [providers],
+  );
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn, { reportFailure: false });
   const stopWorkflow = useAtomCommand(orchestrationEnvironment.stopWorkflow, {
     reportFailure: false,
@@ -402,6 +407,8 @@ function ThreadAgentsSection(props: {
           <ProviderInstanceIcon
             driverKind={driver}
             displayName={provider?.displayName ?? driver}
+            accentColor={markColorByInstanceId.get(row.providerInstanceId ?? "")}
+            showBadge={markColorByInstanceId.has(row.providerInstanceId ?? "")}
             iconClassName={THREAD_DETAILS_PANEL_ICON_CLASS}
           />
         ) : (

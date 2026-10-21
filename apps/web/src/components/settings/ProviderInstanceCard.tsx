@@ -586,6 +586,11 @@ interface ProviderInstanceCardProps {
   readonly instance: ProviderInstanceConfig;
   readonly driverOption: ProviderClientDefinition | undefined;
   readonly liveProvider: ServerProvider | undefined;
+  /**
+   * The instance's mark color, its own accent or the automatic one it gets
+   * beside other instances of its provider. Unset leaves the glyph unmarked.
+   */
+  readonly markColor?: string | undefined;
   readonly mode: "list" | "editor";
   readonly selected?: boolean | undefined;
   readonly onSelect?: (() => void) | undefined;
@@ -651,6 +656,7 @@ export function ProviderInstanceCard({
   instance,
   driverOption,
   liveProvider,
+  markColor,
   mode,
   selected = false,
   onSelect,
@@ -837,11 +843,10 @@ export function ProviderInstanceCard({
     <ProviderInstanceIcon
       driverKind={driverKind ?? instance.driver}
       displayName={displayName}
-      accentColor={accentColor}
-      showBadge={Boolean(accentColor)}
+      accentColor={markColor ?? accentColor}
+      showBadge={Boolean(markColor ?? accentColor)}
       className="size-5"
       iconClassName="size-4 text-foreground/80"
-      badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs"
     />
   );
 
@@ -1164,6 +1169,7 @@ export function ProviderInstanceCard({
                 layout="inline"
                 displayName={displayName}
                 value={accentColor}
+                automaticValue={markColor}
                 onCommit={updateAccentColor}
                 commitDelayMs={120}
               />

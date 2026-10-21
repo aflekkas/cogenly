@@ -438,6 +438,7 @@ function AgentCard({
                     driverKind={providerEntry.driverKind}
                     displayName={providerEntry.displayName}
                     accentColor={providerEntry.accentColor}
+                    showBadge={providerEntry.accentColor !== undefined}
                     iconClassName="size-3.5 opacity-60"
                   />
                 </TooltipTrigger>

@@ -50,6 +50,7 @@ import {
   usePrimaryEnvironmentId,
   type EnvironmentPresentation,
 } from "../../state/environments";
+import { resolveProviderInstanceAccentColors } from "../../providerInstances";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useEnvironmentSessionState } from "../../state/session";
 import { useServerConfigs } from "../../state/entities";
@@ -711,8 +712,7 @@ export function EnvironmentProviderSettings({
     const hasDefaultSlot = providerSettings.hasDefaultInstance || explicitInstance !== undefined;
     if (
       hasDefaultSlot &&
-      (driver === "codex" ||
-        driver === "claudeAgent" ||
+      (providerSettings.hasDefaultInstance ||
         isDirty ||
         resolveProviderInstanceEnabled(effectiveInstance) ||
         defaultInstanceId === targetInstanceId)
@@ -741,6 +741,16 @@ export function EnvironmentProviderSettings({
       });
     }
   }
+
+  // The same marks the model picker shows, from settings so a color change
+  // shows here before the provider snapshot catches up.
+  const markColorByInstanceId = resolveProviderInstanceAccentColors(
+    rows.map((row) => ({
+      instanceId: row.instanceId,
+      driver: row.driver,
+      accentColor: row.instance.accentColor,
+    })),
+  );
 
   const targetInstanceMissing =
     targetInstanceId !== undefined &&
@@ -863,6 +873,7 @@ export function EnvironmentProviderSettings({
         instance={row.instance}
         driverOption={driverOption}
         liveProvider={liveProvider}
+        markColor={markColorByInstanceId.get(row.instanceId)}
         mode={mode}
         selected={mode === "list" && selectedRow?.instanceId === row.instanceId}
         onSelect={mode === "list" ? () => setSelectedInstanceId(row.instanceId) : undefined}

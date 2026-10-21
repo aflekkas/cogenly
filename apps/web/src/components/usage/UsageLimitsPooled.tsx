@@ -20,6 +20,7 @@ import { usePrimarySettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+import { resolveProviderInstanceAccentColors } from "../../providerInstances";
 import { providerClients } from "../settings/providerDriverMeta";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { Button } from "../ui/button";
@@ -65,8 +66,8 @@ function AccountChip({ email }: { readonly email: string }) {
 }
 
 /**
- * The same mark the model picker uses for a native instance (provider glyph,
- * initials badge, accent); hub accounts have no instance, so they get the chip.
+ * The same mark the model picker uses for a native instance (provider glyph
+ * with the instance's colored dot); hub accounts have no instance, so they get the chip.
  */
 function AccountAvatar({
   account,
@@ -85,7 +86,7 @@ function AccountAvatar({
           String(account.driver)
         }
         accentColor={account.accentColor}
-        showBadge={Boolean(account.displayName)}
+        showBadge={Boolean(account.accentColor)}
         indicatorBackground="var(--popover)"
         className={cn("size-5", className)}
         iconClassName="size-4 text-foreground/80"
@@ -532,6 +533,25 @@ function PoolWindowCard({
   );
 }
 
+/**
+ * Accounts with the mark colors the model picker gives their instances, so
+ * two Claude instances carry the same dots here as in the rail.
+ */
+function withInstanceMarkColors(
+  presentations: Parameters<typeof collectLimitAccounts>[0],
+): readonly LimitAccount[] {
+  const markColors = new Map<string, string>();
+  for (const [environmentId, presentation] of presentations) {
+    const colors = resolveProviderInstanceAccentColors(presentation.serverConfig?.providers ?? []);
+    for (const [instanceId, color] of colors)
+      markColors.set(`${environmentId}:${instanceId}`, color);
+  }
+  return collectLimitAccounts(presentations).map((account) => {
+    const accentColor = markColors.get(account.key) ?? account.accentColor;
+    return accentColor === account.accentColor ? account : { ...account, accentColor };
+  });
+}
+
 function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
   const color = barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
@@ -574,7 +594,7 @@ export function UsageLimitsPooled({
   readonly presentations: Parameters<typeof collectLimitAccounts>[0];
   readonly now: number;
 }) {
-  const pools = collectLimitPools(collectLimitAccounts(presentations), now);
+  const pools = collectLimitPools(withInstanceMarkColors(presentations), now);
   const notices = collectLimitNotices(presentations);
   const externalLinks = collectExternalUsageLinks(presentations);
   return (

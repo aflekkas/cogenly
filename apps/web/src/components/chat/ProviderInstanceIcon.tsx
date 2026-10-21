@@ -3,57 +3,50 @@ import { type CSSProperties, memo } from "react";
 import { providerInstanceInitials } from "@t3tools/client-runtime/state/provider-instance-display";
 
 import { ProviderDriverKind } from "@t3tools/contracts";
-import { ClaudeAI, Icon, OpenAI } from "../Icons";
 
 import { cn } from "~/lib/utils";
 import { providerClients } from "../settings/providerDriverMeta";
 import { ProviderPackageIcon } from "./ProviderPackageIcon";
 
-const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
-  [ProviderDriverKind.make("codex")]: OpenAI,
-  [ProviderDriverKind.make("claudeAgent")]: ClaudeAI,
-};
-
-const PROVIDER_TEXT_COLOR_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
-  [ProviderDriverKind.make("codex")]: "text-black dark:text-white",
-  [ProviderDriverKind.make("claudeAgent")]: "text-[#d97757]",
-};
-
-/** Brand text color for a provider label; package glyphs supply theirs as CSS variables. */
+/**
+ * Brand text color for a provider label; each definition ships its glyph as
+ * data with per-theme fills, supplied here as CSS variables. Unknown
+ * drivers get no brand color.
+ */
 export function providerTextColor(driverKind: ProviderDriverKind): {
   readonly className?: string;
   readonly style?: CSSProperties;
 } {
   const icon = providerClients.get(driverKind)?.icon;
-  if (icon) {
-    return {
-      className: "text-(--icon-light) dark:text-(--icon-dark)",
-      style: { "--icon-light": icon.fill.light, "--icon-dark": icon.fill.dark } as CSSProperties,
-    };
-  }
-  const className = PROVIDER_TEXT_COLOR_BY_PROVIDER[driverKind];
-  return className ? { className } : {};
+  if (!icon) return {};
+  return {
+    className: "text-(--icon-light) dark:text-(--icon-dark)",
+    style: { "--icon-light": icon.fill.light, "--icon-dark": icon.fill.dark } as CSSProperties,
+  };
 }
 
+/**
+ * A provider's glyph for one configured instance. With `showBadge`, a small
+ * dot in the instance's accent color sits on the glyph's lower-right corner so
+ * several instances of one provider read apart without recoloring the brand mark.
+ */
 export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   driverKind: ProviderDriverKind;
   displayName: string;
   accentColor?: string | undefined;
   showBadge?: boolean;
-  badgeContent?: "initials" | "none";
   className?: string;
   iconClassName?: string;
+  /** Positions or sizes the instance dot; it is `size-2` at the icon's corner by default. */
   badgeClassName?: string;
   statusDotClassName?: string;
   indicatorBackground?: string;
 }) {
-  const Icon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
   const packageIcon = providerClients.get(props.driverKind)?.icon;
   const indicatorBackground = props.indicatorBackground ?? "var(--card)";
   const accentStyle = props.accentColor
     ? ({ "--provider-accent": props.accentColor } as CSSProperties)
     : undefined;
-  const badgeContent = props.badgeContent ?? "initials";
 
   return (
     <span
@@ -70,8 +63,6 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
           className={cn("size-5 shrink-0", props.iconClassName)}
           aria-hidden
         />
-      ) : Icon ? (
-        <Icon className={cn("size-5 shrink-0", props.iconClassName)} aria-hidden />
       ) : (
         <span className={cn("text-3xs font-semibold leading-none", props.iconClassName)}>
           {providerInstanceInitials(props.displayName)}
@@ -89,18 +80,15 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
       ) : null}
       {props.showBadge ? (
         <span
+          data-provider-instance-mark=""
           className={cn(
-            "pointer-events-none absolute right-0 bottom-0 z-10 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border px-0.5 text-4xs font-semibold leading-none shadow-sm",
-            props.accentColor
-              ? "bg-(--provider-accent) text-white"
-              : "bg-card text-muted-foreground",
+            "pointer-events-none absolute -right-0.5 -bottom-0.5 z-10 size-2 rounded-full transition-[background-color,box-shadow] duration-(--motion-duration-fast) ease-standard motion-reduce:transition-none",
+            props.accentColor ? "bg-(--provider-accent)" : "bg-muted-foreground",
             props.badgeClassName,
           )}
-          style={{ borderColor: indicatorBackground }}
+          style={{ boxShadow: `0 0 0 1.5px ${indicatorBackground}` }}
           aria-hidden
-        >
-          {badgeContent === "initials" ? providerInstanceInitials(props.displayName) : null}
-        </span>
+        />
       ) : null}
     </span>
   );

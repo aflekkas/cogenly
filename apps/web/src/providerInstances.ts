@@ -15,6 +15,7 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
+  PROVIDER_DISPLAY_NAMES,
   resolveProjectProviderInstanceEnabled,
   type ModelSelection,
   type ProjectId,
@@ -26,12 +27,38 @@ import {
   type ServerProviderState,
 } from "@t3tools/contracts";
 import {
+  nextProviderInstanceAccentColor,
   normalizeProviderAccentColor,
+  providerInstanceRowLabel,
+  resolveProviderInstanceAccentColors,
   resolveProviderInstanceDisplayName,
   shouldShowInstanceBadge,
 } from "@t3tools/client-runtime/state/provider-instance-display";
+import { defaultClientModelForDriver, isClientPickerVisible } from "@t3tools/provider-core/client";
 
-export { normalizeProviderAccentColor, shouldShowInstanceBadge };
+import { providerClients } from "./components/settings/providerDriverMeta";
+
+export {
+  nextProviderInstanceAccentColor,
+  normalizeProviderAccentColor,
+  providerInstanceRowLabel,
+  resolveProviderInstanceAccentColors,
+  shouldShowInstanceBadge,
+};
+
+/**
+ * How rows name an instance under a model: the provider alone, or
+ * "Claude · Personal" when several instances share the provider.
+ */
+export function providerInstanceEntryLabel(
+  entry: Pick<ProviderInstanceEntry, "displayName" | "driverKind" | "sharesDriver">,
+): string {
+  return providerInstanceRowLabel({
+    displayName: entry.displayName,
+    driverLabel: PROVIDER_DISPLAY_NAMES[entry.driverKind] ?? entry.displayName,
+    sharesDriver: entry.sharesDriver,
+  });
+}
 
 /**
  * Local-only placeholder used while a draft has no provider it can safely
@@ -53,7 +80,13 @@ export interface ProviderInstanceEntry {
   readonly instanceId: ProviderInstanceId;
   readonly driverKind: ProviderDriverKind;
   readonly displayName: string;
+  /**
+   * The instance's mark color: its configured accent, else an automatic one
+   * when another instance shares its driver. Unset for a lone, uncolored instance.
+   */
   readonly accentColor?: string | undefined;
+  /** Another configured instance runs the same driver, so rows name the instance. */
+  readonly sharesDriver: boolean;
   readonly continuationGroupKey?: string | undefined;
   readonly enabled: boolean;
   readonly installed: boolean;
@@ -98,14 +131,13 @@ export function isProviderInstancePickerReady(entry: ProviderInstanceEntry): boo
   return entry.enabled && entry.isAvailable && entry.status === "ready";
 }
 
-/** Picker rails contain configured, enabled instances only. */
+/**
+ * Picker rails contain configured, enabled instances of registered drivers
+ * only. A driver not in this build's registry (retired, or a fork's) never
+ * shows, no matter what the server streams.
+ */
 export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): boolean {
-  return (
-    entry.enabled &&
-    (entry.driverKind === "codex" ||
-      entry.driverKind === "claudeAgent" ||
-      entry.driverKind === "muse")
-  );
+  return entry.enabled && isClientPickerVisible(providerClients, entry.driverKind);
 }
 
 /**
@@ -118,6 +150,14 @@ export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): b
 export function deriveProviderInstanceEntries(
   providers: ReadonlyArray<ServerProvider>,
 ): ReadonlyArray<ProviderInstanceEntry> {
+  const accentColors = resolveProviderInstanceAccentColors(providers);
+  const instanceCountByDriver = new Map<ProviderDriverKind, number>();
+  for (const snapshot of providers) {
+    instanceCountByDriver.set(
+      snapshot.driver,
+      (instanceCountByDriver.get(snapshot.driver) ?? 0) + 1,
+    );
+  }
   return providers.map((snapshot) => {
     const instanceId = snapshot.instanceId;
     const driverKind = snapshot.driver;
@@ -127,7 +167,8 @@ export function deriveProviderInstanceEntries(
       instanceId,
       driverKind,
       displayName: resolveProviderInstanceDisplayName(snapshot),
-      accentColor: normalizeProviderAccentColor(snapshot.accentColor),
+      accentColor: accentColors.get(instanceId),
+      sharesDriver: (instanceCountByDriver.get(driverKind) ?? 0) > 1,
       continuationGroupKey: snapshot.continuation?.groupKey,
       enabled: snapshot.enabled,
       installed: snapshot.installed,
@@ -263,6 +304,7 @@ export function getDefaultProviderInstanceModel(
     entry.models.find((model) => model.isDefault && !model.isCustom)?.slug ??
     entry.models.find((model) => !model.isCustom)?.slug ??
     entry.models[0]?.slug ??
+    defaultClientModelForDriver(providerClients, entry.driverKind) ??
     DEFAULT_MODEL_BY_PROVIDER[entry.driverKind]
   );
 }

@@ -769,6 +769,9 @@ function HandoffEndpoint(props: {
             <ProviderInstanceIcon
               driverKind={entry?.driverKind ?? ProviderDriverKind.make(props.instanceId)}
               displayName={entry?.displayName ?? props.instanceId}
+              accentColor={entry?.accentColor}
+              showBadge={entry?.accentColor !== undefined}
+              badgeClassName="size-1.5"
               iconClassName="size-3"
             />
             <span

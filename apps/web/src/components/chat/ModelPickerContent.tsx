@@ -22,6 +22,7 @@ import {
 import { ChevronRightIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import {
+  MODEL_PICKER_FAVORITES,
   MODEL_PICKER_RECENT,
   ModelPickerSidebar,
   type ModelPickerRailSelection,
@@ -34,6 +35,10 @@ import {
   useModelUsage,
 } from "~/lib/modelUsage";
 import { useThreadShells } from "~/state/entities";
+import {
+  useEnvironmentModelPreferences,
+  useToggleEnvironmentModelFavorite,
+} from "~/hooks/useSettings";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
   modelPickerLegacySectionKey,
@@ -57,6 +62,8 @@ import { InlineButton } from "../ui/button";
 import {
   isProviderInstancePickerReady,
   isProviderInstancePickerVisible,
+  providerInstanceEntryLabel,
+  shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 
@@ -69,7 +76,11 @@ type ModelPickerItem = {
   instanceId: ProviderInstanceId;
   driverKind: ProviderDriverKind;
   instanceDisplayName: string;
+  /** The row's provider line, e.g. "Claude · Personal" when Claude has several instances. */
+  instanceLabel: string;
   instanceAccentColor?: string | undefined;
+  /** The provider glyph carries the instance's colored dot. */
+  instanceShowsMark: boolean;
   continuationGroupKey?: string | undefined;
   isLegacy?: boolean | undefined;
   isUnavailable?: boolean | undefined;
@@ -110,7 +121,9 @@ export function shouldOfferModelPickerSetup(
 export function adjacentModelPickerProvider(input: {
   entries: ReadonlyArray<ProviderInstanceEntry>;
   selectedInstanceId: ModelPickerRailSelection;
-  /** Recent leads the cycle when the rail shows it. */
+  /** Favorites leads the cycle when the rail shows it. */
+  includeFavorites?: boolean;
+  /** Recent follows Favorites in the cycle when the rail shows it. */
   includeRecent?: boolean;
   direction: 1 | -1;
   disabledInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
@@ -125,6 +138,7 @@ export function adjacentModelPickerProvider(input: {
     )
     .map((entry) => entry.instanceId);
   if (input.includeRecent) providers.unshift(MODEL_PICKER_RECENT);
+  if (input.includeFavorites) providers.unshift(MODEL_PICKER_FAVORITES);
   if (providers.length === 0) {
     return input.selectedInstanceId;
   }
@@ -281,6 +295,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       }),
     ) &&
     !isProviderInstancePickerReady(activeEntry);
+  // Starred models, keyed by instance plus model and kept in the order starred.
+  const { favorites } = useEnvironmentModelPreferences(props.environmentId);
+  const toggleFavorite = useToggleEnvironmentModelFavorite(props.environmentId);
+  const favoriteKeys = useMemo(
+    () =>
+      new Set(favorites.map((favorite) => modelPickerModelKey(favorite.provider, favorite.model))),
+    [favorites],
+  );
   // The rail entry the user chose; until then the picker opens on Recent when
   // this device has used models, else on the current model's provider.
   const [chosenInstanceId, setChosenInstanceId] = useState<ModelPickerRailSelection | null>(null);
@@ -424,7 +446,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           instanceId,
           driverKind: entry.driverKind,
           instanceDisplayName: entry.displayName,
+          instanceLabel: providerInstanceEntryLabel(entry),
           ...(entry.accentColor ? { instanceAccentColor: entry.accentColor } : {}),
+          instanceShowsMark: shouldShowInstanceBadge(entry, instanceEntries),
           ...(entry.continuationGroupKey
             ? { continuationGroupKey: entry.continuationGroupKey }
             : {}),
@@ -432,7 +456,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       }
     }
     return out;
-  }, [modelOptionsByInstance, entryByInstanceId, props.activeInstanceId, activeModelSlug]);
+  }, [
+    modelOptionsByInstance,
+    entryByInstanceId,
+    instanceEntries,
+    props.activeInstanceId,
+    activeModelSlug,
+  ]);
 
   const isLocked = props.lockedProvider !== null;
   const lockedDisabledInstanceIds = useMemo(() => {
@@ -478,11 +508,24 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     [flatModels, matchesLockedProvider, modelUsage, openedAt],
   );
   const showRecent = recentModels.length > 0;
+  // Favorites: starred models this picker can still offer, in the order starred.
+  const favoriteModels = useMemo(() => {
+    const modelByKey = new Map(
+      flatModels
+        .filter(matchesLockedProvider)
+        .map((model) => [modelPickerModelKey(model.instanceId, model.slug), model] as const),
+    );
+    return favorites.flatMap((favorite) => {
+      const model = modelByKey.get(modelPickerModelKey(favorite.provider, favorite.model));
+      return model ? [model] : [];
+    });
+  }, [favorites, flatModels, matchesLockedProvider]);
   const selectedInstanceId: ModelPickerRailSelection =
     chosenInstanceId === MODEL_PICKER_RECENT && !showRecent
       ? props.activeInstanceId
       : (chosenInstanceId ??
         (openedWithUsage && showRecent ? MODEL_PICKER_RECENT : props.activeInstanceId));
+  const showsFavorites = selectedInstanceId === MODEL_PICKER_FAVORITES;
 
   const handleSelectInstance = useCallback(
     (instanceId: ModelPickerRailSelection) => {
@@ -511,15 +554,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     () =>
       selectedInstanceId === MODEL_PICKER_RECENT
         ? recentModels
-        : flatModels.filter(
-            (model) => model.instanceId === selectedInstanceId && matchesLockedProvider(model),
-          ),
-    [flatModels, matchesLockedProvider, recentModels, selectedInstanceId],
+        : selectedInstanceId === MODEL_PICKER_FAVORITES
+          ? favoriteModels
+          : flatModels.filter(
+              (model) => model.instanceId === selectedInstanceId && matchesLockedProvider(model),
+            ),
+    [favoriteModels, flatModels, matchesLockedProvider, recentModels, selectedInstanceId],
   );
 
   const legacySection = useMemo(() => {
-    // Recent lists what was used, legacy or not.
-    if (selectedInstanceId === MODEL_PICKER_RECENT) return null;
+    // Recent and Favorites list what was used or starred, legacy or not.
+    if (selectedInstanceId === MODEL_PICKER_RECENT || selectedInstanceId === MODEL_PICKER_FAVORITES)
+      return null;
     const currentModels = filteredModels.filter((model) => !model.isLegacy);
     const legacyModels = filteredModels.filter((model) => model.isLegacy);
     if (legacyModels.length === 0) {
@@ -548,7 +594,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, [filteredModels, legacySection]);
 
   const selectedEntry =
-    selectedInstanceId === MODEL_PICKER_RECENT
+    selectedInstanceId === MODEL_PICKER_RECENT || selectedInstanceId === MODEL_PICKER_FAVORITES
       ? undefined
       : entryByInstanceId.get(selectedInstanceId);
   const providerSetupEntries =
@@ -727,8 +773,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return mapping.size > 0 ? mapping : EMPTY_MODEL_JUMP_LABELS;
   }, [keybindings, modelJumpCommandByKey, modelJumpShortcutContext]);
   const modelListExtraData = useMemo(
-    () => ({ modelJumpLabelByKey, activeModelKey, selectedModelKeySet }),
-    [modelJumpLabelByKey, activeModelKey, selectedModelKeySet],
+    () => ({ modelJumpLabelByKey, activeModelKey, selectedModelKeySet, favoriteKeys }),
+    [modelJumpLabelByKey, activeModelKey, selectedModelKeySet, favoriteKeys],
   );
 
   const handleModelListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -793,6 +839,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         const next = adjacentModelPickerProvider({
           entries: sidebarInstanceEntries,
           selectedInstanceId,
+          includeFavorites: true,
           includeRecent: showRecent,
           direction: command === "modelPicker.nextProvider" ? 1 : -1,
           disabledInstanceIds: lockedDisabledInstanceIds,
@@ -850,6 +897,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             selectedInstanceId={selectedInstanceId}
             onSelectInstance={handleSelectInstance}
             onFocusList={focusModelList}
+            showFavorites
             showRecent={showRecent}
             instanceEntries={sidebarInstanceEntries}
             {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
@@ -976,7 +1024,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         instanceId={model.instanceId}
                         driverKind={model.driverKind}
                         providerDisplayName={model.instanceDisplayName}
+                        providerLabel={model.instanceLabel}
                         providerAccentColor={model.instanceAccentColor}
+                        showInstanceMark={model.instanceShowsMark}
+                        isFavorite={favoriteKeys.has(modelKey)}
+                        onToggleFavorite={
+                          props.environmentId
+                            ? () => void toggleFavorite(model.instanceId, model.slug)
+                            : undefined
+                        }
                         isSelected={
                           selectedModelKeys !== undefined
                             ? selectedModelKeySet.has(modelKey)
@@ -1024,7 +1080,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 ))}
               </div>
             ) : (
-              <ComboboxEmpty className="empty:h-0">No models found</ComboboxEmpty>
+              <ComboboxEmpty className="empty:h-0">
+                {showsFavorites ? "Star a model to keep it here" : "No models found"}
+              </ComboboxEmpty>
             )}
             {updateRequiredNotice ? (
               <p className="shrink-0 border-t border-border/70 px-3 py-2 text-xs leading-snug text-muted-foreground">

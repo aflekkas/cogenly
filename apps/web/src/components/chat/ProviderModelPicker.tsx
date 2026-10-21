@@ -182,9 +182,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const allModelNames = selectedEntries
     ? selectedEntries.map((selection) => selection.label).join(", ") || "Choose models"
     : undefined;
+  // A provider with several instances names the one in use, as the glyph's dot only colors it.
+  const triggerModelLabel =
+    props.triggerLabel ??
+    allModelNames ??
+    (showInstanceBadge && activeEntry
+      ? `${triggerLabel} · ${activeEntry.displayName}`
+      : triggerLabel);
   const triggerTooltipContent = shortcutLabel
-    ? `${props.triggerLabel ?? allModelNames ?? triggerLabel} · ${shortcutLabel}`
-    : (props.triggerLabel ?? allModelNames ?? triggerLabel);
+    ? `${triggerModelLabel} · ${shortcutLabel}`
+    : triggerModelLabel;
 
   return (
     <Popover
@@ -228,6 +235,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                       driverKind={selection.entry.driverKind}
                       displayName={selection.entry.displayName}
                       accentColor={selection.entry.accentColor}
+                      showBadge={shouldShowInstanceBadge(selection.entry, props.instanceEntries)}
+                      indicatorBackground="var(--chat-composer-glass-surface,var(--background))"
                       className="size-4 rounded-full bg-(--chat-composer-glass-surface,var(--background)) ring-2 ring-(--chat-composer-glass-surface,var(--background))"
                       iconClassName="size-4"
                     />
@@ -248,10 +257,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               className="size-4"
               iconClassName={cn("size-4", props.activeProviderIconClassName)}
               indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
-              badgeClassName={cn(
-                "right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs",
-                size === "xs" && "shadow-none",
-              )}
             />
           ) : null}
           <Tooltip>

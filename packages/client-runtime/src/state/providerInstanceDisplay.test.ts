@@ -2,7 +2,11 @@ import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  nextProviderInstanceAccentColor,
   normalizeProviderAccentColor,
+  PROVIDER_INSTANCE_AUTO_ACCENT_COLORS,
+  providerInstanceRowLabel,
+  resolveProviderInstanceAccentColors,
   providerInstanceInitials,
   resolveProviderInstanceDisplayName,
   shouldShowInstanceBadge,
@@ -104,5 +108,86 @@ describe("shouldShowInstanceBadge", () => {
     const entry = { driverKind: codex, accentColor: undefined };
     const other = { driverKind: claude, accentColor: undefined };
     expect(shouldShowInstanceBadge(entry, [entry, other])).toBe(false);
+  });
+});
+
+describe("resolveProviderInstanceAccentColors", () => {
+  const defaultClaude = { instanceId: "claudeAgent", driver: claude };
+  const personalClaude = { instanceId: "claude_personal", driver: claude };
+
+  it("gives instances of one driver distinct colors, default first, regardless of input order", () => {
+    const colors = resolveProviderInstanceAccentColors([personalClaude, defaultClaude]);
+    expect(colors.get("claudeAgent")).toBe(PROVIDER_INSTANCE_AUTO_ACCENT_COLORS[0]);
+    expect(colors.get("claude_personal")).toBe(PROVIDER_INSTANCE_AUTO_ACCENT_COLORS[1]);
+  });
+
+  it("leaves a lone instance unmarked", () => {
+    const colors = resolveProviderInstanceAccentColors([
+      defaultClaude,
+      { instanceId: "codex", driver: codex },
+    ]);
+    expect(colors.size).toBe(0);
+  });
+
+  it("lets an explicit accent color win without shifting its siblings", () => {
+    const colors = resolveProviderInstanceAccentColors([
+      defaultClaude,
+      { ...personalClaude, accentColor: "#123456" },
+      { instanceId: "claude_work", driver: claude },
+    ]);
+    expect(colors.get("claudeAgent")).toBe(PROVIDER_INSTANCE_AUTO_ACCENT_COLORS[0]);
+    expect(colors.get("claude_personal")).toBe("#123456");
+    expect(colors.get("claude_work")).toBe(PROVIDER_INSTANCE_AUTO_ACCENT_COLORS[2]);
+  });
+
+  it("preselects the color a new instance would get, skipping one a sibling already shows", () => {
+    expect(nextProviderInstanceAccentColor([defaultClaude], claude)).toBe(
+      PROVIDER_INSTANCE_AUTO_ACCENT_COLORS[1],
+    );
+    expect(
+      nextProviderInstanceAccentColor(
+        [
+          defaultClaude,
+          { ...personalClaude, accentColor: PROVIDER_INSTANCE_AUTO_ACCENT_COLORS[2] },
+        ],
+        claude,
+      ),
+    ).toBe(PROVIDER_INSTANCE_AUTO_ACCENT_COLORS[1]);
+  });
+});
+
+describe("providerInstanceRowLabel", () => {
+  it("names the instance by what sets it apart from the provider", () => {
+    expect(
+      providerInstanceRowLabel({
+        displayName: "Claude (Personal)",
+        driverLabel: "Claude",
+        sharesDriver: true,
+      }),
+    ).toBe("Claude · Personal");
+    expect(
+      providerInstanceRowLabel({
+        displayName: "Codex Work",
+        driverLabel: "Codex",
+        sharesDriver: true,
+      }),
+    ).toBe("Codex · Work");
+    expect(
+      providerInstanceRowLabel({
+        displayName: "Claude",
+        driverLabel: "Claude",
+        sharesDriver: true,
+      }),
+    ).toBe("Claude");
+  });
+
+  it("keeps the instance name for a provider with one instance", () => {
+    expect(
+      providerInstanceRowLabel({
+        displayName: "Claude (UChicago)",
+        driverLabel: "Claude",
+        sharesDriver: false,
+      }),
+    ).toBe("Claude (UChicago)");
   });
 });

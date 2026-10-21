@@ -1,7 +1,7 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { HistoryIcon, SparklesIcon } from "lucide-react";
+import { HistoryIcon, SparklesIcon, StarIcon, type LucideIcon } from "lucide-react";
 import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
 import { cn } from "~/lib/utils";
 import {
@@ -35,14 +35,48 @@ const BADGE_BASE_CLASS =
   "pointer-events-none absolute -right-0.5 top-0.5 z-10 flex size-3.5 items-center justify-center rounded-full bg-transparent shadow-sm ";
 const NEW_BADGE_CLASS = `${BADGE_BASE_CLASS} text-update-foreground `;
 
+/** The rail entry that lists starred models, in the order they were starred. */
+export const MODEL_PICKER_FAVORITES = "favorites";
 /** The rail entry that lists the models used most and most recently. */
 export const MODEL_PICKER_RECENT = "recent";
-export type ModelPickerRailSelection = ProviderInstanceId | typeof MODEL_PICKER_RECENT;
+export type ModelPickerRailSelection =
+  | ProviderInstanceId
+  | typeof MODEL_PICKER_FAVORITES
+  | typeof MODEL_PICKER_RECENT;
+
+const RAIL_LIST_BUTTON_CLASS =
+  "relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors state-hover focus-visible:bg-state-hover focus-visible:outline-none aria-pressed:state-selected";
+
+/** A rail entry for a cross-provider list (Favorites, Recent) rather than one instance. */
+function RailListButton(props: {
+  readonly value: typeof MODEL_PICKER_FAVORITES | typeof MODEL_PICKER_RECENT;
+  readonly label: string;
+  readonly icon: LucideIcon;
+  readonly selected: boolean;
+  readonly onSelect: () => void;
+}) {
+  const Icon = props.icon;
+  return (
+    <div className="relative w-full" data-model-picker-provider={props.value}>
+      <Toolbar.Button
+        className={RAIL_LIST_BUTTON_CLASS}
+        onClick={props.onSelect}
+        type="button"
+        aria-label={props.label}
+        aria-pressed={props.selected}
+      >
+        <Icon className="size-5 shrink-0" aria-hidden />
+      </Toolbar.Button>
+    </div>
+  );
+}
 
 export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   selectedInstanceId: ModelPickerRailSelection;
   onSelectInstance: (instanceId: ModelPickerRailSelection) => void;
-  /** Shows the Recent entry at the top; hidden while nothing has been used. */
+  /** Shows the Favorites entry at the top. */
+  showFavorites?: boolean;
+  /** Shows the Recent entry after Favorites; hidden while nothing has been used. */
   showRecent?: boolean;
   /** Move focus from the rail into the model list. */
   onFocusList: () => void;
@@ -84,7 +118,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
       return;
     }
     setSelectedIndicatorTop(selectedItem.offsetTop + selectedItem.offsetHeight / 2 - 10);
-  }, [props.instanceEntries, props.selectedInstanceId, props.showRecent]);
+  }, [props.instanceEntries, props.selectedInstanceId, props.showFavorites, props.showRecent]);
 
   const selectedEntry = props.instanceEntries.find(
     (entry) => entry.instanceId === props.selectedInstanceId,
@@ -125,21 +159,26 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               }
             />
           ) : null}
+          {props.showFavorites ? (
+            <RailListButton
+              value={MODEL_PICKER_FAVORITES}
+              label="Favorite models"
+              icon={StarIcon}
+              selected={props.selectedInstanceId === MODEL_PICKER_FAVORITES}
+              onSelect={() => handleSelect(MODEL_PICKER_FAVORITES)}
+            />
+          ) : null}
           {props.showRecent ? (
-            <>
-              <div className="relative w-full" data-model-picker-provider={MODEL_PICKER_RECENT}>
-                <Toolbar.Button
-                  className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors state-hover focus-visible:bg-state-hover focus-visible:outline-none aria-pressed:state-selected"
-                  onClick={() => handleSelect(MODEL_PICKER_RECENT)}
-                  type="button"
-                  aria-label="Recent models"
-                  aria-pressed={props.selectedInstanceId === MODEL_PICKER_RECENT}
-                >
-                  <HistoryIcon className="size-5 shrink-0" aria-hidden />
-                </Toolbar.Button>
-              </div>
-              <div className="border-b border-border/70" aria-hidden="true" />
-            </>
+            <RailListButton
+              value={MODEL_PICKER_RECENT}
+              label="Recent models"
+              icon={HistoryIcon}
+              selected={props.selectedInstanceId === MODEL_PICKER_RECENT}
+              onSelect={() => handleSelect(MODEL_PICKER_RECENT)}
+            />
+          ) : null}
+          {props.showFavorites || props.showRecent ? (
+            <div className="border-b border-border/70" aria-hidden="true" />
           ) : null}
           {/* Instance buttons (one per configured instance — built-in + custom) */}
           {props.instanceEntries.map((entry) => {
@@ -204,7 +243,6 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                         ? "var(--background)"
                         : "color-mix(in oklab, var(--muted) 30%, transparent)"
                   }
-                  {...(entry.accentColor ? { badgeClassName: "h-3 min-w-3 px-0.5 text-5xs" } : {})}
                 />
                 {showNewBadge ? (
                   <span className={NEW_BADGE_CLASS} aria-hidden>

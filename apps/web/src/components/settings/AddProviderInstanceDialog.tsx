@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   AuthProvidersManageScope,
+  defaultInstanceIdForDriver,
   ProviderInstanceId,
   ProviderDriverKind,
   type EnvironmentId,
@@ -21,7 +22,10 @@ import {
 } from "../../hooks/useSettings";
 
 import { cn } from "../../lib/utils";
-import { normalizeProviderAccentColor } from "../../providerInstances";
+import {
+  nextProviderInstanceAccentColor,
+  normalizeProviderAccentColor,
+} from "../../providerInstances";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { Button } from "../ui/button";
 import { ChatGptConnectionButton } from "./ChatGptConnectionButton";
@@ -119,17 +123,43 @@ export function AddProviderInstanceDialog({
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Codex and Claude run at their default slots before they are configured, so
-  // those ids stay reserved; other unconfigured default slots are free to take.
+  // Drivers with a default instance run at that slot before they are
+  // configured, so those ids stay reserved; other unconfigured default
+  // slots are free to take.
   const existingIds = useMemo(
-    () => new Set(["codex", "claudeAgent", ...Object.keys(settings.providerInstances ?? {})]),
+    () =>
+      new Set([
+        ...providerClients.definitions
+          .filter((definition) => definition.hasDefaultInstance !== false)
+          .map((definition) => defaultInstanceIdForDriver(definition.driverKind)),
+        ...Object.keys(settings.providerInstances ?? {}),
+      ]),
     [settings.providerInstances],
   );
 
   const driverOption = providerClients.get(driver) ?? DEFAULT_DRIVER_OPTION;
+  // Joining other instances of its provider, the new one starts on the color
+  // it would get automatically, so its mark is already distinct.
+  const siblingInstances = useMemo(() => {
+    const configured = Object.entries(settings.providerInstances ?? {}).map(([id, instance]) => ({
+      instanceId: id,
+      driver: instance.driver,
+      accentColor: instance.accentColor,
+    }));
+    const defaultId = defaultInstanceIdForDriver(driver);
+    // Codex and Claude run at their default slots before they are configured.
+    const runsDefault =
+      (driver === "codex" || driver === "claudeAgent") &&
+      !configured.some((instance) => instance.instanceId === defaultId);
+    return [
+      ...(runsDefault ? [{ instanceId: defaultId as string, driver, accentColor: undefined }] : []),
+      ...configured,
+    ].filter((instance) => instance.driver === driver);
+  }, [driver, settings.providerInstances]);
   const defaultIdentity: ProviderIdentityDraft = {
     label: driverOption.label,
-    accentColor: "",
+    accentColor:
+      siblingInstances.length > 0 ? nextProviderInstanceAccentColor(siblingInstances, driver) : "",
     instanceIdOverride: null,
   };
   const { label, accentColor, instanceIdOverride } = identityByDriver[driver] ?? defaultIdentity;
