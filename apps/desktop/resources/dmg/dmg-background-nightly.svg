@@ -8,15 +8,49 @@
   </defs>
   <rect width="640" height="432" fill="url(#bg)"/>
   <!-- Cogenly mark (assets/brand/cogenly-mark-small.svg) -->
-  <svg x="32" y="24" width="22" height="22" viewBox="0 0 128 128">
+  <svg x="32" y="24" width="22" height="22" viewBox="0 0 128 128" fill="none">
     <defs>
-      <linearGradient id="ember" x1="64" y1="0" x2="64" y2="128" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#FF7B3A"/>
-        <stop offset="1" stop-color="#E63E22"/>
-      </linearGradient>
+      <clipPath id="cogenly-tile-small"><rect width="128" height="128" rx="28"/></clipPath>
     </defs>
-    <rect width="128" height="128" rx="28" fill="url(#ember)"/>
-    <path d="M76.71 44.08A26 26 0 1 0 76.71 83.92" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" fill="none"/>
+    <g clip-path="url(#cogenly-tile-small)" shape-rendering="crispEdges">
+      <rect x="0" y="0" width="16" height="16" fill="#F35D2E"/>
+      <rect x="16" y="0" width="48" height="16" fill="#FF7B3A"/>
+      <rect x="64" y="0" width="16" height="16" fill="#F35D2E"/>
+      <rect x="80" y="0" width="48" height="16" fill="#FF7B3A"/>
+      <rect x="0" y="16" width="16" height="16" fill="#FF7B3A"/>
+      <rect x="16" y="16" width="16" height="16" fill="#F35D2E"/>
+      <rect x="32" y="16" width="48" height="16" fill="#FF7B3A"/>
+      <rect x="80" y="16" width="16" height="16" fill="#F35D2E"/>
+      <rect x="96" y="16" width="32" height="16" fill="#FF7B3A"/>
+      <rect x="0" y="32" width="16" height="16" fill="#F35D2E"/>
+      <rect x="16" y="32" width="16" height="16" fill="#FF7B3A"/>
+      <rect x="32" y="32" width="48" height="16" fill="#F35D2E"/>
+      <rect x="80" y="32" width="16" height="16" fill="#FF7B3A"/>
+      <rect x="96" y="32" width="32" height="16" fill="#F35D2E"/>
+      <rect x="0" y="48" width="16" height="16" fill="#FF7B3A"/>
+      <rect x="16" y="48" width="48" height="16" fill="#F35D2E"/>
+      <rect x="64" y="48" width="16" height="16" fill="#FF7B3A"/>
+      <rect x="80" y="48" width="48" height="16" fill="#F35D2E"/>
+      <rect x="0" y="64" width="16" height="16" fill="#E63E22"/>
+      <rect x="16" y="64" width="48" height="16" fill="#F35D2E"/>
+      <rect x="64" y="64" width="16" height="16" fill="#E63E22"/>
+      <rect x="80" y="64" width="48" height="16" fill="#F35D2E"/>
+      <rect x="0" y="80" width="16" height="16" fill="#F35D2E"/>
+      <rect x="16" y="80" width="16" height="16" fill="#E63E22"/>
+      <rect x="32" y="80" width="48" height="16" fill="#F35D2E"/>
+      <rect x="80" y="80" width="16" height="16" fill="#E63E22"/>
+      <rect x="96" y="80" width="32" height="16" fill="#F35D2E"/>
+      <rect x="0" y="96" width="16" height="16" fill="#E63E22"/>
+      <rect x="16" y="96" width="16" height="16" fill="#F35D2E"/>
+      <rect x="32" y="96" width="48" height="16" fill="#E63E22"/>
+      <rect x="80" y="96" width="16" height="16" fill="#F35D2E"/>
+      <rect x="96" y="96" width="32" height="16" fill="#E63E22"/>
+      <rect x="0" y="112" width="16" height="16" fill="#F35D2E"/>
+      <rect x="16" y="112" width="48" height="16" fill="#E63E22"/>
+      <rect x="64" y="112" width="16" height="16" fill="#F35D2E"/>
+      <rect x="80" y="112" width="48" height="16" fill="#E63E22"/>
+    </g>
+    <path d="M76.71 44.08A26 26 0 1 0 76.71 83.92" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round"/>
     <circle cx="94" cy="64" r="10" fill="#FFFFFF"/>
   </svg>
   <text x="62" y="40" fill="#161616" font-family="Helvetica" font-size="15" font-weight="700" letter-spacing="-0.3">cogenly</text>
