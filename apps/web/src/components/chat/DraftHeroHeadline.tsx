@@ -71,6 +71,7 @@ import {
   ComboboxEmpty,
   ComboboxGroup,
   ComboboxGroupCollapse,
+  ComboboxGroupItems,
   ComboboxGroupLabel,
   ComboboxGroupToggle,
   ComboboxItem,
@@ -736,7 +737,12 @@ export function DraftHeroHeadline({
         <ComboboxEmpty>{searchingGitHub ? null : "No matching repositories."}</ComboboxEmpty>
         <ComboboxList>
           {(group: PickerGroup) => (
-            <ComboboxGroup key={group.value} items={group.items}>
+            <ComboboxGroup
+              key={group.value}
+              items={group.items}
+              // The footer's divider spaces it; no group gap on top of that.
+              className={group.value === ACTIONS_GROUP_KEY ? "not-first:mt-0" : undefined}
+            >
               {group.remote ? (
                 <RemoteRepositorySection
                   group={group}
@@ -759,9 +765,18 @@ export function DraftHeroHeadline({
                   renderItem={renderPickerItem}
                 />
               ) : (
-                <ComboboxCollection>
-                  {(item: PickerItem) => renderPickerItem(item)}
-                </ComboboxCollection>
+                // Flat lists and the footer actions; with project groups
+                // above, the footer lines up with their tucked-in rows.
+                <ComboboxGroupItems
+                  inset={
+                    group.value === ACTIONS_GROUP_KEY &&
+                    filteredPickerGroups.some((entry) => entry.label !== null)
+                  }
+                >
+                  <ComboboxCollection>
+                    {(item: PickerItem) => renderPickerItem(item)}
+                  </ComboboxCollection>
+                </ComboboxGroupItems>
               )}
             </ComboboxGroup>
           )}
@@ -988,7 +1003,9 @@ function RemoteRepositorySection(props: {
           {state.message}
         </p>
       ) : null}
-      <ComboboxCollection>{(item: PickerItem) => props.renderItem(item)}</ComboboxCollection>
+      <ComboboxGroupItems afterHeader>
+        <ComboboxCollection>{(item: PickerItem) => props.renderItem(item)}</ComboboxCollection>
+      </ComboboxGroupItems>
     </div>
   );
 }

@@ -254,7 +254,7 @@ function ComboboxItem({
         tone === "action" && "text-muted-foreground",
         // The hairline spans the popup, not just the row, and sits centered in the gap above the row.
         divider &&
-          "relative mt-2 before:absolute before:-inset-x-1.5 before:-top-1 before:h-px before:bg-border",
+          "relative mt-3 before:absolute before:-inset-x-1.5 before:-top-1.5 before:h-px before:bg-border",
         className,
       )}
       data-slot="combobox-item"
@@ -348,19 +348,22 @@ function ComboboxStatus({ className, ...props }: ComboboxPrimitive.Status.Props)
 function ComboboxGroup({ className, ...props }: ComboboxPrimitive.Group.Props) {
   return (
     <ComboboxPrimitive.Group
-      className={cn("not-first:mt-1.5", className)}
+      className={cn("not-first:mt-2", className)}
       data-slot="combobox-group"
       {...props}
     />
   );
 }
 
-/** A group's header: a small muted line on the row-icon column, optionally led by a mark. */
+/**
+ * A group's header: a quiet section line on the row-icon column, optionally
+ * led by a mark. Never filled, so it cannot read as a selected row.
+ */
 function ComboboxGroupLabel({ className, ...props }: ComboboxPrimitive.GroupLabel.Props) {
   return (
     <ComboboxPrimitive.GroupLabel
       className={cn(
-        "flex min-w-0 items-center gap-2 px-2 pt-1 pb-1 font-medium text-muted-foreground text-xs",
+        "flex min-w-0 items-center gap-2 px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs",
         className,
       )}
       data-slot="combobox-group-label"
@@ -394,7 +397,9 @@ function ComboboxGroupToggle({
           type="button"
           aria-expanded={open}
           className={cn(
-            "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-2 pt-1 pb-1 text-left font-medium text-muted-foreground text-xs outline-none state-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+            // A section label, not a row: no fill at rest or on hover, only
+            // the text lifting a step and a ring for the keyboard.
+            "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-2 pt-1.5 pb-1 text-left font-medium text-muted-foreground text-xs outline-none transition-colors duration-(--motion-duration-fast) ease-standard hover:text-secondary-label focus-visible:text-secondary-label focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
             className,
           )}
           {...props}
@@ -433,7 +438,33 @@ function ComboboxGroupCollapse({ open, children }: { open: boolean; children: Re
       )}
       data-slot="combobox-group-collapse"
     >
-      <div className="min-h-0 overflow-hidden">{children}</div>
+      <div className="min-h-0 overflow-hidden">
+        <ComboboxGroupItems afterHeader>{children}</ComboboxGroupItems>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A group's rows, 4px apart. `inset` tucks them in under their header so
+ * the group they belong to reads at a glance; a flat list leaves it off.
+ */
+function ComboboxGroupItems({
+  inset = true,
+  afterHeader = false,
+  children,
+}: {
+  inset?: boolean;
+  /** Directly under a group header: a small gap keeps the first row off it. */
+  afterHeader?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn("flex min-w-0 flex-col gap-1", inset && "ps-3", afterHeader && "pt-1")}
+      data-slot="combobox-group-items"
+    >
+      {children}
     </div>
   );
 }
@@ -458,5 +489,6 @@ export {
   ComboboxCollection,
   ComboboxGroupToggle,
   ComboboxGroupCollapse,
+  ComboboxGroupItems,
   useComboboxFilter,
 };
