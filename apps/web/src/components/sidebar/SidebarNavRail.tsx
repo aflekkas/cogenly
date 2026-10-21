@@ -44,7 +44,8 @@ import { resolveVerticalTabIndex } from "./navRail.logic";
 import { useNavRailBadgeStore } from "./navRailState";
 import { decisionsWaitingLabel } from "../../agents/agentWorkspace.logic";
 import {
-  listColumnPeekRailHandlers,
+  showListColumnFromRail,
+  toggleListColumn,
   useListColumnPeekOpen,
   useListColumnPeekStore,
 } from "./ListColumnPeek";
@@ -112,17 +113,20 @@ export function SidebarNavRail({
   });
   const searchShortcut = shortcutLabelForCommand(keybindings, "commandPalette.toggle");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  // On a narrow window, hovering the rail floats the collapsed list column out
-  // (ListColumnPeek); a click while it is out switches it there without pinning it.
+  // On a narrow window, a mode click floats the collapsed list column out over
+  // the page (ListColumnPeek) rather than pinning it open; the same icon again
+  // closes it.
   const peekAvailable = useListColumnPeekStore((store) => store.available);
   const peekOpen = useListColumnPeekOpen();
 
   const selectMode = (next: SidebarMode) => {
+    const current = next === mode && !onUtilityPage;
     // A utility page hands the column back to the thread list.
     selectSidebarMode(next, { leaveUtilityPage: true });
+    if (showListColumnFromRail(current)) return;
     // Another mode restores its own remembered list column (see
     // listColumnLayoutStore); picking the current mode again opens a collapsed one.
-    if (next === mode && !open && !peekOpen) setOpen(true);
+    if (next === mode && !open) setOpen(true);
   };
 
   const handleTabsKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -146,10 +150,10 @@ export function SidebarNavRail({
       <button
         type="button"
         aria-label="Toggle main sidebar"
-        aria-pressed={sidebarVisible && !listColumnHidden}
+        aria-pressed={(sidebarVisible || peekOpen) && !listColumnHidden}
         aria-disabled={listColumnHidden || undefined}
         data-sidebar="trigger"
-        onClick={listColumnHidden ? undefined : toggleSidebar}
+        onClick={listColumnHidden ? undefined : () => toggleListColumn(toggleSidebar)}
         // Chrome, like a native toolbar button: a click toggles the column
         // and leaves focus (and its ring) where it was, in the composer.
         onPointerDown={(event) => event.preventDefault()}
@@ -159,7 +163,9 @@ export function SidebarNavRail({
           "[-webkit-app-region:no-drag] aria-disabled:cursor-not-allowed aria-disabled:opacity-64 aria-disabled:hover:text-sidebar-muted-foreground",
         )}
       >
-        <MorphIcon icon={sidebarVisible && !listColumnHidden ? PanelLeftClose : PanelLeft} />
+        <MorphIcon
+          icon={(sidebarVisible || peekOpen) && !listColumnHidden ? PanelLeftClose : PanelLeft}
+        />
       </button>
     </RailTooltip>
   );
@@ -175,7 +181,6 @@ export function SidebarNavRail({
         // Above the floating list column, which slides out from under it.
         peekAvailable && "z-[46]",
       )}
-      {...listColumnPeekRailHandlers}
     >
       {/* The titlebar row. It holds the sidebar toggle, sized and centred like
           the mode buttons. Where the macOS traffic lights own the row, it stays
@@ -284,11 +289,11 @@ export function SidebarNavRail({
             aria-current={onSettings ? "page" : undefined}
             onClick={() => {
               if (onSettings) {
-                if (!open && !peekOpen) setOpen(true);
+                if (!showListColumnFromRail(true) && !open) setOpen(true);
                 return;
               }
               crossfadeModeSwitch(() => {
-                if (!open && !peekOpen) setOpen(true);
+                if (!showListColumnFromRail(false) && !open) setOpen(true);
                 void navigate({ to: "/settings" });
                 return true;
               });

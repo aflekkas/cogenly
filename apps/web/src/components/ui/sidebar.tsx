@@ -430,7 +430,8 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       aria-pressed={isOpen}
       onClick={(event) => {
         onClick?.(event);
-        if (!inert) toggleSidebar();
+        // An onClick that handled the toggle itself prevents the default one.
+        if (!inert && !event.defaultPrevented) toggleSidebar();
       }}
       // Chrome, like a native toolbar button: a click toggles the sidebar and
       // leaves focus (and its ring) where it was. Keyboard focus still rings.

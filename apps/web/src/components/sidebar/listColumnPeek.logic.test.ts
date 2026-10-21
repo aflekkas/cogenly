@@ -15,86 +15,74 @@ function run(...events: ListColumnPeekEvent[]): ListColumnPeekState {
   return events.reduce(reduceListColumnPeek, LIST_COLUMN_PEEK_IDLE);
 }
 
-const enter = { type: "pointer-enter" } as const;
-const leave = { type: "pointer-leave" } as const;
+const open = { type: "open" } as const;
+const toggle = { type: "toggle" } as const;
+const outside = { type: "outside-press" } as const;
+const dismiss = { type: "dismiss" } as const;
 const timer = { type: "timer" } as const;
 const hold = (held: boolean) => ({ type: "hold", held }) as const;
 
 describe("reduceListColumnPeek", () => {
-  it("opens only after the hover intent delay", () => {
-    const intent = run(enter);
-    expect(intent.phase).toBe("closed");
-    expect(intent.pending).toBe("open");
-    expect(resolveListColumnPeekSurface(intent)).toBe("closed");
-    expect(run(enter, timer).phase).toBe("open");
+  it("opens only on a deliberate action, painting the hidden state first", () => {
+    const opening = run(open);
+    expect(opening).toMatchObject({ phase: "closed", pending: "open" });
+    expect(resolveListColumnPeekSurface(opening)).toBe("closed");
+    expect(run(open, timer).phase).toBe("open");
+    expect(resolveListColumnPeekSurface(run(open, timer))).toBe("open");
+    expect(run(toggle, timer).phase).toBe("open");
   });
 
-  it("does nothing when the pointer only passes over the rail", () => {
-    const passed = run(enter, leave);
-    expect(passed).toMatchObject({ phase: "closed", pending: null });
-    expect(resolveListColumnPeekSurface(passed)).toBeUndefined();
+  it("stays open with no close timer of its own", () => {
+    const opened = run(open, timer);
+    expect(opened.pending).toBeNull();
+    // A stray timer tick changes nothing.
+    expect(reduceListColumnPeek(opened, timer)).toBe(opened);
   });
 
-  it("stays open crossing from the rail into the column", () => {
-    const crossed = run(enter, timer, leave, enter);
-    expect(crossed).toMatchObject({ phase: "open", pending: null, hovering: true });
+  it("closes on dismiss, the toggle again or an outside press, then settles", () => {
+    for (const close of [dismiss, toggle, outside]) {
+      const closing = run(open, timer, close);
+      expect(closing).toMatchObject({ phase: "closing", pending: "settle" });
+      expect(resolveListColumnPeekSurface(closing)).toBe("closed");
+      const settled = reduceListColumnPeek(closing, timer);
+      expect(settled).toMatchObject({ phase: "closed", pending: null });
+      expect(resolveListColumnPeekSurface(settled)).toBeUndefined();
+    }
   });
 
-  it("closes after the grace delay, then settles once the motion ends", () => {
-    const left = run(enter, timer, leave);
-    expect(left).toMatchObject({ phase: "open", pending: "close" });
-    const closing = reduceListColumnPeek(left, timer);
-    expect(closing).toMatchObject({ phase: "closing", pending: "settle" });
-    expect(resolveListColumnPeekSurface(closing)).toBe("closed");
-    const settled = reduceListColumnPeek(closing, timer);
-    expect(settled).toMatchObject({ phase: "closed", pending: null });
-    expect(resolveListColumnPeekSurface(settled)).toBeUndefined();
+  it("an outside press leaves it open while the search or a menu holds it", () => {
+    const held = run(open, timer, hold(true), outside);
+    expect(held).toMatchObject({ phase: "open", pending: null });
+    expect(run(open, timer, hold(true), hold(false), outside).phase).toBe("closing");
   });
 
-  it("reopens when the pointer comes back while it is closing", () => {
-    const back = run(enter, timer, leave, timer, enter);
+  it("dismiss and the toggle close it even while held", () => {
+    expect(run(open, timer, hold(true), dismiss).phase).toBe("closing");
+    expect(run(open, timer, hold(true), toggle).phase).toBe("closing");
+  });
+
+  it("opening again while it closes slides it back out", () => {
+    const back = run(open, timer, dismiss, open);
     expect(back).toMatchObject({ phase: "closing", pending: "open" });
     expect(reduceListColumnPeek(back, timer).phase).toBe("open");
-    // Leaving again before the intent delay lets the close finish.
-    expect(reduceListColumnPeek(back, leave)).toMatchObject({
-      phase: "closing",
-      pending: "settle",
-    });
   });
 
-  it("stays open while held, and closes once released away from it", () => {
-    const held = run(enter, timer, hold(true), leave);
-    expect(held).toMatchObject({ phase: "open", pending: null });
-    expect(reduceListColumnPeek(held, hold(false))).toMatchObject({
-      phase: "open",
-      pending: "close",
-    });
+  it("a toggle before it is out cancels the open", () => {
+    expect(run(open, toggle)).toMatchObject({ phase: "closed", pending: null });
+    expect(resolveListColumnPeekSurface(run(open, toggle))).toBeUndefined();
   });
 
-  it("a hold cancels a close already counting down", () => {
-    const counting = run(enter, timer, leave);
-    expect(reduceListColumnPeek(counting, hold(true)).pending).toBeNull();
-  });
-
-  it("releasing the hold while hovering keeps it open", () => {
-    expect(run(enter, timer, hold(true), hold(false))).toMatchObject({
-      phase: "open",
-      pending: null,
-    });
+  it("does nothing on an outside press or dismiss while closed", () => {
+    expect(run(outside)).toBe(LIST_COLUMN_PEEK_IDLE);
+    expect(run(dismiss)).toBe(LIST_COLUMN_PEEK_IDLE);
   });
 
   it("a hold while closed does not open it", () => {
     expect(run(hold(true))).toMatchObject({ phase: "closed", pending: null, held: true });
   });
 
-  it("dismiss closes at once, even while hovering or held", () => {
-    const dismissed = run(enter, timer, hold(true), { type: "dismiss" });
-    expect(dismissed).toMatchObject({ phase: "closing", pending: "settle", hovering: false });
-    expect(run(enter, { type: "dismiss" })).toMatchObject({ phase: "closed", pending: null });
-  });
-
   it("reset drops everything", () => {
-    expect(run(enter, timer, { type: "reset" })).toBe(LIST_COLUMN_PEEK_IDLE);
+    expect(run(open, timer, { type: "reset" })).toBe(LIST_COLUMN_PEEK_IDLE);
   });
 });
 
@@ -108,7 +96,7 @@ describe("listColumnPeekAvailable", () => {
     rightPanelWidth: null,
   };
 
-  it("offers the peek where an open column would cramp the main column", () => {
+  it("offers the overlay where an open column would cramp the main column", () => {
     expect(listColumnPeekAvailable({ ...base, viewportWidth: 1100 })).toBe(true);
     expect(listColumnPeekAvailable({ ...base, viewportWidth: 1600 })).toBe(false);
   });

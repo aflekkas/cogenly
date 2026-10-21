@@ -2634,8 +2634,49 @@ code {
   background: transparent;
 }
 
+/* Overlay-style thumbs, like ScrollArea's: a native scroll list shows its thumb
+   only while the pointer is over it (which covers wheel and trackpad
+   scrolling), fading in and out. The thumb reads its host's reveal, so the
+   host carries the transition; its children pin the value, so a hover
+   restyles one level and not the whole list. Other scrollers stay revealed. */
+@property --app-scrollbar-reveal {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+:where(
+    .messages-timeline-scroll,
+    [class*="overflow-y-auto"],
+    [class*="overflow-auto"],
+    [class*="overflow-y-scroll"]
+  )
+  > * {
+  --app-scrollbar-reveal: 1;
+}
+
+/* After the children's pin, so a nested list hides its own thumb too. */
+:where(
+  .messages-timeline-scroll,
+  [class*="overflow-y-auto"],
+  [class*="overflow-auto"],
+  [class*="overflow-y-scroll"]
+) {
+  --app-scrollbar-reveal: 0;
+  /* A literal, not a motion token: reduced motion keeps opacity fades. */
+  transition: --app-scrollbar-reveal 150ms var(--motion-ease-standard);
+
+  &:hover {
+    --app-scrollbar-reveal: 1;
+  }
+}
+
 ::-webkit-scrollbar-thumb {
-  background: var(--app-scrollbar-thumb);
+  background: color-mix(
+    in srgb,
+    var(--app-scrollbar-thumb) calc(var(--app-scrollbar-reveal) * 100%),
+    transparent
+  );
   border-radius: 3px;
 }
 

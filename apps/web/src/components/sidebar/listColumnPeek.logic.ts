@@ -1,17 +1,14 @@
 import { mainColumnCrampedBesidePanel } from "./listColumnLayoutStore";
 
 /**
- * The list column's hover peek: on a window too narrow to keep the column
- * open beside the main column, hovering the nav rail floats the collapsed
- * column over the page for as long as the pointer stays on the rail or the
- * column. Pure state; ListColumnPeek.tsx owns the timers and the DOM.
+ * The list column's overlay: on a window too narrow to keep the column open
+ * beside the main column, a deliberate action (a rail mode click, the sidebar
+ * toggle or its shortcut) floats the collapsed column over the page. It closes
+ * on a thread pick, Escape, a click outside, or the same rail icon again.
+ * Pure state; ListColumnPeek.tsx owns the listeners and the DOM.
  */
 
-/** Hover intent before the column floats out, so passing over the rail does nothing. */
-export const LIST_COLUMN_PEEK_OPEN_DELAY_MS = 120;
-/** Grace after the pointer leaves, so crossing from rail to column or overshooting doesn't flicker. */
-export const LIST_COLUMN_PEEK_CLOSE_DELAY_MS = 250;
-/** How long the closing motion runs before the column drops its peek styles (--motion-duration-base). */
+/** How long the closing motion runs before the column drops its overlay styles (--motion-duration-base). */
 export const LIST_COLUMN_PEEK_SETTLE_MS = 220;
 /** A route change this soon after a click or Enter inside the column came from it. */
 export const LIST_COLUMN_PEEK_NAVIGATION_WINDOW_MS = 1000;
@@ -20,33 +17,38 @@ export type ListColumnPeekPhase = "closed" | "open" | "closing";
 
 export interface ListColumnPeekState {
   readonly phase: ListColumnPeekPhase;
-  /** The pointer is over the rail or the floating column. */
-  readonly hovering: boolean;
-  /** Something inside the column keeps it open: keyboard focus, the search field, a menu. */
+  /** Something inside the column keeps it open against an outside click: the search field, a menu. */
   readonly held: boolean;
-  /** The timer running: hover intent, leave grace, or the closing motion settling. */
-  readonly pending: "open" | "close" | "settle" | null;
+  /**
+   * The step running: "open" paints the hidden state for a frame so the slide
+   * has somewhere to start, "settle" lets the closing motion finish.
+   */
+  readonly pending: "open" | "settle" | null;
 }
 
 export type ListColumnPeekEvent =
-  | { readonly type: "pointer-enter" }
-  | { readonly type: "pointer-leave" }
+  | { readonly type: "open" }
+  /** The sidebar toggle or its shortcut. */
+  | { readonly type: "toggle" }
   | { readonly type: "hold"; readonly held: boolean }
-  /** The pending timer fired. */
+  /** A press outside the column, the rail and the toggle. */
+  | { readonly type: "outside-press" }
+  /** The pending step finished. */
   | { readonly type: "timer" }
-  /** Closes at once: a thread was picked, or Escape. */
+  /** Closes at once: a thread was picked, Escape, or the same rail icon again. */
   | { readonly type: "dismiss" }
   | { readonly type: "reset" };
 
 export const LIST_COLUMN_PEEK_IDLE: ListColumnPeekState = {
   phase: "closed",
-  hovering: false,
   held: false,
   pending: null,
 };
 
-function closeTimer(state: ListColumnPeekState): ListColumnPeekState["pending"] {
-  return state.phase === "closing" ? "settle" : null;
+function dismiss(state: ListColumnPeekState): ListColumnPeekState {
+  if (state.phase === "open") return { ...state, phase: "closing", pending: "settle" };
+  // Not out yet: a pending open is dropped, a running close finishes.
+  return state.pending === "open" ? { ...state, pending: null } : state;
 }
 
 export function reduceListColumnPeek(
@@ -54,72 +56,37 @@ export function reduceListColumnPeek(
   event: ListColumnPeekEvent,
 ): ListColumnPeekState {
   switch (event.type) {
-    case "pointer-enter": {
-      if (state.phase === "open") {
-        return {
-          ...state,
-          hovering: true,
-          pending: state.pending === "close" ? null : state.pending,
-        };
-      }
-      return { ...state, hovering: true, pending: "open" };
-    }
-    case "pointer-leave": {
-      if (state.phase === "open") {
-        return { ...state, hovering: false, pending: state.held ? null : "close" };
-      }
-      // Left before the intent delay ran out: nothing opens.
-      return {
-        ...state,
-        hovering: false,
-        pending: state.pending === "open" ? closeTimer(state) : state.pending,
-      };
-    }
-    case "hold": {
-      if (state.held === event.held) return state;
-      if (state.phase !== "open") return { ...state, held: event.held };
-      if (event.held) {
-        return { ...state, held: true, pending: state.pending === "close" ? null : state.pending };
-      }
-      return { ...state, held: false, pending: state.hovering ? state.pending : "close" };
-    }
-    case "timer": {
+    case "open":
+      return state.phase === "open" || state.pending === "open"
+        ? state
+        : { ...state, pending: "open" };
+    case "toggle":
+      return state.phase === "open" || state.pending === "open"
+        ? dismiss(state)
+        : reduceListColumnPeek(state, { type: "open" });
+    case "hold":
+      return state.held === event.held ? state : { ...state, held: event.held };
+    case "outside-press":
+      return state.held ? state : dismiss(state);
+    case "timer":
       switch (state.pending) {
         case "open":
           return { ...state, phase: "open", pending: null };
-        case "close":
-          return { ...state, phase: "closing", pending: "settle" };
         case "settle":
           return { ...state, phase: "closed", pending: null };
         default:
           return state;
       }
-    }
-    case "dismiss": {
-      if (state.phase === "open") {
-        return { ...state, phase: "closing", hovering: false, pending: "settle" };
-      }
-      return { ...state, hovering: false, pending: closeTimer(state) };
-    }
+    case "dismiss":
+      return dismiss(state);
     case "reset":
       return state === LIST_COLUMN_PEEK_IDLE ? state : LIST_COLUMN_PEEK_IDLE;
   }
 }
 
-export function listColumnPeekDelayMs(pending: NonNullable<ListColumnPeekState["pending"]>) {
-  switch (pending) {
-    case "open":
-      return LIST_COLUMN_PEEK_OPEN_DELAY_MS;
-    case "close":
-      return LIST_COLUMN_PEEK_CLOSE_DELAY_MS;
-    case "settle":
-      return LIST_COLUMN_PEEK_SETTLE_MS;
-  }
-}
-
 /**
- * What the column draws. "closed" carries the peek's off-canvas styles (and its
- * transition) from the start of hover intent until the closing motion settles,
+ * What the column draws. "closed" carries the overlay's off-canvas styles (and its
+ * transition) from the frame before it opens until the closing motion settles,
  * so the reduced-motion fade has a hidden state to start from. undefined is the
  * plain collapsed column, which the sidebar toggle animates on its own.
  */
@@ -132,7 +99,7 @@ export function resolveListColumnPeekSurface(
 }
 
 /**
- * The peek is offered only where the column is collapsed and opening it inline
+ * The overlay is offered only where the column is collapsed and opening it inline
  * would cramp the main column (the same measure that auto-collapses it beside
  * a right panel). Wide windows keep today's collapsed column.
  */
@@ -154,7 +121,7 @@ export function listColumnPeekAvailable(input: {
   });
 }
 
-/** Whether a route change closes the peek: it followed an activation inside the column. */
+/** Whether a route change closes the overlay: it followed an activation inside the column. */
 export function listColumnPeekDismissedByNavigation(
   lastActivationAt: number | null,
   now: number,

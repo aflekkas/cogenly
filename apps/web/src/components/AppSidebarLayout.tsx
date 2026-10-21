@@ -45,6 +45,7 @@ import { modeSwitchCrossfadeRunning } from "./sidebar/modes/modeSwitchMotion";
 import {
   ListColumnPeekController,
   listColumnPeekPanelProps,
+  toggleListColumn,
   useListColumnPeekSurface,
 } from "./sidebar/ListColumnPeek";
 import { listColumnPeekAvailable } from "./sidebar/listColumnPeek.logic";
@@ -108,14 +109,14 @@ function SidebarControl({
 
       event.preventDefault();
       event.stopPropagation();
-      if (!disabled) toggleSidebar();
+      if (!disabled) toggleListColumn(toggleSidebar);
     };
 
     // Capture before focused editors consume commands such as Mod+B for rich-text formatting.
     window.addEventListener("keydown", onKeyDown, true);
     // A focused desktop browser page forwards the chord as a menu action.
     const unsubscribe = window.desktopBridge?.onMenuAction((action) => {
-      if (action === "sidebar.toggle" && !disabled) toggleSidebar();
+      if (action === "sidebar.toggle" && !disabled) toggleListColumn(toggleSidebar);
     });
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
@@ -145,6 +146,12 @@ function SidebarControl({
               className="pointer-events-auto"
               aria-label="Toggle main sidebar"
               aria-disabled={disabled || undefined}
+              // On a narrow window the toggle floats the column out instead.
+              onClick={(event) => {
+                if (disabled) return;
+                event.preventDefault();
+                toggleListColumn(toggleSidebar);
+              }}
             />
           }
         />
@@ -243,9 +250,9 @@ function ListColumnAutoCollapse({
 }
 
 /**
- * The list column, which on a narrow window floats out over the page while the
- * pointer is on the rail (see ListColumnPeek). Its own component, so a hover
- * re-renders this frame and not the layout or the thread list.
+ * The list column, which on a narrow window floats out over the page from a
+ * rail click or the toggle (see ListColumnPeek). Its own component, so opening
+ * it re-renders this frame and not the layout or the thread list.
  */
 function ListColumnSidebar(props: ComponentProps<typeof Sidebar>) {
   const peek = useListColumnPeekSurface();
