@@ -63,7 +63,7 @@ import {
   workingOnFromItems,
 } from "./agentsClient";
 import type { AgentContact, AgentMessage } from "./agents.types";
-import { useMessageMotion, type SendOrigin } from "./useMessageMotion";
+import { useMessageMotion } from "./useMessageMotion";
 
 const LIVE_RUN = new Set(["preparing", "queued", "starting", "running"]);
 /** The builder's own face: the mono cloud, until the proposal's face takes over. */
@@ -152,12 +152,11 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
     : BUILDER_FACE;
 
   const send = useCallback(
-    async (text: string, from: DOMRect | null, onMessageId: (id: string) => void) => {
+    async (text: string) => {
       if (!environmentId || !modelSelection || sending) return;
       setSending(true);
       setError(null);
       const messageId = newMessageId();
-      if (from) onMessageId(messageId);
       setPending((current) => [
         ...current,
         {
@@ -312,44 +311,36 @@ export function AgentBuilder({ environmentId: requested }: { environmentId?: Env
           creating={creating}
           cardRef={cardRef}
           onCreate={() => void create()}
-          onExample={(text) => void send(text, null, () => {})}
+          onExample={(text) => void send(text)}
         >
-          {(sendOrigin) => (
-            <footer className="agent-composer-area">
-              {error && (
-                <p role="alert" className="agent-error">
-                  {error}
-                </p>
-              )}
-              {environmentId === null ? (
-                <p className="agent-conversation-empty">
-                  Agents aren't available here.
-                  <span>
-                    This machine can't start a conversation without a repository right now.
-                  </span>
-                </p>
-              ) : (
-                <BuilderComposer
-                  environmentId={environmentId}
-                  projectId={thread?.projectId ?? null}
-                  modelSelection={modelSelection}
-                  onModelChange={setChosenModel}
-                  placeholder={
-                    thread
-                      ? "Adjust anything, or ask for something else"
-                      : "What should this agent take care of?"
-                  }
-                  disabled={!modelSelection || creating || created !== null}
-                  sending={sending}
-                  onSend={(text, from) =>
-                    send(text, from, (messageId) => {
-                      if (from) sendOrigin.current = { rect: from, messageId };
-                    })
-                  }
-                />
-              )}
-            </footer>
-          )}
+          <footer className="agent-composer-area">
+            {error && (
+              <p role="alert" className="agent-error">
+                {error}
+              </p>
+            )}
+            {environmentId === null ? (
+              <p className="agent-conversation-empty">
+                Agents aren't available here.
+                <span>This machine can't start a conversation without a repository right now.</span>
+              </p>
+            ) : (
+              <BuilderComposer
+                environmentId={environmentId}
+                projectId={thread?.projectId ?? null}
+                modelSelection={modelSelection}
+                onModelChange={setChosenModel}
+                placeholder={
+                  thread
+                    ? "Adjust anything, or ask for something else"
+                    : "What should this agent take care of?"
+                }
+                disabled={!modelSelection || creating || created !== null}
+                sending={sending}
+                onSend={send}
+              />
+            )}
+          </footer>
         </Transcript>
       </section>
     </SidebarInset>
@@ -381,8 +372,8 @@ function Transcript({
   cardRef: RefObject<HTMLDivElement | null>;
   onCreate: () => void;
   onExample: (text: string) => void;
-  /** The composer, given where a sent text's bubble should arrive from. */
-  children: (sendOrigin: RefObject<SendOrigin | null>) => ReactNode;
+  /** The composer, under the transcript. */
+  children: ReactNode;
 }) {
   // The typing bubble follows a send by a beat, as a reply would.
   const [typingBusy, setTypingBusy] = useState(false);
@@ -402,14 +393,12 @@ function Transcript({
     return { typingKey: step.typingKey, claimed: step.state.claimed };
   }, [messages, busy, typingBusy]);
   const keep = useMemo(() => new Set(claimed.keys()), [claimed]);
-  const sendOrigin = useRef<SendOrigin | null>(null);
   const conversation = useMemo(
     () => ({ key: threadKey, messages, requests: [], hasMoreMessages: false }),
     [threadKey, messages],
   );
   const { scroll, onScroll, stopFollowing } = useMessageMotion(conversation, busy, typingKey, {
     keep,
-    sendOrigin,
   });
   const latestAssistant = messages.findLast((message) => message.role === "assistant");
   return (
@@ -497,7 +486,7 @@ function Transcript({
           )}
         </div>
       </div>
-      {children(sendOrigin)}
+      {children}
     </>
   );
 }
@@ -545,7 +534,7 @@ function BuilderComposer({
   placeholder: string;
   disabled: boolean;
   sending: boolean;
-  onSend: (text: string, from: DOMRect | null) => Promise<void>;
+  onSend: (text: string) => Promise<void>;
 }) {
   const [text, setText] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -560,9 +549,8 @@ function BuilderComposer({
   const submit = async () => {
     const outgoing = text.trim();
     if (!outgoing || sending || disabled) return;
-    const from = textarea.current?.getBoundingClientRect() ?? null;
     setText("");
-    await onSend(outgoing, from);
+    await onSend(outgoing);
     textarea.current?.focus();
   };
   return (

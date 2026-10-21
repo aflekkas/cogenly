@@ -34,8 +34,7 @@ export function AgentComposer({
   modelUnavailable: boolean;
   pickerOpen: boolean;
   onPickerOpenChange: (open: boolean) => void;
-  /** Called with the typed text's rect as it leaves, so its bubble can arrive from there. */
-  onSend: (text: string, from: DOMRect | null) => Promise<void>;
+  onSend: (text: string) => Promise<void>;
   onError: (message: string | null) => void;
   /** The prompt editor, for callers that measure it. */
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
@@ -76,11 +75,10 @@ export function AgentComposer({
     const outgoing = text.trim();
     // A text waits for a model switch to save so it reaches the newly chosen model.
     if (!outgoing || sending || savingModel || modelUnavailable) return;
-    const from = textarea.current?.getBoundingClientRect() ?? null;
-    // The composer clears in the same frame the bubble appears; the text travels.
+    // The composer clears in the same frame the bubble appears below it.
     setText("");
     // A failed text stays in the conversation with its own Retry.
-    await onSend(outgoing, from);
+    await onSend(outgoing);
     textarea.current?.focus();
   }
   return (

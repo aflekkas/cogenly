@@ -1,25 +1,19 @@
-import { useLayoutEffect, useRef, type RefObject } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { observeResize } from "~/lib/observeResize";
 import type { AgentMessage } from "./agents.types";
 
 // --ease-spring and --motion-duration-* in index.css.
 const SPRING = "cubic-bezier(0.22, 1, 0.36, 1)";
-const SEND_MS = 300;
+const SEND_MS = 260;
 const REPLY_MS = 300;
 const REPLY_STAGGER_MS = 60;
 const GROW_MS = 160;
 const REDUCED = "(prefers-reduced-motion: reduce)";
 
-/** Where a text left the composer, taken as it was sent, so its bubble can arrive from there. */
-export interface SendOrigin {
-  rect: DOMRect;
-  messageId: string;
-}
-
 /**
  * Texting-grade motion for an agent conversation, on the rows the owner just
- * caused: a sent text travels from the composer into its bubble (a FLIP on the
- * composer's rect), a reply rises out of the typing bubble and consecutive replies
+ * caused: a sent text rises into its bubble from just below, a reply rises out of
+ * the typing bubble and consecutive replies
  * stagger, a streaming bubble grows smoothly, and the transcript follows the
  * newest bubble. Hydration, paginated history and remounts stay still. Rows under
  * `keep` (a reply that took over the typing bubble's element) are left alone so
@@ -35,13 +29,10 @@ export function useMessageMotion(
   busy: boolean,
   /** Rows after the last message, such as a pending model switch or the typing bubble, that also keep the view pinned. */
   trailing: string | null = null,
-  options: {
-    keep?: ReadonlySet<string> | undefined;
-    sendOrigin?: RefObject<SendOrigin | null> | undefined;
-  } = {},
+  options: { keep?: ReadonlySet<string> | undefined } = {},
 ) {
   const { key, messages, requests, hasMoreMessages } = conversation;
-  const { keep, sendOrigin } = options;
+  const { keep } = options;
   const scroll = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const following = useRef(false);
@@ -89,32 +80,11 @@ export function useMessageMotion(
         row.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: SPRING });
         continue;
       }
-      const origin = sendOrigin?.current;
-      if (sendOrigin && message.role === "user" && origin?.messageId === message.id) {
-        // The text travels from where it was typed into its bubble, filling in as it lands.
-        sendOrigin.current = null;
-        const to = bubble.getBoundingClientRect();
-        const dx = origin.rect.left - to.left;
-        const dy = origin.rect.top - to.top;
-        const sx = Math.max(0.2, Math.min(1.5, origin.rect.width / Math.max(to.width, 1)));
-        const sy = Math.max(0.2, Math.min(1.5, origin.rect.height / Math.max(to.height, 1)));
-        bubble.animate(
-          [
-            {
-              transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
-              opacity: 0.55,
-              transformOrigin: "top left",
-            },
-            { transform: "none", opacity: 1, transformOrigin: "top left" },
-          ],
-          { duration: SEND_MS, easing: SPRING },
-        );
-        continue;
-      }
       if (message.role === "user") {
+        // A sent text rises into place from just below, as the transcript makes room.
         bubble.animate(
           [
-            { opacity: 0, transform: "translateY(12px) scale(0.96)" },
+            { opacity: 0, transform: "translateY(20px)" },
             { opacity: 1, transform: "none" },
           ],
           { duration: SEND_MS, easing: SPRING },
@@ -196,7 +166,7 @@ export function useMessageMotion(
       busy,
       trailing,
     };
-  }, [key, messages, requests, hasMoreMessages, busy, trailing, keep, sendOrigin]);
+  }, [key, messages, requests, hasMoreMessages, busy, trailing, keep]);
   useLayoutEffect(() => {
     const element = scroll.current;
     if (!element) return;

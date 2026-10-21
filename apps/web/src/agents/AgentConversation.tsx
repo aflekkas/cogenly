@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
-import { useMessageMotion, type SendOrigin } from "./useMessageMotion";
+import { useMessageMotion } from "./useMessageMotion";
 import { accentStyle, agentAccent } from "./agentAccent.logic";
 import { AgentIdentity } from "./AgentIdentity";
 import { AgentTypingDots } from "./AgentTypingBubble";
@@ -203,13 +203,12 @@ function ChatPane({
     return { typingKey: step.typingKey, claimed: step.state.claimed };
   }, [agent.messages, typingBusy]);
   const keep = useMemo(() => new Set(claimed.keys()), [claimed]);
-  const sendOrigin = useRef<SendOrigin | null>(null);
   const { scroll, onScroll, stopFollowing } = useMessageMotion(
     { ...agent, key: agentContactKey(agent) },
     busy,
     typingKey ??
       (switches.trailing && `${switches.trailing.instanceId}:${switches.trailing.model}`),
-    { keep, sendOrigin },
+    { keep },
   );
   // An open item's source message opens here; bring it into view once.
   useEffect(() => {
@@ -246,14 +245,12 @@ function ChatPane({
     document.addEventListener("visibilitychange", mark);
     return () => document.removeEventListener("visibilitychange", mark);
   }, [agent, client, canWrite]);
-  async function send(outgoing: string, from: DOMRect | null) {
+  async function send(outgoing: string) {
     if (sending) return;
     setSending(true);
     setError(null);
     try {
-      await client.send(agent, outgoing, (messageId) => {
-        if (from) sendOrigin.current = { rect: from, messageId };
-      });
+      await client.send(agent, outgoing);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Could not send. Retry your message below.",
