@@ -44,7 +44,7 @@ export const ComposerRunningBar = memo(function ComposerRunningBar(props: {
         // Narrower than the composer so it reads as a tab coming out of it; the
         // overlap tucks its bottom under the composer like the other attachments.
         "relative mx-auto -mb-[calc(1rem+1px)] w-[calc(100%-1.25rem)]",
-        "transition-[opacity,translate] duration-200 ease-out starting:translate-y-2 starting:opacity-0 motion-reduce:transition-none",
+        "transition-opacity duration-200 ease-out starting:opacity-0 motion-reduce:transition-none",
       )}
     >
       <ComposerBanner.Root aria-live="polite">

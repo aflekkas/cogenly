@@ -79,11 +79,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 @keyframes t3-mobile-draft-headline-exit {
   from {
     opacity: 1;
-    transform: translateY(0);
   }
   to {
     opacity: 0;
-    transform: translateY(-6px);
   }
 }
 
@@ -818,35 +816,16 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
    autocompletes, popovers and tooltips. Put it on the Base UI Popup element
    itself, with transition-[opacity,scale,translate] (plus anything else the
    popup animates), because Base UI waits for that element's own transitions
-   before unmounting.    The popup fades in from 97% scale (origin --transform-origin) and slides a
-   few pixels out of the trigger along data-side; exits are quicker.
+   before unmounting. The popup fades in from 97% scale about its anchor
+   (origin --transform-origin); nothing slides. Exits are quicker.
    Compositor-only properties, a single transition per open or close. */
 @utility popup-motion {
-  --popup-motion-offset: 4px;
   --tw-duration: 200ms;
   --tw-ease: --theme(--ease-drawer);
 
   &:is([data-starting-style], [data-ending-style]) {
     opacity: 0;
     scale: 0.97;
-  }
-  &[data-side="bottom"]:is([data-starting-style], [data-ending-style]) {
-    translate: 0 calc(-1 * var(--popup-motion-offset));
-  }
-  &[data-side="top"]:is([data-starting-style], [data-ending-style]) {
-    translate: 0 var(--popup-motion-offset);
-  }
-  &:is([data-side="left"], [data-side="inline-start"]):is(
-      [data-starting-style],
-      [data-ending-style]
-    ) {
-    translate: var(--popup-motion-offset) 0;
-  }
-  &:is([data-side="right"], [data-side="inline-end"]):is(
-      [data-starting-style],
-      [data-ending-style]
-    ) {
-    translate: calc(-1 * var(--popup-motion-offset)) 0;
   }
   &[data-ending-style] {
     --tw-duration: 140ms;
@@ -915,34 +894,32 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
 }
 
 /* Enter motion for disclosure content that mounts when opened (inline
-   "show more" panels that aren't a Collapsible): a short fade and drop in.
-   Closing unmounts at once. Uses @starting-style, so it runs once per mount
-   and never on later renders. */
+   "show more" panels that aren't a Collapsible, empty states): a short
+   opacity fade, no travel. Closing unmounts at once. Uses @starting-style, so
+   it runs once per mount and never on later renders. */
 @utility reveal-motion {
   @media (prefers-reduced-motion: no-preference) {
-    transition-property: opacity, translate;
+    transition-property: opacity;
     transition-duration: 160ms;
     transition-timing-function: --theme(--ease-drawer);
 
     @starting-style {
       opacity: 0;
-      translate: 0 -4px;
     }
   }
 }
 
 /* Status icons and labels that swap with state (sidebar row chips, pending
-   markers): key the element by its state so the new one mounts and rises a
-   couple of pixels into place while fading in. Enter only, once per mount. */
+   markers): key the element by its state so the new one mounts and fades
+   in place. Enter only, once per mount. */
 @utility swap-motion {
   @media (prefers-reduced-motion: no-preference) {
-    transition-property: opacity, translate;
+    transition-property: opacity;
     transition-duration: var(--motion-duration-base);
     transition-timing-function: --theme(--ease-standard);
 
     @starting-style {
       opacity: 0;
-      translate: 0 2px;
     }
   }
 }

@@ -621,9 +621,8 @@ function MiniPlayerShell({
                 )}
               />
             </div>
-            {/* Fades and slides in a touch on the fast token as the pointer arrives;
-                reduced motion keeps the fade alone. */}
-            <div className="pointer-events-none absolute right-0 top-0 flex h-8 -translate-y-1 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover p-0.5 opacity-0 shadow-lg/20 transition-[opacity,translate] duration-(--motion-duration-fast) ease-out motion-reduce:translate-y-0 motion-reduce:transition-opacity group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100 group-data-pill-open:pointer-events-auto group-data-pill-open:translate-y-0 group-data-pill-open:opacity-100 active:cursor-grabbing pointer-coarse:right-2.5 pointer-coarse:top-2.5">
+            {/* Fades in on the fast token as the pointer arrives. */}
+            <div className="pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover p-0.5 opacity-0 shadow-lg/20 transition-opacity duration-(--motion-duration-fast) ease-out motion-reduce:transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-data-pill-open:pointer-events-auto group-data-pill-open:opacity-100 active:cursor-grabbing pointer-coarse:right-2.5 pointer-coarse:top-2.5">
               {recording ? (
                 <span aria-hidden className="flex size-6 shrink-0 items-center justify-center">
                   <span className="size-2 rounded-full bg-destructive motion-safe:animate-status-pulse" />

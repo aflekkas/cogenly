@@ -375,7 +375,7 @@ function AgentCard({
             {/* The status owns this slot's width; the hover actions cross-fade
                 in over it, so the name never reflows. */}
             <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
-              <span className="pointer-events-none flex items-center gap-1.5 self-center justify-self-end tabular-nums text-secondary-label transition-[opacity,translate] duration-(--motion-duration-base) ease-standard group-has-[:focus-visible]/sidebar-status-slot:-translate-x-1 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:-translate-x-1 group-any-hover/sidebar-row:opacity-0 motion-reduce:transition-none">
+              <span className="pointer-events-none flex items-center gap-1.5 self-center justify-self-end tabular-nums text-secondary-label transition-opacity duration-(--motion-duration-base) ease-standard group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:opacity-0 motion-reduce:transition-none">
                 {attention > 0 ? (
                   <span
                     key="attention"
@@ -397,7 +397,7 @@ function AgentCard({
               </span>
               <span
                 data-row-hover-actions=""
-                className="pointer-events-none absolute inset-y-0 right-0 flex translate-x-1 items-stretch opacity-0 transition-[opacity,translate] duration-(--motion-duration-base) ease-standard has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:translate-x-0 has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:translate-x-0 group-any-hover/sidebar-row:opacity-100 motion-reduce:transition-none"
+                className="pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100 motion-reduce:transition-none"
               >
                 <Tooltip>
                   <TooltipTrigger

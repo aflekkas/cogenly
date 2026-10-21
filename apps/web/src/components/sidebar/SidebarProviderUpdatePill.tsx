@@ -125,13 +125,9 @@ export function SidebarProviderUpdatePill() {
 
   return (
     <div
-      className={`group/provider-update relative flex min-h-7 w-full shrink-0 items-center overflow-hidden rounded-lg text-2xs leading-4 font-medium transform-gpu transition-[opacity,translate] duration-(--motion-duration-base) ease-drawer will-change-transform ${
+      className={`group/provider-update relative flex min-h-7 w-full shrink-0 items-center overflow-hidden rounded-lg text-2xs leading-4 font-medium transition-opacity duration-(--motion-duration-base) ease-drawer ${
         PROVIDER_UPDATE_PILL_STYLES[displayedView.tone]
-      } ${
-        exitingKey === displayedView.key
-          ? "pointer-events-none translate-y-1.5 opacity-0"
-          : "translate-y-0 opacity-100"
-      }`}
+      } ${exitingKey === displayedView.key ? "pointer-events-none opacity-0" : "opacity-100"}`}
       onTransitionEnd={(event) => {
         if (event.target !== event.currentTarget) {
           return;

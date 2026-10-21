@@ -21,7 +21,6 @@ const DISMISS_TRANSITION_MS = 220;
 // The attached notice opens, closes and swaps on this timing.
 const NOTICE_PRESENCE_MS = 200;
 const NOTICE_PRESENCE_EASING = PANEL_MOTION_EASING;
-const NOTICE_PRESENCE_RISE = "0 4px";
 
 function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -219,20 +218,18 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
             <div className="min-h-0 overflow-hidden">
               <div
                 className={cn(
-                  "transform-gpu space-y-2 pb-2 transition-[opacity,transform] duration-150 ease-out will-change-[opacity,transform]",
+                  "space-y-2 pb-2 transition-opacity duration-150 ease-out",
                   stackExpanded
-                    ? "pointer-events-auto visible translate-y-0 opacity-100"
-                    : "pointer-events-none invisible translate-y-1 opacity-0",
+                    ? "pointer-events-auto visible opacity-100"
+                    : "pointer-events-none invisible opacity-0",
                 )}
               >
                 {stackedItems.map((item) => (
                   <div
                     key={item.id}
                     className={cn(
-                      "transition-[opacity,translate] duration-220 ease-in",
-                      exitingItemId === item.id
-                        ? "pointer-events-none translate-y-28 opacity-0"
-                        : "opacity-100",
+                      "transition-opacity duration-220 ease-in",
+                      exitingItemId === item.id ? "pointer-events-none opacity-0" : "opacity-100",
                     )}
                   >
                     <ComposerBannerStackAlert
@@ -297,10 +294,8 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
         key={frontItem.id}
         data-notice-current=""
         className={cn(
-          "relative z-10 transition-[opacity,translate] duration-220 ease-in",
-          exitingItemId === frontItem.id
-            ? "pointer-events-none translate-y-16 opacity-0"
-            : "opacity-100",
+          "relative z-10 transition-opacity duration-220 ease-in",
+          exitingItemId === frontItem.id ? "pointer-events-none opacity-0" : "opacity-100",
         )}
         onPointerDownCapture={() => {
           setStackExpanded(false);
@@ -362,13 +357,6 @@ export function NoticePresenceFrame({
           ? 0
           : settledHeightRef.current!;
     const fromOpacity = running ? Number(current.opacity) : mounting ? 0 : 1;
-    const fromTranslate = running
-      ? current.translate === "none"
-        ? "0 0"
-        : current.translate
-      : mounting
-        ? NOTICE_PRESENCE_RISE
-        : "0 0";
     running?.cancel();
     motionRef.current = null;
     frame.style.overflow = "";
@@ -386,8 +374,8 @@ export function NoticePresenceFrame({
         reducedMotion
           ? [{ opacity: fromOpacity }, { opacity: 0 }]
           : [
-              { height: `${fromHeight}px`, opacity: fromOpacity, translate: fromTranslate },
-              { height: "0px", opacity: 0, translate: NOTICE_PRESENCE_RISE },
+              { height: `${fromHeight}px`, opacity: fromOpacity },
+              { height: "0px", opacity: 0 },
             ],
         timing,
       );
@@ -417,8 +405,8 @@ export function NoticePresenceFrame({
       reducedMotion
         ? [{ opacity: fromOpacity }, { opacity: 1 }]
         : [
-            { height: `${fromHeight}px`, opacity: fromOpacity, translate: fromTranslate },
-            { height: `${naturalHeight}px`, opacity: 1, translate: "0 0" },
+            { height: `${fromHeight}px`, opacity: fromOpacity },
+            { height: `${naturalHeight}px`, opacity: 1 },
           ],
       timing,
     );

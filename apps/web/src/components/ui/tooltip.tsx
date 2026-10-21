@@ -184,7 +184,7 @@ function TooltipPopup({
         <TooltipPrimitive.Popup
           ref={popupRef}
           className={cn(
-            "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) text-balance rounded-md text-popover-foreground text-xs popup-motion transition-[width,height,opacity,scale,translate] [--popup-motion-offset:2px] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] data-instant:duration-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+            "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) text-balance rounded-md text-popover-foreground text-xs popup-motion transition-[width,height,opacity,scale,translate] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] data-instant:duration-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             variant === "glass"
               ? "dropdown-glass surface-raised surface-raised-floating before:hidden"
               : "border bg-popover surface-raised surface-raised-floating before:hidden",

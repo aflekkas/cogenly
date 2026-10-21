@@ -91,31 +91,20 @@ export function useMessageMotion(
         );
         continue;
       }
-      // A reply rises into place; a burst of replies lands one after another.
-      bubble.animate(
-        [
-          { opacity: 0, transform: "translateY(8px) scale(0.94)" },
-          { opacity: 1, transform: "none" },
-        ],
-        {
-          duration: REPLY_MS,
-          easing: SPRING,
-          delay: replyIndex * REPLY_STAGGER_MS,
-          fill: "backwards",
-        },
-      );
+      // A reply fades in where it lands; a burst of replies lands one after another.
+      bubble.animate([{ opacity: 0 }, { opacity: 1 }], {
+        duration: REPLY_MS,
+        easing: SPRING,
+        delay: replyIndex * REPLY_STAGGER_MS,
+        fill: "backwards",
+      });
       replyIndex += 1;
     }
     for (const request of appendedRequests) {
-      rowFor(request.id)?.animate(
-        reduced
-          ? [{ opacity: 0 }, { opacity: 1 }]
-          : [
-              { opacity: 0, transform: "translateY(8px)" },
-              { opacity: 1, transform: "none" },
-            ],
-        { duration: REPLY_MS, easing: SPRING },
-      );
+      rowFor(request.id)?.animate([{ opacity: 0 }, { opacity: 1 }], {
+        duration: REPLY_MS,
+        easing: SPRING,
+      });
     }
     // Streaming text grows its bubble smoothly rather than in steps.
     const heights = bubbleHeights.current;

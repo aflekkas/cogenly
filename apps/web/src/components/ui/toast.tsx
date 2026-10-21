@@ -562,7 +562,7 @@ function Toasts({ position }: { position: ToastPosition }) {
           return (
             <Toast.Root
               className={cn(
-                "group/toast dropdown-glass surface-raised surface-raised-floating absolute z-[calc(9999-var(--toast-index))] w-full overflow-visible select-none rounded-lg text-popover-foreground [transition:transform_var(--motion-duration-slow)_var(--motion-ease-standard),opacity_var(--motion-duration-slow)_var(--motion-ease-standard),height_.15s] motion-reduce:transition-none [--toast-enter-distance:--spacing(3)]",
+                "group/toast dropdown-glass surface-raised surface-raised-floating absolute z-[calc(9999-var(--toast-index))] w-full overflow-visible select-none rounded-lg text-popover-foreground [transition:transform_var(--motion-duration-slow)_var(--motion-ease-standard),opacity_var(--motion-duration-slow)_var(--motion-ease-standard),height_.15s] motion-reduce:transition-none",
                 // Base positioning using data-position
                 "data-[position*=right]:right-0 data-[position*=right]:left-auto",
                 "data-[position*=left]:right-auto data-[position*=left]:left-0",
@@ -597,17 +597,11 @@ function Toasts({ position }: { position: ToastPosition }) {
                 // Expanded stack
                 "data-position:data-expanded:transform-[translateX(var(--toast-swipe-movement-x))_translateY(var(--toast-calc-offset-y))]",
                 // Starting and ending animations
-                // Top toasts drop a few pixels into place as they fade in, and
-                // rise back out on dismiss, staying clear of the header above.
+                // Toasts fade in and out where they sit; nothing slides in.
+                // Only a swipe dismiss carries the toast off in its direction.
                 "data-starting-style:opacity-0",
-                "data-[position*=top]:data-starting-style:transform-[translateY(calc(-1*var(--toast-enter-distance)))]",
-                "data-[position*=bottom]:data-starting-style:transform-[translateY(calc(100%+var(--toast-inset)))]",
-                "data-[position*=top]:data-[position*=right]:data-starting-style:transform-[translateX(calc(100%+var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]",
                 "data-ending-style:opacity-0",
-                // Ending animations (direction-aware)
-                "data-[position*=bottom]:data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateY(calc(100%+var(--toast-inset)))]",
-                "data-[position*=top]:not-data-[position*=right]:data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateY(calc(-1*var(--toast-enter-distance)))]",
-                "data-[position*=top]:data-[position*=right]:data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateX(calc(100%+var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]",
+                // Swipe-dismiss animations (direction-aware)
                 "data-ending-style:data-[swipe-direction=left]:transform-[translateX(calc(var(--toast-swipe-movement-x)-100%-var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]",
                 "data-ending-style:data-[swipe-direction=right]:transform-[translateX(calc(var(--toast-swipe-movement-x)+100%+var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]",
                 "data-ending-style:data-[swipe-direction=up]:transform-[translateY(calc(var(--toast-swipe-movement-y)-100%-var(--toast-inset)))]",

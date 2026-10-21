@@ -283,9 +283,9 @@ export function WorkLogCollapse({
       {/* Clipped only while moving, so focus rings and shadows show at rest. */}
       <div
         className={cn(
-          "min-h-0 transition-[opacity,translate] ease-standard",
-          open ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0",
-          animateEnter && "starting:-translate-y-1 starting:opacity-0",
+          "min-h-0 transition-opacity ease-standard",
+          open ? "opacity-100" : "opacity-0",
+          animateEnter && "starting:opacity-0",
           (moving || !open) && "overflow-hidden",
         )}
         style={disclosureDuration(open)}

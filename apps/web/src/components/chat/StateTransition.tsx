@@ -7,8 +7,6 @@ import { modeSwitchCrossfadeRunning } from "../sidebar/modes/modeSwitchMotion";
 import { useLastPresent } from "../ui/overlay-presence";
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
-/** The enter rises this far; the leaving copy fades in place. */
-const SWAP_RISE_PX = 4;
 
 function motionDurationMs(): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue("--motion-duration-base");
@@ -73,13 +71,8 @@ function crossFade(group: string, incoming: HTMLElement) {
     () => entry.copy.remove(),
     () => entry.copy.remove(),
   );
-  incoming.animate(
-    [
-      { opacity: 0, transform: `translateY(${SWAP_RISE_PX}px)` },
-      { opacity: 1, transform: "none" },
-    ],
-    { duration, easing },
-  );
+  // Both sides fade in place; nothing rises.
+  incoming.animate([{ opacity: 0 }, { opacity: 1 }], { duration, easing });
 }
 
 /** Fades the copy a removed item left behind, for a replacement that has nothing to show there. */

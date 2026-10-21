@@ -364,39 +364,25 @@
     animation: none;
   }
 }
-/* A row, card or status line that just arrived: a short rise and fade, once per
-   mount. Opacity only under reduced motion. */
+/* A row, card or status line that just arrived: a short opacity fade, once
+   per mount. No travel. */
 @utility agent-enter {
-  transition-property: opacity, translate;
+  transition-property: opacity;
   transition-duration: var(--motion-duration-base);
   transition-timing-function: --theme(--ease-out);
   @starting-style {
     opacity: 0;
-    translate: 0 6px;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    transition-property: opacity;
-    @starting-style {
-      translate: none;
-    }
   }
 }
 /* A value that changed in place (a proposal field, a status): the new text
-   mounts and settles in from a couple of pixels below. */
+   mounts and fades in where it sits. */
 @utility agent-morph {
   display: inline-block;
-  transition-property: opacity, translate;
+  transition-property: opacity;
   transition-duration: var(--motion-duration-fast);
   transition-timing-function: --theme(--ease-out);
   @starting-style {
     opacity: 0;
-    translate: 0 3px;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    transition-property: opacity;
-    @starting-style {
-      translate: none;
-    }
   }
 }
 @utility agent-composer-area {
