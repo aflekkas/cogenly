@@ -16,7 +16,7 @@ import {
   PROJECT_LABEL_COLORS,
   type EnvironmentProjectLabel,
 } from "../../projectLabels/projectLabels.logic";
-import { ProjectColorDot } from "../../projectLabels/ProjectTag";
+import { ProjectFolderIcon } from "../../projectLabels/ProjectFolderMark";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
 import { useProjects } from "../../state/entities";
 import { serverEnvironment } from "../../state/server";
@@ -137,7 +137,7 @@ function FolderRow(props: {
           }
         }}
       >
-        <ProjectColorDot color={label.color} className="size-3" />
+        <ProjectFolderIcon color={label.color} className="size-4" />
         <span className="min-w-0 truncate text-card font-medium text-foreground">{label.name}</span>
         <span className="shrink-0 text-sm tabular-nums text-muted-foreground max-sm:hidden">
           {summary ?? "Empty"}

@@ -27,7 +27,7 @@ import {
 import { projectLabelKey } from "../../projectLabels/projectLabels.logic";
 import { ProjectRepositoryPicker } from "../../projectLabels/ProjectRepositoryPicker";
 import { ProjectSourceLinks } from "../../projectLabels/ProjectSourceLinks";
-import { ProjectColorDot } from "../../projectLabels/ProjectTag";
+import { ProjectFolderIcon } from "../../projectLabels/ProjectFolderMark";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
@@ -206,7 +206,7 @@ export function ProjectView(props: { environmentId: EnvironmentId; labelId: Proj
         <span aria-hidden className="text-muted-foreground">
           /
         </span>
-        {label ? <ProjectColorDot color={label.color} className="size-2.5" /> : null}
+        {label ? <ProjectFolderIcon color={label.color} className="size-3.5" /> : null}
         <h1 className="min-w-0 truncate text-sm font-medium">{label?.name ?? "Project"}</h1>
       </div>
       {label ? (
