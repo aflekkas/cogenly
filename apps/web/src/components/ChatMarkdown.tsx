@@ -117,6 +117,17 @@ import {
 } from "./chat/ExpandedImagePreview";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { markdownImageGallery, markdownImageItems } from "./chat/markdownImageGallery";
+import {
+  groupInlineImageGalleries,
+  isInlineWebImageSource,
+  withoutPartialTrailingImage,
+  type InlineImageHastNode,
+} from "./chat/markdownInlineImages";
+import {
+  MarkdownGalleryFigure,
+  MarkdownGalleryImage,
+  MarkdownImageGalleryRow,
+} from "./chat/MarkdownWebImageGallery";
 import { MediaVideoPlayer } from "./media/MediaVideoPlayer";
 import { MediaActions, type MediaActionSource } from "./media/MediaActions";
 import { resolveProtocolRelativeMediaUrl } from "./media/mediaContent";
@@ -1435,6 +1446,7 @@ function ChatMarkdownImage(props: {
           src={src}
           alt={props.alt}
           data-markdown-copy={props.copyMarkdown}
+          referrerPolicy="no-referrer"
           decoding="async"
           draggable={false}
           className={cn(
@@ -1491,6 +1503,7 @@ function ChatMarkdownImage(props: {
             ref={markLoadedIfComplete}
             src={src}
             alt={props.alt}
+            referrerPolicy="no-referrer"
             decoding="async"
             draggable={false}
             className="invisible absolute inset-0 size-full"
@@ -1862,6 +1875,23 @@ const CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS = [
 const CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS = [rehypeHeadingIds] satisfies NonNullable<
   ReactMarkdownOptions["rehypePlugins"]
 >;
+
+/** Runs after sanitizing, so the gallery markers it adds are never authorable. */
+function rehypeInlineImageGalleries() {
+  return (tree: InlineImageHastNode) => {
+    groupInlineImageGalleries(tree);
+  };
+}
+
+const CHAT_MARKDOWN_GALLERY_REHYPE_PLUGINS = [
+  ...CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS,
+  rehypeInlineImageGalleries,
+] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+
+const CHAT_MARKDOWN_LITERAL_HTML_GALLERY_REHYPE_PLUGINS = [
+  ...CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS,
+  rehypeInlineImageGalleries,
+] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
 function MarkdownExternalLinkContent({
   host,
@@ -2709,6 +2739,13 @@ const CHAT_MARKDOWN_COMPONENTS = {
   h6: markdownHeadingRenderer(6),
   div: function MarkdownDiv({ node, children, ...props }) {
     const { onUseArtifactTemplate } = use(ChatMarkdownRendererContext);
+    if (node?.properties?.dataMarkdownGallery === true) {
+      return (
+        <MarkdownImageGalleryRow count={Number(node.properties.dataGalleryCount)}>
+          {children}
+        </MarkdownImageGalleryRow>
+      );
+    }
     const artifactTemplate = artifactTemplateFromHastProperties(node?.properties);
     if (artifactTemplate) {
       return (
@@ -2716,6 +2753,20 @@ const CHAT_MARKDOWN_COMPONENTS = {
       );
     }
     return <div {...props}>{children}</div>;
+  },
+  figure: function MarkdownFigure({ node, children, ...props }) {
+    if (node?.properties?.dataMarkdownGalleryItem !== true) {
+      return <figure {...props}>{children}</figure>;
+    }
+    const [media = null, source = null] = Children.toArray(children);
+    const caption = node.properties.dataCaption;
+    return (
+      <MarkdownGalleryFigure
+        caption={typeof caption === "string" ? caption : ""}
+        media={media}
+        source={source}
+      />
+    );
   },
   p: function MarkdownParagraph({ node: _node, children, ...props }) {
     const { skills } = use(ChatMarkdownRendererContext);
@@ -3061,6 +3112,19 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const altText = alt ?? "";
     const copyMarkdown = markdownImageCopy(altText, srcString, authoredTitle);
     const { className, style: _style, width, height, ...imageProps } = props;
+    if (node?.properties?.dataGalleryItem === true && isInlineWebImageSource(srcString)) {
+      return (
+        <MarkdownGalleryImage
+          key={srcString}
+          src={srcString}
+          alt={altText}
+          width={width}
+          height={height}
+          copyMarkdown={copyMarkdown}
+          onImageExpand={expandMedia}
+        />
+      );
+    }
     const authoredSizeStyle = authoredImageSizeStyle(width, height);
     const imageSource = classifyMarkdownImageSource(classifiedSrc, imageBaseDir ?? cwd);
     const kind = mediaKindFromPath(classifiedSrc) ?? "image";
@@ -3096,6 +3160,9 @@ const CHAT_MARKDOWN_COMPONENTS = {
           onImageExpand={imageExpand}
         />
       );
+    }
+    if (imageSource._tag === "Direct" && /^http:/i.test(imageSource.uri)) {
+      return <ChatMarkdownImageFallback alt={altText} copyMarkdown={copyMarkdown} kind={kind} />;
     }
     if (imageSource._tag === "Direct") {
       const mediaSrc = resolveProtocolRelativeMediaUrl(imageSource.uri);
@@ -3246,6 +3313,9 @@ function ChatMarkdown({
     localMediaPreview,
     setLocalMediaPreview,
   } = useChatMarkdownState({ text, ...props });
+  // A streaming image renders only once its markdown is complete.
+  const renderedText = props.isStreaming === true ? withoutPartialTrailingImage(text) : text;
+  const galleries = props.githubMedia !== true;
   const incrementalParsing =
     props.isStreaming === true &&
     extraRemarkPlugins.length === 0 &&
@@ -3277,15 +3347,20 @@ function ChatMarkdown({
         <ReactMarkdown
           remarkPlugins={remarkPlugins}
           rehypePlugins={
+            // A pull request body keeps its author's own image layout.
             parseRawHtml
-              ? CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS
-              : CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS
+              ? galleries
+                ? CHAT_MARKDOWN_GALLERY_REHYPE_PLUGINS
+                : CHAT_MARKDOWN_RENDER_REHYPE_PLUGINS
+              : galleries
+                ? CHAT_MARKDOWN_LITERAL_HTML_GALLERY_REHYPE_PLUGINS
+                : CHAT_MARKDOWN_LITERAL_HTML_REHYPE_PLUGINS
           }
           skipHtml={false}
           components={CHAT_MARKDOWN_COMPONENTS}
           urlTransform={markdownUrlTransform}
         >
-          {text}
+          {renderedText}
         </ReactMarkdown>
       </ChatMarkdownRendererContext>
       <OverlayPresence when={localMediaPreview}>
