@@ -4,10 +4,12 @@
  *
  * @module provider/Drivers/codexUsage
  */
-import type { CodexSettings } from "@t3tools/contracts";
+import { UsageProviderKind, type CodexSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+
+const USAGE_PROVIDER = UsageProviderKind.make("codex");
 
 import {
   parseTimestampMs,
@@ -185,7 +187,7 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): UsageRecord |
   if (totalTokens(totals) === 0) return null;
 
   return {
-    provider: "codex",
+    provider: USAGE_PROVIDER,
     timestampMs,
     model: state.model,
     sessionId: state.sessionId,
@@ -241,7 +243,7 @@ export const codexUsageFormat: TranscriptUsageFormat<CodexScanState> = {
 
 export const codexUsageReader: ProviderUsageReader<CodexSettings, Path.Path> = {
   kind: "transcripts",
-  provider: "codex",
+  provider: USAGE_PROVIDER,
   format: codexUsageFormat,
   directories: Effect.fn("codexUsageReader.directories")(function* ({ config, environment }) {
     // An undecodable config has no trustworthy home to read.

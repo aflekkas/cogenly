@@ -5,9 +5,11 @@
  * @module provider/Drivers/claudeUsage
  */
 
-import type { ClaudeSettings } from "@t3tools/contracts";
+import { UsageProviderKind, type ClaudeSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
+
+const USAGE_PROVIDER = UsageProviderKind.make("claude");
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import {
@@ -67,7 +69,7 @@ function parseClaudeRecord(parsed: unknown): UsageRecord | null {
   const cost = record["costUSD"];
 
   return {
-    provider: "claude",
+    provider: USAGE_PROVIDER,
     timestampMs,
     model,
     sessionId: typeof record["sessionId"] === "string" ? record["sessionId"] : "",
@@ -105,7 +107,7 @@ export const claudeUsageFormat: TranscriptUsageFormat<void> = {
 
 export const claudeUsageReader: ProviderUsageReader<ClaudeSettings, Path.Path> = {
   kind: "transcripts",
-  provider: "claude",
+  provider: USAGE_PROVIDER,
   format: claudeUsageFormat,
   directories: Effect.fn("claudeUsageReader.directories")(function* ({ config, environment }) {
     // An undecodable config has no trustworthy home to read.

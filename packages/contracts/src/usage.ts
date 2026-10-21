@@ -31,17 +31,17 @@ export const USAGE_CONTRACT_VERSION = 6 as const;
  */
 export const USAGE_MERGE_COMPATIBLE_SINCE = 4 as const;
 
-// Old usage buckets stay readable even though retired providers are no longer collected.
-export const UsageProviderKind = Schema.Literals([
-  "claude",
-  "codex",
-  "muse",
-  "grok",
-  "cursor",
-  "opencode",
-  "antigravity",
-  "pi",
-]);
+/**
+ * Usage-bucket provider slug. Open (like `ProviderDriverKind`), so a new
+ * driver's buckets decode without a contract change. Retired slugs
+ * (`grok`, `cursor`, `opencode`, `antigravity`, `pi`) stay readable as
+ * plain slugs; clients render unknown slugs with a neutral label/colour
+ * from the provider registry's fallback.
+ */
+export const UsageProviderKind = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(64),
+  Schema.isPattern(/^[a-zA-Z][a-zA-Z0-9_-]*$/),
+).pipe(Schema.brand("UsageProviderKind"));
 export type UsageProviderKind = typeof UsageProviderKind.Type;
 
 /**

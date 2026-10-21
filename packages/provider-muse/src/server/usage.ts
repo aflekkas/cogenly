@@ -18,8 +18,11 @@
  * @module provider-muse/server/usage
  */
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { UsageProviderKind } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
+
+const USAGE_PROVIDER = UsageProviderKind.make("muse");
 
 import {
   tokenCount,
@@ -61,7 +64,7 @@ export function parseMuseRecord(value: unknown): UsageRecord | null {
   const sourceId = payload?.["source_run_record_id"];
   const cacheRead = usage["cache_read_tokens"] ?? usage["cached_tokens"];
   return {
-    provider: "muse",
+    provider: USAGE_PROVIDER,
     timestampMs,
     model,
     sessionId: typeof streamId === "string" ? streamId : "",
@@ -139,7 +142,7 @@ function museSessionsDir(
 
 export const museUsageReader: ProviderUsageReader<MuseSettings, MuseUsageReaderEnv> = {
   kind: "transcripts",
-  provider: "muse",
+  provider: USAGE_PROVIDER,
   format: museUsageFormat,
   directories: Effect.fn("museUsageReader.directories")(function* ({ config, environment }) {
     // An undecodable config has no trustworthy home to read.

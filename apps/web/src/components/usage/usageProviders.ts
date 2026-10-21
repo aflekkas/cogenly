@@ -1,37 +1,19 @@
-import { UsageProviderKind } from "@t3tools/contracts";
+import type { ProviderDriverKind, UsageProviderKind } from "@t3tools/contracts";
+import { usagePresentationForKind } from "@t3tools/provider-core/client";
 
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { providerClients } from "../settings/providerDriverMeta";
 
-type UsageProviderPresentation = {
+export type UsageProviderPresentation = {
   readonly label: string;
   readonly color: string;
-  readonly driverKind: ProviderDriverKind;
+  readonly driverKind: ProviderDriverKind | undefined;
 };
 
 /**
- * Exhaustive presentation for providers supported by the usage contract. Kinds
- * without an entry below get a neutral label and colour.
+ * Presentation for a usage-bucket slug, from the provider registry.
+ * Registered drivers supply their label and bar colour; retired or fork
+ * slugs (`grok`, `cursor`, …) get a neutral row so old buckets still render.
  */
-export const PROVIDER_PRESENTATION = {
-  ...Object.fromEntries(
-    UsageProviderKind.literals.map((kind) => [
-      kind,
-      {
-        label: kind,
-        color: "var(--muted-foreground)",
-        driverKind: ProviderDriverKind.make(kind),
-      },
-    ]),
-  ),
-  muse: { label: "Muse Code", color: "#0081fb", driverKind: ProviderDriverKind.make("muse") },
-  codex: {
-    label: "Codex",
-    color: "var(--contrast-foreground)",
-    driverKind: ProviderDriverKind.make("codex"),
-  },
-  claude: {
-    label: "Claude Code",
-    color: "#d97757",
-    driverKind: ProviderDriverKind.make("claudeAgent"),
-  },
-} as Record<UsageProviderKind, UsageProviderPresentation>;
+export function getUsageProviderPresentation(kind: UsageProviderKind): UsageProviderPresentation {
+  return usagePresentationForKind(providerClients, kind);
+}
