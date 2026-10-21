@@ -6,6 +6,7 @@ import * as Exports from "../export/ExportService.ts";
 import * as AgentEvents from "../agents/AgentEventBus.ts";
 import * as AgentEventReactor from "../agents/AgentEventReactor.ts";
 import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
+import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as WorkHandoff from "../work/WorkHandoffService.ts";
 import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
 import * as AgentMcpPolicy from "../agents/AgentMcpPolicy.ts";
@@ -279,11 +280,11 @@ export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe
 // subscriber. Layers memoize by identity, so providing this twice below
 // still constructs one service.
 const layerProjectLabelsProvided = ProjectLabels.layer.pipe(
-  Layer.provide(layerEventInfrastructure),
+  Layer.provide(Layer.mergeAll(layerEventInfrastructure, ProjectLabelFolders.layer)),
 );
 const layerManagedProjectFoldersProvided = ManagedProjectFolders.layer.pipe(
   Layer.provide(layerProjectService),
-  Layer.provide(layerProjectLabelsProvided),
+  Layer.provide(Layer.mergeAll(layerProjectLabelsProvided, ProjectLabelFolders.layer)),
 );
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
   Layer.provide(
@@ -445,6 +446,7 @@ const layerProductionBase = Layer.mergeAll(
   GlobalSearch.layer.pipe(Layer.provide(AgentStore.layer)),
   Exports.layer,
   layerProjectLabelsProvided,
+  ProjectLabelFolders.layer,
   layerAgentWorkspaceProvided,
   layerAgentEventReactorProvided,
   layerAgentMcpPolicyProvided,

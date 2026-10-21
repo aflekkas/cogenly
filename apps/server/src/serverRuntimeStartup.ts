@@ -39,6 +39,7 @@ import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManag
 import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
+import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
@@ -426,6 +427,7 @@ const make = (options?: StartupOptions) =>
     const agentAwarenessRelay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
     const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
+    const projectLabelFolders = yield* ProjectLabelFolders.ProjectLabelFolders;
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
     const crypto = yield* Crypto.Crypto;
     const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
@@ -487,6 +489,25 @@ const make = (options?: StartupOptions) =>
               operation: error.operation,
               providerInstanceId: error.providerInstanceId,
               environmentVariable: error.environmentVariable,
+              cause: error.cause,
+            }),
+          ),
+        ),
+      );
+
+      yield* Effect.logDebug("startup phase: reconciling project folders");
+      yield* runStartupPhase(
+        "project-folders.reconcile",
+        projectLabelFolders.reconcile.pipe(
+          Effect.tap((summary) =>
+            summary.labels === 0
+              ? Effect.void
+              : Effect.logInfo("Reconciled project folders", summary),
+          ),
+          Effect.catch((error) =>
+            Effect.logWarning("failed to reconcile project folders", {
+              operation: error.operation,
+              path: error.path,
               cause: error.cause,
             }),
           ),

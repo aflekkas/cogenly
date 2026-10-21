@@ -39,12 +39,13 @@ import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
+import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ProjectService from "./ProjectService.ts";
 import {
   UNFILED_REPOSITORIES_SEGMENT,
   resolveProjectsRootDirectory,
-  resolveRepositoryDirectory,
+  sanitizePathSegment,
 } from "./ProjectsRoot.ts";
 
 export class ScratchUnavailableError extends Schema.TaggedError<ScratchUnavailableError>()(
@@ -421,21 +422,19 @@ const make = Effect.gen(function* () {
     Effect.mapError((cause) => new NamedProjectFolderError({ folder: "<projects root>", cause })),
   );
 
+  // Optional like in ProjectLabelService: without it the label's folder is
+  // `<root>/<sanitized name>/`, with it the reconciled folder (which a
+  // Finder rename may have moved).
+  const labelFolders = yield* Effect.serviceOption(ProjectLabelFolders.ProjectLabelFolders);
+
   const claimNamedFolder = Effect.fn("ManagedProjectFolders.claimNamedFolder")(function* (
     name: string,
-    projectName: string | null,
+    parent: string,
   ) {
-    const projectsRoot = yield* serverSettings.getSettings.pipe(
-      Effect.map((settings) =>
-        resolveProjectsRootDirectory(settings.projectsRoot, home, config.baseDir, path),
-      ),
-      Effect.mapError((cause) => new NamedProjectFolderError({ folder: "<projects root>", cause })),
-    );
-    // The same destination resolver as clone-into-project: `<root>/<Project>/
+    // The same destination shape as clone-into-project: `<root>/<Project>/
     // <slug>`, or `<root>/Repositories/<slug>` when unfiled.
     const folderName = newProjectFolderName(name);
-    const base = resolveRepositoryDirectory(projectsRoot, projectName, folderName, path);
-    const parent = path.dirname(base);
+    const base = path.join(parent, folderName);
     yield* fileSystem
       .makeDirectory(parent, { recursive: true })
       .pipe(Effect.mapError((cause) => new NamedProjectFolderError({ folder: parent, cause })));
@@ -504,9 +503,31 @@ const make = Effect.gen(function* () {
     "ManagedProjectFolders.createNamedProject",
   )(function* (input) {
     // Read before claiming anything, so an unknown label fails with no folder left behind.
-    const projectName =
-      input.labelId === undefined ? null : (yield* labels.read(input.labelId)).label.name;
-    const workspaceRoot = yield* claimNamedFolder(input.name, projectName);
+    const projectsRoot = yield* serverSettings.getSettings.pipe(
+      Effect.map((settings) =>
+        resolveProjectsRootDirectory(settings.projectsRoot, home, config.baseDir, path),
+      ),
+      Effect.mapError((cause) => new NamedProjectFolderError({ folder: "<projects root>", cause })),
+    );
+    let parent = path.join(projectsRoot, UNFILED_REPOSITORIES_SEGMENT);
+    if (input.labelId !== undefined) {
+      const label = (yield* labels.read(input.labelId)).label;
+      if (Option.isSome(labelFolders)) {
+        // The reconciled folder, healing a label whose folder went missing.
+        parent = (yield* labelFolders.value.ensureForLabel(label).pipe(
+          Effect.mapError(
+            (cause) =>
+              new NamedProjectFolderError({
+                folder: path.join(projectsRoot, sanitizePathSegment(label.name, "project")),
+                cause,
+              }),
+          ),
+        )).dir;
+      } else {
+        parent = path.join(projectsRoot, sanitizePathSegment(label.name, "project"));
+      }
+    }
+    const workspaceRoot = yield* claimNamedFolder(input.name, parent);
     const removeFolder = fileSystem.remove(workspaceRoot, { recursive: true }).pipe(Effect.ignore);
     // Until the create is dispatched nothing else can use the folder, so any
     // exit but success removes it, an interrupt included.

@@ -15,12 +15,13 @@ import type * as Path from "effect/Path";
 import {
   repositoryDirectoryNameFromRemote,
   resolveProjectsRootDirectory,
-  resolveRepositoryDirectory,
+  sanitizePathSegment,
 } from "../project/ProjectsRoot.ts";
 import type * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import type * as ProjectService from "../project/ProjectService.ts";
 import type * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import type * as ServerSettings from "../serverSettings.ts";
+import type * as ProjectLabelFolders from "./ProjectLabelFolders.ts";
 import type * as ProjectLabelService from "./ProjectLabelService.ts";
 
 export interface ProjectLabelCloneDeps {
@@ -39,6 +40,8 @@ export interface ProjectLabelCloneDeps {
   readonly path: Path.Path;
   readonly home: string;
   readonly cogenlyHome: string;
+  /** When present the clone lands in the reconciled folder, not the sanitized name. */
+  readonly folders?: Pick<ProjectLabelFolders.ProjectLabelFolders["Service"], "dirForLabel">;
   readonly refreshGitStatus: (cwd: string) => Effect.Effect<void>;
 }
 
@@ -67,12 +70,24 @@ export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.c
       (cause) => new ProjectLabelError({ operation: "cloneRepository", reason: "storage", cause }),
     ),
   );
-  const destinationPath = resolveRepositoryDirectory(
-    resolveProjectsRootDirectory(settings.projectsRoot, deps.home, deps.cogenlyHome, deps.path),
-    label.name,
-    folderName,
+  const projectsRoot = resolveProjectsRootDirectory(
+    settings.projectsRoot,
+    deps.home,
+    deps.cogenlyHome,
     deps.path,
   );
+  const projectDir =
+    deps.folders === undefined
+      ? deps.path.join(projectsRoot, sanitizePathSegment(label.name, "project"))
+      : (yield* deps.folders
+          .dirForLabel(label)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProjectLabelError({ operation: "cloneRepository", reason: "storage", cause }),
+            ),
+          )).dir;
+  const destinationPath = deps.path.join(projectDir, sanitizePathSegment(folderName, "repository"));
   const projectId =
     input.projectId ??
     ProjectId.make(

@@ -11,6 +11,7 @@ import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
+import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelOwnerSearch from "./projectLabels/ProjectOwnerRepositorySearch.ts";
 import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -1059,6 +1060,7 @@ const makeWsRpcHandlers = (
     const globalSearch = yield* GlobalSearch.GlobalSearch;
     const exports = yield* Exports.ExportService;
     const projectLabels = yield* ProjectLabels.ProjectLabelService;
+    const projectLabelFolders = yield* ProjectLabelFolders.ProjectLabelFolders;
     const github = yield* GitHubRest.GitHubRest;
     const home = yield* HostProcess.HomeDirectory;
     const path = yield* Path.Path;
@@ -1620,6 +1622,7 @@ const makeWsRpcHandlers = (
           path,
           home,
           cogenlyHome: config.baseDir,
+          folders: projectLabelFolders,
           refreshGitStatus,
         }),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
@@ -2700,6 +2703,7 @@ type WsRequestServices =
   | ProjectCloneTracker.ProjectCloneTracker
   | ProjectEnrichmentService.ProjectEnrichmentService
   | ProjectFaviconResolver.ProjectFaviconResolver
+  | ProjectLabelFolders.ProjectLabelFolders
   | ProjectLabels.ProjectLabelService
   | ProjectService.ProjectService
   | ProjectStore.ProjectStoreV2

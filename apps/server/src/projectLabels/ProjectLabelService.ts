@@ -29,6 +29,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as ProjectLabelFolders from "./ProjectLabelFolders.ts";
 
 type Labels = { readonly labels: ReadonlyArray<ProjectLabelWithRepositories> };
 type Tags = { readonly labels: ReadonlyArray<ThreadProjectLabel> };
@@ -233,6 +234,26 @@ const make = Effect.gen(function* () {
   const identities = yield* Effect.serviceOption(
     RepositoryIdentityResolver.RepositoryIdentityResolver,
   );
+  // Optional for the same reason: without it labels have no folders, and the
+  // folder reconcile heals anything created meanwhile once it is provided.
+  const folders = yield* Effect.serviceOption(ProjectLabelFolders.ProjectLabelFolders);
+  // Folder work runs after the database commit, so a disk failure never
+  // rolls back the label; startup reconcile heals the folder later.
+  const syncFolder = (
+    label: { id: ProjectLabelId; name: string },
+    renamed: boolean,
+  ): Effect.Effect<void> =>
+    Option.isNone(folders)
+      ? Effect.void
+      : (renamed ? folders.value.renameForLabel(label) : folders.value.ensureForLabel(label)).pipe(
+          Effect.asVoid,
+          Effect.catch((cause) =>
+            Effect.logWarning("Project folder could not be synced; reconcile will retry it.", {
+              labelId: label.id,
+              cause,
+            }),
+          ),
+        );
   // A linked repository files its own GitHub link with the project, so owner
   // search and the picker know it without a manual step. Best-effort: no
   // remote, a non-GitHub remote, or an unparseable one simply adds nothing.
@@ -336,17 +357,22 @@ const make = Effect.gen(function* () {
           yield* sql`INSERT INTO project_labels(label_id, name, color, description, created_at, updated_at) VALUES (${id}, ${input.name}, ${input.color ?? null}, ${input.description ?? null}, ${at}, ${at})`;
           return yield* get(id);
         }),
-      ),
+      ).pipe(Effect.tap(({ label }) => syncFolder(label, false))),
     update: (input) =>
-      mutate(
-        "update",
-        input,
-        Effect.gen(function* () {
-          const { label } = yield* get(input.id);
-          yield* sql`UPDATE project_labels SET name = ${input.name ?? label.name}, color = ${input.color === undefined ? (label.color ?? null) : input.color}, description = ${input.description === undefined ? (label.description ?? null) : input.description}, updated_at = ${yield* now} WHERE label_id = ${input.id}`;
-          return yield* get(input.id);
-        }),
-      ),
+      Effect.gen(function* () {
+        const previous = (yield* get(input.id)).label.name;
+        const result = yield* mutate(
+          "update",
+          input,
+          Effect.gen(function* () {
+            const { label } = yield* get(input.id);
+            yield* sql`UPDATE project_labels SET name = ${input.name ?? label.name}, color = ${input.color === undefined ? (label.color ?? null) : input.color}, description = ${input.description === undefined ? (label.description ?? null) : input.description}, updated_at = ${yield* now} WHERE label_id = ${input.id}`;
+            return yield* get(input.id);
+          }),
+        );
+        yield* syncFolder(result.label, input.name !== undefined && input.name !== previous);
+        return result;
+      }),
     delete: (id) =>
       mutate(
         "delete",
