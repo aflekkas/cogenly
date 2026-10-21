@@ -35,6 +35,7 @@ import {
   threadProjectFolderId,
 } from "./projectLabels.logic";
 import { composerProjectFolderId } from "./projectMeta.logic";
+import { HeroProjectSuffixText } from "./HeroProjectSuffix";
 import { ProjectFolderIcon } from "./ProjectFolderMark";
 import { reportProjectFolderFailure, useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
@@ -76,6 +77,11 @@ export function ComposerProjectPicker(props: {
   readonly draftId: DraftId | null;
   readonly size: ComposerControlSize;
   readonly disabled?: boolean;
+  /**
+   * `hero` is the new-chat greeting's " · in <project>" tail: the same picker,
+   * opened from the project's name, and nothing to click without a project.
+   */
+  readonly appearance?: "toolbar" | "hero";
 }) {
   const { environmentId, threadId } = props;
   const environmentIds = useMemo(() => [environmentId], [environmentId]);
@@ -203,6 +209,7 @@ export function ComposerProjectPicker(props: {
   };
 
   const triggerLabel = current ? `Project: ${current.label.name}` : "No project";
+  const isHero = props.appearance === "hero";
 
   return (
     <Combobox
@@ -225,35 +232,63 @@ export function ComposerProjectPicker(props: {
         if (option) void choose(option);
       }}
     >
-      <Tooltip>
-        <TooltipTrigger
+      {isHero ? (
+        // Stays mounted without a project, empty and out of reach, so the
+        // name can fade out and the greeting glide back to centre.
+        <ComboboxTrigger
+          disabled={props.disabled}
+          aria-label={current ? `In ${current.label.name}. Change project` : undefined}
+          aria-hidden={current === null || undefined}
+          tabIndex={current === null ? -1 : undefined}
+          data-hero-project-suffix=""
           render={
-            <ComboboxTrigger
-              disabled={props.disabled}
-              aria-label={triggerLabel}
-              data-composer-project-picker=""
-              render={<ComposerControl size={props.size} className="min-w-0" />}
+            <button
+              type="button"
+              className={cn(
+                "group/hero-suffix pointer-events-auto inline-block cursor-pointer rounded-sm align-baseline text-muted-foreground/60 outline-none transition-colors duration-(--motion-duration-fast) hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring data-popup-open:text-muted-foreground",
+                current === null && "pointer-events-none",
+              )}
             />
           }
         >
-          {current ? (
-            <ProjectFolderIcon
-              color={current.label.color}
-              className={props.size === "xs" ? "size-3" : "size-4"}
-            />
-          ) : (
-            <ComposerControlIcon icon={FolderIcon} size={props.size} />
-          )}
-          <span
-            data-composer-control-label
-            className={cn("max-w-40 truncate", current === null && "text-muted-foreground")}
+          <HeroProjectSuffixText name={current?.label.name ?? null} />
+        </ComboboxTrigger>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <ComboboxTrigger
+                disabled={props.disabled}
+                aria-label={triggerLabel}
+                data-composer-project-picker=""
+                render={<ComposerControl size={props.size} className="min-w-0" />}
+              />
+            }
           >
-            {current ? current.label.name : "No project"}
-          </span>
-        </TooltipTrigger>
-        <TooltipPopup side="top">{current ? "Change project" : "Add to a project"}</TooltipPopup>
-      </Tooltip>
-      <ComboboxPopup align="start" className="w-64">
+            {current ? (
+              <ProjectFolderIcon
+                color={current.label.color}
+                className={props.size === "xs" ? "size-3" : "size-4"}
+              />
+            ) : (
+              <ComposerControlIcon icon={FolderIcon} size={props.size} />
+            )}
+            <span
+              data-composer-control-label
+              className={cn("max-w-40 truncate", current === null && "text-muted-foreground")}
+            >
+              {current ? current.label.name : "No project"}
+            </span>
+          </TooltipTrigger>
+          <TooltipPopup side="top">{current ? "Change project" : "Add to a project"}</TooltipPopup>
+        </Tooltip>
+      )}
+      <ComboboxPopup
+        align={isHero ? "center" : "start"}
+        // Under the hero sentence, clear of its underline, as the Work hero's pickers sit.
+        {...(isHero ? { sideOffset: 8 } : {})}
+        className="w-64"
+      >
         <ComboboxSearchInput
           ref={searchRef}
           aria-label={naming ? "New project name" : "Find a project"}

@@ -48,6 +48,7 @@ import {
   soleRepositoryOf,
   toggleCollapsedGroup,
 } from "~/projectLabels/projectMeta.logic";
+import { ComposerProjectPicker } from "~/projectLabels/ComposerProjectPicker";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import {
   linkedGitHubOwners,
@@ -896,8 +897,9 @@ export function DraftHeroHeadline({
         <FadeSwap
           group="draft-heading"
           swapKey={
+            // A chat's project changes in place (the tail glides), not by a swap.
             isChatDraft
-              ? `chat:${chatProjectName ?? ""}`
+              ? "chat"
               : isScratchDraft
                 ? "no-repository"
                 : `repository:${heroProject?.key ?? ""}:${activeProjectKey}`
@@ -906,8 +908,14 @@ export function DraftHeroHeadline({
           {isChatDraft ? (
             <>
               {greeting}
-              {greetingSuffix ? (
-                <span className="text-muted-foreground/60">{greetingSuffix}</span>
+              {draftThread && draftId ? (
+                <ComposerProjectPicker
+                  appearance="hero"
+                  environmentId={draftThread.environmentId}
+                  threadId={draftThread.threadId}
+                  draftId={draftId}
+                  size="sm"
+                />
               ) : null}
             </>
           ) : isScratchDraft ? (
