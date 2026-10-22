@@ -9,7 +9,12 @@ import { useSidebarModeClassifier } from "../components/sidebar/modes/useSidebar
 import { useProjects, useServerConfigs, useThreadShells } from "../state/entities";
 import { useConnectedEnvironmentIds } from "../state/environments";
 import { indexProjectContents } from "./projectContents.logic";
-import { projectLabelKey, threadProjectFolderId } from "./projectLabels.logic";
+import {
+  projectChatThreadKeys,
+  projectLabelKey,
+  threadProjectFolderId,
+  withoutProjectChats,
+} from "./projectLabels.logic";
 import { useProjectLabelDirectory } from "./useProjectLabels";
 
 /**
@@ -25,7 +30,12 @@ export function useProjectContents() {
   const byProject = useMemo(
     () =>
       indexProjectContents({
-        threads: sortChatsByActivity(filterSidebarV2VisibleThreads(threads, null)),
+        threads: sortChatsByActivity(
+          withoutProjectChats(
+            filterSidebarV2VisibleThreads(threads, null),
+            projectChatThreadKeys(directory.labels),
+          ),
+        ),
         modeOf: (thread) => sidebarModeForThread(thread, classifier),
         folderKeyOf: (thread) => {
           const folderId = threadProjectFolderId(thread);

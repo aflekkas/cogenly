@@ -7,6 +7,8 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  projectChatThreadKeys,
+  withoutProjectChats,
   priorFiling,
   projectFolderChangeKind,
   projectLabelKey,
@@ -144,5 +146,34 @@ describe("projectFolderChangeKind", () => {
     expect(projectFolderChangeKind(chat({ surface: "builder", latestRun: run }), folder)).toBe(
       "move",
     );
+  });
+});
+
+describe("project chats", () => {
+  const withChat = (environmentId: string, id: string, chat: string | null) => ({
+    environmentId: environmentId as never,
+    label: { id, projectChatThreadId: chat } as never,
+  });
+
+  it("collects each folder's chat, scoped by environment", () => {
+    const keys = projectChatThreadKeys([
+      withChat("env-a", "spawn", "t1"),
+      withChat("env-b", "remote", "t1"),
+      withChat("env-a", "bartr", null),
+    ]);
+    expect([...keys].toSorted()).toEqual(["env-a:t1", "env-b:t1"]);
+  });
+
+  it("drops only the project chats from a thread list", () => {
+    const keys = projectChatThreadKeys([withChat("env-a", "spawn", "t1")]);
+    const threads = [
+      { environmentId: "env-a", id: "t1" },
+      { environmentId: "env-b", id: "t1" },
+      { environmentId: "env-a", id: "t2" },
+    ];
+    expect(withoutProjectChats(threads, keys)).toEqual([
+      { environmentId: "env-b", id: "t1" },
+      { environmentId: "env-a", id: "t2" },
+    ]);
   });
 });

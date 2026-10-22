@@ -188,3 +188,26 @@ export function projectFolderChangeKind(
 ): "move" | "fork" {
   return folderId !== null && threadForksIntoProjects(thread) ? "fork" : "move";
 }
+
+/**
+ * Each folder's own project chat, as `environmentId:threadId`. That thread
+ * lives on the project's page, so the Chats list and folder contents skip it.
+ */
+export function projectChatThreadKeys(
+  labels: ReadonlyArray<Pick<EnvironmentProjectLabel, "environmentId" | "label">>,
+): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const entry of labels) {
+    const threadId = entry.label.projectChatThreadId;
+    if (threadId) keys.add(`${entry.environmentId}:${threadId}`);
+  }
+  return keys;
+}
+
+/** `threads` without the project chats in `keys` (see `projectChatThreadKeys`). */
+export function withoutProjectChats<
+  T extends { readonly environmentId: string; readonly id: string },
+>(threads: ReadonlyArray<T>, keys: ReadonlySet<string>): T[] {
+  if (keys.size === 0) return [...threads];
+  return threads.filter((thread) => !keys.has(`${thread.environmentId}:${thread.id}`));
+}

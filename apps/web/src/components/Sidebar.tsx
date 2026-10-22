@@ -231,11 +231,13 @@ import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { RepositoryBadge } from "./sidebar/modes/RepositoryBadge";
 import { SidebarRenameField } from "./sidebar/SidebarRenameField";
 import {
+  projectChatThreadKeys,
   projectLabelKey,
   priorFiling,
   threadFolderState,
   threadForksIntoProjects,
   threadProjectFolderId,
+  withoutProjectChats,
   type ProjectLabelKey,
 } from "../projectLabels/projectLabels.logic";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
@@ -2470,6 +2472,10 @@ export default function Sidebar() {
   // Project folders hold chats and Work, across environments.
   const labelEnvironmentIds = useConnectedEnvironmentIds();
   const projectLabelDirectory = useProjectLabelDirectory(labelEnvironmentIds);
+  const projectChatKeys = useMemo(
+    () => projectChatThreadKeys(projectLabelDirectory.labels),
+    [projectLabelDirectory.labels],
+  );
   const moveThreadToFolder = useMoveThreadToFolder();
   // Chats | Work | Agents: the list below shows one mode's threads at a time.
   const sidebarModes = useSidebarModeState({
@@ -2654,7 +2660,11 @@ export default function Sidebar() {
       const preciseNow = new Date().toISOString();
       // Subagent child threads live in the parent's Agents surface, not the
       // sidebar roster (v2 models them as real threads with lineage).
-      const roster = filterSidebarV2VisibleThreads(sidebarModes.modeThreads, null);
+      // Project chats live on their project's page, not in the Chats list.
+      const roster = withoutProjectChats(
+        filterSidebarV2VisibleThreads(sidebarModes.modeThreads, null),
+        projectChatKeys,
+      );
       const visible = roster;
       inboxReturns.observe(workingShelfEnabled ? threads : null);
       const active: EnvironmentThreadShell[] = [];
@@ -2714,6 +2724,7 @@ export default function Sidebar() {
       };
     }, [
       nowMinute,
+      projectChatKeys,
       serverConfigs,
       sidebarMode,
       sidebarModes.modeThreads,
