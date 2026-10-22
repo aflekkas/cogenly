@@ -162,7 +162,7 @@ export function AgentProposalCard({
 
       <WorkLogCollapse open={creatable && proposal.complete} appear>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 px-4 py-3">
-          <Button variant="pixel" size="sm" disabled={creating} onClick={onCreate}>
+          <Button variant="brand" size="sm" disabled={creating} onClick={onCreate}>
             {creating ? "Creating…" : `Create ${proposal.name ?? "agent"}`}
           </Button>
           <span className="text-xs text-muted-foreground">or keep talking to adjust it</span>
