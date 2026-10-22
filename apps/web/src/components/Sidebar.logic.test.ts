@@ -28,6 +28,7 @@ import {
   resolveSidebarStageBadgeLabel,
   resolveSidebarThreadSection,
   resolveSidebarRowAccessibility,
+  shouldListWorkDraft,
   resolveSidebarThreadStatus,
   isSidebarThreadAwaitingUser,
   resolveSidebarV2TopStatus,
@@ -2081,5 +2082,42 @@ describe("Working shelf (beta)", () => {
         ).map((entry) => entry.id),
       ).toEqual(["asks-approval", "finished"]);
     });
+  });
+});
+
+describe("shouldListWorkDraft", () => {
+  it("skips an open draft that was empty on entry so no empty repository group appears", () => {
+    expect(
+      shouldListWorkDraft({
+        isRouteDraft: true,
+        routeDraftHadContentOnEntry: false,
+        hasContent: true,
+      }),
+    ).toBe(false);
+  });
+  it("lists an open draft that had content on entry", () => {
+    expect(
+      shouldListWorkDraft({
+        isRouteDraft: true,
+        routeDraftHadContentOnEntry: true,
+        hasContent: false,
+      }),
+    ).toBe(true);
+  });
+  it("lists other drafts only with content", () => {
+    expect(
+      shouldListWorkDraft({
+        isRouteDraft: false,
+        routeDraftHadContentOnEntry: false,
+        hasContent: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldListWorkDraft({
+        isRouteDraft: false,
+        routeDraftHadContentOnEntry: true,
+        hasContent: false,
+      }),
+    ).toBe(false);
   });
 });

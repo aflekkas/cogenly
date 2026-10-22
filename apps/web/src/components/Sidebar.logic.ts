@@ -1148,3 +1148,18 @@ export function sortScopedProjectsForSidebar<
       left.id.localeCompare(right.id),
   );
 }
+
+/**
+ * Whether a Work draft is listed (and so may open a repository group). Mirrors
+ * the draft card's own visibility: a draft shows when it has user content, and
+ * the open draft shows only if it had content when it became the route (its
+ * card is frozen at entry). Listing an empty open draft would leave its
+ * repository heading with no card beneath it.
+ */
+export function shouldListWorkDraft(input: {
+  isRouteDraft: boolean;
+  routeDraftHadContentOnEntry: boolean;
+  hasContent: boolean;
+}): boolean {
+  return input.isRouteDraft ? input.routeDraftHadContentOnEntry : input.hasContent;
+}

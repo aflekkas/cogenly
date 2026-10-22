@@ -191,6 +191,7 @@ import {
   useThreadJumpHintVisibility,
   type SidebarListItem,
   type SidebarSection,
+  shouldListWorkDraft,
 } from "./Sidebar.logic";
 import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
 import { createSidebarListMotion } from "./Sidebar.motion";
@@ -2541,16 +2542,37 @@ export default function Sidebar() {
   });
   // Work files each draft under its repository like any card, so the list
   // needs which drafts exist, not their text: a signature typing never
-  // changes. The open draft is listed as is; its card decides whether it
-  // shows (frozen at route entry, as in SidebarDraftBlock).
+  // changes. The open draft is listed only if it had content at route entry
+  // (the card is frozen then, as in SidebarDraftBlock); an empty one would
+  // leave its repository heading with nothing under it.
+  // Whether the open draft had content when it became the route, captured
+  // synchronously on route change like the card's own frozen snapshot.
+  const [routeDraftEntry, setRouteDraftEntry] = useState<{
+    draftId: string | null;
+    hadContent: boolean;
+  }>({ draftId: null, hadContent: false });
+  if (routeDraftEntry.draftId !== routeDraftIdForRows) {
+    setRouteDraftEntry({
+      draftId: routeDraftIdForRows,
+      hadContent:
+        routeDraftIdForRows !== null &&
+        composerDraftHasUserContent(
+          useComposerDraftStore.getState().draftsByThreadKey[routeDraftIdForRows],
+        ),
+    });
+  }
   const workDraftSignature = useComposerDraftStore((store) => {
     if (sidebarMode !== "tasks") return "";
     const parts: string[] = [];
     for (const [draftKey, session] of Object.entries(store.draftThreadsByThreadKey)) {
       if (session.promotedTo != null || !sidebarModes.draftInMode(session)) continue;
       if (
-        draftKey !== routeDraftIdForRows &&
-        !composerDraftHasUserContent(store.draftsByThreadKey[draftKey])
+        !shouldListWorkDraft({
+          isRouteDraft: draftKey === routeDraftIdForRows,
+          routeDraftHadContentOnEntry:
+            routeDraftEntry.draftId === draftKey && routeDraftEntry.hadContent,
+          hasContent: composerDraftHasUserContent(store.draftsByThreadKey[draftKey]),
+        })
       ) {
         continue;
       }
