@@ -207,3 +207,50 @@ export function toggleCollapsedGroup(
     ? collapsedKeys.filter((key) => key !== groupKey)
     : [...collapsedKeys, groupKey];
 }
+
+/**
+ * The line under the Work hero's heading, by what the draft has:
+ * - `repository`: a project and a repository ("in <repo> · or just the project folder");
+ * - `project-folder`: a project, no repository ("in the project folder · pick a repository…");
+ * - `pick-project`: a repository, no project ("in a project… · or start without a repository");
+ * - `pick-either`: neither ("in a project… · in a repository…").
+ * Chats have no line.
+ */
+export type WorkHeroSubline =
+  | "none"
+  | "repository"
+  | "project-folder"
+  | "pick-project"
+  | "pick-either";
+
+export interface WorkHeroLine {
+  readonly subline: WorkHeroSubline;
+  /**
+   * The repository picker's "No repository (project folder)" row: offered in
+   * a project when Work can start without a repository, checked once it does.
+   */
+  readonly projectFolderRow: "hidden" | "offered" | "selected";
+}
+
+export function workHeroLine(input: {
+  readonly isChat: boolean;
+  readonly hasProject: boolean;
+  /** False while the draft sits in the no-project home. */
+  readonly hasRepository: boolean;
+  /** Whether this machine can host Work without a repository. */
+  readonly canStartWithoutRepository: boolean;
+}): WorkHeroLine {
+  if (input.isChat) return { subline: "none", projectFolderRow: "hidden" };
+  if (input.hasProject) {
+    return input.hasRepository
+      ? {
+          subline: "repository",
+          projectFolderRow: input.canStartWithoutRepository ? "offered" : "hidden",
+        }
+      : { subline: "project-folder", projectFolderRow: "selected" };
+  }
+  return {
+    subline: input.hasRepository ? "pick-project" : "pick-either",
+    projectFolderRow: "hidden",
+  };
+}

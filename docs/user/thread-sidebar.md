@@ -148,9 +148,10 @@ palette, or press `mod+alt+n`. It starts on your current machine; before sending
 from the machine menu to move it there. To move a draft into a project, pick the
 project in the heading.
 
-Work started in a project without a repository (**No repository** under the
-heading) runs in the project's own folder, so the files the agent makes sit with
-the project's other files.
+Work started in a project without a repository (**or just the project folder**
+under the heading, or **No repository (project folder)** in its repository menu)
+runs in the project's own folder, so the files the agent makes sit with the
+project's other files.
 
 Each thread without a project works in its own folder under `~/.cogenly/scratch` (the
 `scratch` folder of your T3 data directory), named after its date, the first words
@@ -303,9 +304,11 @@ repositories. A project can hold several repositories, but each repository and e
 thread is in at most one project. Work goes in its repository's project unless you move
 it. Projects are context only; they never change what an agent can access.
 
-A new task can start in a project: pick it in the task's heading or the composer's
-project control, and the task moves to that project's most recently used repository.
-The line under the heading changes the repository, listing the project's own first.
+A new task can start in a project: pick it in the task's heading, with **in a
+project…** on the line under it, or in the composer's project control, and the task
+moves to that project's most recently used repository. The line under the heading
+changes the repository, listing the project's own first; **No repository (project
+folder)** runs the task in the project's own folder instead.
 
 Projects have their own sidebar view: pick **Projects** in the navigation rail (or the
 mobile switcher), or press `mod+alt+4`. Open a project to see its repositories, chats

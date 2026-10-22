@@ -3,7 +3,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
 import { CheckIcon, FolderIcon, FolderMinusIcon, PlusIcon } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   ComposerControl,
@@ -88,8 +88,15 @@ export function ComposerProjectPicker(props: {
    * `hero` is the new-chat greeting's " · in <project>" tail: the same picker,
    * opened from the project's name, and nothing to click without a project.
    * `headline` is the Work hero's "What should we build in <project>?".
+   * `subline` is the quiet "in a project…" under the Work hero's heading, for
+   * Work without a project yet.
    */
-  readonly appearance?: "toolbar" | "hero" | "headline";
+  readonly appearance?: "toolbar" | "hero" | "headline" | "subline";
+  /**
+   * `subline` only: what follows the picker on its line, after a middle dot.
+   * Shown alone when no project can be picked here.
+   */
+  readonly trailing?: ReactNode;
 }) {
   const { environmentId, threadId } = props;
   const environmentIds = useMemo(() => [environmentId], [environmentId]);
@@ -178,6 +185,10 @@ export function ComposerProjectPicker(props: {
   const isChat = surface !== "work" && surface !== "builder" && thread?.source.agent === undefined;
 
   const isHeadline = props.appearance === "headline";
+  const isSubline = props.appearance === "subline";
+  if (isSubline && (!canMove || !isWorkDraft || (projects.length === 0 && !canCreate))) {
+    return props.trailing ?? null;
+  }
   if (!canMove || !(isChat || isWorkDraft)) {
     // The Work hero still names its project when it cannot be changed here.
     return isHeadline && current ? (
@@ -254,8 +265,9 @@ export function ComposerProjectPicker(props: {
 
   const triggerLabel = current ? `Project: ${current.label.name}` : "No project";
   const isHero = props.appearance === "hero";
+  const inSentence = isHero || isHeadline || isSubline;
 
-  return (
+  const picker = (
     <Combobox
       items={options}
       filteredItems={options}
@@ -276,7 +288,17 @@ export function ComposerProjectPicker(props: {
         if (option) void choose(option);
       }}
     >
-      {isHeadline ? (
+      {isSubline ? (
+        // Its visible text names it, as the line's other choices are named.
+        <ComboboxTrigger
+          disabled={props.disabled}
+          data-hero-project-subline=""
+          render={<InlineButton tone="muted" />}
+          className="pointer-events-auto"
+        >
+          in a project…
+        </ComboboxTrigger>
+      ) : isHeadline ? (
         // Named mid-sentence: the visible project name is the accessible name.
         <ComboboxTrigger
           disabled={props.disabled}
@@ -348,9 +370,9 @@ export function ComposerProjectPicker(props: {
         </Tooltip>
       )}
       <ComboboxPopup
-        align={isHero || isHeadline ? "center" : "start"}
+        align={inSentence ? "center" : "start"}
         // Under the hero sentence, clear of its underline, as the Work hero's pickers sit.
-        {...(isHero || isHeadline ? { sideOffset: 8 } : {})}
+        {...(inSentence ? { sideOffset: 8 } : {})}
         className="w-64"
       >
         <ComboboxSearchInput
@@ -416,5 +438,12 @@ export function ComposerProjectPicker(props: {
         </ComboboxList>
       </ComboboxPopup>
     </Combobox>
+  );
+  return isSubline && props.trailing ? (
+    <Fragment>
+      {picker} · {props.trailing}
+    </Fragment>
+  ) : (
+    picker
   );
 }

@@ -16,6 +16,7 @@ import {
   threadProjectMeta,
   toggleCollapsedGroup,
   workDraftFolderId,
+  workHeroLine,
 } from "./projectMeta.logic";
 
 const env = "env" as EnvironmentId;
@@ -262,5 +263,49 @@ describe("repository picker groups", () => {
   it("toggles one group without touching the others", () => {
     expect(toggleCollapsedGroup(["env:bartr"], "env:spawn")).toEqual(["env:bartr", "env:spawn"]);
     expect(toggleCollapsedGroup(["env:bartr", "env:spawn"], "env:spawn")).toEqual(["env:bartr"]);
+  });
+});
+
+describe("workHeroLine", () => {
+  const line = (input: Partial<Parameters<typeof workHeroLine>[0]>) =>
+    workHeroLine({
+      isChat: false,
+      hasProject: false,
+      hasRepository: true,
+      canStartWithoutRepository: true,
+      ...input,
+    });
+
+  it("offers the project folder beside a project's repository", () => {
+    expect(line({ hasProject: true })).toEqual({
+      subline: "repository",
+      projectFolderRow: "offered",
+    });
+  });
+
+  it("does not offer the project folder where Work cannot run without a repository", () => {
+    expect(line({ hasProject: true, canStartWithoutRepository: false }).projectFolderRow).toBe(
+      "hidden",
+    );
+  });
+
+  it("says Work in a project without a repository runs in its folder", () => {
+    expect(line({ hasProject: true, hasRepository: false })).toEqual({
+      subline: "project-folder",
+      projectFolderRow: "selected",
+    });
+  });
+
+  it("lets Work without a project pick one, with or without a repository", () => {
+    expect(line({}).subline).toBe("pick-project");
+    expect(line({ hasRepository: false }).subline).toBe("pick-either");
+    expect(line({ hasRepository: false }).projectFolderRow).toBe("hidden");
+  });
+
+  it("leaves chats without a line", () => {
+    expect(line({ isChat: true, hasProject: true })).toEqual({
+      subline: "none",
+      projectFolderRow: "hidden",
+    });
   });
 });
