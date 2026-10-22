@@ -16,6 +16,7 @@ import {
   scopedRepositoryKey,
   threadFolderState,
   undoFolderId,
+  workThreadFolder,
   type EnvironmentProjectLabel,
 } from "./projectLabels.logic";
 
@@ -87,6 +88,28 @@ describe("threadFolderState", () => {
     const state = threadFolderState(thread("gone", "explicit"), directory);
     expect(state.current).toBeNull();
     expect(state.source).toBeNull();
+  });
+});
+
+describe("workThreadFolder", () => {
+  const work = (
+    projectId: string,
+    projectFolderId: string | null,
+    projectFolderSource: "explicit" | "repository" | null = null,
+  ) => ({ ...thread(projectFolderId, projectFolderSource), projectId: ProjectId.make(projectId) });
+
+  it("names the repository's project, even before the thread's own folder catches up", () => {
+    expect(workThreadFolder(work("server", "spawn", "repository"), directory)).toBe(spawn);
+    expect(workThreadFolder(work("server", null), directory)).toBe(spawn);
+  });
+
+  it("keeps an explicit filing over the repository's project", () => {
+    expect(workThreadFolder(work("server", "bartr", "explicit"), directory)).toBe(bartr);
+  });
+
+  it("drops a repository project the repository has left, and names none without one", () => {
+    expect(workThreadFolder(work("web", "spawn", "repository"), directory)).toBeNull();
+    expect(workThreadFolder(work("web", null), directory)).toBeNull();
   });
 });
 

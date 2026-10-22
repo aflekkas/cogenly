@@ -134,6 +134,33 @@ export function threadFolderState(
   };
 }
 
+/**
+ * The project a Work card names: an explicit filing, else the project its
+ * repository is in now. The repository's project is read from the live
+ * directory because a thread's server-resolved folder is only refreshed with
+ * the thread, so it lags a repository being added to or taken out of a project.
+ */
+export function workThreadFolder(
+  thread: FolderedThread & { readonly projectId: ProjectId },
+  directory: {
+    readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
+    readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
+  },
+): EnvironmentProjectLabel | null {
+  const folderId = threadProjectFolderId(thread);
+  const filed =
+    folderId === null
+      ? null
+      : (directory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
+  const source = thread.source.projectFolderSource ?? null;
+  if (source === "explicit") return filed;
+  const repositoryFolder =
+    directory.folderByRepository.get(scopedRepositoryKey(thread.environmentId, thread.projectId)) ??
+    null;
+  // An older server sends no source, so a folder it resolved may be explicit.
+  return source === "repository" || filed === null ? repositoryFolder : filed;
+}
+
 /** A filing to put back: the folder and how the thread was in it. */
 export interface PriorFiling {
   readonly id: ProjectLabelId;

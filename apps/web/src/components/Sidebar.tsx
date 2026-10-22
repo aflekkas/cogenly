@@ -235,12 +235,15 @@ import {
   projectChatThreadKeys,
   projectLabelKey,
   priorFiling,
+  scopedRepositoryKey,
   threadFolderState,
   threadForksIntoProjects,
   threadProjectFolderId,
   withoutProjectChats,
+  workThreadFolder,
   type ProjectLabelKey,
 } from "../projectLabels/projectLabels.logic";
+import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
 import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
@@ -570,6 +573,8 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   draftId: DraftId;
   composer: ComposerThreadDraftState;
   branch?: string | null;
+  /** The Work draft's project, named ahead of its branch like a Work card's. */
+  folder?: SidebarRowFolder | null;
   project: ProjectFaviconProject | null;
   projectDisplayName: string | null;
   isActive: boolean;
@@ -725,10 +730,18 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
             </span>
           </div>
           <div className="mt-1 flex min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
-            {props.branch ? (
+            {props.folder || props.branch ? (
               <>
-                <GitBranchIcon aria-hidden className="size-3 shrink-0" />
-                <span className="min-w-0 flex-1 fade-truncate">{props.branch}</span>
+                {props.folder ? (
+                  <ProjectFolderIcon color={props.folder.color} />
+                ) : (
+                  <GitBranchIcon aria-hidden className="size-3 shrink-0" />
+                )}
+                <span className="min-w-0 flex-1 fade-truncate">
+                  {props.folder ? <span>{props.folder.name}</span> : null}
+                  {props.folder && props.branch ? " · " : null}
+                  {props.branch}
+                </span>
               </>
             ) : null}
           </div>
@@ -749,6 +762,13 @@ const SidebarWorkDraftCard = memo(function SidebarWorkDraftCard(props: {
   branch: string | null;
   project: ProjectFaviconProject | null;
   projectDisplayName: string | null;
+  environmentId: EnvironmentId;
+  /** The project the draft's repository is in, which the draft follows. */
+  repositoryFolder: SidebarRowFolder | null;
+  folderForLabel: (
+    environmentId: EnvironmentId,
+    labelId: ProjectLabelId,
+  ) => SidebarRowFolder | null;
   isActive: boolean;
   onNavigate: (draftId: DraftId) => void;
   onContextMenu: (draftId: DraftId, position: { x: number; y: number }) => void;
@@ -773,12 +793,24 @@ const SidebarWorkDraftCard = memo(function SidebarWorkDraftCard(props: {
     props.isActive ? undefined : store.draftsByThreadKey[props.draftId],
   );
   const composer = props.isActive ? frozen.composer : withContent(liveComposer);
+  // A project picked in the Work hero rides on the draft until its first send.
+  const draftThreadId = useComposerDraftStore(
+    (store) => store.draftThreadsByThreadKey[props.draftId]?.threadId ?? null,
+  );
+  const pickedFolderId = usePendingProjectFolderStore((state) => {
+    const entry = draftThreadId === null ? undefined : state.byThreadId[draftThreadId];
+    return entry?.environmentId === props.environmentId ? entry.folderId : null;
+  });
+  const folder =
+    (pickedFolderId === null ? null : props.folderForLabel(props.environmentId, pickedFolderId)) ??
+    props.repositoryFolder;
   if (!composer) return null;
   return (
     <SidebarDraftRow
       draftId={props.draftId}
       composer={composer}
       branch={props.branch}
+      folder={folder}
       project={props.project}
       projectDisplayName={props.projectDisplayName}
       isActive={props.isActive}
@@ -2533,6 +2565,39 @@ export default function Sidebar() {
         : (byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
     };
   }, [projectLabelDirectory]);
+  // Work cards name their project: an explicit filing, else the project their
+  // repository is in now, so filing a repository shows on its Work at once.
+  // One stable object per project, so memoized cards skip unchanged renders.
+  const rowFolderByKey = useMemo(
+    () =>
+      new Map(
+        projectLabelDirectory.labels.map(
+          (entry) => [entry.key, { name: entry.label.name, color: entry.label.color }] as const,
+        ),
+      ),
+    [projectLabelDirectory],
+  );
+  const workFolderFor = useCallback(
+    (thread: SidebarThreadSummary): SidebarRowFolder | null => {
+      const entry = workThreadFolder(thread, projectLabelDirectory);
+      return entry ? (rowFolderByKey.get(entry.key) ?? null) : null;
+    },
+    [projectLabelDirectory, rowFolderByKey],
+  );
+  const repositoryFolderFor = useCallback(
+    (environmentId: EnvironmentId, projectId: ProjectId): SidebarRowFolder | null => {
+      const entry = projectLabelDirectory.folderByRepository.get(
+        scopedRepositoryKey(environmentId, projectId),
+      );
+      return entry ? (rowFolderByKey.get(entry.key) ?? null) : null;
+    },
+    [projectLabelDirectory, rowFolderByKey],
+  );
+  const folderForLabel = useCallback(
+    (environmentId: EnvironmentId, labelId: ProjectLabelId): SidebarRowFolder | null =>
+      rowFolderByKey.get(projectLabelKey(environmentId, labelId)) ?? null,
+    [rowFolderByKey],
+  );
   const chatProjectMetaAnimates = useChatProjectMetaAnimates(
     projectLabelDirectory.labels.length > 0,
   );
@@ -4874,7 +4939,7 @@ export default function Sidebar() {
                             ? null
                             : repositoryNameFor(thread)
                         }
-                        folder={folderFor(thread)}
+                        folder={sidebarMode === "tasks" ? workFolderFor(thread) : folderFor(thread)}
                         sweepAction={actionSweep?.keys.has(threadKey) ? actionSweep.action : null}
                         snoozeWakeLabelText={
                           section === "snoozed" && thread.snoozedUntil != null
@@ -5090,6 +5155,12 @@ export default function Sidebar() {
                           branch={draft.branch}
                           project={projectByKey.get(projectKey) ?? null}
                           projectDisplayName={projectDisplayNameByKey.get(projectKey) ?? null}
+                          environmentId={draft.environmentId}
+                          repositoryFolder={repositoryFolderFor(
+                            draft.environmentId,
+                            draft.projectId,
+                          )}
+                          folderForLabel={folderForLabel}
                           isActive={draft.draftId === routeDraftIdForRows}
                           onNavigate={navigateToDraft}
                           onContextMenu={handleDraftContextMenu}
