@@ -3,6 +3,7 @@
 ## Using Cogenly
 
 - [Install Cogenly](./user/install.md)
+- [First-run setup](./user/welcome-wizard.md)
 - [Messages and context](./user/composer.md)
 - [Working with threads](./user/thread-sidebar.md)
 - [Memory and export](./user/memory-and-export.md)
@@ -12,6 +13,7 @@
 - [Appearance and themes](./user/appearance.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Visual replies](./user/html-renders.md)
+- [Importing from T3 Code](./user/importing-from-t3-code.md)
 - [Import browser sessions](./user/browser-import.md)
 - [Use Cogenly as your default browser](./user/default-browser.md)
 - [Devices](./user/devices.md)
@@ -50,6 +52,7 @@ source alone does not explain. Most code changes do not need an internal documen
 - [Terminal runtime](./internals/terminal-runtime.md)
 - [Devices](./internals/devices.md)
 - [Voice input](./internals/voice-input.md)
+- [Import from T3 Code](./internals/t3-import.md)
 
 ### Runbooks
 

@@ -3,28 +3,34 @@
 Cogenly shows a setup flow when you open a new installation or connect to the
 hosted app for the first time. Existing workspaces skip this flow.
 
-## Connect your computers
+## This computer is set up for you
 
-Select one or more computers to set up. If you opened Cogenly directly from a
-server or the desktop app, that computer is already connected and selected.
-It is identified by its name, which may differ from the device running your
-browser.
+When you open the desktop app, or Cogenly served by `cogenly serve` on your
+computer, setup uses that computer right away. It is already connected, so
+setup goes straight to checking your agents. Add more computers later in
+**Settings → Connections**.
 
-You can add more computers before continuing:
+## Connect a computer (hosted app)
 
-- **T3 Connect** connects computers that are signed in to your account.
-  [Install the CLI](./install.md#command-line) and run `t3 connect` on each
-  computer you want to add, then start Cogenly or run `t3 serve` so the
+The hosted app has no computer of its own, so setup starts by connecting one.
+Select one or more computers to set up.
+
+- **Cogenly Connect** connects computers that are signed in to your account.
+  [Install the CLI](./install.md#command-line) and run `cogenly connect` on each
+  computer you want to add, then start Cogenly or run `cogenly serve` so the
   computer stays available.
 - **Add a computer** connects directly to a server on your network or tailnet.
-  Start the server with `t3 serve`, then run `t3 pair --tailscale` and paste
-  the pairing link. You can also run `t3 serve --host <address>` and use
-  `t3 pair` when the server is already reachable on your network.
+  Start the server with `cogenly serve`, then run `cogenly pair --tailscale` and paste
+  the pairing link. You can also run `cogenly serve --host <address>` and use
+  `cogenly pair` when the server is already reachable on your network.
 
-Saved computers and computers discovered through T3 Connect are selected by
+Saved computers and computers discovered through Cogenly Connect are selected by
 default. Uncheck any you do not want to set up; this does not disconnect them.
 Continue when your selected computers are connected. Setup checks
 agents across the selected computers, then offers project import grouped by computer.
+
+If your own computer cannot connect during setup, Cogenly shows this step too,
+so you can pick another computer.
 
 If Cogenly cannot confirm the workspace during startup, the setup flow shows
 **Still connecting** instead of opening the app. Select **Reload** to try again.
@@ -45,9 +51,23 @@ The setup terminal uses the home directory and environment configured for the
 selected provider instance. Sensitive values remain redacted in Settings and
 terminal metadata while the terminal process can use them.
 
+## Bring your projects over from T3 Code
+
+If Cogenly finds T3 Code on the computer, setup offers **Bring your projects
+and chats over from T3 Code**. It imports each project's full history, subagent
+threads, attachments, and providers, the same as **Settings → Import**. See
+[Importing from T3 Code](./importing-from-t3-code.md). Quit T3 Code first.
+
+In that case setup does not offer the Claude Code and Codex session import
+below by default, because it reads the same conversations and would add a
+second, shorter copy of each. Select **Or import raw Claude Code and Codex
+sessions** only for conversations you had outside T3 Code.
+
+You can skip this step and import later from **Settings → Import**.
+
 ## Import your projects
 
-Cogenly finds directories that Claude Code or Codex has used. Git repositories
+Without T3 Code, Cogenly finds directories that Claude Code or Codex has used. Git repositories
 are listed first, newest activity on top. When the remote is on GitHub, the
 group shows the repository as `owner/name`. Clones with the same remote share
 one group. Directories that are not git repositories sit under "Other folders".

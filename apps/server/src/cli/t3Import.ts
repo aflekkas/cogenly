@@ -22,7 +22,7 @@ const encodeResult = Schema.encodeEffect(Schema.fromJsonString(T3ImportResult));
 
 /**
  * Offline Import from T3 Code against a Cogenly home that no server is using.
- * The app's Settings → Data → Import is the normal entry point; this exists for
+ * The app's Settings → Import (or onboarding) is the normal entry point; this exists for
  * rehearsals against a copied home. Prints JSON (counts only, no content).
  */
 export const t3ImportCommand = Command.make("t3-import", {
