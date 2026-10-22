@@ -4,7 +4,7 @@ import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments"
 import { readFilePreviewResponse } from "@t3tools/client-runtime/file-preview";
 import { filePreviewKind, FILE_TEXT_PREVIEW_MAX_BYTES } from "@t3tools/shared/filePreview";
 import { ChevronRightIcon, DownloadIcon, Trash2Icon, WrapTextIcon, XIcon } from "lucide-react";
-import { Check, Code2, Copy, Eye, Table2 } from "lucide";
+import { Code2, Eye, Table2 } from "lucide";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAssetUrlRefresh } from "~/assets/assetUrls";
@@ -13,7 +13,7 @@ import { MorphIcon } from "~/components/MorphIcon";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { toastManager } from "~/components/ui/toast";
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { CopyButton } from "~/components/ui/copy-button";
 import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 
@@ -74,7 +74,6 @@ export function AttachmentFilePreview(props: {
   const renderedMode =
     kind === "markdown" ? "markdown" : kind === "html" ? "html" : delimiter ? "table" : null;
   const attachmentId = props.asset?.attachmentId;
-  const { copyToClipboard, isCopied } = useCopyToClipboard({ target: props.name });
   const resource = useMemo(
     () =>
       attachmentId
@@ -330,12 +329,13 @@ export function AttachmentFilePreview(props: {
           </FileSurfaceAction>
         ) : null}
         {content ? (
-          <FileSurfaceAction
-            label={isCopied ? "Copied" : content.truncated ? "Copy preview" : "Copy contents"}
-            onPress={() => copyToClipboard(content.text, undefined)}
-          >
-            <MorphIcon className="size-3.5" icon={isCopied ? Check : Copy} />
-          </FileSurfaceAction>
+          <CopyButton
+            label={content.truncated ? "Copy preview" : "Copy contents"}
+            size="icon-sm"
+            target={props.name}
+            value={content.text}
+            variant="ghost"
+          />
         ) : null}
         {url ? (
           <FileSurfaceAction

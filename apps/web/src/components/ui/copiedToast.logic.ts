@@ -71,6 +71,3 @@ export function describeCopiedToast(subject: CopiedToastSubject): CopiedToastCon
       return { title: "Branch copied", label: plainToastLabel(subject.branch), icon: "branch" };
   }
 }
-
-/** How long a copy button holds its check icon after a copy lands. */
-export const COPY_CONFIRMATION_MS = 1500;

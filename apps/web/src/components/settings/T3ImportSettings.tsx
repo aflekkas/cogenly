@@ -1,4 +1,5 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { CopyButton } from "../ui/copy-button";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -14,7 +15,6 @@ import {
 import { CircleCheckIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { formatBytes } from "../../lib/formatBytes";
 import { readLocalApi } from "../../localApi";
 import { t3ImportRpc } from "../../rpc/t3Import";
@@ -776,7 +776,6 @@ function DoneSection({
   busy: boolean;
   onCheckAgain: () => void;
 }) {
-  const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "backup path" });
   const selectMode = useSelectSidebarMode();
   return (
     <SettingsSection id="t3-import-done" title="Imported">
@@ -809,13 +808,15 @@ function DoneSection({
         title="Backup"
         description={<span className="block break-all select-all">{result.backupPath}</span>}
         control={
-          <Button
+          <CopyButton
+            label="Copy backup path"
             size="sm"
+            target="backup path"
+            value={result.backupPath}
             variant="outline"
-            onClick={() => copyToClipboard(result.backupPath, undefined)}
           >
-            {isCopied ? "Copied" : "Copy path"}
-          </Button>
+            Copy path
+          </CopyButton>
         }
       />
       <SettingsRow

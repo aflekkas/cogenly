@@ -1,4 +1,5 @@
 import { shellEnvironment } from "../../state/shell";
+import { CopyButton } from "../ui/copy-button";
 import { ProcessSignalActions } from "./ProcessSignalActions";
 import { resolveUsageAccess } from "@t3tools/client-runtime/state/usage-access";
 import { environmentSession } from "../../state/session";
@@ -6,7 +7,7 @@ import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { AuthEnvironmentMaintainScope } from "@t3tools/contracts";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { AlertTriangleIcon, CopyIcon, FolderOpenIcon, InfoIcon } from "lucide-react";
+import { AlertTriangleIcon, FolderOpenIcon, InfoIcon } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide";
 import {
   isAtomCommandInterrupted,
@@ -26,7 +27,6 @@ import { ensureLocalApi } from "../../localApi";
 import { formatRelativeTimeLabel, getRelativeTimeState } from "../../timestampFormat";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Button } from "../ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { ScrollArea } from "../ui/scroll-area";
@@ -205,11 +205,6 @@ function DiagnosticsTable({
 }
 
 function TraceIdCell({ traceId }: { traceId: string }) {
-  const { copyToClipboard, isCopied: copied } = useCopyToClipboard({
-    target: "trace ID",
-    timeout: 1_200,
-  });
-
   return (
     <div className="flex w-full min-w-0 max-w-full items-center gap-2">
       <Tooltip>
@@ -224,21 +219,7 @@ function TraceIdCell({ traceId }: { traceId: string }) {
           {traceId}
         </TooltipPopup>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              size="icon-micro"
-              variant="ghost-muted"
-              aria-label={copied ? "Copied trace ID" : "Copy trace ID"}
-              onClick={() => copyToClipboard(traceId)}
-            >
-              <CopyIcon className="size-3" />
-            </Button>
-          }
-        />
-        <TooltipPopup side="top">{copied ? "Copied" : "Copy full trace ID"}</TooltipPopup>
-      </Tooltip>
+      <CopyButton label="Copy full trace ID" size="icon-micro" target="trace ID" value={traceId} />
     </div>
   );
 }

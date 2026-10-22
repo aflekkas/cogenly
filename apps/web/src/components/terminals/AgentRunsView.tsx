@@ -1,8 +1,8 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { Bot, Check, Copy, ExternalLink, Square } from "lucide-react";
+import { Bot, ExternalLink, Square } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { CopyButton } from "~/components/ui/copy-button";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
 import {
@@ -261,7 +261,6 @@ function RunCommandHeader({
   onStop: (entry: AgentTerminalEntry) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const { copyToClipboard, isCopied } = useCopyToClipboard();
   const live = isAgentTerminalRunning(entry);
   const location = shortenHomePath(entry.worktreePath ?? entry.cwd);
   const toggle = (element: HTMLElement) => {
@@ -304,12 +303,13 @@ function RunCommandHeader({
               onStop={onStop}
             />
           ) : null}
-          <IconAction
-            label={isCopied ? "Copied" : "Copy command"}
-            onClick={() => copyToClipboard(entry.label, undefined)}
-          >
-            {isCopied ? <Check /> : <Copy />}
-          </IconAction>
+          <CopyButton
+            label="Copy command"
+            size="icon-micro"
+            target="command"
+            value={entry.label}
+            variant="ghost"
+          />
         </div>
       </div>
       <div className="flex min-w-0 items-center gap-3 text-3xs text-muted-foreground">

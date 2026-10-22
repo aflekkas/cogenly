@@ -1,12 +1,9 @@
-import { Check, Copy } from "lucide";
 import { useEffect, useMemo, useRef } from "react";
 
 import { APP_DISPLAY_NAME, APP_VERSION } from "../branding";
-import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
-import { cn } from "../lib/utils";
 import { PIXEL_MARK_URL } from "../lib/pixelMark";
-import { MorphIcon } from "./MorphIcon";
 import { Button } from "./ui/button";
+import { CopyButton } from "./ui/copy-button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 import { DisclosureChevron } from "./ui/disclosure";
 
@@ -61,15 +58,11 @@ export function AppErrorScreen({
   );
 }
 
-/** Copies the full error report and swaps to a check mark for a moment as confirmation. */
 function CopyErrorButton({ report }: { report: string }) {
-  const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "error-report" });
-
   return (
-    <Button size="xs" variant="ghost-muted" onClick={() => copyToClipboard(report)}>
-      <MorphIcon className={cn(isCopied && "text-success")} icon={isCopied ? Check : Copy} />
-      {isCopied ? "Copied" : "Copy error"}
-    </Button>
+    <CopyButton label="Copy error" size="xs" target="error report" value={report}>
+      Copy error
+    </CopyButton>
   );
 }
 

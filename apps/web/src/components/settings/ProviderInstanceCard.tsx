@@ -1,12 +1,12 @@
 "use client";
 
+import { CopyButton } from "../ui/copy-button";
 import { Spinner } from "~/components/ui/spinner";
 
 import {
   AlertTriangleIcon,
   CheckIcon,
   ArrowUpCircleIcon,
-  CopyIcon,
   DownloadIcon,
   LayersIcon,
   PlusIcon,
@@ -35,7 +35,6 @@ import {
   toCustomModelSetting,
 } from "@t3tools/shared/model";
 import { cn } from "../../lib/utils";
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -726,24 +725,6 @@ export function ProviderInstanceCard({
   const displayName =
     instance.displayName?.trim() || driverOption?.label || String(instance.driver);
   const accentColor = normalizeProviderAccentColor(instance.accentColor);
-  const { copyToClipboard } = useCopyToClipboard<{ providerName: string }>({
-    onCopy: ({ providerName }) => {
-      toastManager.add({
-        type: "success",
-        title: `${providerName} update command copied`,
-        description: "Run it in a terminal when you are ready to update.",
-      });
-    },
-    onError: (error, { providerName }) => {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: `Could not copy ${providerName} update command`,
-          description: error.message,
-        }),
-      );
-    },
-  });
 
   // Narrow `instance.driver` for callers that key on the closed
   // `ProviderDriverKind` union (e.g. `normalizeModelSlug`'s alias table). Custom
@@ -981,23 +962,27 @@ export function ProviderInstanceCard({
               <code className="min-w-0 flex-1 truncate font-mono text-2xs text-foreground">
                 {updateCommand}
               </code>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      type="button"
-                      size="icon-xs"
-                      variant="ghost-muted"
-                      className="shrink-0"
-                      onClick={() => copyToClipboard(updateCommand, { providerName: displayName })}
-                      aria-label="Copy update command"
-                    >
-                      <CopyIcon className="size-3" />
-                    </Button>
-                  }
-                />
-                <TooltipPopup side="top">Copy command</TooltipPopup>
-              </Tooltip>
+              <CopyButton
+                label="Copy update command"
+                target="update command"
+                value={updateCommand}
+                onCopied={() =>
+                  toastManager.add({
+                    type: "success",
+                    title: `${displayName} update command copied`,
+                    description: "Run it in a terminal when you are ready to update.",
+                  })
+                }
+                onError={(error) =>
+                  toastManager.add(
+                    stackedThreadToast({
+                      type: "error",
+                      title: `Could not copy ${displayName} update command`,
+                      description: error.message,
+                    }),
+                  )
+                }
+              />
             </div>
           ) : null}
         </div>

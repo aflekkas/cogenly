@@ -182,11 +182,12 @@ import {
   HammerIcon,
   WrenchIcon,
   Code2Icon,
+  LinkIcon,
   XIcon,
   ZapIcon,
   RotateCcwIcon,
 } from "lucide-react";
-import { ChevronDown, ChevronRight, Link as LinkIconNode } from "lucide";
+import { ChevronDown, ChevronRight } from "lucide";
 import type {
   ComposerContextId,
   ComposerContextRecord,
@@ -215,7 +216,8 @@ import {
   rememberTimelinePosition,
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
-import { MessageCopyButton } from "./MessageCopyButton";
+import { showClipboardCopiedToast } from "../ui/copiedToast";
+import { CopyButton } from "../ui/copy-button";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { WorkspaceEntryIcon, WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
@@ -2930,22 +2932,29 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
               <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
             )}
             {resolvedContext.text && (
-              <MessageCopyButton
+              <CopyButton
+                label="Copy message"
+                target="message"
+                onCopied={showClipboardCopiedToast}
                 // Structured paste needs the canonical links to retain their positions.
-                text={contextClipboardFragment ? resolvedContext.text : plainText}
+                value={contextClipboardFragment ? resolvedContext.text : plainText}
                 {...(contextClipboardFragment
                   ? {
                       extraFlavors: { [COMPOSER_CONTEXT_CLIPBOARD_MIME]: contextClipboardFragment },
                     }
                   : {})}
+                size="xs"
                 variant="ghost"
               />
             )}
             {promptLink !== null && (
-              <MessageCopyButton
-                text={promptLink}
+              <CopyButton
+                value={promptLink}
                 label="Copy prompt link"
-                icon={LinkIconNode}
+                target="prompt link"
+                onCopied={showClipboardCopiedToast}
+                icon={LinkIcon}
+                size="xs"
                 variant="ghost"
               />
             )}
@@ -3400,7 +3409,16 @@ function AssistantCopyButton({
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  return (
+    <CopyButton
+      value={assistantCopyState.text ?? ""}
+      label="Copy message"
+      target="message"
+      onCopied={showClipboardCopiedToast}
+      size="xs"
+      variant="ghost"
+    />
+  );
 }
 
 function ProposedPlanTimelineRow({

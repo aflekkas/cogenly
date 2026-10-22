@@ -95,6 +95,8 @@ import {
 } from "~/browser/browserRecording";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
+import { COPY_FEEDBACK_MS, createCopyFeedback } from "~/hooks/copyFeedback.logic";
+import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { observeResize } from "~/lib/observeResize";
 
 interface Props {
@@ -635,41 +637,29 @@ export function PreviewView({
             let pathCopied = false;
             let toastId: ReturnType<typeof toastManager.add>;
 
+            // The toast's action label follows the same copied-then-revert feedback as copy buttons.
+            const pathFeedback = createCopyFeedback({
+              resetMs: COPY_FEEDBACK_MS,
+              onStatus: (status) => {
+                pathCopied = status === "copied";
+                updateRecordingToast();
+              },
+            });
             const copyPath = () => {
-              if (!navigator.clipboard?.writeText) {
-                toastManager.update(
-                  toastId,
-                  stackedThreadToast({
-                    type: "error",
-                    title: "Unable to copy recording path",
-                    description: "Clipboard API unavailable.",
-                    actionProps: revealAction,
-                  }),
-                );
-                return;
-              }
-
-              void navigator.clipboard.writeText(artifact.path).then(
-                () => {
-                  pathCopied = true;
-                  updateRecordingToast();
-                  window.setTimeout(() => {
-                    pathCopied = false;
-                    updateRecordingToast();
-                  }, 2_000);
-                },
-                (error) => {
+              void pathFeedback
+                .run(() => writeTextToClipboard(artifact.path, "recording path"))
+                .then((outcome) => {
+                  if (outcome.kind !== "failed") return;
                   toastManager.update(
                     toastId,
                     stackedThreadToast({
                       type: "error",
                       title: "Unable to copy recording path",
-                      description: error instanceof Error ? error.message : "An error occurred.",
+                      description: outcome.error.message,
                       actionProps: revealAction,
                     }),
                   );
-                },
-              );
+                });
             };
 
             const revealAction = {
@@ -685,7 +675,7 @@ export function PreviewView({
                   actionProps: revealAction,
                   data: {
                     secondaryActionProps: {
-                      children: pathCopied ? "Copied!" : "Copy path",
+                      children: pathCopied ? "Copied" : "Copy path",
                       disabled: pathCopied,
                       onClick: copyPath,
                     },
@@ -754,7 +744,7 @@ export function PreviewView({
                 title,
                 description,
                 actionProps: {
-                  children: imageCopied ? "Copied!" : "Copy image",
+                  children: imageCopied ? "Copied" : "Copy image",
                   disabled: imageCopied,
                   onClick: copyImage,
                 },
@@ -763,7 +753,7 @@ export function PreviewView({
                     {
                       id: "copy-path",
                       props: {
-                        children: pathCopied ? "Copied!" : "Copy path",
+                        children: pathCopied ? "Copied" : "Copy path",
                         disabled: pathCopied,
                         onClick: copyPath,
                       },
@@ -778,53 +768,40 @@ export function PreviewView({
             );
           };
 
+          const pathFeedback = createCopyFeedback({
+            resetMs: COPY_FEEDBACK_MS,
+            onStatus: (status) => {
+              pathCopied = status === "copied";
+              updateScreenshotToast();
+            },
+          });
+          const imageFeedback = createCopyFeedback({
+            resetMs: COPY_FEEDBACK_MS,
+            onStatus: (status) => {
+              imageCopied = status === "copied";
+              updateScreenshotToast();
+            },
+          });
           const copyPath = () => {
-            if (!navigator.clipboard?.writeText) {
-              updateScreenshotToast(
-                "error",
-                "Unable to copy screenshot path",
-                "Clipboard API unavailable.",
-              );
-              return;
-            }
-
-            void navigator.clipboard.writeText(artifact.path).then(
-              () => {
-                pathCopied = true;
-                updateScreenshotToast();
-                window.setTimeout(() => {
-                  pathCopied = false;
-                  updateScreenshotToast();
-                }, 2_000);
-              },
-              (error) => {
+            void pathFeedback
+              .run(() => writeTextToClipboard(artifact.path, "screenshot path"))
+              .then((outcome) => {
+                if (outcome.kind !== "failed") return;
                 updateScreenshotToast(
                   "error",
                   "Unable to copy screenshot path",
-                  error instanceof Error ? error.message : "An error occurred.",
+                  outcome.error.message,
                 );
-              },
-            );
+              });
           };
 
           const copyImage = () => {
-            void bridge.copyArtifactToClipboard(artifact.path).then(
-              () => {
-                imageCopied = true;
-                updateScreenshotToast();
-                window.setTimeout(() => {
-                  imageCopied = false;
-                  updateScreenshotToast();
-                }, 2_000);
-              },
-              (error) => {
-                updateScreenshotToast(
-                  "error",
-                  "Unable to copy screenshot",
-                  error instanceof Error ? error.message : "An error occurred.",
-                );
-              },
-            );
+            void imageFeedback
+              .run(() => bridge.copyArtifactToClipboard(artifact.path).then(() => true))
+              .then((outcome) => {
+                if (outcome.kind !== "failed") return;
+                updateScreenshotToast("error", "Unable to copy screenshot", outcome.error.message);
+              });
           };
 
           toastId = toastManager.add(

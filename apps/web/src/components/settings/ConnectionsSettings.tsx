@@ -61,6 +61,7 @@ import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { CopyButton } from "../ui/copy-button";
 import { cn } from "../../lib/utils";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
@@ -653,11 +654,11 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
     window.isSecureContext &&
     navigator.clipboard?.writeText != null;
 
-  const { copyToClipboard } = useCopyToClipboard<{
-    value: string;
-    kind: "code" | "hosted-link" | "link";
-  }>({
-    onCopy: ({ kind }) => {
+  /** CopyButton wiring for one pairing value: its success toast, and the reveal dialog on failure. */
+  const pairingCopyProps = (value: string, kind: "code" | "hosted-link" | "link") => ({
+    value,
+    target: "pairing value",
+    onCopied: () => {
       toastManager.add({
         type: "success",
         title:
@@ -674,7 +675,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
               : "Paste it into another client to finish pairing.",
       });
     },
-    onError: (error, { value, kind }) => {
+    onError: (error: Error) => {
       // Captured per attempt so concurrent copies cannot make the dialog
       // reveal a different value than the one that failed.
       setFailedCopyValue(value);
@@ -695,21 +696,10 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
     },
   });
 
-  const copyPairingValue = useCallback(
-    (value: string, kind: "code" | "hosted-link" | "link") => {
-      copyToClipboard(value, { value, kind });
-    },
-    [copyToClipboard],
-  );
-
   const copyKindForUrl = useCallback(
     (url: string): "hosted-link" | "link" => (isHostedAppPairingUrl(url) ? "hosted-link" : "link"),
     [],
   );
-
-  const handleCopyCode = useCallback(() => {
-    if (credential) copyPairingValue(credential, "code");
-  }, [copyPairingValue, credential]);
 
   const expiresAbsolute = formatAccessTimestamp(pairingLink.expiresAt);
 
@@ -781,9 +771,14 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
           >
             {!credential ? null : canCopyToClipboard ? (
               shareablePairingUrl ? null : (
-                <Button size="xs" variant="outline" onClick={handleCopyCode}>
+                <CopyButton
+                  {...pairingCopyProps(credential, "code")}
+                  label="Copy pairing code"
+                  size="xs"
+                  variant="outline"
+                >
                   Copy code
-                </Button>
+                </CopyButton>
               )
             ) : (
               <DialogTrigger render={<Button size="xs" variant="outline" />}>
@@ -832,9 +827,14 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                   Done
                 </Button>
                 {canCopyToClipboard ? (
-                  <Button variant="outline" onClick={handleCopyCode}>
+                  <CopyButton
+                    {...pairingCopyProps(credential ?? "", "code")}
+                    label="Copy pairing code"
+                    size="default"
+                    variant="outline"
+                  >
                     Copy code
-                  </Button>
+                  </CopyButton>
                 ) : null}
               </DialogFooter>
             </DialogPopup>
@@ -905,18 +905,25 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                 />
                 <TooltipPopup side="top">{qrPairingUrl}</TooltipPopup>
               </Tooltip>
-              <Button
-                size="xs"
-                variant="ghost"
-                className="shrink-0"
-                onClick={() => copyPairingValue(qrPairingUrl, copyKindForUrl(qrPairingUrl))}
-              >
-                Copy link
-              </Button>
+              <span className="shrink-0">
+                <CopyButton
+                  {...pairingCopyProps(qrPairingUrl, copyKindForUrl(qrPairingUrl))}
+                  label="Copy pairing link"
+                  size="xs"
+                  variant="ghost"
+                >
+                  Copy link
+                </CopyButton>
+              </span>
             </div>
-            <Button size="xs" variant="ghost" onClick={handleCopyCode}>
+            <CopyButton
+              {...pairingCopyProps(credential ?? "", "code")}
+              label="Copy pairing code"
+              size="xs"
+              variant="ghost"
+            >
               Copy code only
-            </Button>
+            </CopyButton>
           </div>
           {canRenderQrForSelection ? (
             <div className="w-fit shrink-0 self-center rounded-xl bg-white p-3 sm:self-start">

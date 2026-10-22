@@ -1,8 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
+import { CopyButton } from "../ui/copy-button";
 import { shouldRecommendDatabaseCompaction, type EnvironmentId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { serverEnvironment } from "../../state/server";
 import { Button } from "../ui/button";
@@ -23,7 +23,6 @@ export function DatabaseStorageNotice({
     false,
     Schema.Boolean,
   );
-  const { copyToClipboard } = useCopyToClipboard({ target: "command" });
   const status = result._tag === "Success" ? result.value : null;
   if (dismissed || status === null || !shouldRecommendDatabaseCompaction(status)) return null;
   return (
@@ -41,13 +40,15 @@ export function DatabaseStorageNotice({
           }
           control={
             <div className="flex flex-wrap items-center gap-1.5">
-              <Button
-                variant="outline"
+              <CopyButton
+                label="Copy command"
                 size="sm"
-                onClick={() => copyToClipboard(status.compactCommand, undefined)}
+                target="command"
+                value={status.compactCommand}
+                variant="outline"
               >
                 Copy command
-              </Button>
+              </CopyButton>
               <Button variant="ghost" size="sm" onClick={() => setDismissed(true)}>
                 Dismiss
               </Button>

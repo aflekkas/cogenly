@@ -1,11 +1,11 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
+import { CopyButton } from "../ui/copy-button";
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import {
   Clock3Icon,
-  CopyIcon,
   InboxIcon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -52,7 +52,6 @@ import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { webhookAddress } from "@t3tools/client-runtime/webhook-address";
 import { Link } from "@tanstack/react-router";
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import {
   useEnvironment,
   useEnvironmentHttpBaseUrl,
@@ -899,7 +898,6 @@ function WebhookEndpointField({
     serverEnvironment.rotateScheduledTaskWebhookToken.permissionAtom(environmentId),
   );
   const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
-  const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "webhook URL" });
   const rotate = useAtomCommand(serverEnvironment.rotateScheduledTaskWebhookToken, {
     label: "scheduled task rotate webhook token",
   });
@@ -940,17 +938,17 @@ function WebhookEndpointField({
           value={url}
           onFocus={(event) => event.currentTarget.select()}
         />
-        <Button
+        <CopyButton
+          label="Copy webhook URL"
           size="sm"
+          target="webhook URL"
+          value={url}
           variant="outline"
-          type="button"
           // A bare path is not a URL a sender can call.
           disabled={!copyable}
-          onClick={() => copyToClipboard(url, undefined)}
         >
-          <CopyIcon />
-          {isCopied ? "Copied" : "Copy"}
-        </Button>
+          Copy
+        </CopyButton>
         <Button
           size="sm"
           variant="outline"

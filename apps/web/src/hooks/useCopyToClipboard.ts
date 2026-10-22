@@ -1,5 +1,6 @@
 import * as React from "react";
 import * as Schema from "effect/Schema";
+import { COPY_FEEDBACK_MS, createCopyFeedback, type CopyStatus } from "./copyFeedback.logic";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
   encodeComposerContextClipboardHtml,
@@ -198,7 +199,7 @@ export async function readTextFromClipboard(target = "text"): Promise<string> {
 }
 
 export function useCopyToClipboard<TContext = void>({
-  timeout = 2000,
+  timeout = COPY_FEEDBACK_MS,
   target = "text",
   onCopy,
   onError,
@@ -209,54 +210,39 @@ export function useCopyToClipboard<TContext = void>({
   onCopy?: (ctx: TContext) => void;
   onError?: (error: Error, ctx: TContext) => void;
   extraFlavors?: Readonly<Record<string, string>>;
-} = {}): { copyToClipboard: (value: string, ctx: TContext) => void; isCopied: boolean } {
-  const [isCopied, setIsCopied] = React.useState(false);
-  const timeoutIdRef = React.useRef<NodeJS.Timeout | null>(null);
-  const onCopyRef = React.useRef(onCopy);
-  const onErrorRef = React.useRef(onError);
-  const targetRef = React.useRef(target);
-  const timeoutRef = React.useRef(timeout);
-
-  onCopyRef.current = onCopy;
-  onErrorRef.current = onError;
-  const extraFlavorsRef = React.useRef(extraFlavors);
-  targetRef.current = target;
-  timeoutRef.current = timeout;
-  extraFlavorsRef.current = extraFlavors;
+} = {}): {
+  copyToClipboard: (value: string, ctx: TContext) => void;
+  isCopied: boolean;
+  status: CopyStatus;
+} {
+  const [status, setStatus] = React.useState<CopyStatus>("idle");
+  const feedbackRef = React.useRef<ReturnType<typeof createCopyFeedback> | null>(null);
+  feedbackRef.current ??= createCopyFeedback({ resetMs: timeout, onStatus: setStatus });
+  const latest = React.useRef({ onCopy, onError, target, extraFlavors });
+  latest.current = { onCopy, onError, target, extraFlavors };
+  feedbackRef.current.configure({ resetMs: timeout, onStatus: setStatus });
 
   const copyToClipboard = React.useCallback((value: string, ctx: TContext): void => {
-    void writeTextToClipboard(value, targetRef.current, extraFlavorsRef.current).then(
-      (didCopy) => {
-        if (!didCopy) return;
-        if (timeoutIdRef.current) {
-          clearTimeout(timeoutIdRef.current);
+    const feedback = feedbackRef.current;
+    if (!feedback) return;
+    const { target, extraFlavors } = latest.current;
+    void feedback
+      .run(() => writeTextToClipboard(value, target, extraFlavors))
+      .then((outcome) => {
+        if (outcome.kind === "copied") latest.current.onCopy?.(ctx);
+        if (outcome.kind === "failed") {
+          console.error(outcome.error);
+          latest.current.onError?.(outcome.error, ctx);
         }
-        setIsCopied(true);
-
-        onCopyRef.current?.(ctx);
-
-        if (timeoutRef.current !== 0) {
-          timeoutIdRef.current = setTimeout(() => {
-            setIsCopied(false);
-            timeoutIdRef.current = null;
-          }, timeoutRef.current);
-        }
-      },
-      (error) => {
-        console.error(error);
-        onErrorRef.current?.(error, ctx);
-      },
-    );
+      });
   }, []);
 
-  // Cleanup timeout on unmount
   React.useEffect(() => {
-    return (): void => {
-      if (timeoutIdRef.current) {
-        clearTimeout(timeoutIdRef.current);
-      }
-    };
+    const feedback = feedbackRef.current;
+    // Strict mode runs cleanup and setup again on the same controller.
+    feedback?.attach();
+    return () => feedback?.dispose();
   }, []);
 
-  return { copyToClipboard, isCopied };
+  return { copyToClipboard, isCopied: status === "copied", status };
 }

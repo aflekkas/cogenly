@@ -1,4 +1,5 @@
 import { findErrorTraceId } from "@t3tools/client-runtime/errors";
+import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -173,7 +174,7 @@ export function T3ConnectUserProfilePage() {
         ? {
             secondaryActionProps: {
               children: "Copy trace ID",
-              onClick: () => void navigator.clipboard?.writeText(traceId),
+              onClick: () => void writeTextToClipboard(traceId, "trace ID").catch(() => undefined),
             },
           }
         : undefined,

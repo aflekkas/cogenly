@@ -44,7 +44,7 @@ import {
   WrapTextIcon,
   type LucideIcon,
 } from "lucide-react";
-import { Check, Copy, Maximize2, Minimize2 } from "lucide";
+import { Maximize2, Minimize2 } from "lucide";
 import {
   AuthPreviewOperateScope,
   type AssetResource,
@@ -146,6 +146,8 @@ import {
 import { hasSpecificPierreIconForFileName, syntheticFileNameForLanguageId } from "../pierre-icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Button } from "./ui/button";
+import { showCopyFailedToast } from "./ui/copiedToast";
+import { CopyButton, CopyStatusIcon } from "./ui/copy-button";
 import { Checkbox } from "./ui/checkbox";
 import { MorphIcon } from "~/components/MorphIcon";
 import { ContextChip } from "./ContextChip";
@@ -200,7 +202,7 @@ import {
   WORKSPACE_BASENAME_LOOKUP_LIMIT,
 } from "../workspaceBasenameLookup";
 import { useOpenLink } from "../browser/useOpenLink";
-import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
+import { useCopyToClipboard, writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import {
   isBrowserPreviewFile,
@@ -543,10 +545,18 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
   const [expanded, setExpanded] = useState(readInitialWordWrapSetting);
-  const [copied, setCopied] = useState(false);
-  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { copyToClipboard, status: copyStatus } = useCopyToClipboard<{
+    format: "markdown" | "csv";
+  }>({
+    target: "table",
+    onError: (cause, { format }) => {
+      reportMarkdownActionFailure({ operation: "copy-table", format }, cause);
+      showCopyFailedToast(cause);
+    },
+  });
   const expandLabel = expanded ? "Collapse table cells" : "Expand table cells";
-  const copyLabel = copied ? "Copied" : "Copy table";
+  const copyLabel =
+    copyStatus === "copied" ? "Copied" : copyStatus === "failed" ? "Could not copy" : "Copy table";
 
   function toggleExpanded() {
     const table = tableRef.current;
@@ -572,40 +582,17 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
     setExpanded((value) => !value);
   }
 
-  const handleCopy = useCallback((format: "markdown" | "csv") => {
-    const table = containerRef.current?.querySelector("table");
-    if (!table || typeof navigator === "undefined" || navigator.clipboard == null) {
-      return;
-    }
-    const text =
-      format === "markdown"
-        ? serializeTableElementToMarkdown(table)
-        : serializeTableElementToCsv(table);
-    void navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        if (copiedTimerRef.current != null) {
-          clearTimeout(copiedTimerRef.current);
-        }
-        setCopied(true);
-        copiedTimerRef.current = setTimeout(() => {
-          setCopied(false);
-          copiedTimerRef.current = null;
-        }, 1200);
-      })
-      .catch((cause) => {
-        reportMarkdownActionFailure({ operation: "copy-table", format }, cause);
-      });
-  }, []);
-
-  useEffect(
-    () => () => {
-      if (copiedTimerRef.current != null) {
-        clearTimeout(copiedTimerRef.current);
-        copiedTimerRef.current = null;
-      }
+  const handleCopy = useCallback(
+    (format: "markdown" | "csv") => {
+      const table = containerRef.current?.querySelector("table");
+      if (!table) return;
+      const text =
+        format === "markdown"
+          ? serializeTableElementToMarkdown(table)
+          : serializeTableElementToCsv(table);
+      copyToClipboard(text, { format });
     },
-    [],
+    [copyToClipboard],
   );
 
   return (
@@ -647,13 +634,13 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
                       type="button"
                       variant="ghost-muted"
                       size="icon-xs"
-                      aria-label={copyLabel}
+                      aria-label="Copy table"
                     />
                   }
                 />
               }
             >
-              <MorphIcon className="size-3" icon={copied ? Check : Copy} />
+              <CopyStatusIcon status={copyStatus} />
             </TooltipTrigger>
             <TooltipPopup side="top">{copyLabel}</TooltipPopup>
           </Tooltip>
@@ -844,11 +831,8 @@ function MarkdownCodeBlock({
   diagram?: boolean;
   children: ReactNode;
 }) {
-  const [copied, setCopied] = useState(false);
   const [wrapped, setWrapped] = useState(readInitialWordWrapSetting);
-  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines";
-  const copyLabel = copied ? "Copied" : "Copy code";
   const command = code.trim();
   const canRun =
     onRunShellCommand !== undefined &&
@@ -861,61 +845,23 @@ function MarkdownCodeBlock({
     // make the rendered command differ from what the terminal would receive.
     !/[\p{Cc}\p{Cf}]/u.test(code.slice(0, -1));
 
-  const handleCopy = useCallback(() => {
-    if (typeof navigator === "undefined" || navigator.clipboard == null) {
-      return;
-    }
-    void navigator.clipboard
-      .writeText(code)
-      .then(() => {
-        if (copiedTimerRef.current != null) {
-          clearTimeout(copiedTimerRef.current);
-        }
-        setCopied(true);
-        copiedTimerRef.current = setTimeout(() => {
-          setCopied(false);
-          copiedTimerRef.current = null;
-        }, 1200);
-      })
-      .catch((cause) => {
+  const copyButton = (
+    <CopyButton
+      label="Copy code"
+      onError={(error) => {
         reportMarkdownActionFailure(
           {
             operation: "copy-code-block",
             language,
             ...(fenceTitle ? { fenceTitle } : {}),
           },
-          cause,
+          error,
         );
-      });
-  }, [code, fenceTitle, language]);
-
-  useEffect(
-    () => () => {
-      if (copiedTimerRef.current != null) {
-        clearTimeout(copiedTimerRef.current);
-        copiedTimerRef.current = null;
-      }
-    },
-    [],
-  );
-
-  const copyButton = (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost-muted"
-            size="icon-xs"
-            onClick={handleCopy}
-            aria-label={copyLabel}
-          />
-        }
-      >
-        <MorphIcon className="size-3" icon={copied ? Check : Copy} />
-      </TooltipTrigger>
-      <TooltipPopup side="top">{copyLabel}</TooltipPopup>
-    </Tooltip>
+        showCopyFailedToast(error);
+      }}
+      target="code"
+      value={code}
+    />
   );
 
   if (diagram) {
@@ -2063,19 +2009,9 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
 
   const handleCopy = useCallback(
     (value: string, title: string) => {
-      if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: `Failed to copy ${title.toLowerCase()}`,
-            description: "Clipboard API unavailable.",
-          }),
-        );
-        return;
-      }
-
-      void navigator.clipboard.writeText(value).then(
-        () => {
+      void writeTextToClipboard(value, title.toLowerCase()).then(
+        (didCopy) => {
+          if (!didCopy) return;
           toastManager.add({
             type: "success",
             title: `${title} copied`,

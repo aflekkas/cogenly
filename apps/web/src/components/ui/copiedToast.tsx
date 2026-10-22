@@ -29,6 +29,11 @@ export function showCopiedToast(subject: CopiedToastSubject) {
   });
 }
 
+/** The plain "Copied to clipboard" toast, for copy controls with no better name for the text. */
+export function showClipboardCopiedToast() {
+  showCopiedToast({ kind: "clipboard" });
+}
+
 export function showCopyFailedToast(error: Error) {
   toastManager.add({ type: "error", title: "Could not copy", description: error.message });
 }

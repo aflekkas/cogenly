@@ -3,6 +3,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { CopyButton } from "../ui/copy-button";
 import type {
   EnvironmentId,
   ProviderAuthRespondInput,
@@ -11,9 +12,7 @@ import type {
   ServerProvider,
 } from "@t3tools/contracts";
 import { lazy, Suspense, useRef, useState } from "react";
-import { CopyIcon } from "lucide-react";
 
-import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
 import { ensureLocalApi } from "../../localApi";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
@@ -21,7 +20,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SettingsRow } from "./settingsLayout";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 
@@ -208,31 +206,21 @@ export function ProviderAuthenticationSection({
               >
                 Open browser
               </Button>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      aria-label="Copy sign-in link"
-                      size="icon-sm"
-                      variant="ghost-muted"
-                      disabled={disabled}
-                      onClick={() => {
-                        // Copy inside the click so the clipboard keeps the user
-                        // activation; the link only works once consent is recorded.
-                        const copied = writeTextToClipboard(url, "Provider sign-in link");
-                        void (async () => {
-                          await copied;
-                          if (interaction?.type === "browser" && interaction.requiresConsent)
-                            await send({ type: "browser", action: "accept" });
-                        })().catch(() => setError("Could not copy the sign-in link."));
-                      }}
-                    >
-                      <CopyIcon />
-                    </Button>
-                  }
-                />
-                <TooltipPopup>Copy sign-in link</TooltipPopup>
-              </Tooltip>
+              <CopyButton
+                disabled={disabled}
+                label="Copy sign-in link"
+                size="icon-sm"
+                target="provider sign-in link"
+                value={url}
+                // The link only works once consent is recorded, so it follows a successful copy.
+                onCopied={() => {
+                  if (interaction?.type === "browser" && interaction.requiresConsent)
+                    void send({ type: "browser", action: "accept" }).catch(() =>
+                      setError("Could not copy the sign-in link."),
+                    );
+                }}
+                onError={() => setError("Could not copy the sign-in link.")}
+              />
             </>
           ) : null}
           <>

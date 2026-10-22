@@ -4353,19 +4353,9 @@ export default function ChatView(props: ChatViewProps) {
   };
   const moveRightPanelSurfaceStable = useStableCallback(moveRightPanelSurface);
   const copyRightPanelFilePath = (relativePath: string) => {
-    if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Failed to copy path",
-          description: "Clipboard API unavailable.",
-        }),
-      );
-      return;
-    }
-
-    void navigator.clipboard.writeText(relativePath).then(
-      () => {
+    void writeTextToClipboard(relativePath, "path").then(
+      (didCopy) => {
+        if (!didCopy) return;
         toastManager.add({
           type: "success",
           title: "Path copied",
