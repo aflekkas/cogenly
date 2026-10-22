@@ -188,7 +188,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 label="Favorite models"
                 tooltip="Favorites"
                 icon={StarIcon}
-                iconClassName="fill-current text-warning"
+                iconClassName="fill-current text-icon-muted"
                 selected={props.selectedInstanceId === MODEL_PICKER_FAVORITES}
                 onSelect={() => handleSelect(MODEL_PICKER_FAVORITES)}
               />

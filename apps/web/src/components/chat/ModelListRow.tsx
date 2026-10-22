@@ -151,7 +151,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
                     <StarIcon
                       className={cn(
                         "size-3.5 transition-[color,fill,scale] duration-(--motion-duration-fast) ease-standard motion-reduce:transition-none sm:size-3",
-                        props.isFavorite ? "scale-110 fill-current text-warning" : "scale-100",
+                        props.isFavorite
+                          ? "scale-110 fill-current text-foreground/70"
+                          : "scale-100",
                       )}
                       aria-hidden
                     />
