@@ -5263,7 +5263,7 @@ const COLLAPSED_USER_MESSAGE_HEIGHT_REM = 11;
 const COLLAPSED_USER_MESSAGE_MASK_SIZE = "100% 100%";
 const EXPANDED_USER_MESSAGE_MASK_SIZE = `100% calc(100% + ${COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM}rem)`;
 /** Longest clamp motion; a transition that never ends still settles after it. */
-const USER_MESSAGE_CLAMP_MOTION_MS = 400;
+const USER_MESSAGE_CLAMP_MOTION_MS = 220;
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
 type UserMessageClampPhase = "collapsed" | "opening" | "open" | "closing";
@@ -5279,7 +5279,7 @@ function scrollParent(element: HTMLElement): HTMLElement | null {
 /**
  * A long user message, clamped with a bottom fade until "Show full message".
  * Toggling grows or shrinks the height between the clamp and the full text
- * (slow token open, 0.7x close, ease-standard) while the fade stretches out of
+ * (base token both ways, ease-standard) while the fade stretches out of
  * or back into view. Collapsing a message whose top is scrolled out of view
  * keeps its footer under the pointer; a toggle at the end stays pinned. Find
  * and reduced motion open at once.
@@ -5340,11 +5340,11 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
     // transition's before-change style.
     const root = getComputedStyle(document.documentElement);
     const rem = Number.parseFloat(root.fontSize) || 16;
-    const slowMs =
-      Number.parseFloat(root.getPropertyValue("--motion-duration-slow")) ||
+    const baseMs =
+      Number.parseFloat(root.getPropertyValue("--motion-duration-base")) ||
       USER_MESSAGE_CLAMP_MOTION_MS;
     const timing = {
-      duration: phase === "opening" ? slowMs : slowMs * 0.7,
+      duration: baseMs,
       easing: root.getPropertyValue("--motion-ease-standard").trim() || "ease-out",
     };
     const target =
