@@ -336,14 +336,14 @@ function AgentCard({
     if (!api) return;
     const items: ContextMenuItem<AgentMenuAction>[] = [
       { id: "open", label: "Open", icon: "mail-open" },
-      { id: "details", label: "Open details", icon: "settings" },
+      { id: "details", label: "Open Details", icon: "settings" },
       { id: "rename", label: "Rename", icon: "pencil", disabled: !canWrite },
-      { id: "face", label: "Change face…", disabled: !canWrite },
+      { id: "face", label: "Change Face…", disabled: !canWrite },
       ...(folders.length > 0 || currentFolderId !== null
         ? [
             {
               id: "move-project" as const,
-              label: "Move to project",
+              label: "Move to Project",
               icon: "folder",
               disabled: !canMoveProject,
               children: [
@@ -357,7 +357,7 @@ function AgentCard({
                 })),
                 {
                   id: "move-project-none" as const,
-                  label: "No project",
+                  label: "No Project",
                   checked: currentFolderId === null,
                   disabled: currentFolderId === null,
                   separatorBefore: folders.length > 0,
@@ -367,9 +367,9 @@ function AgentCard({
           ]
         : []),
       ...(unread > 0 && latestReply
-        ? [{ id: "mark-read" as const, label: "Mark as read", icon: "check" }]
+        ? [{ id: "mark-read" as const, label: "Mark as Read", icon: "check" }]
         : []),
-      { id: "copy-link", label: "Copy link", icon: "link" },
+      { id: "copy-link", label: "Copy Link", icon: "link" },
       {
         id: "delete",
         label: "Delete…",

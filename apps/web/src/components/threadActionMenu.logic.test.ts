@@ -132,7 +132,16 @@ describe("buildThreadActionMenuItems per thread kind", () => {
     const archive = buildThreadActionMenuItems(stateFor("work", { isRunning: true })).find(
       (item) => item.id === "archive",
     );
-    expect(archive).toMatchObject({ disabled: true, label: "Archive thread (stop it first)" });
+    expect(archive).toMatchObject({ disabled: true, label: "Archive Thread (Stop It First)" });
+  });
+
+  it("ends Delete with an ellipsis only when it asks first", () => {
+    const deleteLabel = (confirmsDelete: boolean) =>
+      buildThreadActionMenuItems(stateFor("chat", { confirmsDelete })).find(
+        (item) => item.id === "delete",
+      )?.label;
+    expect(deleteLabel(true)).toBe("Delete…");
+    expect(deleteLabel(false)).toBe("Delete");
   });
 
   it("still needs the server to support a kind's lifecycle actions", () => {
@@ -220,9 +229,9 @@ describe("Move to folder in the thread action menu", () => {
   });
 
   it("names the submenu for what picking does: a chat with turns forks", () => {
-    expect(folderItems(stateFor("chat"))[0]?.label).toBe("Move to folder");
+    expect(folderItems(stateFor("chat"))[0]?.label).toBe("Move to Folder");
     expect(folderItems(stateFor("chat", { folder: { ...base, forks: true } }))[0]?.label).toBe(
-      "Fork into project",
+      "Fork into Project",
     );
   });
 
@@ -285,7 +294,7 @@ describe("buildRepositoryActionMenuItems", () => {
       buildRepositoryActionMenuItems({ folder: { key: "env:spawn", name: "Spawn" } }).map(
         (item) => item.label,
       ),
-    ).toEqual(["New thread", "Open Spawn", "Repository settings"]);
+    ).toEqual(["New Thread", "Open Spawn", "Repository Settings"]);
   });
 });
 

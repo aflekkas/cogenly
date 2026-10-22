@@ -7,6 +7,7 @@ import { readLocalApi } from "../../localApi";
 import { useDeleteProjectFolder } from "../../projectLabels/ProjectLabelEditorDialog";
 import {
   PROJECT_LABEL_COLORS,
+  projectLabelPaletteColor,
   type EnvironmentProjectLabel,
 } from "../../projectLabels/projectLabels.logic";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
@@ -47,6 +48,7 @@ export function useProjectFolderMenu(
   const openMenu = async (position: { x: number; y: number }) => {
     const api = readLocalApi();
     if (!api) return;
+    const current = projectLabelPaletteColor(label.color);
     const items: ReadonlyArray<ContextMenuItem<FolderMenuId>> = [
       { id: "open", label: "Open", icon: "folder" },
       { id: "rename", label: "Rename…", icon: "pencil", disabled: !canUpdate },
@@ -54,10 +56,13 @@ export function useProjectFolderMenu(
         id: "recolor",
         label: "Color",
         disabled: !canUpdate,
+        // Each choice shows its swatch, natively too; the current one is checked.
         children: PROJECT_LABEL_COLORS.map((color) => ({
           id: `color:${color.value}` as const,
           label: color.label,
-          checked: (label.color ?? "gray") === color.value,
+          icon: "swatch",
+          iconColor: color.hex,
+          checked: current === color.value,
         })),
       },
       { id: "link-github", label: "Link GitHub…", icon: "link", disabled: !canUpdate },
@@ -81,6 +86,7 @@ export function useProjectFolderMenu(
     else if (id === "delete") {
       if (await deleteFolder(environmentId, label)) handlers.onDeleted();
     } else if (id.startsWith("color:")) {
+      if (id.slice("color:".length) === label.color) return;
       const result = await updateLabel({
         environmentId,
         input: { id: label.id, color: id.slice("color:".length) },

@@ -1,5 +1,7 @@
 import type { ProjectIconColor, ProjectIconOverride } from "@t3tools/contracts";
 
+import type { ProjectPaletteColor } from "./projectIconColors";
+
 /**
  * The glyphs an unconfigured project can get. Folder and repository shapes
  * only, so every fallback still reads as "a project" while two projects in a
@@ -19,16 +21,18 @@ export const PROJECT_FALLBACK_GLYPHS = [
 export type ProjectFallbackGlyph = (typeof PROJECT_FALLBACK_GLYPHS)[number];
 
 // Muted tints only: the fallback must not out-shout a real favicon next to it.
+// Each slot is what its retired hue now shows as (sky, rose, emerald, indigo),
+// so every project keeps the tint it had; violet's double weight is that history.
 const PROJECT_FALLBACK_COLORS = [
   "gray",
-  "sky",
+  "blue",
   "teal",
   "violet",
   "amber",
-  "rose",
-  "emerald",
-  "indigo",
-] as const satisfies ReadonlyArray<ProjectIconColor>;
+  "red",
+  "green",
+  "violet",
+] as const satisfies ReadonlyArray<ProjectPaletteColor>;
 
 /** Visual identity tokens for a project with no picked icon and no favicon. */
 export interface ProjectIdentity {

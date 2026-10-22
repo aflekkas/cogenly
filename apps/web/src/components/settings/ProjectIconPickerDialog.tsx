@@ -2,6 +2,7 @@ import { deriveProjectIdentity } from "../../projectIdentity";
 import type { ProjectIconColor, ProjectIconOverride } from "@t3tools/contracts";
 import { DynamicIcon, type IconName } from "lucide-react/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { normalizeProjectColor } from "../../projectIconColors";
 import { filterProjectIconNames, projectIconColorClassName } from "../../projectIconOptions";
 import { cn } from "~/lib/utils";
 import { ProjectColorPicker } from "../ProjectColorPicker";
@@ -45,7 +46,9 @@ export function ProjectIconPickerDialog({
     current?.kind === "lucide" ? (current.name as IconName) : DEFAULT_ICON,
   );
   const [color, setColor] = useState<ProjectIconColor>(
-    current?.kind === "lucide" || current?.kind === "monogram" ? current.color : automatic.color,
+    current?.kind === "lucide" || current?.kind === "monogram"
+      ? (normalizeProjectColor(current.color) ?? automatic.color)
+      : automatic.color,
   );
   const [query, setQuery] = useState("");
   const previousOpenRef = useRef(false);
@@ -55,7 +58,7 @@ export function ProjectIconPickerDialog({
       setIconName(current?.kind === "lucide" ? (current.name as IconName) : DEFAULT_ICON);
       setColor(
         current?.kind === "lucide" || current?.kind === "monogram"
-          ? current.color
+          ? (normalizeProjectColor(current.color) ?? automatic.color)
           : automatic.color,
       );
       setQuery("");

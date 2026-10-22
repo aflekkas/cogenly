@@ -8,6 +8,8 @@ import * as Schema from "effect/Schema";
 
 import * as Electron from "electron";
 
+import { drawSwatchBitmap, MENU_SWATCH_SCALE, parseHexColor } from "./menuSwatch.ts";
+
 export interface ElectronMenuPosition {
   readonly x: number;
   readonly y: number;
@@ -81,6 +83,11 @@ function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextM
       disabled: sourceItem.disabled === true,
       ...(sourceItem.separatorBefore === true ? { separatorBefore: true } : {}),
       ...(typeof sourceItem.checked === "boolean" ? { checked: sourceItem.checked } : {}),
+      // Of the web fallback's icons, only a color swatch carries meaning a
+      // native menu should keep; glyphs are left out so items read natively.
+      ...(sourceItem.icon === "swatch" && parseHexColor(sourceItem.iconColor) !== null
+        ? { icon: "swatch", iconColor: sourceItem.iconColor! }
+        : {}),
     };
 
     if (sourceItem.children) {
@@ -115,28 +122,28 @@ const normalizePosition = (
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
-  let destructiveMenuIconCache: Option.Option<Electron.NativeImage> | undefined;
+  const swatchCache = new Map<string, Option.Option<Electron.NativeImage>>();
 
-  const getDestructiveMenuIcon = (): Option.Option<Electron.NativeImage> => {
-    if (platform !== "darwin") {
-      return Option.none();
+  const getSwatchIcon = (hex: string): Option.Option<Electron.NativeImage> => {
+    const cached = swatchCache.get(hex);
+    if (cached !== undefined) return cached;
+    let icon: Option.Option<Electron.NativeImage> = Option.none();
+    const color = parseHexColor(hex);
+    if (color !== null) {
+      try {
+        const { buffer, size } = drawSwatchBitmap(color);
+        const image = Electron.nativeImage.createFromBitmap(buffer, {
+          width: size,
+          height: size,
+          scaleFactor: MENU_SWATCH_SCALE,
+        });
+        icon = image.isEmpty() ? Option.none() : Option.some(image);
+      } catch {
+        icon = Option.none();
+      }
     }
-    if (destructiveMenuIconCache !== undefined) {
-      return destructiveMenuIconCache;
-    }
-
-    try {
-      const icon = Electron.nativeImage.createFromNamedImage("trash").resize({
-        width: 12,
-        height: 12,
-      });
-      icon.setTemplateImage(true);
-      destructiveMenuIconCache = icon.isEmpty() ? Option.none() : Option.some(icon);
-    } catch {
-      destructiveMenuIconCache = Option.none();
-    }
-
-    return destructiveMenuIconCache;
+    swatchCache.set(hex, icon);
+    return icon;
   };
 
   const buildTemplate = (
@@ -176,10 +183,10 @@ export const make = Effect.gen(function* () {
       } else {
         itemOption.click = () => complete(Option.some(item.id));
       }
-      if (item.destructive && (!item.children || item.children.length === 0)) {
-        const destructiveIcon = getDestructiveMenuIcon();
-        if (Option.isSome(destructiveIcon)) {
-          itemOption.icon = destructiveIcon.value;
+      if (item.icon === "swatch" && item.iconColor !== undefined) {
+        const swatch = getSwatchIcon(item.iconColor);
+        if (Option.isSome(swatch)) {
+          itemOption.icon = swatch.value;
         }
       }
 

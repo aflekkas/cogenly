@@ -270,7 +270,7 @@ export function buildMultiSelectThreadContextMenuItems(input: {
   hasRunningThread: boolean;
 }): readonly ContextMenuItem<"mark-unread" | "archive" | "delete">[] {
   return [
-    { id: "mark-unread", label: `Mark unread (${input.count})` },
+    { id: "mark-unread", label: `Mark as Unread (${input.count})` },
     {
       id: "archive",
       label: `Archive (${input.count})`,
@@ -324,7 +324,7 @@ export function buildBulkTitleRegenerationContextMenuItem(input: {
   }
   return {
     id: "regenerate-title",
-    label: `Regenerate titles (${input.actionableCount})`,
+    label: `Regenerate Titles (${input.actionableCount})`,
   };
 }
 

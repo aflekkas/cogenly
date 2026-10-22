@@ -43,7 +43,11 @@ import {
   ProjectSourceLinkChips,
   ProjectSourceLinkField,
 } from "../../projectLabels/ProjectSourceLinks";
-import { PROJECT_LABEL_COLORS, projectLabelKey } from "../../projectLabels/projectLabels.logic";
+import {
+  PROJECT_LABEL_COLORS,
+  projectLabelKey,
+  projectLabelPaletteColor,
+} from "../../projectLabels/projectLabels.logic";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
@@ -173,7 +177,7 @@ function ProjectHeaderMenu(props: {
           </MenuSubTrigger>
           <MenuSubPopup>
             <MenuRadioGroup
-              value={props.label.color ?? "gray"}
+              value={projectLabelPaletteColor(props.label.color)}
               onValueChange={(value) => {
                 if (typeof value === "string") props.onRecolor(value);
               }}

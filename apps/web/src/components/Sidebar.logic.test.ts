@@ -260,7 +260,7 @@ describe("buildBulkTitleRegenerationContextMenuItem", () => {
       }),
     ).toEqual({
       id: "regenerate-title",
-      label: "Regenerate titles (3)",
+      label: "Regenerate Titles (3)",
     });
   });
 

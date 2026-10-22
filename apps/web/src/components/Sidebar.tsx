@@ -3835,12 +3835,17 @@ export default function Sidebar() {
                   },
                 ]
               : []),
-            ...(offersMarkUnread ? [{ id: "mark-unread", label: `Mark unread (${count})` }] : []),
+            ...(offersMarkUnread
+              ? [{ id: "mark-unread", label: `Mark as Unread (${count})` }]
+              : []),
             ...(offersDelete
               ? [
                   {
                     id: "delete",
-                    label: `Delete (${count})`,
+                    label:
+                      confirmThreadDelete || deleteAlwaysConfirms
+                        ? `Delete (${count})…`
+                        : `Delete (${count})`,
                     destructive: true,
                     disabled: !canOperateThreads(selectedThreads),
                   },
@@ -4113,6 +4118,7 @@ export default function Sidebar() {
               isSnoozed,
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
               isRunning: !threadRuntimeCanArchive(thread.runtime),
+              confirmsDelete: confirmThreadDelete || capabilities.delete === "always-confirm",
               supports: {
                 settlement: supportsSettlement,
                 snooze: supportsSnooze,

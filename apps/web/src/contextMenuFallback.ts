@@ -16,6 +16,8 @@ const ICON_PATHS: Record<string, ReadonlyArray<{ tag: string; attrs: Record<stri
     { tag: "path", attrs: { d: "M10 12h4" } },
   ],
   check: [{ tag: "path", attrs: { d: "M20 6 9 17l-5-5" } }],
+  // A filled dot in the item's iconColor, such as a project color choice.
+  swatch: [{ tag: "circle", attrs: { cx: "12", cy: "12", r: "7" } }],
   tag: [
     {
       tag: "path",
@@ -188,8 +190,9 @@ function createIconElement(name: string, tone: "neutral" | "destructive"): SVGSV
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("xmlns", SVG_NS);
   svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
+  const filled = name === "swatch";
+  svg.setAttribute("fill", filled ? "currentColor" : "none");
+  svg.setAttribute("stroke", filled ? "none" : "currentColor");
   svg.setAttribute("stroke-width", "2");
   svg.setAttribute("stroke-linecap", "round");
   svg.setAttribute("stroke-linejoin", "round");

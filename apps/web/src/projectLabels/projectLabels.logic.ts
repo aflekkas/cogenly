@@ -12,7 +12,11 @@ import type {
   ProjectLabelWithRepositories,
 } from "@t3tools/contracts";
 
-import { PROJECT_ICON_COLORS } from "../projectIconColors";
+import {
+  normalizeProjectColor,
+  PROJECT_ICON_COLORS,
+  type ProjectPaletteColor,
+} from "../projectIconColors";
 
 export type ProjectLabelKey = `${string}:${string}`;
 
@@ -38,13 +42,19 @@ export function scopedRepositoryKey(
 
 /** The palette repositories already use for icons; a project stores the value name. */
 export const PROJECT_LABEL_COLORS = PROJECT_ICON_COLORS;
-const DEFAULT_PROJECT_LABEL_COLOR = "gray";
-const KNOWN_COLORS = new Set<string>(PROJECT_LABEL_COLORS.map((color) => color.value));
+const DEFAULT_PROJECT_LABEL_COLOR: ProjectPaletteColor = "gray";
 
-/** CSS color for a stored label color; unknown or missing values read as gray. */
+/**
+ * The palette color a stored label color shows as. A retired hue reads as its
+ * nearest remaining one; unknown or missing values read as gray.
+ */
+export function projectLabelPaletteColor(color: string | null | undefined): ProjectPaletteColor {
+  return normalizeProjectColor(color) ?? DEFAULT_PROJECT_LABEL_COLOR;
+}
+
+/** CSS color for a stored label color. */
 export function projectLabelColorValue(color: string | undefined): string {
-  const name = color !== undefined && KNOWN_COLORS.has(color) ? color : DEFAULT_PROJECT_LABEL_COLOR;
-  return `var(--color-${name}-500)`;
+  return `var(--color-${projectLabelPaletteColor(color)}-500)`;
 }
 
 export function sortProjectLabels<T extends { readonly label: { readonly name: string } }>(

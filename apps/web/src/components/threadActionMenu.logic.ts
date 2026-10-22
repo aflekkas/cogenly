@@ -60,7 +60,7 @@ export function buildDraftActionMenuItems(options: {
       : []),
     {
       id: "discard",
-      label: "Discard draft",
+      label: "Discard Draft",
       icon: "trash",
       destructive: true,
       separatorBefore: copyChildren.length > 0,
@@ -79,7 +79,7 @@ export function buildRepositoryActionMenuItems(options: {
   readonly folder: { readonly key: string; readonly name: string } | null;
 }): ReadonlyArray<ContextMenuItem<RepositoryActionMenuId>> {
   return [
-    { id: "new-thread", label: "New thread", icon: "message-square-plus" },
+    { id: "new-thread", label: "New Thread", icon: "message-square-plus" },
     ...(options.folder
       ? [
           {
@@ -91,7 +91,7 @@ export function buildRepositoryActionMenuItems(options: {
       : []),
     {
       id: "project-settings",
-      label: "Repository settings",
+      label: "Repository Settings",
       icon: "settings",
       separatorBefore: true,
     },
@@ -107,8 +107,10 @@ export interface ThreadActionMenuState {
   readonly isSettled: boolean;
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
-  /** Offers "Mark read" in place of "Mark unread". */
+  /** Offers "Mark as Read" in place of "Mark as Unread". */
   readonly isUnread?: boolean;
+  /** Delete asks first (the confirm setting, or a kind that always confirms), so it reads "Delete…". */
+  readonly confirmsDelete?: boolean;
   /** Archive rejects a thread with an attached provider, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
   /** What the thread's environment understands; a kind's action still needs its server. */
@@ -190,17 +192,17 @@ function folderMenuItems(
   if (current !== null && folder.removable) {
     children.push({
       id: "remove-folder",
-      label: "Remove from folder",
+      label: "Remove from Folder",
       disabled,
       separatorBefore: children.length > 0,
     });
   }
   children.push({
     id: "new-folder",
-    label: "New project…",
+    label: "New Project…",
     separatorBefore: children.length > 0,
   });
-  const label = folder.forks === true ? "Fork into project" : "Move to folder";
+  const label = folder.forks === true ? "Fork into Project" : "Move to Folder";
   return [{ id: "move-folder", label, icon: "folder", children }];
 }
 
@@ -223,21 +225,21 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
     ...(can.pin && state.supports.pinning
       ? [
           state.isPinned
-            ? { id: "unpin" as const, label: "Unpin thread", icon: "pin-off" }
-            : { id: "pin" as const, label: "Pin thread", icon: "pin" },
+            ? { id: "unpin" as const, label: "Unpin Thread", icon: "pin-off" }
+            : { id: "pin" as const, label: "Pin Thread", icon: "pin" },
         ]
       : []),
     ...(can.settle && state.supports.settlement
       ? [
           state.isSettled
-            ? { id: "unsettle" as const, label: "Un-settle thread", icon: "circle-check" }
-            : { id: "settle" as const, label: "Settle thread", icon: "circle-check" },
+            ? { id: "unsettle" as const, label: "Un-settle Thread", icon: "circle-check" }
+            : { id: "settle" as const, label: "Settle Thread", icon: "circle-check" },
         ]
       : []),
     ...(can.snooze && state.supports.snooze
       ? [
           state.isSnoozed
-            ? { id: "unsnooze" as const, label: "Wake thread", icon: "clock" }
+            ? { id: "unsnooze" as const, label: "Wake Thread", icon: "clock" }
             : {
                 id: "snooze" as const,
                 label: "Snooze",
@@ -254,15 +256,15 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
         ]
       : []),
     ...(state.limitResume === "scheduled"
-      ? [{ id: "limit-resume:off" as const, label: "Don't resume at reset", icon: "timer-off" }]
+      ? [{ id: "limit-resume:off" as const, label: "Don't Resume at Reset", icon: "timer-off" }]
       : state.limitResume === "cancelled"
-        ? [{ id: "limit-resume:on" as const, label: "Resume at reset", icon: "clock" }]
+        ? [{ id: "limit-resume:on" as const, label: "Resume at Reset", icon: "clock" }]
         : []),
     ...(can.markUnread
       ? [
           state.isUnread
-            ? { id: "mark-read" as const, label: "Mark read", icon: "mail" }
-            : { id: "mark-unread" as const, label: "Mark unread", icon: "mail-open" },
+            ? { id: "mark-read" as const, label: "Mark as Read", icon: "mail" }
+            : { id: "mark-unread" as const, label: "Mark as Unread", icon: "mail-open" },
         ]
       : []),
   ];
@@ -273,7 +275,7 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
       : []),
     ...(can.copyLink
       ? [
-          { id: "copy-thread-link" as const, label: "Thread link", icon: "link" },
+          { id: "copy-thread-link" as const, label: "Thread Link", icon: "link" },
           { id: "copy-thread-id" as const, label: "Thread ID", icon: "hash" },
         ]
       : []),
@@ -285,7 +287,7 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
       ? [{ id: "copy" as const, label: "Copy", icon: "copy", children: copyChildren }]
       : []),
     ...(can.agentSettings
-      ? [{ id: "agent-settings" as const, label: "Agent settings", icon: "settings" }]
+      ? [{ id: "agent-settings" as const, label: "Agent Settings", icon: "settings" }]
       : []),
   ];
   // Archive removes the thread from the sidebar while keeping its
@@ -299,14 +301,22 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
           {
             id: "archive" as const,
             // Supported but unavailable right now, so it says why.
-            label: state.isRunning ? "Archive thread (stop it first)" : "Archive thread",
+            label: state.isRunning ? "Archive Thread (Stop It First)" : "Archive Thread",
             icon: "archive",
             disabled: state.isRunning,
           },
         ]
       : []),
     ...(can.delete !== false
-      ? [{ id: "delete" as const, label: "Delete", destructive: true, icon: "trash" }]
+      ? [
+          {
+            id: "delete" as const,
+            // HIG: an ellipsis when the item asks before acting.
+            label: state.confirmsDelete === true ? "Delete…" : "Delete",
+            destructive: true,
+            icon: "trash",
+          },
+        ]
       : []),
   ];
   const items = [status, thread, removal]
