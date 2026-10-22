@@ -29,7 +29,6 @@ import {
 import { Volume2, VolumeOff } from "lucide";
 import {
   type ComponentProps,
-  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -78,7 +77,7 @@ import {
 import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { PanOnHoverText } from "~/components/sidebar/PanOnHoverText";
-import { resolveTabWidths, TAB_ICON_WIDTH } from "./rightPanelTabWidths";
+import { resolveTabWidths, TAB_GAP, TAB_ICON_WIDTH } from "./rightPanelTabWidths";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { useTheme } from "~/hooks/useTheme";
 import { useDeviceState } from "~/state/device";
@@ -330,25 +329,31 @@ function SortableTabList(props: {
   /** The full strip, so a drop lands at the surface's index in the owner's order. */
   allSurfaces: readonly RightPanelSurface[];
   onMove: ((surfaceId: string, toIndex: number) => void) | undefined;
+  onDraggingChange: (dragging: boolean) => void;
   children: ReactNode;
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const surfaceIds = useMemo(() => props.surfaces.map((surface) => surface.id), [props.surfaces]);
-  const { onMove, allSurfaces } = props;
+  const { onMove, allSurfaces, onDraggingChange } = props;
+  const handleDragStart = useCallback(() => onDraggingChange(true), [onDraggingChange]);
   const handleDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
+      onDraggingChange(false);
       if (!over || active.id === over.id) return;
       const toIndex = allSurfaces.findIndex((surface) => surface.id === over.id);
       if (toIndex >= 0) onMove?.(String(active.id), toIndex);
     },
-    [onMove, allSurfaces],
+    [onMove, allSurfaces, onDraggingChange],
   );
+  const handleDragCancel = useCallback(() => onDraggingChange(false), [onDraggingChange]);
   return (
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
       modifiers={TAB_DRAG_MODIFIERS}
+      onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
       <SortableContext items={surfaceIds} strategy={horizontalListSortingStrategy}>
         {props.children}
@@ -360,10 +365,11 @@ function SortableTabList(props: {
 function SortableTab({
   surfaceId,
   disabled,
+  active,
   className,
   style,
   ...props
-}: ComponentProps<"div"> & { surfaceId: string; disabled: boolean }) {
+}: ComponentProps<"div"> & { surfaceId: string; disabled: boolean; active: boolean }) {
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: surfaceId,
     disabled,
@@ -375,13 +381,21 @@ function SortableTab({
       ref={setNodeRef}
       // The strip sizes the tab (width); the drag adds its own translate.
       style={{ ...style, transform: CSS.Translate.toString(transform), transition }}
-      className={cn(className, isDragging && "relative z-10")}
+      // The shared indicator stays out of a drag (see RightPanelTabs), so the
+      // selected tab carries its own fill while it is lifted.
+      className={cn(
+        className,
+        isDragging && "relative z-10",
+        isDragging && active && "state-selected",
+      )}
     />
   );
 }
 
 /** The tab strip's own motion: widths, arrivals and departures, on the base token. */
 const TAB_MOTION_MS = 220;
+/** Under reduced motion the strip only fades, on the fast token. */
+const TAB_MOTION_REDUCED_MS = 150;
 const TAB_MOTION_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
 const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -420,7 +434,7 @@ function LeavingTabSlot({ width, onDone }: { width: number; onDone: () => void }
     // Plays once, for the width it closed at.
     // eslint-disable-next-line react/exhaustive-effect-dependencies -- a mount-only animation
   }, []);
-  return <div ref={ref} aria-hidden className="h-9 shrink-0 overflow-hidden" />;
+  return <div ref={ref} aria-hidden className="h-7 shrink-0 overflow-hidden" />;
 }
 
 /** Shown only when an open panel has nothing in it: the same choices as "+", as buttons. */
@@ -471,11 +485,6 @@ function RightPanelEmptyState({ options }: { options: readonly RightPanelAddOpti
  */
 const TRAILING_CONTROLS_INSET =
   "calc(var(--workspace-controls-right) + 1px + 2 * var(--workspace-titlebar-control-size) + 0.25rem + 0.5rem)";
-
-/** Tabs are this tall, centered on the title row like the pinned controls. */
-const TAB_HEIGHT = "2.25rem";
-/** From the row's bottom edge up to the tabs' bottom edge: where the strip ends. */
-const TAB_GAP = `calc((var(--workspace-topbar-height) - ${TAB_HEIGHT}) / 2)`;
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
@@ -528,6 +537,46 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           stripWidth - (canAdd && props.open !== false ? NEW_TAB_ALLOWANCE : 0),
         );
 
+  // Where the selected tab's fill goes, in the tablist's own coordinates.
+  // Computed from the target widths rather than read from layout: a read
+  // during the commit would see the start of the tabs' width transition, and
+  // the sum of widths easing on one curve eases on that curve itself, so the
+  // indicator keeps pace with the tabs it follows.
+  const [dragging, setDragging] = useState(false);
+  const indicatorRef = useRef<HTMLSpanElement>(null);
+  const indicator =
+    tabWidths && activeIndex >= 0 && activeIndex < tabWidths.length
+      ? {
+          left: tabWidths.slice(0, activeIndex).reduce((sum, width) => sum + width + TAB_GAP, 0),
+          width: tabWidths[activeIndex]!,
+        }
+      : null;
+  // A switch to another group of tabs is a different strip: the fill lands
+  // on its tab without travelling from the old group's. Under reduced motion
+  // a change of tab fades the fill in at its new place, with no travel.
+  const lastIndicatorGroupRef = useRef<RightPanelSurfaceGroup | null>(null);
+  const syncIndicator = useEffectEvent(() => {
+    const element = indicatorRef.current;
+    if (!element) return;
+    const groupChanged = lastIndicatorGroupRef.current !== activeGroup;
+    lastIndicatorGroupRef.current = activeGroup;
+    if (groupChanged) {
+      element.style.transition = "none";
+      void element.offsetWidth;
+      element.style.transition = "";
+      return;
+    }
+    if (reducedMotion() && indicator) {
+      element.animate([{ opacity: 0 }, { opacity: 1 }], {
+        duration: TAB_MOTION_REDUCED_MS,
+        easing: TAB_MOTION_EASING,
+      });
+    }
+  });
+  // Plays on a change of selected tab or group only, not on a resize.
+  // eslint-disable-next-line react/exhaustive-effect-dependencies -- keyed on the selection
+  useLayoutEffect(() => syncIndicator(), [activeGroup, props.activeSurfaceId]);
+
   // Arrivals grow from nothing and departures fold shut in place, so the
   // tabs beside them slide rather than jump. A switch to another group of
   // tabs is a different strip, not an arrival, and plays nothing.
@@ -557,14 +606,24 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         );
         if (element) arrivals.push({ element, width: element.getBoundingClientRect().width });
       }
+      // The tab fades in where it will sit: its content is held at its final
+      // width while the slot opens, so the title does not reflow or slide as
+      // the neighbours ease aside to make room.
       for (const { element, width } of arrivals) {
-        element.animate(
+        const content = element.firstElementChild;
+        if (content instanceof HTMLElement) content.style.width = `${width}px`;
+        const animation = element.animate(
           [
             { width: "0px", opacity: 0 },
             { width: `${width}px`, opacity: 1 },
           ],
           { duration: TAB_MOTION_MS, easing: TAB_MOTION_EASING },
         );
+        const release = () => {
+          if (content instanceof HTMLElement) content.style.width = "";
+        };
+        animation.addEventListener("finish", release, { once: true });
+        animation.addEventListener("cancel", release, { once: true });
       }
       const current = new Set<string>(ids);
       const gone = seen.ids
@@ -954,16 +1013,13 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     >
       <div
         className={cn(
-          // A tab strip in the titlebar's row. The tabs are centered on the
-          // row, on the same line as the controls the window pins at its
-          // right, and the tinted strip with its hairline ends where the tabs
-          // do (--right-panel-tab-gap below the row's edge): the selected tab
-          // covers the hairline and runs on into the panel's own background,
-          // so it reads as joined to the surface beneath it. The tint and the
-          // hairline are drawn behind the content (isolate + negative z)
-          // rather than as a border, because the tabs scroll inside a clipped
-          // viewport and could not overhang a border without scrolling it.
-          "relative isolate flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-stretch gap-1 pl-2 before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:bottom-(--right-panel-tab-gap) before:-z-10 before:bg-muted/40 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-(--right-panel-tab-gap) after:-z-10 after:h-px after:bg-border/60",
+          // A tab strip in the titlebar's row: a tinted band with a hairline
+          // under it. The tabs are pills centered on the row, on the same
+          // line and at the same height as the controls the window pins at
+          // its right, and the selected one is marked by the fill that
+          // slides between them (see the indicator in the tablist), the way
+          // the sidebar's mode switcher marks its segment.
+          "relative flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-stretch gap-1 border-b border-border/60 bg-muted/40 pl-2",
           // The sheet overlays from the viewport top, so its tab bar keeps
           // the titlebar's height: a compact row re-centers the layout
           // controls a few pixels higher and the cluster jumps on open.
@@ -974,12 +1030,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           props.mode === "inline" && props.maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
         style={
-          {
-            "--right-panel-tab-gap": TAB_GAP,
-            ...(props.mode === "inline" && !props.layoutControls
-              ? { paddingRight: TRAILING_CONTROLS_INSET }
-              : {}),
-          } as CSSProperties
+          props.mode === "inline" && !props.layoutControls
+            ? { paddingRight: TRAILING_CONTROLS_INSET }
+            : undefined
         }
         data-right-panel-tabbar
       >
@@ -999,14 +1052,30 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             surfaces={groupSurfaces}
             allSurfaces={props.surfaces}
             onMove={props.onMoveSurface}
+            onDraggingChange={setDragging}
           >
             <div
               role="tablist"
               aria-label="Panel tabs"
               aria-orientation="horizontal"
-              className="flex h-full w-full items-center gap-0.5"
+              className="relative flex h-full w-full items-center gap-0.5"
               onKeyDown={handleTabListKeyDown}
             >
+              {/* The selected tab's fill: one pill that glides to whichever
+                  tab is selected, sized from the same widths as the tabs so
+                  it tracks their own width transitions. Hidden until the
+                  strip has measured itself and while a tab is being dragged. */}
+              <span
+                aria-hidden
+                ref={indicatorRef}
+                data-right-panel-tab-indicator
+                className="pointer-events-none absolute top-1/2 left-0 h-7 rounded-lg state-selected transition-[transform,width,opacity] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none"
+                style={{
+                  width: `${indicator?.width ?? 0}px`,
+                  transform: `translate(${indicator?.left ?? 0}px, -50%)`,
+                  opacity: indicator && !dragging ? 1 : 0,
+                }}
+              />
               {tabItems.map((item) => {
                 if (item.kind === "leaving") {
                   const { entry } = item;
@@ -1058,6 +1127,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     key={surface.id}
                     surfaceId={surface.id}
                     disabled={!props.onMoveSurface || renamingDevice === surface.id}
+                    active={active}
                     role="tab"
                     id={`${tabIdPrefix}-tab-${index}`}
                     aria-selected={active}
@@ -1082,19 +1152,23 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     style={width === undefined ? undefined : { width: `${width}px` }}
                     className={cn(
                       // Sized by the strip (see tabWidths), like a browser tab; its
-                      // width eases between sizes. The selected tab keeps its name,
-                      // stands on the strip's bottom edge in the panel's own
-                      // background, and is the only one with an outline. h-9 is
-                      // TAB_HEIGHT.
-                      "group/tab h-9 shrink-0 cursor-pointer overflow-hidden rounded-t-xl border border-b-0 text-xs outline-none transition-[width] duration-(--motion-duration-base) ease-standard focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset motion-reduce:transition-none",
+                      // width eases between sizes. The selected tab keeps its name
+                      // and is marked by the shared indicator behind it, not by a
+                      // fill or edge of its own; only keyboard focus draws a ring.
+                      "group/tab relative h-7 shrink-0 cursor-pointer overflow-hidden rounded-lg text-xs outline-none transition-[width,color] duration-(--motion-duration-base) ease-standard focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset motion-reduce:transition-none",
                       width === undefined && "max-w-44",
-                      active
-                        ? "border-border/60 bg-background text-foreground"
-                        : "border-transparent text-muted-foreground state-hover",
+                      active ? "text-foreground" : "text-muted-foreground",
                       ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
                     )}
                   >
-                    <div className="flex h-full items-center gap-1.5 pr-1.5 pl-3 group-data-[compact]/tab:justify-center group-data-[compact]/tab:px-0">
+                    {/* Hover lives on the content, on the fast token, so it never
+                        competes with the tab's own width transition. */}
+                    <div
+                      className={cn(
+                        "flex h-full items-center gap-1.5 rounded-lg pr-1.5 pl-3 transition-[background-color,color,box-shadow] duration-(--motion-duration-fast) ease-standard group-data-[compact]/tab:justify-center group-data-[compact]/tab:px-0",
+                        !active && "state-hover",
+                      )}
+                    >
                       {compact ? (
                         // Icon-only is the one case that needs the full title as a tooltip.
                         <Tooltip>
