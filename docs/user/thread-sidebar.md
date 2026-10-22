@@ -321,6 +321,13 @@ and **Edit** to rename, recolor, describe or delete the project. Deleting a proj
 keeps its chats, Work and repositories; they are just no longer in a folder. Start one
 with **New project** at the top of the list or in the command palette.
 
+From a terminal on the computer running Cogenly, `cogenly project label` does the
+same while Cogenly runs: `list`, `create <name> [--color <color>]`,
+`rename <project> <name>`, `delete <project>`, and
+`add-repo`/`remove-repo <project> <repository>`. Name a project by its name or id and
+a repository by its folder or id; add `--json` for scripts. A folder Cogenly doesn't
+track yet needs `cogenly project add <folder>` first.
+
 To file a thread, right-click it and choose **Move to folder**, or run **Move to folder…** from the command palette. Choose
 **Remove from folder** to take it out; Work then falls back to its repository's
 project. A filed chat also gets
