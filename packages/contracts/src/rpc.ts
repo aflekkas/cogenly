@@ -2,6 +2,7 @@ import * as Search from "./search.ts";
 import * as Facts from "./fact.ts";
 import * as Visual from "./visual.ts";
 import * as Exports from "./export.ts";
+import * as T3Import from "./t3Import.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Work from "./work.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
@@ -376,6 +377,10 @@ export const WS_METHODS = {
   filesystemGetMetadata: "filesystem.getMetadata",
   agentSessionsScan: "agentSessions.scan",
   agentSessionsImport: "agentSessions.import",
+  t3ImportStatus: "t3Import.status",
+  t3ImportScan: "t3Import.scan",
+  t3ImportRun: "t3Import.run",
+  t3ImportCancel: "t3Import.cancel",
   assetsCreateUrl: "assets.createUrl",
   assetsPersistChatAttachments: "assets.persistChatAttachments",
   attachmentsCreateUploadUrl: "attachments.createUploadUrl",
@@ -1269,6 +1274,31 @@ const WsAgentSessionsImportRpc = Rpc.make(WS_METHODS.agentSessionsImport, {
     AgentSessionScanError,
     EnvironmentAuthorizationError,
   ]),
+});
+
+const WsT3ImportStatusRpc = Rpc.make(WS_METHODS.t3ImportStatus, {
+  payload: Schema.Struct({}),
+  success: T3Import.T3ImportStatus,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsT3ImportScanRpc = Rpc.make(WS_METHODS.t3ImportScan, {
+  payload: T3Import.T3ImportScanInput,
+  success: T3Import.T3ImportStarted,
+  error: Schema.Union([T3Import.T3ImportError, EnvironmentAuthorizationError]),
+});
+
+const WsT3ImportRunRpc = Rpc.make(WS_METHODS.t3ImportRun, {
+  payload: T3Import.T3ImportRunInput,
+  success: T3Import.T3ImportStarted,
+  error: Schema.Union([T3Import.T3ImportError, EnvironmentAuthorizationError]),
+});
+
+const WsT3ImportCancelRpc = Rpc.make(WS_METHODS.t3ImportCancel, {
+  payload: Schema.Struct({}),
+  success: Schema.Struct({ cancelled: Schema.Boolean }),
+  error: EnvironmentAuthorizationError,
 });
 
 const WsAssetsCreateUrlRpc = Rpc.make(WS_METHODS.assetsCreateUrl, {
@@ -2390,6 +2420,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemGetMetadataRpc,
   WsAgentSessionsScanRpc,
   WsAgentSessionsImportRpc,
+  WsT3ImportStatusRpc,
+  WsT3ImportScanRpc,
+  WsT3ImportRunRpc,
+  WsT3ImportCancelRpc,
   WsAssetsCreateUrlRpc,
   WsAssetsPersistChatAttachmentsRpc,
   WsAttachmentsCreateUploadUrlRpc,

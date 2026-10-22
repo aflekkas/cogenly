@@ -16,6 +16,11 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.exportCreate]: AuthSettingsWriteScope,
   [WS_METHODS.exportValidate]: AuthSettingsWriteScope,
   [WS_METHODS.exportList]: AuthSettingsWriteScope,
+  // Importing writes projects, threads and settings, so even its status needs the settings grant.
+  [WS_METHODS.t3ImportStatus]: AuthSettingsWriteScope,
+  [WS_METHODS.t3ImportScan]: AuthSettingsWriteScope,
+  [WS_METHODS.t3ImportRun]: AuthSettingsWriteScope,
+  [WS_METHODS.t3ImportCancel]: AuthSettingsWriteScope,
   [WS_METHODS.commitmentsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.visualStateGet]: AuthOrchestrationReadScope,
   [WS_METHODS.visualStateSet]: AuthOrchestrationOperateScope,

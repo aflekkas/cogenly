@@ -21,7 +21,7 @@ import * as WorkHandoff from "./work/WorkHandoffService.ts";
 import * as AgentWorkspace from "./agents/AgentWorkspaceService.ts";
 import * as Agents from "./agents/AgentService.ts";
 import * as AgentStore from "./agents/AgentStore.ts";
-import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
+import { OrchestrationDispatchCommandError, T3ImportError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 
@@ -2250,6 +2250,34 @@ const makeWsRpcHandlers = (
       [WS_METHODS.agentSessionsScan]: () => agentSessionScanner.scan,
       [WS_METHODS.agentSessionsImport]: (input) =>
         agentSessionImporter.importRecentAgentThreads(input),
+      // Placeholder until the T3 import service lands.
+      [WS_METHODS.t3ImportStatus]: () =>
+        Stream.succeed({
+          source: {
+            available: false,
+            databasePath: "",
+            running: false,
+            pendingWalBytes: 0,
+            projects: [],
+            error: "Import from T3 Code is not available on this server yet.",
+          },
+          job: { _tag: "Idle" as const },
+        }),
+      [WS_METHODS.t3ImportScan]: () =>
+        Effect.fail(
+          new T3ImportError({
+            reason: "source-unavailable",
+            detail: "Import from T3 Code is not available on this server yet.",
+          }),
+        ),
+      [WS_METHODS.t3ImportRun]: () =>
+        Effect.fail(
+          new T3ImportError({
+            reason: "source-unavailable",
+            detail: "Import from T3 Code is not available on this server yet.",
+          }),
+        ),
+      [WS_METHODS.t3ImportCancel]: () => Effect.succeed({ cancelled: false }),
       [WS_METHODS.assetsCreateUrl]: (input) =>
         Effect.gen(function* () {
           const path = yield* Path.Path;
