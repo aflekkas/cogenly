@@ -169,7 +169,8 @@ provider credentials, and agent work stay on the remote machine.
 What Cogenly runs on the host:
 
 - A Cogenly server that is already running there, such as the
-  [background service](./background-service.md), is used as is.
+  [background service](./background-service.md), is used as is. A background
+  service that is installed but stopped is started.
 - Otherwise it starts the server from a Cogenly the host already has: the
   `cogenly` command, or a version installed under `~/.cogenly/runtime`.
 - On a host with no Cogenly, it downloads the release matching your desktop app
@@ -196,6 +197,30 @@ A background service sets its own `PATH`; see
 If SSH reconnecting fails after an app update, retry the launch once. Removing
 the connection stops a server that Cogenly launched; a server that was already
 running is left alone.
+
+The environment is named after the host's own name, or "<Provider> VPS" (such
+as "Contabo VPS") when the host carries its provider's default name. To change
+it, open the environment's **⋯** menu in **Settings → Connections** and choose
+**Rename…**.
+
+### Ask your agent to add your server
+
+Ask an agent running on the computer with the desktop app, for example "add my
+VPS to Cogenly, the SSH host is `myvps`". It adds the server through the desktop
+app, which shows "Connecting…" and then "Connected". The agent needs full access.
+
+From a terminal on the same computer:
+
+```bash
+cogenly environment add --ssh myvps --name "My VPS"
+```
+
+`--ssh` takes an alias from your SSH config or `user@host`. Leave out `--name`
+to use the host's own name. The desktop app must be running.
+
+A link works too: `cogenly://environments/add?ssh=myvps&name=My%20VPS`. Because
+any web page can open such a link, the app asks before it connects; only accept
+it if you opened the link yourself.
 
 ## Browser on a remote environment
 
