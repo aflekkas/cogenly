@@ -79,6 +79,8 @@ import {
 import * as ImageHandlers from "./toolkits/images/handlers.ts";
 import { ImageToolkit } from "./toolkits/images/tools.ts";
 import * as ProjectFilesHandlers from "./toolkits/projectFiles/handlers.ts";
+import { ProjectHomeToolkit } from "./toolkits/projectHome/tools.ts";
+import * as ProjectHomeHandlers from "./toolkits/projectHome/handlers.ts";
 import { ProjectFilesToolkit } from "./toolkits/projectFiles/tools.ts";
 import * as ImageSearchService from "../images/ImageSearchService.ts";
 
@@ -993,6 +995,8 @@ export const layer = Layer.mergeAll(
   layerProjectLabelsRegistration,
   // ProjectFiles bubbles to the server root like ThreadManagement.
   toolkitRegistration(ProjectFilesToolkit, ProjectFilesHandlers.layer),
+  // ProjectHome bubbles to the server root like ProjectFiles.
+  toolkitRegistration(ProjectHomeToolkit, ProjectHomeHandlers.layer),
   layerEnvironmentToolkit,
   layerPreviewControlsRegistration,
   layerWorktreeToolkitRegistration,

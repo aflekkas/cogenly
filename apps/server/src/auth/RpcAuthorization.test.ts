@@ -64,6 +64,12 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.workStart)).toBe(AuthOrchestrationOperateScope);
   });
 
+  it("requires operate access to create a project's chat", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.projectLabelsEnsureProjectChat)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
   it("requires owner operate authority for agent decisions and commitment mutations", () => {
     for (const method of [
       WS_METHODS.agentsRequestApproval,

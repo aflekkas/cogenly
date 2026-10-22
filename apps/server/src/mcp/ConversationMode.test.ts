@@ -37,6 +37,9 @@ import { layer as ImageHandlers } from "./toolkits/images/handlers.ts";
 import { ProjectFilesToolkit } from "./toolkits/projectFiles/tools.ts";
 import { layer as ProjectFilesHandlers } from "./toolkits/projectFiles/handlers.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
+import * as ProjectHome from "../projectLabels/ProjectHome.ts";
+import { ProjectHomeToolkit } from "./toolkits/projectHome/tools.ts";
+import { layer as ProjectHomeHandlers } from "./toolkits/projectHome/handlers.ts";
 import { TerminalToolkit } from "./toolkits/terminal/tools.ts";
 import { layer as TerminalHandlers } from "./toolkits/terminal/handlers.ts";
 import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
@@ -78,6 +81,19 @@ const serverLayer = Layer.mergeAll(
   McpHttpServer.toolkitRegistration(ProjectToolkit, ProjectHandlers),
   McpHttpServer.toolkitRegistration(ImageToolkit, ImageHandlers),
   McpHttpServer.toolkitRegistration(ProjectFilesToolkit, ProjectFilesHandlers),
+  McpHttpServer.toolkitRegistration(ProjectHomeToolkit, ProjectHomeHandlers).pipe(
+    Layer.provide(
+      Layer.mock(ProjectHome.ProjectHome)({
+        setInstructions: (input) =>
+          Effect.succeed({
+            projectFolderId: input.id,
+            kind: "instructions" as const,
+            label: "Instructions",
+            action: input.instructions === "" ? ("removed" as const) : ("updated" as const),
+          }),
+      }),
+    ),
+  ),
 ).pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
   Layer.provideMerge(threadLayers),
@@ -235,12 +251,19 @@ const mcpClient = McpSchema.McpServerClient.of({
 
 /** The tool result's JSON text for one caller. */
 const callText = (tool: string, threadId: ThreadId, args: Record<string, unknown>) =>
+  callTextAs(tool, threadScope(threadId), args);
+
+const callTextAs = (
+  tool: string,
+  scope: McpInvocationContext.McpInvocationScope,
+  args: Record<string, unknown>,
+) =>
   McpServer.McpServer.pipe(
     Effect.flatMap((server) => server.callTool({ name: tool, arguments: args })),
     Effect.map(({ content }) =>
       content.map((part) => (part.type === "text" ? part.text : "")).join(""),
     ),
-    Effect.provideService(McpInvocationContext.McpInvocationContext, threadScope(threadId)),
+    Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
     Effect.provideService(McpSchema.McpServerClient, mcpClient),
     Effect.provide(serverLayer),
   );
@@ -395,6 +418,34 @@ describe("conversation-mode MCP boundary", () => {
           ],
         });
       }),
+    ),
+  );
+
+  it.effect("project_instructions_set lets the project chat configure its own project", () =>
+    callText("project_instructions_set", chatThreadId, { instructions: "Use pnpm." }).pipe(
+      Effect.map((text) => {
+        assert.deepEqual(JSON.parse(text), {
+          projectFolderId: "label:conversation",
+          kind: "instructions",
+          label: "Instructions",
+          action: "updated",
+        });
+      }),
+    ),
+  );
+
+  it.effect("project changes are refused for a read-only MCP client", () =>
+    callTextAs(
+      "project_instructions_set",
+      {
+        ...threadScope(chatThreadId),
+        thread: undefined,
+        client: { sessionId: "client", label: "Read only", access: "read-only" },
+      },
+      { projectFolderId: "label:mentioned", instructions: "Nope." },
+    ).pipe(
+      Effect.flatMap(refusalOf),
+      Effect.map((refusal) => assert.equal(refusal.code, "capability_denied")),
     ),
   );
 });

@@ -2,6 +2,7 @@ import * as GlobalSearch from "../../search/GlobalSearch.ts";
 import * as FactService from "../../context/FactService.ts";
 import * as ProjectLabels from "../../projectLabels/ProjectLabelService.ts";
 import * as ProjectFiles from "../../projectLabels/ProjectFiles.ts";
+import * as ProjectHome from "../../projectLabels/ProjectHome.ts";
 import * as WorkHandoff from "../../work/WorkHandoffService.ts";
 import * as AgentService from "../../agents/AgentService.ts";
 import * as AgentWorkspace from "../../agents/AgentWorkspaceService.ts";
@@ -110,6 +111,17 @@ const layerStubServices = Layer.mergeAll(
         projectChatThreadId: null,
       }),
     listResources: () => Effect.succeed({ resources: [], truncated: false }),
+  }),
+  Layer.mock(ProjectHome.ProjectHome)({
+    overview: (id) =>
+      Effect.succeed({
+        projectFolderId: id,
+        name: "MCP smoke",
+        instructions: "Ship small.",
+        repositories: [],
+        sourceLinks: [],
+        projectChatThreadId: null,
+      }),
   }),
   Layer.mock(WorkHandoff.WorkHandoffService)({
     proposeHandoff: () =>
@@ -426,6 +438,23 @@ const smokeCases = [
     tool: "project_files_list",
     args: {},
     expected: { resources: [], truncated: false },
+  },
+  {
+    toolkit: "projectHome",
+    names: [
+      "project_file_remove",
+      "project_file_write",
+      "project_instructions_get",
+      "project_instructions_set",
+      "project_overview",
+      "project_repository_add",
+      "project_repository_remove",
+      "project_source_link",
+      "project_source_unlink",
+    ],
+    tool: "project_overview",
+    args: {},
+    expected: { projectFolderId: "label:smoke", instructions: "Ship small." },
   },
   {
     toolkit: "projectLabels",

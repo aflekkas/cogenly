@@ -87,7 +87,7 @@ export class ProjectHome extends Context.Service<
 /** First project chat id; stable, so a retried create replays instead of duplicating. */
 export const projectChatThreadIdFor = (id: ProjectLabelId) => ThreadId.make(`project-chat:${id}`);
 
-export const sourceLinkLabel = (link: ProjectSourceLink) =>
+const sourceLinkLabel = (link: ProjectSourceLink) =>
   link.kind === "github-owner" ? link.owner : `${link.owner}/${link.repo}`;
 
 const sameSource = (a: ProjectSourceLink, b: ProjectSourceLink) =>
