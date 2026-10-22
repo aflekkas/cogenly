@@ -286,6 +286,7 @@ import {
 } from "./sidebar/SidebarList";
 import { SidebarListEmptyState } from "./sidebar/SidebarListEmptyState";
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
+import { useSidebarScrollMemory } from "./sidebar/useSidebarScrollMemory";
 import { AgentsShelfBar } from "../agents/AgentsShelfBar";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
@@ -2735,9 +2736,10 @@ export default function Sidebar() {
 
   // Chats render a page at a time; the sentinel after the last row reveals
   // the next page as it scrolls into view. Every chat summary is already in
-  // the shell, so this only bounds rendering. A mode change starts over at
-  // the first page.
+  // the shell, so this only bounds rendering. Each mode keeps the pages it
+  // revealed, so coming back lands on the same rows.
   const { count: chatVisibleCount, reveal: revealMoreChats } = useSidebarListReveal({
+    listKey: "chats",
     resetKey: sidebarMode,
     initialCount: CHAT_LIST_PAGE_SIZE,
     pageCount: CHAT_LIST_PAGE_SIZE,
@@ -2825,8 +2827,9 @@ export default function Sidebar() {
   // The settled tail renders in pages: history shouldn't dominate the
   // sidebar, and the common lookups are recent. The sentinel above its
   // oldest row (the list grows upward) reveals the next page as it scrolls
-  // into view. A mode change starts over at the first page.
+  // into view. Each mode keeps the pages it revealed.
   const { count: settledVisibleCount, reveal: revealMoreSettled } = useSidebarListReveal({
+    listKey: "settled",
     resetKey: sidebarMode,
     initialCount: SETTLED_TAIL_INITIAL_COUNT,
     pageCount: SETTLED_TAIL_PAGE_COUNT,
@@ -3675,6 +3678,8 @@ export default function Sidebar() {
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
   const sidebarModeListRef = useRef<HTMLDivElement | null>(null);
+  // Each mode, and search, keeps its own place in the list.
+  useSidebarScrollMemory(sidebarModeListRef, isSearchingThreads ? "search" : sidebarMode);
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
   const listMotionRevealRef = useRef({ chats: chatVisibleCount, settled: settledVisibleCount });

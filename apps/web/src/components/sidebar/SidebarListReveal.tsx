@@ -14,19 +14,30 @@ type RevealAnchor = {
   readonly scrollHeight: number;
 };
 
+/** Pages revealed per list and reset key, so they survive the sidebar unmounting on Settings. */
+const revealedCounts = new Map<string, number>();
+
 /**
  * Paging for a sidebar list whose rows are all on the client: `count` rows
- * render, and `reveal` adds a page. A new `resetKey` (a mode or filter
- * change) starts over at the first page.
+ * render, and `reveal` adds a page. Each `resetKey` (a mode) keeps the pages
+ * it revealed, so switching modes and back shows the same rows, and the list's
+ * scroll position (useSidebarScrollMemory) lands where it was. `listKey` tells
+ * lists sharing a reset key apart.
  */
 export function useSidebarListReveal(options: {
+  readonly listKey: string;
   readonly resetKey: string;
   readonly initialCount: number;
   readonly pageCount: number;
 }) {
-  const { resetKey, initialCount, pageCount } = options;
-  const [state, setState] = useState({ resetKey, count: initialCount });
-  const count = state.resetKey === resetKey ? state.count : initialCount;
+  const { listKey, resetKey, initialCount, pageCount } = options;
+  const memoryKey = `${listKey}:${resetKey}`;
+  const [state, setState] = useState(() => ({
+    memoryKey,
+    count: revealedCounts.get(memoryKey) ?? initialCount,
+  }));
+  const count =
+    state.memoryKey === memoryKey ? state.count : (revealedCounts.get(memoryKey) ?? initialCount);
   const anchorRef = useRef<RevealAnchor | null>(null);
   /** Pass the scroll viewport when the page lands above the visible rows. */
   const reveal = useCallback(
@@ -35,12 +46,16 @@ export function useSidebarListReveal(options: {
         viewport == null
           ? null
           : { viewport, scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight };
-      setState((previous) => ({
-        resetKey,
-        count: (previous.resetKey === resetKey ? previous.count : initialCount) + pageCount,
-      }));
+      setState((previous) => {
+        const next =
+          (previous.memoryKey === memoryKey
+            ? previous.count
+            : (revealedCounts.get(memoryKey) ?? initialCount)) + pageCount;
+        revealedCounts.set(memoryKey, next);
+        return { memoryKey, count: next };
+      });
     },
-    [initialCount, pageCount, resetKey],
+    [initialCount, memoryKey, pageCount],
   );
   // The sidebar viewport opts out of browser scroll anchoring, so a page
   // that lands above the visible rows would push them down. Everything it
