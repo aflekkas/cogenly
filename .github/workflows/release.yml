@@ -67,7 +67,10 @@ jobs:
             if (!firstParent.includes(sha)) throw new Error(`${sha} is not on main's first-parent history.`);
 
             // Build only a commit whose own push CI run on main succeeded.
-            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { ...context.repo, workflow_id: 'ci.yml', head_sha: sha, event: 'push', per_page: 100 });
+            // The head_sha filter is sometimes empty for runs that exist, so also scan recent main pushes.
+            const bySha = await github.paginate(github.rest.actions.listWorkflowRuns, { ...context.repo, workflow_id: 'ci.yml', head_sha: sha, event: 'push', per_page: 100 });
+            const { data: recent } = await github.rest.actions.listWorkflowRuns({ ...context.repo, workflow_id: 'ci.yml', branch: 'main', event: 'push', per_page: 100 });
+            const runs = [...bySha, ...recent.workflow_runs.filter((run) => run.head_sha === sha)];
             const mainRuns = runs.filter((run) => run.head_branch === 'main');
             if (!mainRuns.some((run) => run.conclusion === 'success')) {
               const seen = mainRuns.map((run) => `${run.html_url} (${run.status}${run.conclusion ? `/${run.conclusion}` : ''})`).join(', ');
