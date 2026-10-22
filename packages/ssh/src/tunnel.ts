@@ -64,6 +64,11 @@ const REMOTE_ARCHIVE_DOWNLOAD_SECONDS = 240;
 const REMOTE_ARCHIVE_LOCK_WAIT_SECONDS = 360;
 const REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS = 900_000;
 const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
+// The background service `cogenly service install` writes, and how long (in
+// half-second ticks) a stopped one gets to start and write its runtime file.
+const COGENLY_SERVICE_SYSTEMD_UNIT = "cogenly.service";
+const COGENLY_SERVICE_LAUNCHD_LABEL = "com.cogenly.app.service";
+const REMOTE_SERVICE_START_WAIT_TICKS = 60;
 
 export interface RemoteT3RunnerOptions {
   /**
@@ -757,6 +762,49 @@ else
   REMOTE_PORT=""
   REMOTE_MANAGED=""
 fi
+# Cogenly's background service (\`cogenly service install\`) that is installed but
+# stopped is started rather than launching a second server beside it. Its
+# runtime file names the port once it listens.
+start_installed_service() {
+  if command -v systemctl >/dev/null 2>&1; then
+    if [ -z "\${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$(id -u)" ]; then
+      XDG_RUNTIME_DIR="/run/user/$(id -u)"
+      export XDG_RUNTIME_DIR
+    fi
+    if systemctl --user cat @@T3_SYSTEMD_UNIT@@ >/dev/null 2>&1; then
+      systemctl --user start @@T3_SYSTEMD_UNIT@@ >/dev/null 2>&1
+      return
+    fi
+  fi
+  T3_SERVICE_PLIST="$HOME/Library/LaunchAgents/@@T3_LAUNCHD_LABEL@@.plist"
+  if [ -f "$T3_SERVICE_PLIST" ] && command -v launchctl >/dev/null 2>&1; then
+    launchctl kickstart "gui/$(id -u)/@@T3_LAUNCHD_LABEL@@" >/dev/null 2>&1 ||
+      launchctl bootstrap "gui/$(id -u)" "$T3_SERVICE_PLIST" >/dev/null 2>&1
+    return
+  fi
+  return 1
+}
+if [ -z "$REMOTE_PORT" ] && start_installed_service; then
+  SERVICE_WAIT=0
+  while [ "$SERVICE_WAIT" -lt @@T3_SERVICE_START_WAIT_TICKS@@ ]; do
+    DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port 2>/dev/null || true)"
+    if [ -n "$DEFAULT_RUNTIME_INFO" ]; then
+      REMOTE_PORT="\${DEFAULT_RUNTIME_INFO#* }"
+      if wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
+        REMOTE_PID=""
+        REMOTE_MANAGED="external"
+        rm -f "$PID_FILE"
+        printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
+        printf 'external\\n' >"$MANAGED_FILE"
+      else
+        REMOTE_PORT=""
+      fi
+      break
+    fi
+    SERVICE_WAIT=$((SERVICE_WAIT + 1))
+    sleep 0.5
+  done
+fi
 if [ -z "$REMOTE_PORT" ]; then
   REMOTE_PORT="$(pick_port)" || true
   if [ -z "$REMOTE_PORT" ]; then
@@ -904,6 +952,9 @@ export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
     T3_READY_TIMEOUT_MS: String(REMOTE_READY_TIMEOUT_MS),
     T3_REUSE_READY_TIMEOUT_MS: String(REMOTE_REUSE_READY_TIMEOUT_MS),
     T3_READY_PROBE_TIMEOUT_MS: String(SSH_READY_PROBE_TIMEOUT_MS),
+    T3_SYSTEMD_UNIT: COGENLY_SERVICE_SYSTEMD_UNIT,
+    T3_LAUNCHD_LABEL: COGENLY_SERVICE_LAUNCHD_LABEL,
+    T3_SERVICE_START_WAIT_TICKS: String(REMOTE_SERVICE_START_WAIT_TICKS),
   });
 }
 

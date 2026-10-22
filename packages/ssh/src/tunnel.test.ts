@@ -8,7 +8,7 @@ import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { buildRemoteT3RunnerScript } from "./tunnel.ts";
+import { buildRemoteLaunchScript, buildRemoteT3RunnerScript } from "./tunnel.ts";
 
 const VERSION = "9.9.9";
 // An origin that fails any fetch, proving a case never downloads.
@@ -172,6 +172,107 @@ describe("SSH runner install selection", () => {
       expect(result.code).not.toBe(0);
       expect(result.stderr).toContain(`Could not download ${yield* archiveName}`);
       expect(yield* fs.exists(path.join(home, ".cogenly/runtime/versions", VERSION))).toBe(false);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+/** A pinned runtime whose helpers answer at once, and that logs any server it is asked to run. */
+const pinHelperRuntime = Effect.fn("test.pinHelperRuntime")(function* (home: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const dir = path.join(home, ".cogenly/runtime/versions", VERSION);
+  yield* fs.makeDirectory(dir, { recursive: true });
+  yield* fs.writeFileString(
+    path.join(dir, "t3"),
+    [
+      "#!/bin/sh",
+      'case "$1" in',
+      "  --version) echo 9.9.9 ;;",
+      '  __ssh-helper) case "$2" in',
+      '    runtime-port) [ -f "$3" ] || exit 1; cat "$3" ;;',
+      "    wait-ready) exit 0 ;;",
+      "    pick-port) echo 5999 ;;",
+      "  esac ;;",
+      '  *) echo "$*" >>"$HOME/launched" ;;',
+      "esac",
+      "",
+    ].join("\n"),
+  );
+  yield* fs.chmod(path.join(dir, "t3"), 0o755);
+  yield* fs.writeFileString(path.join(dir, ".install-complete"), `${VERSION}\n`);
+});
+
+/** A `systemctl` that knows `cogenly.service` when `installed`, and whose start writes its runtime file. */
+const writeFakeSystemctl = Effect.fn("test.writeFakeSystemctl")(function* (
+  home: string,
+  installed: boolean,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const file = path.join(home, "bin/systemctl");
+  yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+  yield* fs.writeFileString(
+    file,
+    [
+      "#!/bin/sh",
+      'echo "$*" >>"$HOME/systemctl.log"',
+      'case "$2" in',
+      `  cat) exit ${installed ? 0 : 1} ;;`,
+      '  start) mkdir -p "$HOME/.cogenly/userdata"; echo "4242 4773" >"$HOME/.cogenly/userdata/server-runtime.json" ;;',
+      "esac",
+      "",
+    ].join("\n"),
+  );
+  yield* fs.chmod(file, 0o755);
+});
+
+const runLaunch = Effect.fn("test.runLaunch")(function* (home: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const scriptPath = path.join(home, "launch.sh");
+  yield* fs.writeFileString(
+    scriptPath,
+    buildRemoteLaunchScript({ archiveVersion: VERSION, releaseBaseUrl: UNREACHABLE_ORIGIN }),
+  );
+  return yield* run("/bin/sh", [scriptPath, "state-key"], {
+    HOME: home,
+    PATH: `${home}/bin:/usr/bin:/bin`,
+  });
+});
+
+describe("SSH launch with an installed background service", () => {
+  it.effect("starts the stopped service and uses it instead of a second server", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* makeHome;
+      yield* pinHelperRuntime(home);
+      yield* writeFakeSystemctl(home, true);
+      const result = yield* runLaunch(home);
+      expect(result).toMatchObject({
+        code: 0,
+        stdout: '{"remotePort":4773,"serverKind":"external"}',
+      });
+      expect(yield* fs.readFileString(path.join(home, "systemctl.log"))).toContain(
+        "--user start cogenly.service",
+      );
+      expect(yield* fs.exists(path.join(home, "launched"))).toBe(false);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("launches its own server when no service is installed", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* makeHome;
+      yield* pinHelperRuntime(home);
+      yield* writeFakeSystemctl(home, false);
+      const result = yield* runLaunch(home);
+      expect(result).toMatchObject({
+        code: 0,
+        stdout: '{"remotePort":5999,"serverKind":"managed"}',
+      });
+      expect(yield* fs.readFileString(path.join(home, "systemctl.log"))).not.toContain("start");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
