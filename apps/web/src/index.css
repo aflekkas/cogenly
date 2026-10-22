@@ -1314,22 +1314,6 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   will-change: var(--visible-animation-will-change, auto);
 }
 
-/* The pending-title skeleton's breath: opacity only (compositor-only, no
-   repaint), slow ease-in-out. Reduced motion holds the static block. */
-@keyframes pending-title-pulse {
-  50% {
-    opacity: 0.55;
-  }
-}
-
-@utility pending-title-pulse {
-  animation: pending-title-pulse 1.4s ease-in-out infinite;
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
-}
-
 /* An update's progress bar when the updater reports no percentage: a short
    segment sweeps across while the update runs, paused offscreen like
    visible-animate-spin (pair with observeVisibleAnimation). Reduced motion
