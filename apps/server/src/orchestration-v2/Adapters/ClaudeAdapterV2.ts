@@ -144,7 +144,10 @@ import {
 } from "../../provider/claudeUsageLimits.ts";
 import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
+import {
+  T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
+  T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+} from "@t3tools/provider-core/server/orchestrationInstructions";
 import {
   CONVERSATION_MODE_INSTRUCTIONS,
   buildRuntimeInstructions,
@@ -1119,6 +1122,8 @@ export function makeClaudeQueryOptions(input: {
   readonly sdkSettings?: string | ClaudeSdkSettings;
   readonly environment?: NodeJS.ProcessEnv;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
+  /** The turn's MCP session carries the collaborative browser tools. */
+  readonly browserToolsAvailable?: boolean;
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
   readonly disallowedTools?: ReadonlyArray<string>;
@@ -1212,6 +1217,9 @@ export function makeClaudeQueryOptions(input: {
         (input.conversationMode === true ? `\n${CONVERSATION_MODE_INSTRUCTIONS}` : "") +
         (input.projectManifest === undefined ? "" : `\n${input.projectManifest}`) +
         (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS) +
+        (input.mcpServers !== undefined && input.browserToolsAvailable === true
+          ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS
+          : "") +
         // Conversation turns have no shell at all, so they never route
         // commands through the terminal tools.
         (input.conversationMode === true || !input.disallowedTools?.includes("Bash")
@@ -8415,8 +8423,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         ) {
           const queryPolicy = claudeRuntimeQueryPolicyForRuntimePolicy(turnInput.runtimePolicy);
           const conversationMode = queryPolicy.conversationMode;
+          const mcpSession = yield* mcpSessions.read(turnInput.threadId);
           const mcpOverrides = claudeMcpQueryOverrides({
-            mcpSession: yield* mcpSessions.read(turnInput.threadId),
+            mcpSession,
             readOnlySandbox: conversationMode,
             ...(conversationMode ? { conversationMode } : {}),
             ...(queryPolicy.allowedTools === undefined
@@ -8545,6 +8554,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(mcpOverrides.mcpServers === undefined
               ? {}
               : { mcpServers: mcpOverrides.mcpServers }),
+            ...(mcpSession?.browserToolsAvailable === true && !conversationMode
+              ? { browserToolsAvailable: true }
+              : {}),
             ...(disallowedTools.length === 0 ? {} : { disallowedTools }),
             permissionMode: queryPolicy.permissionMode,
             ...(queryPolicy.allowDangerouslySkipPermissions === undefined
