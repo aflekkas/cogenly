@@ -15,74 +15,34 @@ const threadRef = {
 };
 
 describe("migratePersistedRightPanelState", () => {
-  it("folds per-shell terminal surfaces into the single agent terminal surface", () => {
+  it("drops terminal surfaces now that agent terminals live in the bottom panel", () => {
     const migrated = migratePersistedRightPanelState({
       byThreadKey: {
         "env-1:thread-1": {
           isOpen: true,
-          activeSurfaceId: "terminal:term-2",
+          activeSurfaceId: "terminal",
           surfaces: [
-            { id: "diff", kind: "diff" },
-            {
-              id: "terminal:term-1",
-              kind: "terminal",
-              resourceId: "term-1",
-              terminalIds: ["term-1"],
-              activeTerminalId: "term-1",
-            },
-            {
-              id: "terminal:term-2",
-              kind: "terminal",
-              resourceId: "term-2",
-              terminalIds: ["term-2", "term-3"],
-              activeTerminalId: "term-3",
-            },
+            { id: "terminal", kind: "terminal", activeTerminalId: "agent-1" },
+            { id: "device", kind: "device" },
           ],
+        },
+        "env-1:thread-2": {
+          isOpen: true,
+          activeSurfaceId: "terminal",
+          surfaces: [{ id: "terminal", kind: "terminal" }],
         },
       },
     });
-    expect(migrated.byThreadKey["env-1:thread-1"]).toEqual({
+
+    expect(migrated.byThreadKey["env-1:thread-1"]).toMatchObject({
       isOpen: true,
-      activeSurfaceId: "terminal",
-      surfaces: [{ id: "terminal", kind: "terminal" }],
+      activeSurfaceId: "device",
+      surfaces: [{ id: "device", kind: "device" }],
     });
-  });
-});
-
-describe("terminal surface actions", () => {
-  it("reveals an agent terminal in the single terminal surface", () => {
-    useRightPanelStore.getState().open(threadRef, "files");
-
-    useRightPanelStore.getState().revealAgentTerminal(threadRef, "agent-1");
-
-    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
-    expect(state.isOpen).toBe(true);
-    expect(state.activeSurfaceId).toBe("terminal");
-    expect(state.surfaces).toContainEqual({
-      id: "terminal",
-      kind: "terminal",
-      activeTerminalId: "agent-1",
-    });
-
-    // A later reveal selects the newer command in the same surface.
-    useRightPanelStore.getState().revealAgentTerminal(threadRef, "agent-2");
-    const next = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
-    expect(next.surfaces.filter((surface) => surface.kind === "terminal")).toEqual([
-      { id: "terminal", kind: "terminal", activeTerminalId: "agent-2" },
-    ]);
-  });
-
-  it("keeps a selected shell when the agent starts a command", () => {
-    useRightPanelStore.getState().openTerminal(threadRef, "term-1");
-
-    useRightPanelStore.getState().revealAgentTerminal(threadRef, "agent-3");
-
-    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef);
-    expect(state.activeSurfaceId).toBe("terminal");
-    expect(state.surfaces).toContainEqual({
-      id: "terminal",
-      kind: "terminal",
-      activeTerminalId: "term-1",
+    // A panel that only held the terminal does not reopen empty.
+    expect(migrated.byThreadKey["env-1:thread-2"]).toMatchObject({
+      isOpen: false,
+      surfaces: [],
     });
   });
 });
@@ -94,12 +54,12 @@ describe("selectActiveRightPanelSurface", () => {
         isOpen: true,
         activeSurfaceId: "browser:gone",
         surfaces: [
-          { id: "terminal" as const, kind: "terminal" as const },
           { id: "device" as const, kind: "device" as const },
+          { id: "files" as const, kind: "files" as const },
         ],
       },
     };
-    expect(selectActiveRightPanelSurface(byThreadKey, threadRef)?.id).toBe("terminal");
+    expect(selectActiveRightPanelSurface(byThreadKey, threadRef)?.id).toBe("device");
   });
 });
 
@@ -117,8 +77,8 @@ describe("activateGroup", () => {
     store.openBrowser(groupThreadRef, "tab-2");
     store.openBrowser(groupThreadRef, "tab-3");
     store.activateSurface(groupThreadRef, "browser:tab-2");
-    store.openTerminal(groupThreadRef);
-    expect(read().activeSurfaceId).toBe("terminal");
+    store.open(groupThreadRef, "device");
+    expect(read().activeSurfaceId).toBe("device");
 
     store.activateGroup(groupThreadRef, "browser");
 
@@ -129,7 +89,7 @@ describe("activateGroup", () => {
   it("forgets closed surfaces and falls back to the group's first tab", () => {
     const store = useRightPanelStore.getState();
     store.closeSurface(groupThreadRef, "browser:tab-2");
-    store.openTerminal(groupThreadRef);
+    store.open(groupThreadRef, "device");
 
     store.activateGroup(groupThreadRef, "browser");
 
@@ -140,15 +100,15 @@ describe("activateGroup", () => {
 
   it("does nothing for a group with no surface, so the caller can create one", () => {
     const before = read();
-    useRightPanelStore.getState().activateGroup(groupThreadRef, "device");
+    useRightPanelStore.getState().activateGroup(groupThreadRef, "files");
     expect(read()).toBe(before);
-    expect(selectGroupSurface(before, "device")).toBeNull();
+    expect(selectGroupSurface(before, "files")).toBeNull();
   });
 
   it("treats the explorer and open files as one group", () => {
     const store = useRightPanelStore.getState();
     store.openFile(groupThreadRef, "src/a.ts");
-    store.openTerminal(groupThreadRef);
+    store.open(groupThreadRef, "device");
 
     store.activateGroup(groupThreadRef, "files");
 

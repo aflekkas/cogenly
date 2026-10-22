@@ -17,7 +17,7 @@ export type ClosedView =
   | {
       kind: "panel-tab";
       threadRef: ScopedThreadRef;
-      surface: Exclude<RightPanelSurface, { kind: "terminal" }>;
+      surface: RightPanelSurface;
     }
   | { kind: "browser"; threadRef: ScopedThreadRef; snapshot: PreviewSessionSnapshot };
 

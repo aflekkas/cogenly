@@ -318,11 +318,10 @@ export function buildWhenVariableOptions(): ReadonlyArray<WhenVariableOption> {
   });
 }
 
-// Still decodable so stored keybindings load, but no longer offered: the
-// terminal drawer and the diff panel were removed.
+// Still decodable so stored keybindings load, but no longer offered: user
+// shells and the diff panel were removed.
 export const RETIRED_KEYBINDING_COMMANDS: ReadonlySet<KeybindingCommand> = new Set([
   "diff.toggle",
-  "terminal.toggle",
   "terminal.split",
   "terminal.splitVertical",
   "terminal.new",
@@ -355,6 +354,7 @@ export function commandLabel(command: KeybindingCommand): string {
   // Kept under its old id so stored bindings still apply; it only opens an agent's settings now.
   if (command === "threadPanel.toggle") return "Agent Settings: Open";
   if (command === "preview.focusUrl") return "Preview: Focus URL";
+  if (command === "terminal.toggle") return "Terminal Panel: Toggle";
   // Cogenly projects are repositories in the UI; Projects are context tags.
   if (command === "chat.newWithoutProject") return "Chat: New Without Repository";
   if (command === "projectSearch.toggle") return "Repository Search: Toggle";

@@ -4,9 +4,9 @@
  * This is intentionally a shallow workspace model: it owns an ordered set of
  * surface descriptors and the active surface, while each feature continues to
  * own its durable resource state. Browser surfaces point at preview tab ids,
- * file surfaces point at workspace paths, and files/terminal remain
- * singleton surfaces. The terminal surface holds the thread's agent runs and
- * shells and remembers which one is selected.
+ * file surfaces point at workspace paths, and files/device remain
+ * singleton surfaces. Agent terminals live in the bottom panel
+ * (bottomPanelStore), not here.
  */
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { type ScopedThreadRef } from "@t3tools/contracts";
@@ -17,7 +17,7 @@ import { useClosedViewStore } from "./closedViewStore";
 import { resolveStorage } from "./lib/storage";
 import type { ChatFileAttachment } from "./types";
 
-const RIGHT_PANEL_KINDS = ["files", "file", "preview", "device", "terminal"] as const;
+const RIGHT_PANEL_KINDS = ["files", "file", "preview", "device"] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export interface DeviceTabTarget {
@@ -31,12 +31,6 @@ export type RightPanelSurface =
   | { id: `browser:${string}`; kind: "preview"; resourceId: string }
   | { id: "browser:new"; kind: "preview"; resourceId: null }
   | { id: "device" | `device:${string}`; kind: "device"; target?: DeviceTabTarget; title?: string }
-  | {
-      id: "terminal";
-      kind: "terminal";
-      /** The terminal shown below the command list; the newest one when unset. */
-      activeTerminalId?: string;
-    }
   | {
       id: "files";
       kind: "files";
@@ -68,7 +62,8 @@ const RIGHT_PANEL_STORAGE_KEY = "cogenly:right-panel-state:v2";
 // v14 removes the agents surface; lineage lives in the thread title bar.
 // v16 folds per-shell terminal surfaces into the single agent terminal surface.
 // v17 removes the diff surface and the thread details panel's visibility.
-const RIGHT_PANEL_STORAGE_VERSION = 17;
+// v18 moves agent terminals to the bottom panel: terminal surfaces are dropped.
+const RIGHT_PANEL_STORAGE_VERSION = 18;
 
 export interface ThreadRightPanelState {
   isOpen: boolean;
@@ -88,7 +83,7 @@ export interface ThreadRightPanelState {
  * The header's switcher groups surfaces by what they show: the files explorer
  * and file previews are one group, every other kind is its own.
  */
-export type RightPanelSurfaceGroup = "browser" | "terminal" | "device" | "files";
+export type RightPanelSurfaceGroup = "browser" | "device" | "files";
 
 export function surfaceGroupOf(surface: Pick<RightPanelSurface, "kind">): RightPanelSurfaceGroup {
   switch (surface.kind) {
@@ -97,7 +92,6 @@ export function surfaceGroupOf(surface: Pick<RightPanelSurface, "kind">): RightP
     case "files":
     case "file":
       return "files";
-    case "terminal":
     case "device":
       return surface.kind;
   }
@@ -113,7 +107,7 @@ interface RightPanelStoreState {
   requestMaximize: (ref: ScopedThreadRef) => void;
   consumeMaximizeRequest: (ref: ScopedThreadRef) => boolean;
   closeRevisionByThreadKey: Record<string, number>;
-  open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
+  open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file">) => void;
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
@@ -132,14 +126,6 @@ interface RightPanelStoreState {
     keepSource?: boolean,
   ) => void;
   openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
-  /** Show the terminal surface, selecting `terminalId` when given. */
-  openTerminal: (ref: ScopedThreadRef, terminalId?: string) => void;
-  /**
-   * Show a terminal the agent just started. Automatic, so it does not count as
-   * a user panel choice; it never moves keyboard focus, and it leaves a selected
-   * shell selected so a new command cannot pull the user out of their own shell.
-   */
-  revealAgentTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
   activateSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
   /**
    * Shows the group's most recently active surface and opens the panel. A
@@ -171,9 +157,7 @@ const EMPTY_THREAD_STATE: ThreadRightPanelState = {
   surfaces: [],
 };
 
-const singletonSurface = (
-  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal">,
-): RightPanelSurface => {
+const singletonSurface = (kind: Exclude<RightPanelKind, "file" | "preview">): RightPanelSurface => {
   switch (kind) {
     case "files":
       return { id: "files", kind };
@@ -207,37 +191,6 @@ const attachmentSurface = (attachment: ChatFileAttachment): RightPanelSurface =>
   revealRequestId: 0,
   attachment,
 });
-
-const terminalSurface = (terminalId?: string): RightPanelSurface => ({
-  id: "terminal",
-  kind: "terminal",
-  ...(terminalId === undefined ? {} : { activeTerminalId: terminalId }),
-});
-
-const showTerminal = (
-  current: ThreadRightPanelState,
-  terminalId: string | undefined,
-): ThreadRightPanelState => {
-  const surface = terminalSurface(terminalId);
-  const exists = current.surfaces.some((entry) => entry.id === surface.id);
-  return {
-    ...current,
-    isOpen: true,
-    activeSurfaceId: surface.id,
-    surfaces: exists
-      ? current.surfaces.map((entry) =>
-          entry.id === surface.id && terminalId !== undefined ? surface : entry,
-        )
-      : [...current.surfaces, surface],
-  };
-};
-
-// Shell ids are client-chosen `term-N`; agent commands are server-allocated `agent-*`.
-const isShowingShell = (current: ThreadRightPanelState): boolean => {
-  const surface = current.surfaces.find((entry) => entry.kind === "terminal");
-  const terminalId = surface?.kind === "terminal" ? surface.activeTerminalId : undefined;
-  return terminalId !== undefined && !terminalId.startsWith("agent-");
-};
 
 const upsertSurface = (
   current: ThreadRightPanelState,
@@ -324,7 +277,7 @@ const updateThread = (
 });
 
 // Every store action is a user choice unless it goes through `automaticUpdate`.
-// Only agent terminal and device reveals and resource reconciliation are
+// Only device reveals and resource reconciliation are
 // automatic: a user choice is what remembers dismissed devices.
 const automaticUpdate = (
   state: RightPanelStoreState,
@@ -395,13 +348,13 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
             .map(([threadKey, threadState]) => {
               const validThreadState =
                 threadState && typeof threadState === "object" ? threadState : null;
-              let seenTerminalSurface = false;
               const surfaces = Array.isArray(validThreadState?.surfaces)
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
                     // Removed surfaces: plans render inline, agents in thread lineage,
-                    // and the thread UI has no diff view.
+                    // the thread UI has no diff view, and terminals moved to the bottom panel.
                     const kind = (surface as { kind?: string }).kind;
                     if (
+                      kind === "terminal" ||
                       kind === "plan" ||
                       kind === "diff" ||
                       kind === "agents" ||
@@ -431,20 +384,10 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                           : 0;
                       return [{ ...surface, revealLine, revealRequestId }];
                     }
-                    if (surface.kind !== "terminal") return [surface];
-                    // Older versions kept one surface per user shell. Keep a single
-                    // terminal surface in the first one's place.
-                    if (seenTerminalSurface) return [];
-                    seenTerminalSurface = true;
-                    return [{ id: "terminal", kind: "terminal" }];
+                    return [surface];
                   })
                 : [];
-              const storedActiveSurfaceId = validThreadState?.activeSurfaceId;
-              const rawActiveSurfaceId =
-                typeof storedActiveSurfaceId === "string" &&
-                storedActiveSurfaceId.startsWith("terminal:")
-                  ? "terminal"
-                  : storedActiveSurfaceId;
+              const rawActiveSurfaceId = validThreadState?.activeSurfaceId;
               const persistedActiveSurfaceId = surfaces.some(
                 (surface) => surface.id === rawActiveSurfaceId,
               )
@@ -638,16 +581,6 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               attachmentSurface(attachment),
             );
           }),
-        ),
-      openTerminal: (ref, terminalId) =>
-        set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) => showTerminal(current, terminalId)),
-        ),
-      revealAgentTerminal: (ref, terminalId) =>
-        set((state) =>
-          automaticUpdate(state, scopedThreadKey(ref), (current) =>
-            showTerminal(current, isShowingShell(current) ? undefined : terminalId),
-          ),
         ),
       activateSurface: (ref, surfaceId) =>
         set((state) =>
@@ -863,11 +796,7 @@ useRightPanelStore.subscribe((next, previous) => {
       ...removed.filter((surface) => surface.id === before.activeSurfaceId),
     ];
     for (const surface of closedInOrder) {
-      if (
-        surface.kind === "terminal" ||
-        (surface.kind === "preview" && surface.resourceId !== null)
-      )
-        continue;
+      if (surface.kind === "preview" && surface.resourceId !== null) continue;
       useClosedViewStore.getState().remember({ kind: "panel-tab", threadRef, surface });
     }
   }

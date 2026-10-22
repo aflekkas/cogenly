@@ -110,21 +110,22 @@ describe("KeybindingsSettings.logic", () => {
     ]);
   });
 
-  it("hides stored bindings for the retired terminal drawer commands", () => {
-    const toggle = {
-      command: "terminal.toggle",
-      shortcut: {
-        key: "j",
-        modKey: true,
-        metaKey: false,
-        ctrlKey: false,
-        altKey: false,
-        shiftKey: false,
-      },
+  it("hides stored bindings for the retired shell commands but offers the panel toggle", () => {
+    const shortcut = {
+      key: "n",
+      modKey: true,
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+    };
+    const retired = {
+      command: "terminal.new",
+      shortcut,
     } satisfies ResolvedKeybindingsConfig[number];
-    expect(buildKeybindingRows([toggle], "")).toEqual([]);
-    expect(buildKeybindingCommandOptions([toggle])).not.toContain("terminal.toggle");
-    expect(buildKeybindingCommandOptions([])).not.toContain("terminal.new");
+    expect(buildKeybindingRows([retired], "")).toEqual([]);
+    expect(buildKeybindingCommandOptions([retired])).not.toContain("terminal.new");
+    expect(buildKeybindingCommandOptions([])).toContain("terminal.toggle");
   });
 
   it("captures platform-specific mod shortcuts", () => {

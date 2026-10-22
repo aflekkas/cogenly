@@ -56,7 +56,7 @@ function resolvePlatform(options: ShortcutMatchOptions | undefined): string {
 function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatchContext {
   return {
     terminalFocus: false,
-    // The terminal drawer is gone; stored `when` clauses naming it read as false.
+    // The bottom panel of agent terminals; the chat view reports it.
     terminalOpen: false,
     previewFocus: false,
     previewOpen: false,

@@ -311,6 +311,8 @@ export interface AgentRunsViewProps {
   readonly visible: boolean;
   readonly focusToken: number;
   readonly autoFocus: boolean;
+  /** Bumped after the panel holding the output was resized, so the terminal refits. */
+  readonly resizeEpoch?: number;
   readonly onSelect: (terminalId: string) => void;
   readonly onFocusOutput: () => void;
   readonly onStop: (entry: AgentTerminalEntry) => void;
@@ -451,7 +453,7 @@ export function AgentRunsView(props: AgentRunsViewProps) {
             focusRequestId={props.focusToken}
             autoFocus={props.autoFocus}
             visible={props.visible}
-            resizeEpoch={0}
+            resizeEpoch={props.resizeEpoch ?? 0}
           />
         </div>
         <RunStatusFooter entry={selected} />

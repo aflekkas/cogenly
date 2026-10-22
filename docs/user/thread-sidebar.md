@@ -122,8 +122,8 @@ conversation mode: the agent answers directly and can't edit files or run shell
 commands. So a chat's
 menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
 which always asks first, while settling, snoozing, archiving, repository settings
-and the branch and worktree controls, the right panel, and its browser, terminal and device
-belong to Work. When a
+and the branch and worktree controls, the right panel with its browser and device, and the
+terminal panel belong to Work. When a
 chat turns into code, **Start Work…** hands it to a new Work session. An agent's
 conversation belongs to the agent: rename it or remove it from the agent's
 **Details**.
@@ -249,10 +249,10 @@ terminals that wait at an idle prompt, and keeps their output. A project script 
 started stays open while it runs a command. Agent-run terminals, including dev servers
 and their child processes, stop when you settle, archive, or delete the thread.
 
-Every shell command the agent runs appears in the right panel's **Terminal** tab, newest
-first and labelled with the command. The tab opens when the agent starts a command,
-without taking focus from the composer. Running commands stream live and have a stop
-button. Finished ones stay listed with their exit status. You can scroll, select and copy
+Every shell command the agent runs appears in the terminal panel under the conversation
+(see [Terminal](terminal.md)), newest first and labelled with the command. The panel never
+opens by itself; its button shows a dot while a command runs. Running commands stream live
+and have a stop button. Finished ones stay listed with their exit status. You can scroll, select and copy
 their output, and type into a command that still reads input. Cogenly does not open a
 shell of its own there. Agent terminal commands require full-access/default mode. To
 restore provider-native shells, set the server preference `enableAgentTerminals` to

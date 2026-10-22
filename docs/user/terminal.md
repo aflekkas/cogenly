@@ -1,21 +1,24 @@
 # Terminal
 
-In a Work thread, open **Terminal** with the terminal button at the top right or from the right
-panel's **+** menu. Chats have no terminal. It has two sections:
+In a Work thread, the terminal panel sits under the conversation and shows the commands the
+agents ran. Open it with the panel button at the top right, `mod+J`, or **Show output** on a
+command in the conversation. Chats have no terminal.
 
-- **Agent runs** lists every command the agent ran in the thread. Running
-  commands stay at the top; select one to see its full command, working
-  directory, output, and how it ended. A dev server that prints a local address
-  gets an **Open** button, which follows your **Open links in** setting
-  (Cmd/Ctrl-click opens the system browser). **Stop** ends a running command;
-  it stays listed with its exit status.
-- **Shells** are terminals you open yourself with **+** in the Terminal header.
-  They start in the thread's workspace. Double-click a shell's tab, or press F2
-  on it, to rename it on this device. Project scripts also open here.
+The panel never opens by itself. While it is closed, a dot on its button means an agent command
+is running.
 
-In the run list, Up and Down move between runs, Enter moves focus into the
-output, and Esc returns to the list. When the agent starts a command while you
-are in a shell, the shell stays selected; the new run appears under Agent runs.
+Each agent that ran a command gets a tab: the thread's own agent, and each subagent with its
+own conversation. A tab lists that agent's commands, running ones at the top; select one to see
+its full command, working directory, output, and how it ended. A dev server that prints a local
+address gets an **Open** button, which follows your **Open links in** setting (Cmd/Ctrl-click
+opens the system browser). **Stop** ends a running command; it stays listed with its exit
+status.
+
+Closing a tab hides it until that agent runs another command. Drag the panel's top edge to
+resize it. Each thread remembers whether its panel was open and how tall it was.
+
+In the command list, Up and Down move between commands, Enter moves focus into the output, and
+Esc returns to the list.
 
 ## Terminal history
 

@@ -803,7 +803,7 @@ describe("agent browser close confirmation", () => {
   const surfaces = [
     { id: "browser:one", kind: "preview", resourceId: "tab-1" },
     { id: "browser:two", kind: "preview", resourceId: "tab-2" },
-    { id: "terminal", kind: "terminal" },
+    { id: "device", kind: "device" },
   ] satisfies RightPanelSurface[];
 
   it("only warns for browsers under active agent control", () => {
@@ -864,7 +864,7 @@ describe("floating browser preview", () => {
     expect(
       shouldRenderPreviewMiniPlayer(
         { kind: "browser", tabId: "tab-1" },
-        { id: "terminal", kind: "terminal" },
+        { id: "device", kind: "device" },
         true,
       ),
     ).toBe(true);

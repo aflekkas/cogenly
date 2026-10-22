@@ -22,7 +22,6 @@ import {
   PanelRight,
   Plus,
   Smartphone,
-  TerminalSquare,
   VenetianMask,
   X,
 } from "lucide-react";
@@ -90,7 +89,7 @@ import { previewBridge } from "./preview/previewBridge";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { observeResize } from "~/lib/observeResize";
 
-export type RightPanelAddKind = "browser" | "terminal" | "device" | "files";
+export type RightPanelAddKind = "browser" | "device" | "files";
 
 /** One thing the strip's "+" can open as a new tab. */
 export interface RightPanelAddOption {
@@ -106,7 +105,6 @@ export interface RightPanelAddOption {
 
 const ADD_OPTION_PRESENTATION = {
   browser: { label: "Browser", Icon: Globe2 },
-  terminal: { label: "Terminal", Icon: TerminalSquare },
   device: { label: "Device", Icon: Smartphone },
   files: { label: "Files", Icon: Files },
 } as const;
@@ -153,8 +151,6 @@ interface RightPanelTabsProps {
   onCopyFilePath: (relativePath: string) => void;
   /** What "+" offers, in menu order. */
   addOptions: readonly RightPanelAddOption[];
-  /** Agent commands running right now; the Terminal tab says so in its title. */
-  terminalLiveRunCount?: number;
   children: ReactNode;
 }
 
@@ -240,8 +236,6 @@ export function surfaceTitle(
       return surface.relativePath.slice(
         Math.max(surface.relativePath.lastIndexOf("/"), surface.relativePath.lastIndexOf("\\")) + 1,
       );
-    case "terminal":
-      return "Terminal";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
@@ -307,8 +301,6 @@ function SurfaceIcon({
           className="size-3"
         />
       );
-    case "terminal":
-      return <TerminalSquare className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -1219,18 +1211,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                         // place, like a sidebar row; no tooltip repeats it.
                         <PanOnHoverText className="min-w-0 flex-1 text-left group-data-[compact]/tab:hidden">
                           {title}
-                          {surface.kind === "terminal" && (props.terminalLiveRunCount ?? 0) > 0 ? (
-                            // The live count rides in the title, with the strip's
-                            // own status dot, so the surface needs no header row.
-                            <span className="text-muted-foreground">
-                              {" · "}
-                              <span
-                                aria-hidden
-                                className="mb-px inline-block size-1.5 rounded-full bg-success align-middle"
-                              />{" "}
-                              {props.terminalLiveRunCount} running
-                            </span>
-                          ) : null}
                         </PanOnHoverText>
                       )}
                       {audio === "none" || !audioRuntimeTabId ? null : (

@@ -70,7 +70,9 @@ export const STATIC_KEYBINDING_COMMANDS = [
   ...SIDEBAR_MODE_KEYBINDING_COMMANDS,
   "navigation.back",
   "navigation.forward",
-  // terminal.* retired with the terminal drawer: still decoded so stored rules load, never run.
+  // terminal.toggle shows the bottom panel of agent terminals. The other
+  // terminal.* commands retired with the drawer's shells: still decoded so
+  // stored rules load, never run.
   "terminal.toggle",
   "terminal.split",
   "terminal.splitVertical",

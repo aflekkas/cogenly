@@ -1,8 +1,11 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
 
-import { useRightPanelStore } from "../rightPanelStore";
+import { useBottomPanelStore } from "../bottomPanelStore";
 
-/** Reveal an existing terminal in the right panel's Terminal surface, without opening another PTY. */
+/**
+ * Open a thread's bottom panel on one of its agent's commands, without
+ * opening another PTY. A user action: nothing calls this when a run starts.
+ */
 export function revealThreadTerminal(threadRef: ScopedThreadRef, terminalId: string) {
-  useRightPanelStore.getState().openTerminal(threadRef, terminalId);
+  useBottomPanelStore.getState().showRun(threadRef, threadRef.threadId, terminalId);
 }

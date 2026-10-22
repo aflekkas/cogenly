@@ -55,8 +55,6 @@ import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
   AuthPreviewOperateScope,
-  AuthTerminalReadScope,
-  AuthTerminalOperateScope,
   type AssistantCitation,
   type ChatFileAttachment,
   CommandId,
@@ -140,12 +138,12 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import { truncate } from "@t3tools/shared/String";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
-import { AgentTerminalsPanel } from "./AgentTerminalsPanel";
 import {
-  agentTerminalEntries,
-  isAgentTerminalId,
-  terminalSections,
-} from "./AgentTerminalsPanel.logic";
+  BottomTerminalPanel,
+  type BottomPanelMotionTarget,
+  type BottomPanelRunResolver,
+} from "./terminals/BottomTerminalPanel";
+import { selectThreadBottomPanelState, useBottomPanelStore } from "../bottomPanelStore";
 import { Debouncer } from "@tanstack/react-pacer";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
@@ -376,7 +374,6 @@ import { type ReviewCommentContext } from "../reviewCommentContext";
 import { environmentCatalog } from "../connection/catalog";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnectDelay";
-import { useKnownTerminalSessions } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "~/state/session";
 import {
@@ -1101,8 +1098,6 @@ export default function ChatView(props: ChatViewProps) {
     forceExpandedMobileComposer = false,
   } = props;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
-  const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
-  const canReadTerminal = useEnvironmentScope(environmentId, AuthTerminalReadScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
   const { settleThread, pinThread, unpinThread } = useThreadActions();
@@ -1693,55 +1688,7 @@ export default function ChatView(props: ChatViewProps) {
   const activeMessageCount = isServerThread
     ? Math.max(committedServerMessageIds.size, serverProjection?.messages.length ?? 0)
     : 0;
-  const activeThreadKnownSessionsRaw = useKnownTerminalSessions({
-    environmentId: activeThread?.environmentId ?? null,
-    threadId: activeThreadId,
-  });
-  const activeThreadKnownSessions = useMemo(() => {
-    if (activeThreadId === null || activeThreadKnownSessionsRaw === null) {
-      return [];
-    }
-    return activeThreadKnownSessionsRaw.filter(
-      (session) => session.target.threadId === activeThreadId,
-    );
-  }, [activeThreadId, activeThreadKnownSessionsRaw]);
-  const activeServerOrderedTerminalIds = useMemo(
-    () => activeThreadKnownSessions.map((session) => session.target.terminalId),
-    [activeThreadKnownSessions],
-  );
-  // For the Terminal tab's title; the surface itself derives the same count.
-  const terminalLiveRunCount = useMemo(
-    () => terminalSections(agentTerminalEntries(activeThreadKnownSessions)).liveRunCount,
-    [activeThreadKnownSessions],
-  );
   const activeThreadRef = useActiveThreadRef(activeThread);
-  // Agent commands that were already known when this client first saw the thread
-  // stay where they are; one that starts afterwards opens the Terminal surface.
-  const seenAgentTerminalsRef = useRef(new Map<string, Set<string>>());
-  useEffect(() => {
-    if (!activeThreadRef || activeThreadKnownSessionsRaw === null) return;
-    const threadKey = scopedThreadKey(activeThreadRef);
-    const seen = seenAgentTerminalsRef.current.get(threadKey);
-    const agentIds = activeServerOrderedTerminalIds.filter(isAgentTerminalId);
-    if (!seen) {
-      seenAgentTerminalsRef.current.set(threadKey, new Set(agentIds));
-      return;
-    }
-    const started = agentIds.filter((terminalId) => !seen.has(terminalId));
-    if (started.length === 0) return;
-    for (const terminalId of started) seen.add(terminalId);
-    const newest =
-      agentTerminalEntries(activeThreadKnownSessions).find((entry) =>
-        started.includes(entry.terminalId),
-      )?.terminalId ?? started.at(-1)!;
-    useRightPanelStore.getState().revealAgentTerminal(activeThreadRef, newest);
-  }, [
-    activeServerOrderedTerminalIds,
-    activeThreadKnownSessions,
-    activeThreadKnownSessionsRaw,
-    activeThreadRef,
-  ]);
-
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
   const activeEnvironmentServerBrowser = useEnvironmentSupportsServerBrowser(
     activeThreadRef?.environmentId ?? null,
@@ -1821,6 +1768,9 @@ export default function ChatView(props: ChatViewProps) {
   );
   const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
   const rightPanelOpen = rightPanelState.isOpen && rightPanelSupported;
+  const bottomPanelOpen = useBottomPanelStore(
+    (state) => selectThreadBottomPanelState(state.byThreadKey, activeThreadRef).open,
+  );
   const panelAnimationDurationMs = PANEL_ANIMATION_DURATION;
   const rightPanelPresenceValue = useMemo(
     () => ({
@@ -3430,7 +3380,7 @@ export default function ChatView(props: ChatViewProps) {
     }
     const setupThreadRef = activeThreadRef;
     return (terminalId: string) => {
-      useRightPanelStore.getState().openTerminal(setupThreadRef, terminalId);
+      useBottomPanelStore.getState().showRun(setupThreadRef, setupThreadRef.threadId, terminalId);
       setTerminalFocusRequestId((value) => value + 1);
     };
   }, [activeThreadRef, worktreeSetupThreadId]);
@@ -4268,25 +4218,44 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
   const togglePreviewPanelStable = useStableCallback(togglePreviewPanel);
-  // Shows the thread's terminals; opening the surface never starts a shell by itself.
-  const openTerminalSurface = () => {
-    if (!activeThreadRef || !activeProject || !activeThreadCapabilities.terminal) return;
-    useRightPanelStore.getState().openTerminal(activeThreadRef);
-    setTerminalFocusRequestId((value) => value + 1);
+  // The bottom panel holds the agents' commands. Only these user actions open
+  // it; an agent starting a command never does.
+  const bottomPanelAvailable = activeThreadCapabilities.terminal && activeProject !== null;
+  const toggleBottomPanel = () => {
+    if (!activeThreadRef || !bottomPanelAvailable) return;
+    const opening =
+      !useBottomPanelStore.getState().byThreadKey[scopedThreadKey(activeThreadRef)]?.open;
+    useBottomPanelStore.getState().toggle(activeThreadRef);
+    if (opening) setTerminalFocusRequestId((value) => value + 1);
   };
-  const selectPanelTerminal = (terminalId: string) => {
-    if (!activeThreadRef) return;
-    useRightPanelStore.getState().openTerminal(activeThreadRef, terminalId);
+  const toggleBottomPanelStable = useStableCallback(toggleBottomPanel);
+  const bottomPanelRunResolverRef = useRef<BottomPanelRunResolver | null>(null);
+  // A "Terminal run" row in the timeline opens the panel on the command it started.
+  const showTerminalRun = (call: Parameters<BottomPanelRunResolver>[0]) => {
+    if (!activeThreadRef || !bottomPanelAvailable) return;
+    const match = bottomPanelRunResolverRef.current?.(call) ?? null;
+    if (match)
+      useBottomPanelStore.getState().showRun(activeThreadRef, match.tabId, match.terminalId);
+    else useBottomPanelStore.getState().setOpen(activeThreadRef, true);
   };
-  const selectPanelTerminalStable = useStableCallback(selectPanelTerminal);
+  const showTerminalRunStable = useStableCallback(showTerminalRun);
+  const [bottomPanelActivity, setBottomPanelActivity] = useState(false);
+  // What glides with the panel's top edge on open and close. A timeline
+  // following its end moves up with the panel; otherwise only the composer
+  // does. A centred draft composer moves half as far.
+  const getBottomPanelMotionTargets = (): BottomPanelMotionTarget[] => {
+    const composer = composerOverlayElement;
+    if (isDraftHeroState) return composer ? [{ element: composer, shift: 0.5 }] : [];
+    const main = workspaceLayoutElement?.querySelector<HTMLElement>("[data-chat-header-overlap]");
+    if (main && isAtEndRef.current) return [{ element: main, shift: 1 }];
+    return composer ? [{ element: composer, shift: 1 }] : [];
+  };
+  const getBottomPanelMotionTargetsStable = useStableCallback(getBottomPanelMotionTargets);
   const activateRightPanelSurface = (surface: RightPanelSurface) => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().activateSurface(activeThreadRef, surface.id);
     if (surface.kind === "preview" && surface.resourceId) {
       setActivePreviewTab(activeThreadRef, surface.resourceId);
-    }
-    if (surface.kind === "terminal") {
-      setTerminalFocusRequestId((value) => value + 1);
     }
   };
   const activateRightPanelSurfaceStable = useStableCallback(activateRightPanelSurface);
@@ -4308,8 +4277,6 @@ export default function ChatView(props: ChatViewProps) {
     if (rightPanelState.surfaces.length === 0) {
       if (activeThreadCapabilities.browser && canOperatePreview && browserAvailable) {
         createBrowserSurface();
-      } else if (activeThreadCapabilities.terminal && activeProject !== null) {
-        openTerminalSurface();
       } else if (activeThreadCapabilities.device) {
         addDeviceSurface();
       }
@@ -6019,6 +5986,7 @@ export default function ChatView(props: ChatViewProps) {
 
   const getShortcutContext = (eventTarget: EventTarget | null = document.activeElement) => ({
     terminalFocus: getTerminalFocusOwner() !== null,
+    terminalOpen: bottomPanelOpen,
     previewFocus: isPreviewFocused(),
     previewOpen: previewPanelOpen,
     editableFocus: isEditableFocused(eventTarget),
@@ -6136,6 +6104,14 @@ export default function ChatView(props: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         toggleRightPanelStable();
+        return;
+      }
+
+      if (command === "terminal.toggle") {
+        if (!bottomPanelAvailable) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) toggleBottomPanelStable();
         return;
       }
 
@@ -6292,6 +6268,8 @@ export default function ChatView(props: ChatViewProps) {
     toggleRightPanelStable,
     toggleRightPanelMaximizedStable,
     rightPanelSupported,
+    toggleBottomPanelStable,
+    bottomPanelAvailable,
     composerRef,
     draftId,
     environmentId,
@@ -8923,17 +8901,6 @@ export default function ChatView(props: ChatViewProps) {
           }}
         />
       </Suspense>
-    ) : renderedRightPanelSurface?.kind === "terminal" ? (
-      <AgentTerminalsPanel
-        key={activeThreadKey}
-        visible={rightPanelOpen}
-        threadRef={activeThreadRef}
-        threadStarted={isServerThread}
-        activeTerminalId={renderedRightPanelSurface.activeTerminalId}
-        focusRequestId={terminalFocusRequestId}
-        onSelectTerminal={selectPanelTerminalStable}
-        onAddTerminalContext={addTerminalContextToDraftStable}
-      />
     ) : renderedRightPanelSurface?.kind === "device" ? (
       <Suspense fallback={null}>
         <DevicePanel
@@ -9020,14 +8987,6 @@ export default function ChatView(props: ChatViewProps) {
       onSelectInProfile: createBrowserSurfaceStable,
     },
     {
-      offered: activeThreadCapabilities.terminal,
-      kind: "terminal" as const,
-      available: activeProject !== null && (canReadTerminal || canOperateTerminal),
-      unavailableLabel: "Terminals are only available from a repository thread.",
-      shortcutLabel: null,
-      onSelect: openTerminalSurface,
-    },
-    {
       offered: activeThreadCapabilities.device,
       kind: "device" as const,
       available: true,
@@ -9049,6 +9008,16 @@ export default function ChatView(props: ChatViewProps) {
     rightPanelOpen,
     rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
     onToggleRightPanel: toggleRightPanelStable,
+    ...(bottomPanelAvailable
+      ? {
+          bottomPanel: {
+            open: bottomPanelOpen,
+            activity: bottomPanelActivity,
+            shortcutLabel: shortcutLabelForCommand(keybindings, "terminal.toggle"),
+            onToggle: toggleBottomPanelStable,
+          },
+        }
+      : {}),
   } satisfies PanelLayoutControlsProps;
   // Pinned at the window's top-right, open or closed, beside maximize. Open,
   // that corner is the panel's tab strip, whose "+" chooses what to show.
@@ -9148,7 +9117,7 @@ export default function ChatView(props: ChatViewProps) {
         className={cn(
           // isolate keeps the chat's raised overlays under the right panel, so
           // content gliding beside a sliding panel passes beneath it unclipped.
-          "isolate flex min-h-0 min-w-0 flex-col",
+          "relative isolate flex min-h-0 min-w-0 flex-col",
           rightPanelMaximized ? "w-0 flex-none overflow-x-hidden" : "flex-1",
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
@@ -9302,6 +9271,7 @@ export default function ChatView(props: ChatViewProps) {
                     ? { onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocallyStable }
                     : {})}
                   {...(onOpenWorktreeSetupTerminal ? { onOpenWorktreeSetupTerminal } : {})}
+                  {...(bottomPanelAvailable ? { onShowTerminalRun: showTerminalRunStable } : {})}
                   isPreparingWorktree={!paintOnlyDisplayedTimeline && isPreparingWorktree}
                   footer={
                     paintOnlyDisplayedTimeline ? null : pendingHandoff === null ? (
@@ -9786,6 +9756,19 @@ export default function ChatView(props: ChatViewProps) {
           {/* end chat column */}
         </div>
         {/* end horizontal flex container */}
+
+        {bottomPanelAvailable && activeThreadRef ? (
+          <BottomTerminalPanel
+            threadRef={activeThreadRef}
+            threadStarted={isServerThread}
+            focusRequestId={terminalFocusRequestId}
+            toggleShortcutLabel={shortcutLabelForCommand(keybindings, "terminal.toggle")}
+            onAddTerminalContext={addTerminalContextToDraftStable}
+            getMotionTargets={getBottomPanelMotionTargetsStable}
+            runResolverRef={bottomPanelRunResolverRef}
+            onActivityChange={setBottomPanelActivity}
+          />
+        ) : null}
       </div>
 
       {rightPanelPresent && !shouldUsePlanSidebarSheet && activeThreadRef ? (
@@ -9815,7 +9798,6 @@ export default function ChatView(props: ChatViewProps) {
           onMoveSurface={moveRightPanelSurfaceStable}
           onCopyFilePath={copyRightPanelFilePathStable}
           addOptions={rightPanelAddOptions}
-          terminalLiveRunCount={terminalLiveRunCount}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -9860,7 +9842,6 @@ export default function ChatView(props: ChatViewProps) {
             onMoveSurface={moveRightPanelSurfaceStable}
             onCopyFilePath={copyRightPanelFilePathStable}
             addOptions={rightPanelAddOptions}
-            terminalLiveRunCount={terminalLiveRunCount}
           >
             {rightPanelContent}
           </RightPanelTabs>

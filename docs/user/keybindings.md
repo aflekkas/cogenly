@@ -110,11 +110,12 @@ the same jumps in a browser.
 Combine keys with `!` for not, `&&` for and, `||` for or, and parentheses:
 
 ```json
-{ "key": "mod+j", "command": "preview.toggle", "when": "previewOpen && !terminalFocus" }
+{ "key": "mod+shift+j", "command": "preview.toggle", "when": "previewOpen && !terminalFocus" }
 ```
 
-The `terminal.*` commands and the `terminalOpen` key belonged to the removed terminal
-drawer. Rules that use them still load but do nothing.
+`terminal.toggle` (`mod+j`) shows or hides the terminal panel, and `terminalOpen` is true while
+it is open. The other `terminal.*` commands belonged to user shells, which were removed. Rules
+that use them still load but do nothing.
 
 ## Find in the current thread
 

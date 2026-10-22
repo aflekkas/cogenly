@@ -404,7 +404,15 @@ interface TimelineRowSharedState {
   onRetryWorkspacePreparation: ((runId: RunId) => void) | null;
   onWorktreeSetupWorkLocally: (() => void) | null;
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
+  onShowTerminalRun: ((call: TerminalRunToolCall) => void) | null;
   workGroupViewState: WorkGroupViewState;
+}
+
+/** A "Terminal run" tool call, for opening the bottom panel on the command it started. */
+export interface TerminalRunToolCall {
+  readonly output: unknown;
+  readonly command: string | null;
+  readonly startedAt: string;
 }
 
 interface TimelineRowActivityState {
@@ -516,6 +524,8 @@ interface MessagesTimelineProps {
   onRetryWorkspacePreparation?: (runId: RunId) => void;
   onWorktreeSetupWorkLocally?: () => void;
   onOpenWorktreeSetupTerminal?: (terminalId: string) => void;
+  /** Opens the bottom panel on the command a "Terminal run" row started. */
+  onShowTerminalRun?: (call: TerminalRunToolCall) => void;
   isPreparingWorktree?: boolean;
   isCompacting?: boolean;
   /** The agent waits on an approval or an answer from the user. */
@@ -641,6 +651,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onRetryWorkspacePreparation,
   onWorktreeSetupWorkLocally,
   onOpenWorktreeSetupTerminal,
+  onShowTerminalRun,
   isPreparingWorktree = false,
   isCompacting = false,
   awaitingUser = false,
@@ -1520,6 +1531,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onRetryWorkspacePreparation: onRetryWorkspacePreparation ?? null,
       onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
       onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
+      onShowTerminalRun: onShowTerminalRun ?? null,
       workGroupViewState,
     }),
     [
@@ -1560,6 +1572,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onRetryWorkspacePreparation,
       onWorktreeSetupWorkLocally,
       onOpenWorktreeSetupTerminal,
+      onShowTerminalRun,
       workGroupViewState,
     ],
   );
@@ -6267,6 +6280,10 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       : null;
   const viewedImagePath = workEntryViewedImagePath(workEntry);
   const payload = workEntry.structuredPayload;
+  const terminalRunCall =
+    registryTool?.key === "terminal_run" && payload?.type === "dynamic_tool"
+      ? terminalRunToolCall(payload.input, payload.output, workEntry.createdAt)
+      : null;
   const skill =
     payload?.type === "dynamic_tool"
       ? claudeSkillInvocation(payload.toolName, payload.input)
@@ -6461,6 +6478,18 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               Open chat
             </button>
           ) : null}
+          {terminalRunCall && ctx.onShowTerminalRun ? (
+            <InlineButton
+              aria-label="Show this command in the terminal panel"
+              onClick={(event) => {
+                event.stopPropagation();
+                ctx.onShowTerminalRun?.(terminalRunCall);
+              }}
+              onKeyDown={stopRowToggle}
+            >
+              Show output
+            </InlineButton>
+          ) : null}
           {notifiedSubagentThreadId ? (
             <InlineButton
               aria-label="Open subagent thread"
@@ -6521,6 +6550,18 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       </WorkLogCollapse>
     </WorkLogRow>
   );
+}
+
+function terminalRunToolCall(
+  input: unknown,
+  output: unknown,
+  startedAt: string,
+): TerminalRunToolCall {
+  const command =
+    input !== null && typeof input === "object" && "command" in input
+      ? (input as { command?: unknown }).command
+      : null;
+  return { output, command: typeof command === "string" ? command : null, startedAt };
 }
 
 function QuestionAnswerHistory({
