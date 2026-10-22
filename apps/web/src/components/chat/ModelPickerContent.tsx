@@ -37,6 +37,7 @@ import {
   parseModelPickerLegacySectionKey,
   parseModelPickerModelKey,
 } from "./modelPickerKeys";
+import { orderModelPickerFavorites } from "./modelPickerFavorites.logic";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { Combobox, ComboboxEmpty, ComboboxItem, ComboboxListVirtualized } from "../ui/combobox";
 import { ModelEsque } from "./providerIconUtils";
@@ -250,7 +251,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       }),
     ) &&
     !isProviderInstancePickerReady(activeEntry);
-  // Starred models, keyed by instance plus model and kept in the order starred.
+  // Starred models, keyed by instance plus model.
   const { favorites } = useEnvironmentModelPreferences(props.environmentId);
   const toggleFavorite = useToggleEnvironmentModelFavorite(props.environmentId);
   const favoriteKeys = useMemo(
@@ -418,18 +419,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, [instanceEntries, isLocked, matchesLockedProvider]);
   const showSidebar = sidebarInstanceEntries.length > 0;
 
-  // Favorites: starred models this picker can still offer, in the order starred.
-  const favoriteModels = useMemo(() => {
-    const modelByKey = new Map(
-      flatModels
-        .filter(matchesLockedProvider)
-        .map((model) => [modelPickerModelKey(model.instanceId, model.slug), model] as const),
-    );
-    return favorites.flatMap((favorite) => {
-      const model = modelByKey.get(modelPickerModelKey(favorite.provider, favorite.model));
-      return model ? [model] : [];
-    });
-  }, [favorites, flatModels, matchesLockedProvider]);
+  // Favorites: starred models this picker can still offer, in the rail's
+  // provider order and then each provider's own model order.
+  const favoriteModels = useMemo(
+    () =>
+      orderModelPickerFavorites({
+        models: flatModels.filter(matchesLockedProvider),
+        favoriteKeys,
+        instanceOrder: sidebarInstanceEntries,
+      }),
+    [favoriteKeys, flatModels, matchesLockedProvider, sidebarInstanceEntries],
+  );
   const selectedInstanceId: ModelPickerRailSelection =
     chosenInstanceId ??
     (openedWithFavorites && favoriteModels.length > 0
