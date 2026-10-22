@@ -270,7 +270,7 @@ import { Dialog } from "./ui/dialog";
 import { WizardPopup } from "./ui/wizard";
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
-import { ThreadLineageBreadcrumb } from "./chat/ThreadLineageBreadcrumb";
+import { ThreadHeaderTitle } from "./chat/ThreadLineageBreadcrumb";
 import { resolveThreadOrigin } from "./chat/threadLineage.logic";
 import { isEditableFocused } from "../lib/editableFocus";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
@@ -5666,7 +5666,7 @@ export default function ChatView(props: ChatViewProps) {
       ),
     [threadStatusLine, workHandoffAnchors, workTaskAnchors],
   );
-  // The header breadcrumb's way back (see ThreadLineageBreadcrumb), and the
+  // The header breadcrumb's way back (see ThreadHeaderTitle), and the
   // target of the thread.openParent shortcut.
   const activeThreadOrigin = activeThreadShell
     ? resolveThreadOrigin(activeThreadShell.source)
@@ -9092,20 +9092,23 @@ export default function ChatView(props: ChatViewProps) {
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel && rightPanelSupported
             ? panelLayoutControls
             : null}
-          <ThreadLineageBreadcrumb
-            shell={isServerThread ? activeThreadShell : null}
-            messagesCarried={workHandoffMessagesCarried}
-            onOpenThread={onOpenRelatedThreadStable}
-          />
+          {/* The title stays visible whether or not the sidebar shows the
+              thread; a draft has none yet, so its heading is for screen readers. */}
+          {isServerThread ? (
+            <ThreadHeaderTitle
+              shell={activeThreadShell}
+              title={activeThread.title}
+              messagesCarried={workHandoffMessagesCarried}
+              onOpenThread={onOpenRelatedThreadStable}
+            />
+          ) : (
+            <h2 className="sr-only">{activeThread.title}</h2>
+          )}
           {threadDetailsControl && !threadDetailsInTitlebarCluster ? (
             <span key="header" className="swap-motion ms-auto flex h-full shrink-0 items-center">
               {threadDetailsControl}
             </span>
           ) : null}
-          {/* No visible title for a top-level thread: the sidebar names it, its
-              right-click menu renames it, and the details card holds its project
-              tags. Only a child thread shows a breadcrumb back to its origin. */}
-          <h2 className="sr-only">{activeThread.title}</h2>
         </header>
 
         {/* Main content area with optional plan sidebar. Its centered lane

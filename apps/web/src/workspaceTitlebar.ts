@@ -6,12 +6,6 @@ import { NAV_RAIL_WIDTH_PX } from "./components/sidebar/navRail.logic";
 export const COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS =
   "[[data-sidebar-state=collapsed]:not([data-nav-rail])_&]:pl-[var(--workspace-titlebar-content-left)] [[data-sidebar-state=collapsed][data-nav-rail]_&]:pl-[max(var(--workspace-gutter-start),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width)))] max-md:[[data-sidebar-state=expanded]_&]:pl-[var(--workspace-titlebar-content-left)]";
 
-// The same inset on the trailing side, for a header whose content column is
-// centered: equal padding on both sides keeps the column on the page's center
-// line even when the toggle and history buttons push the leading side in.
-export const COLLAPSED_SIDEBAR_TITLEBAR_MIRROR_INSET_CLASS =
-  "[[data-sidebar-state=collapsed]:not([data-nav-rail])_&]:pr-[var(--workspace-titlebar-content-left)] [[data-sidebar-state=collapsed][data-nav-rail]_&]:pr-[max(var(--workspace-gutter-end),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width)))] max-md:[[data-sidebar-state=expanded]_&]:pr-[var(--workspace-titlebar-content-left)]";
-
 // Where the fixed sidebar toggle sits beside the macOS traffic lights. The
 // desktop preload keeps it in native points at any zoom level.
 const MACOS_FIXED_TOGGLE_LEFT = "var(--desktop-window-controls-inset, 90px)";

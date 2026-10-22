@@ -11,7 +11,7 @@ import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
 import { SidebarInset } from "../components/ui/sidebar";
 import { useNavigateToMainApp } from "../components/sidebar/mainAppLocation";
 import { settleModeSwitchMainPane } from "../components/sidebar/modes/modeSwitchMotion";
-import { WorkspacePageHeader, WorkspacePageHeaderContent } from "../components/WorkspacePageHeader";
+import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
 import { useEscapeToGoBack } from "../hooks/useNavigateBack";
 import {
@@ -96,13 +96,8 @@ function SettingsContentLayout() {
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader
-          electron={isElectron}
-          contentWidth={location.pathname === "/settings/diagnostics" ? "expanded" : "readable"}
-        >
-          <WorkspacePageHeaderContent>
-            <SettingsBreadcrumb pathname={location.pathname} />
-          </WorkspacePageHeaderContent>
+        <WorkspacePageHeader electron={isElectron}>
+          <SettingsBreadcrumb pathname={location.pathname} />
         </WorkspacePageHeader>
 
         <div key={contentScopeKey} className="min-h-0 flex flex-1 flex-col">

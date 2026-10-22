@@ -5,6 +5,8 @@ import type { ThreadId } from "@t3tools/contracts";
 import { ChevronLeftIcon, EllipsisIcon } from "lucide-react";
 import { useMemo } from "react";
 
+import { cn } from "~/lib/utils";
+
 import { shortcutLabelForCommand } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useThreadShell } from "~/state/entities";
@@ -49,14 +51,20 @@ function useThreadLineageChain(shell: EnvironmentThreadShell | null) {
 
 const SEGMENT_CLASS = "min-w-0 shrink [-webkit-app-region:no-drag]";
 
+// Clear of the fixed titlebar controls at the header's right edge.
+const HEADER_TITLE_MAX_WIDTH_CLASS = "max-w-[min(40rem,calc(100%-10rem))]";
+
 /**
- * `‹ Parent / This thread` in the chat header for subagents, forks, and Work
- * started from a chat or an agent conversation. A deeper chain keeps its root
- * and direct parent and folds the middle into a "…" menu. Renders nothing for
- * a thread with no origin.
+ * The chat header's leading title, always visible at the pane's left gutter
+ * (after the toggle and back/forward pair while the sidebar is collapsed).
+ * A top-level thread shows its title; a subagent, fork, or Work started from a
+ * chat or an agent conversation shows `‹ Parent / This thread` instead, where
+ * a deeper chain keeps its root and direct parent and folds the middle into a
+ * "…" menu. Until the thread's shell loads, the title shows alone.
  */
-export function ThreadLineageBreadcrumb(props: {
+export function ThreadHeaderTitle(props: {
   readonly shell: EnvironmentThreadShell | null;
+  readonly title: string;
   /** For Work started from a chat: how many of the chat's messages the handoff carried. */
   readonly messagesCarried?: number | null;
   readonly onOpenThread: (threadId: ThreadId) => void;
@@ -64,7 +72,22 @@ export function ThreadLineageBreadcrumb(props: {
   const ancestors = useThreadLineageChain(props.shell);
   const segments = collapseThreadBreadcrumb(ancestors);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  if (props.shell === null || segments === null) return null;
+  if (props.shell === null || segments === null) {
+    return (
+      <h2
+        // Keyed by title: a navigation or rename fades the new one in place.
+        key={props.title}
+        className={cn(
+          "swap-motion min-w-0 truncate text-sm font-medium text-foreground",
+          HEADER_TITLE_MAX_WIDTH_CLASS,
+        )}
+        // Leads the top bar, so it rides the pane's left edge when the sidebar toggles.
+        data-panel-flip="start"
+      >
+        {props.title}
+      </h2>
+    );
+  }
   const shortcut = shortcutLabelForCommand(keybindings, "thread.openParent");
   const leading = segments.root ?? segments.parent;
 
@@ -115,8 +138,10 @@ export function ThreadLineageBreadcrumb(props: {
       // Keyed by thread: a navigation mounts a fresh trail that fades in place.
       key={`${props.shell.environmentId}:${props.shell.id}`}
       aria-label="Thread lineage"
-      className="swap-motion flex min-w-0 max-w-[min(40rem,calc(100%-10rem))] items-center text-xs"
+      className={cn("swap-motion flex min-w-0 items-center text-xs", HEADER_TITLE_MAX_WIDTH_CLASS)}
+      data-panel-flip="start"
     >
+      <h2 className="sr-only">{props.title}</h2>
       {segments.root ? (
         <>
           <span className="flex min-w-0 max-w-48 shrink-[2]">{segment(segments.root, false)}</span>
