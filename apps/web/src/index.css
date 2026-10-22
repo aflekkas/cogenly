@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./agents/agents.css";
+@import "./components/ui/pixelButton.css";
 
 @custom-variant dark (&:is(.dark, .dark *));
 @custom-variant light (&:not(.dark, .dark *));
@@ -3208,68 +3209,6 @@ code {
   text-decoration: none;
   user-select: none;
   pointer-events: none;
-}
-
-/* The send tile: the app icon's 8x8 dithered ember ramp, without the glyph.
-   A solid deep base, then the mark's mid and bright cells as two masked
-   layers, so every state and theme is just three colours and the cells stay
-   vector-sharp at any pixel ratio. Hover lifts the ramp a step; idle (disabled)
-   collapses all three to the flat grey tile. */
-.composer-send-tile {
-  --send-px-top: var(--color-send-top);
-  --send-px-deep: var(--color-send-bottom);
-  --send-px-mid: color-mix(in oklab, var(--send-px-top) 50%, var(--send-px-deep));
-  background-color: var(--send-px-deep);
-  color: var(--color-send-foreground);
-  transition-property: color, background-color, box-shadow, opacity, scale, filter;
-  transition-duration: var(--motion-duration-fast);
-  transition-timing-function: var(--ease-out);
-
-  &::before,
-  &::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    mask-size: 100% 100%;
-    mask-repeat: no-repeat;
-    transition:
-      background-color var(--motion-duration-fast) var(--ease-out),
-      box-shadow var(--motion-duration-fast) var(--ease-out);
-  }
-
-  /* Every cell of the mark that is not the deep ember. */
-  &::before {
-    background-color: var(--send-px-mid);
-    mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'><path d='M0 0h8v4H0zM1 4h3v1H1zM5 4h3v1H5zM0 5h1v1H0zM2 5h3v1H2zM6 5h2v1H6zM1 6h1v1H1zM5 6h1v1H5zM0 7h1v1H0zM4 7h1v1H4z'/></svg>");
-  }
-
-  /* The mark's brightest cells. The top-edge highlight rides on this layer
-     because the element's own inset shadow would paint under the cells. */
-  &::after {
-    background-color: var(--send-px-top);
-    mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'><path d='M1 0h3v1H1zM5 0h3v1H5zM0 1h1v1H0zM2 1h3v1H2zM6 1h2v1H6zM1 2h1v1H1zM5 2h1v1H5zM0 3h1v1H0zM4 3h1v1H4z'/></svg>");
-    box-shadow: inset var(--inset-shadow-control-highlight);
-  }
-
-  &:enabled:hover {
-    --send-px-top: var(--color-send-top-hover);
-    --send-px-deep: color-mix(in oklab, var(--color-send-bottom) 55%, var(--color-send-top));
-  }
-
-  &:enabled:active::after {
-    box-shadow: inset var(--inset-shadow-control-pressed);
-  }
-
-  &:disabled {
-    --send-px-top: var(--color-send-idle);
-    --send-px-deep: var(--color-send-idle);
-    color: var(--color-send-idle-foreground);
-  }
-
-  &:disabled::after {
-    box-shadow: none;
-  }
 }
 
 /* Dictation: volatile text rides at the caret until a final segment replaces it. */

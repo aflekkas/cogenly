@@ -10,6 +10,7 @@ import { isElectron } from "./env";
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
 import { getRouter } from "./router";
 import { installNavigationHistoryTracker } from "./navigationHistory";
+import { installDocumentVisibilityAttribute } from "./lib/documentVisibility";
 import {
   syncDocumentElectronPlatformClasses,
   syncDocumentWindowControlsOverlayClass,
@@ -24,6 +25,7 @@ prepareProviderAuthDelivery();
 const history = isElectron ? createHashHistory() : createBrowserHistory();
 // Tracks from the first entry so the titlebar back/forward know their reach.
 installNavigationHistoryTracker(history);
+installDocumentVisibilityAttribute();
 
 const router = getRouter(history);
 

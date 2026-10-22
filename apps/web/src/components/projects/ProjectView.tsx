@@ -418,7 +418,7 @@ function ProjectPage(props: {
           <span className="flex shrink-0 items-center gap-1.5">
             <Button
               size="sm"
-              variant="brand"
+              variant="pixel"
               onClick={() =>
                 void startScratchThread(environmentId, {
                   surface: "chat",

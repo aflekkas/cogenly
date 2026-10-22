@@ -132,9 +132,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           <button
             type="button"
             className={cn(
-              "flex shrink-0 cursor-pointer items-center justify-center rounded-tile bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none [&_svg]:pointer-events-none",
+              // The red pixel ramp (pixelButton.css); it only shows while a
+              // run is live, so the pixels always crawl.
+              "pixel-button pixel-button-danger flex shrink-0 cursor-pointer items-center justify-center rounded-tile text-white shadow-xs shadow-black/24 active:shadow-none [&_svg]:pointer-events-none",
               insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
             )}
+            data-working=""
             {...pointerFocusProps}
             disabled={!canOperateThread}
             onClick={() => {
@@ -305,12 +308,13 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     <button
       type={showResume ? "button" : "submit"}
       className={cn(
-        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-tile shadow-xs enabled:cursor-pointer hover:scale-105 active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
-        // The app icon's pixel-dithered ember ramp (composer-send-tile in
-        // index.css); a flat grey tile with a dark arrow while there is
-        // nothing to send.
-        "composer-send-tile enabled:shadow-black/24",
+        "flex h-9 w-9 items-center justify-center rounded-tile text-white shadow-xs enabled:cursor-pointer hover:scale-105 active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
+        // The app icon's pixel-dithered ember ramp (pixelButton.css); a flat
+        // grey tile with a dark arrow while there is nothing to send. The
+        // pixels crawl while a run is live and this queues or steers.
+        "pixel-button enabled:shadow-black/24",
       )}
+      data-working={isRunning && !showResume ? "" : undefined}
       {...pointerFocusProps}
       onClick={showResume ? onResume : onSubmitMessage}
       disabled={

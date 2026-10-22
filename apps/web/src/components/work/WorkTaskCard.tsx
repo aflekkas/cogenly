@@ -307,7 +307,7 @@ export function WorkTaskCard(props: {
         ) : null}
         {state === "proposed" && !editing ? (
           <div className="flex items-center gap-1.5 pt-1">
-            <Button size="compact" disabled={busy} onClick={() => void approve()}>
+            <Button size="compact" variant="pixel" disabled={busy} onClick={() => void approve()}>
               Approve
             </Button>
             <Button
@@ -454,6 +454,7 @@ function WorkTaskEditor(props: {
       <div className="flex items-center gap-1.5">
         <Button
           size="compact"
+          variant="pixel"
           disabled={props.busy || brief.trim().length === 0}
           onClick={() =>
             props.onApprove({

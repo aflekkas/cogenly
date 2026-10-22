@@ -273,7 +273,7 @@ export function ConnectAgentSurface() {
         ) : null}
 
         <div className="flex flex-wrap gap-2">
-          <Button disabled={!canApprove} type="submit">
+          <Button disabled={!canApprove} type="submit" variant="pixel">
             {pending === "approve" ? "Approving…" : "Approve"}
           </Button>
           <Button

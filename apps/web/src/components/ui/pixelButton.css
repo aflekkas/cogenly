@@ -1,0 +1,120 @@
+/* The pixel button: a primary action painted with the app icon's 8x8
+   dithered ember ramp. Button's `pixel` and `pixel-danger` variants and the
+   composer send tile share it.
+
+   Three tones from one masked layer: the element's background is the deep
+   tone and ::before paints the bright tone through the brand mark's cell
+   pattern, bright cells opaque and mid cells at half, so hover, pressed,
+   disabled and both themes are just two colours changing. Cells are a fixed
+   4px wide and an eighth of the height tall (4px on a 32px control), crisp
+   at 1x and 2x since the mask is vector.
+
+   Hover lifts the ramp a step: the bright cells spread into the mid cells and
+   the deep base rises to the mid tone, crossfaded over the fast duration.
+   `data-working` crawls the pattern one cell to the right every half second
+   (4s per period), for the queue/steer tile and the stop button while a run
+   is live. The crawl pauses while the document is hidden and never runs
+   under reduced motion, where hover lifts both tones together so no cell
+   changes class. */
+.pixel-button {
+  /* Light: the brand ramp spread wider than the flat fill so the cells read
+     at real size, bright over deep; white text sits on the mid tone at 4:1. */
+  --pixel-top: #f0652a;
+  --pixel-deep: #b2380e;
+  --pixel-hover: #ff7b3a;
+  --pixel-cell: 4px;
+  --px-top: var(--pixel-top);
+  --px-deep: var(--pixel-deep);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: var(--px-deep);
+  transition-property: color, background-color, box-shadow, opacity, scale, filter;
+  transition-duration: var(--motion-duration-fast);
+  transition-timing-function: var(--ease-out);
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-color: var(--px-top);
+    mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'><path fill-opacity='.5' d='M0 0h8v4H0zM1 4h3v1H1zM5 4h3v1H5zM0 5h1v1H0zM2 5h3v1H2zM6 5h2v1H6zM1 6h1v1H1zM5 6h1v1H5zM0 7h1v1H0zM4 7h1v1H4z'/><path d='M1 0h3v1H1zM5 0h3v1H5zM0 1h1v1H0zM2 1h3v1H2zM6 1h2v1H6zM1 2h1v1H1zM5 2h1v1H5zM0 3h1v1H0zM4 3h1v1H4z'/></svg>");
+    mask-size: calc(var(--pixel-cell) * 8) 100%;
+    mask-repeat: repeat-x;
+    mask-position: 0 0;
+    transition: background-color var(--motion-duration-fast) var(--ease-out);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  &:is(:hover, [data-pressed]):not(:disabled, [aria-disabled="true"]) {
+    --px-top: var(--pixel-hover);
+    --px-deep: color-mix(in oklab, var(--pixel-top) 55%, var(--pixel-deep));
+  }
+
+  &:active:not(:disabled, [aria-disabled="true"]) {
+    --px-top: var(--pixel-top);
+    --px-deep: color-mix(in oklab, var(--pixel-deep) 85%, black);
+  }
+
+  /* Nothing to do: the flat grey tile with a dark glyph. */
+  &:is(:disabled, [aria-disabled="true"]) {
+    --px-top: var(--color-send-idle);
+    --px-deep: var(--color-send-idle);
+    color: var(--color-send-idle-foreground);
+  }
+
+  &[data-working]::before {
+    animation: pixel-button-crawl 4s steps(8) infinite;
+  }
+}
+
+/* Stop: a red ramp with less spread between steps, so it reads as red first
+   and pixel second. */
+.pixel-button-danger {
+  --pixel-top: #f26a5f;
+  --pixel-deep: #d83a33;
+  --pixel-hover: #f77f72;
+}
+
+.dark {
+  .pixel-button {
+    /* The icon's own ember, the deep step pushed a touch redder. */
+    --pixel-top: #ff8440;
+    --pixel-deep: #d83418;
+    --pixel-hover: #ff9a5a;
+  }
+
+  .pixel-button-danger {
+    --pixel-top: #f36b63;
+    --pixel-deep: #cf3a34;
+    --pixel-hover: #f9847a;
+  }
+}
+
+@keyframes pixel-button-crawl {
+  to {
+    mask-position: calc(var(--pixel-cell) * 8) 0;
+  }
+}
+
+html[data-document-hidden="true"] .pixel-button::before {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pixel-button {
+    &::before {
+      animation: none;
+    }
+
+    &:is(:hover, [data-pressed]):not(:disabled, [aria-disabled="true"]) {
+      --px-top: var(--pixel-hover);
+      --px-deep: color-mix(in oklab, var(--pixel-deep) 80%, var(--pixel-hover));
+    }
+  }
+}

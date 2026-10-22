@@ -197,7 +197,7 @@ function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
           }
         >
           <Button
-            variant="brand"
+            variant="pixel"
             size="sm"
             onClick={() => requestAgentCreation(primaryEnvironmentId)}
           >

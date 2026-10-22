@@ -882,7 +882,7 @@ export function NavRailUpdates({
                     {heroAction ? (
                       <Button
                         size="xs"
-                        variant={heroAction.filled ? "default" : "outline"}
+                        variant={heroAction.filled ? "pixel" : "outline"}
                         disabled={heroAction.onClick === null}
                         onClick={heroAction.onClick ?? undefined}
                       >
