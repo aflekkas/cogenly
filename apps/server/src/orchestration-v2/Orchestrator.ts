@@ -27,6 +27,7 @@ import {
   type ModelSelection,
   OrchestrationV2Command,
   type OrchestrationV2InternalCommand,
+  type WorkTask,
   type OrchestrationV2ServerCommand,
   type ThreadPullRequestLink,
   type ThreadPullRequestWatch,
@@ -74,6 +75,7 @@ import {
   derivePendingBackgroundWork,
   pendingBackgroundTurnItems,
 } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
+import { isT3ImportCommandId } from "../t3Import/T3ImportCommandIds.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -452,9 +454,30 @@ function isGoalCommand(message: {
 
 const threadPullRequestLinksEqual = Schema.toEquivalence(Schema.NullOr(ThreadLinkedPullRequest));
 
+/** A chat's task cards with `task` added, or replacing the card with its id in place. */
+function upsertWorkTask(
+  tasks: ReadonlyArray<WorkTask> | undefined,
+  task: WorkTask,
+): ReadonlyArray<WorkTask> {
+  const existing = tasks ?? [];
+  const index = existing.findIndex((candidate) => candidate.id === task.id);
+  if (index === -1) return [...existing, task];
+  const previous = existing[index]!;
+  // A card keeps where and when it first appeared.
+  const merged = {
+    ...task,
+    createdAt: previous.createdAt,
+    ...(previous.runId === undefined ? {} : { runId: previous.runId }),
+  };
+  return existing.map((candidate, at) => (at === index ? merged : candidate));
+}
+
 function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
   switch (command.type) {
     case "work.handoff.record":
+    case "work.task.propose":
+    case "work.task.dismiss":
+    case "work.task.report":
     case "thread.create":
     case "thread.archive":
     case "thread.unarchive":
@@ -7223,6 +7246,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 : { throughMessageId: command.throughMessageId }),
             },
           ],
+          ...(command.task === undefined
+            ? {}
+            : {
+                workTasks: upsertWorkTask(source.workTasks, {
+                  ...command.task,
+                  status: "started",
+                  threadId: target.thread.id,
+                  updatedAt: DateTime.formatIso(now),
+                }),
+              }),
         },
       });
       // The carried transcript is delivered into the Work thread's first turn by
@@ -7262,6 +7295,156 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     },
   );
+
+  /** The chat a task card belongs to, refusing a deleted one. */
+  const readWorkTaskChat = Effect.fn("orchestrationV2.readWorkTaskChat")(function* (
+    command: Extract<
+      OrchestrationV2ServerCommand,
+      { readonly type: "work.task.propose" | "work.task.dismiss" | "work.task.report" }
+    >,
+  ) {
+    const chat = yield* projectionStore
+      .getThread(command.threadId)
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    if (chat.deletedAt !== null) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "The chat was deleted.",
+      });
+    }
+    return chat;
+  });
+
+  const dispatchWorkTaskPropose = Effect.fn("orchestrationV2.dispatch.workTaskPropose")(function* (
+    command: Extract<OrchestrationV2InternalCommand, { readonly type: "work.task.propose" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const chat = yield* readWorkTaskChat(command);
+    if ((chat.workTasks ?? []).some((task) => task.id === command.task.id)) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "That task card already exists.",
+      });
+    }
+    const now = yield* DateTime.now;
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "thread.metadata-updated",
+      threadId: chat.id,
+      providerInstanceId: chat.providerInstanceId,
+      occurredAt: now,
+      payload: {
+        ...chat,
+        updatedAt: now,
+        workTasks: upsertWorkTask(chat.workTasks, {
+          ...command.task,
+          status: "proposed",
+          createdAt: DateTime.formatIso(now),
+          updatedAt: DateTime.formatIso(now),
+        }),
+      },
+    });
+  });
+
+  const dispatchWorkTaskDismiss = Effect.fn("orchestrationV2.dispatch.workTaskDismiss")(function* (
+    command: Extract<OrchestrationV2Command, { readonly type: "work.task.dismiss" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const chat = yield* readWorkTaskChat(command);
+    const task = (chat.workTasks ?? []).find((candidate) => candidate.id === command.taskId);
+    // Only a card still waiting on the user moves; a started one is stopped from its Work.
+    if (task === undefined || task.status !== (command.dismissed ? "proposed" : "dismissed")) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: command.dismissed
+          ? "Only a proposed task can be dismissed."
+          : "Only a dismissed task can be restored.",
+      });
+    }
+    const now = yield* DateTime.now;
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "thread.metadata-updated",
+      threadId: chat.id,
+      providerInstanceId: chat.providerInstanceId,
+      occurredAt: now,
+      payload: {
+        ...chat,
+        updatedAt: now,
+        workTasks: upsertWorkTask(chat.workTasks, {
+          ...task,
+          status: command.dismissed ? "dismissed" : "proposed",
+          updatedAt: DateTime.formatIso(now),
+        }),
+      },
+    });
+  });
+
+  const dispatchWorkTaskReport = Effect.fn("orchestrationV2.dispatch.workTaskReport")(function* (
+    command: Extract<OrchestrationV2InternalCommand, { readonly type: "work.task.report" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) {
+    const chat = yield* readWorkTaskChat(command);
+    const task = (chat.workTasks ?? []).find((candidate) => candidate.id === command.taskId);
+    // Each task reports once; later runs in its Work show live on the card instead.
+    if (task?.status !== "started" || task.outcome !== undefined) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "The task is not started or already reported.",
+      });
+    }
+    const now = yield* DateTime.now;
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "thread.metadata-updated",
+      threadId: chat.id,
+      providerInstanceId: chat.providerInstanceId,
+      occurredAt: now,
+      payload: {
+        ...chat,
+        updatedAt: now,
+        workTasks: upsertWorkTask(chat.workTasks, {
+          ...task,
+          outcome: command.outcome,
+          updatedAt: DateTime.formatIso(now),
+        }),
+      },
+    });
+    // An archived chat keeps the result on its card without starting a turn.
+    if (chat.archivedAt !== null) return;
+    // Queued behind whatever the chat is doing; an idle chat starts a turn now.
+    yield* dispatchMessage(
+      {
+        type: "message.dispatch",
+        commandId: command.commandId,
+        threadId: chat.id,
+        messageId: command.wake.messageId,
+        text: command.wake.text,
+        notification: command.wake.notification,
+        attachments: [],
+        dispatchMode: { type: "queue_after_active" },
+        createdBy: "agent",
+        creationSource: "server",
+      },
+      events,
+      effects,
+    );
+  });
 
   const dispatchCreatedThreadRecord = Effect.fn("orchestrationV2.dispatch.createdThreadRecord")(
     function* (
@@ -11313,6 +11496,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "work.handoff.record":
         yield* dispatchWorkHandoffRecord(command, events);
         break;
+      case "work.task.propose":
+        yield* dispatchWorkTaskPropose(command, events);
+        break;
+      case "work.task.dismiss":
+        yield* dispatchWorkTaskDismiss(command, events);
+        break;
+      case "work.task.report":
+        yield* dispatchWorkTaskReport(command, events, effects);
+        break;
       case "thread.created.record":
         yield* dispatchCreatedThreadRecord(command, events);
         break;
@@ -11622,6 +11814,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         (stored) =>
           stored.event.type === "run.updated" &&
           !String(stored.commandId).startsWith("command:runtime-reconcile:") &&
+          // Imported T3 history ended long ago; promoting a queue for it would start a run.
+          !isT3ImportCommandId(stored.commandId) &&
           (stored.event.payload.status === "completed" ||
             stored.event.payload.status === "interrupted" ||
             stored.event.payload.status === "failed" ||
@@ -11896,6 +12090,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .latestSequence()
         .pipe(Effect.map((latest) => eventSink.stream({ afterSequence: latest }))),
     ).pipe(
+      // Reactors on this stream (settlement, PR sync, delegated questions,
+      // awareness) act on new activity; imported T3 history is not new.
+      Stream.filter((stored) => !isT3ImportCommandId(stored.commandId)),
       Stream.map((stored) => stored.event),
       Stream.mapError(
         (cause) =>

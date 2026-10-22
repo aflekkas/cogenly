@@ -19,6 +19,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Bus from "./AgentEventBus.ts";
+import { isT3ImportCommandId } from "../t3Import/T3ImportCommandIds.ts";
 import * as Events from "../orchestration-v2/EventStore.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
@@ -67,6 +68,8 @@ const make = Effect.gen(function* () {
   const observe: AgentEventReactor["Service"]["observe"] = (stored) =>
     Effect.gen(function* () {
       const event = stored.event;
+      // Imported T3 history must not trigger agents.
+      if (isT3ImportCommandId(stored.commandId)) return;
       if (
         ![
           "run.updated",
