@@ -80,6 +80,7 @@ import { BrowserSettingsReadError } from "~/browser/openFileInPreview";
 import { PreviewFileNotShown, PreviewUnreachable } from "./PreviewUnreachable";
 import { revealInFileExplorerLabel } from "./fileExplorerLabel";
 import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
+import { previewTabHasPage } from "./previewMiniPlayerVisibility.logic";
 import { Badge } from "~/components/ui/badge";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { alternatePreviewRuntime, useRendersServerTabNatively } from "~/browser/previewRuntime";
@@ -1096,7 +1097,9 @@ export function PreviewView({
         }
         pictureInPicture={miniPlayerTabId === tabId}
         pictureInPictureDisabled={
-          isUnreachable || (!isServerTab && !desktopOverlay?.hasWebContents)
+          isUnreachable ||
+          !previewTabHasPage(snapshot?.navStatus) ||
+          (!isServerTab && !desktopOverlay?.hasWebContents)
         }
         onPickElement={
           tabId && isServerTab

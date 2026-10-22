@@ -263,6 +263,7 @@ import { previewRuntimeTabId } from "../browser/previewRuntimeTabId";
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
 import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
+import { previewTabHasPage } from "./preview/previewMiniPlayerVisibility.logic";
 import { usePreviewSession } from "./preview/usePreviewSession";
 import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
@@ -4230,7 +4231,14 @@ export default function ChatView(props: ChatViewProps) {
   const closePreviewPanel = () => {
     if (activeThreadRef) {
       // Closing the panel on a live browser or device floats it instead of dropping it.
-      if (activeRightPanelSurface?.kind === "preview" && activeRightPanelSurface.resourceId) {
+      // A new or blank tab has nothing to float, so it just closes with the panel.
+      if (
+        activeRightPanelSurface?.kind === "preview" &&
+        activeRightPanelSurface.resourceId &&
+        previewTabHasPage(
+          activePreviewState.sessions[activeRightPanelSurface.resourceId]?.navStatus,
+        )
+      ) {
         usePreviewMiniPlayerStore
           .getState()
           .open(activeThreadRef, browserMiniPlayerSource(activeRightPanelSurface.resourceId));

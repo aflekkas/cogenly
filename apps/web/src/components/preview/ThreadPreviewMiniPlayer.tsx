@@ -49,7 +49,10 @@ import { useDeviceState } from "~/state/device";
 
 import { DeviceStreamView } from "../device/DeviceStreamView";
 import type { DeviceScreenSize } from "@t3tools/client-runtime/device/stream";
-import type { PreviewStreamViewport } from "@t3tools/client-runtime/preview/server-browser-stream";
+import type {
+  PreviewStreamControl,
+  PreviewStreamViewport,
+} from "@t3tools/client-runtime/preview/server-browser-stream";
 import { previewBridge } from "./previewBridge";
 import { showPreviewPopup } from "./showPreviewPopup";
 import {
@@ -68,6 +71,11 @@ import {
   resolvePreviewMiniPlayerSourceSize,
   resolvePreviewMiniPlayerVisibleBounds,
 } from "./previewMiniPlayerLayout";
+import {
+  PREVIEW_MINI_PLAYER_FIRST_PAINT_TIMEOUT_MS,
+  previewTabHasPage,
+  resolvePreviewMiniPlayerPresence,
+} from "./previewMiniPlayerVisibility.logic";
 
 interface PointerGesture {
   readonly pointerId: number;
@@ -209,15 +217,48 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
   const nativeServerTab = useRendersServerTabNatively(threadRef.environmentId, snapshot);
   const serverTab = snapshot?.runtime === "server" && !nativeServerTab;
   const [streamViewport, setStreamViewport] = useState<PreviewStreamViewport | null>(null);
-  // A server tab draws nothing until its first frame; until then, and while
-  // the page is blank, the frame shows a themed placeholder instead of white.
+  const [streamControl, setStreamControl] = useState<PreviewStreamControl | null>(null);
+  // A server tab draws nothing until its first frame; a desktop tab draws once
+  // its webview exists. Either way the card stays transparent until a real
+  // page has loaded into it, so a blank or never-used tab never floats.
   const [streamPainted, setStreamPainted] = useState(false);
   const navStatus = snapshot?.navStatus;
-  const pageBlank =
-    !navStatus ||
-    navStatus._tag === "Idle" ||
-    navStatus.url === "about:blank" ||
-    (navStatus._tag === "Loading" && serverTab && !streamPainted);
+  const hasPage = previewTabHasPage(navStatus);
+  const hasWebContents = Boolean(desktopOverlay?.hasWebContents);
+  const surfaceReady = serverTab ? streamPainted : hasWebContents;
+  // Latched on the first real page, so a later reload keeps showing the old page.
+  const [pagePainted, setPagePainted] = useState(false);
+  if (!pagePainted && surfaceReady && hasPage && navStatus?._tag !== "Loading") {
+    setPagePainted(true);
+  }
+  const painted = pagePainted && surfaceReady;
+  const agentDriving = serverTab
+    ? streamControl?.controller === "agent"
+    : desktopOverlay?.controller === "agent";
+  // An agent-driven tab may show a spinner while it loads, but only for so
+  // long: a stream that never sends a frame or a webview that never attaches
+  // fades the card out instead of spinning forever. A new address starts over.
+  const pageUrl = navStatus && navStatus._tag !== "Idle" ? navStatus.url : null;
+  const [waitUrl, setWaitUrl] = useState(pageUrl);
+  const [waitExpired, setWaitExpired] = useState(false);
+  if (waitUrl !== pageUrl) {
+    setWaitUrl(pageUrl);
+    setWaitExpired(false);
+  }
+  useEffect(() => {
+    if (painted || waitExpired || !agentDriving) return;
+    const timer = window.setTimeout(
+      () => setWaitExpired(true),
+      PREVIEW_MINI_PLAYER_FIRST_PAINT_TIMEOUT_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [agentDriving, painted, waitExpired, waitUrl]);
+  const presence = resolvePreviewMiniPlayerPresence({
+    hasPage,
+    painted,
+    agentDriving,
+    waitExpired,
+  });
   const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
   const serverPictureInPicture =
     useServerPictureInPictureKey() === serverPictureInPictureKey(threadRef.threadId, tabId);
@@ -275,6 +316,7 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
       miniPlayer={miniPlayer}
       sourceSize={sourceSize}
       label="Floating browser preview"
+      shown={presence !== "hidden"}
       recording={recording}
       onOpenInPanel={openInPanel}
       pillActions={
@@ -288,7 +330,7 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
                   aria-label={
                     poppedOut ? "Close popped-out preview" : "Pop preview into separate window"
                   }
-                  disabled={!serverTab && !desktopOverlay?.hasWebContents}
+                  disabled={!serverTab && !hasWebContents}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={toggleNativePictureInPicture}
                 />
@@ -318,18 +360,20 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
               followSize={false}
               controlPosition="bottom"
               onViewport={setStreamViewport}
+              onControl={setStreamControl}
               onFirstFrame={() => setStreamPainted(true)}
               onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId, "floating")}
               className="size-full"
             />
-            <MiniPlayerPlaceholder label="Loading preview…" visible={!streamPainted || pageBlank} />
+            <MiniPlayerPlaceholder label="Loading preview…" visible={presence !== "shown"} />
           </div>
         ) : (
           <>
             <BrowserSurfaceSlot
               tabId={runtimeTabId}
-              // The native webview paints above the DOM, so a blank page is hidden for the placeholder.
-              visible={Boolean(desktopOverlay?.hasWebContents) && !pageBlank}
+              // The native webview paints above the DOM and ignores the card's
+              // fade, so it shows only with a page in it and the card up.
+              visible={presence === "shown"}
               cornerRadius={PREVIEW_MINI_PLAYER_CORNER_RADIUS}
               zIndex={PREVIEW_MINI_PLAYER_WEBVIEW_Z_INDEX}
               fitSourceContent
@@ -337,8 +381,8 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
               className="absolute inset-0"
             />
             <MiniPlayerPlaceholder
-              label={desktopOverlay?.hasWebContents ? "Loading preview…" : "Reconnecting preview…"}
-              visible={!desktopOverlay?.hasWebContents || pageBlank}
+              label={hasWebContents ? "Loading preview…" : "Reconnecting preview…"}
+              visible={presence !== "shown"}
             />
           </>
         )
@@ -419,6 +463,7 @@ function MiniPlayerShell({
   onOpenInPanel,
   pillActions,
   recording = false,
+  shown = true,
   cornerRadius = frameCornerRadius,
   children,
 }: {
@@ -429,6 +474,11 @@ function MiniPlayerShell({
   readonly onOpenInPanel: () => void;
   readonly pillActions?: ReactNode;
   readonly recording?: boolean;
+  /**
+   * False keeps the card mounted, so its source can keep loading, but
+   * transparent and out of reach of the pointer and keyboard.
+   */
+  readonly shown?: boolean;
   /** The clip radius for a given frame; the pill stays inside the curve. */
   readonly cornerRadius?: (frame: PreviewMiniPlayerSize) => number;
   readonly children: (frame: PreviewMiniPlayerFrame) => ReactNode;
@@ -529,6 +579,14 @@ function MiniPlayerShell({
     return () => window.clearTimeout(timer);
   }, [settling]);
 
+  // The card fades in on mount and whenever it comes back, and out when hidden.
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
+  const faded = !(entered && shown);
+
   const radius = frame ? cornerRadius(frame) : PREVIEW_MINI_PLAYER_CORNER_RADIUS;
   // Inside a wide curve the default 8px inset would land on the clipped-away corner.
   const pillInset = Math.max(8, Math.round(radius * 0.55));
@@ -601,7 +659,15 @@ function MiniPlayerShell({
   };
 
   return (
-    <div ref={rootRef} className="pointer-events-none absolute inset-0">
+    <div
+      ref={rootRef}
+      inert={!shown}
+      aria-hidden={!shown || undefined}
+      className={cn(
+        "pointer-events-none absolute inset-0 transition-opacity duration-(--motion-duration-base) ease-out",
+        faded && "opacity-0",
+      )}
+    >
       {frame ? (
         <section
           aria-label={label}
