@@ -249,6 +249,8 @@ const layerWithFiles = layerTest.pipe(
                 labelId: filedLabelId,
                 name: "Manifest",
                 dir: "/projects/Manifest",
+                instructions: "",
+                projectChatThreadId: null,
               }
             : null,
         ),

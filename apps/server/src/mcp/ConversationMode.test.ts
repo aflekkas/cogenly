@@ -147,11 +147,19 @@ const serverLayer = Layer.mergeAll(
           labelId: ProjectLabelId.make("label:conversation"),
           name: "Conversation",
           dir: "/projects/Conversation",
+          instructions: "",
+          projectChatThreadId: null,
         }),
       folderById: (labelId) =>
         Effect.succeed(
           labelId === "label:mentioned"
-            ? { labelId, name: "Mentioned", dir: "/projects/Mentioned" }
+            ? {
+                labelId,
+                name: "Mentioned",
+                dir: "/projects/Mentioned",
+                instructions: "",
+                projectChatThreadId: null,
+              }
             : null,
         ),
       listResources: (labelId) =>

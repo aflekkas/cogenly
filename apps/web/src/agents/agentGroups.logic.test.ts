@@ -22,6 +22,8 @@ function folder(environmentId: EnvironmentId, id: string, name: string): Environ
       repositoryIds: [],
       sourceLinks: [],
       threadCount: 0,
+      instructions: "",
+      projectChatThreadId: null,
     },
   };
 }

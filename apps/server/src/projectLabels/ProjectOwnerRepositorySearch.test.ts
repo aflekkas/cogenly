@@ -23,6 +23,8 @@ const labelWithOwners = (...owners: ReadonlyArray<string>): ProjectLabelWithRepo
   repositoryIds: [],
   sourceLinks: owners.map((owner) => ({ kind: "github-owner" as const, owner })),
   threadCount: 0,
+  instructions: "",
+  projectChatThreadId: null,
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 });

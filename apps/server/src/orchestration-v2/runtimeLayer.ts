@@ -7,6 +7,7 @@ import * as AgentEvents from "../agents/AgentEventBus.ts";
 import * as AgentEventReactor from "../agents/AgentEventReactor.ts";
 import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
+import * as ProjectHome from "../projectLabels/ProjectHome.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as WorkHandoff from "../work/WorkHandoffService.ts";
 import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
@@ -76,13 +77,16 @@ export const layerEventInfrastructure = Layer.mergeAll(
   OrchestrationCommandReceipts.layer,
 );
 
+// Shared so every consumer gets the one files index and watcher.
+const layerProjectFilesProvided = ProjectFiles.layer.pipe(Layer.provide(ProjectLabelFolders.layer));
+
 const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
   Layer.provide(
     Layer.mergeAll(
       ProjectStore.layer,
       ProjectLabelFolders.layer,
       // Nested: a merge would leave the files layer's folder requirement dangling.
-      ProjectFiles.layer.pipe(Layer.provide(ProjectLabelFolders.layer)),
+      layerProjectFilesProvided,
     ),
   ),
 );
@@ -462,7 +466,19 @@ const layerProductionBase = Layer.mergeAll(
   Exports.layer,
   layerProjectLabelsProvided,
   ProjectLabelFolders.layer,
-  ProjectFiles.layer.pipe(Layer.provide(ProjectLabelFolders.layer)),
+  layerProjectFilesProvided,
+  ProjectHome.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        layerProjectLabelsProvided,
+        layerProjectFilesProvided,
+        layerThreadLaunchProvided,
+        layerThreadManagementProvided,
+        layerManagedProjectFoldersProvided,
+        ProjectStore.layer,
+      ),
+    ),
+  ),
   layerAgentWorkspaceProvided,
   layerAgentEventReactorProvided,
   layerAgentMcpPolicyProvided,

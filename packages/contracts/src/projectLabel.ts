@@ -8,6 +8,7 @@ import {
   TrimmedNonEmptyString,
   TrimmedString,
 } from "./baseSchemas.ts";
+import { ModelSelection } from "./modelSelection.ts";
 import { SourceControlCloneProtocol, SourceControlProviderKind } from "./sourceControl.ts";
 
 /** Project folders provide context only and never grant access. Legacy names/IDs are stable. */
@@ -15,6 +16,9 @@ export const ProjectLabelId = TrimmedNonEmptyString.pipe(Schema.brand("ProjectLa
 export type ProjectLabelId = typeof ProjectLabelId.Type;
 const color = TrimmedNonEmptyString.check(Schema.isMaxLength(100));
 const description = Schema.String.check(Schema.isMaxLength(4000));
+/** Standing guidance for every agent working in the project; empty means none. */
+export const PROJECT_INSTRUCTIONS_MAX_LENGTH = 20_000;
+const instructions = Schema.String.check(Schema.isMaxLength(PROJECT_INSTRUCTIONS_MAX_LENGTH));
 const fields = {
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   color: Schema.optional(color),
@@ -23,6 +27,11 @@ const fields = {
 export const ProjectLabel = Schema.Struct({
   id: ProjectLabelId,
   ...fields,
+  /**
+   * Injected into the runtime instructions of every thread filed in the
+   * project, for every provider. Older servers and caches decode as empty.
+   */
+  instructions: instructions.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -57,7 +66,18 @@ export const ProjectLabelWithRepositories = Schema.Struct({
   repositoryIds: Schema.Array(ProjectId),
   // Older servers (and caches written by them) predate source links.
   sourceLinks: Schema.Array(ProjectSourceLink).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
-  /** Visible chats and Work: excludes archives, delegated children and agent conversations. */
+  /**
+   * The project's own chat (project home), created lazily by
+   * `projectLabels.ensureProjectChat`. Null until the first visit. Clients
+   * leave it out of the normal Chats list; it is a regular chat-surface thread.
+   */
+  projectChatThreadId: Schema.NullOr(ThreadId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /**
+   * Visible chats and Work: excludes archives, delegated children, agent
+   * conversations and the project chat.
+   */
   threadCount: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 });
 export type ProjectLabelWithRepositories = typeof ProjectLabelWithRepositories.Type;
@@ -157,14 +177,18 @@ export const ThreadProjectLabel = Schema.Struct({
   source: Schema.Literals(["user", "suggested"]),
 });
 export type ThreadProjectLabel = typeof ThreadProjectLabel.Type;
-export const ProjectLabelCreateInput = Schema.Struct(fields);
+export const ProjectLabelCreateInput = Schema.Struct({
+  ...fields,
+  instructions: Schema.optional(instructions),
+});
 export type ProjectLabelCreateInput = typeof ProjectLabelCreateInput.Type;
-/** Omitted fields are preserved; null clears color or description. */
+/** Omitted fields are preserved; null clears color or description; "" clears instructions. */
 export const ProjectLabelUpdateInput = Schema.Struct({
   id: ProjectLabelId,
   name: Schema.optional(fields.name),
   color: Schema.optional(Schema.NullOr(color)),
   description: Schema.optional(Schema.NullOr(description)),
+  instructions: Schema.optional(instructions),
 });
 export type ProjectLabelUpdateInput = typeof ProjectLabelUpdateInput.Type;
 export const ProjectLabelKey = Schema.Struct({ id: ProjectLabelId });
@@ -379,3 +403,109 @@ export const ProjectRecallInput = Schema.Struct({
   limit: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(50))),
 });
 export type ProjectRecallInput = typeof ProjectRecallInput.Type;
+
+/*
+ * Project home (chat-first project page)
+ *
+ * - Project chat: one durable chat-surface thread per project, created lazily
+ *   by `projectLabels.ensureProjectChat` (idempotent; returns the same thread
+ *   every time, recreating it only if it was deleted). Its id is
+ *   `ProjectLabelWithRepositories.projectChatThreadId`; clients find it there
+ *   and keep it out of the normal Chats list. It runs with a system prompt
+ *   that makes it the project's configurator: the project tools below, work
+ *   handed to tasks through `work_task`.
+ * - Instructions: `ProjectLabel.instructions`, set with `projectLabels.update`
+ *   ({ id, instructions }), injected into every thread filed in the project.
+ * - Configuration RPCs (all guarded): projectLabels.update (instructions),
+ *   linkRepository / unlinkRepository, linkSource / unlinkSource,
+ *   addResource / removeResource, ensureProjectChat.
+ * - MCP tools for agents in a project's threads (target the caller's own
+ *   project unless `projectFolderId` names another): project_overview,
+ *   project_instructions_get, project_instructions_set, project_repository_add,
+ *   project_repository_remove, project_source_link, project_source_unlink,
+ *   project_file_write, project_file_remove, plus project_files_list,
+ *   project_file_read and project_recall. Every mutation returns a
+ *   `ProjectChangeReceipt` the chat renders as a compact card.
+ */
+
+/** Input for `projectLabels.ensureProjectChat`. */
+export const ProjectChatEnsureInput = Schema.Struct({
+  id: ProjectLabelId,
+  /** Used only when the chat is created: the user's default model selection. */
+  modelSelection: ModelSelection,
+});
+export type ProjectChatEnsureInput = typeof ProjectChatEnsureInput.Type;
+export const ProjectChatEnsureResult = Schema.Struct({
+  threadId: ThreadId,
+  /** True only for the call that created the thread. */
+  created: Schema.Boolean,
+});
+export type ProjectChatEnsureResult = typeof ProjectChatEnsureResult.Type;
+
+/** What a project change touched. */
+export const ProjectChangeKind = Schema.Literals(["repository", "source", "instructions", "file"]);
+export type ProjectChangeKind = typeof ProjectChangeKind.Type;
+/** `unchanged`: the project already looked like that (already linked, not present, same text). */
+export const ProjectChangeAction = Schema.Literals(["added", "removed", "updated", "unchanged"]);
+export type ProjectChangeAction = typeof ProjectChangeAction.Type;
+/**
+ * Compact record of one project configuration change, returned by every
+ * project mutation tool so the chat can render it as a card.
+ */
+export const ProjectChangeReceipt = Schema.Struct({
+  projectFolderId: ProjectLabelId,
+  kind: ProjectChangeKind,
+  /** Human-readable subject: a repository title, `owner/repo`, `Instructions`, a file path. */
+  label: Schema.String,
+  action: ProjectChangeAction,
+});
+export type ProjectChangeReceipt = typeof ProjectChangeReceipt.Type;
+
+/** Targets the calling thread's project unless a folder is named. */
+export const ProjectTargetInput = Schema.Struct(projectFolderTarget);
+export type ProjectTargetInput = typeof ProjectTargetInput.Type;
+/** `project_overview` result: what an agent needs to configure the project. */
+export const ProjectOverviewResult = Schema.Struct({
+  projectFolderId: ProjectLabelId,
+  name: Schema.String,
+  description: Schema.optional(Schema.String),
+  instructions: Schema.String,
+  repositories: Schema.Array(Schema.Struct({ id: ProjectId, title: Schema.String })),
+  sourceLinks: Schema.Array(ProjectSourceLink),
+  projectChatThreadId: Schema.NullOr(ThreadId),
+});
+export type ProjectOverviewResult = typeof ProjectOverviewResult.Type;
+export const ProjectInstructionsResult = Schema.Struct({
+  projectFolderId: ProjectLabelId,
+  instructions: Schema.String,
+});
+export type ProjectInstructionsResult = typeof ProjectInstructionsResult.Type;
+export const ProjectInstructionsSetInput = Schema.Struct({
+  ...projectFolderTarget,
+  /** The whole new text; "" clears. */
+  instructions,
+});
+export type ProjectInstructionsSetInput = typeof ProjectInstructionsSetInput.Type;
+export const ProjectRepositoryChangeInput = Schema.Struct({
+  ...projectFolderTarget,
+  /** An existing repository (see project_overview or t3_project_list). */
+  repositoryId: ProjectId,
+});
+export type ProjectRepositoryChangeInput = typeof ProjectRepositoryChangeInput.Type;
+export const ProjectSourceChangeInput = Schema.Struct({
+  ...projectFolderTarget,
+  link: ProjectSourceLink,
+});
+export type ProjectSourceChangeInput = typeof ProjectSourceChangeInput.Type;
+/** Saves a markdown note under `Resources/`; a taken name gets a numeric suffix. */
+export const ProjectFileWriteInput = Schema.Struct({
+  ...projectFolderTarget,
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  text: Schema.String.check(Schema.isMaxLength(1_000_000)),
+});
+export type ProjectFileWriteInput = typeof ProjectFileWriteInput.Type;
+export const ProjectFileRemoveInput = Schema.Struct({
+  ...projectFolderTarget,
+  path: TrimmedNonEmptyString.check(Schema.isMaxLength(1000)),
+});
+export type ProjectFileRemoveInput = typeof ProjectFileRemoveInput.Type;

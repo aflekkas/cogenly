@@ -54,6 +54,8 @@ const organizer = (access: "read-only" | "full-access", moves: Array<unknown>) =
               repositoryIds: [],
               sourceLinks: [],
               threadCount: 0,
+              instructions: "",
+              projectChatThreadId: null,
             },
           ],
         }),

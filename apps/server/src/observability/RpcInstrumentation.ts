@@ -98,6 +98,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.projectLabelsAddResource]: "projectLabels",
   [WS_METHODS.projectLabelsRemoveResource]: "projectLabels",
   [WS_METHODS.projectLabelsReadResource]: "projectLabels",
+  [WS_METHODS.projectLabelsEnsureProjectChat]: "projectLabels",
   [WS_METHODS.workStart]: "work",
   [WS_METHODS.agentsList]: "agents",
   [WS_METHODS.agentsSubscribe]: "agents",

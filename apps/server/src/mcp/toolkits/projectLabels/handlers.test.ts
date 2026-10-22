@@ -96,6 +96,8 @@ const labelShape = {
   repositoryIds: [],
   sourceLinks: [],
   threadCount: 0,
+  instructions: "",
+  projectChatThreadId: null,
 };
 
 it.effect.each([

@@ -106,6 +106,8 @@ const layerStubServices = Layer.mergeAll(
         labelId: ProjectLabelId.make("label:smoke"),
         name: "MCP smoke",
         dir: "/workspace/mcp-smoke",
+        instructions: "",
+        projectChatThreadId: null,
       }),
     listResources: () => Effect.succeed({ resources: [], truncated: false }),
   }),

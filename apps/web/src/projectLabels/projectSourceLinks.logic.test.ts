@@ -37,6 +37,8 @@ function folder(
     repositoryIds: repositoryIds.map((repositoryId) => ProjectId.make(repositoryId)),
     sourceLinks,
     threadCount: 0,
+    instructions: "",
+    projectChatThreadId: null,
   };
   return { key: projectLabelKey(env, id), environmentId: env, label };
 }

@@ -14,6 +14,7 @@ import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelFork from "./projectLabels/ProjectLabelForkToProject.ts";
 import * as ProjectFiles from "./projectLabels/ProjectFiles.ts";
+import * as ProjectHome from "./projectLabels/ProjectHome.ts";
 import * as ProjectLabelOwnerSearch from "./projectLabels/ProjectOwnerRepositorySearch.ts";
 import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -1065,6 +1066,7 @@ const makeWsRpcHandlers = (
     const projectLabels = yield* ProjectLabels.ProjectLabelService;
     const projectLabelFolders = yield* ProjectLabelFolders.ProjectLabelFolders;
     const projectFiles = yield* ProjectFiles.ProjectFiles;
+    const projectHome = yield* ProjectHome.ProjectHome;
     const github = yield* GitHubRest.GitHubRest;
     const home = yield* HostProcess.HomeDirectory;
     const path = yield* Path.Path;
@@ -1631,6 +1633,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsAddResource]: (input) => projectFiles.createResource(input),
       [WS_METHODS.projectLabelsRemoveResource]: (input) => projectFiles.removeResource(input),
       [WS_METHODS.projectLabelsReadResource]: (input) => projectFiles.readResource(input),
+      [WS_METHODS.projectLabelsEnsureProjectChat]: (input) => projectHome.ensureChat(input),
       [WS_METHODS.projectLabelsCloneRepository]: (input) =>
         ProjectLabelClone.cloneRepositoryIntoLabel(input, {
           labels: projectLabels,
@@ -2730,6 +2733,7 @@ type WsRequestServices =
   | ProjectEnrichmentService.ProjectEnrichmentService
   | ProjectFaviconResolver.ProjectFaviconResolver
   | ProjectFiles.ProjectFiles
+  | ProjectHome.ProjectHome
   | ProjectLabelFolders.ProjectLabelFolders
   | ProjectLabels.ProjectLabelService
   | ProjectService.ProjectService

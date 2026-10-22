@@ -32,6 +32,8 @@ const testLabel = ProjectLabelWithRepositories.make({
   repositoryIds: [],
   sourceLinks: [],
   threadCount: 0,
+  instructions: "",
+  projectChatThreadId: null,
 });
 
 /** Every filing the service attempted, in order. Tests key off their own project id. */

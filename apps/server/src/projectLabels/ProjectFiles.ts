@@ -16,7 +16,7 @@ import {
   type ProjectLabelRemoveResourceResult,
   type ProjectRecallResult,
   ProjectResource,
-  type ThreadId,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -59,6 +59,10 @@ export interface ProjectFolderLocation {
   readonly labelId: ProjectLabelId;
   readonly name: string;
   readonly dir: string;
+  /** The project's instructions; empty when none. */
+  readonly instructions: string;
+  /** The project's own chat, once created. */
+  readonly projectChatThreadId: ThreadId | null;
 }
 
 export class ProjectFiles extends Context.Service<
@@ -945,15 +949,27 @@ const make = Effect.gen(function* () {
 
   const folderById: ProjectFiles["Service"]["folderById"] = Effect.fn("ProjectFiles.folderById")(
     function* (labelId) {
-      const rows = yield* sql<{ name: string }>`
-        SELECT name FROM project_labels WHERE label_id = ${labelId}
+      const rows = yield* sql<{
+        name: string;
+        instructions: string | null;
+        project_chat_thread_id: string | null;
+      }>`
+        SELECT name, instructions, project_chat_thread_id FROM project_labels WHERE label_id = ${labelId}
       `.pipe(Effect.mapError(storage("read")));
-      const name = rows[0]?.name;
-      if (name === undefined) return null;
+      const row = rows[0];
+      if (row === undefined) return null;
+      const { name } = row;
       const { dir } = yield* folders
         .dirForLabel({ id: labelId, name })
         .pipe(Effect.mapError(storage("read")));
-      return { labelId, name, dir };
+      return {
+        labelId,
+        name,
+        dir,
+        instructions: row.instructions ?? "",
+        projectChatThreadId:
+          row.project_chat_thread_id === null ? null : ThreadId.make(row.project_chat_thread_id),
+      };
     },
   );
 

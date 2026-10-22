@@ -1153,6 +1153,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:removeProjectLabelResource",
       tag: WS_METHODS.projectLabelsRemoveResource,
     }),
+    /** The project's own chat: created on first call, the same thread afterwards. */
+    ensureProjectChat: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:ensureProjectChat",
+      tag: WS_METHODS.projectLabelsEnsureProjectChat,
+    }),
     /** GitHub repositories under a project's linked owners; empty query lists recent pushes. */
     projectLabelOwnerRepositories: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:projectLabels:ownerRepositories",

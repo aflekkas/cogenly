@@ -525,6 +525,7 @@ export const WS_METHODS = {
   projectLabelsAddResource: "projectLabels.addResource",
   projectLabelsRemoveResource: "projectLabels.removeResource",
   projectLabelsReadResource: "projectLabels.readResource",
+  projectLabelsEnsureProjectChat: "projectLabels.ensureProjectChat",
   workStart: "work.start",
   agentsList: "agents.list",
   agentsSubscribe: "agents.subscribe",
@@ -1976,6 +1977,16 @@ const WsProjectLabelsReadResourceRpc = Rpc.make(WS_METHODS.projectLabelsReadReso
   success: ProjectLabels.ProjectLabelReadResourceResult,
   error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
+// The project's own chat, created on first call and stable afterwards.
+const WsProjectLabelsEnsureProjectChatRpc = Rpc.make(WS_METHODS.projectLabelsEnsureProjectChat, {
+  payload: ProjectLabels.ProjectChatEnsureInput,
+  success: ProjectLabels.ProjectChatEnsureResult,
+  error: Schema.Union([
+    ProjectLabels.ProjectLabelError,
+    OrchestrationDispatchCommandError,
+    EnvironmentAuthorizationError,
+  ]),
+});
 const WsWorkStartRpc = Rpc.make(WS_METHODS.workStart, {
   payload: Work.WorkStartInput,
   success: Work.WorkStartResult,
@@ -2319,6 +2330,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsAddResourceRpc,
   WsProjectLabelsRemoveResourceRpc,
   WsProjectLabelsReadResourceRpc,
+  WsProjectLabelsEnsureProjectChatRpc,
   WsWorkStartRpc,
   WsAgentsApprovalsListRpc,
   WsAgentsRequestApprovalRpc,

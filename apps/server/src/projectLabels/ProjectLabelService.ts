@@ -64,6 +64,11 @@ export class ProjectLabelService extends Context.Service<
     readonly unlinkSource: (
       input: ProjectLabelSourceLinkInput,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    /** Records the project's own chat; ProjectHome owns creating it. */
+    readonly setProjectChat: (input: {
+      readonly id: ProjectLabelId;
+      readonly threadId: ThreadId;
+    }) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly getThreadLabels: (threadId: ThreadId) => Effect.Effect<Tags, ProjectLabelError>;
     readonly subscribeThreadLabels: (threadId: ThreadId) => Stream.Stream<Tags, ProjectLabelError>;
     /** Effective folder memberships across every live thread. */
@@ -102,12 +107,13 @@ const make = Effect.gen(function* () {
       : new ProjectLabelError({ operation, reason: "storage", cause });
   const missing = (operation: string) => new ProjectLabelError({ operation, reason: "not_found" });
   const readLabels = (id?: ProjectLabelId) =>
-    sql`SELECT label_id AS id, name, color, description, created_at AS createdAt, updated_at AS updatedAt,
+    sql`SELECT label_id AS id, name, color, description, instructions, project_chat_thread_id AS projectChatThreadId, created_at AS createdAt, updated_at AS updatedAt,
     (SELECT json_group_array(repository_id) FROM (SELECT repository_id FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositories
     , (SELECT json_group_array(json(source)) FROM (SELECT json_object('kind', kind, 'owner', owner, 'repo', repo) AS source FROM label_source_links s WHERE s.label_id = l.label_id ORDER BY kind, owner, repo)) AS sources
     , (SELECT count(*) FROM effective_thread_project_folders f
       JOIN orchestration_v2_projection_threads t ON t.thread_id = f.thread_id
       WHERE f.folder_id = l.label_id AND t.archived_at IS NULL
+        AND t.thread_id IS NOT l.project_chat_thread_id
         AND COALESCE(json_extract(t.payload_json, '$.lineage.relationshipToParent'), '') <> 'subagent'
         AND (json_extract(t.payload_json, '$.agent.role') = 'work' OR (
           json_extract(t.payload_json, '$.agent') IS NULL
@@ -134,6 +140,7 @@ const make = Effect.gen(function* () {
               ...row,
               color: row.color ?? undefined,
               description: row.description ?? undefined,
+              instructions: row.instructions ?? "",
               repositoryIds,
               sourceLinks,
             });
@@ -375,7 +382,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const id = ProjectLabelId.make(`label:${yield* crypto.randomUUIDv4()}`);
           const at = yield* now;
-          yield* sql`INSERT INTO project_labels(label_id, name, color, description, created_at, updated_at) VALUES (${id}, ${input.name}, ${input.color ?? null}, ${input.description ?? null}, ${at}, ${at})`;
+          yield* sql`INSERT INTO project_labels(label_id, name, color, description, instructions, created_at, updated_at) VALUES (${id}, ${input.name}, ${input.color ?? null}, ${input.description ?? null}, ${input.instructions ?? ""}, ${at}, ${at})`;
           return yield* get(id);
         }),
       ).pipe(Effect.tap(({ label }) => syncFolder(label, false))),
@@ -387,7 +394,7 @@ const make = Effect.gen(function* () {
           input,
           Effect.gen(function* () {
             const { label } = yield* get(input.id);
-            yield* sql`UPDATE project_labels SET name = ${input.name ?? label.name}, color = ${input.color === undefined ? (label.color ?? null) : input.color}, description = ${input.description === undefined ? (label.description ?? null) : input.description}, updated_at = ${yield* now} WHERE label_id = ${input.id}`;
+            yield* sql`UPDATE project_labels SET name = ${input.name ?? label.name}, color = ${input.color === undefined ? (label.color ?? null) : input.color}, description = ${input.description === undefined ? (label.description ?? null) : input.description}, instructions = ${input.instructions ?? label.instructions}, updated_at = ${yield* now} WHERE label_id = ${input.id}`;
             return yield* get(input.id);
           }),
         );
@@ -417,6 +424,16 @@ const make = Effect.gen(function* () {
     unlinkRepository: (input) => repository(input, false),
     linkSource: (input) => sourceLink(input, true),
     unlinkSource: (input) => sourceLink(input, false),
+    setProjectChat: (input) =>
+      mutate(
+        "setProjectChat",
+        input,
+        Effect.gen(function* () {
+          yield* get(input.id);
+          yield* sql`UPDATE project_labels SET project_chat_thread_id = ${input.threadId}, updated_at = ${yield* now} WHERE label_id = ${input.id}`;
+          return yield* get(input.id);
+        }),
+      ),
     setThreadLabels: (input) => {
       const ids = [...new Set(input.labelIds)];
       if (ids.length > 1)
