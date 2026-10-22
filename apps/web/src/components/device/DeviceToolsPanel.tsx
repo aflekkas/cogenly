@@ -1,9 +1,10 @@
 import type { DeviceHubAccess } from "@t3tools/client-runtime/state/deviceHubAccess";
 import type { DevicePermission, DeviceSummary, DeviceTextSize } from "@t3tools/contracts";
-import { ChevronDown, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import { DisclosureChevron } from "~/components/ui/disclosure";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "~/components/ui/collapsible";
 import { Input } from "~/components/ui/input";
 import {
@@ -635,9 +636,9 @@ function EventLogSection(props: {
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex w-full items-center gap-1.5 border-b px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">
         Event log
-        <ChevronDown
-          className={cn("ml-auto size-3.5 transition-transform", open && "rotate-180")}
-        />
+        <span className="ml-auto flex">
+          <DisclosureChevron />
+        </span>
       </CollapsibleTrigger>
       <CollapsiblePanel>
         <ol className="max-h-64 overflow-y-auto px-3 py-2 font-mono text-2xs leading-relaxed">

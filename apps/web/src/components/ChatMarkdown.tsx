@@ -25,7 +25,6 @@ import {
   encodeComposerContextClipboardHtml,
 } from "@t3tools/shared/composerContextClipboard";
 import {
-  ChevronRightIcon,
   CodeIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
@@ -151,6 +150,7 @@ import { Checkbox } from "./ui/checkbox";
 import { MorphIcon } from "~/components/MorphIcon";
 import { ContextChip } from "./ContextChip";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
+import { DisclosureChevron } from "./ui/disclosure";
 import { ScrollArea } from "./ui/scroll-area";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -698,13 +698,10 @@ function MarkdownDetails({
         data-markdown-details-open={expanded ? "true" : "false"}
       >
         <CollapsibleTrigger
-          className="flex w-full items-center gap-2 py-2 text-left text-sm font-medium text-foreground data-panel-open:[&_svg]:rotate-90"
+          className="flex w-full items-center gap-2 py-2 text-left text-sm font-medium text-foreground"
           data-markdown-details-summary=""
         >
-          <ChevronRightIcon
-            className="size-4 shrink-0 text-muted-foreground transition-transform"
-            aria-hidden
-          />
+          <DisclosureChevron />
           <span>{summary}</span>
         </CollapsibleTrigger>
         <CollapsiblePanel ref={findRevealRef} hiddenUntilFound={searching}>

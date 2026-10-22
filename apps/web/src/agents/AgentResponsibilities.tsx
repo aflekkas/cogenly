@@ -1,8 +1,7 @@
-import { cn } from "~/lib/utils";
+import { DisclosureChevron } from "~/components/ui/disclosure";
 import {
   BellIcon,
   BookmarkIcon,
-  ChevronDownIcon,
   ShieldCheckIcon,
   FlagIcon,
   FolderGit2Icon,
@@ -21,10 +20,7 @@ import type { AgentAvatar, AgentPermissions } from "@t3tools/contracts";
 import { PopoverTrigger } from "~/components/ui/popover";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import { ThreadDetailsSection } from "~/components/chat/ThreadDetailsSection";
-import {
-  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
-  THREAD_DETAILS_PANEL_ICON_CLASS,
-} from "~/components/chat/threadDetailsPanelStyles";
+import { THREAD_DETAILS_PANEL_ICON_CLASS } from "~/components/chat/threadDetailsPanelStyles";
 import {
   Dialog,
   DialogHeader,
@@ -386,15 +382,7 @@ export function AgentResponsibilities({
                 icon={ShieldCheckIcon}
                 label={grantedLabels.length > 0 ? grantedLabels.join(" · ") : "Nothing yet"}
                 detail={workStart.text}
-                trailing={
-                  <ChevronDownIcon
-                    className={cn(
-                      THREAD_DETAILS_PANEL_CHEVRON_CLASS,
-                      "transition-transform ease-standard",
-                      permissionsOpen && "rotate-180",
-                    )}
-                  />
-                }
+                trailing={<DisclosureChevron />}
               />
             }
           />
@@ -423,15 +411,7 @@ export function AgentResponsibilities({
                         .join(", ") || "off"
                     }
                     tone="muted"
-                    trailing={
-                      <ChevronDownIcon
-                        className={cn(
-                          THREAD_DETAILS_PANEL_CHEVRON_CLASS,
-                          "transition-transform ease-standard",
-                          highImpactOpen && "rotate-180",
-                        )}
-                      />
-                    }
+                    trailing={<DisclosureChevron />}
                   />
                 }
               />

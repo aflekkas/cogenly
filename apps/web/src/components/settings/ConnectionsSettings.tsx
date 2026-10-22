@@ -2,7 +2,6 @@ import { useLastPresent } from "~/components/ui/overlay-presence";
 import { SessionPermissions } from "./SessionPermissions";
 import { AUTH_SCOPE_OPTIONS as PAIRING_SCOPE_OPTIONS } from "@t3tools/shared/authScopeOptions";
 import {
-  ChevronRightIcon,
   ChevronsLeftRightEllipsisIcon,
   EllipsisIcon,
   PlusIcon,
@@ -135,6 +134,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
+import { DisclosureChevron } from "../ui/disclosure";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { AnimatedHeight } from "../AnimatedHeight";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
@@ -1655,13 +1655,7 @@ function SavedBackendListRow({
             className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
           >
             {routeCount === 1 ? "Routes" : `${routeCount} routes`}
-            <ChevronRightIcon
-              aria-hidden
-              className={cn(
-                "size-3 shrink-0 transition-transform duration-150 motion-reduce:transition-none",
-                routesOpen && "rotate-90",
-              )}
-            />
+            <DisclosureChevron open={routesOpen} />
           </button>
           <span aria-hidden className="shrink-0">
             ·
@@ -1674,13 +1668,7 @@ function SavedBackendListRow({
             className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
           >
             Permissions
-            <ChevronRightIcon
-              aria-hidden
-              className={cn(
-                "size-3 shrink-0 transition-transform duration-150 motion-reduce:transition-none",
-                permissionsOpen && "rotate-90",
-              )}
-            />
+            <DisclosureChevron open={permissionsOpen} />
           </button>
         </span>
       }
@@ -3732,13 +3720,10 @@ export function ConnectionsSettings() {
               </>
             ) : null}
             {primaryEnvironment ? (
-              <details className="group px-3 sm:px-4">
+              <details className="px-3 sm:px-4">
                 <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                   Permissions
-                  <ChevronRightIcon
-                    aria-hidden
-                    className="size-3 text-muted-foreground group-open:rotate-90"
-                  />
+                  <DisclosureChevron />
                 </summary>
                 <SessionPermissions
                   environmentId={primaryEnvironment.environmentId}

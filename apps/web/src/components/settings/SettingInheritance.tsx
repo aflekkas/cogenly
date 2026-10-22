@@ -6,7 +6,7 @@ import {
   type ServerSettings,
   type WorktreeSubmodules,
 } from "@t3tools/contracts";
-import { CheckIcon, ChevronRightIcon, LayersIcon } from "lucide-react";
+import { CheckIcon, LayersIcon } from "lucide-react";
 import * as Equal from "effect/Equal";
 
 import { cn } from "../../lib/utils";
@@ -15,6 +15,7 @@ import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "~/lib/pullRequestContext";
 import { Button, InlineButton } from "../ui/button";
+import { DisclosureChevron } from "../ui/disclosure";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -343,10 +344,7 @@ export function SettingInheritance({
                               ? "Environment"
                               : winningLayer?.label}
                           </span>
-                          <ChevronRightIcon
-                            aria-hidden
-                            className="size-3 shrink-0 text-muted-foreground [[data-panel-open]_&]:rotate-90"
-                          />
+                          <DisclosureChevron />
                         </span>
                         <span className="flex min-w-0 flex-col gap-0.5 text-xs text-muted-foreground">
                           {members.map((member) => (
@@ -389,10 +387,7 @@ export function SettingInheritance({
                     <div className="flex items-center justify-between gap-3 px-2 text-xs text-muted-foreground">
                       {foldOverrides ? (
                         <CollapsibleTrigger render={<InlineButton tone="muted" />}>
-                          <ChevronRightIcon
-                            aria-hidden
-                            className="size-3 [[data-panel-open]_&]:rotate-90"
-                          />
+                          <DisclosureChevron />
                           Overridden by
                         </CollapsibleTrigger>
                       ) : (

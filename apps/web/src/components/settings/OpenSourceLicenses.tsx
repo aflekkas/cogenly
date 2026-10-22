@@ -1,4 +1,4 @@
-import { ChevronRightIcon, ExternalLinkIcon, SearchIcon } from "lucide-react";
+import { ExternalLinkIcon, SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -11,6 +11,7 @@ import {
 } from "@t3tools/shared/thirdPartyLicenses";
 
 import { Button } from "../ui/button";
+import { DisclosureChevron } from "../ui/disclosure";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { SearchInput } from "../ui/search-input";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -65,11 +66,8 @@ function LicenseNoticeRow({
     <Collapsible open={open} onOpenChange={onOpenChange}>
       <article>
         <div className="flex min-h-10 items-center hover:bg-muted/35 sm:min-h-9">
-          <CollapsibleTrigger className="group flex min-h-10 min-w-0 flex-1 items-center gap-2.5 px-3 text-left sm:min-h-9 sm:px-4">
-            <ChevronRightIcon
-              aria-hidden
-              className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90"
-            />
+          <CollapsibleTrigger className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 px-3 text-left sm:min-h-9 sm:px-4">
+            <DisclosureChevron />
             <span className="flex min-w-0 flex-1 items-baseline gap-2">
               <span className="truncate font-medium text-foreground">{entry.name}</span>
               {entry.version ? (

@@ -1,5 +1,4 @@
 import { Check, Copy } from "lucide";
-import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
 import { APP_DISPLAY_NAME, APP_VERSION } from "../branding";
@@ -9,6 +8,7 @@ import { PIXEL_MARK_URL } from "../lib/pixelMark";
 import { MorphIcon } from "./MorphIcon";
 import { Button } from "./ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
+import { DisclosureChevron } from "./ui/disclosure";
 
 /**
  * The app's full-page error state: the pixel mark, a title, one line and Reload. A quiet row
@@ -42,8 +42,8 @@ export function AppErrorScreen({
         </Button>
 
         <div className="mt-4 flex flex-wrap items-center justify-center gap-1">
-          <CollapsibleTrigger render={<Button className="group" size="xs" variant="ghost-muted" />}>
-            <ChevronRightIcon className="transition-transform duration-200 group-data-panel-open:rotate-90 motion-reduce:transition-none" />
+          <CollapsibleTrigger render={<Button size="xs" variant="ghost-muted" />}>
+            <DisclosureChevron />
             Details
           </CollapsibleTrigger>
           <Button size="xs" variant="ghost-muted" onClick={onRetry}>

@@ -1,18 +1,15 @@
 import {
   createContext,
   use,
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type ComponentProps,
   type ReactNode,
 } from "react";
-import { ChevronRightIcon } from "lucide-react";
-import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "../../lib/utils";
 import { observeVisibleAnimation } from "../../lib/visibleAnimation";
-import { useLastPresent } from "../ui/overlay-presence";
+import { DisclosureChevron, DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 
 const GroupedRows = createContext(false);
 
@@ -129,7 +126,7 @@ function WorkLogLine({ icon, label, trailing, wrapLabel, active, disclosure }: R
         {expandable ? (
           <>
             <span className="flex size-4 shrink-0 items-center justify-center self-center">
-              <WorkLogChevron open={disclosure} reveal />
+              <DisclosureChevron open={disclosure} reveal />
             </span>
             <span className="min-w-0 flex-1" />
           </>
@@ -204,137 +201,11 @@ export function WorkLogRow({
   );
 }
 
-const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
-/** Longest disclosure motion; a close that never fires transitionend still unmounts after it. */
-const DISCLOSURE_MOTION_MS = 400;
-
-/** Disclosures open on the slow token and leave at 0.7x, like panels. */
-function disclosureDuration(open: boolean) {
-  return {
-    transitionDuration: open
-      ? "var(--motion-duration-slow)"
-      : "calc(var(--motion-duration-slow) * 0.7)",
-  };
-}
-
 /**
- * A disclosure chevron that rotates in step with the content it opens.
- * `reveal` keeps a closed chevron hidden until its row is hovered or focused.
+ * The timeline's names for the shared disclosure motion: the chevron turns in
+ * step with the content growing in. See `ui/disclosure.tsx`.
  */
-export function WorkLogChevron({ open, reveal = false }: { open: boolean; reveal?: boolean }) {
-  return (
-    <ChevronRightIcon
-      aria-hidden
-      className={cn(
-        "size-3 shrink-0 text-icon-muted transition-[rotate,opacity] ease-standard motion-reduce:transition-none",
-        open && "rotate-90",
-        reveal && !open
-          ? "opacity-0 group-hover/timeline-row:opacity-70 group-focus-visible/timeline-row:opacity-70 group-hover/disclosure:opacity-70 group-focus-visible/disclosure:opacity-70"
-          : "opacity-70",
-      )}
-      style={disclosureDuration(open)}
-    />
-  );
-}
-
-/**
- * Grows disclosure content from zero height and fades and drops it in; closing
- * runs the same motion back and unmounts once it ends, holding the last open
- * content meanwhile. Only an open that happens after mount animates, or the
- * first one when `appear` is set, so virtualized rows that remount open stay
- * still. `layout="group-content"` carries an expanded group's trailing space:
- * while closing it grows to the gap the collapsed header will own, so removing
- * the row afterwards moves nothing. Reduced motion opens and closes at once.
- */
-export function WorkLogCollapse({
-  open,
-  appear = false,
-  layout = "row",
-  continues = false,
-  onExitComplete,
-  children,
-}: {
-  open: boolean;
-  appear?: boolean;
-  layout?: "row" | "group-content";
-  continues?: boolean | undefined;
-  onExitComplete?: (() => void) | undefined;
-  children: ReactNode;
-}) {
-  const reducedMotion = useMediaQuery(REDUCED_MOTION);
-  const [mounted, setMounted] = useState(open);
-  const [animateEnter, setAnimateEnter] = useState(appear);
-  const [moving, setMoving] = useState(appear && open);
-  const [previousOpen, setPreviousOpen] = useState(open);
-  const held = useLastPresent(open ? children : null);
-  if (previousOpen !== open) {
-    setPreviousOpen(open);
-    setMoving(true);
-    if (open) {
-      if (!mounted) setAnimateEnter(true);
-      setMounted(true);
-    }
-  }
-  const present = mounted && !(reducedMotion && !open);
-  const onExitCompleteRef = useRef(onExitComplete);
-  useLayoutEffect(() => {
-    onExitCompleteRef.current = onExitComplete;
-  });
-  // Reports the close once nothing is left on screen, including a row that
-  // remounted closed or closed under reduced motion.
-  useEffect(() => {
-    if (!open && !present) onExitCompleteRef.current?.();
-  }, [open, present]);
-  const settle = () => {
-    setMoving(false);
-    if (!open) setMounted(false);
-  };
-  // A transition that never starts (hidden tab, interrupted style) still settles.
-  useEffect(() => {
-    if (!moving) return;
-    const timer = setTimeout(() => {
-      setMoving(false);
-      if (!open) setMounted(false);
-    }, DISCLOSURE_MOTION_MS + 100);
-    return () => clearTimeout(timer);
-  }, [moving, open]);
-  if (!present) return null;
-  const gapClassName =
-    layout === "group-content" && !continues ? (open ? "pb-1" : "pb-2") : undefined;
-  if (reducedMotion) return <div className={gapClassName}>{children}</div>;
-  return (
-    <div
-      inert={!open}
-      style={disclosureDuration(open)}
-      className={cn(
-        "grid transition-[grid-template-rows,padding] ease-standard",
-        open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-        animateEnter && "starting:grid-rows-[0fr]",
-        animateEnter && layout === "group-content" && !continues && "starting:pb-2",
-        gapClassName,
-      )}
-      onTransitionEnd={(event) => {
-        if (event.target !== event.currentTarget || event.propertyName !== "grid-template-rows") {
-          return;
-        }
-        settle();
-      }}
-    >
-      {/* Clipped only while moving, so focus rings and shadows show at rest. */}
-      <div
-        className={cn(
-          "min-h-0 transition-opacity ease-standard",
-          open ? "opacity-100" : "opacity-0",
-          animateEnter && "starting:opacity-0",
-          (moving || !open) && "overflow-hidden",
-        )}
-        style={disclosureDuration(open)}
-      >
-        {open ? children : held}
-      </div>
-    </div>
-  );
-}
+export { DisclosureChevron as WorkLogChevron, DisclosurePanel as WorkLogCollapse };
 
 /** Distance from the end, in px, that still counts as reading the newest text. */
 const LIVE_EDGE_PX = 4;
@@ -401,10 +272,11 @@ export function WorkLogDisclosure({
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="flex min-w-0 flex-col">
-      <button
-        type="button"
-        aria-expanded={open}
-        className="group/disclosure flex w-fit items-center gap-1 rounded-sm text-xs text-muted-foreground transition-colors select-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      <DisclosureTrigger
+        open={open}
+        reveal
+        variant="quiet"
+        className="w-fit"
         onClick={(event) => {
           event.stopPropagation();
           onToggle?.(open);
@@ -413,11 +285,10 @@ export function WorkLogDisclosure({
         onKeyDown={(event) => event.stopPropagation()}
       >
         {label}
-        <WorkLogChevron open={open} reveal />
-      </button>
-      <WorkLogCollapse open={open}>
+      </DisclosureTrigger>
+      <DisclosurePanel open={open}>
         <div className="pt-1">{children}</div>
-      </WorkLogCollapse>
+      </DisclosurePanel>
     </div>
   );
 }

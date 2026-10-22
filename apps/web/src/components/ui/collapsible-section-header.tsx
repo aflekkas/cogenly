@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
-import { ChevronDownIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { DisclosureChevron } from "./disclosure";
 
 const tones = {
   muted: { label: "text-sidebar-muted-foreground/60", line: "bg-sidebar-border/60" },
@@ -37,10 +37,7 @@ export function CollapsibleSectionHeader({
       <span className="shrink-0">{children}</span>
       <span aria-hidden className={cn("h-px min-w-2 flex-1", tones[tone].line)} />
       {accessory}
-      <ChevronDownIcon
-        aria-hidden
-        className={cn("size-3 shrink-0 transition-transform", !expanded && "rotate-180")}
-      />
+      <DisclosureChevron open={expanded} />
     </button>
   );
 }

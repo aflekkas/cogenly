@@ -1,8 +1,9 @@
 import { useState } from "react";
 import * as Option from "effect/Option";
 import type { SshDeviceHostConfig } from "@t3tools/contracts";
-import { CheckIcon, ChevronDownIcon, MonitorIcon, XIcon } from "lucide-react";
+import { CheckIcon, MonitorIcon, XIcon } from "lucide-react";
 import { Button, InlineButton } from "../ui/button";
+import { DisclosureChevron } from "../ui/disclosure";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
@@ -169,11 +170,7 @@ export function DeviceHostEditor({
                     <span role="status" className="text-left">
                       {checkSummary}
                     </span>
-                    {results ? (
-                      <ChevronDownIcon
-                        className={`size-3 shrink-0 ${checksOpen ? "rotate-180" : ""}`}
-                      />
-                    ) : null}
+                    {results ? <DisclosureChevron /> : null}
                   </CollapsibleTrigger>
                 </div>
               )}

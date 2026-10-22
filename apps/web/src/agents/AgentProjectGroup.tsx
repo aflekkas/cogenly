@@ -1,9 +1,9 @@
-import { ChevronRightIcon, FolderIcon, PlusIcon } from "lucide-react";
+import { FolderIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { cn } from "~/lib/utils";
+import { DisclosureChevron } from "~/components/ui/disclosure";
 import type { EnvironmentProjectLabel } from "~/projectLabels/projectLabels.logic";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 
@@ -47,13 +47,7 @@ export function AgentProjectGroup(props: {
             )}
             <span className="min-w-0 shrink truncate">{name}</span>
             <span aria-hidden className="h-px min-w-2 flex-1 bg-sidebar-border/60" />
-            <ChevronRightIcon
-              aria-hidden
-              className={cn(
-                "size-3 shrink-0 opacity-70 transition-[rotate] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
-                open && "rotate-90",
-              )}
-            />
+            <DisclosureChevron open={open} />
           </button>
           {props.onCreate ? (
             <span className="flex shrink-0 pointer-fine:opacity-0 pointer-fine:transition-opacity pointer-fine:duration-(--motion-duration-fast) pointer-fine:group-hover/agent-group:opacity-100 pointer-fine:focus-within:opacity-100">

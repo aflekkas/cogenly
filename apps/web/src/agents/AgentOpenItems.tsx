@@ -9,8 +9,6 @@ import {
   ArrowUpRightIcon,
   CalendarIcon,
   CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   ClockIcon,
   EllipsisIcon,
   LinkIcon,
@@ -32,6 +30,7 @@ import {
 } from "~/components/ui/select";
 import { Textarea } from "~/components/ui/textarea";
 import { requestConfirmDialog } from "~/confirmDialog";
+import { DisclosureChevron } from "~/components/ui/disclosure";
 import { cn } from "~/lib/utils";
 import { ProjectLabelChips, ProjectLabelPicker } from "~/projectLabels/ProjectLabelPicker";
 import { ProjectTag } from "~/projectLabels/ProjectTag";
@@ -196,7 +195,7 @@ export function AgentOpenItems({
               aria-expanded={showClosed}
               onClick={() => setShowClosed((value) => !value)}
             >
-              {showClosed ? <ChevronDownIcon /> : <ChevronRightIcon />}
+              <DisclosureChevron open={showClosed} />
               {group.label} · {group.items.length}
             </Button>
             {showClosed &&
@@ -372,7 +371,7 @@ function CommitmentRow({
         aria-expanded={showHistory}
         onClick={() => setShowHistory((value) => !value)}
       >
-        {showHistory ? <ChevronDownIcon /> : <ChevronRightIcon />}
+        <DisclosureChevron open={showHistory} />
         History
       </Button>
       {showHistory && (

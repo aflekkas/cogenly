@@ -19,7 +19,7 @@ import {
   useRef,
   type KeyboardEvent,
 } from "react";
-import { ChevronRightIcon, StarIcon } from "lucide-react";
+import { StarIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import {
   MODEL_PICKER_FAVORITES,
@@ -48,6 +48,7 @@ import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
 } from "../../keybindings";
+import { DisclosureChevron } from "~/components/ui/disclosure";
 import { cn } from "~/lib/utils";
 import { TooltipProvider } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
@@ -850,12 +851,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                               {legacySection.legacyModels.length} models
                             </div>
                           </div>
-                          <ChevronRightIcon
-                            className={cn(
-                              "size-4 transition-transform",
-                              legacySection.isExpanded && "rotate-90",
-                            )}
-                          />
+                          <DisclosureChevron open={legacySection.isExpanded} />
                         </ComboboxItem>
                       );
                     }

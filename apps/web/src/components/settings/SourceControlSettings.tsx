@@ -1,5 +1,4 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { ChevronDownIcon } from "lucide-react";
 import * as Duration from "effect/Duration";
 import * as Option from "effect/Option";
 import { useEffect, useState, type ReactNode } from "react";
@@ -25,6 +24,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { DisclosureChevron } from "../ui/disclosure";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import {
   Empty,
@@ -323,9 +323,7 @@ function DiscoveryItemRow({
                 aria-expanded={isExpanded}
                 aria-label={`Toggle ${item.label} details`}
               >
-                <ChevronDownIcon
-                  className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")}
-                />
+                <DisclosureChevron open={isExpanded} />
               </Button>
             ) : null}
             {!isVcsNotReady(item) ? (

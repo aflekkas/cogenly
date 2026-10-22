@@ -15,7 +15,7 @@ import type {
 import { codexAuthHandoffUrl } from "@t3tools/shared/codexAuthHandoff";
 import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
 import { isLoopbackHost } from "@t3tools/shared/preview";
-import { CheckIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
+import { CheckIcon, ExternalLinkIcon } from "lucide-react";
 import { Children, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 
 import { ensureLocalApi } from "../../localApi";
@@ -28,6 +28,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
+import { DisclosureChevron } from "../ui/disclosure";
 import { ChatGptConnectionButton } from "./ChatGptConnectionButton";
 import { ChatGptUsageButton } from "./ChatGptUsageButton";
 import { ChatGptAccountPicker } from "./ChatGptAccountPicker";
@@ -1105,7 +1106,7 @@ function CodexSignInDescription({
       onClick={onToggle}
     >
       {label}
-      <ChevronRightIcon aria-hidden className={`size-3 shrink-0 ${expanded ? "rotate-90" : ""}`} />
+      <DisclosureChevron open={expanded} />
     </button>
   );
 }
