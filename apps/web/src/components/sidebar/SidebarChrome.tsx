@@ -25,6 +25,7 @@ import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUp
 import { observeResize } from "~/lib/observeResize";
 import { useUiStateStore } from "../../uiStateStore";
 import { SIDEBAR_MODE_LABELS } from "./modes/sidebarModes.logic";
+import { settingsReturnHref } from "./modes/spaceRouteMemory";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -203,7 +204,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   }, [isMobile, setOpenMobile]);
   const handleSettingsClick = useCallback(() => {
     closeMobileSidebar();
-    void navigate({ to: "/settings" });
+    void navigate({ href: settingsReturnHref() });
   }, [closeMobileSidebar, navigate]);
   const handleUsageClick = useCallback(() => {
     closeMobileSidebar();

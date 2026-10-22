@@ -34,6 +34,7 @@ import { routeHidesListColumn, SIDEBAR_TOGGLE_DISABLED_LABEL } from "./sidebar/l
 import { useAgentsEmpty } from "../agents/agentsClient";
 import { useUiStateStore } from "../uiStateStore";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
+import { settingsReturnHref, SpaceRouteMemoryTracker } from "./sidebar/modes/spaceRouteMemory";
 import {
   mainColumnCrampedBesidePanel,
   useListColumnLayoutStore,
@@ -387,7 +388,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       if (action === "open-settings") {
         const isSettingsRoute = /^\/settings(\/|$)/.test(pathname);
         if (!isSettingsRoute) {
-          void navigate({ to: "/settings" });
+          void navigate({ href: settingsReturnHref() });
         }
       }
     });
@@ -468,6 +469,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       {titlebarLayout.sidebarToggle === "rail-titlebar" ? <RailNavigationHistoryControl /> : null}
       <NavigationHistoryShortcuts />
       <MainAppLocationTracker />
+      <SpaceRouteMemoryTracker />
     </SidebarProvider>
   );
 }

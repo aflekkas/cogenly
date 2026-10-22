@@ -121,8 +121,10 @@ if that project exists there. Otherwise it selects an environment that has it.
 The **Chats** tab lists threads without a project, newest first under **Today**,
 **Yesterday**, **Previous 7 days** and **Older**. **New chat** beside search, `mod+n`
 while Chats is open, and **New chat** in the command palette all start one without a
-project; they never open a repository. Opening **Chats** shows your most recent chat,
-or a new one when you have none. A small dot marks a chat that is still running
+project; they never open a repository. Opening **Chats** returns to the chat you last
+had open there; the first time, or once that chat is archived or deleted, it shows your
+most recent chat, or a new one when you have none. Every tab in the rail works the same
+way, Settings included: switching away and back returns to where you were. A small dot marks a chat that is still running
 or waiting on you. Older chats load as you scroll, and search covers all of them. Add
 repositories from **Work** or the command palette.
 

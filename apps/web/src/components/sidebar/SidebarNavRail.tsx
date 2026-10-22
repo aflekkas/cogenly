@@ -40,6 +40,7 @@ import { SIDEBAR_MODE_ICONS } from "./modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./modes/sidebarModes.logic";
 import { crossfadeModeSwitch } from "./modes/modeSwitchMotion";
 import { useSelectSidebarMode } from "./modes/useSelectSidebarMode";
+import { settingsReturnHref } from "./modes/spaceRouteMemory";
 import { resolveVerticalTabIndex } from "./navRail.logic";
 import { useNavRailBadgeStore } from "./navRailState";
 import { decisionsWaitingLabel } from "../../agents/agentWorkspace.logic";
@@ -84,6 +85,7 @@ export function SidebarNavRail({
 }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const mode = useUiStateStore((store) => store.sidebarMode);
+  const setMode = useUiStateStore((store) => store.setSidebarMode);
   const selectSidebarMode = useSelectSidebarMode();
   const decisionsWaiting = useNavRailBadgeStore((store) => store.decisionsWaiting);
   const { open, setOpen, toggleSidebar } = useSidebar();
@@ -116,8 +118,21 @@ export function SidebarNavRail({
   // rail (ListColumnPeek); clicking it docks the column.
   const peekAvailable = useListColumnPeekStore((store) => store.available);
 
+  const onProjectsPage = pathname === "/project" || pathname.startsWith("/project/");
   const selectMode = (next: SidebarMode) => {
-    // A utility page hands the column back to the thread list.
+    // Picking Projects again from a project goes back to its overview. The
+    // other modes have no index page (their landing opens a thread or a new
+    // draft), so picking them again keeps what is open.
+    if (next === "projects" && open && pathname.startsWith("/project/")) {
+      crossfadeModeSwitch(() => {
+        setMode("projects");
+        void navigate({ to: "/project" });
+        return true;
+      });
+      return;
+    }
+    // A utility page hands the column back to the thread list; another mode
+    // returns to the page it last showed (spaceRouteMemory).
     selectSidebarMode(next, { leaveUtilityPage: true });
     // Another mode restores its own remembered list column (see
     // listColumnLayoutStore); picking the current mode again opens a collapsed one.
@@ -199,7 +214,6 @@ export function SidebarNavRail({
         {SIDEBAR_MODES.map((segment, segmentIndex) => {
           // A utility page owns the column, so no mode reads as current there.
           // The Projects pages have no list, so the route, not the list's mode, says where you are.
-          const onProjectsPage = pathname === "/project" || pathname.startsWith("/project/");
           const selected =
             (onProjectsPage ? segment === "projects" : segment === mode) && !onUtilityPage;
           const label = SIDEBAR_MODE_LABELS[segment];
@@ -282,13 +296,19 @@ export function SidebarNavRail({
             aria-label="Settings"
             aria-current={onSettings ? "page" : undefined}
             onClick={() => {
-              if (onSettings) {
+              // Settings again, with its column open, goes back to its first page.
+              const href = onSettings
+                ? open && pathname !== "/settings/general"
+                  ? "/settings/general"
+                  : null
+                : settingsReturnHref();
+              if (href === null) {
                 if (!open) setOpen(true);
                 return;
               }
               crossfadeModeSwitch(() => {
                 if (!open) setOpen(true);
-                void navigate({ to: "/settings" });
+                void navigate({ href });
                 return true;
               });
             }}

@@ -8,6 +8,7 @@ import { isSidebarUtilityPage, useNavigateToMainApp } from "../mainAppLocation";
 import { modeSwitchReplacesMainPanel, type MainPanelContent } from "./modeLanding.logic";
 import { crossfadeModeSwitch } from "./modeSwitchMotion";
 import { useLandOnMode } from "./useLandOnMode";
+import { useSpaceReturn } from "./spaceRouteMemory";
 import type { SidebarMode } from "./sidebarModes.logic";
 
 /**
@@ -18,6 +19,10 @@ import type { SidebarMode } from "./sidebarModes.logic";
  * thread into its mode sets the mode directly and keeps the thread. A landing
  * goes straight to its thread or draft; only a mode with nothing to open yet
  * (loading, or its empty state) passes through the index route.
+ *
+ * Before any landing, a mode returns to the page it last showed
+ * (spaceRouteMemory), as a normal push, while that thread or project is still
+ * there. Picking the mode already shown changes nothing.
  */
 export function useSelectSidebarMode() {
   const setMode = useUiStateStore((store) => store.setSidebarMode);
@@ -25,6 +30,7 @@ export function useSelectSidebarMode() {
   const readRouteThreadKind = useReadRouteThreadKind();
   const navigateToMainApp = useNavigateToMainApp();
   const landOnMode = useLandOnMode();
+  const spaceReturn = useSpaceReturn();
 
   const readMainPanelContent = useCallback((): MainPanelContent => {
     const { pathname } = router.state.location;
@@ -55,8 +61,14 @@ export function useSelectSidebarMode() {
       const land = () => {
         if (!landOnMode(next)) void router.navigate({ to: "/" });
       };
+      const returnHref = spaceReturn(next);
       crossfadeModeSwitch(() => {
         setMode(next);
+        if (returnHref !== null) {
+          if (returnHref === router.state.location.href) return false;
+          void router.navigate({ href: returnHref });
+          return true;
+        }
         if (onUtilityPage) {
           // Back to where the user was in the same mode; a fresh landing in another,
           // since the remembered page may be a thread that mode does not list.
@@ -69,6 +81,6 @@ export function useSelectSidebarMode() {
         return replacesMainPanel || content?.kind === "index";
       });
     },
-    [landOnMode, navigateToMainApp, readMainPanelContent, router, setMode],
+    [landOnMode, navigateToMainApp, readMainPanelContent, router, setMode, spaceReturn],
   );
 }

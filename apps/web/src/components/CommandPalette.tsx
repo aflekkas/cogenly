@@ -106,6 +106,7 @@ import { ADD_REPOSITORY, listWorkPickerChoices, listWorkRepositories } from "./w
 import { agentStatusLabel } from "../agents/agents.logic";
 import { useAgents } from "../agents/agentsClient";
 import { useSelectSidebarMode } from "./sidebar/modes/useSelectSidebarMode";
+import { settingsReturnHref } from "./sidebar/modes/spaceRouteMemory";
 import { useReadRouteThreadKind, useThreadKind } from "../hooks/useThreadKind";
 import { threadCapabilities } from "../threadCapabilities";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
@@ -475,7 +476,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         setOpen(false);
         // The desktop menu owns this accelerator too; both land on the same page.
         if (!/^\/settings(\/|$)/.test(router.state.location.pathname)) {
-          void navigate({ to: "/settings" });
+          void navigate({ href: settingsReturnHref() });
         }
         return;
       }
@@ -2481,7 +2482,7 @@ function OpenCommandPaletteDialog(props: {
     icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
     shortcutCommand: "settings.open",
     run: async () => {
-      await navigate({ to: "/settings" });
+      await navigate({ href: settingsReturnHref() });
     },
   });
 
