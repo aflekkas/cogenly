@@ -305,11 +305,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     <button
       type={showResume ? "button" : "submit"}
       className={cn(
-        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-tile shadow-xs transition-[color,background-color,box-shadow,opacity,scale,filter] duration-(--motion-duration-fast) enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
-        // The reference's navy tile, lit from the bottom right; a flat grey
-        // tile with a dark arrow while there is nothing to send.
-        "bg-linear-to-br from-send-top to-send-bottom text-send-foreground enabled:shadow-black/24 hover:from-send-top-hover hover:to-send-bottom-hover",
-        "disabled:from-send-idle disabled:to-send-idle disabled:text-send-idle-foreground",
+        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-tile shadow-xs enabled:cursor-pointer hover:scale-105 active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
+        // The app icon's pixel-dithered ember ramp (composer-send-tile in
+        // index.css); a flat grey tile with a dark arrow while there is
+        // nothing to send.
+        "composer-send-tile enabled:shadow-black/24",
       )}
       {...pointerFocusProps}
       onClick={showResume ? onResume : onSubmitMessage}
