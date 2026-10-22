@@ -93,37 +93,22 @@ function errorDescriptionClampClass(type: unknown, description: unknown): string
 }
 
 /**
- * The one dismiss control every toast shares, as in T3 Code: a small round ×
- * "orb" that sits on the card's top-right corner, overhanging it by 6px. It is
- * always visible; the inline action layout leaves end padding so text and
- * actions stay clear of it.
+ * The one dismiss control every toast shares: a quiet ghost × inside the card,
+ * the same height as an `xs` action button (24px) so it lines up beside one.
+ * No ring, border or shadow; the hover fill comes from the ghost variant.
  */
 function ToastDismissButton({ onDismiss }: { onDismiss: () => void }) {
   return (
-    <div
-      className={cn(
-        // The orb is its own badge: the popover fill and menu hairline
-        // (dropdown-glass), cut out of the card corner by a 2px ring in the
-        // page colour. The fill stays opaque here so the hover tint on the
-        // button blends over it instead of replacing it.
-        "dropdown-glass absolute -top-1.5 -right-1.5 z-20 size-6 rounded-full shadow-sm ring-2 ring-background",
-        "transition-shadow duration-(--motion-duration-fast) ease-standard hover:shadow-md motion-reduce:transition-none",
-      )}
+    <Button
+      aria-label="Dismiss notification"
+      data-slot="toast-close"
+      onClick={onDismiss}
+      size="icon-xs"
+      type="button"
+      variant="ghost-muted"
     >
-      <button
-        aria-label="Dismiss notification"
-        className={cn(
-          "inline-flex size-full cursor-pointer items-center justify-center rounded-full text-muted-foreground outline-none",
-          "transition-colors duration-(--motion-duration-fast) ease-standard hover:bg-accent hover:text-foreground motion-reduce:transition-none",
-          "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-        )}
-        data-slot="toast-close"
-        onClick={onDismiss}
-        type="button"
-      >
-        <XIcon className="size-3" strokeWidth={2.25} />
-      </button>
-    </div>
+      <XIcon className="size-3.5" strokeWidth={2} />
+    </Button>
   );
 }
 
@@ -291,8 +276,9 @@ type ToastCardToast = {
 /**
  * The single toast card: icon slot, title, description, the actions beside the
  * text (or on an end-aligned row below it with `actionLayout: "stacked-end"`),
- * and the × orb on the corner. Every notice in the app renders through it,
- * with the same padding, typography and controls.
+ * and the ghost × in the trailing area: after the inline actions, vertically
+ * centred on them, or else top-right on the title's first line. Every notice
+ * in the app renders through it, with the same padding, typography and controls.
  */
 function ToastCard({
   toast,
@@ -316,99 +302,103 @@ function ToastCard({
     secondaryActionProps ?? {};
   const secondaryActionVariant = data?.secondaryActionVariant ?? "outline";
   const hasPrimaryAction = hasVisibleToastAction(toast.actionProps);
-  const hasActions =
-    copyErrorText !== null ||
-    hasPrimaryAction ||
-    additionalActions.length > 0 ||
-    secondaryActionProps !== undefined;
+  const hasLabelledActions =
+    hasPrimaryAction || additionalActions.length > 0 || secondaryActionProps !== undefined;
+  const hasActions = copyErrorText !== null || hasLabelledActions;
   const stackedActionLayout = hasActions && data?.actionLayout === "stacked-end";
+  // Labelled inline actions carry the × on their row. Otherwise it sits on the
+  // title line, and a lone copy icon (error bodies) sits there with it rather
+  // than floating mid-height beside a long description.
+  const dismissBesideActions = hasLabelledActions && !stackedActionLayout;
+  const copyBesideDismiss = copyErrorText !== null && !dismissBesideActions;
 
   return (
-    <>
-      <ToastDismissButton onDismiss={onDismiss} />
-      <Toast.Content
-        className={cn(
-          // `overflow-x: clip` avoids the CSS quirk where pairing `hidden` + `y: visible`
-          // forces `y` to `auto`. Expandable detail panels can extend below without being cut off.
-          "pointer-events-auto flex min-h-0 overflow-y-visible pl-3.5 text-sm [overflow-x:clip]",
-          // Inline: text and actions share one row. The end padding keeps
-          // whatever sits last clear of the corner orb (which overhangs 18px).
-          stackedActionLayout
-            ? "flex-col gap-2 py-2.5 pr-3.5"
-            : cn("items-center justify-between gap-1.5 py-3", hasActions ? "pr-6" : "pr-10"),
-          className,
-        )}
-      >
-        <div
-          className={cn("flex min-w-0 flex-col gap-0.5", stackedActionLayout ? "pr-5" : "flex-1")}
-        >
-          <div className="flex min-w-0 gap-2">
-            {leadingIcon || Icon ? (
-              <div
-                className="flex h-lh w-4 shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0"
-                data-slot="toast-icon"
-              >
-                {leadingIcon ??
-                  (Icon ? (
-                    <Icon className="in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning in-data-[type=loading]:opacity-80" />
-                  ) : null)}
-              </div>
-            ) : null}
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <Toast.Title
-                className="min-w-0 wrap-break-word font-medium text-foreground"
-                data-slot="toast-title"
-              />
-              <ToastDescriptionAndExpandable
-                toastData={data}
-                toastDescription={toast.description}
-                toastType={toast.type}
-              />
+    <Toast.Content
+      className={cn(
+        // `overflow-x: clip` avoids the CSS quirk where pairing `hidden` + `y: visible`
+        // forces `y` to `auto`. Expandable detail panels can extend below without being cut off.
+        // End padding is 4px short of the start so the × icon (5px inside its
+        // 24px box) lands on the same inset as the leading icon.
+        "pointer-events-auto flex min-h-0 overflow-y-visible pl-3.5 pr-2.5 text-sm [overflow-x:clip]",
+        stackedActionLayout ? "flex-col gap-2 py-2.5" : "items-center justify-between gap-2 py-3",
+        className,
+      )}
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 gap-2">
+          {leadingIcon || Icon ? (
+            <div
+              className="flex h-lh w-4 shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0"
+              data-slot="toast-icon"
+            >
+              {leadingIcon ??
+                (Icon ? (
+                  <Icon className="in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning in-data-[type=loading]:opacity-80" />
+                ) : null)}
             </div>
+          ) : null}
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <Toast.Title
+              className="min-w-0 wrap-break-word font-medium text-foreground"
+              data-slot="toast-title"
+            />
+            <ToastDescriptionAndExpandable
+              toastData={data}
+              toastDescription={toast.description}
+              toastType={toast.type}
+            />
           </div>
+          {dismissBesideActions ? null : (
+            // 24px controls centred on the 20px title line.
+            <div className="-my-0.5 flex shrink-0 items-center gap-0.5 self-start">
+              {copyBesideDismiss ? <CopyErrorButton text={copyErrorText} /> : null}
+              <ToastDismissButton onDismiss={onDismiss} />
+            </div>
+          )}
         </div>
-        {hasActions ? (
-          <div
-            className={cn(
-              "flex items-center gap-1.5",
-              stackedActionLayout ? "w-full flex-wrap justify-end" : "shrink-0",
-            )}
-          >
-            {copyErrorText !== null ? <CopyErrorButton text={copyErrorText} /> : null}
-            {additionalActions.map(({ id, props: { className: actionClassName, ...props } }) => (
-              <Button
-                {...props}
-                className={actionClassName}
-                key={id}
-                size="xs"
-                type="button"
-                variant={secondaryActionVariant}
-              />
-            ))}
-            {secondaryActionProps ? (
-              <Button
-                {...secondaryActionRest}
-                className={secondaryActionClassName}
-                size="xs"
-                type="button"
-                variant={secondaryActionVariant}
-              />
-            ) : null}
-            {hasPrimaryAction ? (
-              <Toast.Action
-                className={cn(
-                  buttonVariants({ size: "xs", variant: data?.actionVariant ?? "default" }),
-                  "shrink-0",
-                )}
-                data-slot="toast-action"
-              >
-                {toast.actionProps?.children}
-              </Toast.Action>
-            ) : null}
-          </div>
-        ) : null}
-      </Toast.Content>
-    </>
+      </div>
+      {hasActions && !copyBesideDismiss ? (
+        <div
+          className={cn(
+            "flex items-center gap-1.5",
+            stackedActionLayout ? "w-full flex-wrap justify-end" : "shrink-0",
+          )}
+        >
+          {copyErrorText !== null ? <CopyErrorButton text={copyErrorText} /> : null}
+          {additionalActions.map(({ id, props: { className: actionClassName, ...props } }) => (
+            <Button
+              {...props}
+              className={actionClassName}
+              key={id}
+              size="xs"
+              type="button"
+              variant={secondaryActionVariant}
+            />
+          ))}
+          {secondaryActionProps ? (
+            <Button
+              {...secondaryActionRest}
+              className={secondaryActionClassName}
+              size="xs"
+              type="button"
+              variant={secondaryActionVariant}
+            />
+          ) : null}
+          {hasPrimaryAction ? (
+            <Toast.Action
+              className={cn(
+                buttonVariants({ size: "xs", variant: data?.actionVariant ?? "default" }),
+                "shrink-0",
+              )}
+              data-slot="toast-action"
+            >
+              {toast.actionProps?.children}
+            </Toast.Action>
+          ) : null}
+          {dismissBesideActions ? <ToastDismissButton onDismiss={onDismiss} /> : null}
+        </div>
+      ) : null}
+    </Toast.Content>
   );
 }
 
