@@ -3,6 +3,8 @@ import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipel
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
+import { DisclosureChevron } from "../ui/disclosure";
+import { sharedSubagentDriver, subagentGroupLabel } from "./subagentRow.logic";
 import {
   WorkLogBlock,
   WorkLogButton,
@@ -10,7 +12,6 @@ import {
   WorkLogDetails,
   WorkLogList,
   WorkLogRow,
-  WorkLogChevron,
   WorkLogExpansion,
   WorkLogShimmer,
 } from "./WorkLog";
@@ -80,10 +81,7 @@ import {
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
 import { turnItemHasDetail } from "@t3tools/client-runtime/work-log/item-detail";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
-import {
-  subagentGroupSummary,
-  summarizeSubagentStatuses,
-} from "@t3tools/client-runtime/state/subagent-display";
+import { subagentGroupSummary } from "@t3tools/client-runtime/state/subagent-display";
 import { observeResize } from "~/lib/observeResize";
 
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
@@ -318,7 +316,7 @@ import { useLastPresent } from "../ui/overlay-presence";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import {
   isV2LifecycleItem,
-  SubagentAvatar,
+  SubagentGlyph,
   SubagentElapsed,
   SubagentNotificationLink,
   SubagentHoverCardGroup,
@@ -3673,7 +3671,7 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
               {visibility === "inherited" ? "Inherited" : "Synthetic"}
             </span>
           ) : null}
-          <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground/60 transition-transform group-open:rotate-180" />
+          <DisclosureChevron />
         </summary>
         <div className="border-t border-border/45 px-3 py-2 ps-8">
           {presentation.detail ? (
@@ -3854,16 +3852,10 @@ function useSubagentRowDisclosure(anchorKey: string): SubagentRowDisclosure {
   );
 }
 
-/** Ids rendered before now; only later ones animate in, never a remount's first paint. */
-function useArrivals(ids: ReadonlyArray<string>): ReadonlySet<string> {
-  const [seen] = useState(() => new Set(ids));
-  return useMemo(() => new Set(ids.filter((id) => !seen.has(id))), [ids, seen]);
-}
-
 /**
- * Every subagent one turn launched, native or delegated, as one row: stacked
- * provider avatars, "N subagents", live working/done/failed counts and the
- * span from first launch to last settle. It opens smoothly to each agent's row.
+ * Every subagent one turn launched, native or delegated, as one work-log row:
+ * a provider glyph, "N subagents · counts", and the span from first launch to
+ * last settle. It opens smoothly to each agent's row.
  */
 const V2SubagentGroup = memo(function V2SubagentGroup({
   row,
@@ -3894,10 +3886,15 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
       completedAt: live?.completedAt ?? item.completedAt,
     };
   });
-  const arrivals = useArrivals(agents.map(({ item }) => item.id));
   const summary = subagentGroupSummary(agents);
-  const label = `${members.length} ${members.length === 1 ? "subagent" : "subagents"}`;
-  const statusSummary = summarizeSubagentStatuses(agents.map(({ status }) => status));
+  const label = subagentGroupLabel(agents.map(({ status }) => status));
+  const driver = sharedSubagentDriver(members.map((item) => item.driver));
+  const provider =
+    driver === undefined
+      ? undefined
+      : ctx.providerStatuses.find(
+          (candidate) => candidate.instanceId === members[0]?.providerInstanceId,
+        );
   const toggle = () => {
     ctx.onToggleWorkEntry(row.id, expanded);
     if (expanded) ctx.workGroupViewState.expandedEntries.delete(groupId);
@@ -3906,69 +3903,46 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
   };
   return (
     <WorkLogBlock continues={row.continuesWorkLog}>
-      <div data-subagent-group className="group/timeline-row flex min-w-0 flex-col">
-        <button
-          type="button"
-          aria-label={label}
-          aria-description={statusSummary}
+      <div data-subagent-group className="flex min-w-0 flex-col">
+        <WorkLogButton
+          aria-label={label.count}
+          aria-description={label.summary}
           aria-expanded={expanded}
           onClick={toggle}
-          className={cn(
-            "flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-1.5 py-1.5 text-left state-hover state-fade focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-            expanded || summary.active ? "text-foreground" : "text-secondary-label",
-          )}
-        >
-          <span className="flex shrink-0 items-center -space-x-1.5" aria-hidden>
-            {agents.slice(0, 3).map(({ item, status }) => (
-              <SubagentAvatar
-                key={item.id}
-                driver={item.driver}
-                provider={ctx.providerStatuses.find(
-                  (provider) => provider.instanceId === item.providerInstanceId,
-                )}
-                status={agents.length === 1 ? status : undefined}
-                className={arrivals.has(item.id) ? "swap-motion" : undefined}
-              />
-            ))}
-            {agents.length > 3 ? (
-              <span
-                key={agents.length}
-                className="inline-flex size-6 items-center justify-center rounded-full bg-muted text-3xs font-medium text-muted-foreground ring-2 ring-background swap-motion"
-              >
-                +{agents.length - 3}
-              </span>
-            ) : null}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span key={label} className="truncate text-xs font-semibold swap-motion">
-                {label}
-              </span>
-              <span className="flex size-4 shrink-0 items-center justify-center">
-                <WorkLogChevron open={expanded} reveal />
-              </span>
+          icon={<SubagentGlyph driver={driver} provider={provider} size="group" />}
+          label={
+            <span key={label.text} className="swap-motion">
+              {label.count}
+              {label.summary ? (
+                <>
+                  <span aria-hidden className="text-muted-foreground">
+                    {" · "}
+                  </span>
+                  <span
+                    className={summary.failed && !summary.active ? "text-destructive" : undefined}
+                  >
+                    {label.summary}
+                  </span>
+                </>
+              ) : null}
             </span>
-            <span
-              key={statusSummary}
-              className={cn(
-                "block truncate text-3xs swap-motion",
-                summary.active
-                  ? "text-info"
-                  : summary.failed
-                    ? "text-destructive"
-                    : "text-muted-foreground",
-              )}
-            >
-              {statusSummary}
-            </span>
-          </span>
-          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-            <SubagentElapsed agent={subagentGroupTiming(agents)} />
-          </span>
-        </button>
+          }
+          active={summary.active}
+          disclosure={expanded}
+          trailing={
+            <>
+              {/* Same columns as the member rows, so elapsed times line up. */}
+              <span className="size-4 shrink-0" aria-hidden />
+              <span className="min-w-8 shrink-0 text-end text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                <SubagentElapsed agent={subagentGroupTiming(agents)} />
+              </span>
+              <span className="size-4 shrink-0" aria-hidden />
+            </>
+          }
+        />
         <WorkLogCollapse open={expanded}>
-          {/* Indented under the stack, so each agent reads as a child of the turn's spawn. */}
-          <div className="ms-4 flex min-w-0 flex-col border-s border-border/60 ps-2 pt-0.5 pb-1">
+          {/* Indented under the glyph, so each agent reads as a child of the turn's spawn. */}
+          <div className="ms-3 flex min-w-0 flex-col border-s border-border/60 ps-1.5 pt-0.5 pb-1">
             <SubagentHoverCardGroup>
               {members.map((item) => (
                 <V2LifecycleRow
