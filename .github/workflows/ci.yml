@@ -19,11 +19,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-      - uses: voidzero-dev/setup-vp@v1
+      # vp is the lockfile's vite-plus; the viteplus.dev installer fails when npm per-version metadata 502s.
+      - uses: actions/setup-node@v6
         with:
           node-version-file: package.json
+          package-manager-cache: false
+      - uses: pnpm/action-setup@v6
+        with:
           cache: true
-          run-install: true
+      - name: Install dependencies
+        run: |
+          echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+          PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH" pnpm install --frozen-lockfile
       - run: vp run fmt:check
       - run: vp run lint
 
@@ -33,11 +40,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - uses: voidzero-dev/setup-vp@v1
+      # vp is the lockfile's vite-plus; the viteplus.dev installer fails when npm per-version metadata 502s.
+      - uses: actions/setup-node@v6
         with:
           node-version-file: package.json
+          package-manager-cache: false
+      - uses: pnpm/action-setup@v6
+        with:
           cache: true
-          run-install: true
+      - name: Install dependencies
+        run: |
+          echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+          PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH" pnpm install --frozen-lockfile
       - run: vp run --filter @t3tools/desktop ensure:electron
       - run: vp run typecheck
 
@@ -47,11 +61,18 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
-      - uses: voidzero-dev/setup-vp@v1
+      # vp is the lockfile's vite-plus; the viteplus.dev installer fails when npm per-version metadata 502s.
+      - uses: actions/setup-node@v6
         with:
           node-version-file: package.json
+          package-manager-cache: false
+      - uses: pnpm/action-setup@v6
+        with:
           cache: true
-          run-install: true
+      - name: Install dependencies
+        run: |
+          echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+          PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH" pnpm install --frozen-lockfile
       - run: vp run --filter @t3tools/desktop ensure:electron
       - name: Install native test prerequisites
         run: |
