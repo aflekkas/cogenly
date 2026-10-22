@@ -54,6 +54,75 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
   };
 });
 
+// Claude Code names a project's session folder after its cwd with every
+// non-alphanumeric character replaced by `-`. Longer names are cut to this
+// length and get a hash suffix, which differs between the CLI and the SDK, so
+// those folders are matched by prefix.
+const CLAUDE_PROJECT_DIR_MAX_LENGTH = 200;
+
+export const claudeProjectDirName = (cwd: string): string => cwd.replace(/[^a-zA-Z0-9]/g, "-");
+
+/**
+ * The config dir the spawned CLI reads sessions from: `CLAUDE_CONFIG_DIR` of
+ * the environment it is spawned with (resolved against its cwd, as the CLI
+ * does), else `~/.claude` under that environment's HOME.
+ */
+export const resolveClaudeSessionConfigDir = Effect.fn("resolveClaudeSessionConfigDir")(
+  function* (input: {
+    readonly environment: NodeJS.ProcessEnv;
+    readonly cwd: string;
+  }): Effect.fn.Return<string, never, Path.Path> {
+    const path = yield* Path.Path;
+    const configured = input.environment.CLAUDE_CONFIG_DIR?.trim() ?? "";
+    if (configured.length > 0) return path.resolve(input.cwd, configured);
+    const home = input.environment.HOME?.trim() || (yield* HostProcess.HomeDirectory);
+    return path.join(home, ".claude");
+  },
+);
+
+/**
+ * Whether `claude --resume <sessionId>` run in `cwd` against `configDir` finds
+ * the session. The CLI only looks in the folder for its own cwd under its own
+ * config dir, so a session created in another cwd or account is not found.
+ * A filesystem error other than absence counts as found: only a provably
+ * missing transcript should cost the native session.
+ */
+export const claudeSessionTranscriptExists = Effect.fn("claudeSessionTranscriptExists")(
+  function* (input: {
+    readonly configDir: string;
+    readonly cwd: string;
+    readonly sessionId: string;
+  }): Effect.fn.Return<boolean, never, FileSystem.FileSystem | Path.Path> {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const projectsDir = path.join(input.configDir, "projects");
+    const fileName = `${input.sessionId}.jsonl`;
+    const exists = (file: string) => fileSystem.exists(file).pipe(Effect.orElseSucceed(() => true));
+    const cwds = new Set([input.cwd]);
+    // The CLI may record the realpath (macOS /tmp -> /private/tmp).
+    const realCwd = yield* fileSystem.realPath(input.cwd).pipe(Effect.option);
+    if (realCwd._tag === "Some") cwds.add(realCwd.value);
+    let entries: ReadonlyArray<string> | undefined;
+    for (const cwd of cwds) {
+      const dirName = claudeProjectDirName(cwd);
+      if (dirName.length <= CLAUDE_PROJECT_DIR_MAX_LENGTH) {
+        if (yield* exists(path.join(projectsDir, dirName, fileName))) return true;
+        continue;
+      }
+      entries ??= yield* fileSystem
+        .readDirectory(projectsDir)
+        .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+      const prefix = `${dirName.slice(0, CLAUDE_PROJECT_DIR_MAX_LENGTH)}-`;
+      for (const entry of entries) {
+        if (entry.startsWith(prefix) && (yield* exists(path.join(projectsDir, entry, fileName)))) {
+          return true;
+        }
+      }
+    }
+    return false;
+  },
+);
+
 /**
  * Whether an administrator installed Claude Code's `managed-mcp.json`. While it
  * exists Claude refuses `--strict-mcp-config` and exits before initializing,

@@ -618,8 +618,17 @@ export const layer: Layer.Layer<
     }) =>
       Effect.gen(function* () {
         const completedAt = yield* DateTime.now;
+        // A start that replaced a missing native session ran on the provider
+        // thread's new native id; record that one, or the next start would
+        // treat the replacement as never prompted.
+        const ranOnNativeThreadId =
+          input.attempt.nativeThreadId !== undefined &&
+          input.attempt.providerThreadId === input.providerThread.id
+            ? input.providerThread.nativeThreadRef?.nativeId
+            : undefined;
         const finalizedAttempt: OrchestrationV2RunAttempt | null = {
           ...input.attempt,
+          ...(ranOnNativeThreadId == null ? {} : { nativeThreadId: ranOnNativeThreadId }),
           status: input.terminal.status,
           completedAt,
         };

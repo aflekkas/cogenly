@@ -120,8 +120,10 @@ import * as ServerConfig from "../../config.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
 import {
+  claudeSessionTranscriptExists,
   claudeSignedOutMessage,
   makeClaudeEnvironment,
+  resolveClaudeSessionConfigDir,
 } from "../../provider/Drivers/ClaudeHome.ts";
 import {
   bundledClaudeModelCatalog,
@@ -1520,6 +1522,20 @@ const isTerminalProviderTurn = (turn: OrchestrationV2ProviderTurn): boolean =>
   turn.status === "interrupted" ||
   turn.status === "failed" ||
   turn.status === "cancelled";
+
+/**
+ * The result `claude --resume` sends when it has no transcript for the
+ * session in its cwd and config dir, before doing anything else.
+ */
+export const isClaudeConversationNotFoundResult = (message: SDKMessage): boolean =>
+  message.type === "result" &&
+  message.is_error &&
+  "errors" in message &&
+  message.errors.some((error) => error.includes("No conversation found with session ID"));
+
+// A resumed CLI refuses an unknown session in milliseconds. A slower first
+// frame (hooks, a large transcript) means it found the session.
+const CLAUDE_RESUME_PROBE_TIMEOUT = "10 seconds";
 
 const getNativeConversationHeadId = Effect.fnUntraced(function* (
   providerThread: OrchestrationV2ProviderThread,
@@ -3084,6 +3100,10 @@ interface ClaudeLiveQueryContext {
   receivedInit: boolean;
   // Stop, rollback or fork is closing this process; its work is ending.
   stopping: boolean;
+  // Opened with --resume: settles with whether the CLI found the session,
+  // from its first frame. A "No conversation found" result never reaches
+  // the turn; the start that opened the process fails instead.
+  readonly resumeProbe: Deferred.Deferred<boolean> | undefined;
   // Registry entries still running when this process opened. Their process
   // is gone and never reports their end; any later task_started replaces the
   // entry, so an entry still in this set runs nowhere.
@@ -3517,6 +3537,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         const steeredTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const queryContext = yield* Ref.make<ClaudeLiveQueryContext | null>(null);
         const openedNativeThreads = yield* Ref.make(new Set<string>());
+        // Native sessions the CLI said it has no conversation for. They are
+        // never resumed again, so the next start binds a fresh seeded one.
+        const missingNativeThreads = yield* Ref.make(new Set<string>());
         const latestPlanByKind = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact>());
         // Claude 5 task tools edit one list per native session, across turns.
         const taskListsByNativeThread = yield* Ref.make(new Map<string, ClaudeTaskList>());
@@ -8572,9 +8595,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             status: "active",
           });
           const closed = yield* Deferred.make<void, never>();
+          // Only a prompted start waits for the probe; it is the one that can fail over.
+          const resumeProbe =
+            shouldResume && !isClaudeProviderContinuationTurn(turnInput)
+              ? yield* Deferred.make<boolean>()
+              : undefined;
           const context: ClaudeLiveQueryContext = {
             nativeThreadId,
             query: querySession,
+            resumeProbe,
             queryPolicyKey,
             selection: compiledSelection,
             closed,
@@ -8609,46 +8638,73 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 }),
               ),
             );
+          // The first frame of a resumed process says whether Claude found the
+          // session. "No conversation found" is held back from the turn: the
+          // process is dropped here so its exit settles nothing, and the start
+          // that opened it fails with a missing native thread instead.
+          const settleResumeProbe = (message: SDKMessage) =>
+            Effect.gen(function* () {
+              if (resumeProbe === undefined || (yield* Deferred.isDone(resumeProbe))) return false;
+              if (!isClaudeConversationNotFoundResult(message)) {
+                yield* Deferred.succeed(resumeProbe, true);
+                return false;
+              }
+              yield* Deferred.succeed(resumeProbe, false);
+              yield* Ref.update(missingNativeThreads, (current) =>
+                new Set(current).add(nativeThreadId),
+              );
+              context.stopping = true;
+              yield* Ref.update(queryContext, (current) =>
+                current?.query === querySession ? null : current,
+              );
+              return true;
+            });
+          const handleLiveMessage = (message: SDKMessage) =>
+            Effect.suspend(() => {
+              let restoreFrom: PermissionMode | null = null;
+              if (
+                message.type === "system" &&
+                message.subtype === "init" &&
+                !context.receivedInit
+              ) {
+                context.receivedInit = true;
+                if (
+                  queryOptions.permissionMode === "bypassPermissions" &&
+                  message.permissionMode !== undefined &&
+                  message.permissionMode !== "bypassPermissions"
+                ) {
+                  restoreFrom = message.permissionMode;
+                }
+              }
+              if (
+                message.type === "system" &&
+                (message.subtype === "init" || message.subtype === "status") &&
+                message.permissionMode !== undefined
+              ) {
+                context.permissionMode = message.permissionMode;
+              }
+              const handled = handleSdkMessage({ query: querySession, message });
+              // Forked so the control request does not wait behind the message lock.
+              return restoreFrom === null
+                ? handled
+                : restoreRequestedBypass(restoreFrom).pipe(
+                    Effect.forkIn(sessionScope),
+                    Effect.andThen(handled),
+                  );
+            });
           yield* querySession.messages.pipe(
             Stream.runForEach((message) =>
               sdkMessageLock.withPermits(1)(
-                Effect.suspend(() => {
-                  let restoreFrom: PermissionMode | null = null;
-                  if (
-                    message.type === "system" &&
-                    message.subtype === "init" &&
-                    !context.receivedInit
-                  ) {
-                    context.receivedInit = true;
-                    if (
-                      queryOptions.permissionMode === "bypassPermissions" &&
-                      message.permissionMode !== undefined &&
-                      message.permissionMode !== "bypassPermissions"
-                    ) {
-                      restoreFrom = message.permissionMode;
-                    }
-                  }
-                  if (
-                    message.type === "system" &&
-                    (message.subtype === "init" || message.subtype === "status") &&
-                    message.permissionMode !== undefined
-                  ) {
-                    context.permissionMode = message.permissionMode;
-                  }
-                  const handled = handleSdkMessage({ query: querySession, message });
-                  // Forked so the control request does not wait behind the message lock.
-                  return restoreFrom === null
-                    ? handled
-                    : restoreRequestedBypass(restoreFrom).pipe(
-                        Effect.forkIn(sessionScope),
-                        Effect.andThen(handled),
-                      );
-                }),
+                settleResumeProbe(message).pipe(
+                  Effect.flatMap((refused) => (refused ? Effect.void : handleLiveMessage(message))),
+                ),
               ),
             ),
             Effect.exit,
             Effect.flatMap(
               Effect.fnUntraced(function* (exit: ClaudeQueryStreamExit) {
+                // A process that ended without a frame refused nothing.
+                if (resumeProbe !== undefined) yield* Deferred.succeed(resumeProbe, true);
                 // Output held for a prompt echo that never came still
                 // belongs to the turn this stream ended in. A replaced
                 // query's exit must not touch the next query's turn.
@@ -8679,6 +8735,77 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             Effect.forkIn(sessionScope),
           );
           return context;
+        });
+
+        /**
+         * Whether `--resume` of this native session would find it: the process
+         * holding it is alive, or its transcript is where the CLI will look,
+         * under the instance's current config dir for this cwd. A changed cwd
+         * (a chat filed into a project) or account (another CLAUDE_CONFIG_DIR)
+         * leaves the transcript elsewhere.
+         */
+        const nativeSessionResumable = Effect.fnUntraced(function* (input: {
+          readonly nativeThreadId: string;
+          readonly cwd: string;
+        }) {
+          const live = yield* Ref.get(queryContext);
+          if (live !== null && live.nativeThreadId === input.nativeThreadId && !live.stopping) {
+            return true;
+          }
+          if ((yield* Ref.get(missingNativeThreads)).has(input.nativeThreadId)) return false;
+          const configDir = yield* resolveClaudeSessionConfigDir({
+            environment: adapterOptions.environment,
+            cwd: input.cwd,
+          }).pipe(Effect.provideService(Path.Path, path));
+          const found = yield* claudeSessionTranscriptExists({
+            configDir,
+            cwd: input.cwd,
+            sessionId: input.nativeThreadId,
+          }).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
+          );
+          if (!found) {
+            yield* Effect.logWarning("orchestration-v2.claude-session-not-resumable", {
+              nativeThreadId: input.nativeThreadId,
+              cwd: input.cwd,
+              configDir,
+            });
+          }
+          return found;
+        });
+
+        /**
+         * Waits for a freshly resumed process's first frame. When Claude has no
+         * conversation for the session, the turn is detached before it ran and
+         * the start fails with a missing native thread, which the orchestrator
+         * answers with one retry in a fresh session seeded from app history.
+         */
+        const confirmResumedSession = Effect.fnUntraced(function* (input: {
+          readonly live: ClaudeLiveQueryContext;
+          readonly context: ActiveClaudeTurnContext;
+        }) {
+          const probe = input.live.resumeProbe;
+          if (probe === undefined) return;
+          yield* Deferred.await(probe).pipe(Effect.timeoutOption(CLAUDE_RESUME_PROBE_TIMEOUT));
+          // Past the wait the session counts as found, and a later refusal
+          // reaches the turn like any other failure.
+          yield* sdkMessageLock.withPermits(1)(Deferred.succeed(probe, true));
+          if (yield* Deferred.await(probe)) return;
+          const nativeThreadId = input.live.nativeThreadId;
+          yield* Ref.update(activeTurn, (current) => (current === input.context ? null : current));
+          if (input.live.lastTurn === input.context) input.live.lastTurn = null;
+          yield* Ref.update(openedNativeThreads, (current) => {
+            const updated = new Set(current);
+            updated.delete(nativeThreadId);
+            return updated;
+          });
+          yield* input.live.query.close.pipe(Effect.ignore);
+          return yield* new ProviderAdapter.ProviderAdapterNativeThreadMissingError({
+            driver: CLAUDE_PROVIDER,
+            nativeThreadId,
+            detail: `No conversation found with session ID: ${nativeThreadId}`,
+          });
         });
 
         const startTurn = Effect.fn("ClaudeAdapterV2.startTurn")(
@@ -8807,6 +8934,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               // Counted only here, so a turn that failed to start does not age reports.
               yield* startUserTurnForWakeReports(nativeThreadId);
               yield* querySession.query.offer(userMessage);
+              yield* confirmResumedSession({ live: querySession, context });
               return;
             }
             // Transcript reads suspend replay. Hold live SDK frames until the whole
@@ -9272,7 +9400,25 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ),
           ),
           resumeThread: Effect.fn("ClaudeAdapterV2.resumeThread")(
-            function* (threadInput: { readonly providerThread: OrchestrationV2ProviderThread }) {
+            function* (threadInput: {
+              readonly providerThread: OrchestrationV2ProviderThread;
+              readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
+            }) {
+              const nativeThreadId = threadInput.providerThread.nativeThreadRef?.nativeId;
+              const cwd = threadInput.runtimePolicy?.cwd;
+              if (
+                typeof nativeThreadId === "string" &&
+                typeof cwd === "string" &&
+                !(yield* nativeSessionResumable({ nativeThreadId, cwd }))
+              ) {
+                // Failing here makes the orchestrator bind a fresh native
+                // session seeded with the thread's history instead.
+                return yield* new ProviderAdapter.ProviderAdapterNativeThreadMissingError({
+                  driver: CLAUDE_PROVIDER,
+                  nativeThreadId,
+                  detail: `Claude session ${nativeThreadId} cannot be resumed from ${cwd} with this account.`,
+                });
+              }
               const updatedAt = yield* DateTime.now;
               return {
                 ...threadInput.providerThread,

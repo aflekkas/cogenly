@@ -306,6 +306,25 @@ export class ProviderAdapterTurnStartError extends Schema.TaggedError<ProviderAd
   }
 }
 
+/**
+ * The provider has no conversation for the native thread a turn tried to
+ * resume (its transcript lives under another working directory or account,
+ * or was never written). Carried as a turn-start cause so the orchestrator
+ * can replace the native thread with a fresh one seeded from app history.
+ */
+export class ProviderAdapterNativeThreadMissingError extends Schema.TaggedError<ProviderAdapterNativeThreadMissingError>()(
+  "ProviderAdapterNativeThreadMissingError",
+  {
+    driver: ProviderDriverKind,
+    nativeThreadId: Schema.String,
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
 export class ProviderAdapterSteerRunUnsupportedError extends Schema.TaggedError<ProviderAdapterSteerRunUnsupportedError>()(
   "ProviderAdapterSteerRunUnsupportedError",
   {

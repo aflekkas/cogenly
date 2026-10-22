@@ -64,6 +64,11 @@ export class ProviderTurnStartError extends Schema.TaggedError<ProviderTurnStart
 
 const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
 
+/** The adapter found no native conversation to resume (another cwd or account, or none written). */
+const nativeThreadMissing = (error: unknown): boolean =>
+  Predicate.isTagged(error, "ProviderAdapterNativeThreadMissingError") ||
+  (Predicate.hasProperty(error, "cause") && nativeThreadMissing(error.cause));
+
 /** Claude refuses to replace a process running background work before it reads the prompt. */
 const refusedBeforePrompt = (error: unknown): boolean =>
   Predicate.isTagged(error, "ClaudeBackgroundWorkBlocksQueryReplacementError") ||
@@ -1171,6 +1176,11 @@ export const layer: Layer.Layer<
         compact = false,
       ) =>
         Effect.gen(function* () {
+          // A missing-session retry targets a replacement native thread that
+          // has seen none of the handoffs delivered to the one it replaces.
+          const target = turnInput.providerThread;
+          const replacedNativeThread =
+            target.nativeThreadRef?.nativeId !== runningProviderThread.nativeThreadRef?.nativeId;
           // A failed turn/start can leave the requested turn absent from
           // native history even when its preceding handoff was injected.
           const retryHandoff =
@@ -1198,7 +1208,7 @@ export const layer: Layer.Layer<
           const delivery = yield* deliverContextHandoffs({
             handoffs: [...effectiveHandoffs, ...retryHandoff],
             deferInline: compact,
-            providerThread: runningProviderThread,
+            providerThread: target,
             budget: Effect.gen(function* () {
               return handoffBudget({
                 tokenCap,
@@ -1206,20 +1216,21 @@ export const layer: Layer.Layer<
                 // The note is sent with the user text, so it spends the same allowance.
                 userText: restartNote === "" ? userText : `${restartNote}\n\n${userText}`,
                 attachments: message.attachments,
-                providerThread: budgetProviderThread,
+                providerThread: replacedNativeThread ? target : budgetProviderThread,
                 nativeContextEstimate:
+                  !replacedNativeThread &&
                   budgetProviderThread.contextUsage?.usedTokens === undefined
                     ? yield* nativeContextEstimate
                     : 0,
               });
             }),
-            alreadyDeliveredItemIds: deliveredItemIds,
+            alreadyDeliveredItemIds: replacedNativeThread ? new Set() : deliveredItemIds,
             ...(session.injectHistory === undefined
               ? {}
               : {
                   inject: (history: ProviderAdapter.ProviderAdapterV2HistoricalContext) =>
                     session.injectHistory!({
-                      providerThread: runningProviderThread,
+                      providerThread: target,
                       ...history,
                     }),
                 }),
@@ -1301,11 +1312,110 @@ export const layer: Layer.Layer<
         !noteContinuation
           ? session
           : makeDeliverySession(session, startWithHandoffs);
+      // Claude can refuse to resume a native session this check could not
+      // rule out. Retry that turn once in a fresh native session seeded with
+      // the thread's history, as a failed resume above would have.
+      const recoverMissingNativeThread = (
+        turnInput: Parameters<typeof session.startTurn>[0],
+        compact: boolean,
+      ) =>
+        Effect.gen(function* () {
+          yield* Effect.logWarning(
+            "Provider native session missing at turn start; retrying in a fresh native session",
+            { driver: session.driver, providerThreadId: providerThread.id, runId },
+          );
+          const replacement = yield* session.ensureThread({
+            threadId: projection.thread.id,
+            title: projection.thread.title,
+            modelSelection: run.modelSelection,
+            runtimePolicy: resolvedRuntimePolicy,
+            providerSessionId,
+            existingProviderThread: { ...providerThread, nativeThreadRef: null },
+          });
+          yield* seedFreshSession(replacement);
+          const now = yield* DateTime.now;
+          const recoveredProviderThread: OrchestrationV2ProviderThread = {
+            ...runningProviderThread,
+            nativeThreadRef: replacement.nativeThreadRef,
+            nativeConversationHeadRef: null,
+            contextUsage: contextUsageForHandoff({
+              sameNativeThread: false,
+              sameSelection,
+              reuseTelemetry,
+              previousUsage,
+              knownModelWindow,
+            }),
+            updatedAt: now,
+          };
+          const replacementNativeId = replacement.nativeThreadRef?.nativeId;
+          yield* eventSink.write({
+            events: [
+              {
+                id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+                type: "provider-thread.updated",
+                threadId: projection.thread.id,
+                driver: session.driver,
+                providerInstanceId: run.providerInstanceId,
+                occurredAt: now,
+                payload: recoveredProviderThread,
+              },
+              {
+                id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+                type: "run-attempt.updated",
+                threadId: projection.thread.id,
+                runId: run.id,
+                nodeId: rootNode.id,
+                providerInstanceId: run.providerInstanceId,
+                occurredAt: now,
+                payload: {
+                  ...runningAttempt,
+                  ...(replacementNativeId == null ? {} : { nativeThreadId: replacementNativeId }),
+                },
+              },
+            ],
+          });
+          return yield* startWithHandoffs(
+            { ...turnInput, providerThread: recoveredProviderThread, nativeThreadHasTurns: false },
+            compact,
+          );
+        }).pipe(
+          Effect.mapError((cause) =>
+            cause._tag === "ProviderAdapterTurnStartError"
+              ? cause
+              : new ProviderAdapter.ProviderAdapterTurnStartError({
+                  driver: session.driver,
+                  threadId: projection.thread.id,
+                  providerThreadId: providerThread.id,
+                  runId: run.id,
+                  cause,
+                }),
+          ),
+        );
+      let nativeThreadRecovered = false;
+      const withNativeThreadRecovery =
+        (start: typeof session.startTurn, compact: boolean): typeof session.startTurn =>
+        (turnInput) =>
+          start(turnInput).pipe(
+            Effect.catchIf(
+              (error) => !nativeThreadRecovered && nativeThreadMissing(error),
+              () => {
+                nativeThreadRecovered = true;
+                return recoverMissingNativeThread(turnInput, compact);
+              },
+            ),
+          );
+      const recoveringSession: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
+        ...deliverySession,
+        startTurn: withNativeThreadRecovery(deliverySession.startTurn, false),
+        ...(deliverySession.compactThread === undefined
+          ? {}
+          : { compactThread: withNativeThreadRecovery(deliverySession.compactThread, true) }),
+      };
       return runExecution.startRootRun({
         commandId: CommandId.make(`command:effect:provider-turn.start:${run.id}`),
         appThread: projection.thread,
         providerSessionId,
-        session: deliverySession,
+        session: recoveringSession,
         run: runningRun,
         rootNode: runningRootNode,
         checkpointScope,
