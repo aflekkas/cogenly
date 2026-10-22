@@ -6,35 +6,27 @@
  */
 
 /**
- * Cogenly publishes no CLI releases yet, so there is no default download
- * origin: nothing is fetched unless `COGENLY_RELEASE_BASE_URL` names a mirror.
- * Set this to `"<owner>/<repo>"` once Cogenly ships CLI archives and checksums.
+ * Every prod release attaches the Linux CLI archives and one SHA256SUMS next
+ * to the macOS desktop build. `COGENLY_RELEASE_BASE_URL` still overrides the
+ * origin for mirrors.
  */
-const CLI_RELEASE_REPOSITORY: string | null = null;
+const CLI_RELEASE_REPOSITORY: string | null = "aflekkas/cogenly";
 /** Whether a default release origin exists to check for updates against. */
 export const CLI_RELEASES_PUBLISHED: boolean = CLI_RELEASE_REPOSITORY !== null;
 export const CLI_RELEASES_UNAVAILABLE_MESSAGE =
-  "Standalone CLI updates are not published yet. Update the desktop app through Settings or install from source.";
+  "No Cogenly release origin is configured. Update the desktop app through Settings or install from source.";
 export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 /** Overrides the download origin for mirrors and air-gapped installs. */
 export const CLI_RELEASE_BASE_URL_ENV = "COGENLY_RELEASE_BASE_URL";
 
 /**
- * The archives a release attaches. Kept in step with the build_linux_cli
- * matrix, build_windows_arm64_cli, and the `cli_archive` rows in
+ * The archives a release attaches. Kept in step with the `cli` matrix in
  * .github/workflows/release.yml: a key here without a build there produces
  * download URLs that 404, and a build there without a key here is
- * unreachable from every installer.
+ * unreachable from every installer. macOS runs the server inside the desktop
+ * app, so it has no CLI archive.
  */
-// No darwin-x64: Node single-executables are unsupported on x64 macOS (the
-// SEA docs list macOS as arm64 only) and the binary segfaults on start.
-export const CLI_ARCHIVE_PLATFORM_KEYS = [
-  "darwin-arm64",
-  "linux-arm64",
-  "linux-x64",
-  "win32-arm64",
-  "win32-x64",
-] as const;
+export const CLI_ARCHIVE_PLATFORM_KEYS = ["linux-arm64", "linux-x64"] as const;
 export type CliArchivePlatformKey = (typeof CLI_ARCHIVE_PLATFORM_KEYS)[number];
 
 export function cliArchivePlatformKey(
@@ -60,7 +52,7 @@ export function cliArchiveTarCommand(
 }
 
 export function cliArchiveFileName(version: string, platformKey: CliArchivePlatformKey): string {
-  return `t3-${version}-${platformKey}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
+  return `t3-${version}-${platformKey}.tar.gz`;
 }
 
 const CLI_RELEASE_DEFAULT_BASE_URL =

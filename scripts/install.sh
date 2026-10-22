@@ -1,26 +1,25 @@
 #!/bin/sh
-# Installs the Cogenly CLI from a GitHub Release archive. Needs only sh, tar,
-# sha256sum or shasum, and curl or wget; no Node, npm, or compiler.
+# Installs the Cogenly server and CLI on Linux from a GitHub Release archive
+# of aflekkas/cogenly. Needs only sh, tar, sha256sum or shasum, and curl or
+# wget; no Node, npm, or compiler. On a Mac, the desktop app runs the server.
 #
-# Cogenly has no published releases yet: without COGENLY_RELEASE_BASE_URL and
-# COGENLY_VERSION this script exits before downloading anything.
+#   curl -fsSL https://raw.githubusercontent.com/aflekkas/cogenly/main/scripts/install.sh | sh
 #
 # Environment:
-#   COGENLY_CHANNEL           release train to follow: stable, nightly, or preview
-#                            (default: stable; preview is a maintainers' test train)
+#   COGENLY_CHANNEL           release train to follow: prod or staging (default: prod)
 #   COGENLY_VERSION           exact version to install (overrides COGENLY_CHANNEL)
 #   COGENLY_HOME              Cogenly home directory (default: ~/.cogenly)
 #   COGENLY_INSTALL_BIN_DIR   where the `cogenly` symlink goes (default: ~/.local/bin)
-#   COGENLY_RELEASE_BASE_URL  mirror for releases/download (required for now)
+#   COGENLY_RELEASE_BASE_URL  mirror for releases/download (default: GitHub Releases)
 #
 # The archive is unpacked into $COGENLY_HOME/runtime/versions/<version>, the
-# same layout `t3 service install` uses, so the service reuses this download
-# instead of fetching the release again.
+# same layout `cogenly service install` and desktop SSH use, so neither
+# downloads the release again.
 set -eu
 
-# No default repository until Cogenly publishes releases.
-repo=""
-base_url="${COGENLY_RELEASE_BASE_URL:-}"
+repo="aflekkas/cogenly"
+base_url="${COGENLY_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"
+base_url="${base_url%/}"
 t3_home="${COGENLY_HOME:-$HOME/.cogenly}"
 bin_dir="${COGENLY_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 
@@ -28,10 +27,6 @@ fail() {
   printf '\ncogenly install: %s\n' "$1" >&2
   exit 1
 }
-
-if [ -z "$repo" ] && { [ -z "$base_url" ] || [ -z "${COGENLY_VERSION:-}" ]; }; then
-  fail "Cogenly has no published releases yet. Set COGENLY_RELEASE_BASE_URL and COGENLY_VERSION to install from a mirror."
-fi
 
 # ANSI stays on stderr, so `curl ... | sh` still gets progress.
 interactive=false
@@ -130,9 +125,9 @@ download() {
 }
 
 case "$(uname -s)" in
-  Darwin) platform="darwin" ;;
   Linux) platform="linux" ;;
-  *) fail "unsupported operating system $(uname -s); use the desktop app or npm" ;;
+  Darwin) fail "on a Mac, install the Cogenly desktop app: https://github.com/${repo}/releases/latest" ;;
+  *) fail "unsupported operating system $(uname -s); Cogenly releases ship Linux servers" ;;
 esac
 case "$(uname -m)" in
   arm64 | aarch64) arch="arm64" ;;
@@ -148,35 +143,23 @@ else
   fail "sha256sum or shasum is required"
 fi
 
-channel="${COGENLY_CHANNEL:-stable}"
+channel="${COGENLY_CHANNEL:-prod}"
 version="${COGENLY_VERSION:-}"
 if [ -z "$version" ]; then
-  # Tags are v<semver>; the channel is the prerelease identifier, or none for
-  # stable. Only tags of the requested train are considered, so a stable
-  # install can never pick up a nightly or preview build by accident.
+  # Tags are v<semver>. Prod tags are plain X.Y.Z; staging tags carry a
+  # -staging.<date>.<run> prerelease, so a prod install never picks one up.
   case "$channel" in
-    stable) tag_pattern='v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)' ;;
-    nightly | preview) tag_pattern="v\([0-9][^\"]*-${channel}\.[0-9]*\.[0-9]*\)" ;;
-    *) fail "COGENLY_CHANNEL must be stable, nightly, or preview" ;;
+    prod | stable) tag_pattern='v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)' ;;
+    staging) tag_pattern='v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*-staging\.[0-9]*\.[0-9]*\)' ;;
+    *) fail "COGENLY_CHANNEL must be prod or staging" ;;
   esac
   tmp_index="$(mktemp)"
-  fetch "https://api.github.com/repos/${repo}/releases?per_page=100" "$tmp_index"
+  fetch "https://api.github.com/repos/${repo}/releases?per_page=100" "$tmp_index" \
+    || fail "could not list Cogenly releases; set COGENLY_VERSION"
   version="$(sed -n "s/.*\"tag_name\": *\"${tag_pattern}\".*/\1/p" "$tmp_index" | head -n 1)"
   rm -f "$tmp_index"
   [ -n "$version" ] || fail "could not find a ${channel} release; set COGENLY_VERSION"
 fi
-case "$version" in
-  *-preview.*)
-    printf '%s\n' \
-      "Cogenly ${version} is a preview build." \
-      "  Preview builds are cut by maintainers from unreleased branches to exercise the release" \
-      "  pipeline. They can be broken, receive no fixes, and are never offered as updates." \
-      "  Set COGENLY_CHANNEL=stable (the default) for a supported build." >&2
-    if [ "$channel" != "preview" ] && [ -z "${COGENLY_VERSION:-}" ]; then
-      fail "refusing a preview build that was not explicitly requested"
-    fi
-    ;;
-esac
 
 stem="t3-${version}-${platform}-${arch}"
 archive="${stem}.tar.gz"

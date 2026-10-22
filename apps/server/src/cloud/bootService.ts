@@ -641,9 +641,8 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     ]),
   ).join(":");
   // A CLI running under plain Node from a checkout pins a wrapper that execs
-  // the checkout when no release origin offers an archive. Anything else —
-  // single-executables, odd wrappers — resolves no checkout and keeps the
-  // archive path, which reports the missing origin itself.
+  // the checkout. Anything else (single-executables, odd wrappers) resolves
+  // no checkout and pins the release archive for this version.
   const cwd = yield* HostProcess.WorkingDirectory;
   const checkoutCandidate = resolveCheckoutRuntime({
     isExecutable: yield* HostProcess.IsExecutable,

@@ -12,28 +12,28 @@ import {
 } from "./cliRelease.ts";
 
 describe("cliRelease", () => {
-  it("names archives by version and platform, zip only on Windows", () => {
-    expect(cliArchiveFileName("1.2.3-preview.20260911.4", "linux-x64")).toBe(
-      "t3-1.2.3-preview.20260911.4-linux-x64.tar.gz",
+  it("names archives by version and platform", () => {
+    // The release workflow, the SSH runner, and install.sh spell the same name.
+    expect(cliArchiveFileName("1.2.3", "linux-x64")).toBe("t3-1.2.3-linux-x64.tar.gz");
+    expect(cliArchiveFileName("1.2.3-staging.20260911.4", "linux-arm64")).toBe(
+      "t3-1.2.3-staging.20260911.4-linux-arm64.tar.gz",
     );
-    expect(cliArchiveFileName("1.2.3", "win32-x64")).toBe("t3-1.2.3-win32-x64.zip");
   });
 
   it("only maps platforms and architectures that have a release archive", () => {
-    expect(cliArchivePlatformKey("darwin", "arm64")).toBe("darwin-arm64");
     expect(cliArchivePlatformKey("linux", "x64")).toBe("linux-x64");
-    expect(cliArchivePlatformKey("win32", "x64")).toBe("win32-x64");
-    // Node single-executables are unsupported on x64 macOS.
-    expect(cliArchivePlatformKey("darwin", "x64")).toBeUndefined();
     expect(cliArchivePlatformKey("linux", "arm64")).toBe("linux-arm64");
-    expect(cliArchivePlatformKey("win32", "arm64")).toBe("win32-arm64");
+    // macOS runs the server inside the desktop app; releases ship no CLI archive for it.
+    expect(cliArchivePlatformKey("darwin", "arm64")).toBeUndefined();
+    expect(cliArchivePlatformKey("win32", "x64")).toBeUndefined();
     expect(cliArchivePlatformKey("freebsd", "x64")).toBeUndefined();
     expect(cliArchivePlatformKey("linux", "ia32")).toBeUndefined();
   });
 
-  it("resolves download URLs under the tagged release, honoring a mirror", () => {
-    // Cogenly publishes no releases yet, so only a mirror yields a URL.
-    expect(cliReleaseDownloadBaseUrl("1.2.3")).toBeNull();
+  it("resolves download URLs under the tagged Cogenly release, honoring a mirror", () => {
+    expect(cliReleaseDownloadBaseUrl("1.2.3")).toBe(
+      "https://github.com/aflekkas/cogenly/releases/download/v1.2.3",
+    );
     expect(cliReleaseDownloadBaseUrl("1.2.3", "https://mirror.example/t3/")).toBe(
       "https://mirror.example/t3/v1.2.3",
     );
@@ -84,7 +84,9 @@ describe("cliRelease", () => {
     expect(newestCliReleaseVersion([{ tag_name: "v1.2.3" }], "staging")).toBeUndefined();
   });
 
-  it("has no release index to page through until Cogenly publishes releases", () => {
-    expect(cliReleaseIndexPageUrl(1)).toBeNull();
+  it("pages through the Cogenly release index", () => {
+    expect(cliReleaseIndexPageUrl(2)).toBe(
+      "https://api.github.com/repos/aflekkas/cogenly/releases?per_page=100&page=2",
+    );
   });
 });

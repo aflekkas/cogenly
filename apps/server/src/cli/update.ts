@@ -74,16 +74,16 @@ const resolveNewestVersion = Effect.fn("cli.update.resolve_newest")(function* (
       .pipe(
         Effect.flatMap(HttpClientResponse.filterStatusOk),
         Effect.flatMap((response) => response.text),
-        Effect.mapError(() => new CliUpdateError({ reason: "Could not list t3 releases." })),
+        Effect.mapError(() => new CliUpdateError({ reason: "Could not list Cogenly releases." })),
         Effect.timeoutOrElse({
           duration: RELEASE_INDEX_TIMEOUT,
           orElse: () =>
-            Effect.fail(new CliUpdateError({ reason: "Timed out listing t3 releases." })),
+            Effect.fail(new CliUpdateError({ reason: "Timed out listing Cogenly releases." })),
         }),
       );
     const releases = yield* decodeReleaseIndex(body).pipe(
       Effect.mapError(
-        () => new CliUpdateError({ reason: "The t3 release index had an unexpected shape." }),
+        () => new CliUpdateError({ reason: "The Cogenly release index had an unexpected shape." }),
       ),
     );
     const version = newestCliReleaseVersion(releases, channel);
@@ -220,7 +220,7 @@ const updateFlags = {
   ...projectLocationFlags,
   channel: Flag.Literals("channel", CLI_RELEASE_CHANNELS).pipe(
     Flag.withDescription(
-      "Release channel to follow. Defaults to the channel this t3 was published on.",
+      "Release channel to follow. Defaults to the channel this cogenly was published on.",
     ),
     Flag.optional,
   ),
@@ -249,7 +249,7 @@ export const updateCommand = Command.make("update", {
   version: versionArgument,
 }).pipe(
   Command.withDescription(
-    "Download a newer t3 and switch this machine to it, including the background service when one is installed.",
+    "Download a newer Cogenly and switch this machine to it, including the background service when one is installed.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
@@ -356,7 +356,7 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   }
   if (input.requestedVersion !== undefined && !isExactServiceVersion(input.requestedVersion)) {
     return yield* new CliUpdateError({
-      reason: `'${input.requestedVersion}' is not an exact t3 version.`,
+      reason: `'${input.requestedVersion}' is not an exact Cogenly version.`,
     });
   }
   const progress = createUpdateProgress();
@@ -414,7 +414,7 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   }
   if (!input.allowDowngrade && compareExactServiceVersions(targetVersion, newestInstalled) < 0) {
     return yield* new CliUpdateError({
-      reason: `t3@${targetVersion} is older than the installed ${newestInstalled}. Pass --allow-downgrade to install it anyway.`,
+      reason: `cogenly@${targetVersion} is older than the installed ${newestInstalled}. Pass --allow-downgrade to install it anyway.`,
     });
   }
 
@@ -440,7 +440,7 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   let restartService = false;
   if (serviceInstalled && !serviceCurrent) {
     yield* Console.log(
-      "  A background service is installed for this T3 home. Restarting it interrupts anything running in it: agent turns, terminals, remote clients.",
+      "  A background service is installed for this Cogenly home. Restarting it interrupts anything running in it: agent turns, terminals, remote clients.",
     );
     if (input.assumeYes) {
       restartService = true;
@@ -479,14 +479,14 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
         .pipe(
           Effect.mapError(
             (cause) =>
-              new PinnedRuntimeInstallError({ step: "verifying the downloaded t3", cause }),
+              new PinnedRuntimeInstallError({ step: "verifying the downloaded cogenly", cause }),
           ),
           Effect.flatMap((result) =>
             result.code === 0 && /\bv(\S+)\s*$/.exec(result.stdout)?.[1] === targetVersion
               ? Effect.void
               : Effect.fail(
                   new PinnedRuntimeInstallError({
-                    step: "verifying the downloaded t3",
+                    step: "verifying the downloaded cogenly",
                     exitCode: Number(result.code),
                   }),
                 ),
@@ -495,14 +495,16 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   }).pipe(
     Effect.ensuring(Effect.sync(progress.finish)),
     Effect.catchIf(
+      // Releases before the Linux archives shipped have a SHA256SUMS without them.
       (error): error is PinnedRuntimeInstallError =>
         error._tag === "PinnedRuntimeInstallError" &&
-        error.step.startsWith("downloading the t3 release checksums") &&
-        String(error.cause).includes("404"),
+        ((error.step.startsWith("downloading the t3 release checksums") &&
+          String(error.cause).includes("404")) ||
+          error.step.startsWith("finding t3-")),
       () =>
         Effect.fail(
           new CliUpdateError({
-            reason: `No release archive was published for t3@${targetVersion}.`,
+            reason: `No ${platform}-${arch} release archive was published for cogenly@${targetVersion}.`,
           }),
         ),
     ),
@@ -542,7 +544,7 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       Effect.mapError(
         (error) =>
           new CliUpdateError({
-            reason: `t3@${targetVersion} is installed but the background service could not be ${restartService ? "updated" : "pointed at it"}: ${error.message}`,
+            reason: `cogenly@${targetVersion} is installed but the background service could not be ${restartService ? "updated" : "pointed at it"}: ${error.message}`,
           }),
       ),
     );
@@ -565,7 +567,7 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     );
   } else if (status.installed && !servesThisHome) {
     yield* Console.log(
-      `  The background service serves ${status.installedBaseDir ?? "another T3 home"} and was left unchanged.`,
+      `  The background service serves ${status.installedBaseDir ?? "another Cogenly home"} and was left unchanged.`,
     );
   }
   if (foreground !== undefined) {

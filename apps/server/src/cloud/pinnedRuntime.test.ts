@@ -140,7 +140,7 @@ describe("checkout runtime install", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  it.effect("reports the missing origin without a checkout or mirror", () =>
+  it.effect("names the supported platforms when releases have no archive for this one", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -161,7 +161,9 @@ describe("checkout runtime install", () => {
       const isInstallError = Schema.is(PinnedRuntimeInstallError);
       expect(isInstallError(error)).toBe(true);
       if (isInstallError(error)) {
-        expect(error.step).toContain("locating a release to download");
+        // Rejected before any download: macOS servers come from the desktop app.
+        expect(error.step).toContain("selecting a release archive for darwin-arm64");
+        expect(error.step).toContain("Linux x64 and arm64");
       }
     }).pipe(Effect.provide(layer)),
   );

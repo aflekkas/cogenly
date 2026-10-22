@@ -176,8 +176,8 @@ interface PinnedRuntimeInstallInput {
   readonly releaseBaseUrl?: string | undefined;
   readonly onProgress?: (progress: PinnedRuntimeProgress) => void;
   /**
-   * How to pin when no release origin is configured: a wrapper that execs
-   * this checkout's CLI. Absent outside checkout invocations.
+   * Pin a wrapper that execs this checkout's CLI instead of downloading a
+   * release archive. Absent outside checkout invocations.
    */
   readonly checkout?: CheckoutRuntime | undefined;
 }
@@ -244,7 +244,7 @@ const installFromArchive = Effect.fn("cloud.pinned_runtime.install_archive")(fun
   const platformKey = cliArchivePlatformKey(input.platform, input.arch);
   if (platformKey === undefined) {
     return yield* new PinnedRuntimeInstallError({
-      step: `selecting a t3 release archive for ${input.platform}-${input.arch}`,
+      step: `selecting a release archive for ${input.platform}-${input.arch} (Cogenly releases ship Linux x64 and arm64 servers; elsewhere use the desktop app or a source checkout)`,
     });
   }
   const httpClient = input.httpClient;
@@ -350,15 +350,17 @@ const installRuntime = Effect.fn("cloud.pinned_runtime.install")(function* (
   stagingDir: string,
   stagingPaths: PinnedRuntimePaths,
 ) {
+  // A CLI run from a checkout pins that checkout: it is the code being run,
+  // and its version may never have been released.
+  if (input.checkout !== undefined) {
+    yield* Effect.logInfo(
+      `Pinning the source checkout at ${input.checkout.entryPath} as cogenly@${input.version}. Rebuild the checkout and restart the service to update.`,
+    );
+    return yield* installFromCheckout(input, stagingPaths, input.checkout);
+  }
   const baseUrl = cliReleaseDownloadBaseUrl(input.version, input.releaseBaseUrl);
   if (baseUrl !== null) {
     return yield* installFromArchive(input, stagingDir, baseUrl);
-  }
-  if (input.checkout !== undefined) {
-    yield* Effect.logInfo(
-      `No release origin for t3@${input.version}; pinning the source checkout at ${input.checkout.entryPath}. Rebuild the checkout and restart the service to update.`,
-    );
-    return yield* installFromCheckout(input, stagingPaths, input.checkout);
   }
   return yield* new PinnedRuntimeInstallError({
     step: `locating a release to download (${CLI_RELEASES_UNAVAILABLE_MESSAGE} Set ${CLI_RELEASE_BASE_URL_ENV} to a release mirror)`,
