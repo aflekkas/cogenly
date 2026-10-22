@@ -10,7 +10,6 @@ import {
   Lock,
   MousePointer2,
   MousePointerClick,
-  PictureInPicture2,
 } from "lucide-react";
 import {
   type FormEvent,
@@ -104,9 +103,6 @@ interface Props {
   onCapture?: ((record: boolean) => void) | undefined;
   captureDisabled?: boolean | undefined;
   recording?: boolean | undefined;
-  onPictureInPicture?: (() => void) | undefined;
-  pictureInPicture?: boolean | undefined;
-  pictureInPictureDisabled?: boolean | undefined;
   /**
    * When provided, renders an annotation-mode toggle button to the right of
    * the URL input. Pressed while annotation mode is active (button shows in `pressed`
@@ -191,9 +187,6 @@ export function PreviewChromeRow({
   onCapture,
   captureDisabled,
   recording,
-  onPictureInPicture,
-  pictureInPicture,
-  pictureInPictureDisabled,
   onPickElement,
   pickActive,
   pickDisabled,
@@ -382,16 +375,6 @@ export function PreviewChromeRow({
                 {recording ? "Stop recording" : "Screenshot · Shift-click to record"}
               </TooltipPopup>
             </Tooltip>
-          ) : null}
-          {onPictureInPicture ? (
-            <ToolbarButton
-              label={pictureInPicture ? "Close floating preview" : "Float preview over chat"}
-              onClick={onPictureInPicture}
-              disabled={pictureInPictureDisabled}
-              pressed={pictureInPicture ?? false}
-            >
-              <PictureInPicture2 className={cn(pictureInPicture && "text-primary")} />
-            </ToolbarButton>
           ) : null}
           {trailingActions}
         </div>

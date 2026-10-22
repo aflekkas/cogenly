@@ -15,11 +15,7 @@ import { cn, isMacPlatform } from "~/lib/utils";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
 import { useActiveBrowserRecordingTabIds } from "./browserRecording";
-import {
-  browserViewportSettingKey,
-  resolveBrowserViewportLayout,
-  resolveFittedBrowserViewport,
-} from "./browserViewportLayout";
+import { browserViewportSettingKey } from "./browserViewportLayout";
 import { BrowserDeviceToolbar } from "./BrowserDeviceToolbar";
 import { BrowserViewportResizeHandles } from "./BrowserViewportResizeHandles";
 import { acquireDesktopTab, type AcquiredDesktopTab, withDesktopTab } from "./desktopTabLifetime";
@@ -96,9 +92,6 @@ export function HostedBrowserWebview(props: {
       const current = state.byTabId[runtimeTabId];
       return {
         content: current?.content ?? null,
-        cornerRadius: current?.cornerRadius ?? 0,
-        fitSourceContent: current?.fitSourceContent ?? false,
-        fittedSourceContent: current?.fittedSourceContent ?? null,
         rect: resolveBrowserSurfacePanelRect(state.byTabId, runtimeTabId),
         visible: current?.visible ?? false,
         zIndex: current?.zIndex ?? 30,
@@ -242,14 +235,14 @@ export function HostedBrowserWebview(props: {
           height: hiddenContentSize?.height ?? lastRect?.height ?? 800,
         };
   const containerSize = active && lastRect ? lastRect : hiddenSize;
-  const deviceToolbarVisible = active && viewport._tag !== "fill" && !presentation.fitSourceContent;
+  const deviceToolbarVisible = active && viewport._tag !== "fill";
   const {
     activeDrag,
     commitViewportChange,
     effectiveViewport,
     handleResizeKeyDown,
     handleResizePointerDown,
-    layout: viewportLayout,
+    layout,
   } = useBrowserViewportResize({
     tabId: runtimeTabId,
     viewport,
@@ -258,18 +251,6 @@ export function HostedBrowserWebview(props: {
     deviceToolbarVisible,
     aspectRatio: lockedAspectRatio,
   });
-  const fittedSourceViewport =
-    presentation.fitSourceContent && lastRect
-      ? resolveFittedBrowserViewport(
-          viewport,
-          presentation.fittedSourceContent,
-          normalizedZoomFactor,
-        )
-      : null;
-  const layout =
-    fittedSourceViewport && lastRect
-      ? resolveBrowserViewportLayout(lastRect, fittedSourceViewport, normalizedZoomFactor)
-      : viewportLayout;
 
   const syncContentPresentation = useCallback(() => {
     const wrapper = wrapperRef.current;
@@ -306,7 +287,6 @@ export function HostedBrowserWebview(props: {
     // Inactive macOS guests intentionally remain paintable offscreen; other platforms still
     // suspend them, and automation continues to see the macOS guests as inactive.
     keepPaintableWhenInactive: isMacPlatform(navigator.platform),
-    cornerRadius: presentation.cornerRadius,
     zIndex: presentation.zIndex,
     rect: lastRect,
     hiddenSize,
@@ -349,18 +329,14 @@ export function HostedBrowserWebview(props: {
           data-preview-viewport-mode={effectiveViewport._tag}
           data-preview-viewport-key={browserViewportSettingKey(effectiveViewport)}
           data-preview-css-width={
-            fittedSourceViewport
-              ? fittedSourceViewport.width
-              : effectiveViewport._tag === "fill"
-                ? Math.max(1, Math.round(layout.viewportWidth / normalizedZoomFactor))
-                : effectiveViewport.width
+            effectiveViewport._tag === "fill"
+              ? Math.max(1, Math.round(layout.viewportWidth / normalizedZoomFactor))
+              : effectiveViewport.width
           }
           data-preview-css-height={
-            fittedSourceViewport
-              ? fittedSourceViewport.height
-              : effectiveViewport._tag === "fill"
-                ? Math.max(1, Math.round(layout.viewportHeight / normalizedZoomFactor))
-                : effectiveViewport.height
+            effectiveViewport._tag === "fill"
+              ? Math.max(1, Math.round(layout.viewportHeight / normalizedZoomFactor))
+              : effectiveViewport.height
           }
           aria-hidden={active ? undefined : true}
           className={cn(
@@ -376,7 +352,7 @@ export function HostedBrowserWebview(props: {
             transformOrigin: "top left",
           }}
         />
-        {active && effectiveViewport._tag !== "fill" && !fittedSourceViewport ? (
+        {active && effectiveViewport._tag !== "fill" ? (
           <>
             <BrowserViewportResizeHandles
               layout={layout}

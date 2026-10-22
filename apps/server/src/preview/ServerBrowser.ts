@@ -1260,7 +1260,7 @@ const make = Effect.gen(function* () {
         ...(/^https?:/i.test(url) ? { url } : {}),
         runtime: "server",
         ...(opener.profileId === undefined ? {} : { profileId: opener.profileId }),
-        // Agent popups stay with the agent and only float when it asks, like its own opens.
+        // Agent popups stay with the agent and only show when it asks, like its own opens.
         ...(opener.control.agentId === null
           ? {}
           : { automationOwner: opener.control.agentId, reveal: false }),

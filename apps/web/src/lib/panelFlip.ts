@@ -175,7 +175,7 @@ export function capturePanelFlip(root: ParentNode | null): PanelFlipSnapshot | n
  * from a layout effect: it inverts there, in the task that committed the new
  * layout, so the first frame that paints it already draws marked content where
  * it was; the glide itself starts on the next frame. Size-derived positions
- * (the mini player, the canvas lanes) re-render in this frame's resize step,
+ * (the canvas lanes) re-render in this frame's resize step,
  * so content is measured again there and retargeted.
  */
 export function playPanelFlip(

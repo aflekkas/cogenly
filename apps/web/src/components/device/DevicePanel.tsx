@@ -8,7 +8,6 @@ import type {
 import { Smartphone, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
 import { useRightPanelStore, type RightPanelSurface } from "~/rightPanelStore";
 import { Button } from "~/components/ui/button";
 import { DiscoveryList, DiscoveryListRow } from "~/components/ui/discovery-list";
@@ -100,19 +99,6 @@ export function DevicePanel(props: {
     } finally {
       setPendingDevice(null);
     }
-  };
-
-  // Floating the device closes the panel, like the browser's floating preview.
-  const floatActive = () => {
-    if (!activeDevice) return;
-    usePreviewMiniPlayerStore.getState().open(props.threadRef, {
-      kind: "device",
-      hostId: activeDevice.hostId,
-      deviceId: activeDevice.id,
-      platform: activeDevice.platform,
-      name: activeDevice.name,
-    });
-    useRightPanelStore.getState().close(props.threadRef);
   };
 
   const closeActive = (powerOff: boolean) => {
@@ -208,7 +194,6 @@ export function DevicePanel(props: {
               }
               hostDiagnostics={state.hostStatusDetail}
               visible={props.visible}
-              onFloat={floatActive}
               onClose={() => closeActive(false)}
               onPowerOff={() => closeActive(true)}
             />

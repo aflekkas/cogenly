@@ -186,12 +186,7 @@ export function ServerBrowserSurface(props: {
   readonly threadId: string;
   readonly tabId: string;
   readonly visible: boolean;
-  /** Sends the surface size so fill-mode tabs follow it. The floating player scales the page instead. */
-  readonly followSize?: boolean;
-  /**
-   * Floating previews reserve the top edge for their existing hover controls.
-   * `none` leaves the control row to the host, which shows it in its own chrome.
-   */
+  /** `none` leaves the control row to the host, which shows it in its own chrome. */
   readonly controlPosition?: "top" | "bottom" | "none";
   readonly onFirstFrame?: () => void;
   readonly onViewport?: (viewport: PreviewStreamViewport) => void;
@@ -207,7 +202,6 @@ export function ServerBrowserSurface(props: {
     threadId,
     tabId,
     visible,
-    followSize = true,
     controlPosition = "top",
     onFirstFrame,
     onViewport,
@@ -575,7 +569,7 @@ export function ServerBrowserSurface(props: {
       const previous = sizeRef.current;
       if (previous?.width === size.width && previous.height === size.height) return;
       sizeRef.current = size;
-      if (followSize) clientRef.current?.send({ type: "resize", ...size });
+      clientRef.current?.send({ type: "resize", ...size });
       // Outgrowing the cap reconnects the stream, so grow it once the size settles
       // rather than on every throttled resize of a drag.
       if (capTimer !== null) clearTimeout(capTimer);
@@ -593,7 +587,7 @@ export function ServerBrowserSurface(props: {
       if (timer !== null) clearTimeout(timer);
       if (capTimer !== null) clearTimeout(capTimer);
     };
-  }, [followSize]);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -665,7 +659,7 @@ export function ServerBrowserSurface(props: {
             clearInput();
           } else if (previous?.controller !== "you") {
             const size = sizeRef.current;
-            if (followSize && size) client.send({ type: "resize", ...size });
+            if (size) client.send({ type: "resize", ...size });
           }
         },
         onConnectedChange: (connected) => {
@@ -715,7 +709,6 @@ export function ServerBrowserSurface(props: {
     setPickDraftOpen,
     showPickHover,
     environmentId,
-    followSize,
     hostSetup,
     tabId,
     threadId,

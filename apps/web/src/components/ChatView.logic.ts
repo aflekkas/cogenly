@@ -51,7 +51,6 @@ import type { DraftThreadEnvMode } from "../composerDraftStore";
 import { collapseExpandedComposerCursor, type ComposerSubmissionIntent } from "../composer-logic";
 import type { ReviewCommentContext } from "../reviewCommentContext";
 import { derivePhase, type TimelineEntry } from "../session-logic";
-import type { PreviewMiniPlayerSource } from "../previewMiniPlayerStore";
 import type { DesktopPreviewOverlay } from "../previewStateStore";
 import type { RightPanelSurface } from "../rightPanelStore";
 import {
@@ -86,31 +85,6 @@ export function agentControlledBrowserCloseConfirmation(
     `Close ${activeBrowserCount} browsers while the agent is using them?`,
     "The agent is actively controlling these browsers. Closing them may interrupt the current browser actions.",
   ].join("\n");
-}
-
-/**
- * The floating player shows only while its source is live on this thread and
- * the same source is not already rendered in the panel. `sourceLive` is false
- * for a browser tab with no session on this thread (a fresh draft, a closed
- * tab, or a list not loaded yet), so a stale entry never floats a blank frame.
- */
-export function shouldRenderPreviewMiniPlayer(
-  source: PreviewMiniPlayerSource | null,
-  renderedRightPanelSurface: RightPanelSurface | null,
-  sourceLive: boolean,
-): boolean {
-  if (source === null || !sourceLive) return false;
-  if (source.kind === "browser") {
-    return !(
-      renderedRightPanelSurface?.kind === "preview" &&
-      renderedRightPanelSurface.resourceId === source.tabId
-    );
-  }
-  return !(
-    renderedRightPanelSurface?.kind === "device" &&
-    renderedRightPanelSurface.target?.hostId === source.hostId &&
-    renderedRightPanelSurface.target.deviceId === source.deviceId
-  );
 }
 
 export function codexArtifactTemplatePromptToAppend(

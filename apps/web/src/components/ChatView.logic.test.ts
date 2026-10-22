@@ -18,7 +18,6 @@ import {
   codexArtifactTemplatePromptToAppend,
   shouldDockDraftHeroForSubmission,
   shouldRefocusComposerOnWindowFocus,
-  shouldRenderPreviewMiniPlayer,
   branchMismatchKey,
   buildExpiredTerminalContextToastCopy,
   createLocalDispatchSnapshot,
@@ -833,54 +832,6 @@ describe("agent browser close confirmation", () => {
         "tab-2": { controller: "agent" },
       }),
     ).toContain("Close 2 browsers");
-  });
-});
-
-describe("floating browser preview", () => {
-  it("only hides the duplicate while the same browser is rendered in the panel", () => {
-    expect(shouldRenderPreviewMiniPlayer(null, null, true)).toBe(false);
-    expect(
-      shouldRenderPreviewMiniPlayer(
-        { kind: "browser", tabId: "tab-1" },
-        {
-          id: "browser:one",
-          kind: "preview",
-          resourceId: "tab-1",
-        },
-        true,
-      ),
-    ).toBe(false);
-    expect(
-      shouldRenderPreviewMiniPlayer(
-        { kind: "browser", tabId: "tab-1" },
-        {
-          id: "browser:two",
-          kind: "preview",
-          resourceId: "tab-2",
-        },
-        true,
-      ),
-    ).toBe(true);
-    expect(
-      shouldRenderPreviewMiniPlayer(
-        { kind: "browser", tabId: "tab-1" },
-        { id: "device", kind: "device" },
-        true,
-      ),
-    ).toBe(true);
-  });
-
-  it("stays hidden on a draft or once the source is no longer live", () => {
-    expect(shouldRenderPreviewMiniPlayer({ kind: "browser", tabId: "tab-1" }, null, false)).toBe(
-      false,
-    );
-    expect(
-      shouldRenderPreviewMiniPlayer(
-        { kind: "device", hostId: "host", deviceId: "device", platform: "ios", name: "Phone" },
-        null,
-        false,
-      ),
-    ).toBe(false);
   });
 });
 

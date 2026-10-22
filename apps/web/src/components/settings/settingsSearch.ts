@@ -585,12 +585,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["links default browser in-app browser external open"],
   },
   {
-    id: "browser-auto-show-floating-preview",
-    title: "Auto-show floating preview",
-    to: "/settings/integrations",
-    searchTerms: ["agent opens browser device simulator pop into view hide"],
-  },
-  {
     id: "automatic-pull",
     title: "Automatically pull",
     to: "/settings/source-control",

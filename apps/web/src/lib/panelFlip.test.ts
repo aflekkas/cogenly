@@ -249,7 +249,7 @@ describe("playPanelFlip", () => {
     playPanelFlip(snapshotOf(element, 336), 250);
     runNextFrame();
     element.getAnimations()[0]!.currentTime = 16;
-    // The resize step re-renders a measured position (the mini player).
+    // The resize step re-renders a measured position (a canvas lane).
     element.left = 100;
     await runResizeStep();
     const [animation] = element.getAnimations();

@@ -1,6 +1,5 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
-import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import {
   resolveBackgroundDraftWorkspaceOptions,
@@ -260,18 +259,9 @@ import { resolveDiscoveredServerUrl } from "../browser/browserTargetResolver";
 import { previewRuntimeTabId } from "../browser/previewRuntimeTabId";
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
-import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
-import { previewTabHasPage } from "./preview/previewMiniPlayerVisibility.logic";
 import { usePreviewSession } from "./preview/usePreviewSession";
 import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
-
-import {
-  browserMiniPlayerSource,
-  previewMiniPlayerSourceKey,
-  selectThreadPreviewMiniPlayer,
-  usePreviewMiniPlayerStore,
-} from "../previewMiniPlayerStore";
 import { RightPanelTabs, type RightPanelAddOption } from "./RightPanelTabs";
 import { useDeviceState } from "~/state/device";
 import { DeviceSetup } from "./device/DeviceSetup";
@@ -493,7 +483,6 @@ import {
   isBranchMismatchDismissedForSession,
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
-  shouldRenderPreviewMiniPlayer,
   getStartedThreadModelChangeBlockReason,
   type LocalDispatchSnapshot,
   cloneComposerImageForRetry,
@@ -740,8 +729,6 @@ function useDraftHeroLayoutTransition(isDraftHeroState: boolean, animationDurati
 const { Component: PreviewPanel, preload: preloadPreviewPanel } = preloadableComponent(() =>
   import("./preview/PreviewPanel").then((module) => module.PreviewPanel),
 );
-const selectAutoShowFloatingPreview = (settings: { browserAutoShowFloatingPreview: boolean }) =>
-  settings.browserAutoShowFloatingPreview;
 const { Component: DevicePanel, preload: preloadDevicePanel } = preloadableComponent(() =>
   import("./device/DevicePanel").then((module) => module.DevicePanel),
 );
@@ -1763,9 +1750,6 @@ export default function ChatView(props: ChatViewProps) {
         : undefined,
     [activeThreadRef, activePreviewServerEpoch],
   );
-  const activePreviewMiniPlayer = usePreviewMiniPlayerStore((state) =>
-    selectThreadPreviewMiniPlayer(state.byThreadKey, activeThreadRef),
-  );
   const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
   const rightPanelOpen = rightPanelState.isOpen && rightPanelSupported;
   const bottomPanelOpen = useBottomPanelStore(
@@ -1798,19 +1782,6 @@ export default function ChatView(props: ChatViewProps) {
   const rightPanelControlsAtRoot = rightPanelPresent && !shouldUsePlanSidebarSheet;
   const renderedRightPanelSurface = rightPanelPresence.value?.activeSurface ?? null;
   const renderedRightPanelSurfaces = rightPanelPresence.value?.surfaces ?? [];
-  const activePreviewMiniPlayerSource = activePreviewMiniPlayer?.source ?? null;
-  // A floating browser needs a live session for its tab on this thread, which a
-  // fresh draft never has; until the session list loads an entry is unconfirmed.
-  // A floating device closes itself once its session ends (below).
-  const previewMiniPlayerSourceLive =
-    activePreviewMiniPlayerSource?.kind !== "browser" ||
-    (previewSessionsReady &&
-      activePreviewState.sessions[activePreviewMiniPlayerSource.tabId] !== undefined);
-  const previewMiniPlayerVisible = shouldRenderPreviewMiniPlayer(
-    activePreviewMiniPlayerSource,
-    renderedRightPanelSurface,
-    previewMiniPlayerSourceLive,
-  );
   const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized = canMaximizeRightPanel && rightPanelState.maximized === true;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
@@ -1833,18 +1804,6 @@ export default function ChatView(props: ChatViewProps) {
         hiddenTabIds,
       );
   }, [activePreviewState.sessions, activeThreadRef, previewSessionsReady]);
-
-  useEffect(() => {
-    const source = activePreviewMiniPlayer?.source;
-    if (
-      activeThreadRef &&
-      previewSessionsReady &&
-      source?.kind === "browser" &&
-      !activePreviewState.sessions[source.tabId]
-    ) {
-      usePreviewMiniPlayerStore.getState().close(activeThreadRef);
-    }
-  }, [activePreviewMiniPlayer, activePreviewState.sessions, activeThreadRef, previewSessionsReady]);
 
   const latestRunSettled = isLatestRunSettled(activeLatestRun, activeRuntime);
   const activePlan = useMemo(
@@ -4065,7 +4024,6 @@ export default function ChatView(props: ChatViewProps) {
   // snapshot is a baseline: persisted tabs restore themselves, and existing
   // sessions must not resurrect closed tabs. A session whose device summary
   // has not arrived yet stays out of the baseline so a later snapshot opens it.
-  const autoShowFloatingPreview = useClientSettings(selectAutoShowFloatingPreview);
   const previousDeviceSessions = useRef(new Map<string, Set<string>>());
   useEffect(() => {
     if (!activeThreadRef || !deviceStateLoaded) return;
@@ -4094,10 +4052,6 @@ export default function ChatView(props: ChatViewProps) {
         platform: device.platform,
         name: device.name,
       };
-      if (autoShowFloatingPreview) {
-        usePreviewMiniPlayerStore.getState().open(activeThreadRef, { kind: "device", ...target });
-        continue;
-      }
       const existing = useRightPanelStore
         .getState()
         .byThreadKey[scopedThreadKey(activeThreadRef)]?.surfaces.some(
@@ -4111,7 +4065,6 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [
     activeThreadRef,
-    autoShowFloatingPreview,
     deviceStateLoaded,
     shouldUsePlanSidebarSheet,
     deviceState.sessions,
@@ -4138,16 +4091,16 @@ export default function ChatView(props: ChatViewProps) {
         ? previous.get(session.tabId) !== requested.id
         : !previous.has(session.tabId);
       if (!fresh || session.reveal !== true) continue;
-      if (!autoShowFloatingPreview && requested?.force !== true) continue;
       const surface = rightPanelState.surfaces.find(
         (surface) => surface.kind === "preview" && surface.resourceId === session.tabId,
       );
-      if (surface && requested?.force === true) {
-        useRightPanelStore.getState().activateSurface(activeThreadRef, surface.id);
-      } else if (!surface) {
-        usePreviewMiniPlayerStore
-          .getState()
-          .open(activeThreadRef, browserMiniPlayerSource(session.tabId));
+      if (requested?.force === true) {
+        if (surface) useRightPanelStore.getState().activateSurface(activeThreadRef, surface.id);
+        else useRightPanelStore.getState().openBrowser(activeThreadRef, session.tabId);
+      } else if (!surface && !shouldUsePlanSidebarSheet) {
+        // A new tab the agent revealed without forcing it opens in the panel,
+        // like an agent-opened device; the phone sheet waits to be asked.
+        useRightPanelStore.getState().openBrowser(activeThreadRef, session.tabId);
       }
     }
   }, [
@@ -4155,23 +4108,9 @@ export default function ChatView(props: ChatViewProps) {
     activePreviewState.listLoaded,
     activePreviewState.sessions,
     activeThreadRef,
-    autoShowFloatingPreview,
     rightPanelState.surfaces,
+    shouldUsePlanSidebarSheet,
   ]);
-  // A floating device follows its session: once the agent or another client
-  // closes the device there is nothing left to stream.
-  useEffect(() => {
-    if (!activeThreadRef || !deviceStateLoaded) return;
-    const source = activePreviewMiniPlayer?.source;
-    if (source?.kind !== "device") return;
-    const sessionStillExists = deviceState.sessions.some(
-      (session) =>
-        session.threadId === activeThreadRef.threadId &&
-        session.hostId === source.hostId &&
-        session.deviceId === source.deviceId,
-    );
-    if (!sessionStillExists) usePreviewMiniPlayerStore.getState().close(activeThreadRef);
-  }, [activePreviewMiniPlayer, activeThreadRef, deviceState.sessions, deviceStateLoaded]);
   const openFileSurface = (relativePath: string) => {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().openFile(activeThreadRef, relativePath);
@@ -4180,23 +4119,6 @@ export default function ChatView(props: ChatViewProps) {
   const activeRunningTurnId = activeRuntime?.activeRunId ?? null;
   const closePreviewPanel = () => {
     if (activeThreadRef) {
-      // Closing the panel on a live browser or device floats it instead of dropping it.
-      // A new or blank tab has nothing to float, so it just closes with the panel.
-      if (
-        activeRightPanelSurface?.kind === "preview" &&
-        activeRightPanelSurface.resourceId &&
-        previewTabHasPage(
-          activePreviewState.sessions[activeRightPanelSurface.resourceId]?.navStatus,
-        )
-      ) {
-        usePreviewMiniPlayerStore
-          .getState()
-          .open(activeThreadRef, browserMiniPlayerSource(activeRightPanelSurface.resourceId));
-      } else if (activeRightPanelSurface?.kind === "device" && activeRightPanelSurface.target) {
-        usePreviewMiniPlayerStore
-          .getState()
-          .open(activeThreadRef, { kind: "device", ...activeRightPanelSurface.target });
-      }
       useRightPanelStore.getState().setMaximized(activeThreadRef, false);
       useRightPanelStore.getState().close(activeThreadRef);
     }
@@ -9183,8 +9105,6 @@ export default function ChatView(props: ChatViewProps) {
             }}
             controlsRef={threadFindControlsRef}
             onOpenChange={setIsThreadFindActive}
-            detailsCardTopInset={isThreadFindActive ? THREAD_FIND_BAR_RESERVED_HEIGHT : 0}
-            composerOverlayElement={isDraftHeroState ? null : composerOverlayElement}
             data-chat-workspace-drop-target="true"
             onDragEnter={workspaceFileDropHandlers.onDragEnter}
             onDragOver={workspaceFileDropHandlers.onDragOver}
@@ -9708,18 +9628,6 @@ export default function ChatView(props: ChatViewProps) {
 
             {canOperatePreview && activeThreadRef && activeEnvironmentServerBrowser ? (
               <PreviewSessionSync threadRef={activeThreadRef} />
-            ) : null}
-            {activeThreadRef &&
-            activePreviewMiniPlayer &&
-            previewMiniPlayerVisible &&
-            (activePreviewMiniPlayer.source.kind === "device"
-              ? activeThreadCapabilities.device
-              : activeThreadCapabilities.browser && canOperatePreview) ? (
-              <ThreadPreviewMiniPlayer
-                key={`${activeThreadKey}:${previewMiniPlayerSourceKey(activePreviewMiniPlayer.source)}`}
-                threadRef={activeThreadRef}
-                miniPlayer={activePreviewMiniPlayer}
-              />
             ) : null}
 
             <AlertDialog open={branchRestoreConfirmOpen} onOpenChange={setBranchRestoreConfirmOpen}>

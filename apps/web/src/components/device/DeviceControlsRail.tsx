@@ -7,7 +7,6 @@ import {
   Box,
   Maximize,
   MoreHorizontal,
-  PictureInPicture2,
   Power,
   RotateCcw,
   SlidersHorizontal,
@@ -44,7 +43,6 @@ export function DeviceControlsRail(props: {
   onScreenshot: () => void;
   toolsOpen: boolean;
   onTools: () => void;
-  onFloat: () => void;
   onClose: () => void;
   onPowerOff: () => void;
 }) {
@@ -209,10 +207,6 @@ export function DeviceControlsRail(props: {
             <MoreHorizontal />
           </MenuTrigger>
           <MenuPopup side={popupSide} align="end">
-            <MenuItem onClick={props.onFloat}>
-              <PictureInPicture2 />
-              Float device over chat
-            </MenuItem>
             <MenuItem onClick={props.onClose}>
               <X />
               Close device panel

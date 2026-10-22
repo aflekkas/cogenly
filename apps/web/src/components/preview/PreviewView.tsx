@@ -50,11 +50,6 @@ import {
 import { previewEnvironment } from "~/state/preview";
 import { usePreviewStreamAccess } from "~/state/previewStream";
 import { useAtomCommand } from "~/state/use-atom-command";
-import {
-  browserMiniPlayerSource,
-  selectThreadPreviewMiniPlayerTabId,
-  usePreviewMiniPlayerStore,
-} from "~/previewMiniPlayerStore";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useRightPanelStore } from "~/rightPanelStore";
 
@@ -80,7 +75,6 @@ import { BrowserSettingsReadError } from "~/browser/openFileInPreview";
 import { PreviewFileNotShown, PreviewUnreachable } from "./PreviewUnreachable";
 import { revealInFileExplorerLabel } from "./fileExplorerLabel";
 import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
-import { previewTabHasPage } from "./previewMiniPlayerVisibility.logic";
 import { Badge } from "~/components/ui/badge";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { alternatePreviewRuntime, useRendersServerTabNatively } from "~/browser/previewRuntime";
@@ -175,9 +169,6 @@ export function PreviewView({
   const recentHistoryEntries = useThreadRecentHistory(
     threadRef,
     BROWSER_HISTORY_MAX_ENTRIES_PER_PROJECT,
-  );
-  const miniPlayerTabId = usePreviewMiniPlayerStore((state) =>
-    selectThreadPreviewMiniPlayerTabId(state.byThreadKey, threadRef),
   );
   const addPreviewAnnotation = useComposerDraftStore((store) => store.addPreviewAnnotation);
   const addImage = useComposerDraftStore((store) => store.addImage);
@@ -453,15 +444,6 @@ export function PreviewView({
     serverOwnsRendering,
   ]);
 
-  // The panel showing a tab is where that tab lives: a floating entry left
-  // over from an earlier undock would keep "Float" pressed while nothing
-  // floats, and would float the tab again the moment the panel closed.
-  useEffect(() => {
-    if (visible && tabId && miniPlayerTabId === tabId) {
-      usePreviewMiniPlayerStore.getState().close(threadRef);
-    }
-  }, [miniPlayerTabId, tabId, threadRef, visible]);
-
   const handleZoomIn = useCallback(() => {
     if (serverOwnsRendering) stepServerZoom(1);
     else if (previewBridge && runtimeTabId) void previewBridge.zoomIn(runtimeTabId);
@@ -580,16 +562,6 @@ export function PreviewView({
     useRightPanelStore.getState().openBrowser(threadRef, result.value.tabId);
     await closePreviewSession({ closePreview, snapshot, tabId, threadRef });
   }, [closePreview, moveTarget, open, snapshot, tabId, threadRef, url, viewport]);
-
-  const handlePictureInPicture = useCallback(() => {
-    if (!tabId) return;
-    if (miniPlayerTabId === tabId) {
-      usePreviewMiniPlayerStore.getState().close(threadRef);
-      return;
-    }
-    usePreviewMiniPlayerStore.getState().open(threadRef, browserMiniPlayerSource(tabId));
-    useRightPanelStore.getState().close(threadRef);
-  }, [miniPlayerTabId, tabId, threadRef]);
 
   /**
    * The menu's actions. A server tab, streamed or rendered natively here, runs
@@ -1088,19 +1060,10 @@ export function PreviewView({
         onSubmit={(next) => void handleSubmitUrl(next)}
         onOpenInBrowser={tabId ? handleOpenInBrowser : undefined}
         // Capture drives the desktop webview, so server tabs leave it out.
-        // Annotation and floating work for both.
+        // Annotation works for both.
         onCapture={previewBridge && tabId && !isServerTab ? handleCapture : undefined}
         captureDisabled={!desktopOverlay || isUnreachable}
         recording={recordingRuntimeTabId !== null}
-        onPictureInPicture={
-          tabId && (isServerTab || previewBridge) ? handlePictureInPicture : undefined
-        }
-        pictureInPicture={miniPlayerTabId === tabId}
-        pictureInPictureDisabled={
-          isUnreachable ||
-          !previewTabHasPage(snapshot?.navStatus) ||
-          (!isServerTab && !desktopOverlay?.hasWebContents)
-        }
         onPickElement={
           tabId && isServerTab
             ? () => setServerPickTabId(serverPickActive ? null : runtimeTabId)
@@ -1214,7 +1177,7 @@ export function PreviewView({
                 onControl={(control) =>
                   setServerControl(control ? { tabId: runtimeTabId, control } : null)
                 }
-                onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId, "panel")}
+                onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId)}
                 pick={{
                   active: serverPickActive,
                   markers: serverPickMarkers,

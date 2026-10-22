@@ -585,7 +585,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.browserRecordingShowKeyPresses,
       settings.browserRecordingShowMousePresses,
       settings.browserLinkTarget,
-      settings.browserAutoShowFloatingPreview,
       settings.diffColorScheme,
       settings.chatWidth,
       settings.enableAgentBrowserAccess,
@@ -682,7 +681,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       browserRecordingShowKeyPresses: DEFAULT_UNIFIED_SETTINGS.browserRecordingShowKeyPresses,
       browserRecordingShowMousePresses: DEFAULT_UNIFIED_SETTINGS.browserRecordingShowMousePresses,
       browserLinkTarget: DEFAULT_UNIFIED_SETTINGS.browserLinkTarget,
-      browserAutoShowFloatingPreview: DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview,
       // Re-granted like any other default. The confirmation dialog lists it by
       // name, so a user restoring defaults is told the agent regains access
       // rather than discovering it later.

@@ -402,6 +402,16 @@ describe("ClientSettings removed window capture", () => {
   });
 });
 
+describe("ClientSettings removed floating preview", () => {
+  it("ignores the auto-show preference saved by older builds", () => {
+    const decoded = decodeClientSettings({ browserAutoShowFloatingPreview: false });
+    expect(decoded).not.toHaveProperty("browserAutoShowFloatingPreview");
+    expect(decodeClientSettingsPatch({ browserAutoShowFloatingPreview: true })).not.toHaveProperty(
+      "browserAutoShowFloatingPreview",
+    );
+  });
+});
+
 describe("ClientSettings proactive panels", () => {
   it("is opt-in and accepts client-local updates", () => {
     expect(decodeClientSettings({}).proactivePanelsEnabled).toBe(false);
