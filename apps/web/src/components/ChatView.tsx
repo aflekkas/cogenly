@@ -148,6 +148,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
 import {
   Fragment,
+  type ReactNode,
   type SetStateAction,
   Suspense,
   useCallback,
@@ -850,7 +851,16 @@ function isCompactCommandMessage(message: ChatMessage): boolean {
   return message.role === "user" && text === "/compact" && !message.attachments?.length;
 }
 
-type ChatViewProps =
+/**
+ * ChatView inside another page (the project home): no top bar, right panel or
+ * terminal drawer, since the host page owns those, and `renderEmptyState` in
+ * place of the timeline's placeholder while the thread has no messages.
+ */
+export interface ChatViewEmbedding {
+  readonly renderEmptyState?: (composer: { readonly fill: (prompt: string) => void }) => ReactNode;
+}
+
+type ChatViewProps = { embedded?: ChatViewEmbedding } & (
   | {
       environmentId: EnvironmentId;
       threadId: ThreadId;
@@ -866,7 +876,8 @@ type ChatViewProps =
       forceExpandedMobileComposer?: boolean;
       routeKind: "draft";
       draftId: DraftId;
-    };
+    }
+);
 
 function useLocalDispatchState(input: {
   activeThread: Thread | undefined;
@@ -1084,6 +1095,7 @@ export default function ChatView(props: ChatViewProps) {
     routeKind,
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
+    embedded,
   } = props;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
@@ -1725,7 +1737,7 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadCapabilities = threadCapabilities(activeThreadKind);
   // A thread kind without panel surfaces has no right panel: nothing below opens,
   // shows or toggles one for it. Chats offer the browser only.
-  const rightPanelSupported = hasRightPanel(activeThreadCapabilities);
+  const rightPanelSupported = hasRightPanel(activeThreadCapabilities) && !embedded;
   useEffect(() => {
     if (!rightPanelSupported) return;
     void preloadPreviewPanel();
@@ -3355,6 +3367,8 @@ export default function ChatView(props: ChatViewProps) {
     backgroundSubmissionPending,
     hasWorktreeSetupCard: worktreeSetup !== null,
   });
+  const embeddedEmptyStateVisible =
+    timelineEntries.length === 0 && !isWorking && !threadDetailLoading && !isDraftHeroState;
   const {
     attachTransitionGroup: attachDraftHeroTransitionGroup,
     attachComposerAnchor: attachDraftHeroComposerAnchor,
@@ -3755,6 +3769,10 @@ export default function ChatView(props: ChatViewProps) {
     composerRef.current?.focusAtEnd();
   };
   const focusComposerStable = useStableCallback(focusComposer);
+  const fillEmbeddedComposer = useStableCallback((prompt: string) => {
+    setComposerDraftPrompt(composerDraftTarget, prompt);
+    window.requestAnimationFrame(() => composerRef.current?.focusAtEnd());
+  });
   const canInterruptRunningThread =
     canOperateThread && deriveCanInterruptRunningThread(activeThread !== undefined, activeRuntime);
   const onInterrupt = async () => {
@@ -4143,7 +4161,8 @@ export default function ChatView(props: ChatViewProps) {
   const togglePreviewPanelStable = useStableCallback(togglePreviewPanel);
   // The bottom panel holds the agents' commands. Only these user actions open
   // it; an agent starting a command never does.
-  const bottomPanelAvailable = activeThreadCapabilities.terminal && activeProject !== null;
+  const bottomPanelAvailable =
+    activeThreadCapabilities.terminal && activeProject !== null && !embedded;
   const toggleBottomPanel = () => {
     if (!activeThreadRef || !bottomPanelAvailable) return;
     const opening =
@@ -9051,6 +9070,7 @@ export default function ChatView(props: ChatViewProps) {
           data-chat-header
           className={cn(
             "relative z-30",
+            embedded && "hidden",
             !isElectron && "pointer-events-none *:pointer-events-auto",
             isElectron
               ? cn(
@@ -9093,7 +9113,7 @@ export default function ChatView(props: ChatViewProps) {
         <div
           className="relative flex min-h-0 min-w-0 flex-1"
           data-panel-flip="center"
-          data-chat-header-overlap
+          data-chat-header-overlap={embedded ? undefined : true}
         >
           {/* Chat column */}
           <ThreadFindCanvas
@@ -9277,7 +9297,11 @@ export default function ChatView(props: ChatViewProps) {
                   onIsAtEndChange={onIsAtEndChangeStable}
                   onManualNavigation={cancelTimelineLiveFollowForUserNavigationStable}
                   cancelPositionRestoreRef={cancelPositionRestoreRef}
-                  hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
+                  hideEmptyPlaceholder={
+                    isDraftHeroState ||
+                    threadDetailLoading ||
+                    embedded?.renderEmptyState !== undefined
+                  }
                   loadingThread={threadDetailLoading && !isDraftHeroState}
                   topFadeEnabled={!hasTimelineTopBanner}
                   {...(paintOnlyDisplayedTimeline || threadHistoryControls === undefined
@@ -9285,6 +9309,16 @@ export default function ChatView(props: ChatViewProps) {
                     : { historyControls: threadHistoryControls })}
                 />
               </WorkHandoffMarkersProvider>
+              {embedded?.renderEmptyState ? (
+                <div
+                  className="absolute inset-x-0 top-0 z-10 flex flex-col overflow-y-auto transition-opacity duration-(--motion-duration-base) ease-standard data-hidden:pointer-events-none data-hidden:opacity-0"
+                  style={{ bottom: composerTimelineInset }}
+                  data-hidden={embeddedEmptyStateVisible ? undefined : ""}
+                  inert={!embeddedEmptyStateVisible}
+                >
+                  {embedded.renderEmptyState({ fill: fillEmbeddedComposer })}
+                </div>
+              ) : null}
 
               {/* Scroll-to-end button: shown once the reader leaves the live edge. */}
               <div
