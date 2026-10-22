@@ -4,8 +4,8 @@ Apply these settings to `aflekkas/cogenly` after reviewing the workflow changes.
 This checklist does not apply settings automatically.
 
 - [ ] Default branch is `main`; Actions are enabled and may use checkout,
-      setup-node, pnpm/action-setup, rust-toolchain, Swatinem/rust-cache,
-      github-script, and upload/download-artifact.
+      setup-node, cache, rust-toolchain, Swatinem/rust-cache, github-script,
+      and upload/download-artifact.
 - [ ] Protect `main`: require pull requests, require branches to be up to date,
       block force pushes/deletion, and require these exact check names from CI:
       **Lint**, **Typecheck**, **Test**. Run CI once so GitHub can offer the names.

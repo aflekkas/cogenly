@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+# Corepack fetches pnpm without asking; jobs have no terminal to answer.
+env:
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+
 # Serialize publication and keep queued runs.
 # Adapted from T3 Code's release queue.
 concurrency:
@@ -114,9 +118,18 @@ jobs:
         with:
           node-version-file: package.json
           package-manager-cache: false
-      - uses: pnpm/action-setup@v6
+      # Corepack (bundled with Node 24) fetches packageManager's pnpm directly;
+      # pnpm/action-setup's npm bootstrap has stalled for minutes.
+      - name: Set up pnpm
+        id: pnpm
+        run: |
+          corepack enable pnpm
+          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
         with:
-          cache: true
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-${{ runner.arch }}-
       - name: Install dependencies
         run: |
           echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"

@@ -52,11 +52,12 @@ electron-builder producing the zip and DMG in parallel. Both artifacts ship:
 the DMG is the first-install download and the zip is the update payload.
 
 - Every job sets up Node from `engines` in package.json and pnpm from
-  `packageManager`, then runs `pnpm install --frozen-lockfile` with the pnpm
-  store cached on the lockfile. `vp` is the lockfile's `vite-plus`, from
+  `packageManager` through Node's bundled Corepack, then runs
+  `pnpm install --frozen-lockfile` with the pnpm store cached on the lockfile. `vp` is the lockfile's `vite-plus`, from
   `node_modules/.bin`. CI and Release don't use `voidzero-dev/setup-vp`: its
   installer resolves the Vite+ CLI through npm's per-version metadata endpoint,
-  and that endpoint has failed for every version at once.
+  and that endpoint has failed for every version at once. `pnpm/action-setup`
+  isn't used either, because its npm-based bootstrap has stalled for minutes.
 - The resource monitor's crates and Cargo target dir are cached with
   `Swatinem/rust-cache`.
 - The build job checks out the commit shallowly, since packaging reads only
