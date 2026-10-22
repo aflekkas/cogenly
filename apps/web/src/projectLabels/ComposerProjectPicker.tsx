@@ -37,7 +37,6 @@ import {
 } from "./projectLabels.logic";
 import { composerProjectFolderId } from "./projectMeta.logic";
 import { HeroProjectSuffixText } from "./HeroProjectSuffix";
-import { ForkHint } from "./ForkHint";
 import { ProjectFolderIcon } from "./ProjectFolderMark";
 import { reportProjectFolderFailure, useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
@@ -332,11 +331,7 @@ export function ComposerProjectPicker(props: {
                     <ProjectFolderIcon color={option.color} className="size-4" />
                   </ComboboxItemIcon>
                   <span className="min-w-0 flex-1 truncate">{option.name}</span>
-                  {option.id === current?.label.id ? (
-                    <CheckIcon className="ml-auto" />
-                  ) : forks ? (
-                    <ForkHint />
-                  ) : null}
+                  {option.id === current?.label.id ? <CheckIcon className="ml-auto" /> : null}
                 </>
               ) : option.kind === "new" ? (
                 <>
