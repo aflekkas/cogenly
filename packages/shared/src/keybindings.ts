@@ -189,6 +189,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+p", command: "thread.pin", when: "!terminalFocus" },
   { key: "mod+alt+s", command: "thread.startWork", when: "!terminalFocus" },
   { key: "mod+z", command: "thread.undo", when: "!terminalFocus && !editableFocus" },
+  // Finder's "enclosing folder" is mod+up; mod+up and mod+shift+up edit text in the composer.
+  {
+    key: "mod+alt+arrowup",
+    command: "thread.openParent",
+    when: "!terminalFocus && !modelPickerOpen",
+  },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,

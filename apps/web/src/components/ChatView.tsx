@@ -269,6 +269,8 @@ import { Dialog } from "./ui/dialog";
 import { WizardPopup } from "./ui/wizard";
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
+import { ThreadLineageBreadcrumb } from "./chat/ThreadLineageBreadcrumb";
+import { resolveThreadOrigin } from "./chat/threadLineage.logic";
 import { isEditableFocused } from "../lib/editableFocus";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { resolveChatShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -276,7 +278,6 @@ import {
   AlarmClockIcon,
   CheckCircle2Icon,
   MessageCircleIcon,
-  MessageSquareIcon,
   PaperclipIcon,
   DownloadIcon,
   GitBranchIcon,
@@ -446,7 +447,6 @@ import { classifyThreadKind, hasRightPanel, threadCapabilities } from "../thread
 import {
   UnanchoredWorkHandoffMarkers,
   WorkHandoffMarkersProvider,
-  formatWorkHandoffSourceDetail,
 } from "./work/WorkHandoffMarkers";
 import { anchorWorkHandoffs } from "./work/work.logic";
 import { anchorWorkTasks, handoffsWithoutTasks } from "./work/workTask.logic";
@@ -5647,42 +5647,18 @@ export default function ChatView(props: ChatViewProps) {
       ),
     [threadStatusLine, workHandoffAnchors, workTaskAnchors],
   );
-  // Work started from a chat links back above its first message, as a subagent does.
-  const workSourceChatThreadId =
-    activeThreadShell?.source.workOrigin === "chat"
-      ? (activeThreadShell.source.sourceThreadId ?? null)
-      : null;
-  const workSourceChatRef = useMemo(
-    () =>
-      workSourceChatThreadId === null || activeThreadShell === null
-        ? null
-        : scopeThreadRef(activeThreadShell.environmentId, workSourceChatThreadId),
-    [activeThreadShell, workSourceChatThreadId],
-  );
-  const workSourceChat = useThreadShell(workSourceChatRef);
+  // The header breadcrumb's way back (see ThreadLineageBreadcrumb), and the
+  // target of the thread.openParent shortcut.
+  const activeThreadOrigin = activeThreadShell
+    ? resolveThreadOrigin(activeThreadShell.source)
+    : null;
   const workHandoffMessagesCarried =
-    workSourceChatRef === null
-      ? null
-      : (serverProjection?.contextHandoffs.find(
-          (handoff) => handoff.sourceThreadId === workSourceChatRef.threadId,
-        )?.messagesCarried ?? null);
-  const timelineParentLink = useMemo(
-    () =>
-      parentThreadLink ??
-      (workSourceChatRef === null
-        ? null
-        : {
-            threadId: workSourceChatRef.threadId,
-            title: formatWorkHandoffSourceDetail(
-              workSourceChat?.title ?? "Chat",
-              workHandoffMessagesCarried,
-            ),
-            label: "From chat",
-            icon: MessageSquareIcon,
-            actionLabel: "Open the chat this Work came from",
-          }),
-    [parentThreadLink, workHandoffMessagesCarried, workSourceChat?.title, workSourceChatRef],
-  );
+    activeThreadOrigin?.kind === "chat"
+      ? (serverProjection?.contextHandoffs.find(
+          (handoff) => handoff.sourceThreadId === activeThreadOrigin.threadId,
+        )?.messagesCarried ?? null)
+      : null;
+  const activeThreadOriginId = activeThreadOrigin?.threadId ?? null;
   const activeThreadHasCompactableConversation = serverVisibleTurnItems.some(
     ({ item }) =>
       item.type === "user_message" &&
@@ -6005,6 +5981,14 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "thread.openParent") {
+        if (activeThreadOriginId === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) onOpenRelatedThreadStable(activeThreadOriginId);
+        return;
+      }
+
       if (command === "thread.pin") {
         if (!canPinActiveThreadStable()) return;
         event.preventDefault();
@@ -6192,6 +6176,8 @@ export default function ChatView(props: ChatViewProps) {
     settleThread,
     supportsSettlement,
     copyActiveThreadReferenceStable,
+    activeThreadOriginId,
+    onOpenRelatedThreadStable,
     canPinActiveThreadStable,
     toggleActiveThreadPinStable,
     getShortcutContextStable,
@@ -9086,14 +9072,19 @@ export default function ChatView(props: ChatViewProps) {
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel && rightPanelSupported
             ? panelLayoutControls
             : null}
+          <ThreadLineageBreadcrumb
+            shell={isServerThread ? activeThreadShell : null}
+            messagesCarried={workHandoffMessagesCarried}
+            onOpenThread={onOpenRelatedThreadStable}
+          />
           {threadDetailsControl && !threadDetailsInTitlebarCluster ? (
             <span key="header" className="swap-motion ms-auto flex h-full shrink-0 items-center">
               {threadDetailsControl}
             </span>
           ) : null}
-          {/* No breadcrumb or visible title, as in the reference: the sidebar names
-              the thread, its right-click menu renames it, and the details card holds
-              its project tags. The title stays as the transcript's heading. */}
+          {/* No visible title for a top-level thread: the sidebar names it, its
+              right-click menu renames it, and the details card holds its project
+              tags. Only a child thread shows a breadcrumb back to its origin. */}
           <h2 className="sr-only">{activeThread.title}</h2>
         </header>
 
@@ -9241,7 +9232,6 @@ export default function ChatView(props: ChatViewProps) {
                   displayThreadKey={displayedTimelineKey}
                   paintOnly={paintOnlyDisplayedTimeline}
                   onOpenThread={onOpenRelatedThreadStable}
-                  parentThreadLink={paintOnlyDisplayedTimeline ? null : timelineParentLink}
                   onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRunStable}
                   onRollbackCheckpoint={onTimelineRollbackCheckpointStable}
                   supportsConversationRollback={

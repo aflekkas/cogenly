@@ -1,0 +1,162 @@
+import { useAtomValue } from "@effect/atom-react";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import type { ThreadId } from "@t3tools/contracts";
+import { ChevronLeftIcon, EllipsisIcon } from "lucide-react";
+import { useMemo } from "react";
+
+import { shortcutLabelForCommand } from "~/keybindings";
+import { primaryServerKeybindingsAtom } from "~/state/server";
+import { useThreadShell } from "~/state/entities";
+import { Button } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { formatWorkHandoffSourceDetail } from "../work/WorkHandoffMarkers";
+import {
+  buildThreadLineageChain,
+  collapseThreadBreadcrumb,
+  resolveThreadOrigin,
+  THREAD_ORIGIN_LABELS,
+  type ThreadLineageAncestor,
+} from "./threadLineage.logic";
+
+/** The thread a shell goes back to, scoped to its environment. */
+function originRef(shell: EnvironmentThreadShell | null) {
+  if (shell === null) return null;
+  const origin = resolveThreadOrigin(shell.source);
+  return origin === null ? null : scopeThreadRef(shell.environmentId, origin.threadId);
+}
+
+/**
+ * Ancestors of a thread, root first. One shell subscription per level, up to
+ * THREAD_LINEAGE_MAX_DEPTH, so the header re-renders only when a thread in its
+ * own chain changes.
+ */
+function useThreadLineageChain(shell: EnvironmentThreadShell | null) {
+  const first = useThreadShell(originRef(shell));
+  const second = useThreadShell(originRef(first));
+  const third = useThreadShell(originRef(second));
+  const fourth = useThreadShell(originRef(third));
+  return useMemo(() => {
+    if (shell === null) return [];
+    const known = [first, second, third, fourth];
+    return buildThreadLineageChain(
+      shell.source,
+      (threadId) => known.find((candidate) => candidate?.id === threadId) ?? null,
+    );
+  }, [shell, first, second, third, fourth]);
+}
+
+const SEGMENT_CLASS = "min-w-0 shrink [-webkit-app-region:no-drag]";
+
+/**
+ * `‹ Parent / This thread` in the chat header for subagents, forks, and Work
+ * started from a chat or an agent conversation. A deeper chain keeps its root
+ * and direct parent and folds the middle into a "…" menu. Renders nothing for
+ * a thread with no origin.
+ */
+export function ThreadLineageBreadcrumb(props: {
+  readonly shell: EnvironmentThreadShell | null;
+  /** For Work started from a chat: how many of the chat's messages the handoff carried. */
+  readonly messagesCarried?: number | null;
+  readonly onOpenThread: (threadId: ThreadId) => void;
+}) {
+  const ancestors = useThreadLineageChain(props.shell);
+  const segments = collapseThreadBreadcrumb(ancestors);
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  if (props.shell === null || segments === null) return null;
+  const shortcut = shortcutLabelForCommand(keybindings, "thread.openParent");
+  const leading = segments.root ?? segments.parent;
+
+  const segment = (ancestor: ThreadLineageAncestor, isParent: boolean) => {
+    const title = ancestor.title ?? "Untitled thread";
+    const kindLabel = THREAD_ORIGIN_LABELS[ancestor.kind];
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          delay={300}
+          render={
+            <Button
+              variant="ghost-muted"
+              size="xs"
+              className={SEGMENT_CLASS}
+              aria-label={isParent ? `${kindLabel}: ${title}` : title}
+              onClick={() => props.onOpenThread(ancestor.threadId)}
+            />
+          }
+        >
+          {ancestor === leading ? <ChevronLeftIcon aria-hidden /> : null}
+          {isParent ? (
+            <span className="shrink-0 opacity-70 max-sm:hidden">{kindLabel} ·</span>
+          ) : null}
+          <span className="min-w-0 truncate">{title}</span>
+        </TooltipTrigger>
+        <TooltipPopup side="bottom">
+          {isParent
+            ? `${kindLabel}: ${
+                ancestor.kind === "chat"
+                  ? formatWorkHandoffSourceDetail(title, props.messagesCarried)
+                  : title
+              }`
+            : title}
+          {isParent && shortcut ? ` (${shortcut})` : null}
+        </TooltipPopup>
+      </Tooltip>
+    );
+  };
+  const separator = (
+    <span aria-hidden className="shrink-0 px-0.5 text-muted-foreground/50 select-none">
+      /
+    </span>
+  );
+
+  return (
+    <nav
+      // Keyed by thread: a navigation mounts a fresh trail that fades in place.
+      key={`${props.shell.environmentId}:${props.shell.id}`}
+      aria-label="Thread lineage"
+      className="swap-motion flex min-w-0 max-w-[min(40rem,calc(100%-10rem))] items-center text-xs"
+    >
+      {segments.root ? (
+        <>
+          <span className="flex min-w-0 max-w-48 shrink-[2]">{segment(segments.root, false)}</span>
+          {separator}
+        </>
+      ) : null}
+      {segments.hidden.length > 0 ? (
+        <>
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  variant="ghost-muted"
+                  size="icon-xs"
+                  className="[-webkit-app-region:no-drag]"
+                  aria-label={`${segments.hidden.length} more in this thread's lineage`}
+                />
+              }
+            >
+              <EllipsisIcon aria-hidden />
+            </MenuTrigger>
+            <MenuPopup align="start">
+              {segments.hidden.map((ancestor) => (
+                <MenuItem
+                  key={ancestor.threadId}
+                  onClick={() => props.onOpenThread(ancestor.threadId)}
+                >
+                  <span className="max-w-72 truncate">{ancestor.title ?? "Untitled thread"}</span>
+                </MenuItem>
+              ))}
+            </MenuPopup>
+          </Menu>
+          {separator}
+        </>
+      ) : null}
+      {segment(segments.parent, true)}
+      {separator}
+      <span aria-current="page" className="min-w-0 shrink-[2] truncate px-1 text-foreground">
+        {props.shell.title}
+      </span>
+    </nav>
+  );
+}

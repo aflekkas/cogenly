@@ -146,6 +146,9 @@ terminals so native undo keeps working there.
 
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
 through the pages you have visited, like a browser's back and forward buttons.
+`thread.openParent` (`mod+alt+arrowup`) opens the thread the current one came from: the
+agent that started a subagent, the thread a fork was made from, or the chat a Work
+session was started from. Back returns you to the child.
 
 `chat.new` may ask you to choose a project when there is more than one; while the
 sidebar shows **Chats**, it starts a chat without a project instead.

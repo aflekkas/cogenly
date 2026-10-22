@@ -1409,6 +1409,23 @@ describe("composer and thread shortcuts", () => {
     );
   });
 
+  it("binds mod+alt+up to the parent thread, leaving the open model picker its own arrows", () => {
+    const up = event({ key: "ArrowUp", code: "ArrowUp", altKey: true, metaKey: true });
+    assert.strictEqual(
+      resolveShortcutCommand(up, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false, modelPickerOpen: false },
+      }),
+      "thread.openParent",
+    );
+    assert.isNull(
+      resolveShortcutCommand(up, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: true },
+      }),
+    );
+  });
+
   const altEffortBindings = compileResolvedKeybindingsConfig([
     { key: "mod+alt+e", command: "composer.effort", when: "!terminalFocus" },
   ]);

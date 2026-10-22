@@ -352,6 +352,7 @@ export function commandLabel(command: KeybindingCommand): string {
   // The mode id stays `tasks`; users know it as Work.
   if (command === "sidebar.mode.tasks") return "Sidebar: Mode: Work";
   if (command === "view.reopenClosed") return "Reopen Closed Tab";
+  if (command === "thread.openParent") return "Thread: Go to Parent";
   // Kept under its old id so stored bindings still apply; it only opens an agent's settings now.
   if (command === "threadPanel.toggle") return "Agent Settings: Open";
   if (command === "preview.focusUrl") return "Preview: Focus URL";

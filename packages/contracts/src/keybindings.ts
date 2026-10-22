@@ -45,6 +45,7 @@ const THREAD_KEYBINDING_COMMANDS = [
   "thread.startWork",
   "thread.pin",
   "thread.undo",
+  "thread.openParent",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];

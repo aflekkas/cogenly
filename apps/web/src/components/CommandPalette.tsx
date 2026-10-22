@@ -183,6 +183,7 @@ import {
   newProjectId,
 } from "../lib/utils";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
+import { resolveThreadOrigin, THREAD_ORIGIN_LABELS } from "./chat/threadLineage.logic";
 import { useAvailableSettingsSearchItems } from "./settings/useAvailableSettingsSearchItems";
 import {
   applyWslEnvironmentConfiguration,
@@ -2219,6 +2220,31 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  const activeThreadOrigin = activeThread ? resolveThreadOrigin(activeThread.source) : null;
+  if (activeThread !== null && activeThreadOrigin !== null) {
+    const originThreadRef = scopeThreadRef(activeThread.environmentId, activeThreadOrigin.threadId);
+    const originTitle = threads.find(
+      (thread) =>
+        thread.environmentId === originThreadRef.environmentId &&
+        thread.id === originThreadRef.threadId,
+    )?.title;
+    actionItems.push({
+      kind: "action",
+      value: "action:open-parent-thread",
+      searchTerms: ["parent", "back", "up", "origin", "subagent", "fork", "source chat"],
+      title: "Go to parent thread",
+      description: `${THREAD_ORIGIN_LABELS[activeThreadOrigin.kind]}${originTitle ? ` · ${originTitle}` : ""}`,
+      icon: <CornerLeftUpIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "thread.openParent",
+      run: async () => {
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(originThreadRef),
+        });
+      },
+    });
+  }
+
   if (referenceThreadRef !== null && activeCapabilities?.startWork === true && canStartWork) {
     const threadRef = referenceThreadRef;
     actionItems.push({
@@ -3464,7 +3490,7 @@ function OpenCommandPaletteDialog(props: {
       platform: navigator.platform,
       context: { modelPickerOpen: false },
     });
-    if (threadJumpIndexFromCommand(command ?? "") !== null) {
+    if (threadJumpIndexFromCommand(command ?? "") !== null || command === "thread.openParent") {
       event.preventDefault();
       event.stopPropagation();
       const matchingItem = displayedGroups

@@ -541,14 +541,6 @@ interface MessagesTimelineProps {
   /** The rows are a held snapshot of the previous thread while the next one loads. */
   paintOnly?: boolean;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
-  /** The thread this one came from, shown above its first message. Defaults to a subagent's parent. */
-  parentThreadLink?: {
-    readonly threadId: ThreadId;
-    readonly title: string;
-    readonly label?: string;
-    readonly icon?: LucideIcon;
-    readonly actionLabel?: string;
-  } | null;
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
@@ -667,7 +659,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
   displayThreadKey,
   paintOnly = false,
   onOpenThread,
-  parentThreadLink = null,
   onForkFromRun,
   onRollbackCheckpoint,
   supportsConversationRollback,
@@ -1605,37 +1596,17 @@ const ConversationTimeline = memo(function ConversationTimeline({
       latestRun?.runId,
     ],
   );
-  const listHeader = useMemo(() => {
-    const leadingContent =
-      parentThreadLink === null ? (
-        topFadeEnabled ? (
-          TIMELINE_LIST_FADE_HEADER
-        ) : (
-          TIMELINE_LIST_HEADER
-        )
-      ) : (
-        <div className="messages-timeline-row-frame">
-          <div className="chat-content-lane pt-1 sm:pt-2">
-            <TimelineSystemDivider
-              label={parentThreadLink.label ?? "Subagent of"}
-              detail={parentThreadLink.title}
-              icon={parentThreadLink.icon ?? BotIcon}
-              actionLabel={parentThreadLink.actionLabel ?? "Open parent thread"}
-              onAction={() => onOpenThread(parentThreadLink.threadId)}
-            />
-          </div>
-        </div>
-      );
-    return (
+  const listHeader = useMemo(
+    () => (
       <>
         {/* Room for the chat header, which floats over the scroller's top. */}
         <div aria-hidden className="h-(--chat-header-overlap)" />
-        {parentThreadLink === null ? leadingContent : null}
+        {topFadeEnabled ? TIMELINE_LIST_FADE_HEADER : TIMELINE_LIST_HEADER}
         {historyControls ? <TimelineHistoryControl {...historyControls} /> : null}
-        {parentThreadLink !== null ? leadingContent : null}
       </>
-    );
-  }, [historyControls, onOpenThread, parentThreadLink, topFadeEnabled]);
+    ),
+    [historyControls, topFadeEnabled],
+  );
 
   const canvas = useChatCanvas();
   const registerTimeline = canvas?.registerTimeline;
@@ -1768,7 +1739,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
   if (
     rows.length === 0 &&
     !isWorking &&
-    parentThreadLink === null &&
     historyControls === undefined &&
     // A status line (settled, snoozed) still needs the list, whose footer renders it.
     footer === null
