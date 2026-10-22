@@ -11,15 +11,17 @@
  * steps through them with `background-position` / `mask-position`:
  *
  * - face-<tone>: the resting mosaic, one frame.
- * - lit-<tone>: every cell one tone brighter, one frame. Hover and the working
- *   shimmer paint it through the masks below.
- * - exit-<tone>: the tone leaving, EXIT_TICKS frames. Blocks step out bottom
- *   first, in the splash's order: one frame at the deep in-between tone, then
+ * - sweep-<tone>: light moving down through the mosaic, SWEEP_FRAMES frames.
+ *   A band of brighter tones (SWEEP_PROFILE, in tones above rest) travels top
+ *   to bottom; its leading edge reaches each block on the block's tick, in
+ *   the splash's order (height plus a Bayer dither and a little noise), so
+ *   both edges are ragged. Only the band's cells are painted; the face shows
+ *   through elsewhere. The last frame is empty, the band gone. Hover plays it
+ *   once; `data-working` loops it with a rest on that empty frame.
+ * - exit-<tone>: the tone leaving, EXIT_TICKS frames. Blocks step out top
+ *   first, in the same order: one frame at the deep in-between tone, then
  *   gone (transparent), so the tone beneath shows through.
  * - exit-mask: the same order as alpha only, for the flat idle tile leaving.
- * - hover-mask: HOVER_TICKS + 1 frames revealing the lit layer in that order.
- * - shimmer-mask: SHIMMER_TICKS frames, each a different sparse set of blocks,
- *   the splash's "one tone off for a moment" while a run is live.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -28,23 +30,28 @@ import * as NodeURL from "node:url";
 const COLS = 8;
 const ROWS = 8;
 const EXIT_TICKS = 6;
-const HOVER_TICKS = 3;
-const SHIMMER_TICKS = 12;
-const SHIMMER_SHARE = 0.1;
+// Ticks for the sweep's leading edge to cross the grid, and the band behind
+// it: how many tones above rest a block shows on the ticks after its own.
+const SWEEP_TICKS = 10;
+const SWEEP_PROFILE = [1, 2, 2, 1];
+const SWEEP_FRAMES = SWEEP_TICKS + SWEEP_PROFILE.length;
 // Height of the dissolving band as a share of the grid (the splash uses 0.3 of
 // the window; a little wider here so six ticks don't read as plain rows).
 const BAND = 0.45;
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
-// Six-step ramps, lit (index 0) through deep (index 5), plus the in-between
-// tone a block shows on its exit tick. Brand is the splash's own ember ramp.
+// Seven-step ramps, hot (index 0) through deep (index 6), plus the in-between
+// tone a block shows on its exit tick. A block at rest sits two steps below
+// the top, so the sweep's band has room to brighten it. Brand is the splash's
+// own ember ramp with a hotter step above it.
+const REST = 2;
 const RAMPS = {
   brand: {
-    ramp: ["#ff9a5c", "#ff8040", "#fa6c34", "#f3592a", "#eb4824", "#de3a1e"],
+    ramp: ["#ffb27a", "#ff9a5c", "#ff8040", "#fa6c34", "#f3592a", "#eb4824", "#de3a1e"],
     deep: "#c4301a",
   },
   danger: {
-    ramp: ["#ff8f84", "#ff7366", "#f9625a", "#f0514e", "#e44243", "#d4353a"],
+    ramp: ["#ffa89e", "#ff8f84", "#ff7366", "#f9625a", "#f0514e", "#e44243", "#d4353a"],
     deep: "#b82a30",
   },
 } as const;
@@ -67,7 +74,9 @@ interface Block {
   readonly size: 1 | 2;
   readonly tone: number;
   readonly order: number;
+  /** The exit tick this block leaves on, and the sweep tick the band reaches it. */
   tick: number;
+  sweepTick: number;
 }
 
 function buildBlocks(random: () => number): Block[] {
@@ -94,16 +103,17 @@ function buildBlocks(random: () => number): Block[] {
         size,
         // Bands by height with a jittered quantization, so band edges are ragged.
         tone: Math.max(0, Math.min(4, Math.round(t * 4 + (random() - 0.5) * 1.1))),
-        // Bottom first, spread over a band by the Bayer matrix plus a little noise.
-        order: 1 - t + BAND * (0.8 * ((BAYER[(y & 3) * 4 + (x & 3)]! + 0.5) / 16) + 0.2 * random()),
+        // Top first, spread over a band by the Bayer matrix plus a little noise.
+        order: t + BAND * (0.8 * ((BAYER[(y & 3) * 4 + (x & 3)]! + 0.5) / 16) + 0.2 * random()),
         tick: 0,
+        sweepTick: 0,
       });
     }
   }
   return blocks;
 }
 
-// Share of blocks cleared by time f (0..1): the splash's trapezoidal rate.
+// Share of blocks reached by time f (0..1): the splash's trapezoidal rate.
 function clearedBy(f: number) {
   const rate = 1 / (1 - 0.1 - 0.075);
   if (f < 0.2) return (rate * f * f) / 0.4;
@@ -122,13 +132,13 @@ function timeForShare(u: number) {
   return (low + high) / 2;
 }
 
-function assignTicks(blocks: Block[]) {
+// Spreads the blocks over `ticks` ticks in their order, along that rate.
+function assignTicks(blocks: Block[], ticks: number, set: (block: Block, tick: number) => void) {
   const ordered = blocks.slice().sort((a, b) => a.order - b.order);
   ordered.forEach((block, rank) => {
     const at = timeForShare((rank + 0.5) / ordered.length);
-    block.tick = Math.min(EXIT_TICKS - 1, Math.floor(at * EXIT_TICKS));
+    set(block, Math.min(ticks - 1, Math.floor(at * ticks)));
   });
-  return ordered;
 }
 
 type Paint = (block: Block, frame: number) => string | null;
@@ -168,43 +178,30 @@ function sprite(blocks: readonly Block[], frames: number, paint: Paint) {
 
 const random = mulberry32(12);
 const blocks = buildBlocks(random);
-const ordered = assignTicks(blocks);
-const rank = new Map(ordered.map((block, index) => [block, index]));
-
-const shimmerFrames: Set<Block>[] = [];
-for (let frame = 0; frame < SHIMMER_TICKS; frame++) {
-  const previous = shimmerFrames[frame - 1];
-  const picked = new Set<Block>();
-  const count = Math.round(blocks.length * SHIMMER_SHARE);
-  while (picked.size < count) {
-    const block = blocks[Math.floor(random() * blocks.length)]!;
-    if (!previous?.has(block)) picked.add(block);
-  }
-  shimmerFrames.push(picked);
-}
+assignTicks(blocks, EXIT_TICKS, (block, tick) => {
+  block.tick = tick;
+});
+assignTicks(blocks, SWEEP_TICKS, (block, tick) => {
+  block.sweepTick = tick;
+});
 
 const lines = ["/* Generated by scripts/pixelButtonSprites.ts; edit that, not this. */", ":root {"];
 for (const [tone, { ramp, deep }] of Object.entries(RAMPS)) {
-  lines.push(`  --pixel-face-${tone}: ${sprite(blocks, 1, (block) => ramp[block.tone + 1]!)};`);
-  lines.push(`  --pixel-lit-${tone}: ${sprite(blocks, 1, (block) => ramp[block.tone]!)};`);
+  lines.push(`  --pixel-face-${tone}: ${sprite(blocks, 1, (block) => ramp[block.tone + REST]!)};`);
+  lines.push(
+    `  --pixel-sweep-${tone}: ${sprite(blocks, SWEEP_FRAMES, (block, frame) => {
+      const lift = SWEEP_PROFILE[frame - block.sweepTick];
+      return lift === undefined ? null : ramp[block.tone + REST - lift]!;
+    })};`,
+  );
   lines.push(
     `  --pixel-exit-${tone}: ${sprite(blocks, EXIT_TICKS, (block, frame) =>
-      block.tick < frame ? null : block.tick === frame ? deep : ramp[block.tone + 1]!,
+      block.tick < frame ? null : block.tick === frame ? deep : ramp[block.tone + REST]!,
     )};`,
   );
 }
 lines.push(
   `  --pixel-exit-mask: ${sprite(blocks, EXIT_TICKS, (block, frame) => (block.tick < frame ? null : "%23fff"))};`,
-);
-lines.push(
-  `  --pixel-hover-mask: ${sprite(blocks, HOVER_TICKS + 1, (block, frame) =>
-    rank.get(block)! < (frame / HOVER_TICKS) * blocks.length ? "%23fff" : null,
-  )};`,
-);
-lines.push(
-  `  --pixel-shimmer-mask: ${sprite(blocks, SHIMMER_TICKS, (block, frame) =>
-    shimmerFrames[frame]!.has(block) ? "%23fff" : null,
-  )};`,
 );
 lines.push("}", "");
 

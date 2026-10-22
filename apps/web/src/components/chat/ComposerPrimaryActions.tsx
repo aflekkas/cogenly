@@ -138,7 +138,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           <button
             type="button"
             // The red pixel mosaic (pixelButton.css); it only shows while a
-            // run is live, so the cells always shimmer.
+            // run is live, so the light always sweeps.
             className="pixel-button pixel-button-danger flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-tile text-white shadow-xs shadow-black/24 active:shadow-none sm:size-7 [&_svg]:pointer-events-none"
             data-working=""
             {...pointerFocusProps}
@@ -326,7 +326,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         "flex h-9 w-9 items-center justify-center rounded-tile text-white shadow-xs enabled:cursor-pointer hover:scale-105 active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
         // The boot splash's pixel mosaic (pixelButton.css): ember to send,
         // red to stop, a flat grey tile with a dark arrow while there is
-        // nothing to send. The cells shimmer while a run is live.
+        // nothing to send. Light sweeps down the cells while a run is live.
         "pixel-button enabled:shadow-black/24",
         showStop && "pixel-button-danger",
       )}

@@ -6,7 +6,7 @@ export type PixelTone = "brand" | "danger" | "idle";
 /**
  * Plays the pixel button's tone change. Render it inside any `.pixel-button`
  * and pass the tone the button shows now: when that changes, the old tone
- * steps out over the new one (the splash's rising exit, 300ms) and the layer
+ * steps out over the new one (the splash's exit, top first, 300ms) and the layer
  * removes itself. A change that lands mid-exit restarts the exit from the
  * tone the user last saw at rest, so a flicker through a third tone (send,
  * busy, stop) still reads as one change. The first render and a `resetKey`
