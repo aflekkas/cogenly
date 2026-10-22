@@ -58,3 +58,15 @@ export class ServerCliExecutableImportError extends Schema.TaggedError<ServerCli
     return `${this.bundlePath} imports file-backed packages that a single-executable cannot resolve: ${this.specifiers.join(", ")}. Load them through createRequire instead.`;
   }
 }
+
+export class ServerCliExecutableUnstagedRequireError extends Schema.TaggedError<ServerCliExecutableUnstagedRequireError>()(
+  "ServerCliExecutableUnstagedRequireError",
+  {
+    bundlePath: Schema.String,
+    packages: Schema.Array(Schema.String),
+  },
+) {
+  override get message(): string {
+    return `${this.bundlePath} loads ${this.packages.join(", ")} through createRequire, but the CLI archive does not stage them. Add them to CLI_RUNTIME_EXTERNAL_PREFIXES in scripts/lib/cli-external-packages.ts.`;
+  }
+}

@@ -10,7 +10,11 @@ import { Command, Flag } from "effect/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { DEVELOPMENT_ICON_OVERRIDES } from "../../../scripts/lib/brand-assets.ts";
-import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-executable-imports.ts";
+import {
+  findCreateRequiredPackages,
+  findEsmImportsOfExternalPackages,
+} from "../../../scripts/lib/cli-executable-imports.ts";
+import { isRuntimeExternalCliDependency } from "../../../scripts/lib/cli-external-packages.ts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import {
   ServerCliBuildAssetMissingError,
@@ -18,6 +22,7 @@ import {
   ServerCliDevelopmentIconSourceMissingError,
   ServerCliDevelopmentIconTargetMissingError,
   ServerCliExecutableImportError,
+  ServerCliExecutableUnstagedRequireError,
 } from "./cliErrors.ts";
 import { publishPlatformsThenLauncher } from "./publishOrder.ts";
 
@@ -148,9 +153,21 @@ const buildExeCmd = Command.make(
       // passes the bundler and `node dist/bin.mjs`, then throws inside the
       // binary, so read the emitted module graph rather than trusting config.
       const bundlePath = path.join(serverDir, "dist-exe/bin.mjs");
-      const specifiers = findEsmImportsOfExternalPackages(yield* fs.readFileString(bundlePath));
+      const bundle = yield* fs.readFileString(bundlePath);
+      const specifiers = findEsmImportsOfExternalPackages(bundle);
       if (specifiers.length > 0) {
         return yield* new ServerCliExecutableImportError({ bundlePath, specifiers });
+      }
+      // A package reached through createRequire loads from the node_modules
+      // beside the executable, which holds only the runtime externals.
+      const unstaged = findCreateRequiredPackages(bundle).filter(
+        (name) => !isRuntimeExternalCliDependency(name),
+      );
+      if (unstaged.length > 0) {
+        return yield* new ServerCliExecutableUnstagedRequireError({
+          bundlePath,
+          packages: unstaged,
+        });
       }
       yield* Effect.log(
         "[cli] Built dist-exe/t3 (expects client/, resource-monitor/, and the runtime-external node_modules beside it; scripts/build-cli-archive.ts assembles that tree)",

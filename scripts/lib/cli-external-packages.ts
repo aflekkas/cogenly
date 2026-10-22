@@ -36,6 +36,10 @@ export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   "@clerk/electron-passkeys",
   "node-gyp-build",
   "node-addon-api",
+  // Loaded through createRequire only on runtimes whose fetch negotiates h2
+  // (Node 26, so the CLI executable), to pin fetch to HTTP/1.1. See
+  // apps/server/src/outboundHttp.ts.
+  "undici",
   // ws's optional accelerators. Nothing in this repo declares them, so they are
   // not in the staged production install and the packaged app does not ship
   // them either way -- ws wraps the require in try/catch and falls back to its
