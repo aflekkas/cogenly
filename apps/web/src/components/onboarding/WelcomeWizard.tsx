@@ -32,11 +32,24 @@ import {
   MonitorIcon,
   TerminalIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
 import { useCompleteOnboarding } from "../../onboarding/firstRun";
+import { isLocalEnvironmentDisabled } from "../../localEnvironment";
+import {
+  detectT3ImportForOnboarding,
+  onboardingStageIndex,
+  onboardingStages,
+  onboardingStepAtStage,
+  resolveLocalOnboardingSetup,
+  resolveOnboardingImportPath,
+  resolveOnboardingStartStep,
+  type OnboardingStep,
+  type OnboardingT3Detection,
+} from "../../onboarding/wizardFlow.logic";
+import { t3ImportRpc } from "../../rpc/t3Import";
 import {
   groupOnboardingProjects,
   partitionOnboardingProjects,
@@ -82,7 +95,8 @@ import { TerminalViewport } from "../TerminalViewport";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
 import { presentSavedCloudEnvironmentConnection } from "../cloud/cloudEnvironmentConnectionPresentation";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
-import { Alert, AlertDescription } from "../ui/alert";
+import { T3ImportFlowView, useT3ImportFlow } from "../settings/T3ImportSettings";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button } from "../ui/button";
 import { CommandBlock } from "../CommandBlock";
 import { Checkbox } from "../ui/checkbox";
@@ -96,21 +110,23 @@ import { Dialog } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
+import { useUiStateStore } from "../../uiStateStore";
 
 /**
  * First-run welcome wizard. Rendered over the workspace at `/welcome` on a
- * fresh install (no completed-onboarding flag, empty workspace). Flow per the
- * onboarding overhaul spec: connection choice → sign-in/pair (remote paths) →
- * managed Codex setup or an inline CLI terminal → project import → main screen.
- * Every step past the connection gate is skippable; the whole wizard is
- * re-runnable by clearing the flag.
+ * fresh install (no completed-onboarding flag, empty workspace).
+ *
+ * Served by a local server, setup goes straight to this computer: agents →
+ * import → main screen. More computers are added later in Settings →
+ * Connections. The hosted app first connects a computer (Cogenly Connect or a
+ * pairing link). The import step is Import from T3 Code when T3 Code is on the
+ * computer, otherwise the Claude Code and Codex session import. Every step
+ * past the connection gate is skippable; visiting /welcome reruns it.
  */
 
-type WizardStep = "connection" | "agents" | "import";
 const NO_ENVIRONMENTS: readonly EnvironmentId[] = [];
 
 const AGENT_ONBOARDING_THREAD_ID = ThreadId.make("onboarding-agent-setup");
-const ONBOARDING_STAGES = ["Connect", "Agents", "Repositories"] as const;
 const SCAN_LIMIT_MESSAGE = "Scan limit reached. Some repositories or conversations may be missing.";
 
 export function WelcomeWizard({
@@ -124,7 +140,17 @@ export function WelcomeWizard({
   readonly onDone: (projectRef?: ScopedProjectRef) => void | Promise<void>;
 }) {
   const completeOnboarding = useCompleteOnboarding();
-  const [step, setStep] = useState<WizardStep>(resumeEnvironmentId ? "agents" : "connection");
+  const [step, setStep] = useState<OnboardingStep>(() =>
+    resolveOnboardingStartStep({
+      resumeEnvironmentId,
+      localAvailable,
+      localEnvironmentDisabled: isLocalEnvironmentDisabled(),
+    }),
+  );
+  // Local setup has no connection stage unless this computer fails to connect.
+  const [includeConnection, setIncludeConnection] = useState(step !== "local");
+  const [sessionScansWanted, setSessionScansWanted] = useState(false);
+  const showSessionImport = useCallback(() => setSessionScansWanted(true), []);
   const { environments } = useEnvironments();
   const [selection, setSelection] = useState<ReadonlySet<EnvironmentId> | null>(null);
   const autoSelectedComputers = useRef(new Set<EnvironmentId>());
@@ -156,9 +182,11 @@ export function WelcomeWizard({
   }, [environments]);
   const selectedIds =
     selection ?? new Set(primaryEnvironment ? [primaryEnvironment.environmentId] : []);
-  const scans = useProjectScans(step === "import" ? setupIds : NO_ENVIRONMENTS);
+  // The session scan runs only once the import step shows the session import.
+  const scanSessions = step === "import" && sessionScansWanted;
+  const scans = useProjectScans(scanSessions ? setupIds : NO_ENVIRONMENTS);
   const isLoadingProjects =
-    step === "import" &&
+    scanSessions &&
     scans.every((scan) => scan.data === null) &&
     scans.some((scan) => scan.isPending);
   const startSetup = (ids: readonly EnvironmentId[]) => {
@@ -166,7 +194,26 @@ export function WelcomeWizard({
     setSetupIds(ids);
     setStep("agents");
   };
-  const stageIndex = step === "agents" ? 1 : step === "import" ? 2 : 0;
+  // This computer is already registered as the primary environment; set it up
+  // as soon as its connection is live, without asking.
+  const localSetup = step === "local" ? resolveLocalOnboardingSetup(primaryEnvironment) : null;
+  if (localSetup?.kind === "setup") {
+    setSetupIds(localSetup.environmentIds);
+    setStep("agents");
+  } else if (localSetup?.kind === "choose") {
+    setIncludeConnection(true);
+    setStep("connection");
+  }
+  const stages = onboardingStages(includeConnection);
+  const stageIndex = onboardingStageIndex(step, includeConnection);
+  // T3 Code is looked for on this computer when it is being set up.
+  const t3EnvironmentId =
+    primaryEnvironment && setupIds.includes(primaryEnvironment.environmentId)
+      ? primaryEnvironment.environmentId
+      : (setupIds[0] ?? null);
+  const t3MachineLabel =
+    environments.find((environment) => environment.environmentId === t3EnvironmentId)?.label ??
+    "this computer";
   const finish = useCallback(
     (projectRef?: ScopedProjectRef, importWarning?: string, importedThreadCount = 0) => {
       if (finishingPromiseRef.current !== null) return finishingPromiseRef.current;
@@ -235,18 +282,26 @@ export function WelcomeWizard({
           }
         >
           <WizardSteps
-            steps={ONBOARDING_STAGES}
+            steps={stages}
             currentStep={stageIndex}
             isStepDisabled={(index) => isImporting || index >= stageIndex}
             onStepChange={(index) => {
               if (isImporting || index > stageIndex) return;
-              setStep(index === 0 ? "connection" : "agents");
+              setStep(onboardingStepAtStage(index, includeConnection));
             }}
           />
         </WizardHeader>
 
         <WizardPanel holdHeight={isLoadingProjects}>
-          {step === "connection" ? (
+          {step === "local" ? (
+            <LocalConnectStep
+              label={primaryEnvironment?.label ?? null}
+              onChooseComputer={() => {
+                setIncludeConnection(true);
+                setStep("connection");
+              }}
+            />
+          ) : step === "connection" ? (
             <ConnectionStep
               expandPairingInitially={!localAvailable && !hasCloudPublicConfig()}
               selectedIds={selectedIds}
@@ -270,11 +325,17 @@ export function WelcomeWizard({
           ) : step === "agents" ? (
             <AgentsStep environmentIds={setupIds} onContinue={() => setStep("import")} />
           ) : (
-            <ImportStep
+            <ImportStage
+              t3EnvironmentId={t3EnvironmentId}
+              t3MachineLabel={t3MachineLabel}
               scans={scans}
               isImporting={isImporting}
               setIsImporting={setIsImporting}
+              onSessionImportShown={showSessionImport}
               onDone={finish}
+              footerNote={
+                includeConnection ? null : "Add more computers anytime in Settings → Connections."
+              }
             />
           )}
         </WizardPanel>
@@ -1169,8 +1230,13 @@ function ImportStep({
   isImporting,
   setIsImporting,
   onDone,
+  notice,
+  footerNote,
 }: {
   readonly scans: ReturnType<typeof useProjectScans>;
+  /** Shown under the heading, such as the duplicate warning when T3 Code was found. */
+  readonly notice?: ReactNode;
+  readonly footerNote?: ReactNode;
   readonly isImporting: boolean;
   readonly setIsImporting: (value: boolean) => void;
   readonly onDone: (
@@ -1409,6 +1475,7 @@ function ImportStep({
     return (
       <div className="flex h-full min-h-40 flex-col">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Your repositories</h1>
+        {notice}
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-6">
           <Spinner size="lg" tone="muted" />
           <p className="text-center text-sm text-muted-foreground">
@@ -1429,6 +1496,7 @@ function ImportStep({
       title="Import your repositories"
       description="Import repositories and conversations from Claude Code and Codex on your selected computers."
     >
+      {notice}
       {candidates.length > 0 ? (
         <div className="mt-5 flex items-center justify-between gap-3 text-xs text-muted-foreground">
           <span role="status">
@@ -1524,6 +1592,7 @@ function ImportStep({
             : `Import ${selected.length} ${selected.length === 1 ? "repository" : "repositories"}`}
         </Button>
       </div>
+      <StepFootnote>{footerNote}</StepFootnote>
     </StepShell>
   );
 }
@@ -1783,7 +1852,218 @@ function ImportRowMeta({
   );
 }
 
+// ── Step 1′: this computer ───────────────────────────────────
+
+/** Shown only while this computer's own connection settles. */
+function LocalConnectStep({
+  label,
+  onChooseComputer,
+}: {
+  readonly label: string | null;
+  readonly onChooseComputer: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-40 flex-col">
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+        Setting up {label ?? "this computer"}
+      </h1>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 py-6">
+        <Spinner size="lg" tone="muted" />
+        <p className="text-center text-sm text-muted-foreground">Connecting to this computer…</p>
+      </div>
+      <div className="flex justify-end">
+        <Button variant="ghost-muted" onClick={onChooseComputer}>
+          Use another computer
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── Step 3: import, T3 Code or sessions ──────────────────────
+
+type OnboardingDone = (
+  projectRef?: ScopedProjectRef,
+  importWarning?: string,
+  importedThreadCount?: number,
+) => Promise<boolean>;
+
+interface ImportStageProps {
+  readonly t3EnvironmentId: EnvironmentId | null;
+  readonly t3MachineLabel: string;
+  readonly scans: ReturnType<typeof useProjectScans>;
+  readonly isImporting: boolean;
+  readonly setIsImporting: (value: boolean) => void;
+  readonly onSessionImportShown: () => void;
+  readonly onDone: OnboardingDone;
+  readonly footerNote: ReactNode;
+}
+
+/**
+ * Import from T3 Code when T3 Code is on the computer, else the Claude Code
+ * and Codex session import. Both read the same conversations, so only one is
+ * offered up front; see `resolveOnboardingImportPath`.
+ */
+function ImportStage(props: ImportStageProps) {
+  const canImportT3 = useAtomValue(t3ImportRpc.scan.permissionAtom(props.t3EnvironmentId));
+  if (props.t3EnvironmentId === null || !canImportT3) {
+    return <SessionImportPath {...props} t3Found={false} onUseT3={undefined} />;
+  }
+  return <T3AwareImportStage {...props} t3EnvironmentId={props.t3EnvironmentId} />;
+}
+
+function T3AwareImportStage(props: ImportStageProps & { readonly t3EnvironmentId: EnvironmentId }) {
+  const { t3EnvironmentId, t3MachineLabel, setIsImporting, onDone, footerNote } = props;
+  const flow = useT3ImportFlow(t3EnvironmentId);
+  const setSidebarMode = useUiStateStore((store) => store.setSidebarMode);
+  const detected = detectT3ImportForOnboarding({
+    canImport: true,
+    status: flow.status,
+    statusError: flow.statusError,
+  });
+  // Decide once, so a status that changes later (T3 Code quit or reopened)
+  // never swaps the step under the user.
+  const [decided, setDecided] = useState<OnboardingT3Detection | null>(null);
+  if (decided === null && detected !== "checking") setDecided(detected);
+  const [choice, setChoice] = useState<"sessions" | null>(null);
+  const path = resolveOnboardingImportPath(decided ?? "checking", choice);
+
+  // A running check or import pauses the progress bar, like the session import.
+  useEffect(() => {
+    if (path === "t3") setIsImporting(flow.busy);
+  }, [flow.busy, path, setIsImporting]);
+
+  if (path === "sessions") {
+    return (
+      <SessionImportPath
+        {...props}
+        t3Found={decided === "found"}
+        onUseT3={decided === "found" ? () => setChoice(null) : undefined}
+      />
+    );
+  }
+  if (path === "checking") {
+    return (
+      <div className="flex h-full min-h-40 flex-col">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Your projects</h1>
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 py-6">
+          <Spinner size="lg" tone="muted" />
+          <p className="text-center text-sm text-muted-foreground">Looking for T3 Code…</p>
+        </div>
+      </div>
+    );
+  }
+
+  const { view } = flow;
+  const done = view.kind === "done";
+  const finishAfterT3Import = () => {
+    if (view.kind !== "done") return;
+    // Imported T3 threads are repository work, listed under Work.
+    setSidebarMode("tasks");
+    void onDone(undefined, undefined, view.result.importedThreads);
+  };
+  return (
+    <StepShell
+      title="Bring your projects and chats over from T3 Code"
+      description={`T3 Code is on ${t3MachineLabel}. Import its projects with their full history and pick up right where you left off.`}
+    >
+      <ScrollArea scrollFade className="mt-5 h-auto max-h-[min(32rem,55dvh)]">
+        <div className="flex flex-col gap-6 pr-3">
+          <T3ImportFlowView flow={flow} presentation="onboarding" />
+        </div>
+      </ScrollArea>
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+        {done || view.kind === "importing" ? (
+          <span />
+        ) : (
+          <Button
+            variant="ghost-muted"
+            size="sm"
+            disabled={flow.busy}
+            onClick={() => setChoice("sessions")}
+          >
+            Or import raw Claude Code and Codex sessions
+          </Button>
+        )}
+        {done ? (
+          <Button autoFocus onClick={finishAfterT3Import}>
+            Continue
+            <ArrowRightIcon className="size-3.5" />
+          </Button>
+        ) : (
+          <Button
+            variant="ghost-muted"
+            disabled={view.kind === "scanning"}
+            onClick={() => void onDone()}
+          >
+            {view.kind === "importing" ? "Continue while it imports" : "Skip for now"}
+          </Button>
+        )}
+      </div>
+      <StepFootnote>
+        {done ? (
+          footerNote
+        ) : (
+          <>You can import from T3 Code later in Settings → Import. {footerNote}</>
+        )}
+      </StepFootnote>
+    </StepShell>
+  );
+}
+
+function SessionImportPath({
+  scans,
+  isImporting,
+  setIsImporting,
+  onDone,
+  onSessionImportShown,
+  footerNote,
+  t3Found,
+  onUseT3,
+}: ImportStageProps & {
+  readonly t3Found: boolean;
+  readonly onUseT3: (() => void) | undefined;
+}) {
+  useEffect(() => {
+    onSessionImportShown();
+  }, [onSessionImportShown]);
+  return (
+    <ImportStep
+      scans={scans}
+      isImporting={isImporting}
+      setIsImporting={setIsImporting}
+      onDone={onDone}
+      footerNote={footerNote}
+      notice={
+        t3Found ? (
+          <div className="swap-motion mt-4">
+            <Alert variant="warning" controlAlignment="first-line">
+              <AlertTitle>This can duplicate your T3 Code chats.</AlertTitle>
+              <AlertDescription>
+                Conversations you had in T3 Code come in again as separate, shorter copies. Use this
+                only for sessions you ran outside T3 Code.
+              </AlertDescription>
+              {onUseT3 ? (
+                <AlertAction>
+                  <Button size="xs" variant="outline" disabled={isImporting} onClick={onUseT3}>
+                    Import from T3 Code
+                  </Button>
+                </AlertAction>
+              ) : null}
+            </Alert>
+          </div>
+        ) : null
+      }
+    />
+  );
+}
+
 // ── Shared bits ──────────────────────────────────────────────
+
+function StepFootnote({ children }: { readonly children?: ReactNode }) {
+  if (children === null || children === undefined || children === false) return null;
+  return <p className="mt-3 text-right text-xs text-muted-foreground">{children}</p>;
+}
 
 function StepShell({
   title,
@@ -1792,7 +2072,7 @@ function StepShell({
 }: {
   readonly title: string;
   readonly description?: string;
-  readonly children?: React.ReactNode;
+  readonly children?: ReactNode;
 }) {
   return (
     <>
