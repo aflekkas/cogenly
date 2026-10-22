@@ -26,6 +26,14 @@ import {
 import { useComposerMenuProps } from "./composerEventScope";
 import { shortcutLabelForCommand } from "../../keybindings";
 
+/**
+ * The trigger's label and chevron frames. A narrow composer collapses them with
+ * grid-cols-[0fr], opacity-0 and a negative start margin that takes back the gap;
+ * all three ease together. Reduced motion keeps the fade and snaps the width.
+ */
+const COLLAPSIBLE_FRAME_CLASS =
+  "grid min-w-0 grid-cols-[1fr] transition-[grid-template-columns,opacity,margin-inline-start] duration-(--motion-duration-base) ease-out motion-reduce:transition-opacity";
+
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   environmentId: EnvironmentId | null;
   /**
@@ -207,7 +215,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <PopoverTrigger
         render={
           <ComposerControl
-            aria-label={props.triggerAriaLabel ?? allModelNames}
+            aria-label={props.triggerAriaLabel ?? allModelNames ?? triggerModelLabel}
             size={size}
             data-chat-provider-model-picker="true"
             className={cn(
@@ -221,65 +229,85 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           />
         }
       >
-        <span
-          className={cn("flex min-w-0 flex-1 items-center", size === "xs" ? "gap-1" : "gap-1.5")}
-        >
-          {selectedEntries && props.triggerLabel === undefined ? (
-            <span className="flex shrink-0 items-center -space-x-1" aria-hidden="true">
-              {selectedEntries
-                .slice(0, 3)
-                .map((selection) =>
-                  selection.entry ? (
-                    <ProviderInstanceIcon
-                      key={`${selection.instanceId}:${selection.model}`}
-                      driverKind={selection.entry.driverKind}
-                      displayName={selection.entry.displayName}
-                      accentColor={selection.entry.accentColor}
-                      showBadge={shouldShowInstanceBadge(selection.entry, props.instanceEntries)}
-                      indicatorBackground="var(--chat-composer-glass-surface,var(--background))"
-                      className="size-4 rounded-full bg-(--chat-composer-glass-surface,var(--background)) ring-2 ring-(--chat-composer-glass-surface,var(--background))"
-                      iconClassName="size-4"
-                    />
-                  ) : null,
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                className={cn(
+                  "flex min-w-0 flex-1 items-center",
+                  size === "xs" ? "gap-1" : "gap-1.5",
                 )}
-              {selectedEntries.length > 3 ? (
-                <span className="relative z-30 flex size-4 items-center justify-center rounded-full bg-(--chat-composer-glass-surface,var(--background)) text-3xs ring-2 ring-(--chat-composer-glass-surface,var(--background))">
-                  +{selectedEntries.length - 3}
-                </span>
-              ) : null}
-            </span>
-          ) : activeEntry && props.triggerLabel === undefined ? (
-            <ProviderInstanceIcon
-              driverKind={activeEntry.driverKind}
-              displayName={activeEntry.displayName}
-              accentColor={activeEntry.accentColor}
-              showBadge={showInstanceBadge}
-              className="size-4"
-              iconClassName={cn("size-4", props.activeProviderIconClassName)}
-              indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
-            />
-          ) : null}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span
-                  className="min-w-0 flex-1 overflow-hidden truncate"
-                  data-chat-provider-model-picker-label="true"
-                />
-              }
+              />
+            }
+          >
+            {selectedEntries && props.triggerLabel === undefined ? (
+              <span className="flex shrink-0 items-center -space-x-1" aria-hidden="true">
+                {selectedEntries
+                  .slice(0, 3)
+                  .map((selection) =>
+                    selection.entry ? (
+                      <ProviderInstanceIcon
+                        key={`${selection.instanceId}:${selection.model}`}
+                        driverKind={selection.entry.driverKind}
+                        displayName={selection.entry.displayName}
+                        accentColor={selection.entry.accentColor}
+                        showBadge={shouldShowInstanceBadge(selection.entry, props.instanceEntries)}
+                        indicatorBackground="var(--chat-composer-glass-surface,var(--background))"
+                        className="size-4 rounded-full bg-(--chat-composer-glass-surface,var(--background)) ring-2 ring-(--chat-composer-glass-surface,var(--background))"
+                        iconClassName="size-4"
+                      />
+                    ) : null,
+                  )}
+                {selectedEntries.length > 3 ? (
+                  <span className="relative z-30 flex size-4 items-center justify-center rounded-full bg-(--chat-composer-glass-surface,var(--background)) text-3xs ring-2 ring-(--chat-composer-glass-surface,var(--background))">
+                    +{selectedEntries.length - 3}
+                  </span>
+                ) : null}
+              </span>
+            ) : activeEntry && props.triggerLabel === undefined ? (
+              <ProviderInstanceIcon
+                driverKind={activeEntry.driverKind}
+                displayName={activeEntry.displayName}
+                accentColor={activeEntry.accentColor}
+                showBadge={showInstanceBadge}
+                className="size-4"
+                iconClassName={cn("size-4", props.activeProviderIconClassName)}
+                indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
+              />
+            ) : null}
+            {/* A one-column grid so a container can collapse the label to icon-only
+              (grid-cols-[0fr]) and the width eases instead of snapping. */}
+            <span
+              className={COLLAPSIBLE_FRAME_CLASS}
+              data-chat-provider-model-picker-label-frame="true"
             >
-              {props.triggerLabel ?? multipleLabel ?? triggerTitle}
-            </TooltipTrigger>
-            <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
-          </Tooltip>
-          {selectedModel?.isUnavailable && !selectedEntries && props.triggerLabel === undefined ? (
-            <Badge variant="outline" size="sm">
-              Unavailable
-            </Badge>
-          ) : null}
-        </span>
-        <span aria-hidden="true" className="flex items-center">
-          <ComposerControlChevron size={size} />
+              <span
+                // flex-1 is inert in the grid; measurement reads flex-none as the
+                // resting strip's deliberate collapse.
+                className="min-w-0 flex-1 overflow-hidden truncate"
+                data-chat-provider-model-picker-label="true"
+              >
+                {props.triggerLabel ?? multipleLabel ?? triggerTitle}
+              </span>
+            </span>
+            {selectedModel?.isUnavailable &&
+            !selectedEntries &&
+            props.triggerLabel === undefined ? (
+              <Badge variant="outline" size="sm">
+                Unavailable
+              </Badge>
+            ) : null}
+          </TooltipTrigger>
+          <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
+        </Tooltip>
+        <span
+          aria-hidden="true"
+          className={COLLAPSIBLE_FRAME_CLASS}
+          data-chat-provider-model-picker-chevron="true"
+        >
+          <span className="flex min-w-0 items-center overflow-hidden">
+            <ComposerControlChevron size={size} />
+          </span>
         </span>
       </PopoverTrigger>
       <PopoverPopup

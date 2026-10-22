@@ -24,9 +24,13 @@ function providerModelPickerNaturalWidth(picker: HTMLElement): number {
   if (renderedWidth === 0) return 0;
   const style = getComputedStyle(picker);
   const label = picker.querySelector<HTMLElement>('[data-chat-provider-model-picker-label="true"]');
-  // Narrow composers deliberately collapse the label with w-0 and flex-none.
+  // Narrow composers deliberately collapse the label: the resting strip with w-0
+  // and flex-none, the expanded footer by fading its frame out at grid-cols-[0fr].
   // A flexible label squeezed to zero still needs its natural width recovered.
-  const labelIsCollapsed = label?.clientWidth === 0 && getComputedStyle(label).flexGrow === "0";
+  const labelIsCollapsed =
+    label?.clientWidth === 0 &&
+    (getComputedStyle(label).flexGrow === "0" ||
+      (label.parentElement !== null && getComputedStyle(label.parentElement).opacity === "0"));
   const hiddenLabelWidth =
     label && !labelIsCollapsed ? Math.max(0, label.scrollWidth - label.clientWidth) : 0;
   const maxWidth = Number.parseFloat(style.maxWidth);

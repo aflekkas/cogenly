@@ -4584,7 +4584,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 !showInlineRestingControls &&
                   "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
               )
-            : "min-w-13"
+            : // A narrow composer shows the provider icon alone rather than a clipped
+              // name (the tooltip and aria-label keep the full name); the chevron
+              // stays until even that does not fit.
+              "min-w-13 @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:-ms-1.5 @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:grid-cols-[0fr] @max-xs/composer-surface:[&_[data-chat-provider-model-picker-label-frame]]:opacity-0 @max-[12rem]/composer-surface:min-w-0 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:-ms-1.5 @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:grid-cols-[0fr] @max-[12rem]/composer-surface:[&_[data-chat-provider-model-picker-chevron]]:opacity-0"
         }
         open={isComposerModelPickerOpen}
         instanceIndicatorBackground={
@@ -6445,9 +6448,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-controls="left"
                   data-chat-composer-footer-controls="true"
                   className={cn(
-                    // The 4px bleed keeps focus rings clear of the scroll clip; the first
-                    // control's box starts at the prompt's text inset.
-                    "relative -m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+                    // The 4px bleed keeps focus rings clear of the scroll clip. The start
+                    // also pulls in by a control's px-2.5, so the first control's icon sits
+                    // on the prompt's text inset while its hover background bleeds left.
+                    "relative -my-1 -ms-3.5 -me-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                   )}
                 >
                   {composerControlsCollapsed ? null : composerControls}

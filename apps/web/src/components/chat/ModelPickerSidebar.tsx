@@ -44,8 +44,8 @@ const BADGE_BASE_CLASS =
 const NEW_BADGE_CLASS = `${BADGE_BASE_CLASS} text-update-foreground `;
 
 /**
- * Rail tooltips open to the right, over the list's leading edge, so they wait
- * out a short hover before showing. The rail's own provider overrides the
+ * Rail tooltips open to the left, outside the popover, so they never cover the
+ * model list; they still wait out a short hover before showing. The rail's own provider overrides the
  * picker's zero-delay one; the timeout keeps the group warm so moving between
  * icons switches the one shared tooltip at once instead of re-opening it.
  */
@@ -301,8 +301,9 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
         {({ payload }) =>
           payload ? (
             <TooltipPopup
-              side="right"
-              sideOffset={6}
+              side="left"
+              // Clears the rail's p-1 inset and the popover border.
+              sideOffset={10}
               align="center"
               className={RAIL_TOOLTIP_POPUP_CLASS}
             >
