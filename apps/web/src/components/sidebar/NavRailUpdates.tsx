@@ -2,10 +2,14 @@
  * The rail's Updates button, below Settings. It is always there: quiet at
  * rest, with a blue dot when this app, a server or a provider CLI (Claude,
  * Codex, Muse Code) on any machine has an update. Hovering or focusing it
- * previews the popover; clicking pins it open. The popover lists this app,
- * each server and each provider CLI with its version and status, shows each
- * update's progress in its row, and updates one or all of them through the
- * same actions as the sidebar update button.
+ * previews the popover; clicking pins it open.
+ *
+ * The popover leads with this app: its version and one status line for
+ * everything, with the app's update as the only filled button. What's new
+ * sits under it, then each machine's server and provider CLIs, quiet unless
+ * one needs an update, and a footer with when it was all last checked and
+ * the action to update everything. The release history opens in the same
+ * frame.
  */
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -20,11 +24,12 @@ import {
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { Atom } from "effect/reactivity";
-import { CheckIcon, DownloadIcon } from "lucide-react";
+import { CheckIcon, DownloadIcon, LaptopMinimalIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { APP_VERSION } from "~/branding";
 import { isElectron } from "~/env";
+import { useNowMinute } from "~/hooks/useNowMinute";
 import { cn } from "~/lib/utils";
 import { observeVisibleAnimation } from "~/lib/visibleAnimation";
 import { useCogenlyReleases } from "~/state/cogenlyReleases";
@@ -37,30 +42,43 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import {
   canCheckForUpdate,
   getDesktopUpdateDownloadedVersion,
+  getDesktopUpdateReleaseHistoryUrl,
   resolveDesktopUpdateButtonAction,
   shouldShowLocalDesktopUpdateControl,
 } from "../desktopUpdate.logic";
 import { useServerUpdate } from "../ServerUpdateAction";
 import { Button } from "../ui/button";
-import { Separator } from "../ui/separator";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { RefreshIcon } from "../ui/refresh-icon";
+import { Separator } from "../ui/separator";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { ReleaseHistoryView, UpdateReleaseNotes } from "./NavRailReleaseNotes";
+import {
+  GitHubLink,
+  ReleaseHistoryView,
+  type ReleaseTone,
+  WhatsNewNotes,
+} from "./NavRailReleaseNotes";
 import {
   collectProviderUpdateRows,
   describeAppRow,
   describeDesktopUpdateRow,
   describeServerUpdateRow,
-  describeUpdatesSummary,
+  describeUpdatesFooter,
+  describeUpdatesHeroStatus,
+  formatCheckedAgo,
+  latestCheckedAt,
   type ProviderUpdateRowView,
   rowNeedsUpdate,
-  UPDATE_ROW_STATUS_LABELS,
-  type UpdateRowStatus,
+  type UpdatesHeroTone,
   type UpdateRowView,
 } from "./navRailUpdates.logic";
-import { releaseHistory, releasesBetween } from "./releaseNotes.logic";
+import {
+  type CogenlyRelease,
+  compareReleaseVersions,
+  releaseHistory,
+  releasesBetween,
+} from "./releaseNotes.logic";
 import {
   checkForLocalUpdate,
   confirmAndInstallLocalUpdate,
@@ -72,26 +90,106 @@ import { UpdateEverythingDialog } from "./UpdateEverythingDialog";
 import { postponeUpdateRestart, useUpdateEverythingRun } from "./updateEverythingRun";
 import { useUpdateEverything } from "./useUpdateEverything";
 
-/** How long a finished row shows its check before settling on "Up to date". */
+/** How long a finished row shows its check before settling back to quiet. */
 const UPDATED_CHECK_MS = 2_400;
 /** Hover preview: wait this long before opening, and this long after leaving. */
 const HOVER_OPEN_DELAY_MS = 150;
 const HOVER_CLOSE_DELAY_MS = 200;
 
-function formatVersion(version: string): string {
-  return /^\d/.test(version) ? `v${version}` : version;
+/** "v0.1.2 → v0.1.3" with the incoming version in the foreground; `v` for the app only. */
+function VersionPair({
+  current,
+  next,
+  prefix,
+  className,
+}: {
+  current: string | null;
+  next: string | null;
+  prefix: boolean;
+  className?: string;
+}) {
+  const format = (version: string) => (prefix && /^\d/.test(version) ? `v${version}` : version);
+  const from = current ?? next;
+  if (!from) return null;
+  const to = current && next && current !== next ? next : null;
+  return (
+    <span className={cn("text-xs text-muted-foreground tabular-nums", className)}>
+      {format(from)}
+      {to ? (
+        <>
+          <span aria-label=" to " className="mx-0.75 opacity-70">
+            →
+          </span>
+          <span className="text-foreground">{format(to)}</span>
+        </>
+      ) : null}
+    </span>
+  );
 }
 
-function versionLabel(row: UpdateRowView): string | null {
-  const { currentVersion, latestVersion } = row;
-  if (currentVersion && latestVersion && currentVersion !== latestVersion) {
-    return `${formatVersion(currentVersion)} → ${formatVersion(latestVersion)}`;
-  }
-  const version = currentVersion ?? latestVersion;
-  return version ? formatVersion(version) : null;
+/** A 2px progress line laid over the bottom of its row, so it takes no room. */
+function ProgressLine({
+  percent,
+  label,
+  className,
+}: {
+  percent: number | null;
+  label: string;
+  className: string;
+}) {
+  return (
+    <div
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      {...(percent === null ? {} : { "aria-valuenow": Math.floor(percent) })}
+      className={cn(
+        "reveal-motion pointer-events-none absolute h-0.5 overflow-hidden rounded-full bg-muted",
+        className,
+      )}
+    >
+      {percent === null ? (
+        <div
+          ref={observeVisibleAnimation}
+          className="update-progress-indeterminate absolute inset-y-0 left-0 w-1/3 rounded-full bg-foreground/80"
+        />
+      ) : (
+        <div
+          className="h-full origin-left rounded-full bg-foreground/80 transition-transform duration-(--motion-duration-base) ease-standard motion-reduce:transition-none"
+          style={{ transform: `scaleX(${Math.max(0.02, percent / 100)})` }}
+        />
+      )}
+    </div>
+  );
 }
 
-function RowIcon({ row, prominent }: { row: UpdateRowView; prominent: boolean }) {
+function HeroStatus({ tone, label }: { tone: UpdatesHeroTone; label: string }) {
+  return (
+    // Keyed by state so each new status fades in place instead of snapping.
+    <span
+      key={`${tone}:${label}`}
+      aria-live="polite"
+      className={cn(
+        "swap-motion flex min-w-0 items-center gap-1.25 text-xs tabular-nums",
+        tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
+      )}
+    >
+      {tone === "current" ? (
+        <CheckIcon
+          aria-hidden
+          className="size-3 shrink-0 text-success-foreground"
+          strokeWidth={2.5}
+        />
+      ) : tone === "pending" ? (
+        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-info" />
+      ) : null}
+      <span className="line-clamp-2 break-words">{label}</span>
+    </span>
+  );
+}
+
+function RowIcon({ row }: { row: UpdateRowView }) {
   if ("driver" in row) {
     const provider = row as ProviderUpdateRowView;
     return (
@@ -109,133 +207,88 @@ function RowIcon({ row, prominent }: { row: UpdateRowView; prominent: boolean })
       alt=""
       aria-hidden
       draggable={false}
-      className={cn("shrink-0 rounded-tile", prominent ? "size-6" : "size-5")}
+      className="size-5 shrink-0 rounded-tile"
     />
   );
 }
 
-/** A thin bar under an updating row: the real percentage when the updater
-    reports one, else a sweeping segment. */
-function RowProgress({
-  percent,
-  label,
-  prominent,
-}: {
-  percent: number | null;
-  label: string;
-  prominent: boolean;
-}) {
-  return (
-    <div
-      role="progressbar"
-      aria-label={label}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      {...(percent === null ? {} : { "aria-valuenow": Math.floor(percent) })}
-      className={cn(
-        "reveal-motion relative mb-1.5 h-0.5 overflow-hidden rounded-full bg-muted",
-        prominent ? "ml-8.5" : "ml-7.5",
-      )}
-    >
-      {percent === null ? (
-        <div
-          ref={observeVisibleAnimation}
-          className="update-progress-indeterminate absolute inset-y-0 left-0 w-1/3 rounded-full bg-info"
-        />
-      ) : (
-        <div
-          className="h-full origin-left rounded-full bg-info transition-transform duration-(--motion-duration-base) ease-standard motion-reduce:transition-none"
-          style={{ transform: `scaleX(${Math.max(0.02, percent / 100)})` }}
-        />
-      )}
-    </div>
-  );
-}
-
-type RowDisplayStatus = UpdateRowStatus | "updated";
-
-const STATUS_TONE: Record<RowDisplayStatus, string> = {
-  current: "text-muted-foreground",
-  available: "text-info-foreground",
-  updating: "text-muted-foreground",
-  failed: "text-destructive-foreground",
-  updated: "text-success-foreground",
-};
-
-function RowStatus({ status, label }: { status: RowDisplayStatus; label: string }) {
-  return (
-    // Keyed by state so each new status rises into place instead of snapping.
-    <span
-      key={`${status}:${label}`}
-      className={cn(
-        "swap-motion flex items-center gap-1 text-xs whitespace-nowrap tabular-nums",
-        STATUS_TONE[status],
-      )}
-    >
-      {status === "updating" ? (
-        <Spinner size="xs" tone="muted" aria-hidden role={undefined} />
-      ) : null}
-      {status === "updated" ? <CheckIcon aria-hidden className="size-3.5" /> : null}
-      {label}
-    </span>
-  );
-}
-
-function UpdateRow({
+/**
+ * A server or provider row: name and version, nothing else while it is up to
+ * date (a faint check on hover). One that needs an update shows the version
+ * it moves to and its button; one updating, a spinner and a progress line.
+ */
+function ListRow({
   row,
   updated,
   action,
-  prominent = false,
 }: {
   row: UpdateRowView;
   /** Just finished updating: shows a check for a moment. */
   updated: boolean;
-  action?: ReactNode;
-  /** The app's own row: a touch larger than the provider rows below it. */
-  prominent?: boolean;
+  action: ReactNode;
 }) {
-  const versions = versionLabel(row);
-  const status: RowDisplayStatus = updated && row.status === "current" ? "updated" : row.status;
-  const label =
-    status === "updated"
-      ? "Updated"
-      : status === "updating"
-        ? (row.detail ?? UPDATE_ROW_STATUS_LABELS.updating)
-        : UPDATE_ROW_STATUS_LABELS[row.status];
+  const justUpdated = updated && row.status === "current";
   const failure = row.status === "failed" ? row.detail : null;
+  const trail = justUpdated ? (
+    <span
+      key="updated"
+      className="swap-motion flex items-center gap-1 text-xs text-success-foreground"
+    >
+      <CheckIcon aria-hidden className="size-3" strokeWidth={2.5} />
+      Updated
+    </span>
+  ) : row.status === "updating" ? (
+    <span
+      key="updating"
+      className="swap-motion flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground tabular-nums"
+    >
+      <Spinner size="xs" tone="muted" aria-hidden role={undefined} />
+      {row.detail ?? "Updating"}
+    </span>
+  ) : action ? (
+    <span key={`action:${row.status}`} className="swap-motion flex">
+      {action}
+    </span>
+  ) : row.status === "failed" ? (
+    <span key="failed" className="swap-motion text-xs text-destructive-foreground">
+      Failed
+    </span>
+  ) : (
+    <CheckIcon
+      key="current"
+      aria-hidden
+      className="size-3 text-muted-foreground opacity-0 transition-opacity duration-(--motion-duration-fast) ease-standard group-hover/row:opacity-55"
+      strokeWidth={2.5}
+    />
+  );
   return (
     <div className="reveal-motion flex flex-col">
-      <div className={cn("flex items-center gap-2.5", prominent ? "h-11" : "h-9")}>
-        <RowIcon row={row} prominent={prominent} />
-        <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span className={cn("shrink-0 font-medium", prominent ? "text-base" : "text-sm")}>
-            {row.name}
-          </span>
-          {versions ? (
-            <span className="min-w-0 truncate text-xs text-muted-foreground tabular-nums">
-              {versions}
-            </span>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <RowStatus status={status} label={label} />
-          {action}
-        </div>
-      </div>
-      {row.status === "updating" ? (
-        <RowProgress
-          percent={row.percent ?? null}
-          label={`Updating ${row.name}`}
-          prominent={prominent}
+      <div
+        className={cn(
+          "group/row relative -mx-1.5 flex h-7.5 items-center gap-2 rounded-md px-1.5 transition-colors duration-(--motion-duration-fast) ease-standard hover:bg-accent",
+          rowNeedsUpdate(row) && "bg-muted/48",
+        )}
+      >
+        <RowIcon row={row} />
+        <span className="shrink-0 text-menu font-medium">{row.name}</span>
+        <VersionPair
+          current={row.currentVersion}
+          next={row.latestVersion}
+          prefix={false}
+          className="min-w-0 truncate"
         />
-      ) : null}
+        <span className="flex-1" />
+        <span className="flex shrink-0 items-center">{trail}</span>
+        {row.status === "updating" ? (
+          <ProgressLine
+            percent={row.percent ?? null}
+            label={`Updating ${row.name}`}
+            className="right-1.5 bottom-0 left-8.5"
+          />
+        ) : null}
+      </div>
       {failure ? (
-        <p
-          className={cn(
-            "reveal-motion pb-1.5 text-xs break-words text-muted-foreground",
-            prominent ? "pl-8.5" : "pl-7.5",
-          )}
-        >
+        <p className="reveal-motion pt-0.5 pb-1.5 pl-7 text-xs break-words text-muted-foreground">
           {failure}
         </p>
       ) : null}
@@ -249,6 +302,38 @@ function RowButton({ label, onClick }: { label: string; onClick: () => void }) {
       {label}
     </Button>
   );
+}
+
+function RefreshButton({ checking, onCheck }: { checking: boolean; onCheck: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-xs"
+            variant="ghost-muted"
+            aria-label={checking ? "Checking for updates" : "Check for updates"}
+            aria-busy={checking}
+            disabled={checking}
+            onClick={onCheck}
+          >
+            <RefreshIcon refreshing={checking} />
+          </Button>
+        }
+      />
+      <TooltipPopup side="top">
+        {checking ? "Checking for updates…" : "Check for updates"}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** The hero's one action: the app's update. Only "Update & restart" and friends are filled. */
+interface HeroAction {
+  readonly label: string;
+  readonly filled: boolean;
+  /** Null while the update it starts is already running. */
+  readonly onClick: (() => void) | null;
 }
 
 interface MachineGroup {
@@ -452,14 +537,11 @@ export function NavRailUpdates({
   const updateCount = tracked.filter(({ row }) => rowNeedsUpdate(row)).length;
   const updateLabel = `${updateCount} ${updateCount === 1 ? "update" : "updates"} available`;
   const isChecking = checking || desktopState?.status === "checking";
-  const summary = describeUpdatesSummary({
-    rows: tracked.map(({ row }) => row),
-    batchSize,
-    checking: isChecking,
-  });
+  const anyUpdating = tracked.some(({ row }) => row.status === "updating");
 
   // This app's restart countdown can be postponed, so it stays in view.
   const countdown = run?.phase === "countdown";
+  const restarting = countdown && run?.restartAt != null;
   const popoverOpen = open || countdown;
 
   const releasesSnapshot = useCogenlyReleases(popoverOpen);
@@ -470,6 +552,39 @@ export function NavRailUpdates({
     appRow.latestVersion && appRow.status !== "current"
       ? releasesBetween(releases, installedVersion, appRow.latestVersion)
       : [];
+  const installedHistory = releaseHistory(releases, installedVersion);
+  const history = [
+    ...incomingReleases,
+    ...installedHistory.filter(
+      (release) => !incomingReleases.some((incoming) => incoming.version === release.version),
+    ),
+  ];
+  const notesReleases =
+    incomingReleases.length > 0 ? incomingReleases : installedHistory.slice(0, 1);
+  const releaseTone = (release: CogenlyRelease): ReleaseTone => {
+    if (incomingReleases.includes(release)) return "available";
+    if (release.version === installedVersion) return "installed";
+    if (installedVersion && compareReleaseVersions(release.version, installedVersion) < 0) {
+      return "older";
+    }
+    return "plain";
+  };
+
+  // "Checked 2 minutes ago": the newest check of this app and every provider.
+  // A minute clock, so the label keeps counting while the popover is open.
+  const nowMinute = useNowMinute();
+  const checkedAt = latestCheckedAt([
+    desktopState?.checkedAt,
+    ...connected.flatMap((environment) =>
+      (environment.serverConfig?.providers ?? []).map(
+        (provider) => provider.versionAdvisory?.checkedAt ?? provider.checkedAt,
+      ),
+    ),
+  ]);
+  const checkedAgo =
+    checkedAt === null
+      ? null
+      : formatCheckedAgo(checkedAt, Math.max(Date.parse(`${nowMinute}:00Z`), checkedAt));
 
   const closePopover = () => {
     setOpen(false);
@@ -540,9 +655,11 @@ export function NavRailUpdates({
     setChecking(false);
   };
 
+  // "Update all" earns its place beside the hero's and the rows' own buttons
+  // only when there is more than one update to take.
   const canUpdateAll =
     run === null &&
-    updateCount > 0 &&
+    updateCount > 1 &&
     ((everything.hasUpdates && !isDownloading) || desktopAction !== "none");
   const updateAll = () => {
     if (everything.hasUpdates && !isDownloading) {
@@ -568,10 +685,11 @@ export function NavRailUpdates({
     );
   };
 
+  const serverTarget = (group: MachineGroup) =>
+    everything.servers.find((server) => server.environmentId === group.environmentId);
+
   const serverAction = (group: MachineGroup, row: UpdateRowView) => {
-    const target = everything.servers.find(
-      (server) => server.environmentId === group.environmentId,
-    );
+    const target = serverTarget(group);
     if (!target || (row.status !== "available" && row.status !== "failed")) return null;
     return (
       <RowButton
@@ -581,43 +699,74 @@ export function NavRailUpdates({
     );
   };
 
-  const desktopRowAction = countdown ? (
-    <RowButton label="Later" onClick={postponeUpdateRestart} />
-  ) : shownDesktopRow?.action && shownDesktopRow.status !== "updating" ? (
-    <RowButton
-      label={
-        shownDesktopRow.status === "failed"
-          ? "Retry"
-          : shownDesktopRow.action === "install"
-            ? "Restart"
-            : "Update"
+  // The app's update is the hero's one button. It stays, disabled, while the
+  // update runs, so the hero holds its shape from the click to the restart.
+  const heroAction = ((): HeroAction | null => {
+    if (shownDesktopRow) {
+      if (countdown || shownDesktopRow.status === "updating") {
+        return { label: "Update & restart", filled: false, onClick: null };
       }
-      onClick={() => runDesktopAction(shownDesktopRow.action!)}
-    />
-  ) : null;
-  const shownAppRow =
-    countdown && run?.restartAt != null
-      ? { ...appRow, status: "updating" as const, detail: "Restarting soon", percent: null }
-      : appRow;
+      const action = shownDesktopRow.action;
+      if (!action) return null;
+      const onClick = () => runDesktopAction(action);
+      if (shownDesktopRow.status === "failed") return { label: "Retry", filled: false, onClick };
+      return action === "install"
+        ? { label: "Update & restart", filled: true, onClick }
+        : { label: "Download", filled: true, onClick };
+    }
+    if (appServerGroup && appServerGroup.server) {
+      const row = appServerGroup.server;
+      if (row.status === "updating") return { label: "Update", filled: false, onClick: null };
+      const target = serverTarget(appServerGroup);
+      if (!target || (row.status !== "available" && row.status !== "failed")) return null;
+      const onClick = () => void updateServer(target);
+      return row.status === "failed"
+        ? { label: "Retry", filled: false, onClick }
+        : { label: "Update", filled: true, onClick };
+    }
+    return null;
+  })();
+
+  const heroStatus = describeUpdatesHeroStatus({
+    app: appRow,
+    ready: shownDesktopRow?.action === "install",
+    restarting,
+    rows: tracked.map(({ row }) => row),
+    batchSize,
+    checking: isChecking,
+  });
+  const footerText = describeUpdatesFooter({
+    app: restarting ? { status: "updating" } : appRow,
+    rows: tracked.map(({ row }) => row),
+    batchSize,
+    checkedAgo,
+  });
+  const historyUrl = getDesktopUpdateReleaseHistoryUrl();
+  // The refresh button lives in the hero until the hero has an action to
+  // offer; then it moves down beside "Update all".
+  const refreshInHero = heroAction === null;
+  const footerActions = [
+    countdown ? (
+      <Button key="later" size="xs" variant="ghost-muted" onClick={postponeUpdateRestart}>
+        Later
+      </Button>
+    ) : null,
+    !refreshInHero && !anyUpdating && !countdown ? (
+      <RefreshButton key="refresh" checking={isChecking} onCheck={() => void checkForUpdates()} />
+    ) : null,
+    canUpdateAll ? (
+      <Button key="all" size="xs" variant="outline" onClick={updateAll}>
+        Update all
+      </Button>
+    ) : null,
+  ].filter((action) => action !== null);
+
   const showReleases = () => {
     setPinned(true);
     setView("releases");
   };
-  const appRowAction =
-    (desktopRow
-      ? desktopRowAction
-      : appServerGroup
-        ? serverAction(appServerGroup, appRow)
-        : null) ??
-    (shownAppRow.status === "current" ? (
-      <Button size="xs" variant="ghost-muted" onClick={showReleases}>
-        What's new
-      </Button>
-    ) : null);
-
-  // Name the machines when there are several, or when the desktop app's own
-  // row sits above the one machine's providers.
-  const showMachineLabels = groups.length > 1 || (groups.length === 1 && !serverIsAppRow);
+  const appUpdating = appRow.status === "updating" || restarting;
+  const hasNotes = notesReleases.length > 0;
 
   return (
     <>
@@ -688,7 +837,7 @@ export function NavRailUpdates({
         >
           <div
             ref={popupRef}
-            className="flex flex-col gap-1"
+            className="flex flex-col pt-0.5"
             // Using anything inside a preview pins it, so it stays while the
             // pointer wanders off to watch the update.
             onPointerDownCapture={() => setPinned(true)}
@@ -699,96 +848,124 @@ export function NavRailUpdates({
             {view === "releases" ? (
               <ReleaseHistoryView
                 snapshot={releasesSnapshot}
-                releases={releaseHistory(releases, installedVersion)}
-                installedVersion={installedVersion}
+                releases={history}
+                toneOf={releaseTone}
+                historyUrl={historyUrl}
                 onBack={() => setView("updates")}
               />
             ) : (
-              <div key="updates" className="swap-motion flex flex-col gap-1">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 flex-col">
-                    <span className="text-sm font-medium">Updates</span>
-                    <span
-                      key={summary}
-                      className="swap-motion truncate text-xs text-muted-foreground tabular-nums"
-                      aria-live="polite"
-                    >
-                      {summary}
-                    </span>
-                  </div>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          size="icon-xs"
-                          variant="ghost-muted"
-                          aria-label={isChecking ? "Checking for updates" : "Check for updates"}
-                          aria-busy={isChecking}
-                          disabled={isChecking}
-                          onClick={() => void checkForUpdates()}
-                        >
-                          <RefreshIcon refreshing={isChecking} />
-                        </Button>
-                      }
-                    />
-                    <TooltipPopup side="top">
-                      {isChecking ? "Checking for updates…" : "Check for updates"}
-                    </TooltipPopup>
-                  </Tooltip>
-                </div>
-                <div className="flex flex-col">
-                  <UpdateRow
-                    prominent
-                    row={shownAppRow}
-                    updated={updated.has(appRowId)}
-                    action={appRowAction}
+              <div key="updates" className="swap-motion flex flex-col">
+                <div className="relative flex items-center gap-2.5 pt-0.5 pb-2">
+                  <img
+                    src="/cogenly-mark.svg"
+                    alt=""
+                    aria-hidden
+                    draggable={false}
+                    className="size-8 shrink-0 rounded-tile select-none"
                   />
-                  <UpdateReleaseNotes releases={incomingReleases} onShowHistory={showReleases} />
-                  {groups.length > 0 ? (
-                    <>
-                      <Separator className="mt-1" />
-                      <span className="mt-2 mb-0.5 truncate text-2xs font-medium text-muted-foreground select-none">
-                        Providers
-                      </span>
-                    </>
-                  ) : null}
-                  {groups.map((group) => (
-                    <section key={group.environmentId} className="flex flex-col">
-                      {showMachineLabels ? (
-                        <span className="mt-1.5 truncate text-xs text-muted-foreground">
-                          {group.label}
-                        </span>
-                      ) : null}
-                      {group.server ? (
-                        <UpdateRow
-                          row={group.server}
-                          updated={updated.has(`${group.environmentId}:server`)}
-                          action={serverAction(group, group.server)}
-                        />
-                      ) : null}
-                      {group.providers.map((row) => (
-                        <UpdateRow
-                          key={row.key}
-                          row={row}
-                          updated={updated.has(`${group.environmentId}:${row.key}`)}
-                          action={providerAction(group, row)}
-                        />
-                      ))}
-                    </section>
-                  ))}
-                  {groups.length === 0 && connected.length === 0 ? (
-                    <span className="py-1 text-xs text-muted-foreground">
-                      No connected machines to check.
-                    </span>
+                  <div className="flex min-w-0 flex-1 flex-col gap-px">
+                    <div className="flex min-w-0 items-baseline gap-1.5">
+                      <span className="shrink-0 text-sm font-medium">{appRow.name}</span>
+                      <VersionPair
+                        current={appRow.currentVersion}
+                        next={appRow.status === "current" ? null : appRow.latestVersion}
+                        prefix
+                        className="min-w-0 truncate"
+                      />
+                    </div>
+                    <HeroStatus tone={heroStatus.tone} label={heroStatus.label} />
+                  </div>
+                  <div
+                    key={heroAction ? `action:${heroAction.label}` : "refresh"}
+                    className="swap-motion flex shrink-0 items-center gap-1"
+                  >
+                    {heroAction ? (
+                      <Button
+                        size="xs"
+                        variant={heroAction.filled ? "default" : "outline"}
+                        disabled={heroAction.onClick === null}
+                        onClick={heroAction.onClick ?? undefined}
+                      >
+                        {heroAction.label}
+                      </Button>
+                    ) : (
+                      <RefreshButton checking={isChecking} onCheck={() => void checkForUpdates()} />
+                    )}
+                  </div>
+                  {appUpdating ? (
+                    <ProgressLine
+                      percent={restarting ? null : (appRow.percent ?? null)}
+                      label={`Updating ${appRow.name}`}
+                      className="right-0 bottom-0.5 left-10.5"
+                    />
                   ) : null}
                 </div>
-                {canUpdateAll ? (
-                  <div className="reveal-motion flex justify-end pt-1">
-                    <Button size="xs" variant="outline" onClick={updateAll}>
-                      Update all
-                    </Button>
-                  </div>
+                {hasNotes ? (
+                  <>
+                    <Separator />
+                    <WhatsNewNotes
+                      // A new set of notes (the update arrived, or was installed) fades in anew.
+                      key={notesReleases.map((release) => release.version).join(",")}
+                      releases={notesReleases}
+                      pending={incomingReleases.length > 0}
+                      hasEarlier={history.length > notesReleases.length}
+                      onShowHistory={showReleases}
+                    />
+                  </>
                 ) : null}
+                {groups.length > 0 || connected.length === 0 ? <Separator /> : null}
+                {groups.map((group, index) => (
+                  <section
+                    key={group.environmentId}
+                    aria-label={`Providers on ${group.label}`}
+                    className="flex flex-col pt-2"
+                  >
+                    <div className="flex h-5 items-baseline justify-between gap-2">
+                      <span className="text-2xs font-medium text-muted-foreground select-none">
+                        {index === 0 ? "Providers" : null}
+                      </span>
+                      <span className="inline-flex min-w-0 items-center gap-1 text-2xs text-muted-foreground">
+                        <LaptopMinimalIcon aria-hidden className="size-2.75 shrink-0" />
+                        <span className="truncate">{group.label}</span>
+                      </span>
+                    </div>
+                    {group.server ? (
+                      <ListRow
+                        row={group.server}
+                        updated={updated.has(`${group.environmentId}:server`)}
+                        action={serverAction(group, group.server)}
+                      />
+                    ) : null}
+                    {group.providers.map((row) => (
+                      <ListRow
+                        key={row.key}
+                        row={row}
+                        updated={updated.has(`${group.environmentId}:${row.key}`)}
+                        action={providerAction(group, row)}
+                      />
+                    ))}
+                  </section>
+                ))}
+                {connected.length === 0 ? (
+                  <span className="pt-2 text-xs text-muted-foreground">
+                    No connected machines to check.
+                  </span>
+                ) : null}
+                <div className="mt-2 flex min-h-6 items-center justify-between gap-2 border-t pt-2">
+                  <span
+                    key={footerText}
+                    className="swap-motion min-w-0 truncate text-2xs text-muted-foreground tabular-nums"
+                  >
+                    {footerText}
+                  </span>
+                  {footerActions.length > 0 ? (
+                    <div className="reveal-motion flex shrink-0 items-center gap-1.5">
+                      {footerActions}
+                    </div>
+                  ) : historyUrl ? (
+                    <GitHubLink href={historyUrl}>All releases on GitHub</GitHubLink>
+                  ) : null}
+                </div>
               </div>
             )}
           </div>

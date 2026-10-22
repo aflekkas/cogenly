@@ -1,20 +1,26 @@
 /**
- * Cogenly's release notes in the rail's Updates popover: what an available
- * update brings, under the app's row, and the release history, a sub-view
- * opened from that row. Notes come from GitHub (useCogenlyReleases); with
- * none loaded, both stay out of the way.
+ * Cogenly's release notes in the rail's Updates popover: a few lines of
+ * What's new under the hero (the installed release, or what a pending update
+ * brings), and the release history, a sub-view in the same frame. Notes come
+ * from GitHub (useCogenlyReleases); with none loaded, both stay out of the way.
  */
-import { ChevronLeftIcon, ExternalLinkIcon } from "lucide-react";
+import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import type { CogenlyReleasesSnapshot } from "~/state/cogenlyReleases";
-import { getDesktopUpdateReleaseHistoryUrl } from "../desktopUpdate.logic";
 import { openDesktopUpdateReleaseNotes } from "../desktopUpdate.toast";
 import { Button } from "../ui/button";
-import { Separator } from "../ui/separator";
 import { Spinner } from "../ui/spinner";
-import { type CogenlyRelease, formatReleaseDate } from "./releaseNotes.logic";
+import {
+  type CogenlyRelease,
+  digestReleaseNotes,
+  formatReleaseDate,
+  formatReleaseDay,
+} from "./releaseNotes.logic";
+
+/** Bullets of What's new under the hero: the installed release's, or the pending update's. */
+const DIGEST_LIMIT = { installed: 3, pending: 4 } as const;
 
 function itemKeys(items: ReadonlyArray<string>) {
   const seen = new Map<string, number>();
@@ -26,13 +32,13 @@ function itemKeys(items: ReadonlyArray<string>) {
 }
 
 /** Opens GitHub in the system browser on desktop, in a new tab on the web. */
-function GitHubLink({ href, children }: { href: string; children: ReactNode }) {
+export function GitHubLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="link inline-flex items-center gap-1 rounded-sm text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      className="link inline-flex shrink-0 items-center gap-1 rounded-sm text-2xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       onClick={(event) => {
         const bridge = window.desktopBridge;
         if (!bridge) return;
@@ -46,119 +52,193 @@ function GitHubLink({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-function ReleaseEntry({ release, installed }: { release: CogenlyRelease; installed: boolean }) {
-  const date = formatReleaseDate(release.publishedAt);
+/** A note bullet: a small muted dot, not a list marker, so lines align with the eyebrow. */
+function NoteList({ items, className }: { items: ReadonlyArray<string>; className?: string }) {
   return (
-    <section className="flex flex-col gap-1.5" aria-label={`Cogenly v${release.version}`}>
-      <div className="flex items-baseline gap-1.5">
-        <h3 className="text-xs font-semibold tabular-nums">v{release.version}</h3>
-        {date ? <span className="text-xs text-muted-foreground tabular-nums">{date}</span> : null}
-        {installed ? (
-          <span className="ml-auto text-2xs font-medium text-muted-foreground">Installed</span>
-        ) : null}
+    <ul className={cn("flex flex-col", className)}>
+      {itemKeys(items).map(({ item, key }) => (
+        <li
+          key={key}
+          className="relative pl-3.5 text-xs leading-4.25 break-words text-popover-foreground/85 before:absolute before:top-[7px] before:left-[3px] before:size-1 before:rounded-full before:bg-muted-foreground/70"
+        >
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * What's new, under the hero between hairlines: an eyebrow, a few bullets,
+ * and a trailing link into the release history. `pending` is an update's
+ * releases (newest first); otherwise `releases` is the installed release.
+ */
+export function WhatsNewNotes({
+  releases,
+  pending,
+  hasEarlier,
+  onShowHistory,
+}: {
+  releases: ReadonlyArray<CogenlyRelease>;
+  pending: boolean;
+  /** The history holds releases beyond these, so the link says "earlier releases". */
+  hasEarlier: boolean;
+  onShowHistory: () => void;
+}) {
+  if (releases.length === 0) return null;
+  const { groups, remaining } = digestReleaseNotes(
+    releases,
+    pending ? DIGEST_LIMIT.pending : DIGEST_LIMIT.installed,
+  );
+  const single = releases.length === 1 ? releases[0]! : null;
+  const day = single ? formatReleaseDay(single.publishedAt) : null;
+  const more =
+    remaining > 0
+      ? hasEarlier
+        ? `${remaining} more, and earlier releases`
+        : `${remaining} more`
+      : hasEarlier
+        ? "Earlier releases"
+        : "Full release notes";
+  return (
+    <section aria-label="What's new" className="reveal-motion flex flex-col gap-1.25 pt-2 pb-2.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-2xs font-medium text-muted-foreground select-none">
+          What's new
+          {single ? (
+            <>
+              {" in "}
+              <span className="text-foreground tabular-nums">{single.version}</span>
+            </>
+          ) : null}
+        </span>
+        {single ? (
+          day ? (
+            <span className="text-2xs text-muted-foreground tabular-nums">{day}</span>
+          ) : null
+        ) : (
+          <span className="text-2xs text-muted-foreground tabular-nums">
+            {releases.length} releases
+          </span>
+        )}
       </div>
-      {release.sections.length > 0 ? (
-        release.sections.map((section) => (
-          <div key={section.title ?? "notes"} className="flex flex-col gap-0.5">
-            {section.title ? (
-              <span className="text-2xs font-medium text-muted-foreground select-none">
-                {section.title}
-              </span>
-            ) : null}
-            <ul className="flex flex-col gap-0.5 pl-4 text-xs leading-5 text-popover-foreground/90">
-              {itemKeys(section.items).map(({ item, key }) => (
-                <li key={key} className="list-disc break-words">
-                  {item}
-                </li>
-              ))}
-            </ul>
+      {single ? (
+        <NoteList items={groups[0]?.items ?? []} className="gap-0.75" />
+      ) : (
+        groups.map(({ release, items }) => (
+          <div key={release.version} className="flex flex-col gap-1 not-first:mt-1">
+            <div className="flex items-baseline gap-1.5 text-2xs text-muted-foreground tabular-nums">
+              <span className="text-xs font-medium text-foreground">v{release.version}</span>
+              {formatReleaseDay(release.publishedAt)}
+            </div>
+            {items.length > 0 ? <NoteList items={items} className="gap-0.75" /> : null}
           </div>
         ))
-      ) : (
-        <span className="text-xs text-muted-foreground">No notes for this release.</span>
       )}
-      <GitHubLink href={release.url}>View on GitHub</GitHubLink>
+      {groups.every((group) => group.items.length === 0) ? (
+        <span className="text-xs text-muted-foreground">No notes for this release.</span>
+      ) : null}
+      <button
+        type="button"
+        onClick={onShowHistory}
+        className="link inline-flex items-center gap-1 self-start rounded-sm pl-3.5 text-xs leading-4.25 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      >
+        {more}
+        <ChevronRightIcon aria-hidden className="size-3 shrink-0" strokeWidth={2.25} />
+      </button>
     </section>
   );
 }
 
-function ReleaseList({
-  releases,
-  installedVersion,
-  className,
-}: {
-  releases: ReadonlyArray<CogenlyRelease>;
-  installedVersion: string | null;
-  className: string;
-}) {
-  return (
-    <div className={cn("scroll-fade-y min-h-0 overflow-y-auto", className)}>
-      {releases.map((release, index) => (
-        <div key={release.version}>
-          {index > 0 ? <Separator className="my-2.5" /> : null}
-          <ReleaseEntry release={release} installed={release.version === installedVersion} />
-        </div>
-      ))}
-    </div>
-  );
-}
+export type ReleaseTone = "installed" | "available" | "older" | "plain";
 
-/** Under the app's row while an update is available: every release it brings. */
-export function UpdateReleaseNotes({
-  releases,
-  onShowHistory,
-}: {
-  releases: ReadonlyArray<CogenlyRelease>;
-  onShowHistory: () => void;
-}) {
-  if (releases.length === 0) return null;
+function ReleaseEntry({ release, tone }: { release: CogenlyRelease; tone: ReleaseTone }) {
+  const date = formatReleaseDate(release.publishedAt);
   return (
-    <div className="reveal-motion mb-1.5 flex flex-col gap-1.5 rounded-lg bg-muted/48 px-2.5 py-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-2xs font-medium text-muted-foreground select-none">What's new</span>
-        <Button size="xs" variant="ghost-muted" onClick={onShowHistory}>
-          All releases
-        </Button>
+    <section
+      className="flex flex-col gap-1.5 py-2.5 not-first:border-t"
+      aria-label={`Cogenly v${release.version}`}
+    >
+      <div className="flex items-baseline gap-2">
+        <h3
+          className={cn(
+            "text-xs font-semibold tabular-nums",
+            tone === "older" && "text-foreground/80",
+          )}
+        >
+          v{release.version}
+        </h3>
+        {date ? <span className="text-xs text-muted-foreground tabular-nums">{date}</span> : null}
+        {tone === "installed" ? (
+          <span className="ml-auto inline-flex items-center gap-1 text-2xs font-medium text-success-foreground">
+            <CheckIcon aria-hidden className="size-2.75" strokeWidth={2.5} />
+            Installed
+          </span>
+        ) : tone === "available" ? (
+          <span className="ml-auto text-2xs font-medium text-info-foreground">Available</span>
+        ) : null}
       </div>
-      <ReleaseList releases={releases} installedVersion={null} className="max-h-48" />
-    </div>
+      <div className={cn("flex flex-col gap-1.5", tone === "older" && "opacity-80")}>
+        {release.sections.length > 0 ? (
+          release.sections.map((section) => (
+            <div key={section.title ?? "notes"} className="flex flex-col gap-0.5">
+              {section.title ? (
+                <span className="text-2xs font-medium text-muted-foreground select-none">
+                  {section.title}
+                </span>
+              ) : null}
+              <NoteList items={section.items} className="gap-0.5" />
+            </div>
+          ))
+        ) : (
+          <span className="text-xs text-muted-foreground">No notes for this release.</span>
+        )}
+      </div>
+    </section>
   );
 }
 
-/** The popover's release history view, current release first. */
+/** The popover's release history view, newest first, in the updates' own frame. */
 export function ReleaseHistoryView({
   snapshot,
   releases,
-  installedVersion,
+  toneOf,
+  historyUrl,
   onBack,
 }: {
   snapshot: CogenlyReleasesSnapshot;
   releases: ReadonlyArray<CogenlyRelease>;
-  installedVersion: string | null;
+  toneOf: (release: CogenlyRelease) => ReleaseTone;
+  historyUrl: string | null;
   onBack: () => void;
 }) {
-  const historyUrl = getDesktopUpdateReleaseHistoryUrl();
   return (
-    <div className="swap-motion flex flex-col gap-2">
-      <div className="flex items-center gap-1.5">
+    <div key="releases" className="swap-motion flex flex-col">
+      <div className="flex items-center gap-1.5 pb-1.5">
         <Button size="icon-xs" variant="ghost-muted" aria-label="Back to updates" onClick={onBack}>
           <ChevronLeftIcon aria-hidden />
         </Button>
-        <span className="text-sm font-medium">What's new</span>
+        <span className="text-sm font-medium">Release notes</span>
         {snapshot.loading ? (
           <Spinner size="xs" tone="muted" aria-label="Loading release notes" />
         ) : null}
+        {releases.length > 0 ? (
+          <span className="ml-auto text-2xs text-muted-foreground tabular-nums">
+            {releases.length} {releases.length === 1 ? "release" : "releases"}
+          </span>
+        ) : null}
       </div>
+      <div className="h-px bg-border" />
       {releases.length > 0 ? (
-        <ReleaseList
-          releases={releases}
-          installedVersion={installedVersion}
-          className="max-h-[min(24rem,calc(var(--available-height)-7rem))] pr-1"
-        />
+        <div className="scroll-fade-y max-h-[min(24rem,calc(var(--available-height)-7rem))] min-h-0 overflow-y-auto pr-1">
+          {releases.map((release) => (
+            <ReleaseEntry key={release.version} release={release} tone={toneOf(release)} />
+          ))}
+        </div>
       ) : (
         <span
           key={snapshot.loading ? "loading" : "empty"}
-          className="swap-motion py-2 text-xs text-muted-foreground"
+          className="swap-motion py-3 text-xs text-muted-foreground"
         >
           {snapshot.loading
             ? "Loading release notes…"
@@ -167,11 +247,12 @@ export function ReleaseHistoryView({
               : "No release notes yet."}
         </span>
       )}
-      {historyUrl ? (
-        <div className="flex justify-end border-t pt-1.5">
-          <GitHubLink href={historyUrl}>All releases on GitHub</GitHubLink>
-        </div>
-      ) : null}
+      <div className="flex min-h-6 items-center justify-between gap-2 border-t pt-2">
+        <span className="truncate text-2xs text-muted-foreground">
+          Notes come from GitHub releases
+        </span>
+        {historyUrl ? <GitHubLink href={historyUrl}>All releases on GitHub</GitHubLink> : null}
+      </div>
     </div>
   );
 }

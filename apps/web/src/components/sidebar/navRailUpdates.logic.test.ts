@@ -10,7 +10,11 @@ import {
   collectProviderUpdateRows,
   describeDesktopUpdateRow,
   describeServerUpdateRow,
+  describeUpdatesFooter,
+  describeUpdatesHeroStatus,
   describeUpdatesSummary,
+  formatCheckedAgo,
+  latestCheckedAt,
   rowNeedsUpdate,
 } from "./navRailUpdates.logic";
 
@@ -149,7 +153,7 @@ describe("describeDesktopUpdateRow", () => {
         availableVersion: "2.1.0",
         downloadPercent: 42.7,
       }),
-    ).toMatchObject({ status: "updating", detail: "Downloading 42%", percent: 42.7 });
+    ).toMatchObject({ status: "updating", detail: "Downloading · 42%", percent: 42.7 });
     expect(
       describeDesktopUpdateRow({
         ...base,
@@ -244,5 +248,116 @@ describe("describeUpdatesSummary", () => {
     expect(describeUpdatesSummary({ rows: rows("current"), batchSize: 0, checking: false })).toBe(
       "Everything is up to date",
     );
+  });
+});
+
+describe("describeUpdatesHeroStatus", () => {
+  const app = (
+    status: "current" | "available" | "updating" | "failed",
+    detail: string | null = null,
+  ) => ({ status, detail, latestVersion: status === "current" ? null : "0.1.3" }) as const;
+  const base = { ready: false, restarting: false, batchSize: 0, checking: false };
+
+  it("speaks for the app first, then everything else", () => {
+    expect(
+      describeUpdatesHeroStatus({ ...base, app: app("available"), ready: true, rows: [] }),
+    ).toEqual({ tone: "pending", label: "v0.1.3 is ready to install" });
+    expect(describeUpdatesHeroStatus({ ...base, app: app("available"), rows: [] })).toEqual({
+      tone: "pending",
+      label: "v0.1.3 is available",
+    });
+    expect(
+      describeUpdatesHeroStatus({
+        ...base,
+        app: app("updating", "Downloading · 64%"),
+        rows: [{ key: "codex", status: "updating" }],
+        batchSize: 2,
+      }),
+    ).toEqual({ tone: "busy", label: "Downloading · 64%" });
+    expect(
+      describeUpdatesHeroStatus({ ...base, app: app("failed", "network down"), rows: [] }),
+    ).toEqual({ tone: "failed", label: "network down" });
+  });
+
+  it("falls back to the whole list's summary", () => {
+    const rows = [
+      { key: "app", status: "current" },
+      { key: "codex", status: "available" },
+    ] as const;
+    expect(describeUpdatesHeroStatus({ ...base, app: app("current"), rows })).toEqual({
+      tone: "pending",
+      label: "1 update available",
+    });
+    expect(
+      describeUpdatesHeroStatus({ ...base, app: app("current"), rows, checking: true }),
+    ).toEqual({ tone: "busy", label: "Checking…" });
+    expect(describeUpdatesHeroStatus({ ...base, app: app("current"), rows: [rows[0]] })).toEqual({
+      tone: "current",
+      label: "Everything is up to date",
+    });
+    expect(
+      describeUpdatesHeroStatus({ ...base, app: app("available"), rows, restarting: true }),
+    ).toEqual({ tone: "busy", label: "Restarting soon" });
+  });
+});
+
+describe("checked at", () => {
+  it("takes the newest valid instant", () => {
+    expect(latestCheckedAt([null, "nope", "2026-10-22T10:00:00Z", "2026-10-22T09:00:00Z"])).toBe(
+      Date.parse("2026-10-22T10:00:00Z"),
+    );
+    expect(latestCheckedAt([undefined, null])).toBeNull();
+  });
+
+  it("reads as plain words", () => {
+    const now = Date.parse("2026-10-22T10:00:00Z");
+    expect(formatCheckedAgo(now - 30_000, now)).toBe("just now");
+    expect(formatCheckedAgo(now - 60_000, now)).toBe("1 minute ago");
+    expect(formatCheckedAgo(now - 2 * 60_000, now)).toBe("2 minutes ago");
+    expect(formatCheckedAgo(now - 3 * 3_600_000, now)).toBe("3 hours ago");
+    expect(formatCheckedAgo(now - 30 * 3_600_000, now)).toBe("yesterday");
+    expect(formatCheckedAgo(now - 72 * 3_600_000, now)).toBe("3 days ago");
+  });
+});
+
+describe("describeUpdatesFooter", () => {
+  it("says when it checked, with what is left to update", () => {
+    const current = { status: "current" } as const;
+    expect(
+      describeUpdatesFooter({ app: current, rows: [], batchSize: 0, checkedAgo: "2 minutes ago" }),
+    ).toBe("Checked 2 minutes ago");
+    expect(
+      describeUpdatesFooter({
+        app: current,
+        rows: [
+          { key: "app", status: "available" },
+          { key: "codex", status: "available" },
+        ],
+        batchSize: 0,
+        checkedAgo: "just now",
+      }),
+    ).toBe("2 updates · checked just now");
+    expect(
+      describeUpdatesFooter({
+        app: current,
+        rows: [{ key: "codex", status: "failed" }],
+        batchSize: 0,
+        checkedAgo: null,
+      }),
+    ).toBe("1 update");
+  });
+
+  it("counts the batch while the app updates beside other rows", () => {
+    expect(
+      describeUpdatesFooter({
+        app: { status: "updating" },
+        rows: [
+          { key: "app", status: "updating" },
+          { key: "codex", status: "current" },
+        ],
+        batchSize: 2,
+        checkedAgo: "just now",
+      }),
+    ).toBe("Updating 2 of 2…");
   });
 });

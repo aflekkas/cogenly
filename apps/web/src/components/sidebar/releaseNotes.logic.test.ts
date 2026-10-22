@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  digestReleaseNotes,
+  formatReleaseDay,
   parseGitHubReleases,
   parseReleaseNotesBody,
   releaseHistory,
@@ -93,5 +95,40 @@ describe("release ranges", () => {
       "0.1.1",
       "0.1.0",
     ]);
+  });
+});
+
+describe("digestReleaseNotes", () => {
+  const releases = parseGitHubReleases([
+    release("v0.1.3", "## New\n- A\n- B\n## Fixes\n- C"),
+    release("v0.1.2", ""),
+    release("v0.1.1", "- D\n- E"),
+  ]);
+
+  it("takes the first bullets across releases and counts the rest", () => {
+    const digest = digestReleaseNotes(releases, 4);
+    expect(digest.groups.map(({ release, items }) => [release.version, items])).toEqual([
+      ["0.1.3", ["A", "B", "C"]],
+      ["0.1.2", []],
+      ["0.1.1", ["D"]],
+    ]);
+    expect(digest.remaining).toBe(1);
+  });
+
+  it("leaves out releases past the limit", () => {
+    const digest = digestReleaseNotes(releases, 2);
+    expect(digest.groups.map(({ release }) => release.version)).toEqual(["0.1.3"]);
+    expect(digest.remaining).toBe(3);
+  });
+});
+
+describe("formatReleaseDay", () => {
+  it("names today and yesterday, else the date", () => {
+    const now = new Date(2026, 9, 22, 15, 0);
+    expect(formatReleaseDay(new Date(2026, 9, 22, 1, 0).toISOString(), now)).toBe("Today");
+    expect(formatReleaseDay(new Date(2026, 9, 21, 23, 0).toISOString(), now)).toBe("Yesterday");
+    expect(formatReleaseDay(new Date(2026, 9, 1, 12, 0).toISOString(), now)).toMatch(/1/);
+    expect(formatReleaseDay(null, now)).toBeNull();
+    expect(formatReleaseDay("not a date", now)).toBeNull();
   });
 });

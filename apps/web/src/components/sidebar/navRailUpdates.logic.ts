@@ -107,7 +107,7 @@ export function describeDesktopUpdateRow(state: DesktopUpdateState): DesktopUpda
     return {
       ...base,
       status: "updating",
-      detail: percent === null ? "Downloading" : `Downloading ${Math.floor(percent)}%`,
+      detail: percent === null ? "Downloading…" : `Downloading · ${Math.floor(percent)}%`,
       percent,
       action: null,
     };
@@ -207,4 +207,83 @@ export function describeUpdatesSummary(input: {
   const needed = input.rows.filter(rowNeedsUpdate).length;
   if (needed > 0) return `${needed} ${needed === 1 ? "update" : "updates"} available`;
   return "Everything is up to date";
+}
+
+export type UpdatesHeroTone = "current" | "pending" | "busy" | "failed";
+
+/**
+ * The popover's one status line, under the app's name: what the app is doing,
+ * else what anything else is doing, else what needs an update. `ready` is an
+ * app update downloaded and waiting for a restart.
+ */
+export function describeUpdatesHeroStatus(input: {
+  readonly app: Pick<UpdateRowView, "status" | "detail" | "latestVersion">;
+  readonly ready: boolean;
+  readonly restarting: boolean;
+  readonly rows: ReadonlyArray<Pick<UpdateRowView, "key" | "status">>;
+  readonly batchSize: number;
+  readonly checking: boolean;
+}): { readonly tone: UpdatesHeroTone; readonly label: string } {
+  const { app } = input;
+  if (input.restarting) return { tone: "busy", label: "Restarting soon" };
+  if (app.status === "updating") return { tone: "busy", label: app.detail ?? "Updating…" };
+  const summary = describeUpdatesSummary(input);
+  if (input.rows.some((row) => row.status === "updating") || input.checking) {
+    return { tone: "busy", label: summary };
+  }
+  if (app.status === "failed") return { tone: "failed", label: app.detail ?? "Update failed" };
+  if (app.status === "available" && app.latestVersion) {
+    const version = /^\d/.test(app.latestVersion) ? `v${app.latestVersion}` : app.latestVersion;
+    return {
+      tone: "pending",
+      label: input.ready ? `${version} is ready to install` : `${version} is available`,
+    };
+  }
+  if (input.rows.some(rowNeedsUpdate)) return { tone: "pending", label: summary };
+  return { tone: "current", label: summary };
+}
+
+/** The newest of several "checked at" instants, or null when none parse. */
+export function latestCheckedAt(instants: ReadonlyArray<string | null | undefined>): number | null {
+  let latest: number | null = null;
+  for (const instant of instants) {
+    if (!instant) continue;
+    const time = Date.parse(instant);
+    if (Number.isNaN(time)) continue;
+    if (latest === null || time > latest) latest = time;
+  }
+  return latest;
+}
+
+/** "just now", "2 minutes ago", "yesterday"… for the popover's footer. */
+export function formatCheckedAgo(checkedAt: number, now: number): string {
+  const minutes = Math.floor((now - checkedAt) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return minutes === 1 ? "1 minute ago" : `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+/**
+ * The footer's line. While the app updates beside other rows, the batch count
+ * ("Updating 1 of 2…") lives here, as the hero shows the app's own progress;
+ * otherwise it is how many updates are left and when they were checked.
+ */
+export function describeUpdatesFooter(input: {
+  readonly app: Pick<UpdateRowView, "status">;
+  readonly rows: ReadonlyArray<Pick<UpdateRowView, "key" | "status">>;
+  readonly batchSize: number;
+  readonly checkedAgo: string | null;
+}): string {
+  const updating = input.rows.filter((row) => row.status === "updating").length;
+  if (input.app.status === "updating" && Math.max(updating, input.batchSize) > 1) {
+    return describeUpdatesSummary({ ...input, checking: false });
+  }
+  const needed = input.rows.filter(rowNeedsUpdate).length;
+  const count = needed > 0 ? `${needed} ${needed === 1 ? "update" : "updates"}` : null;
+  if (count && input.checkedAgo) return `${count} · checked ${input.checkedAgo}`;
+  if (count) return count;
+  return input.checkedAgo ? `Checked ${input.checkedAgo}` : "";
 }

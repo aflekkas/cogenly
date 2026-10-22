@@ -25,9 +25,15 @@ export interface ContextMenuItem<T extends string = string> {
   disabled?: boolean;
   /** Renders as a non-interactive section header label. Web fallback only — stripped on desktop native menus. */
   header?: boolean;
-  /** Icon keyword resolved by the web fallback. Stripped on desktop native menus. */
+  /**
+   * Icon keyword resolved by the web fallback. Stripped on desktop native
+   * menus, except `"swatch"`: a round dot of `iconColor`, drawn natively too.
+   */
   icon?: string;
-  /** CSS color for the icon, such as a project's folder color. Web fallback only. */
+  /**
+   * CSS color for the icon, such as a project's folder color. A `"swatch"`
+   * icon needs a `#rrggbb` value, since native menus cannot resolve CSS.
+   */
   iconColor?: string;
   /** Inserts a visual section divider immediately before this item. */
   separatorBefore?: boolean;

@@ -150,3 +150,49 @@ export function formatReleaseDate(publishedAt: string | null): string | null {
   if (Number.isNaN(date.getTime())) return null;
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
+
+/** "Today", "Yesterday", else the short date: the What's new eyebrow's date. */
+export function formatReleaseDay(publishedAt: string | null, now = new Date()): string | null {
+  if (!publishedAt) return null;
+  const date = new Date(publishedAt);
+  if (Number.isNaN(date.getTime())) return null;
+  const day = (value: Date) =>
+    new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+  const days = Math.round((day(now) - day(date)) / 86_400_000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+  });
+}
+
+export interface ReleaseNotesDigestGroup {
+  readonly release: CogenlyRelease;
+  readonly items: ReadonlyArray<string>;
+}
+
+/**
+ * The few lines of What's new under the popover's hero: the first `limit`
+ * bullets across `releases` (newest first, every section in order), grouped by
+ * release, and how many bullets were left out. A release with no bullets
+ * still gets its group while there is room, so its version shows.
+ */
+export function digestReleaseNotes(
+  releases: ReadonlyArray<CogenlyRelease>,
+  limit: number,
+): { groups: ReleaseNotesDigestGroup[]; remaining: number } {
+  const groups: ReleaseNotesDigestGroup[] = [];
+  let room = limit;
+  let remaining = 0;
+  for (const release of releases) {
+    const items = release.sections.flatMap((section) => section.items);
+    const shown = items.slice(0, Math.max(0, room));
+    room -= shown.length;
+    remaining += items.length - shown.length;
+    if (shown.length > 0 || (items.length === 0 && room > 0))
+      groups.push({ release, items: shown });
+  }
+  return { groups, remaining };
+}
