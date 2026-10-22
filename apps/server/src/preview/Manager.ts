@@ -61,6 +61,12 @@ export class PreviewManager extends Context.Service<
     readonly requestReveal: (
       input: PreviewCloseInput & { readonly tabId: string; readonly force: boolean },
     ) => Effect.Effect<void, PreviewError>;
+    /** Publishes whether an agent drives a server tab, so the panel can say so. */
+    readonly reportAgentDriving: (input: {
+      readonly threadId: string;
+      readonly tabId: string;
+      readonly agentDriving: boolean;
+    }) => Effect.Effect<void, PreviewError>;
     readonly resize: (
       input: PreviewResizeInput,
     ) => Effect.Effect<PreviewSessionSnapshot, PreviewError>;
@@ -499,9 +505,40 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     );
   });
 
+  const reportAgentDriving: PreviewManager["Service"]["reportAgentDriving"] = Effect.fn(
+    "PreviewManager.reportAgentDriving",
+  )(function* (input) {
+    yield* mutateExistingSession(
+      input.threadId,
+      input.tabId,
+      Effect.fn("PreviewManager.reportSessionAgentDriving")(function* (session) {
+        if ((session.snapshot.agentDriving ?? false) === input.agentDriving)
+          return { next: session, emit: null, result: undefined };
+        const { agentDriving: _previous, ...rest } = session.snapshot;
+        const snapshot: PreviewSessionSnapshot = {
+          ...rest,
+          ...(input.agentDriving ? { agentDriving: true } : {}),
+          updatedAt: yield* currentIsoTimestamp,
+        };
+        return {
+          next: { ...session, snapshot },
+          emit: {
+            type: "navigated" as const,
+            threadId: session.threadId,
+            tabId: session.tabId,
+            createdAt: snapshot.updatedAt,
+            snapshot,
+          },
+          result: undefined,
+        };
+      }),
+    );
+  });
+
   return PreviewManager.of({
     open,
     requestReveal,
+    reportAgentDriving,
     navigate,
     reportStatus,
     resize,

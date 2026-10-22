@@ -81,6 +81,11 @@ export function createPreviewEnvironmentAtoms<R, E>(
       tag: WS_METHODS.previewReportProfiles,
       concurrency: { mode: "latest", key: ({ environmentId }) => environmentId },
     }),
+    reportShown: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:preview:report-shown",
+      tag: WS_METHODS.previewReportShown,
+      concurrency: { mode: "latest", key: ({ environmentId }) => environmentId },
+    }),
     reportStatus: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:preview:report-status",
       tag: WS_METHODS.previewReportStatus,

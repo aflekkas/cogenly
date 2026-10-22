@@ -10,6 +10,8 @@ import {
   resolveBrowserProfiles,
   type BrowserProfile,
   type PreviewReportProfilesInput,
+  type PreviewReportShownInput,
+  type PreviewAutomationTabSummary,
   PREVIEW_AUTOMATION_SERVER_OPERATIONS,
   PreviewViewportSetting as PreviewViewportSettingSchema,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
@@ -84,6 +86,7 @@ import * as PreviewBrowser from "./PreviewBrowser.ts";
 import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
 import { presentAsChrome, ServerBrowserContexts } from "./ServerBrowserContexts.ts";
 import { BrowserControlInterrupted, SessionControl } from "./SessionControl.ts";
+import * as Targeting from "./serverBrowserTargeting.ts";
 
 const SERVER_HOST_CLIENT_ID = SERVER_BROWSER_AUTOMATION_CLIENT_ID;
 const RENDER_SCALE = 2;
@@ -266,6 +269,8 @@ export class ServerBrowser extends Context.Service<
      * clients report again on connect and whenever the list changes.
      */
     readonly reportProfiles: (input: PreviewReportProfilesInput) => Effect.Effect<void>;
+    /** Records which tabs the desktop app's panel shows; see `PreviewReportShownInput`. */
+    readonly reportShown: (input: PreviewReportShownInput) => Effect.Effect<void>;
   }
 >()("t3/preview/ServerBrowser") {}
 
@@ -391,6 +396,8 @@ const AGENT_TAB_LIMIT = 8;
 const SERVER_TAB_LIMIT = 32;
 /** Agent tabs nobody watches close after this long without an agent request. */
 const AGENT_TAB_IDLE_MS = 30 * 60 * 1000;
+/** How often one tab may ask the panel to show it. */
+const PANEL_REVEAL_INTERVAL_MS = 5_000;
 const IDLE_SWEEP_INTERVAL = "1 minute";
 
 const DOWNLOAD_LIMIT = 20;
@@ -523,6 +530,23 @@ const make = Effect.gen(function* () {
   const closedSessions = new Set<string>();
   let hostConnectionId: string | null = null;
   let viewerResizeOrder = 0;
+  /** Native tabs the desktop panel last reported on screen; null until it reports. */
+  let shownReport: ReadonlySet<string> | null = null;
+  /** When each tab last asked the panel to show it, so busy agents do not flood viewers. */
+  const revealRequestedAt = new Map<string, number>();
+
+  const targetable = (tab: ServerTab): Targeting.TargetableTab => ({
+    tabId: tab.tabId,
+    threadId: tab.threadId,
+    agentId: tab.control.agentId,
+    createdAt: tab.createdAt,
+    usedAt: tab.usedAt,
+    viewerCount: tab.viewers.size,
+    rendersOnDesktop: tab.desktop !== null,
+  });
+  /** Advisory: the user can see the tab. Nothing refuses to act because it is false. */
+  const isShown = (tab: ServerTab) =>
+    Targeting.isTabShown(targetable(tab), { reported: shownReport });
 
   const contexts = new ServerBrowserContexts({
     profilesDir: NodePath.join(config.stateDir, "server-browser", "profiles"),
@@ -555,6 +579,17 @@ const make = Effect.gen(function* () {
       : null;
 
   const broadcastControl = (tab: ServerTab) => {
+    // Every client's panel, including the desktop's native tabs, which have no
+    // viewer stream, shows when an agent drives the tab.
+    runFork(
+      manager
+        .reportAgentDriving({
+          threadId: tab.threadId,
+          tabId: tab.tabId,
+          agentDriving: tab.control.agentDrives && !tab.closing,
+        })
+        .pipe(Effect.ignore),
+    );
     for (const viewer of tab.viewers)
       viewer.push({
         _tag: "control",
@@ -629,7 +664,7 @@ const make = Effect.gen(function* () {
             liveTabs: [...tabs.values()].map((tab) => ({
               threadId: tab.threadId,
               tabId: tab.tabId,
-              visible: tab.viewers.size > 0,
+              visible: isShown(tab),
             })),
           }),
         ),
@@ -710,14 +745,17 @@ const make = Effect.gen(function* () {
   /** Whether the preview session for a tab still exists. */
   const sessionOpen = (tab: ServerTab) => !closedSessions.has(tabKey(tab.threadId, tab.tabId));
 
-  const dropTab = (tab: ServerTab, closeSession: boolean) => {
+  /** `reconnect` tells viewers the tab lives on in another page, as when it moves to the desktop. */
+  const dropTab = (tab: ServerTab, closeSession: boolean, viewerEnd?: "reconnect") => {
     const key = tabKey(tab.threadId, tab.tabId);
     if (tabs.get(key) !== tab) return;
     tabs.delete(key);
+    if (closeSession) revealRequestedAt.delete(key);
     tab.closing = true;
     clearAbortedNavigation(tab);
     // A desktop page outlives the connection unless its session closed with it.
-    const end = tab.desktop && !closeSession && sessionOpen(tab) ? "reconnect" : "gone";
+    const end =
+      viewerEnd ?? (tab.desktop && !closeSession && sessionOpen(tab) ? "reconnect" : "gone");
     for (const viewer of tab.viewers) viewer.push({ _tag: end });
     void tab.control.close().catch(constVoid);
     // The desktop owns its page; letting go only ends this connection.
@@ -730,6 +768,24 @@ const make = Effect.gen(function* () {
     if (closeSession) {
       runFork(manager.close({ threadId: tab.threadId, tabId: tab.tabId }).pipe(Effect.ignore));
     }
+  };
+
+  /**
+   * Asks every client to show a tab and select it in the thread's browser
+   * panel. Throttled per tab, since an agent acting on a tab off screen asks on
+   * each action until the panel shows it.
+   */
+  const requestPanelReveal = (threadId: string, tabId: string) => {
+    const key = tabKey(threadId, tabId);
+    const now = Date.now();
+    if (now - (revealRequestedAt.get(key) ?? Number.NEGATIVE_INFINITY) < PANEL_REVEAL_INTERVAL_MS)
+      return;
+    revealRequestedAt.set(key, now);
+    runFork(
+      manager
+        .requestReveal({ threadId: ThreadId.make(threadId), tabId, force: true })
+        .pipe(Effect.ignore),
+    );
   };
 
   /**
@@ -772,16 +828,33 @@ const make = Effect.gen(function* () {
   const createTab = async (snapshot: PreviewSessionSnapshot): Promise<ServerTab> => {
     const adopted = adoptedPages.get(tabKey(snapshot.threadId, snapshot.tabId));
     adoptedPages.delete(tabKey(snapshot.threadId, snapshot.tabId));
+    // An agent tab nobody shows never gets a `<webview>`, and would run headless
+    // with logins the panel does not have. Ask the panel to show it first.
+    if (
+      Targeting.revealBeforeAttach({
+        desktopAvailable: desktopChannel.available,
+        alreadyAttached: await Effect.runPromise(
+          desktopChannel.isAttached({ threadId: snapshot.threadId, tabId: snapshot.tabId }),
+        ),
+        adopted: adopted !== undefined,
+        agentOwned: snapshot.automationOwner !== undefined,
+      })
+    ) {
+      requestPanelReveal(snapshot.threadId, snapshot.tabId);
+    }
     const desktop =
       adopted === undefined && (await desktopRenders(snapshot))
         ? await connectDesktop(snapshot)
         : null;
     // An agent tab without a profile (no client reported one) keeps throwaway storage.
     const isolatedContext =
-      adopted === undefined &&
-      desktop === null &&
-      ((snapshot.automationOwner !== undefined && snapshot.profileId === undefined) ||
-        snapshot.profileId === INCOGNITO_BROWSER_PROFILE_ID);
+      Targeting.tabBacking({
+        adopted: adopted !== undefined,
+        desktopAttached: desktop !== null,
+        agentOwned: snapshot.automationOwner !== undefined,
+        profileId: snapshot.profileId,
+        incognitoProfileId: INCOGNITO_BROWSER_PROFILE_ID,
+      }) === "headless-isolated";
     const context =
       adopted?.page.context() ??
       desktop?.page.context() ??
@@ -944,6 +1017,8 @@ const make = Effect.gen(function* () {
     page.on("crash", () => dropTab(tab, true));
     tabs.set(key, tab);
     reportLiveTabs();
+    // An agent's own tab is the agent's from the start; the panel says so.
+    if (control.agentDrives) broadcastControl(tab);
     // A popup is already loading its own URL, and the desktop loads its tab's.
     if (!adopted && !desktop && snapshot.navStatus._tag === "Loading") {
       tab.initialNavigation = page
@@ -1338,8 +1413,7 @@ const make = Effect.gen(function* () {
   const closeIdleAgentTabs = () => {
     const cutoff = Date.now() - AGENT_TAB_IDLE_MS;
     for (const tab of tabs.values()) {
-      if (tab.control.agentId !== null && tab.viewers.size === 0 && tab.usedAt < cutoff)
-        dropTab(tab, true);
+      if (tab.control.agentId !== null && !isShown(tab) && tab.usedAt < cutoff) dropTab(tab, true);
     }
   };
 
@@ -1348,18 +1422,53 @@ const make = Effect.gen(function* () {
    * thread's tab the user is looking at or used last, so "this page" works.
    */
   const latestThreadTab = (threadId: string, agentSessionId?: string) => {
-    const threadTabs = [...tabs.values()].filter((tab) => tab.threadId === threadId);
-    return (
-      threadTabs
-        .filter((tab) => tab.control.agentId === agentSessionId)
-        .sort((left, right) => right.createdAt - left.createdAt)[0] ??
-      threadTabs.sort(
-        (left, right) =>
-          Number(right.viewers.size > 0) - Number(left.viewers.size > 0) ||
-          right.usedAt - left.usedAt,
-      )[0]
-    );
+    const byTargetable = new Map([...tabs.values()].map((tab) => [targetable(tab), tab]));
+    const picked = Targeting.pickDefaultTab(byTargetable.keys(), threadId, agentSessionId, {
+      reported: shownReport,
+    });
+    return picked === undefined ? undefined : byTargetable.get(picked);
   };
+
+  /** Which tab an action ran on, returned with its result. */
+  const tabSummary = (tab: ServerTab): PreviewAutomationTabSummary => {
+    const url = tab.page.url();
+    const threadTabs = [...tabs.values()]
+      .filter((candidate) => candidate.threadId === tab.threadId)
+      .map((candidate) => ({
+        ...targetable(candidate),
+        url: candidate.page.url() === "about:blank" ? null : candidate.page.url(),
+      }));
+    const rendering = Targeting.tabRenderingStatus(targetable(tab), desktopChannel.available);
+    const notice = Targeting.targetNotice(
+      { ...targetable(tab), url: url === "about:blank" ? null : url },
+      threadTabs,
+      desktopChannel.available,
+      { reported: shownReport },
+    );
+    return {
+      tabId: tab.tabId,
+      url: url === "about:blank" ? null : url,
+      ...(tab.profileId === undefined ? {} : { profileId: tab.profileId }),
+      visible: isShown(tab),
+      rendering: rendering.rendering,
+      ...(rendering.sessionMismatch ? { sessionMismatch: true } : {}),
+      ...(notice === undefined ? {} : { notice }),
+    };
+  };
+
+  /** Adds the tab an action ran on to its result; `evaluate` returns the page's own value. */
+  const withTabSummary = (operation: string, result: unknown, tab: ServerTab): unknown => {
+    if (operation === "evaluate") return result;
+    if (result === undefined) return { tab: tabSummary(tab) };
+    if (typeof result !== "object" || result === null || Array.isArray(result)) return result;
+    return { ...result, tab: tabSummary(tab) };
+  };
+
+  const reportShown: ServerBrowser["Service"]["reportShown"] = (input) =>
+    Effect.sync(() => {
+      shownReport = new Set(input.tabs.map((tab) => tabKey(tab.threadId, tab.tabId)));
+      reportLiveTabs();
+    });
 
   const tabOwner = (tab: ServerTab) =>
     tab.control.controller !== null
@@ -1430,13 +1539,18 @@ const make = Effect.gen(function* () {
     }
     const url = tab.page.url();
     const viewport = tab.page.viewportSize();
+    const summary = tabSummary(tab);
     const status = {
       available: true,
-      visible: tab.viewers.size > 0,
+      visible: summary.visible,
       tabId: tab.tabId,
       url: url === "about:blank" ? null : url,
       title: null,
       loading: tab.loading,
+      ...(summary.profileId === undefined ? {} : { profileId: summary.profileId }),
+      ...(summary.rendering === undefined ? {} : { rendering: summary.rendering }),
+      ...(summary.sessionMismatch ? { sessionMismatch: true } : {}),
+      ...(summary.notice === undefined ? {} : { notice: summary.notice }),
       control: {
         owner: tabOwner(tab),
         ownedByCaller: tab.control.agentId === agentSessionId,
@@ -1456,8 +1570,9 @@ const make = Effect.gen(function* () {
           ...(candidate.openerTabId === undefined ? {} : { openerTabId: candidate.openerTabId }),
           owner: tabOwner(candidate),
           ownedByCaller: candidate.control.agentId === agentSessionId,
-          visible: candidate.viewers.size > 0,
+          visible: isShown(candidate),
           ...(candidate.profileId === undefined ? {} : { profileId: candidate.profileId }),
+          rendering: candidate.desktop === null ? ("background" as const) : ("panel" as const),
         })),
       ...profileStatus(),
       downloads: tab.downloads.map(({ fileName, path, sizeBytes, url, completedAt }) => ({
@@ -1955,6 +2070,19 @@ const make = Effect.gen(function* () {
       return statusWithTitle(tab, request.agentSessionId);
     }
     const agentSessionId = request.agentSessionId!;
+    const result = await runOnTab(tab, request, agentSessionId);
+    return withTabSummary(request.operation, result, tab);
+  };
+
+  const runOnTab = async (
+    tab: ServerTab,
+    request: PreviewAutomationRequest,
+    agentSessionId: string,
+  ): Promise<unknown> => {
+    // The user should see the tab an agent drives: acting on one off screen
+    // brings it into the panel. A read of a tab leaves the panel alone.
+    if (!READ_OPERATIONS.has(request.operation) && !isShown(tab) && desktopChannel.available)
+      requestPanelReveal(tab.threadId, tab.tabId);
     // A read of another agent's tab, or of any tab while a person drives it,
     // runs in place: it neither queues behind their input nor takes control.
     // Every other call takes control, and a person taking it back interrupts it.
@@ -2602,10 +2730,21 @@ const make = Effect.gen(function* () {
   // The page came back, for example after its DevTools closed. Reconnect now
   // rather than on the next viewer or agent, or the tab's URL and title stop
   // reaching every client in the meantime.
+  //
+  // A tab that had to start headless (its thread was not open on the desktop)
+  // moves to the desktop's page as soon as it attaches. The headless page has
+  // the server's own cookies; left running, the agent would drive a page the
+  // user never sees, signed out where the panel is signed in.
   yield* desktopChannel.attached.pipe(
     Stream.runForEach((key) =>
       Effect.gen(function* () {
-        if (tabs.has(tabKey(key.threadId, key.tabId))) return;
+        const existing = tabs.get(tabKey(key.threadId, key.tabId));
+        if (
+          existing &&
+          !Targeting.shouldMoveToDesktop({ rendersOnDesktop: existing.desktop !== null })
+        )
+          return;
+        if (existing) dropTab(existing, false, "reconnect");
         const { sessions } = yield* manager.list({ threadId: ThreadId.make(key.threadId) });
         const snapshot = sessions.find(
           (session) => session.tabId === key.tabId && session.runtime === "server",
@@ -2668,6 +2807,7 @@ const make = Effect.gen(function* () {
     attachViewer,
     clearProfile,
     reportProfiles,
+    reportShown,
     openDownload,
     answerFileChooser,
   });

@@ -88,13 +88,44 @@ export const PreviewAutomationProfile = Schema.Struct({
 });
 export type PreviewAutomationProfile = typeof PreviewAutomationProfile.Type;
 
+/**
+ * Server hosts: `panel` when the desktop app's browser panel renders the tab
+ * (the user's own profile and logins), `background` when the server's own
+ * browser does.
+ */
+export const PreviewAutomationTabRendering = Schema.Literals(["panel", "background"]);
+export type PreviewAutomationTabRendering = typeof PreviewAutomationTabRendering.Type;
+
+/** The tab an action ran on, returned with action results so agent and user agree on it. */
+export const PreviewAutomationTabSummary = Schema.Struct({
+  tabId: PreviewTabId,
+  url: Schema.NullOr(Schema.String),
+  profileId: Schema.optional(BrowserProfileId),
+  /** Advisory: whether the user can see this tab. Never a reason to stop or to ask the user. */
+  visible: Schema.Boolean,
+  rendering: Schema.optional(PreviewAutomationTabRendering),
+  /** The tab does not share the logins of the browser panel the user sees. */
+  sessionMismatch: Schema.optional(Schema.Boolean),
+  /** Something the agent should know about this tab, in plain words. */
+  notice: Schema.optional(Schema.String),
+});
+export type PreviewAutomationTabSummary = typeof PreviewAutomationTabSummary.Type;
+
 export const PreviewAutomationStatus = Schema.Struct({
   available: Schema.Boolean,
+  /** Advisory: whether the user can see this tab. Never a reason to stop or to ask the user. */
   visible: Schema.Boolean,
   tabId: Schema.NullOr(PreviewTabId),
   url: Schema.NullOr(Schema.String),
   title: Schema.NullOr(Schema.String),
   loading: Schema.Boolean,
+  /** Server hosts: the tab's browser profile. */
+  profileId: Schema.optional(BrowserProfileId),
+  rendering: Schema.optional(PreviewAutomationTabRendering),
+  /** Server hosts: the tab does not share the logins of the browser panel the user sees. */
+  sessionMismatch: Schema.optional(Schema.Boolean),
+  /** Server hosts: something the agent should know about this tab, in plain words. */
+  notice: Schema.optional(Schema.String),
   control: Schema.optional(
     Schema.Struct({
       owner: PreviewAutomationTabOwner,
@@ -146,6 +177,7 @@ export const PreviewAutomationStatus = Schema.Struct({
         ownedByCaller: Schema.optional(Schema.Boolean),
         visible: Schema.optional(Schema.Boolean),
         profileId: Schema.optional(BrowserProfileId),
+        rendering: Schema.optional(PreviewAutomationTabRendering),
       }),
     ),
   ),
@@ -727,6 +759,8 @@ export const PreviewAutomationActionEvent = Schema.Struct({
 export type PreviewAutomationActionEvent = typeof PreviewAutomationActionEvent.Type;
 
 export const PreviewAutomationSnapshot = Schema.Struct({
+  /** Server hosts: the tab this snapshot read. */
+  tab: Schema.optional(PreviewAutomationTabSummary),
   url: Schema.String,
   title: Schema.String,
   loading: Schema.Boolean,

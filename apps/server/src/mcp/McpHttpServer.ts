@@ -584,6 +584,8 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
             Effect.gen(function* () {
               const snapshot = encodedResult as SnapshotMetadata & {
                 readonly url: string;
+                /** The tab read, so the agent can say which page it saw. */
+                readonly tab?: unknown;
                 readonly screenshot: {
                   readonly mimeType: "image/png";
                   readonly data: string;
@@ -603,6 +605,7 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
                 const saved = {
                   url: cutText(snapshot.url, MAX_SNAPSHOT_IDENTIFIER_CHARS),
                   screenshotPath,
+                  ...(snapshot.tab === undefined ? {} : { tab: snapshot.tab }),
                 };
                 return new McpSchema.CallToolResult({
                   isError: false,
@@ -632,6 +635,7 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
                     type: "text",
                     text: encodeJsonText({
                       url: cutText(snapshot.url, MAX_SNAPSHOT_IDENTIFIER_CHARS),
+                      ...(snapshot.tab === undefined ? {} : { tab: snapshot.tab }),
                     }),
                   },
                   { type: "text", text: bounded.text },

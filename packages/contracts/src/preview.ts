@@ -313,6 +313,8 @@ export const PreviewSessionSnapshot = Schema.Struct({
   reveal: Schema.optional(Schema.Boolean),
   /** A fresh presentation request, including whether it overrides automatic-floating settings. */
   revealRequest: Schema.optional(Schema.Struct({ id: Schema.String, force: Schema.Boolean })),
+  /** Server tabs only: an agent drives the tab and no person has taken it back. */
+  agentDriving: Schema.optional(Schema.Boolean),
   updatedAt: Schema.String,
 });
 export type PreviewSessionSnapshot = typeof PreviewSessionSnapshot.Type;
@@ -396,6 +398,18 @@ export const PreviewReportProfilesInput = Schema.Struct({
   defaultProfileId: BrowserProfileId,
 });
 export type PreviewReportProfilesInput = typeof PreviewReportProfilesInput.Type;
+
+/**
+ * The server tabs the desktop app shows in its browser panel right now. Each
+ * report replaces the last, so agents can tell the tab on screen from tabs the
+ * app keeps alive behind it.
+ */
+export const PreviewReportShownInput = Schema.Struct({
+  tabs: Schema.Array(Schema.Struct({ threadId: ThreadId, tabId: PreviewTabId })).check(
+    Schema.isMaxLength(32),
+  ),
+});
+export type PreviewReportShownInput = typeof PreviewReportShownInput.Type;
 
 export const PreviewClearProfileInput = Schema.Struct({
   profileId: BrowserProfileId,
