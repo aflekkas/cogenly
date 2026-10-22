@@ -1,5 +1,5 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { Bot, ExternalLink, Square } from "lucide-react";
+import { Bot, ExternalLink, Square, SquareTerminal } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { CopyButton } from "~/components/ui/copy-button";
@@ -480,6 +480,13 @@ export function AgentRunsView(props: AgentRunsViewProps) {
             worktreePath={selected.worktreePath}
             onAddTerminalContext={props.onAddTerminalContext}
             showExitMessage={false}
+            unavailable={
+              <TerminalSectionEmpty
+                icon={<SquareTerminal />}
+                title="Output isn't available for this run"
+                detail="It printed nothing, or its log has since been cleared."
+              />
+            }
             focusRequestId={props.focusToken}
             autoFocus={props.autoFocus}
             visible={props.visible}

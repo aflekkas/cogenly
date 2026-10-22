@@ -14,6 +14,7 @@ import {
   type TerminalAttachInput,
   type TerminalSummary,
 } from "@t3tools/contracts";
+import * as Predicate from "effect/Predicate";
 import { useMemo } from "react";
 
 import { useEnvironmentQuery } from "./query";
@@ -124,10 +125,20 @@ export function selectKnownTerminalSessions(
   return sessions;
 }
 
+export interface AttachedTerminalSessionState extends TerminalSessionState {
+  /** The server holds neither a session nor a log for this terminal, so there is nothing to show. */
+  readonly unavailable: boolean;
+}
+
+/** A lookup failure means the terminal is gone, not that attaching broke. */
+export function isTerminalUnavailableFailure(failure: unknown): boolean {
+  return Predicate.isTagged(failure, "TerminalSessionLookupError");
+}
+
 export function useAttachedTerminalSession(input: {
   readonly environmentId: EnvironmentId | null;
   readonly terminal: TerminalAttachInput | null;
-}): TerminalSessionState {
+}): AttachedTerminalSessionState {
   const canRead = useEnvironmentScope(input.environmentId, AuthTerminalReadScope);
   const canOperate = useEnvironmentScope(input.environmentId, AuthTerminalOperateScope);
   const attach = useEnvironmentQuery(
@@ -156,7 +167,7 @@ export function useAttachedTerminalSession(input: {
 
   return useMemo(() => {
     if (input.environmentId === null || input.terminal === null) {
-      return EMPTY_TERMINAL_SESSION_STATE;
+      return { ...EMPTY_TERMINAL_SESSION_STATE, unavailable: false };
     }
     const summary =
       (metadata.data === null
@@ -165,8 +176,19 @@ export function useAttachedTerminalSession(input: {
             .byThreadId.get(input.terminal.threadId)
             ?.find((terminal) => terminal.terminalId === input.terminal?.terminalId)) ?? null;
     const state = combineTerminalSessionState(summary, attach.data ?? EMPTY_TERMINAL_BUFFER_STATE);
-    return attach.error === null ? state : { ...state, error: attach.error, status: "error" };
-  }, [attach.data, attach.error, input.environmentId, input.terminal, metadata.data]);
+    if (attach.error === null) return { ...state, unavailable: false };
+    if (isTerminalUnavailableFailure(attach.failure)) {
+      return { ...state, error: null, status: "closed", unavailable: true };
+    }
+    return { ...state, error: attach.error, status: "error", unavailable: false };
+  }, [
+    attach.data,
+    attach.error,
+    attach.failure,
+    input.environmentId,
+    input.terminal,
+    metadata.data,
+  ]);
 }
 
 export function useKnownTerminalSessions(input: {

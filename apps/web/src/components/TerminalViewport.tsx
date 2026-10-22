@@ -19,7 +19,7 @@ import {
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
-import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { readTextFromClipboard, writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
@@ -337,6 +337,8 @@ interface TerminalViewportProps {
   onAddTerminalContext?: (selection: TerminalContextSelection) => void;
   /** Writes "[terminal] Process exited…" into the output; off when the host shows status itself. */
   showExitMessage?: boolean;
+  /** Shown over the output when the server has no session or log for this terminal. */
+  unavailable?: ReactNode;
   focusRequestId: number;
   autoFocus: boolean;
   visible: boolean;
@@ -355,6 +357,7 @@ export function TerminalViewport({
   onSessionExited,
   onAddTerminalContext,
   showExitMessage = true,
+  unavailable,
   focusRequestId,
   autoFocus,
   visible,
@@ -1025,10 +1028,17 @@ export function TerminalViewport({
     };
   }, [environmentId, resizeEpoch, terminalId, threadId]);
   return (
-    <div
-      ref={containerRef}
-      tabIndex={-1}
-      className="relative h-full w-full overflow-hidden bg-(--terminal-background)"
-    />
+    <div className="relative h-full w-full">
+      <div
+        ref={containerRef}
+        tabIndex={-1}
+        className="relative h-full w-full overflow-hidden bg-(--terminal-background)"
+      />
+      {terminalSession.unavailable && unavailable ? (
+        <div className="reveal-motion absolute inset-0 flex items-center justify-center bg-(--terminal-background)">
+          {unavailable}
+        </div>
+      ) : null}
+    </div>
   );
 }
