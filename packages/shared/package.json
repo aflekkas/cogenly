@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./snooze": {
+      "types": "./src/snooze.ts",
+      "import": "./src/snooze.ts"
+    },
     "./workStatus": {
       "types": "./src/workStatus.ts",
       "import": "./src/workStatus.ts"

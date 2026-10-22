@@ -1,5 +1,6 @@
 // @effect-diagnostics globalDate:off -- UI snooze presets use local calendar boundaries and Intl labels.
 import * as DateTime from "effect/DateTime";
+import { localTimeZone, snoozePresetTimes, type SnoozePresetKey } from "@t3tools/shared/snooze";
 
 import type { PendingSubagentRequest } from "./models.ts";
 
@@ -217,8 +218,6 @@ export function threadWokeAt(
 }
 
 const HOUR_MS = 60 * 60 * 1_000;
-const EVENING_HOUR = 18;
-const MORNING_HOUR = 9;
 
 export type SnoozePresetId = "hour" | "three-hours" | "evening" | "tomorrow" | "next-week";
 
@@ -232,80 +231,40 @@ export interface SnoozePreset {
   readonly snoozedUntil: string;
 }
 
+const PRESET_ROWS: Readonly<
+  Record<SnoozePresetKey, { readonly id: SnoozePresetId; readonly label: string }>
+> = {
+  in_1h: { id: "hour", label: "In 1 hour" },
+  in_3h: { id: "three-hours", label: "In 3 hours" },
+  this_evening: { id: "evening", label: "This evening" },
+  tomorrow: { id: "tomorrow", label: "Tomorrow" },
+  next_week: { id: "next-week", label: "Next week" },
+};
+
 function snoozeTimeOfDayLabel(date: Date): string {
   return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-function snoozeAtHour(base: Date, hour: number): Date {
-  const next = DateTime.toDate(DateTime.makeUnsafe(base));
-  next.setHours(hour, 0, 0, 0);
-  return next;
-}
-
-// Calendar-day advance instead of adding DAY_MS: fixed millisecond offsets
-// land on the wrong local day across DST transitions (a spring-forward day
-// is 23 hours, so 23:30 + 24h skips the whole next day).
-function addSnoozeDays(base: Date, days: number): Date {
-  const next = DateTime.toDate(DateTime.makeUnsafe(base));
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
 /**
- * Shared "snooze until" choices for every client. "This evening" only
- * appears while it is meaningfully before evening; after that the calendar
- * choices start at "Tomorrow". Calendar presets that land on the same
- * instant collapse: on Sundays "Tomorrow" and "Next week" are both Monday
- * morning, so only "Tomorrow" is offered.
+ * Shared "snooze until" choices for every client, in the device's zone. The
+ * times come from `@t3tools/shared/snooze`, which the agent's snooze tool
+ * resolves through too.
  */
 export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset> {
-  const inAnHour = DateTime.toDate(DateTime.makeUnsafe(now.getTime() + HOUR_MS));
-  const inThreeHours = DateTime.toDate(DateTime.makeUnsafe(now.getTime() + 3 * HOUR_MS));
-  const presets: SnoozePreset[] = [
-    {
-      id: "hour",
-      label: "In 1 hour",
-      whenLabel: snoozeTimeOfDayLabel(inAnHour),
-      snoozedUntil: inAnHour.toISOString(),
+  return snoozePresetTimes({ nowMs: now.getTime(), timeZone: localTimeZone() }).map(
+    ({ key, atMs }) => {
+      const wake = DateTime.toDate(DateTime.makeUnsafe(atMs));
+      const time = snoozeTimeOfDayLabel(wake);
+      return {
+        ...PRESET_ROWS[key],
+        whenLabel:
+          key === "next_week"
+            ? `${wake.toLocaleDateString(undefined, { weekday: "short" })} ${time}`
+            : time,
+        snoozedUntil: wake.toISOString(),
+      };
     },
-    {
-      id: "three-hours",
-      label: "In 3 hours",
-      whenLabel: snoozeTimeOfDayLabel(inThreeHours),
-      snoozedUntil: inThreeHours.toISOString(),
-    },
-  ];
-
-  const evening = snoozeAtHour(now, EVENING_HOUR);
-  if (evening.getTime() - now.getTime() > HOUR_MS) {
-    presets.push({
-      id: "evening",
-      label: "This evening",
-      whenLabel: snoozeTimeOfDayLabel(evening),
-      snoozedUntil: evening.toISOString(),
-    });
-  }
-
-  const tomorrow = snoozeAtHour(addSnoozeDays(now, 1), MORNING_HOUR);
-  presets.push({
-    id: "tomorrow",
-    label: "Tomorrow",
-    whenLabel: snoozeTimeOfDayLabel(tomorrow),
-    snoozedUntil: tomorrow.toISOString(),
-  });
-
-  const daysUntilMonday = (1 - now.getDay() + 7) % 7 || 7;
-  const nextWeek = snoozeAtHour(addSnoozeDays(now, daysUntilMonday), MORNING_HOUR);
-  if (nextWeek.getTime() !== tomorrow.getTime()) {
-    presets.push({
-      id: "next-week",
-      label: "Next week",
-      whenLabel: `${nextWeek.toLocaleDateString(undefined, { weekday: "short" })} ${snoozeTimeOfDayLabel(nextWeek)}`,
-      snoozedUntil: nextWeek.toISOString(),
-    });
-  }
-
-  return presets;
+  );
 }
 
 /**
