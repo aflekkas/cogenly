@@ -3,15 +3,20 @@
  * Read-only access to a T3 Code state database (`statev2.sqlite`).
  *
  * T3 Code and Cogenly share their schema up to migration 62, so the tables read
- * here have the same columns in both. The file is opened with `immutable=1`:
- * SQLite takes no locks and never touches the `-wal`/`-shm` files, so the
- * source install is never written. That also means a running T3 server's
- * uncheckpointed writes are invisible, which is why the import asks the user
- * to quit T3 first.
+ * here have the same columns in both.
+ *
+ * T3 Code may be running while Cogenly reads it. Detection reads the live file
+ * (see `openLive`). A scan or import reads a snapshot instead:
+ * `snapshotT3SourceDatabase` copies the live database with SQLite's online
+ * backup API, in one step so the copy is a single consistent read
+ * transaction, into a private temp directory. The snapshot is then opened
+ * with `immutable=1`. Nothing in T3's userdata is ever opened for writing.
  *
  * @module T3SourceDatabase
  */
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 import * as NodeURL from "node:url";
 
@@ -93,15 +98,43 @@ const integer = (value: unknown): number =>
       ? Number(value)
       : Number(value ?? 0);
 
-/** Open `dbPath` strictly read-only. Throws when the file is missing or not a T3 V2 database. */
-export function openT3SourceDatabase(dbPath: string): T3SourceDatabase {
+const REQUIRED_TABLES = [
+  "orchestration_events",
+  "projection_projects",
+  "orchestration_v2_projection_threads",
+  "orchestration_v2_projection_messages",
+];
+
+function openReadOnly(dbPath: string, immutable: boolean) {
   if (!NodeFS.existsSync(dbPath)) {
     throw new Error(`No T3 Code database at ${dbPath}.`);
   }
   const url = NodeURL.pathToFileURL(dbPath);
   url.searchParams.set("mode", "ro");
-  url.searchParams.set("immutable", "1");
-  const database = new NodeSqlite.DatabaseSync(url.href, { readOnly: true });
+  if (immutable) url.searchParams.set("immutable", "1");
+  return new NodeSqlite.DatabaseSync(url.href, { readOnly: true });
+}
+
+/**
+ * Read T3's live database. While T3 runs, its `-wal` file exists and this is
+ * an ordinary read-only WAL reader, so T3's committed changes are visible.
+ * A closed T3 has folded its WAL away; a WAL reader would recreate the
+ * `-wal`/`-shm` files in T3's directory, so the file is read as immutable.
+ */
+function openLive(dbPath: string) {
+  return openReadOnly(dbPath, !NodeFS.existsSync(`${dbPath}-wal`));
+}
+
+/**
+ * Open a T3 V2 database strictly read-only: `live` for T3's own file, which
+ * may be changing, else a snapshot nothing writes. Throws when the file is
+ * missing or not a T3 V2 database.
+ */
+export function openT3SourceDatabase(
+  dbPath: string,
+  options: { readonly live: boolean } = { live: false },
+): T3SourceDatabase {
+  const database = options.live ? openLive(dbPath) : openReadOnly(dbPath, true);
   try {
     const tables = new Set(
       database
@@ -109,12 +142,7 @@ export function openT3SourceDatabase(dbPath: string): T3SourceDatabase {
         .all()
         .map((row) => text(row.name)),
     );
-    for (const required of [
-      "orchestration_events",
-      "projection_projects",
-      "orchestration_v2_projection_threads",
-      "orchestration_v2_projection_messages",
-    ]) {
+    for (const required of REQUIRED_TABLES) {
       if (!tables.has(required)) {
         throw new Error(`${dbPath} is not a T3 Code database (missing ${required}).`);
       }
@@ -259,6 +287,88 @@ export function openT3SourceDatabase(dbPath: string): T3SourceDatabase {
       })),
     close: () => database.close(),
   };
+}
+
+/** A consistent copy of T3's database in a private temp directory; see `snapshotT3SourceDatabase`. */
+export interface T3SourceSnapshot {
+  readonly directory: string;
+  readonly path: string;
+}
+
+/** Room a snapshot needs on top of the database itself, for the copy's journal and slack. */
+const SNAPSHOT_HEADROOM_BYTES = 256 * 1024 * 1024;
+/** The backup's pages per step. One step copies everything inside one read transaction. */
+const SNAPSHOT_ONE_STEP = 2_147_483_647;
+
+const fileBytes = (path: string) => {
+  try {
+    return NodeFS.statSync(path).size;
+  } catch {
+    return 0;
+  }
+};
+
+export interface T3SnapshotSpace {
+  readonly requiredBytes: number;
+  readonly availableBytes: number;
+  readonly enough: boolean;
+}
+
+/** Free space for a snapshot of `dbPath` under `tempRoot`: the database, its WAL and headroom. */
+export function checkT3SnapshotSpace(input: {
+  readonly dbPath: string;
+  readonly tempRoot: string;
+  /** Bytes free under a directory; tests pin it. */
+  readonly freeBytes?: (directory: string) => number;
+}): T3SnapshotSpace {
+  const requiredBytes =
+    fileBytes(input.dbPath) + fileBytes(`${input.dbPath}-wal`) + SNAPSHOT_HEADROOM_BYTES;
+  const availableBytes = (
+    input.freeBytes ??
+    ((directory) => {
+      const stats = NodeFS.statfsSync(directory);
+      return Number(stats.bavail) * Number(stats.bsize);
+    })
+  )(input.tempRoot);
+  return { requiredBytes, availableBytes, enough: availableBytes >= requiredBytes };
+}
+
+export const defaultT3SnapshotRoot = () => NodeOS.tmpdir();
+
+/**
+ * Copy the live database at `dbPath` into a new directory under `tempRoot`.
+ * The source is opened read-only, and the copy runs as a single backup step,
+ * so it reflects one moment even while T3 keeps writing; later T3 changes
+ * are simply not in it. Check space with `checkT3SnapshotSpace` first, and
+ * remove the snapshot with `removeT3SourceSnapshot`.
+ */
+export async function snapshotT3SourceDatabase(input: {
+  readonly dbPath: string;
+  readonly tempRoot: string;
+}): Promise<T3SourceSnapshot> {
+  const source = openLive(input.dbPath);
+  const directory = NodeFS.mkdtempSync(NodePath.join(input.tempRoot, "cogenly-t3-import-"));
+  const path = NodePath.join(directory, "statev2.sqlite");
+  try {
+    await NodeSqlite.backup(source, path, { rate: SNAPSHOT_ONE_STEP });
+    // The copy inherits WAL mode; fold it into one file so `immutable` reads are exact.
+    const copy = new NodeSqlite.DatabaseSync(path);
+    try {
+      copy.exec("PRAGMA journal_mode = DELETE");
+    } finally {
+      copy.close();
+    }
+    return { directory, path };
+  } catch (cause) {
+    NodeFS.rmSync(directory, { recursive: true, force: true });
+    throw cause;
+  } finally {
+    source.close();
+  }
+}
+
+export function removeT3SourceSnapshot(snapshot: T3SourceSnapshot): void {
+  NodeFS.rmSync(snapshot.directory, { recursive: true, force: true });
 }
 
 /**

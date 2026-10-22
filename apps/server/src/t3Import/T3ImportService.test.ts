@@ -1,10 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import type { T3ImportStatus } from "@t3tools/contracts";
+import { T3_IMPORT_RUNNING_NOTE, type T3ImportStatus } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -32,14 +33,18 @@ NodeFS.writeFileSync(
   }),
 );
 
-const layer = layerOffline({ sourceDir: fixture.dir }).pipe(
-  Layer.provideMerge(ServerSettings.layerTest()),
-  Layer.provideMerge(Sqlite.layerConfig),
-  Layer.provideMerge(
-    Layer.fresh(ServerConfig.layerTest(process.cwd(), { prefix: "t3-import-service-test-" })),
-  ),
-  Layer.provide(NodeServices.layer),
-);
+const snapshotRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-import-snapshots-"));
+
+const makeLayer = (options: { readonly freeBytes?: (directory: string) => number } = {}) =>
+  layerOffline({ sourceDir: fixture.dir, snapshotRoot, ...options }).pipe(
+    Layer.provideMerge(ServerSettings.layerTest()),
+    Layer.provideMerge(Sqlite.layerConfig),
+    Layer.provideMerge(
+      Layer.fresh(ServerConfig.layerTest(process.cwd(), { prefix: "t3-import-service-test-" })),
+    ),
+    Layer.provide(NodeServices.layer),
+  );
+const layer = makeLayer();
 
 /** The first status the UI would render that satisfies `predicate`. */
 const waitFor = (
@@ -112,7 +117,7 @@ describe("T3ImportService", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  it.effect("refuses to import while T3 Code is running", () =>
+  it.effect("imports while T3 Code is running, from a snapshot it deletes afterwards", () =>
     Effect.gen(function* () {
       const service = yield* T3ImportService;
       const runtimeFile = NodePath.join(fixture.dir, "server-runtime.json");
@@ -123,14 +128,31 @@ describe("T3ImportService", () => {
         yield* service.scan({ scope: { sourceProjectIds: [] } });
         const scanned = yield* waitFor(service, (current) => current.job._tag === "Scanned");
         if (scanned.job._tag !== "Scanned") throw new Error("not scanned");
-        expect(scanned.job.report.warnings.some((warning) => warning.includes("Quit"))).toBe(true);
-        const refused = yield* service
-          .run({ reportId: scanned.job.report.reportId, includeSettings: false })
-          .pipe(Effect.flip);
-        expect(refused.reason).toBe("source-running");
+        expect(scanned.job.report.warnings).toContain(T3_IMPORT_RUNNING_NOTE);
+        // The confirmed import replays the scan's snapshot, so it is held until then.
+        expect(NodeFS.readdirSync(snapshotRoot)).toHaveLength(1);
+        yield* service.run({ reportId: scanned.job.report.reportId, includeSettings: false });
+        const done = yield* waitFor(
+          service,
+          (current) => current.job._tag === "Completed" || current.job._tag === "Failed",
+        );
+        if (done.job._tag !== "Completed") throw new Error(JSON.stringify(done.job));
+        expect(done.job.result.writtenEvents).toBe(3);
+        expect(NodeFS.readdirSync(snapshotRoot)).toEqual([]);
       } finally {
         NodeFS.rmSync(runtimeFile);
       }
     }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("fails clearly when the snapshot would not fit, leaving nothing behind", () =>
+    Effect.gen(function* () {
+      const service = yield* T3ImportService;
+      yield* service.scan({ scope: { sourceProjectIds: [] } });
+      const failed = yield* waitFor(service, (current) => current.job._tag === "Failed");
+      if (failed.job._tag !== "Failed") throw new Error("not failed");
+      expect(failed.job.message).toMatch(/needs .* free in .* but only 0\.0 GB is free/);
+      expect(NodeFS.readdirSync(snapshotRoot)).toEqual([]);
+    }).pipe(Effect.provide(makeLayer({ freeBytes: () => 0 }))),
   );
 });

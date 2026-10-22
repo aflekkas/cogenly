@@ -20,7 +20,6 @@ function t3Status(available: boolean): T3ImportStatus {
       available,
       databasePath: "/Users/me/.t3/userdata/statev2.sqlite",
       running: false,
-      pendingWalBytes: 0,
       projects: [],
     },
     job: { _tag: "Idle" },

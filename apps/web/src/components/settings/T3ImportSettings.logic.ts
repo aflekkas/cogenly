@@ -1,4 +1,5 @@
 import type {
+  T3ImportError,
   T3ImportPhase,
   T3ImportProgress,
   T3ImportProviderBinding,
@@ -23,7 +24,12 @@ export type T3ImportView =
   | { readonly kind: "loading" }
   | { readonly kind: "unavailable"; readonly message: string }
   | { readonly kind: "intro" }
-  | { readonly kind: "scanning"; readonly percent: number | null }
+  | {
+      readonly kind: "scanning";
+      readonly percent: number | null;
+      /** Still copying T3's database into the snapshot the check reads. */
+      readonly copying: boolean;
+    }
   | { readonly kind: "report"; readonly report: T3ImportReport; readonly stale: boolean }
   | {
       readonly kind: "importing";
@@ -43,10 +49,10 @@ export type T3ImportView =
 export interface T3ImportViewState {
   readonly view: T3ImportView;
   /**
-   * T3 Code is running, so checking and importing wait until it quits. An
-   * import already under way keeps going: the server read its snapshot first.
+   * T3 Code is open. Nothing waits for it to quit: a check reads a snapshot,
+   * so this only drives a soft note that later T3 changes need another run.
    */
-  readonly blocked: boolean;
+  readonly t3Open: boolean;
 }
 
 /** T3 projects ticked when the page opens: the server's defaults, never Scratch. */
@@ -101,6 +107,7 @@ export function isT3ImportReportStale(
 
 /** Share of the bar each phase owns. Events dominate a real import, so they get most of it. */
 const PHASE_SPANS: Readonly<Record<T3ImportPhase, readonly [start: number, end: number]>> = {
+  snapshot: [0, 0],
   reading: [0, 5],
   backup: [5, 10],
   projects: [10, 12],
@@ -131,6 +138,7 @@ export function t3ScanProgressPercent(progress: T3ImportProgress): number | null
 }
 
 export const T3_IMPORT_PHASE_LABELS: Readonly<Record<T3ImportPhase, string>> = {
+  snapshot: "Copying T3 Code's data",
   reading: "Reading T3 Code's data",
   backup: "Backing up Cogenly",
   projects: "Setting up projects",
@@ -143,14 +151,18 @@ export function deriveT3ImportView(
   status: T3ImportStatus | null,
   selection: ReadonlySet<string>,
 ): T3ImportViewState {
-  if (status === null) return { view: { kind: "loading" }, blocked: false };
+  if (status === null) return { view: { kind: "loading" }, t3Open: false };
   const { source, job } = status;
-  const blocked = source.available && source.running;
+  const t3Open = source.available && source.running;
   switch (job._tag) {
     case "Scanning":
       return {
-        view: { kind: "scanning", percent: t3ScanProgressPercent(job.progress) },
-        blocked: false,
+        view: {
+          kind: "scanning",
+          percent: t3ScanProgressPercent(job.progress),
+          copying: job.progress.phase === "snapshot",
+        },
+        t3Open,
       };
     case "Importing":
       return {
@@ -161,20 +173,20 @@ export function deriveT3ImportView(
           percent: t3ImportProgressPercent(job.progress),
           backupPath: job.backupPath,
         },
-        blocked: false,
+        t3Open,
       };
     case "Completed":
-      // People reopen T3 Code after importing; the summary shouldn't nag them to quit it.
-      return { view: { kind: "done", result: job.result }, blocked: false };
+      // People keep using T3 Code after importing; the summary shouldn't repeat the note.
+      return { view: { kind: "done", result: job.result }, t3Open: false };
     case "Cancelled":
       return {
         view: { kind: "cancelled", backupPath: job.backupPath, writtenEvents: job.writtenEvents },
-        blocked,
+        t3Open,
       };
     case "Failed":
       return {
         view: { kind: "failed", message: job.message, backupPath: job.backupPath },
-        blocked,
+        t3Open,
       };
     case "Scanned":
       return {
@@ -183,7 +195,7 @@ export function deriveT3ImportView(
           report: job.report,
           stale: isT3ImportReportStale(job.report, selection, source.projects),
         },
-        blocked,
+        t3Open,
       };
     case "Idle":
       if (!source.available) {
@@ -192,19 +204,19 @@ export function deriveT3ImportView(
             kind: "unavailable",
             message: source.error ?? "No T3 Code data was found on this machine.",
           },
-          blocked: false,
+          t3Open: false,
         };
       }
-      return { view: { kind: "intro" }, blocked };
+      return { view: { kind: "intro" }, t3Open };
   }
 }
 
-type T3ImportErrorReason = "busy" | "source-unavailable" | "source-running" | "stale-report";
+type T3ImportErrorReason = T3ImportError["reason"];
 
 const ERROR_MESSAGES: Readonly<Record<T3ImportErrorReason, string>> = {
   busy: "Another check or import is already running. Wait for it to finish.",
   "source-unavailable": "T3 Code's data couldn't be read.",
-  "source-running": "Quit T3 Code to continue.",
+  "insufficient-space": "There isn't enough free disk space to copy T3 Code's data.",
   "stale-report": "T3 Code's data changed since the check. Check again before importing.",
 };
 
@@ -218,7 +230,9 @@ export function describeT3ImportFailure(error: unknown): string {
     const candidate = error as { _tag?: unknown; reason?: unknown; detail?: unknown };
     if (candidate._tag === "T3ImportError" && isT3ImportErrorReason(candidate.reason)) {
       const base = ERROR_MESSAGES[candidate.reason];
-      return candidate.reason === "source-unavailable" && typeof candidate.detail === "string"
+      return (candidate.reason === "source-unavailable" ||
+        candidate.reason === "insufficient-space") &&
+        typeof candidate.detail === "string"
         ? `${base} ${candidate.detail}`
         : base;
     }

@@ -47,7 +47,6 @@ function source(overrides: Partial<T3ImportSource> = {}): T3ImportSource {
     available: true,
     databasePath: "/Users/me/.t3/userdata/statev2.sqlite",
     running: false,
-    pendingWalBytes: 0,
     projects: PROJECTS,
     ...overrides,
   };
@@ -114,7 +113,7 @@ describe("T3ImportSettings.logic", () => {
   it("is loading until the first status arrives", () => {
     expect(deriveT3ImportView(null, DEFAULTS)).toEqual({
       view: { kind: "loading" },
-      blocked: false,
+      t3Open: false,
     });
   });
 
@@ -126,13 +125,25 @@ describe("T3ImportSettings.logic", () => {
     expect(state.view).toEqual({ kind: "unavailable", message: "No database at ~/.t3" });
   });
 
-  it("blocks checking and importing while T3 Code runs, but not an import under way", () => {
+  it("never waits for T3 Code to quit, only notes that it is open", () => {
     const running = { running: true };
-    expect(deriveT3ImportView(status({ _tag: "Idle" }, running), DEFAULTS).blocked).toBe(true);
+    const intro = deriveT3ImportView(status({ _tag: "Idle" }, running), DEFAULTS);
+    expect(intro).toEqual({ view: { kind: "intro" }, t3Open: true });
     expect(
-      deriveT3ImportView(status({ _tag: "Scanned", report: report([]) }, running), DEFAULTS)
-        .blocked,
+      deriveT3ImportView(status({ _tag: "Scanned", report: report([]) }, running), DEFAULTS).t3Open,
     ).toBe(true);
+    expect(
+      deriveT3ImportView(
+        status(
+          {
+            _tag: "Scanning",
+            progress: { phase: "snapshot", processedEvents: 0, totalEvents: 0 },
+          },
+          running,
+        ),
+        DEFAULTS,
+      ).view,
+    ).toEqual({ kind: "scanning", percent: null, copying: true });
     const importing = deriveT3ImportView(
       status(
         {
@@ -145,11 +156,11 @@ describe("T3ImportSettings.logic", () => {
       ),
       DEFAULTS,
     );
-    expect(importing.blocked).toBe(false);
+    expect(importing.t3Open).toBe(true);
     expect(importing.view.kind).toBe("importing");
   });
 
-  it("shows a cancelled import with what it wrote, and leaves a finished one unblocked", () => {
+  it("shows a cancelled import with what it wrote, and a finished one without the note", () => {
     const cancelled = deriveT3ImportView(
       status({ _tag: "Cancelled", backupPath: "/backups/a.sqlite", writtenEvents: 42 }),
       DEFAULTS,
@@ -172,7 +183,7 @@ describe("T3ImportSettings.logic", () => {
       status({ _tag: "Completed", result }, { running: true }),
       DEFAULTS,
     );
-    expect(done).toEqual({ view: { kind: "done", result }, blocked: false });
+    expect(done).toEqual({ view: { kind: "done", result }, t3Open: false });
   });
 
   it("marks a report stale once the selection changes", () => {
@@ -211,10 +222,12 @@ describe("T3ImportSettings.logic", () => {
     expect(
       describeT3ImportFailure({
         _tag: "T3ImportError",
-        reason: "source-running",
-        detail: "pid 12",
+        reason: "insufficient-space",
+        detail: "Copying T3 Code's data needs 12.3 GB free in /tmp, but only 2.0 GB is free.",
       }),
-    ).toBe("Quit T3 Code to continue.");
+    ).toBe(
+      "There isn't enough free disk space to copy T3 Code's data. Copying T3 Code's data needs 12.3 GB free in /tmp, but only 2.0 GB is free.",
+    );
     expect(
       describeT3ImportFailure({
         _tag: "T3ImportError",

@@ -9,20 +9,28 @@ import { NonNegativeInt, ProjectId } from "./baseSchemas.ts";
  *
  * RPCs (all need the settings write grant):
  * - `t3Import.status` (stream of `T3ImportStatus`): the source install
- *   (`source`: found?, T3 running?, unflushed WAL bytes, its projects with
+ *   (`source`: found?, T3 running?, its projects with
  *   default selection and the Cogenly project each merges into) plus the
  *   server-side job (`job`: Idle | Scanning | Scanned | Importing | Completed |
  *   Cancelled | Failed, with progress). Jobs run on the server, so a reload resumes the
  *   view. `source.running` re-polls every few seconds while subscribed.
- * - `t3Import.scan` (`T3ImportScanInput`): starts a dry run for the selected
- *   T3 project ids. Writes nothing; the job ends as `Scanned` with a report.
+ * - `t3Import.scan` (`T3ImportScanInput`): snapshots T3's database (T3 may
+ *   stay open) and starts a dry run for the selected T3 project ids. Writes
+ *   nothing to Cogenly; the job ends as `Scanned` with a report.
  * - `t3Import.run` (`T3ImportRunInput`): imports what the given `reportId`
- *   described. Rejected (`T3ImportError`) while T3 is running, while another
- *   job runs, or when the report is not the latest scan. Backs up the database
- *   first (`Importing.backupPath`, then `Completed.result.backupPath`).
+ *   described, from that scan's snapshot. Rejected (`T3ImportError`) while
+ *   another job runs, or when the report is not the latest scan. Backs up the
+ *   database first (`Importing.backupPath`, then `Completed.result.backupPath`).
  * - `t3Import.cancel`: stops a running scan or import between batches. What was
  *   already written stays; re-running continues where it stopped.
  */
+
+/**
+ * Shown while T3 Code is open, by every client and as a report warning: a scan
+ * reads a snapshot, so later T3 changes wait for the next run.
+ */
+export const T3_IMPORT_RUNNING_NOTE =
+  "T3 Code is open; anything that changes after the check won't come over until you run it again.";
 
 /** Which T3 projects to import, by their T3 project id. Empty means the default selection. */
 export const T3ImportScope = Schema.Struct({
@@ -48,10 +56,8 @@ export type T3ImportSourceProject = typeof T3ImportSourceProject.Type;
 export const T3ImportSource = Schema.Struct({
   available: Schema.Boolean,
   databasePath: Schema.String,
-  /** T3 Code's server is running; its database can change under the import. */
+  /** T3 Code's server is running; changes it makes after a scan come over on the next run. */
   running: Schema.Boolean,
-  /** Bytes in T3's write-ahead log, which a read-only snapshot cannot include. */
-  pendingWalBytes: NonNegativeInt,
   projects: Schema.Array(T3ImportSourceProject),
   /** Where the pre-import database backup is written, on the environment's machine. */
   backupDirectory: Schema.optional(Schema.String),
@@ -151,6 +157,8 @@ export const T3ImportResult = Schema.Struct({
 export type T3ImportResult = typeof T3ImportResult.Type;
 
 export const T3ImportPhase = Schema.Literals([
+  /** Copying T3's database into a temp snapshot, before a scan reads it. */
+  "snapshot",
   "reading",
   "backup",
   "projects",
@@ -208,7 +216,7 @@ export type T3ImportRunInput = typeof T3ImportRunInput.Type;
 export const T3ImportStarted = Schema.Struct({ started: Schema.Boolean });
 
 export class T3ImportError extends Schema.TaggedError<T3ImportError>()("T3ImportError", {
-  reason: Schema.Literals(["busy", "source-unavailable", "source-running", "stale-report"]),
+  reason: Schema.Literals(["busy", "source-unavailable", "insufficient-space", "stale-report"]),
   detail: Schema.String,
 }) {
   override get message(): string {

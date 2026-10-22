@@ -3,14 +3,15 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type {
-  EnvironmentId,
-  T3ImportReport,
-  T3ImportResult,
-  T3ImportSourceProject,
-  T3ImportStatus,
+import {
+  T3_IMPORT_RUNNING_NOTE,
+  type EnvironmentId,
+  type T3ImportReport,
+  type T3ImportResult,
+  type T3ImportSourceProject,
+  type T3ImportStatus,
 } from "@t3tools/contracts";
-import { CircleCheckIcon, CircleAlertIcon, PowerIcon } from "lucide-react";
+import { CircleCheckIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
@@ -20,7 +21,7 @@ import { t3ImportRpc } from "../../rpc/t3Import";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { WorkLogDisclosure } from "../chat/WorkLog";
 import { useSelectSidebarMode } from "../sidebar/modes/useSelectSidebarMode";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
+import { Alert, AlertDescription } from "../ui/alert";
 import { useAnimatedPanelHeight } from "../ui/animated-panel-height";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -120,7 +121,7 @@ export function useT3ImportFlow(environmentId: EnvironmentId) {
   const scan = useAtomCommand(t3ImportRpc.scan, { reportFailure: false });
   const run = useAtomCommand(t3ImportRpc.run, { reportFailure: false });
 
-  const { view, blocked } = deriveT3ImportView(status, selection);
+  const { view, t3Open } = deriveT3ImportView(status, selection);
 
   const cancel = useAtomCommand(t3ImportRpc.cancel, { reportFailure: false });
   const [cancelling, setCancelling] = useState(false);
@@ -187,7 +188,7 @@ export function useT3ImportFlow(environmentId: EnvironmentId) {
     statusError,
     refreshStatus,
     view,
-    blocked,
+    t3Open,
     selection,
     toggleProject,
     includeSettings,
@@ -221,7 +222,7 @@ export function T3ImportFlowView({
     statusError,
     refreshStatus,
     view,
-    blocked,
+    t3Open,
     selection,
     pending,
     busy,
@@ -272,21 +273,11 @@ export function T3ImportFlowView({
     </SettingsSection>
   ) : (
     <>
-      {blocked ? (
+      {t3Open ? (
         <div className="swap-motion">
-          <Alert variant="warning" controlAlignment="first-line">
-            <PowerIcon />
-            <AlertTitle>Quit T3 Code to continue.</AlertTitle>
-            <AlertDescription>
-              {presentation === "onboarding"
-                ? "This ends any T3 session in progress. Setup checks again on its own."
-                : "This ends any T3 session in progress. This page checks again on its own."}
-            </AlertDescription>
-            <AlertAction>
-              <Button size="xs" variant="outline" onClick={refreshStatus}>
-                Retry
-              </Button>
-            </AlertAction>
+          <Alert variant="info" controlAlignment="first-line">
+            <InfoIcon />
+            <AlertDescription>{T3_IMPORT_RUNNING_NOTE}</AlertDescription>
           </Alert>
         </div>
       ) : null}
@@ -303,14 +294,14 @@ export function T3ImportFlowView({
             <>
               <Button size="sm" disabled>
                 <Spinner size="xs" />
-                Checking…
+                {view.copying ? "Copying T3 Code's data…" : "Checking…"}
               </Button>
               {cancelButton}
             </>
           ) : view.kind === "intro" || (view.kind === "report" && view.stale) ? (
             <Button
               size="sm"
-              disabled={blocked || busy || selection.size === 0}
+              disabled={busy || selection.size === 0}
               onClick={() => void flow.startScan()}
             >
               {pending === "scan" ? (
@@ -336,7 +327,6 @@ export function T3ImportFlowView({
             view={view}
             presentation={presentation}
             source={status!.source}
-            blocked={blocked}
             busy={busy}
             pending={pending}
             includeSettings={flow.includeSettings}
@@ -474,7 +464,6 @@ function StageSection({
   view,
   presentation,
   source,
-  blocked,
   busy,
   pending,
   includeSettings,
@@ -486,7 +475,6 @@ function StageSection({
   view: T3ImportView;
   presentation: "settings" | "onboarding";
   source: T3ImportSourceWithBackup;
-  blocked: boolean;
   busy: boolean;
   pending: "scan" | "run" | null;
   includeSettings: boolean;
@@ -499,7 +487,7 @@ function StageSection({
     case "report":
       return (
         <div key="report" className="swap-motion flex flex-col gap-8">
-          <ReportSections report={view.report} pendingWalBytes={source.pendingWalBytes} />
+          <ReportSections report={view.report} />
           {view.report.settings.length > 0 ? (
             <SettingsSection id="t3-import-settings" title="Settings">
               <SettingsRow
@@ -543,9 +531,7 @@ function StageSection({
                 view.stale ? null : (
                   <Button
                     size="sm"
-                    disabled={
-                      blocked || busy || summarizeT3ImportReport(view.report).nothingToImport
-                    }
+                    disabled={busy || summarizeT3ImportReport(view.report).nothingToImport}
                     onClick={() => onImport(view.report)}
                   >
                     {pending === "run" ? (
@@ -593,7 +579,6 @@ function StageSection({
           <DoneSection
             result={view.result}
             presentation={presentation}
-            blocked={blocked}
             busy={busy}
             onCheckAgain={onCheckAgain}
           />
@@ -620,7 +605,7 @@ function StageSection({
                 </>
               }
               control={
-                <Button size="sm" disabled={blocked || busy} onClick={onCheckAgain}>
+                <Button size="sm" disabled={busy} onClick={onCheckAgain}>
                   Check again
                 </Button>
               }
@@ -653,7 +638,7 @@ function StageSection({
                 </>
               }
               control={
-                <Button size="sm" disabled={blocked || busy} onClick={onCheckAgain}>
+                <Button size="sm" disabled={busy} onClick={onCheckAgain}>
                   Try again
                 </Button>
               }
@@ -674,13 +659,7 @@ function backupSentence(source: T3ImportSourceWithBackup): string {
     : "Cogenly backs up its database and settings first, to the backups folder in its data directory.";
 }
 
-function ReportSections({
-  report,
-  pendingWalBytes,
-}: {
-  report: T3ImportReport;
-  pendingWalBytes: number;
-}) {
+function ReportSections({ report }: { report: T3ImportReport }) {
   const summary = summarizeT3ImportReport(report);
   const skipped = listT3SkippedEvents(report.skipped, report.totals.skippedEvents);
   const rerunParts = [
@@ -743,15 +722,12 @@ function ReportSections({
             </div>
           </SettingsRow>
         ) : null}
-        {pendingWalBytes > 0 ? (
-          <SettingsRow
-            title="Some recent T3 changes may be missing"
-            description={`T3 Code hasn't written its last ${formatBytes(pendingWalBytes)} of changes yet. Open T3 Code and quit it once, then check again.`}
-          />
-        ) : null}
-        {report.warnings.map((warning) => (
-          <SettingsRow key={warning} title="Note" description={warning} />
-        ))}
+        {/* The page's own note already says this while T3 Code is open. */}
+        {report.warnings
+          .filter((warning) => warning !== T3_IMPORT_RUNNING_NOTE)
+          .map((warning) => (
+            <SettingsRow key={warning} title="Note" description={warning} />
+          ))}
       </SettingsSection>
       {report.providers.length > 0 ? (
         <SettingsSection id="t3-import-providers" title="Providers">
@@ -792,13 +768,11 @@ function ReportSections({
 function DoneSection({
   result,
   presentation,
-  blocked,
   busy,
   onCheckAgain,
 }: {
   result: T3ImportResult;
   presentation: "settings" | "onboarding";
-  blocked: boolean;
   busy: boolean;
   onCheckAgain: () => void;
 }) {
@@ -852,7 +826,7 @@ function DoneSection({
             : "Re-running is safe: nothing is duplicated, and only what changed in T3 Code since is added. Find it later in Settings → Import."
         }
         control={
-          <Button size="sm" variant="outline" disabled={blocked || busy} onClick={onCheckAgain}>
+          <Button size="sm" variant="outline" disabled={busy} onClick={onCheckAgain}>
             Check again
           </Button>
         }

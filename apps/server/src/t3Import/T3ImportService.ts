@@ -3,6 +3,12 @@
  * Import from T3 Code, as a server service: detects the local T3 install,
  * runs dry-run scans and imports as background jobs, and publishes their state.
  *
+ * T3 Code may stay open. A scan copies T3's database into a temp snapshot
+ * (see `T3SourceDatabase.ts`) and the confirmed import replays that same
+ * snapshot, so the report and the import agree; T3 changes made after the
+ * scan come over on the next run. The snapshot is deleted when the import
+ * ends, a new scan starts, or the service stops.
+ *
  * An import is: back up Cogenly's database, add the provider instances the
  * threads were run with (so they resume against the same Claude/Codex homes),
  * optionally bring over preferences, map or create projects by folder, replay
@@ -30,6 +36,7 @@ import {
   type T3ImportSourceProject,
   type T3ImportStatus,
   T3ImportError,
+  T3_IMPORT_RUNNING_NOTE,
 } from "@t3tools/contracts";
 import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -74,14 +81,23 @@ import {
   type T3ProviderPlan,
 } from "./T3SettingsPlan.ts";
 import {
+  checkT3SnapshotSpace,
+  defaultT3SnapshotRoot,
   openT3SourceDatabase,
+  removeT3SourceSnapshot,
+  snapshotT3SourceDatabase,
   type T3SourceDatabase,
   type T3SourceProjectRow,
+  type T3SourceSnapshot,
 } from "./T3SourceDatabase.ts";
 
 export interface T3ImportServiceOptions {
   /** T3 Code's userdata directory; defaults to `~/.t3/userdata`. */
   readonly sourceDir?: string;
+  /** Where snapshots of T3's database go; defaults to the OS temp directory. */
+  readonly snapshotRoot?: string;
+  /** Free bytes under a directory; tests pin it to exercise the space check. */
+  readonly freeBytes?: (directory: string) => number;
 }
 
 export class T3ImportService extends Context.Service<
@@ -95,14 +111,6 @@ export class T3ImportService extends Context.Service<
       input: T3ImportRunInput,
     ) => Effect.Effect<{ readonly started: boolean }, T3ImportError>;
     readonly cancel: Effect.Effect<{ readonly cancelled: boolean }>;
-    /** Scan and wait for the report; for the CLI. */
-    readonly scanNow: (scope: T3ImportScope) => Effect.Effect<T3ImportReport, T3ImportError>;
-    /** Import and wait for the result; for the CLI. */
-    readonly runNow: (input: {
-      readonly scope: T3ImportScope;
-      readonly includeSettings: boolean;
-      readonly allowRunningSource?: boolean;
-    }) => Effect.Effect<T3ImportResult, T3ImportError>;
   }
 >()("t3/t3Import/T3ImportService") {}
 
@@ -130,12 +138,8 @@ export function isT3ServerRunning(sourceDir: string): boolean {
   }
 }
 
-function walBytes(dbPath: string): number {
-  try {
-    return NodeFS.statSync(`${dbPath}-wal`).size;
-  } catch {
-    return 0;
-  }
+function formatGigabytes(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
 interface CogenlyProjectRow {
@@ -197,6 +201,7 @@ const make = (options: T3ImportServiceOptions = {}) =>
     const sourceDir = options.sourceDir ?? NodePath.join(home, ".t3", "userdata");
     const sourceDbPath = NodePath.join(sourceDir, "statev2.sqlite");
     const sourceAttachmentsDir = NodePath.join(sourceDir, "attachments");
+    const snapshotRoot = options.snapshotRoot ?? defaultT3SnapshotRoot();
     const scratchRoot = normalizeProjectPathForComparison(NodePath.join(home, ".t3", "scratch"));
 
     const job = yield* SubscriptionRef.make<T3ImportJob>({ _tag: "Idle" });
@@ -204,22 +209,62 @@ const make = (options: T3ImportServiceOptions = {}) =>
       readonly reportId: string;
       readonly scope: T3ImportScope;
     } | null>(null);
+    /** The snapshot the latest scan read; the confirmed import replays it. */
+    const heldSnapshot = yield* Ref.make<T3SourceSnapshot | null>(null);
     const cancelRequested = yield* Ref.make(false);
     const running = yield* Ref.make<Fiber.Fiber<unknown, unknown> | null>(null);
 
     const failed = (reason: T3ImportError["reason"], detail: string) =>
       new T3ImportError({ reason, detail });
 
-    const withSource = <A, E, R>(use: (source: T3SourceDatabase) => Effect.Effect<A, E, R>) =>
+    const withSource = <A, E, R>(
+      dbPath: string,
+      live: boolean,
+      use: (source: T3SourceDatabase) => Effect.Effect<A, E, R>,
+    ) =>
       Effect.acquireUseRelease(
         Effect.try({
-          try: () => openT3SourceDatabase(sourceDbPath),
+          try: () => openT3SourceDatabase(dbPath, { live }),
           catch: (cause) =>
             failed("source-unavailable", cause instanceof Error ? cause.message : String(cause)),
         }),
         use,
         (source) => Effect.sync(() => source.close()),
       );
+
+    const dropSnapshot = Ref.getAndSet(heldSnapshot, null).pipe(
+      Effect.flatMap((snapshot) =>
+        snapshot === null ? Effect.void : Effect.sync(() => removeT3SourceSnapshot(snapshot)),
+      ),
+    );
+    yield* Effect.addFinalizer(() => dropSnapshot);
+
+    /** Copy T3's live database into a temp snapshot, after checking there is room for it. */
+    const takeSnapshot = Effect.fn("T3Import.takeSnapshot")(function* () {
+      yield* dropSnapshot;
+      if (!NodeFS.existsSync(sourceDbPath)) {
+        return yield* failed("source-unavailable", `No T3 Code database at ${sourceDbPath}.`);
+      }
+      const space = checkT3SnapshotSpace({
+        dbPath: sourceDbPath,
+        tempRoot: snapshotRoot,
+        ...(options.freeBytes === undefined ? {} : { freeBytes: options.freeBytes }),
+      });
+      if (!space.enough) {
+        return yield* failed(
+          "insufficient-space",
+          `Copying T3 Code's data needs ${formatGigabytes(space.requiredBytes)} free in ${snapshotRoot}, but only ${formatGigabytes(space.availableBytes)} is free. Free up space and try again.`,
+        );
+      }
+      // A backup cannot be stopped halfway; let it finish, then clean up.
+      const snapshot = yield* Effect.tryPromise({
+        try: () => snapshotT3SourceDatabase({ dbPath: sourceDbPath, tempRoot: snapshotRoot }),
+        catch: (cause) =>
+          failed("source-unavailable", `Couldn't copy T3 Code's data: ${errorSummary(cause)}`),
+      }).pipe(Effect.uninterruptible);
+      yield* Ref.set(heldSnapshot, snapshot);
+      return snapshot;
+    });
 
     const cogenlyProjects = sql<CogenlyProjectRow>`
       SELECT project_id, title, workspace_root FROM projection_projects WHERE deleted_at IS NULL
@@ -234,11 +279,10 @@ const make = (options: T3ImportServiceOptions = {}) =>
       const base = {
         databasePath: sourceDbPath,
         running: isT3ServerRunning(sourceDir),
-        pendingWalBytes: walBytes(sourceDbPath),
         backupDirectory: NodePath.join(config.baseDir, "backups"),
       };
       const rows = yield* cogenlyProjects.pipe(Effect.orElseSucceed(() => []));
-      const listed = yield* withSource((source) =>
+      const listed = yield* withSource(sourceDbPath, true, (source) =>
         Effect.sync(() => {
           const counts = source.projectThreadCounts();
           return source.listProjects().map((project): T3ImportSourceProject => {
@@ -453,16 +497,7 @@ const make = (options: T3ImportServiceOptions = {}) =>
       });
 
       const warnings: Array<string> = [];
-      if (detected.running) {
-        warnings.push(
-          "T3 Code is running. Quit it before importing so its database stops changing; this ends the current T3 session.",
-        );
-      }
-      if (detected.pendingWalBytes > 0) {
-        warnings.push(
-          `T3 Code has ${Math.ceil(detected.pendingWalBytes / 1024)} KB of recent changes not yet saved into its database. Quit T3 Code (or open and quit it again) so they are included.`,
-        );
-      }
+      if (detected.running) warnings.push(T3_IMPORT_RUNNING_NOTE);
       for (const target of targets) {
         if (target.action === "create" && !NodeFS.existsSync(target.source.workspaceRoot)) {
           warnings.push(
@@ -518,12 +553,17 @@ const make = (options: T3ImportServiceOptions = {}) =>
       } satisfies ImportPlan;
     });
 
-    const scanNow = (scope: T3ImportScope) =>
-      withSource((source) =>
-        withDeps(buildPlan(source, scope, (progress) => setProgress(progress))).pipe(
-          Effect.catchTags({ SqlError: Effect.die }),
-        ),
-      ).pipe(Effect.map((plan) => plan.report));
+    /** Scan the held snapshot, taking a fresh one first. */
+    const scanSnapshot = (scope: T3ImportScope) =>
+      Effect.gen(function* () {
+        yield* setProgress({ phase: "snapshot", processedEvents: 0, totalEvents: 0 });
+        const snapshot = yield* takeSnapshot();
+        return yield* withSource(snapshot.path, false, (source) =>
+          withDeps(buildPlan(source, scope, (progress) => setProgress(progress))).pipe(
+            Effect.catchTags({ SqlError: Effect.die }),
+          ),
+        ).pipe(Effect.map((plan) => plan.report));
+      }).pipe(Effect.onError(() => dropSnapshot));
 
     const backupNow = Effect.fn("T3Import.backup")(function* () {
       const stamp = DateTime.formatIso(yield* DateTime.now).replaceAll(":", "-");
@@ -546,15 +586,17 @@ const make = (options: T3ImportServiceOptions = {}) =>
       return outPath;
     });
 
-    const runNow = Effect.fn("T3Import.runNow")(function* (input: {
-      readonly scope: T3ImportScope;
-      readonly includeSettings: boolean;
-      readonly allowRunningSource?: boolean;
-    }) {
-      if (input.allowRunningSource !== true && isT3ServerRunning(sourceDir)) {
-        return yield* failed("source-running", "Quit T3 Code before importing.");
-      }
+    /** Import from the snapshot the confirmed scan read. */
+    const importSnapshot = Effect.fn("T3Import.importSnapshot")(function* (
+      snapshot: T3SourceSnapshot,
+      input: {
+        readonly scope: T3ImportScope;
+        readonly includeSettings: boolean;
+      },
+    ) {
       return yield* withSource(
+        snapshot.path,
+        false,
         Effect.fnUntraced(function* (source) {
           const plan = yield* withDeps(
             buildPlan(source, input.scope, (progress) => setProgress(progress)),
@@ -696,7 +738,7 @@ const make = (options: T3ImportServiceOptions = {}) =>
     const scan = (input: T3ImportScanInput) =>
       startJob(
         { _tag: "Scanning", progress: { phase: "reading", processedEvents: 0, totalEvents: 0 } },
-        scanNow(input.scope).pipe(
+        scanSnapshot(input.scope).pipe(
           Effect.tap((report) =>
             Ref.set(latest, { reportId: report.reportId, scope: report.scope }),
           ),
@@ -715,11 +757,9 @@ const make = (options: T3ImportServiceOptions = {}) =>
         ) {
           return yield* failed("stale-report", "Run a new dry run before importing.");
         }
-        if (isT3ServerRunning(sourceDir)) {
-          return yield* failed(
-            "source-running",
-            "Quit T3 Code before importing. This ends the current T3 session.",
-          );
+        const snapshot = yield* Ref.get(heldSnapshot);
+        if (snapshot === null) {
+          return yield* failed("stale-report", "Run a new dry run before importing.");
         }
         return yield* startJob(
           {
@@ -732,7 +772,10 @@ const make = (options: T3ImportServiceOptions = {}) =>
             },
             backupPath: null,
           },
-          runNow({ scope: confirmed.scope, includeSettings: input.includeSettings }),
+          importSnapshot(snapshot, {
+            scope: confirmed.scope,
+            includeSettings: input.includeSettings,
+          }).pipe(Effect.ensuring(Effect.andThen(Ref.set(latest, null), dropSnapshot))),
           (result): T3ImportJob => ({ _tag: "Completed", result }),
         );
       });
@@ -755,7 +798,6 @@ const make = (options: T3ImportServiceOptions = {}) =>
               Effect.map((source) => ({
                 ...source,
                 running: isT3ServerRunning(sourceDir),
-                pendingWalBytes: walBytes(sourceDbPath),
               })),
               Effect.tap((source) => Ref.set(sourceRef, source)),
             ),
@@ -797,8 +839,6 @@ const make = (options: T3ImportServiceOptions = {}) =>
       scan,
       run,
       cancel,
-      scanNow,
-      runNow,
     });
   });
 

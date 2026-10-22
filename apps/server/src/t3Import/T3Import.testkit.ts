@@ -124,13 +124,18 @@ export function run(threadId: string, status: "running" | "completed"): Orchestr
   };
 }
 
-/** A T3 Code database with the tables the importer reads; schema only, synthetic rows. */
-export function makeT3Fixture() {
+/**
+ * A T3 Code database with the tables the importer reads; schema only, synthetic rows.
+ * `wal` mimics a running T3: WAL mode with checkpoints off, so appended rows stay
+ * in the `-wal` file while the fixture is open.
+ */
+export function makeT3Fixture(options: { readonly wal?: boolean } = {}) {
   const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-import-fixture-"));
   const workspaceRoot = NodePath.join(dir, "project");
   NodeFS.mkdirSync(workspaceRoot);
   const dbPath = NodePath.join(dir, "statev2.sqlite");
   const db = new NodeSqlite.DatabaseSync(dbPath);
+  if (options.wal === true) db.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;");
   db.exec(`
     CREATE TABLE orchestration_events (
       sequence INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE,
