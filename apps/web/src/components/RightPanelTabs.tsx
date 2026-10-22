@@ -23,7 +23,6 @@ import {
   Plus,
   Smartphone,
   VenetianMask,
-  X,
 } from "lucide-react";
 import { Volume2, VolumeOff } from "lucide";
 import {
@@ -76,7 +75,6 @@ import {
 import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { PanOnHoverText } from "~/components/sidebar/PanOnHoverText";
-import { resolveTabWidths, TAB_GAP, TAB_ICON_WIDTH } from "./rightPanelTabWidths";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { useTheme } from "~/hooks/useTheme";
 import { useDeviceState } from "~/state/device";
@@ -87,6 +85,7 @@ import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanel
 import { FaviconImage } from "./preview/PreviewFaviconIcon";
 import { previewBridge } from "./preview/previewBridge";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
+import { PanelTab } from "./PanelTab";
 import { observeResize } from "~/lib/observeResize";
 
 export type RightPanelAddKind = "browser" | "device" | "files";
@@ -256,8 +255,8 @@ function PreviewFavicon({ capturedUrl, url }: { capturedUrl: string | null; url:
   return (
     <FaviconImage
       sources={[capturedUrl, publicProviderUrl]}
-      fallback={<Globe2 className="size-3 shrink-0" />}
-      className="size-3 shrink-0 rounded-sm object-contain"
+      fallback={<Globe2 className="size-3.5 shrink-0" />}
+      className="size-3.5 shrink-0 rounded-sm object-contain"
     />
   );
 }
@@ -291,23 +290,23 @@ function SurfaceIcon({
       return <PreviewFavicon capturedUrl={capturedUrl} url={url} />;
     }
     case "files":
-      return <Files className="size-3 shrink-0" />;
+      return <Files className="size-3.5 shrink-0" />;
     case "file":
       return (
         <PierreEntryIcon
           pathValue={surface.relativePath}
           kind="file"
           theme={theme}
-          className="size-3"
+          className="size-3.5"
         />
       );
     case "device":
       return surface.target?.platform === "ios" ? (
-        <AppleIcon className="size-3 shrink-0" />
+        <AppleIcon className="size-3.5 shrink-0" />
       ) : surface.target?.platform === "android" ? (
-        <AndroidIcon className="size-3 shrink-0" />
+        <AndroidIcon className="size-3.5 shrink-0" />
       ) : (
-        <Smartphone className="size-3 shrink-0" />
+        <Smartphone className="size-3.5 shrink-0" />
       );
   }
 }
@@ -321,31 +320,25 @@ function SortableTabList(props: {
   /** The full strip, so a drop lands at the surface's index in the owner's order. */
   allSurfaces: readonly RightPanelSurface[];
   onMove: ((surfaceId: string, toIndex: number) => void) | undefined;
-  onDraggingChange: (dragging: boolean) => void;
   children: ReactNode;
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const surfaceIds = useMemo(() => props.surfaces.map((surface) => surface.id), [props.surfaces]);
-  const { onMove, allSurfaces, onDraggingChange } = props;
-  const handleDragStart = useCallback(() => onDraggingChange(true), [onDraggingChange]);
+  const { onMove, allSurfaces } = props;
   const handleDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
-      onDraggingChange(false);
       if (!over || active.id === over.id) return;
       const toIndex = allSurfaces.findIndex((surface) => surface.id === over.id);
       if (toIndex >= 0) onMove?.(String(active.id), toIndex);
     },
-    [onMove, allSurfaces, onDraggingChange],
+    [onMove, allSurfaces],
   );
-  const handleDragCancel = useCallback(() => onDraggingChange(false), [onDraggingChange]);
   return (
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
       modifiers={TAB_DRAG_MODIFIERS}
-      onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      onDragCancel={handleDragCancel}
     >
       <SortableContext items={surfaceIds} strategy={horizontalListSortingStrategy}>
         {props.children}
@@ -357,11 +350,10 @@ function SortableTabList(props: {
 function SortableTab({
   surfaceId,
   disabled,
-  active,
   className,
   style,
   ...props
-}: ComponentProps<"div"> & { surfaceId: string; disabled: boolean; active: boolean }) {
+}: ComponentProps<"div"> & { surfaceId: string; disabled: boolean }) {
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: surfaceId,
     disabled,
@@ -371,29 +363,18 @@ function SortableTab({
       {...props}
       {...listeners}
       ref={setNodeRef}
-      // The strip sizes the tab (width); the drag adds its own translate.
+      // The drag adds its own translate.
       style={{ ...style, transform: CSS.Translate.toString(transform), transition }}
-      // The shared indicator stays out of a drag (see RightPanelTabs), so the
-      // selected tab carries its own fill while it is lifted.
-      className={cn(
-        className,
-        isDragging && "relative z-10",
-        isDragging && active && "state-selected",
-      )}
+      className={cn(className, isDragging && "relative z-10")}
     />
   );
 }
 
-/** The tab strip's own motion: widths, arrivals and departures, on the base token. */
+/** The tab strip's own motion: arrivals and departures, on the base token. */
 const TAB_MOTION_MS = 220;
-/** Under reduced motion the strip only fades, on the fast token. */
-const TAB_MOTION_REDUCED_MS = 150;
 const TAB_MOTION_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
 const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-/** The "+" button, its gap and its margin: what a strip keeps clear of its tabs. */
-const NEW_TAB_ALLOWANCE = 24 + 2 + 2;
 
 interface LeavingTab {
   readonly surface: RightPanelSurface;
@@ -486,7 +467,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const tabIdPrefix = useId();
   const [renamingDevice, setRenamingDevice] = useState<string | null>(null);
   const [hasOverflow, setHasOverflow] = useState(false);
-  const [stripWidth, setStripWidth] = useState<number | null>(null);
   const [leavingTabs, setLeavingTabs] = useState<readonly LeavingTab[]>([]);
 
   // The row only lists the active group's surfaces: the header switches groups.
@@ -506,68 +486,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const browserOption = offeredOptions.find((option) => option.kind === "browser") ?? null;
   const canAdd = offeredOptions.length > 0;
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-
-  // Tabs are sized from the strip's measured width, not from how many there
-  // are: every tab keeps its title until the strip runs out of room, then all
-  // shrink evenly, and only below a readable width do the inactive ones become
-  // icons (rightPanelTabWidths). Width changes transition; a strip that still
-  // does not fit scrolls.
-  useEffect(() => {
-    const viewport = tabScrollViewport(tabListRef.current);
-    if (!viewport) return;
-    const update = () => setStripWidth(viewport.clientWidth);
-    update();
-    return observeResize(viewport, update);
-  }, []);
-  const activeIndex = groupSurfaces.findIndex((surface) => surface.id === props.activeSurfaceId);
-  const tabWidths =
-    stripWidth === null
-      ? null
-      : resolveTabWidths(
-          groupSurfaces.length,
-          activeIndex,
-          stripWidth - (canAdd && props.open !== false ? NEW_TAB_ALLOWANCE : 0),
-        );
-
-  // Where the selected tab's fill goes, in the tablist's own coordinates.
-  // Computed from the target widths rather than read from layout: a read
-  // during the commit would see the start of the tabs' width transition, and
-  // the sum of widths easing on one curve eases on that curve itself, so the
-  // indicator keeps pace with the tabs it follows.
-  const [dragging, setDragging] = useState(false);
-  const indicatorRef = useRef<HTMLSpanElement>(null);
-  const indicator =
-    tabWidths && activeIndex >= 0 && activeIndex < tabWidths.length
-      ? {
-          left: tabWidths.slice(0, activeIndex).reduce((sum, width) => sum + width + TAB_GAP, 0),
-          width: tabWidths[activeIndex]!,
-        }
-      : null;
-  // A switch to another group of tabs is a different strip: the fill lands
-  // on its tab without travelling from the old group's. Under reduced motion
-  // a change of tab fades the fill in at its new place, with no travel.
-  const lastIndicatorGroupRef = useRef<RightPanelSurfaceGroup | null>(null);
-  const syncIndicator = useEffectEvent(() => {
-    const element = indicatorRef.current;
-    if (!element) return;
-    const groupChanged = lastIndicatorGroupRef.current !== activeGroup;
-    lastIndicatorGroupRef.current = activeGroup;
-    if (groupChanged) {
-      element.style.transition = "none";
-      void element.offsetWidth;
-      element.style.transition = "";
-      return;
-    }
-    if (reducedMotion() && indicator) {
-      element.animate([{ opacity: 0 }, { opacity: 1 }], {
-        duration: TAB_MOTION_REDUCED_MS,
-        easing: TAB_MOTION_EASING,
-      });
-    }
-  });
-  // Plays on a change of selected tab or group only, not on a resize.
-  // eslint-disable-next-line react/exhaustive-effect-dependencies -- keyed on the selection
-  useLayoutEffect(() => syncIndicator(), [activeGroup, props.activeSurfaceId]);
 
   // Arrivals grow from nothing and departures fold shut in place, so the
   // tabs beside them slide rather than jump. A switch to another group of
@@ -643,8 +561,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       }
     });
   });
-  // Keyed on the tab set: the strip's width reaches the tabs through
-  // tabWidths, and their observed sizes follow it on their own.
+  // Keyed on the tab set: a title change resizes its tab, and the observed
+  // sizes follow it on their own.
   // eslint-disable-next-line react/exhaustive-effect-dependencies -- keyed on the tab set
   useLayoutEffect(() => syncTabSet(), [tabSetKey]);
   const dismissLeaving = useCallback(
@@ -884,8 +802,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     activeTab?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [props.activeSurfaceId, hasOverflow]);
 
-  // Tabs shrink to an icon before the row scrolls; past that, the wheel scrolls
-  // it sideways and the fade on each edge says there is more.
+  // A strip with more tabs than room scrolls: the wheel scrolls it sideways
+  // and the fade on each edge says there is more.
   useEffect(() => {
     const viewport = tabScrollViewport(tabListRef.current);
     if (!viewport) return;
@@ -1005,13 +923,16 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     >
       <div
         className={cn(
-          // A tab strip in the titlebar's row: a tinted band with a hairline
-          // under it. The tabs are pills centered on the row, on the same
-          // line and at the same height as the controls the window pins at
-          // its right, and the selected one is marked by the fill that
-          // slides between them (see the indicator in the tablist), the way
-          // the sidebar's mode switcher marks its segment.
-          "relative flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-stretch gap-1 border-b border-border/60 bg-muted/40 pl-2",
+          // A tab strip in the titlebar's row, on the panel's own surface.
+          // The tabs sit centered on the row, at the same height as the
+          // controls the window pins at its right. Browser and file tabs
+          // open on a toolbar row with its own hairline, so the strip and
+          // that row read as one header with one line under it; a device
+          // has no toolbar, so the strip draws the line itself.
+          "relative flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-stretch gap-1 border-b bg-background pl-2 transition-[border-color] duration-(--motion-duration-fast) ease-out",
+          activeGroup === "browser" || activeGroup === "files"
+            ? "border-transparent"
+            : "border-border/60",
           // The sheet overlays from the viewport top, so its tab bar keeps
           // the titlebar's height: a compact row re-centers the layout
           // controls a few pixels higher and the cluster jumps on open.
@@ -1044,7 +965,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             surfaces={groupSurfaces}
             allSurfaces={props.surfaces}
             onMove={props.onMoveSurface}
-            onDraggingChange={setDragging}
           >
             <div
               role="tablist"
@@ -1053,21 +973,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               className="relative flex h-full w-full items-center gap-0.5"
               onKeyDown={handleTabListKeyDown}
             >
-              {/* The selected tab's fill: one pill that glides to whichever
-                  tab is selected, sized from the same widths as the tabs so
-                  it tracks their own width transitions. Hidden until the
-                  strip has measured itself and while a tab is being dragged. */}
-              <span
-                aria-hidden
-                ref={indicatorRef}
-                data-right-panel-tab-indicator
-                className="pointer-events-none absolute top-1/2 left-0 h-7 rounded-lg state-selected transition-[transform,width,opacity] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none"
-                style={{
-                  width: `${indicator?.width ?? 0}px`,
-                  transform: `translate(${indicator?.left ?? 0}px, -50%)`,
-                  opacity: indicator && !dragging ? 1 : 0,
-                }}
-              />
               {tabItems.map((item) => {
                 if (item.kind === "leaving") {
                   const { entry } = item;
@@ -1083,9 +988,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 const active = surface.id === props.activeSurfaceId;
                 const pending = props.pendingSurfaceIds.has(surface.id);
                 const title = surfaceTitle(surface, props.previewSessions);
-                const width = tabWidths?.[index];
-                // Icon-only: the strip is out of room and this tab is not the selected one.
-                const compact = width === TAB_ICON_WIDTH;
                 const previewTabId = previewTabIdOf(surface, props.previewSessions);
                 // Desktop state is keyed by the session id, but desktop actions
                 // must be addressed with the runtime id.
@@ -1098,28 +1000,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 // One tab stop for the whole strip: the selected tab, or the
                 // first one while nothing is selected.
                 const tabStop = active || (props.activeSurfaceId === null && index === 0);
-                const icon = (
-                  <span className="relative flex size-3 shrink-0 items-center justify-center">
-                    <SurfaceIcon
-                      surface={surface}
-                      sessions={props.previewSessions}
-                      desktopByTabId={props.desktopByTabId}
-                      theme={resolvedTheme}
-                    />
-                    {pending ? (
-                      <span
-                        className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
-                        aria-hidden
-                      />
-                    ) : null}
-                  </span>
-                );
                 return (
                   <SortableTab
                     key={surface.id}
                     surfaceId={surface.id}
                     disabled={!props.onMoveSurface || renamingDevice === surface.id}
-                    active={active}
                     role="tab"
                     id={`${tabIdPrefix}-tab-${index}`}
                     aria-selected={active}
@@ -1128,7 +1013,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     tabIndex={tabStop ? 0 : -1}
                     data-surface-id={surface.id}
                     data-active-tab={active}
-                    data-compact={compact ? "" : undefined}
                     onClick={(event) => {
                       // The close and mute buttons inside the tab act on their own.
                       if (event.target instanceof Element && event.target.closest("button")) return;
@@ -1141,49 +1025,29 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     onMouseDown={handleTabMouseDown}
                     onAuxClick={(event) => handleTabAuxClick(event, surface)}
                     onContextMenu={(event) => handleTabContextMenu(event, surface)}
-                    style={width === undefined ? undefined : { width: `${width}px` }}
                     className={cn(
-                      // Sized by the strip (see tabWidths), like a browser tab; its
-                      // width eases between sizes. The selected tab keeps its name
-                      // and is marked by the shared indicator behind it, not by a
-                      // fill or edge of its own; only keyboard focus draws a ring.
-                      "group/tab relative h-7 shrink-0 cursor-pointer overflow-hidden rounded-lg text-xs outline-none transition-[width,color] duration-(--motion-duration-base) ease-standard focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset motion-reduce:transition-none",
-                      width === undefined && "max-w-44",
-                      active ? "text-foreground" : "text-muted-foreground",
+                      // As wide as its title, up to a cap past which the title
+                      // truncates; a strip that runs out of room scrolls. Only
+                      // keyboard focus draws a ring; PanelTab draws the rest.
+                      "relative h-7 max-w-44 shrink-0 cursor-pointer overflow-hidden rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
                       ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
                     )}
                   >
-                    {/* Hover lives on the content, on the fast token, so it never
-                        competes with the tab's own width transition. It is a
-                        whisper of the selected fill, not the state-hover step:
-                        that step sits one notch under state-selected, so a
-                        hovered tab read as a second selected one. Only the
-                        indicator ever draws the selected fill. */}
-                    <div
-                      className={cn(
-                        "flex h-full items-center gap-1.5 rounded-lg pr-1.5 pl-3 transition-[background-color,color] duration-(--motion-duration-fast) ease-standard group-data-[compact]/tab:justify-center group-data-[compact]/tab:px-0",
-                        !active && "hover:bg-state-selected/40 hover:text-foreground",
-                      )}
-                    >
-                      {compact ? (
-                        // Icon-only is the one case that needs the full title as a tooltip.
-                        <Tooltip>
-                          <TooltipTrigger render={<span className="flex" />}>{icon}</TooltipTrigger>
-                          <TooltipPopup>
-                            {surface.kind === "device" ? (
-                              <DeviceTabTooltip
-                                surface={surface}
-                                environmentId={props.environmentId}
-                                title={title}
-                              />
-                            ) : (
-                              title
-                            )}
-                          </TooltipPopup>
-                        </Tooltip>
-                      ) : (
-                        icon
-                      )}
+                    <PanelTab.Body active={active}>
+                      <PanelTab.Icon>
+                        <SurfaceIcon
+                          surface={surface}
+                          sessions={props.previewSessions}
+                          desktopByTabId={props.desktopByTabId}
+                          theme={resolvedTheme}
+                        />
+                        {pending ? (
+                          <span
+                            className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
+                            aria-hidden
+                          />
+                        ) : null}
+                      </PanelTab.Icon>
                       {renamingDevice === surface.id ? (
                         <input
                           aria-label="Device tab name"
@@ -1206,10 +1070,22 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                             }
                           }}
                         />
+                      ) : surface.kind === "device" ? (
+                        // A device's tooltip adds its host and OS version.
+                        <Tooltip>
+                          <TooltipTrigger render={<PanelTab.Label />}>{title}</TooltipTrigger>
+                          <TooltipPopup>
+                            <DeviceTabTooltip
+                              surface={surface}
+                              environmentId={props.environmentId}
+                              title={title}
+                            />
+                          </TooltipPopup>
+                        </Tooltip>
                       ) : (
                         // A truncated title pans on hover so it can be read in
                         // place, like a sidebar row; no tooltip repeats it.
-                        <PanOnHoverText className="min-w-0 flex-1 text-left group-data-[compact]/tab:hidden">
+                        <PanOnHoverText className="min-w-0 flex-1 text-left">
                           {title}
                         </PanOnHoverText>
                       )}
@@ -1217,10 +1093,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                         <Tooltip>
                           <TooltipTrigger
                             render={
-                              <button
-                                type="button"
+                              <PanelTab.Action
                                 tabIndex={-1}
-                                className="flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-muted group-data-[compact]/tab:hidden"
                                 aria-label={audio === "muted" ? `Unmute ${title}` : `Mute ${title}`}
                                 onClick={() => {
                                   void previewBridge
@@ -1232,7 +1106,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                                   className="size-3"
                                   icon={audio === "muted" ? VolumeOff : Volume2}
                                 />
-                              </button>
+                              </PanelTab.Action>
                             }
                           />
                           <TooltipPopup>
@@ -1240,21 +1114,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                           </TooltipPopup>
                         </Tooltip>
                       )}
-                      {/* Shown on the selected tab and on hover, fading in; not a
-                          tab stop, since Delete closes the focused tab. */}
-                      <button
-                        type="button"
+                      {/* Not a tab stop, since Delete closes the focused tab. */}
+                      <PanelTab.Close
+                        active={active}
                         tabIndex={-1}
                         aria-label={`Close ${title}`}
                         onClick={() => props.onCloseSurface(surface)}
-                        className={cn(
-                          "flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-opacity duration-(--motion-duration-fast) ease-out hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-data-[compact]/tab:hidden",
-                          !active && "opacity-0 group-hover/tab:opacity-100",
-                        )}
-                      >
-                        <X className="size-3" />
-                      </button>
-                    </div>
+                      />
+                    </PanelTab.Body>
                   </SortableTab>
                 );
               })}
