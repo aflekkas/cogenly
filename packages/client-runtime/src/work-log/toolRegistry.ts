@@ -606,6 +606,153 @@ function threadTarget(call: WorkLogToolCall): WorkLogToolTarget | null {
   return id ? { kind: "thread", id, title: text(thread?.title) ?? null, quoted: true } : null;
 }
 
+// Project home tools return a `ProjectChangeReceipt` ({ kind, label, action });
+// the row reads as that receipt: `Added repository spawn-platform`.
+type ProjectReceiptAction = "added" | "removed" | "updated" | "unchanged";
+
+function projectReceipt(
+  call: WorkLogToolCall,
+): { readonly action: ProjectReceiptAction; readonly label: string } | null {
+  const action = text(call.output.action);
+  if (
+    action !== "added" &&
+    action !== "removed" &&
+    action !== "updated" &&
+    action !== "unchanged"
+  ) {
+    return null;
+  }
+  return { action, label: text(call.output.label) ?? "" };
+}
+
+function sourceLinkLabel(call: WorkLogToolCall): string | undefined {
+  const link = asRecord(call.input.link);
+  const owner = text(link?.owner);
+  if (!owner) return undefined;
+  const repo = text(link?.repo);
+  return repo ? `${owner}/${repo}` : owner;
+}
+
+function named(noun: string, name: string | undefined): string {
+  return name ? `${noun} ${name}` : `a ${noun}`;
+}
+
+function projectChangeTool(spec: {
+  readonly icon: WorkLogToolIcon;
+  /** While running: `Adding a repository`. */
+  readonly pending: (call: WorkLogToolCall) => string;
+  /** What was attempted, after `Failed:`: `add a repository`. */
+  readonly attempt: (call: WorkLogToolCall) => string;
+  /** The receipt as a sentence: `Added repository spawn-platform`. */
+  readonly done: (receipt: NonNullable<ReturnType<typeof projectReceipt>>) => string;
+}): WorkLogToolDescriptor {
+  const object = (call: WorkLogToolCall) => {
+    const receipt = call.status === "completed" ? projectReceipt(call) : null;
+    if (receipt) return spec.done(receipt);
+    return call.status === "inProgress" ? spec.pending(call) : spec.attempt(call);
+  };
+  return {
+    icon: spec.icon,
+    verb: null,
+    object,
+    raw: "collapsed",
+    groupKey: "project-change",
+    group: { style: "count", noun: ["project change", "project changes"] },
+    // A few changes read as their receipts, each by its own tool; more collapse to a count.
+    summarize: (calls) =>
+      calls.length <= 3
+        ? calls
+            .map((call) => {
+              const key = normalizeWorkLogToolKey(call.toolName);
+              const own = key === null ? undefined : PROJECT_TOOLS[key];
+              return own ? own.object(call, null) : object(call);
+            })
+            .join(" · ")
+        : null,
+    priority: 0,
+  };
+}
+
+const PROJECT_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
+  project_overview: {
+    icon: "folder",
+    verb: ["Reading", "Read", "read"],
+    object: () => "the project's setup",
+    raw: "collapsed",
+    group: { style: "times", noun: ["project setup", "project setup"] },
+  },
+  project_instructions_get: {
+    icon: "book-open",
+    verb: ["Reading", "Read", "read"],
+    object: () => "the project's instructions",
+    raw: "collapsed",
+    group: { style: "times", noun: ["project instructions", "project instructions"] },
+  },
+  project_instructions_set: projectChangeTool({
+    icon: "book-open",
+    pending: () => "Updating the project's instructions",
+    attempt: () => "update the project's instructions",
+    done: ({ action }) =>
+      action === "unchanged"
+        ? "Project instructions already said that"
+        : "Updated the project's instructions",
+  }),
+  project_repository_add: projectChangeTool({
+    icon: "git-branch",
+    pending: () => "Adding a repository",
+    attempt: () => "add a repository",
+    done: ({ action, label }) =>
+      action === "unchanged"
+        ? `${named("Repository", label || undefined)} was already in the project`
+        : `Added ${named("repository", label || undefined)}`,
+  }),
+  project_repository_remove: projectChangeTool({
+    icon: "git-branch",
+    pending: () => "Removing a repository",
+    attempt: () => "remove a repository",
+    done: ({ action, label }) =>
+      action === "unchanged"
+        ? `${named("Repository", label || undefined)} wasn't in the project`
+        : `Removed ${named("repository", label || undefined)}`,
+  }),
+  project_source_link: projectChangeTool({
+    icon: "globe",
+    pending: (call) => `Linking ${named("source", sourceLinkLabel(call))}`,
+    attempt: (call) => `link ${named("source", sourceLinkLabel(call))}`,
+    done: ({ action, label }) =>
+      action === "unchanged"
+        ? `${named("Source", label || undefined)} was already linked`
+        : `Linked ${named("source", label || undefined)}`,
+  }),
+  project_source_unlink: projectChangeTool({
+    icon: "globe",
+    pending: (call) => `Unlinking ${named("source", sourceLinkLabel(call))}`,
+    attempt: (call) => `unlink ${named("source", sourceLinkLabel(call))}`,
+    done: ({ action, label }) =>
+      action === "unchanged"
+        ? `${named("Source", label || undefined)} wasn't linked`
+        : `Unlinked ${named("source", label || undefined)}`,
+  }),
+  project_file_write: projectChangeTool({
+    icon: "file-plus",
+    pending: (call) => `Saving ${named("file", text(call.input.title))}`,
+    attempt: (call) => `save ${named("file", text(call.input.title))}`,
+    done: ({ action, label }) =>
+      action === "updated"
+        ? `Updated ${named("file", label || undefined)}`
+        : `Saved ${named("file", label || undefined)}`,
+  }),
+  project_file_remove: projectChangeTool({
+    icon: "trash",
+    pending: (call) => `Removing ${named("file", text(call.input.path))}`,
+    attempt: (call) => `remove ${named("file", text(call.input.path))}`,
+    done: ({ action, label }) =>
+      action === "unchanged"
+        ? `${named("File", label || undefined)} was already gone`
+        : `Removed ${named("file", label || undefined)}`,
+  }),
+};
+
 const COGENLY_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
   search: {
     icon: "search",
@@ -695,6 +842,7 @@ const COGENLY_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
 export const WORK_LOG_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
   ...NATIVE_TOOLS,
   ...COGENLY_TOOLS,
+  ...PROJECT_TOOLS,
 };
 
 /** Reasoning summaries use the same row; their label is the thought itself. */
@@ -803,7 +951,9 @@ export function normalizeWorkLogToolKey(toolName: string | null | undefined): st
   const name = toolName?.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
   if (!name) return null;
   const tool = COGENLY_PREFIX.exec(name)?.groups?.tool;
-  if (tool && Object.hasOwn(COGENLY_TOOLS, tool)) return tool;
+  if (tool && (Object.hasOwn(COGENLY_TOOLS, tool) || Object.hasOwn(PROJECT_TOOLS, tool))) {
+    return tool;
+  }
   return resolveT3McpToolId(name) ?? (tool ? tool : nativeToolKey(name));
 }
 

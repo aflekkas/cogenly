@@ -342,3 +342,70 @@ describe("resolveWorkLogNotice", () => {
     expect(notice({ type: "command_execution", input: "ls" })).toBeNull();
   });
 });
+
+describe("project change receipts", () => {
+  const receipt = (kind: string, label: string, action: string) => ({
+    projectFolderId: "spawn",
+    kind,
+    label,
+    action,
+  });
+
+  it("reads a completed change as its receipt", () => {
+    expect(
+      resolveWorkLogTool({
+        toolName: "mcp__cogenly__project_repository_add",
+        input: { repositoryId: "p1" },
+        output: receipt("repository", "spawn-platform", "added"),
+        status: "completed",
+      })?.label,
+    ).toBe("Added repository spawn-platform");
+    expect(
+      resolveWorkLogTool({
+        toolName: "cogenly.project_source_link",
+        input: { link: { kind: "github-owner", owner: "spawn-partners" } },
+        output: {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(receipt("source", "spawn-partners", "unchanged")),
+            },
+          ],
+        },
+        status: "completed",
+      })?.label,
+    ).toBe("Source spawn-partners was already linked");
+  });
+
+  it("names the attempt from the input before the receipt arrives", () => {
+    const call = {
+      toolName: "mcp__cogenly__project_source_link",
+      input: { link: { kind: "github-repo", owner: "spawn-partners", repo: "mobile" } },
+    };
+    expect(resolveWorkLogTool({ ...call, status: "inProgress" })?.label).toBe(
+      "Linking source spawn-partners/mobile",
+    );
+    expect(resolveWorkLogTool({ ...call, status: "failed" })?.label).toBe(
+      "Failed: link source spawn-partners/mobile",
+    );
+  });
+
+  it("groups a few changes as their receipts and more as a count", () => {
+    const change = (label: string) => ({
+      toolName: "mcp__cogenly__project_repository_add",
+      output: receipt("repository", label, "added"),
+      status: "completed" as const,
+    });
+    const instructions = {
+      toolName: "mcp__cogenly__project_instructions_set",
+      output: receipt("instructions", "Instructions", "updated"),
+      status: "completed" as const,
+    };
+    expect(workLogToolGroupLabel([change("a"), instructions])).toBe(
+      "Added repository a · Updated the project's instructions",
+    );
+    expect(workLogToolGroupLabel([change("a"), change("b"), change("c"), change("d")])).toBe(
+      "4 project changes",
+    );
+  });
+});
