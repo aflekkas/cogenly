@@ -1708,8 +1708,8 @@ export const make = Effect.gen(function* () {
 
   // `git worktree add -b feature origin/main` makes the new local branch track
   // origin/main. That upstream is the branch's base, not its published PR
-  // head. Looking up PRs for it can attach an old reverse merge from main and
-  // auto-settle an unrelated feature thread.
+  // head. Looking up PRs for it can attach an old reverse merge from main to
+  // an unrelated feature thread.
   //
   // The branch may still have been pushed under its own name by a plain
   // `git push <remote> feature` that never moved the upstream. When a remote

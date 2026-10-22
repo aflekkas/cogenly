@@ -29,6 +29,7 @@ import {
   OrchestrationV2Command,
   OrchestrationV2LimitRecoveryUpdate,
   OrchestrationV2DomainEvent,
+  OrchestrationV2DomainEventJson,
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
@@ -1569,5 +1570,26 @@ describe("latestProviderTurnForAttempt", () => {
     ];
     expect(latestProviderTurnForAttempt(turns, RunAttemptId.make("goal-attempt"))?.id).toBe("last");
     expect(latestProviderTurnForAttempt(turns, null)).toBeUndefined();
+  });
+});
+
+describe("retired auto-settle events", () => {
+  it("still decodes a stored thread.auto-settle-set event and drops its retired field", () => {
+    const { thread } = emptyThreadProjection();
+    const stored = {
+      id: "event-auto-settle-1",
+      threadId: "thread-1",
+      occurredAt: "2026-04-20T00:00:00.000Z",
+      type: "thread.auto-settle-set",
+      payload: {
+        ...thread,
+        createdAt: "2026-04-20T00:00:00.000Z",
+        updatedAt: "2026-04-20T00:00:00.000Z",
+        autoSettleDisabledAt: "2026-04-20T00:00:00.000Z",
+      },
+    };
+    const event = Schema.decodeUnknownSync(OrchestrationV2DomainEventJson)(stored);
+    expect(event.type).toBe("thread.auto-settle-set");
+    expect(event.payload).not.toHaveProperty("autoSettleDisabledAt");
   });
 });

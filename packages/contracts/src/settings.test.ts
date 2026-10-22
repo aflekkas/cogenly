@@ -580,31 +580,24 @@ describe("ClientSettings follow-up behavior", () => {
   });
 });
 
-describe("ServerSettings thread settlement", () => {
-  it("defaults merge settlement on and inactivity settlement to three days", () => {
-    const settings = decodeServerSettings({});
-    expect(settings.sidebarAutoSettleAfterDays).toBe(3);
-    expect(settings.sidebarAutoSettleOnMerge).toBe(true);
-  });
-
-  it("allows both automatic rules to be disabled", () => {
-    expect(
-      decodeServerSettings({
-        sidebarAutoSettleAfterDays: null,
-        sidebarAutoSettleOnMerge: false,
-      }),
-    ).toMatchObject({ sidebarAutoSettleAfterDays: null, sidebarAutoSettleOnMerge: false });
-    expect(
-      decodeServerSettingsPatch({
-        sidebarAutoSettleAfterDays: null,
-        sidebarAutoSettleOnMerge: false,
-      }),
-    ).toMatchObject({ sidebarAutoSettleAfterDays: null, sidebarAutoSettleOnMerge: false });
-  });
-
-  it.each([-1, 0, 91])("rejects an auto-settle threshold outside 1..90: %s", (value) => {
-    expect(() => decodeServerSettings({ sidebarAutoSettleAfterDays: value })).toThrow();
-    expect(() => decodeServerSettingsPatch({ sidebarAutoSettleAfterDays: value })).toThrow();
+describe("ServerSettings retired auto-settle", () => {
+  it("loads settings files that still carry the auto-settle keys", () => {
+    const stored = {
+      sidebarAutoSettleAfterDays: 3,
+      sidebarAutoSettleOnMerge: true,
+      sidebarAutoSettleKeepPullRequests: false,
+      projectSettingsOverrides: {
+        "project-1": { sidebarAutoSettleAfterDays: null, defaultAutoPull: true },
+      },
+    };
+    const decoded = decodeServerSettings(stored);
+    expect(decoded).not.toHaveProperty("sidebarAutoSettleAfterDays");
+    expect(decoded).not.toHaveProperty("sidebarAutoSettleOnMerge");
+    expect(decoded).not.toHaveProperty("sidebarAutoSettleKeepPullRequests");
+    expect(decoded.projectSettingsOverrides).toEqual({ "project-1": { defaultAutoPull: true } });
+    expect(decodeServerSettingsPatch(stored)).toEqual({
+      projectSettingsOverrides: { "project-1": { defaultAutoPull: true } },
+    });
   });
 });
 

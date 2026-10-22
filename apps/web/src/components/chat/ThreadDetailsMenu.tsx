@@ -1,7 +1,5 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import {
-  AuthOrchestrationOperateScope,
   NodeId,
   resolveEnvironmentMachineKind,
   ThreadId,
@@ -22,12 +20,10 @@ import {
   MessageSquareIcon,
   MoreHorizontalIcon,
   SquareIcon,
-  TimerIcon,
 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { useThreadKind } from "~/hooks/useThreadKind";
 import { cn } from "~/lib/utils";
 import {
   useProjects,
@@ -37,12 +33,9 @@ import {
   useThreadShells,
 } from "~/state/entities";
 import { orchestrationEnvironment } from "~/state/orchestration";
-import { useEnvironmentScope } from "~/state/session";
 import { shellEnvironment } from "~/state/shell";
 import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { useOrchestrationCommand } from "~/state/use-orchestration-command";
-import { threadCapabilities } from "~/threadCapabilities";
 import { buildThreadRouteParams } from "~/threadRoutes";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
@@ -56,7 +49,6 @@ import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
-import { Switch } from "../ui/switch";
 import { showCopiedToast } from "../ui/copiedToast";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -324,7 +316,6 @@ function ThreadDetailsMenuContent(props: {
             <TooltipPopup side="left">{workspacePath}</TooltipPopup>
           </Tooltip>
         ) : null}
-        <AutoSettleRow environmentId={props.environmentId} threadId={props.threadId} />
       </ThreadDetailsSection>
       {lineageLinks.length > 0 ? (
         <ThreadDetailsSection headingId="thread-details-lineage-heading" title="Lineage">
@@ -351,54 +342,6 @@ function ThreadDetailsMenuContent(props: {
         onOpenThread={openThread}
       />
     </div>
-  );
-}
-
-/**
- * Work's per-thread opt-out from automatic settling (inactivity, merged pull
- * request), for threads that should stay in the active list however quiet
- * they get. Hidden where the thread's kind or server has no auto-settle.
- */
-function AutoSettleRow(props: {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-}) {
-  const shell = useThreadShell(scopeThreadRef(props.environmentId, props.threadId));
-  const kind = useThreadKind(shell);
-  const supported =
-    useServerConfigs().get(props.environmentId)?.environment.capabilities.threadAutoSettleOptOut ===
-    true;
-  const canOperate = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
-  const setAutoSettle = useOrchestrationCommand(threadEnvironment.setAutoSettle, {
-    reportFailure: false,
-  });
-  if (shell === null || kind === null || !threadCapabilities(kind).autoSettle || !supported) {
-    return null;
-  }
-  const toggle = async (enabled: boolean) => {
-    const result = await setAutoSettle({
-      environmentId: props.environmentId,
-      input: { threadId: props.threadId, enabled },
-    });
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      toastManager.add({ type: "error", title: "Failed to update auto-settle" });
-    }
-  };
-  return (
-    <label
-      className={cn("flex cursor-pointer items-center", THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS)}
-    >
-      <TimerIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-      <span className={cn("min-w-0 flex-1 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
-        Auto-settle
-      </span>
-      <Switch
-        size="sm"
-        checked={shell.autoSettleDisabledAt == null}
-        disabled={!canOperate}
-        onCheckedChange={(enabled) => void toggle(enabled)}
-      />
-    </label>
   );
 }
 

@@ -21,7 +21,6 @@ describe("ExecutionEnvironmentDescriptor", () => {
       storageCleanupRun: true,
       projectWorktreeCleanup: true,
       worktreesDirectory: true,
-      threadAutoSettlementScope: true,
     };
     expect(decodeDescriptor({ ...descriptor, capabilities }).capabilities).toMatchObject(
       capabilities,

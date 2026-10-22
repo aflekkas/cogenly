@@ -3,7 +3,7 @@
  *
  * Every server keeps its own `settings.json`, but some keys are user
  * preferences that only live on the server because the server has to act on
- * them (auto-settlement runs with no client attached). A user does not want
+ * them (limit recovery runs with no client attached). A user does not want
  * those to differ per machine. Clients write these keys to every shared-settings
  * sync target, and warn when another target still holds a different value so
  * the user can push their current value out.
@@ -23,8 +23,6 @@ import type { EnvironmentConnectionPhase } from "../connection/presentation.ts";
 /** Server keys that hold a user preference rather than machine config. */
 const SHARED_SERVER_SETTING_KEYS = [
   "continueThreadsAfterServerUpdate",
-  "sidebarAutoSettleAfterDays",
-  "sidebarAutoSettleOnMerge",
   "autoResumeLimitedThreads",
   "snoozeLimitedThreads",
   "newWorktreesStartFromOrigin",
@@ -100,19 +98,19 @@ export function pickSharedServerSettings(
 
 /**
  * Whether an environment can participate in shared-settings sync right now.
- * Auto-settlement establishes baseline support; newer preferences are filtered separately.
+ * Settlement support establishes the baseline; newer preferences are filtered separately.
  */
 export function supportsSharedSettingsSync(environment: {
   readonly connection: { readonly phase: EnvironmentConnectionPhase };
   readonly serverConfig: {
     readonly environment: {
-      readonly capabilities: Pick<ExecutionEnvironmentCapabilities, "threadAutoSettlement">;
+      readonly capabilities: Pick<ExecutionEnvironmentCapabilities, "threadSettlement">;
     };
   } | null;
 }): boolean {
   return (
     environment.connection.phase === "connected" &&
-    environment.serverConfig?.environment.capabilities.threadAutoSettlement === true
+    environment.serverConfig?.environment.capabilities.threadSettlement === true
   );
 }
 

@@ -214,7 +214,7 @@ type MenuItems = ReadonlyArray<ContextMenuItem<ThreadActionMenuId>>;
  * Three groups: the thread's state, the thread itself, and removal.
  * Repository actions (new thread, settings, opening its folder) sit on the
  * Work list's repository heading; title regeneration sits in the rename
- * field; auto-settle sits in the thread details popover.
+ * field.
  */
 export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuItems {
   const can = state.capabilities;

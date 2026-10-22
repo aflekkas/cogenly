@@ -42,7 +42,6 @@ import { refreshArchivedThreadsForEnvironment } from "../lib/archivedThreadsStat
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
 import {
-  readEnvironmentSupportsAutoSettleOptOut,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
   readEnvironmentSupportsPinning,
@@ -111,18 +110,6 @@ export class ThreadSnoozeBlockedError extends Schema.TaggedError<ThreadSnoozeBlo
 ) {
   override get message(): string {
     return "This thread is waiting on you. Respond to the pending request before snoozing it.";
-  }
-}
-
-export class ThreadAutoSettleOptOutUnsupportedError extends Schema.TaggedError<ThreadAutoSettleOptOutUnsupportedError>()(
-  "ThreadAutoSettleOptOutUnsupportedError",
-  {
-    environmentId: EnvironmentId,
-    threadId: ThreadId,
-  },
-) {
-  override get message(): string {
-    return "This environment's server does not support turning auto-settle off per thread yet. Update the server to use it.";
   }
 }
 
@@ -306,9 +293,6 @@ export function useThreadActions() {
     reportFailure: false,
   });
   const unsettleThreadMutation = useOrchestrationCommand(threadEnvironment.unsettle, {
-    reportFailure: false,
-  });
-  const setThreadAutoSettleMutation = useOrchestrationCommand(threadEnvironment.setAutoSettle, {
     reportFailure: false,
   });
   const pinThreadMutation = useOrchestrationCommand(threadEnvironment.pin, {
@@ -686,35 +670,12 @@ export function useThreadActions() {
         );
       }
       ThreadUndo.invalidate("settle", scopedThreadKey(target));
-      // reason "user" pins the thread active: auto-settle (PR merged /
-      // inactivity) stays suppressed until real activity clears the pin.
       return unsettleThreadMutation({
         environmentId: target.environmentId,
         input: { threadId: target.threadId, reason: "user" },
       });
     },
     [unsettleThreadMutation],
-  );
-
-  /** Turns automatic settlement (inactivity, merged PR) on or off for one thread. */
-  const setThreadAutoSettle = useCallback(
-    async (target: ScopedThreadRef, enabled: boolean) => {
-      if (!readEnvironmentSupportsAutoSettleOptOut(target.environmentId)) {
-        return AsyncResult.failure(
-          Cause.fail(
-            new ThreadAutoSettleOptOutUnsupportedError({
-              environmentId: target.environmentId,
-              threadId: target.threadId,
-            }),
-          ),
-        );
-      }
-      return setThreadAutoSettleMutation({
-        environmentId: target.environmentId,
-        input: { threadId: target.threadId, enabled },
-      });
-    },
-    [setThreadAutoSettleMutation],
   );
 
   const settleThread = useCallback(
@@ -955,7 +916,6 @@ export function useThreadActions() {
       reorderPinnedThread,
       markThreadUnread,
       markThreadRead,
-      setThreadAutoSettle,
     }),
     [
       archiveThread,
@@ -965,7 +925,6 @@ export function useThreadActions() {
       markThreadUnread,
       pinThread,
       reorderPinnedThread,
-      setThreadAutoSettle,
       settleThread,
       snoozeThread,
       unarchiveThread,

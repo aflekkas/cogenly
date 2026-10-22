@@ -32,7 +32,6 @@ export interface ThreadCapabilities {
   readonly snooze: boolean;
   /** Pin to the top of its list, unpin, and reorder the pins. */
   readonly pin: boolean;
-  readonly autoSettle: boolean;
   /** Archive, and unarchive from Settings → Archived threads. */
   readonly archive: boolean;
   /**
@@ -70,7 +69,6 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     settle: false,
     snooze: false,
     pin: true,
-    autoSettle: false,
     archive: false,
     delete: "always-confirm",
     copyLink: true,
@@ -95,7 +93,6 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     settle: true,
     snooze: true,
     pin: false,
-    autoSettle: true,
     archive: true,
     delete: "setting",
     copyLink: true,
@@ -120,7 +117,6 @@ const CAPABILITIES: Record<ThreadKind, ThreadCapabilities> = {
     settle: false,
     snooze: false,
     pin: false,
-    autoSettle: false,
     archive: false,
     delete: false,
     copyLink: true,
