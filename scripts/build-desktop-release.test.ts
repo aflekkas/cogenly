@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { it } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
-import * as NodeFS from "node:fs";
+import * as FileSystem from "effect/FileSystem";
 import { createBuildConfig, MAC_AUDIO_INPUT_ENTITLEMENT } from "./build-desktop-artifact.ts";
 
 const configFor = (version: string, signed = false, mock = false) =>
@@ -39,8 +39,9 @@ describe("desktop release packaging", () => {
       expect(config.mac).not.toHaveProperty("provisioningProfile");
       // Dictation needs microphone capture under the hardened runtime.
       const entitlements = (config.mac as { entitlements: string }).entitlements;
-      expect(NodeFS.readFileSync(entitlements, "utf8")).toContain(MAC_AUDIO_INPUT_ENTITLEMENT);
-    }),
+      const fs = yield* FileSystem.FileSystem;
+      expect(yield* fs.readFileString(entitlements)).toContain(MAC_AUDIO_INPUT_ENTITLEMENT);
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
   it.effect("ships the dictation helper and a microphone usage description on macOS", () =>
     Effect.gen(function* () {
