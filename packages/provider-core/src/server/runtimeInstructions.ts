@@ -47,6 +47,10 @@ export function buildProjectManifest(input: {
   readonly directory: string;
   readonly resources: ReadonlyArray<string>;
   readonly total: number;
+  /** The project's instructions; blank adds nothing. */
+  readonly instructions?: string | undefined;
+  /** True for the project's own chat, which also gets PROJECT_CHAT_INSTRUCTIONS. */
+  readonly projectChat?: boolean | undefined;
 }): string {
   const shown = input.resources.slice(0, PROJECT_MANIFEST_MAX_RESOURCES);
   const files =
@@ -54,8 +58,31 @@ export function buildProjectManifest(input: {
       ? "(no project files yet)"
       : shown.map((resource) => `- ${toSingleLine(resource)}`).join("\n");
   const more = input.total - shown.length;
-  return `<project_manifest>The thread's project folder is "${toSingleLine(input.name)}" at ${toSingleLine(input.directory)}. Project files:\n${files}${more > 0 ? `\n+${more} more` : ""}\nUse project_recall to search these files and project_file_read to read one.</project_manifest>`;
+  const manifest = `<project_manifest>The thread's project folder is "${toSingleLine(input.name)}" at ${toSingleLine(input.directory)}. Project files:\n${files}${more > 0 ? `\n+${more} more` : ""}\nUse project_recall to search these files and project_file_read to read one.</project_manifest>`;
+  const instructions = input.instructions?.trim() ?? "";
+  return [
+    manifest,
+    ...(instructions.length === 0
+      ? []
+      : [
+          `<project_instructions>The user set these instructions for every thread in this project; follow them:\n${instructions}\n</project_instructions>`,
+        ]),
+    ...(input.projectChat === true ? [PROJECT_CHAT_INSTRUCTIONS] : []),
+  ].join("\n");
 }
+
+/**
+ * The project's own chat configures and runs its project. Appended to the
+ * project manifest for that one thread, so every adapter carries it.
+ */
+export const PROJECT_CHAT_INSTRUCTIONS = `<project_chat>This is the project's own chat, the place the user configures and runs this project from. Act on requests about the project yourself with the cogenly project tools; they target this project by default:
+- project_overview shows its repositories (with ids), GitHub sources and instructions. Check it before changing anything.
+- Repositories: project_repository_add / project_repository_remove for repositories already on this machine (find ids with t3_project_list); t3_project_label_clone_repository clones a GitHub repository into the project.
+- Sources: project_source_link / project_source_unlink for GitHub owners or repositories.
+- Instructions: project_instructions_get, then project_instructions_set with the whole new text. Keep them short and in the user's words.
+- Files: project_files_list, project_file_read, project_recall, project_file_write (saves a note) and project_file_remove.
+Before removing a repository, source or file, or replacing instructions the user did not dictate, confirm in one short sentence and wait. Each change returns a receipt the user sees as a card, so do not restate it at length.
+For coding work (changing a repository's code, running commands, fixing or building something) do not try to do it here: start it with work_task, targeting the right repository, and say what it will do. Answer questions about the project from project_recall and the file tools before guessing.</project_chat>`;
 
 /**
  * System prompt for chat-surface turns. The thread is a conversation, not a

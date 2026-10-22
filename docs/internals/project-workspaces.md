@@ -37,6 +37,15 @@ it does not own a copy.
 - Agents reach resources through the `cogenly` MCP server: list, read (paged
   text), and recall (search across the project's files). Threads in a project
   get a short manifest of its resources in their context.
+- Project instructions and the project chat's own system prompt ride inside
+  that manifest (`buildProjectManifest`), so every adapter carries them with
+  no per-provider code. Codex and Muse resend it every turn; Claude bakes it
+  into the system prompt when its process opens, so an instructions edit
+  reaches a live Claude thread only after that process restarts.
+- Each project has one project chat (`projectLabels.ensureProjectChat`),
+  an ordinary chat-surface thread the label points at. It is left out of the
+  project's thread count and the Chats list, and it configures the project
+  through the `project_*` MCP tools, which act on the caller's own project.
 
 ## Rules that keep cross-environment projects possible
 

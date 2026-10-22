@@ -114,4 +114,16 @@ describe("CONVERSATION_MODE_INSTRUCTIONS", () => {
     expect(CONVERSATION_MODE_INSTRUCTIONS).toContain('mode "propose"');
     expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("A subagent is different");
   });
+
+  it("adds the project's instructions and leaves them out when blank", () => {
+    const base = { name: "P", directory: "/projects/P", resources: [], total: 0 };
+    expect(buildProjectManifest({ ...base, instructions: "Ship small PRs." })).toContain(
+      "<project_instructions>The user set these instructions for every thread in this project; follow them:\nShip small PRs.",
+    );
+    expect(buildProjectManifest({ ...base, instructions: "   " })).not.toContain(
+      "<project_instructions>",
+    );
+    expect(buildProjectManifest(base)).not.toContain("<project_chat>");
+    expect(buildProjectManifest({ ...base, projectChat: true })).toContain("<project_chat>");
+  });
 });

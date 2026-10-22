@@ -315,3 +315,53 @@ it.layer(layerWithFiles)("RuntimePolicyV2 project manifest", (it) => {
     }),
   );
 });
+
+const projectChatId = ThreadId.make("thread:runtime-policy");
+const layerWithInstructions = layerTest.pipe(
+  Layer.provideMerge(
+    Layer.mock(ProjectFiles.ProjectFiles)({
+      folderForThread: () =>
+        Effect.succeed({
+          labelId: filedLabelId,
+          name: "Manifest",
+          dir: "/projects/Manifest",
+          instructions: "Use pnpm, never npm.",
+          projectChatThreadId: projectChatId,
+        }),
+      manifestEntries: () => Effect.succeed({ entries: [], total: 0 }),
+    }),
+  ),
+);
+
+it.layer(layerWithInstructions)("RuntimePolicyV2 project instructions", (it) => {
+  it.effect("injects the project's instructions and the project chat prompt", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const resolved = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: null, surface: "chat" }),
+        modelSelection,
+      });
+      const manifest = resolved.projectManifest ?? "";
+      assert.include(manifest, "<project_instructions>");
+      assert.include(manifest, "Use pnpm, never npm.");
+      assert.include(manifest, "<project_chat>");
+      assert.include(manifest, "work_task");
+    }),
+  );
+
+  it.effect("gives other threads in the project the instructions but not the chat prompt", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const thread = makeThread({ now, worktreePath: "/repo/worktree", surface: "work" });
+      const resolved = yield* policy.resolve({
+        thread: { ...thread, id: ThreadId.make("thread:other-work") },
+        modelSelection,
+      });
+      const manifest = resolved.projectManifest ?? "";
+      assert.include(manifest, "Use pnpm, never npm.");
+      assert.notInclude(manifest, "<project_chat>");
+    }),
+  );
+});

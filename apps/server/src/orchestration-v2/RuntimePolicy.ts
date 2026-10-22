@@ -110,6 +110,8 @@ export const layerFromProjectStore: Layer.Layer<
                 directory: folder.dir,
                 resources: entries,
                 total,
+                instructions: folder.instructions,
+                projectChat: folder.projectChatThreadId === thread.id,
               }),
             };
           }).pipe(
