@@ -7,6 +7,7 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
+import * as Queue from "effect/Queue";
 import { TestClock } from "effect/testing";
 import type { PtyProcess, PtyExitEvent } from "@t3tools/shared/PtyAdapter";
 import * as ProcessRunner from "../processRunner.ts";
@@ -234,6 +235,79 @@ it.effect("stale agent tabs cannot spawn shells on attach or restart after a ser
       ).toBe("TerminalSessionLookupError");
       expect(yield* manager.listAgents("A")).toEqual([]);
       expect(process.signals).toEqual([]);
+    }),
+  ),
+);
+
+it.effect("an evicted finished run replays its persisted log on attach without spawning", () =>
+  provide(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-terminal-test-" });
+      let spawns = 0;
+      let process = new FakePty();
+      const manager = yield* Manager.makeWithOptions({
+        logsDir: cwd,
+        ptyAdapter: {
+          spawn: () =>
+            Effect.sync(() => {
+              spawns += 1;
+              process = new FakePty();
+              return process;
+            }),
+        },
+        processKillGraceMs: 0,
+        processTable: Effect.succeed([]),
+        // Only the newest finished session stays in memory.
+        maxRetainedInactiveSessions: 1,
+      });
+      const exited = yield* Queue.unbounded<string>();
+      yield* manager.subscribe((event) =>
+        event.type === "exited"
+          ? Queue.offer(exited, event.terminalId).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      const finish = (command: string, output: string) =>
+        Effect.gen(function* () {
+          const run = yield* manager.runAgent({ threadId: "A", command, cwd, background: true });
+          if (output) process.output(output);
+          process.finish(0);
+          expect(yield* Queue.take(exited)).toBe(run.terminalId);
+          return run.terminalId;
+        });
+
+      const first = yield* finish("echo done", "done\r\n");
+      // Lets the debounced history write land, and makes the next run newer.
+      yield* TestClock.adjust(1_000);
+      yield* finish("echo next", "");
+      // The first run's session was evicted from memory, but a client may still list it.
+      expect((yield* manager.listAgents("A")).map((run) => run.terminalId)).not.toContain(first);
+
+      const identity = { threadId: "A", terminalId: first };
+      const attached: Array<string> = [];
+      yield* manager.attachStream(identity, (event) =>
+        Effect.sync(() => {
+          if (event.type === "snapshot") {
+            attached.push(`${event.snapshot.status}:${event.snapshot.history}`);
+          }
+        }),
+      );
+      const observed: Array<string> = [];
+      yield* manager.observeStream(identity, (event) =>
+        Effect.sync(() => {
+          if (event.type === "snapshot") observed.push(event.snapshot.history);
+        }),
+      );
+      expect(attached).toEqual(["exited:done\r\n"]);
+      expect(observed).toEqual(["done\r\n"]);
+      expect(spawns).toBe(2);
+
+      // A run that left no log has nothing to replay.
+      expect(
+        (yield* manager
+          .attachStream({ threadId: "A", terminalId: "agent-silent" }, () => Effect.void)
+          .pipe(Effect.flip))._tag,
+      ).toBe("TerminalSessionLookupError");
     }),
   ),
 );

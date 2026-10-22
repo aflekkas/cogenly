@@ -1930,6 +1930,51 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     return history;
   });
 
+  /**
+   * A finished agent run's output from its persisted log, for a client that
+   * still lists the run after its session was evicted or lost to a restart.
+   * Read-only: nothing is spawned or rewritten. Fails with a lookup error when
+   * there is no log (the run printed nothing, or its history was deleted).
+   */
+  const persistedAgentSnapshot = Effect.fn("terminal.persistedAgentSnapshot")(function* (
+    threadId: string,
+    terminalId: string,
+  ): Effect.fn.Return<TerminalSessionSnapshot, TerminalSessionLookupError | TerminalHistoryError> {
+    if (!terminalId.startsWith("agent-")) {
+      return yield* new TerminalSessionLookupError({ threadId, terminalId });
+    }
+    yield* flushPersist(threadId, terminalId);
+    const filePath = historyPath(threadId, terminalId);
+    const readError = (cause: unknown) =>
+      new TerminalHistoryError({ operation: "read", threadId, terminalId, cause });
+    const info = yield* fileSystem.stat(filePath).pipe(Effect.option);
+    if (Option.isNone(info)) {
+      return yield* new TerminalSessionLookupError({ threadId, terminalId });
+    }
+    const { history } = yield* readHistoryTail(filePath).pipe(
+      Effect.scoped,
+      Effect.mapError(readError),
+    );
+    const updatedAt = Option.match(info.value.mtime, {
+      onNone: () => nowIso,
+      onSome: (mtime) => Effect.succeed(mtime.toISOString()),
+    });
+    return {
+      threadId,
+      terminalId,
+      // The run's directory went with its session; clients read it from metadata.
+      cwd: logsDir,
+      worktreePath: null,
+      status: "exited",
+      pid: null,
+      history: new BoundedTerminalHistory(historyLineLimit, history, historyByteLimit).value(),
+      exitCode: null,
+      exitSignal: null,
+      label: truncateTerminalWireLabel(getTerminalLabel(terminalId)),
+      updatedAt: yield* updatedAt,
+    };
+  });
+
   const deleteHistory = Effect.fn("terminal.deleteHistory")(function* (
     threadId: string,
     terminalId: string,
@@ -2026,8 +2071,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const evictInactiveSessionsIfNeeded = Effect.fn("terminal.evictInactiveSessionsIfNeeded")(
     function* () {
       yield* modifyManagerState((state) => {
+        // A session still starting is live; evicting it would orphan its spawn.
         const inactiveSessions = [...state.sessions.values()].filter(
-          (session) => session.status !== "running",
+          (session) => session.status !== "running" && session.status !== "starting",
         );
         if (inactiveSessions.length <= maxRetainedInactiveSessions) {
           return [undefined, state] as const;
@@ -2781,12 +2827,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         const existing = yield* getSession(input.threadId, terminalId);
 
         if (Option.isNone(existing)) {
-          if (!input.cwd) {
-            return yield* new TerminalSessionLookupError({
-              threadId: input.threadId,
-              terminalId,
-            });
-          }
+          if (!input.cwd) return yield* persistedAgentSnapshot(input.threadId, terminalId);
 
           const resolvedInput = yield* resolveLaunchInputEnvironment({
             ...input,
@@ -2924,7 +2965,13 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       input,
       withThreadLock(
         input.threadId,
-        requireSession(input.threadId, input.terminalId).pipe(Effect.map(snapshot)),
+        getSession(input.threadId, input.terminalId).pipe(
+          Effect.flatMap((session) =>
+            Option.isSome(session)
+              ? Effect.succeed(snapshot(session.value))
+              : persistedAgentSnapshot(input.threadId, input.terminalId),
+          ),
+        ),
       ),
       listener,
     );
