@@ -1162,11 +1162,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     )}
                   >
                     {/* Hover lives on the content, on the fast token, so it never
-                        competes with the tab's own width transition. */}
+                        competes with the tab's own width transition. It is a
+                        whisper of the selected fill, not the state-hover step:
+                        that step sits one notch under state-selected, so a
+                        hovered tab read as a second selected one. Only the
+                        indicator ever draws the selected fill. */}
                     <div
                       className={cn(
-                        "flex h-full items-center gap-1.5 rounded-lg pr-1.5 pl-3 transition-[background-color,color,box-shadow] duration-(--motion-duration-fast) ease-standard group-data-[compact]/tab:justify-center group-data-[compact]/tab:px-0",
-                        !active && "state-hover",
+                        "flex h-full items-center gap-1.5 rounded-lg pr-1.5 pl-3 transition-[background-color,color] duration-(--motion-duration-fast) ease-standard group-data-[compact]/tab:justify-center group-data-[compact]/tab:px-0",
+                        !active && "hover:bg-state-selected/40 hover:text-foreground",
                       )}
                     >
                       {compact ? (

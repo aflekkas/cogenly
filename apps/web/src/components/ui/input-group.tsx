@@ -26,11 +26,12 @@ const inputGroupVariants = cva(
           "dropdown-glass rounded-2xl has-[input:focus-visible,textarea:focus-visible]:ring-0 has-[input:focus-visible,textarea:focus-visible]:border-[color-mix(in_srgb,var(--contrast-foreground)_18%,transparent)]",
         ghost:
           "border-transparent bg-transparent shadow-none hover:bg-muted/40 has-[input:focus-visible,textarea:focus-visible]:bg-background",
-        // A toolbar field (an address bar): invisible at rest, a soft fill on
-        // hover, and on focus the same fill with a hairline and a 1px ring
-        // rather than the form field's heavier ring.
+        // A toolbar field (an address bar): borderless at rest and when
+        // focused, like the composer. Hover and focus are the same soft fill,
+        // fading on the fast token; the caret and placeholder are the focus
+        // indication, so the form field's hairline and ring stay off.
         toolbar:
-          "border-transparent bg-transparent shadow-none hover:bg-muted/40 has-[input:focus-visible,textarea:focus-visible]:border-border/60 has-[input:focus-visible,textarea:focus-visible]:bg-muted/40 has-[input:focus-visible,textarea:focus-visible]:ring-1 has-[input:focus-visible,textarea:focus-visible]:ring-ring/30",
+          "border-transparent bg-transparent shadow-none transition-colors duration-(--motion-duration-fast) ease-standard hover:bg-muted/40 has-[input:focus-visible,textarea:focus-visible]:border-transparent has-[input:focus-visible,textarea:focus-visible]:bg-muted/40 has-[input:focus-visible,textarea:focus-visible]:ring-0",
       },
     },
   },
