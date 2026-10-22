@@ -142,7 +142,19 @@ export function adjacentModelPickerProvider(input: {
 }
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
-const MODEL_LIST_ESTIMATED_ITEM_SIZE = 52;
+// A two-line model row: ComboboxItem's py-1 (8px) around two text-xs
+// leading-snug lines (16.5px each) and the 4px gap between them.
+const MODEL_LIST_ROW_HEIGHT = 45;
+const MODEL_LIST_ESTIMATED_ITEM_SIZE = MODEL_LIST_ROW_HEIGHT;
+// Rows sit 4px apart (ModelListSeparator's h-1); the list scroller pads py-1.5.
+const MODEL_LIST_ROW_GAP = 4;
+const MODEL_LIST_VERTICAL_PADDING = 12;
+const MODEL_PICKER_VISIBLE_ROWS = 5;
+/** The popover's fixed height: exactly five rows, their gaps and the list padding (253px). */
+const MODEL_PICKER_HEIGHT =
+  MODEL_PICKER_VISIBLE_ROWS * MODEL_LIST_ROW_HEIGHT +
+  (MODEL_PICKER_VISIBLE_ROWS - 1) * MODEL_LIST_ROW_GAP +
+  MODEL_LIST_VERTICAL_PADDING;
 
 // Rows sit 4px apart, the rail's own rhythm, so a selected row and a hovered
 // neighbour read as two pills instead of one block.
@@ -732,8 +744,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         ref={pickerContentRef}
         // One height for every rail selection, Legacy models and empty states
         // alike, so switching providers never resizes the popover; the list
-        // scrolls inside. Clamped to the room the popover has beside the trigger.
-        className="relative flex h-86.5 max-h-(--available-height) w-screen max-w-90 flex-row overflow-hidden"
+        // scrolls inside. Sized to five rows; clamped to the room beside the trigger.
+        style={{ height: MODEL_PICKER_HEIGHT }}
+        className="relative flex max-h-(--available-height) w-screen max-w-90 flex-row overflow-hidden"
         data-model-picker-content="true"
       >
         {/* Sidebar */}
