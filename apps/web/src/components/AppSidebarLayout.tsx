@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   useEffect,
+  useLayoutEffect,
   useState,
   useSyncExternalStore,
   type ComponentProps,
@@ -41,6 +42,7 @@ import {
   rightPanelFitsAgain,
   shouldReopenAutoClosedPanel,
   useListColumnLayoutStore,
+  windowTooNarrowToDock,
 } from "./sidebar/listColumnLayoutStore";
 import { modeSwitchCrossfadeRunning } from "./sidebar/modes/modeSwitchMotion";
 import {
@@ -198,10 +200,10 @@ function ProjectProjectionRetention() {
 
 /**
  * Collapses the list column on its own while an inline right panel would leave
- * the main column cramped, and brings it back once there is room again (the
- * panel closes or the window grows). Both play the toggle's motion. The
- * user's per-mode preference is untouched; reopening the column by hand beside
- * the panel holds until the panel opens again.
+ * the main column cramped, or the window is too narrow for it, and brings it
+ * back once there is room again (the panel closes or the window grows). Both
+ * play the toggle's motion. The user's per-mode preference is untouched;
+ * reopening the column by hand holds until a right panel opens again.
  */
 function ListColumnAutoCollapse({
   cramped,
@@ -214,7 +216,8 @@ function ListColumnAutoCollapse({
   const { setOpen, isMobile } = useSidebar();
   const autoCollapsed = useListColumnLayoutStore((store) => store.autoCollapsed);
   const dismissed = useListColumnLayoutStore((store) => store.autoCollapseDismissed);
-  useEffect(() => {
+  // Before paint, so a narrow window never shows the column docked for a frame.
+  useLayoutEffect(() => {
     if (isMobile) return;
     const { beginAutomaticChange } = useListColumnLayoutStore.getState();
     if (cramped && preferredOpen && !autoCollapsed && !dismissed) {
@@ -463,7 +466,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       style={sidebarProviderStyle}
     >
       <ListColumnAutoCollapse
-        cramped={mainColumnCramped && !listSidebarHidden}
+        cramped={(mainColumnCramped || windowTooNarrowToDock(viewportWidth)) && !listSidebarHidden}
         preferredOpen={preferredOpen}
       />
       <ReopenAutoClosedPanel scopeShown={scopeShown} roomAgain={roomForPanelAgain} />

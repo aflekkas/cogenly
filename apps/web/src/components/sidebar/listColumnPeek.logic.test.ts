@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { PANEL_ANIMATION_DURATION } from "../../panelAnimations";
 import {
   LIST_COLUMN_PEEK_IDLE,
+  LIST_COLUMN_PEEK_SETTLE_MS,
   LIST_COLUMN_PEEK_NAVIGATION_WINDOW_MS,
   listColumnPeekAvailable,
   listColumnPeekDismissedByNavigation,
   reduceListColumnPeek,
   resolveListColumnPeekSurface,
   type ListColumnPeekEvent,
+  listColumnPeekDelayMs,
   type ListColumnPeekState,
 } from "./listColumnPeek.logic";
 
@@ -129,5 +132,10 @@ describe("listColumnPeekDismissedByNavigation", () => {
       listColumnPeekDismissedByNavigation(1000, 1001 + LIST_COLUMN_PEEK_NAVIGATION_WINDOW_MS),
     ).toBe(false);
     expect(listColumnPeekDismissedByNavigation(null, 1200)).toBe(false);
+  });
+
+  it("holds the overlay styles until the close has run its full panel duration", () => {
+    expect(LIST_COLUMN_PEEK_SETTLE_MS).toBe(PANEL_ANIMATION_DURATION);
+    expect(listColumnPeekDelayMs("settle")).toBe(PANEL_ANIMATION_DURATION);
   });
 });

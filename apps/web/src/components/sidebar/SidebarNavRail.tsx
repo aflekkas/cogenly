@@ -186,7 +186,7 @@ export function SidebarNavRail({
       data-app-sidebar=""
       data-nav-rail=""
       className={cn(
-        "relative z-20 hidden h-full w-(--nav-rail-width) shrink-0 flex-col items-center bg-nav-rail pb-2 text-sidebar-foreground md:flex",
+        "relative z-20 hidden h-full w-(--nav-rail-width) shrink-0 flex-col items-center bg-nav-rail pb-2 text-sidebar-foreground desktop-layout:flex",
         // Above the floating list column, which slides out from under it.
         peekAvailable && "z-[46]",
       )}

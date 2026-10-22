@@ -107,6 +107,18 @@ export function mainColumnCrampedBesidePanel(input: {
   );
 }
 
+/**
+ * Below this window width the list column rests collapsed and floats out from
+ * the sidebar toggle, where a phone would show the sheet. A click still docks
+ * it, and that holds until a right panel opens.
+ */
+export const LIST_COLUMN_DOCK_MIN_VIEWPORT_WIDTH_PX = 768;
+
+/** Whether the window alone is too narrow to keep the list column docked by default. */
+export function windowTooNarrowToDock(viewportWidth: number): boolean {
+  return viewportWidth < LIST_COLUMN_DOCK_MIN_VIEWPORT_WIDTH_PX;
+}
+
 /** Whether a closed right panel fits again, at its minimum, beside the column as it is now. */
 export function rightPanelFitsAgain(input: {
   readonly viewportWidth: number;

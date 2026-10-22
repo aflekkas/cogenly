@@ -29,7 +29,9 @@ const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
-const SIDEBAR_TITLEBAR_CONTROL_SIZE = "max-sm:[--workspace-titlebar-control-size:--spacing(8)]";
+// Touch-sized titlebar controls on phones only; a narrow desktop window keeps its own.
+const SIDEBAR_TITLEBAR_CONTROL_SIZE =
+  "sheet-layout:max-sm:[--workspace-titlebar-control-size:--spacing(8)]";
 
 type SidebarContextProps = {
   state: ResponsiveSidebarState;
@@ -336,7 +338,7 @@ function Sidebar({
   return (
     <SidebarInstanceContext value={instanceContextValue}>
       <div
-        className="group peer hidden text-sidebar-foreground md:block"
+        className="group peer hidden text-sidebar-foreground desktop-layout:block"
         data-collapsible={state === "collapsed" ? collapsible : ""}
         data-side={side}
         data-slot="sidebar"
@@ -364,7 +366,7 @@ function Sidebar({
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex",
+            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) desktop-layout:flex",
             // Offcanvas open and close move the panel on a transform only, so
             // it runs on the compositor without relayout or repainting the
             // grain: the collapsed state puts it off-canvas, and a user toggle
@@ -377,11 +379,13 @@ function Sidebar({
               ? cn(
                   // Over the main pane and its raised controls; the nav rail
                   // lifts above it so the column slides out from under it.
-                  "z-[45] shadow-(--surface-raised-shadow-floating) transition-[translate,visibility] motion-reduce:translate-x-0 motion-reduce:transition-[opacity,visibility]",
+                  "z-[45] shadow-(--sidebar-peek-shadow) transition-[translate,visibility] motion-reduce:translate-x-0 motion-reduce:transition-[opacity,visibility]",
                   peek === "open"
                     ? "visible translate-x-0 duration-(--motion-duration-panel) ease-drawer"
                     : cn(
-                        "invisible duration-(--motion-duration-fast) ease-popup-exit motion-reduce:opacity-0",
+                        // Closes on the same duration and curve it opens on;
+                        // LIST_COLUMN_PEEK_SETTLE_MS waits it out.
+                        "invisible duration-(--motion-duration-panel) ease-drawer motion-reduce:opacity-0",
                         side === "left" ? "-translate-x-full" : "translate-x-full",
                       ),
                 )

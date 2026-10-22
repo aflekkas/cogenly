@@ -9,8 +9,12 @@
 export const LIST_COLUMN_PEEK_OPEN_DELAY_MS = 120;
 /** Grace after the pointer leaves, so crossing from the toggle to the overlay or overshooting doesn't flicker. */
 export const LIST_COLUMN_PEEK_CLOSE_DELAY_MS = 250;
-/** How long the closing motion runs before the column drops its overlay styles (--motion-duration-base). */
-export const LIST_COLUMN_PEEK_SETTLE_MS = 220;
+/**
+ * How long the closing motion runs before the column drops its overlay styles:
+ * the panel duration it opens and closes on (--motion-duration-panel,
+ * PANEL_ANIMATION_DURATION in panelAnimations.ts).
+ */
+export const LIST_COLUMN_PEEK_SETTLE_MS = 270;
 /** A route change this soon after a click or Enter inside the column came from it. */
 export const LIST_COLUMN_PEEK_NAVIGATION_WINDOW_MS = 1000;
 

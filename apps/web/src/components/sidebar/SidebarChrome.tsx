@@ -49,7 +49,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       )}
     >
       {/* Match the fixed control's inset and border compensation inside the sheet's safe area. */}
-      <div className="relative top-[calc(var(--workspace-controls-top)-env(safe-area-inset-top))] z-10 ml-[calc(var(--workspace-controls-left)+1px-env(safe-area-inset-left))] flex shrink-0 items-center md:hidden">
+      <div className="relative top-[calc(var(--workspace-controls-top)-env(safe-area-inset-top))] z-10 ml-[calc(var(--workspace-controls-left)+1px-env(safe-area-inset-left))] flex shrink-0 items-center desktop-layout:hidden">
         <SidebarTrigger
           className="relative top-auto translate-y-0"
           aria-label="Toggle main sidebar"
@@ -125,7 +125,7 @@ function SidebarTitle({ title }: { title: SidebarTitleState }) {
     <div
       className={cn(
         "relative z-10 ml-[max(var(--sidebar-content-inset),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden text-foreground",
-        title.mode ? "md:[[data-nav-rail]_&]:flex" : "md:flex",
+        title.mode ? "desktop-layout:[[data-nav-rail]_&]:flex" : "desktop-layout:flex",
       )}
     >
       {/* Keyed by its label, so a new title fades in as the mode changes. */}

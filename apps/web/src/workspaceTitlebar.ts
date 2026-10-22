@@ -4,7 +4,7 @@ import { NAV_RAIL_WIDTH_PX } from "./components/sidebar/navRail.logic";
 // Beside the rail, only the macOS toggle after the traffic lights is fixed; the
 // header otherwise keeps its gutter after the rail.
 export const COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS =
-  "[[data-sidebar-state=collapsed]:not([data-nav-rail])_&]:pl-[var(--workspace-titlebar-content-left)] [[data-sidebar-state=collapsed][data-nav-rail]_&]:pl-[max(var(--workspace-gutter-start),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width)))] max-md:[[data-sidebar-state=expanded]_&]:pl-[var(--workspace-titlebar-content-left)]";
+  "[[data-sidebar-state=collapsed]:not([data-nav-rail])_&]:pl-[var(--workspace-titlebar-content-left)] [[data-sidebar-state=collapsed][data-nav-rail]_&]:pl-[max(var(--workspace-gutter-start),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width)))] sheet-layout:[[data-sidebar-state=expanded]_&]:pl-[var(--workspace-titlebar-content-left)]";
 
 // Where the fixed sidebar toggle sits beside the macOS traffic lights. The
 // desktop preload keeps it in native points at any zoom level.

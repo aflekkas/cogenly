@@ -5,6 +5,7 @@ import {
   rightPanelFitsAgain,
   shouldReopenAutoClosedPanel,
   useListColumnLayoutStore,
+  windowTooNarrowToDock,
 } from "./listColumnLayoutStore";
 
 const initial = useListColumnLayoutStore.getState();
@@ -75,6 +76,29 @@ describe("listColumnLayoutStore", () => {
     expect(rightPanelFitsAgain({ ...narrow, viewportWidth: 1400, listColumnOpen: true })).toBe(
       true,
     );
+  });
+
+  it("rests the column collapsed below 768px, where a phone shows the sheet", () => {
+    expect(windowTooNarrowToDock(767)).toBe(true);
+    expect(windowTooNarrowToDock(768)).toBe(false);
+    expect(windowTooNarrowToDock(1440)).toBe(false);
+  });
+
+  it("docks by hand on a narrow window, without a panel, and holds there", () => {
+    const store = useListColumnLayoutStore.getState();
+    // The narrow window collapses the column on its own.
+    store.beginAutomaticChange(true);
+    store.applyOpenChange("chats", false);
+    expect(useListColumnLayoutStore.getState()).toMatchObject({
+      autoCollapsed: true,
+      openByMode: { chats: true },
+    });
+    // A click on the toggle docks it and dismisses the automatic collapse.
+    useListColumnLayoutStore.getState().applyOpenChange("chats", true);
+    expect(useListColumnLayoutStore.getState()).toMatchObject({
+      autoCollapsed: false,
+      autoCollapseDismissed: true,
+    });
   });
 
   it("reopens a panel closed for room only on its own page and with room", () => {

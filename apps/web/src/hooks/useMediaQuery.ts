@@ -82,6 +82,15 @@ export function useMediaQuery(query: BreakpointQuery | MediaQueryInput | (string
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
+/**
+ * The phone layout: a narrow window without a mouse or trackpad, where the
+ * sidebar is a sheet with its own mode switcher and footer. A narrow desktop
+ * window keeps the desktop layout (the nav rail and the list column, which
+ * floats out when collapsed). Mirrors the `sheet-layout` and `desktop-layout`
+ * variants in index.css; change them together.
+ */
+export const SHEET_LAYOUT_MEDIA_QUERY = "(width < 768px) and (not (pointer: fine))";
+
 export function useIsMobile(): boolean {
-  return useMediaQuery("max-md");
+  return useMediaQuery(SHEET_LAYOUT_MEDIA_QUERY);
 }

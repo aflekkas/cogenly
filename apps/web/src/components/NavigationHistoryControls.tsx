@@ -27,8 +27,8 @@ const MOUSE_BUTTON_FORWARD = 4;
 
 /**
  * Back and forward through the app's pages, Safari style, after the sidebar
- * toggle in the titlebar. Hidden below md, where the toggle row is tight and
- * the sheet owns the sidebar.
+ * toggle in the titlebar. Hidden in the sheet layout, where the toggle row is
+ * tight and the sheet owns the sidebar.
  */
 export function NavigationHistoryButtons() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -37,7 +37,10 @@ export function NavigationHistoryButtons() {
   const forwardShortcut = shortcutLabelForCommand(keybindings, "navigation.forward");
 
   return (
-    <div className="ml-1 hidden items-center gap-1 md:flex" data-navigation-history-controls="">
+    <div
+      className="ml-1 hidden items-center gap-1 desktop-layout:flex"
+      data-navigation-history-controls=""
+    >
       <HistoryButton
         label="Back"
         shortcut={backShortcut}

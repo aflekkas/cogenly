@@ -9,6 +9,20 @@
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));
 
+/* The sidebar's two layouts (useIsMobile, SHEET_LAYOUT_MEDIA_QUERY): a narrow
+   touch window gets the sheet; any window with a mouse or trackpad, however
+   narrow, keeps the nav rail and the list column. Exact complements. */
+@custom-variant desktop-layout {
+  @media (width >= 768px), (pointer: fine) {
+    @slot;
+  }
+}
+@custom-variant sheet-layout {
+  @media (width < 768px) and (not (pointer: fine)) {
+    @slot;
+  }
+}
+
 /* Secondary hovering pointers reveal sidebar actions on touch-primary devices. */
 @custom-variant any-hover {
   @media (any-hover: hover) {
@@ -144,7 +158,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --workspace-titlebar-control-size: 1.75rem;
   --workspace-titlebar-control-gap: 0.75rem;
   /* The back/forward pair after the sidebar toggle (NavigationHistoryControls):
-     a leading gap, two controls and the gap between them. Hidden below md. */
+     a leading gap, two controls and the gap between them. Hidden in the sheet layout. */
   --workspace-titlebar-history-width: 0px;
   --workspace-titlebar-scroll-fade-height: 1.5rem;
   /* Top-anchored toasts sit this far below the window's top edge. */
@@ -185,7 +199,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --workspace-gutter: 1.25rem;
   }
 
-  @variant md {
+  @variant desktop-layout {
     --workspace-titlebar-history-width: calc(2 * var(--workspace-titlebar-control-size) + 0.5rem);
   }
 
@@ -1888,6 +1902,10 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   --surface-raised-highlight: rgb(255 255 255 / 70%);
   --surface-raised-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 4px 14px -6px rgb(0 0 0 / 8%);
   --surface-raised-shadow-floating: 0 1px 2px rgb(0 0 0 / 5%), 0 16px 40px -18px rgb(0 0 0 / 30%);
+  /* The collapsed list column floating out over the page (ListColumnPeek): the
+     floating surface's shade, cast sideways onto the content beside it, as the
+     bottom drawer's falls upward. */
+  --sidebar-peek-shadow: 1px 0 2px rgb(0 0 0 / 5%), 12px 0 32px -14px rgb(0 0 0 / 22%);
   /* State tokens (state-hover / state-selected). Translucent so they read on
      any surface; [data-app-sidebar] swaps the fills for the sidebar row
      tokens so themes keep driving navigation. */
@@ -2029,6 +2047,7 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     /* The reference's details card drops about four rows of shade. */
     --surface-raised-shadow-floating:
       0 1px 2px rgb(0 0 0 / 30%), 0 10px 24px -14px rgb(0 0 0 / 60%);
+    --sidebar-peek-shadow: 1px 0 2px rgb(0 0 0 / 30%), 12px 0 32px -12px rgb(0 0 0 / 70%);
     /* Dark states are flat: a selected, pressed or open surface is one fill
        step brighter, and nothing else. No hairline edge, sheen, lit top edge
        or drop shadow; those stay on floating surfaces (popovers, the details
