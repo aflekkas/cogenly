@@ -191,8 +191,10 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
               })}
             </CommandList>
           ) : (
-            <div className="px-5 pt-3.5 pb-7">
-              <p className="text-secondary-label text-xs">
+            // One list-item row (same p-2 inset, same min height) so the empty state is as tall as
+            // a single result; the tucked overlap below it is the wrapper's padding, not extra.
+            <div className="p-2">
+              <p className="flex min-h-8 items-center px-2 text-secondary-label text-xs sm:min-h-7">
                 {props.isLoading
                   ? props.triggerKind === "skill"
                     ? "Searching workspace skills..."

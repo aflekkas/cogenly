@@ -141,6 +141,7 @@ import { ComposerBanner } from "./ComposerBanner";
 import { ComposerSurface } from "./ComposerSurface";
 import {
   AttachmentPresence,
+  NoticePresenceFrame,
   ComposerBannerStack,
   type ComposerBannerStackContent,
   type ComposerBannerStackItem,
@@ -1058,6 +1059,50 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
       {props.children}
     </div>,
     document.body,
+  );
+}
+
+/**
+ * Keeps the command menu mounted while it sinks back behind the composer, on the same frame as
+ * the attached notices (200ms, clipped at the seam, opacity settling over the last 40%, opacity
+ * only under reduced motion). The last menu stays drawn, inert, until the exit finishes; reopening
+ * mid-exit takes over the same frame from where it is.
+ */
+function ComposerCommandMenuPresence(props: {
+  anchor: HTMLElement | null;
+  show: boolean;
+  children: ReactNode;
+}) {
+  const heldRef = useRef<ReactNode>(null);
+  const [present, setPresent] = useState(props.show);
+  if (props.show) {
+    heldRef.current = props.children;
+    if (!present) setPresent(true);
+  }
+  // A menu already up when the composer mounts is just there.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+  }, []);
+  const onClosed = useCallback(() => {
+    heldRef.current = null;
+    setPresent(false);
+  }, []);
+
+  if (!present) return null;
+  return (
+    <ComposerCommandMenuLayer anchor={props.anchor}>
+      <NoticePresenceFrame
+        open={props.show}
+        swapKey={null}
+        animateMountRef={mountedRef}
+        onClosed={onClosed}
+      >
+        <div data-notice-current="" aria-hidden={props.show ? undefined : true} inert={!props.show}>
+          {heldRef.current}
+        </div>
+      </NoticePresenceFrame>
+    </ComposerCommandMenuLayer>
   );
 }
 
@@ -6052,8 +6097,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : composerMenuEmptyState
                   : ""}
               </div>
-              {composerSuggestionsVisible && (
-                <ComposerCommandMenuLayer anchor={composerMenuAnchor}>
+              {
+                <ComposerCommandMenuPresence
+                  anchor={composerMenuAnchor}
+                  show={composerSuggestionsVisible}
+                >
                   <ComposerCommandMenu
                     listId={composerSuggestionListId}
                     items={composerMenuItems}
@@ -6065,8 +6113,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onHighlightedItemChange={onComposerMenuItemHighlightedStable}
                     onSelect={onSelectComposerItemStable}
                   />
-                </ComposerCommandMenuLayer>
-              )}
+                </ComposerCommandMenuPresence>
+              }
 
               {!isComposerCollapsedMobile &&
                 pendingUserInputs.length === 0 &&
