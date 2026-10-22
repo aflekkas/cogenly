@@ -9,6 +9,7 @@ import { prepareProviderAuthDelivery } from "./providerAuthDelivery";
 import { isElectron } from "./env";
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
 import { getRouter } from "./router";
+import { installNavigationHistoryTracker } from "./navigationHistory";
 import {
   syncDocumentElectronPlatformClasses,
   syncDocumentWindowControlsOverlayClass,
@@ -21,6 +22,8 @@ prepareProviderAuthDelivery();
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();
+// Tracks from the first entry so the titlebar back/forward know their reach.
+installNavigationHistoryTracker(history);
 
 const router = getRouter(history);
 

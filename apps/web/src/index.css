@@ -140,6 +140,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --workspace-native-controls-inset: 0px;
   --workspace-titlebar-control-size: 1.75rem;
   --workspace-titlebar-control-gap: 0.75rem;
+  /* The back/forward pair after the sidebar toggle (NavigationHistoryControls):
+     a leading gap, two controls and the gap between them. Hidden below md. */
+  --workspace-titlebar-history-width: 0px;
   --workspace-titlebar-scroll-fade-height: 1.5rem;
   /* Top-anchored toasts sit this far below the window's top edge. */
   --toast-top-offset: 0.75rem;
@@ -172,6 +175,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
   @variant sm {
     --workspace-gutter: 1.25rem;
+  }
+
+  @variant md {
+    --workspace-titlebar-history-width: calc(2 * var(--workspace-titlebar-control-size) + 0.5rem);
   }
 
   @variant dark {

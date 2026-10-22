@@ -15,11 +15,7 @@ import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
 } from "../keybindings";
-import { isEditableFocused } from "../lib/editableFocus";
-import { isPreviewFocused } from "../lib/previewFocus";
-import { isTerminalFocused } from "../lib/terminalFocus";
-import { isModelPickerOpen } from "../modelPickerVisibility";
-import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
+import { useRightPanelStore } from "../rightPanelStore";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
@@ -31,6 +27,7 @@ import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarNavRail } from "./sidebar/SidebarNavRail";
+import { NavigationHistoryButtons, NavigationHistoryShortcuts } from "./NavigationHistoryControls";
 import { resolveWorkspaceTitlebarLayout } from "../workspaceTitlebar";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { routeHidesListColumn, SIDEBAR_TOGGLE_DISABLED_LABEL } from "./sidebar/listColumnRoutes";
@@ -163,52 +160,28 @@ function SidebarControl({
             : `Toggle main sidebar${shortcutLabel ? ` (${shortcutLabel})` : ""}`}
         </TooltipPopup>
       </Tooltip>
+      <NavigationHistoryButtons />
     </div>
   );
 }
 
-// Moves through the app's route history like a browser's back/forward buttons.
-function NavigationHistoryShortcuts() {
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const routeThreadRef = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteRef(params),
-  });
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      if (
-        event.target instanceof HTMLElement &&
-        event.target.closest("[data-keybinding-capture]")
-      ) {
-        return;
-      }
-      const command = resolveShortcutCommand(event, keybindings, {
-        context: {
-          terminalFocus: isTerminalFocused(),
-          previewFocus: isPreviewFocused(),
-          previewOpen: routeThreadRef
-            ? selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, routeThreadRef) ===
-              "preview"
-            : false,
-          editableFocus: isEditableFocused(event.target),
-          modelPickerOpen: isModelPickerOpen(),
-        },
-      });
-      if (command !== "navigation.back" && command !== "navigation.forward") return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      if (command === "navigation.back") window.history.back();
-      else window.history.forward();
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, routeThreadRef]);
-
-  return null;
+/**
+ * The back/forward pair when the sidebar toggle leads the rail: fixed in the
+ * titlebar row just after the rail, where the macOS layout puts it after the
+ * toggle instead (SidebarControl).
+ */
+function RailNavigationHistoryControl() {
+  const { isMobile, mobileSheetMounted } = useSidebar();
+  return (
+    <div
+      className={cn(
+        "pointer-events-none fixed left-[var(--workspace-history-controls-left)] top-[var(--workspace-controls-top)] z-50 flex h-[var(--workspace-topbar-height)] items-center",
+        isMobile && mobileSheetMounted && "hidden",
+      )}
+    >
+      <NavigationHistoryButtons />
+    </div>
+  );
 }
 
 // Settings swaps the thread sidebar out of the tree. Keep the lightweight
@@ -492,6 +465,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         showButton={titlebarLayout.sidebarToggle === "fixed"}
         disabled={listSidebarHidden}
       />
+      {titlebarLayout.sidebarToggle === "rail-titlebar" ? <RailNavigationHistoryControl /> : null}
       <NavigationHistoryShortcuts />
       <MainAppLocationTracker />
     </SidebarProvider>

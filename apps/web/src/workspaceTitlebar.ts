@@ -10,10 +10,15 @@ export const COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS =
 // desktop preload keeps it in native points at any zoom level.
 const MACOS_FIXED_TOGGLE_LEFT = "var(--desktop-window-controls-inset, 90px)";
 
+// Where the back/forward pair starts when the toggle leads the rail: the pair's
+// own leading gap brings its first control to the rail's 12px rhythm.
+const RAIL_HISTORY_CONTROLS_LEFT = "calc(var(--nav-rail-width) + 0.5rem)";
+
 export type SidebarTogglePlacement =
   /** The rail's titlebar row, centred like the mode buttons. */
   | "rail-titlebar"
-  /** Fixed in the titlebar row, just after the macOS window controls. */
+  /** Fixed in the titlebar row, just after the macOS window controls, leading
+   * the back/forward pair. */
   | "fixed";
 
 export interface WorkspaceTitlebarLayout {
@@ -71,8 +76,10 @@ export function resolveWorkspaceTitlebarLayout(input: {
     navRailWidthPx: NAV_RAIL_WIDTH_PX,
     style: {
       "--nav-rail-width": `${NAV_RAIL_WIDTH_PX}px`,
-      // Nothing fixed sits in the titlebar, so content only has to clear the rail.
-      "--workspace-titlebar-content-left": "0px",
+      // Only the back/forward pair sits fixed in the titlebar, just after the
+      // rail, so content clears the rail and that pair.
+      "--workspace-history-controls-left": RAIL_HISTORY_CONTROLS_LEFT,
+      "--workspace-titlebar-content-left": `calc(${RAIL_HISTORY_CONTROLS_LEFT} + var(--workspace-titlebar-history-width) + var(--workspace-titlebar-control-gap))`,
     },
     windowControlsStyle,
   };

@@ -345,7 +345,8 @@ function ProjectPage(props: {
       reportProjectFolderFailure(failure, result);
     }
   };
-  const leave = () => void navigate({ to: "/project" });
+  // The deleted project's page is gone, so it leaves no history entry to return to.
+  const leave = () => void navigate({ to: "/project", replace: true });
   const remove = async () => {
     if (label === null) return;
     if (await deleteFolder(environmentId, label)) leave();

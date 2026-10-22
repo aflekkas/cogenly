@@ -686,6 +686,19 @@ export const make = Effect.gen(function* () {
         event.preventDefault();
       }
     });
+    // Mouse side buttons (Windows, Linux) and three-finger swipes (macOS) move
+    // through the app's pages like the titlebar back/forward buttons.
+    const sendHistoryAction = (action: "navigation.back" | "navigation.forward") => {
+      if (!window.isDestroyed()) window.webContents.send(MENU_ACTION_CHANNEL, action);
+    };
+    window.on("app-command", (_event, command) => {
+      if (command === "browser-backward") sendHistoryAction("navigation.back");
+      else if (command === "browser-forward") sendHistoryAction("navigation.forward");
+    });
+    window.on("swipe", (_event, direction) => {
+      if (direction === "left") sendHistoryAction("navigation.back");
+      else if (direction === "right") sendHistoryAction("navigation.forward");
+    });
     window.webContents.on("input-event", (_event, input) => {
       if (input.type === "gestureScrollEnd") window.webContents.send(TRACKPAD_SCROLL_END_CHANNEL);
     });

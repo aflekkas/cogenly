@@ -106,7 +106,7 @@ export function SidebarProjectsList(props: {
   const [renaming, setRenaming] = useState<EnvironmentProjectLabel | null>(null);
   const [linking, setLinking] = useState<EnvironmentProjectLabel | null>(null);
   const leaveIfActive = (entry: EnvironmentProjectLabel) => {
-    if (entry.key === props.activeProjectKey) void navigate({ to: "/project" });
+    if (entry.key === props.activeProjectKey) void navigate({ to: "/project", replace: true });
   };
   if (directory.labels.length === 0) {
     return (

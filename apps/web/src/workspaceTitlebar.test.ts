@@ -31,12 +31,15 @@ describe("resolveWorkspaceTitlebarLayout", () => {
     expect(layout.style["--workspace-titlebar-content-left"]).toBeUndefined();
   });
 
-  it("starts titlebar content after the rail when the toggle leads the rail", () => {
+  it("starts titlebar content after the rail and the back/forward pair when the toggle leads the rail", () => {
     const layout = resolveWorkspaceTitlebarLayout({
       navRailVisible: true,
       macosWindowControlsVisible: false,
     });
-    expect(layout.style["--workspace-titlebar-content-left"]).toBe("0px");
+    expect(layout.style["--workspace-history-controls-left"]).toContain("--nav-rail-width");
+    expect(layout.style["--workspace-titlebar-content-left"]).toContain(
+      "--workspace-titlebar-history-width",
+    );
   });
 
   it("falls back to a fixed toggle after the window controls without the rail", () => {

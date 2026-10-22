@@ -126,7 +126,12 @@ export function SettingsScopeNotice({
         )}
         onClick={() => {
           if (targetId)
-            void navigate({ to: pathname, search: () => choice.search, hash: targetId });
+            void navigate({
+              to: pathname,
+              search: () => choice.search,
+              hash: targetId,
+              replace: true,
+            });
           else selectScope(choice.search);
         }}
       >

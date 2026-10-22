@@ -175,6 +175,7 @@ const KEYBINDING_GROUPS = [
     id: "navigation",
     title: "Navigation",
     prefixes: [
+      "navigation",
       "sidebar",
       "rightPanel",
       "commandPalette",

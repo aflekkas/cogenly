@@ -158,6 +158,8 @@ function SettingsRouteLayout() {
           }),
           hash: "",
           resetScroll: false,
+          // A scope change filters the same page; back leaves the page instead.
+          replace: true,
         });
       }}
     >
