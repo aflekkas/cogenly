@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 
 import {
   bootServiceBaseDirOf,
+  bootServicePath,
   renderBootServicePlist,
   renderBootServiceUnit,
   type BootServicePlan,
@@ -43,6 +44,38 @@ describe("boot service unit renderer", () => {
     expect(unit).toContain("WorkingDirectory=%h\n");
     expect(unit).toContain('Environment=COGENLY_HOME="/home/owner/my 100%% dir"\n');
     expect(unit).toContain("StandardOutput=append:/home/owner/my 100%% dir/boot-service.log\n");
+  });
+
+  it("gives the server a PATH that finds provider CLIs without a login shell", () => {
+    const unit = renderBootServiceUnit(plan, {
+      environmentPath: bootServicePath({
+        installerPath: "/usr/bin:/bin",
+        execDir: "/home/owner/.cogenly/runtime/versions/0.1.0",
+        homeDir: "/home/owner",
+      }),
+    });
+    const pathLine = /^Environment=PATH=(.*)$/m.exec(unit)?.[1]?.split(":") ?? [];
+    // claude's installer, npm -g with a user prefix (codex), bun, and the system gh.
+    for (const directory of [
+      "/home/owner/.local/bin",
+      "/home/owner/.npm-global/bin",
+      "/home/owner/.bun/bin",
+      "/usr/bin",
+    ]) {
+      expect(pathLine).toContain(directory);
+    }
+    // The installing shell keeps precedence, and nothing repeats.
+    expect(pathLine.slice(0, 2)).toEqual(["/usr/bin", "/bin"]);
+    expect(new Set(pathLine).size).toBe(pathLine.length);
+    expect(renderBootServiceUnit(plan)).not.toContain("Environment=PATH=");
+  });
+
+  it("drops installer PATH entries a service file cannot carry", () => {
+    expect(
+      bootServicePath({ installerPath: "/ok:/bad\u0001dir::", execDir: "/exec", homeDir: "" })
+        .split(":")
+        .slice(0, 2),
+    ).toEqual(["/ok", "/exec"]);
   });
 
   it("bakes the schedule zone into the unit when configured", () => {

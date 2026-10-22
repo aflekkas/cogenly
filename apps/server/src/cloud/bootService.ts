@@ -97,8 +97,53 @@ export interface BootServicePlan {
   readonly timeZone?: string;
 }
 
+/**
+ * The PATH a service runs with, so the server finds claude, codex, gh and
+ * other provider CLIs without a login shell. The installing shell's PATH
+ * comes first; the per-user bin directories cover installs a non-interactive
+ * or login-only shell leaves out (Ubuntu's `.bashrc` stops early for those,
+ * so `~/.npm-global/bin` is often missing from `bash -lc`).
+ */
+export function bootServicePath(input: {
+  readonly installerPath: string;
+  readonly execDir: string;
+  readonly homeDir: string;
+}): string {
+  const userDirectories =
+    input.homeDir === ""
+      ? []
+      : [".local/bin", ".npm-global/bin", ".bun/bin", ".cargo/bin", "bin"].map(
+          (directory) => `${input.homeDir}/${directory}`,
+        );
+  const installerDirectories = input.installerPath.split(":").filter(
+    (directory) =>
+      directory.length > 0 &&
+      Array.from(directory).every((character) => {
+        const code = character.charCodeAt(0);
+        return code >= 0x20 || code === 0x09 || code === 0x0a || code === 0x0d;
+      }),
+  );
+  return Array.from(
+    new Set([
+      ...installerDirectories,
+      input.execDir,
+      ...userDirectories,
+      "/opt/homebrew/bin",
+      "/home/linuxbrew/.linuxbrew/bin",
+      "/usr/local/bin",
+      "/usr/bin",
+      "/bin",
+      "/usr/sbin",
+      "/sbin",
+    ]),
+  ).join(":");
+}
+
 /** Pure renderer: service units cannot rely on the user's shell or PATH. */
-export function renderBootServiceUnit(plan: BootServicePlan): string {
+export function renderBootServiceUnit(
+  plan: BootServicePlan,
+  options?: { readonly environmentPath?: string },
+): string {
   // The user manager has no reliable network-online target; server networking retries itself.
   return [
     "[Unit]",
@@ -110,6 +155,9 @@ export function renderBootServiceUnit(plan: BootServicePlan): string {
     "Type=simple",
     "WorkingDirectory=%h",
     `Environment=COGENLY_HOME=${quoteSystemdValue(plan.baseDir)}`,
+    ...(options?.environmentPath === undefined
+      ? []
+      : [`Environment=PATH=${quoteSystemdValue(options.environmentPath)}`]),
     ...(plan.timeZone === undefined
       ? []
       : [`Environment=COGENLY_TZ=${quoteSystemdValue(plan.timeZone)}`]),
@@ -256,6 +304,7 @@ export interface BootServiceManager {
 function systemdManager(input: {
   readonly path: Path.Path;
   readonly homeDir: string;
+  readonly environmentPath: string;
 }): BootServiceManager {
   const unitPath = input.path.join(
     input.homeDir,
@@ -267,7 +316,7 @@ function systemdManager(input: {
   return {
     kind: "systemd",
     unitPath,
-    render: renderBootServiceUnit,
+    render: (plan) => renderBootServiceUnit(plan, { environmentPath: input.environmentPath }),
     stop: [
       {
         step: "stopping the installed service",
@@ -412,7 +461,11 @@ function selectBootServiceManager(input: {
     return undefined;
   }
   if (input.platform === "linux") {
-    return systemdManager({ path: input.path, homeDir: input.homeDir });
+    return systemdManager({
+      path: input.path,
+      homeDir: input.homeDir,
+      environmentPath: input.environmentPath,
+    });
   }
   if (input.platform === "darwin" && input.uid !== undefined) {
     return launchdManager({
@@ -620,26 +673,11 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const path = yield* Path.Path;
   const runner = yield* ProcessRunner.ProcessRunner;
   const host = input.host ?? { execPath: hostExecPath };
-  const xmlSafeInstallerDirectories = installerPath.split(":").filter(
-    (directory) =>
-      directory.length > 0 &&
-      Array.from(directory).every((character) => {
-        const code = character.charCodeAt(0);
-        return code >= 0x20 || code === 0x09 || code === 0x0a || code === 0x0d;
-      }),
-  );
-  const environmentPath = Array.from(
-    new Set([
-      ...xmlSafeInstallerDirectories,
-      path.dirname(host.execPath),
-      "/opt/homebrew/bin",
-      "/usr/local/bin",
-      "/usr/bin",
-      "/bin",
-      "/usr/sbin",
-      "/sbin",
-    ]),
-  ).join(":");
+  const environmentPath = bootServicePath({
+    installerPath,
+    execDir: path.dirname(host.execPath),
+    homeDir,
+  });
   // A CLI running under plain Node from a checkout pins a wrapper that execs
   // the checkout. Anything else (single-executables, odd wrappers) resolves
   // no checkout and pins the release archive for this version.
@@ -1089,14 +1127,17 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       ? serviceStateActiveVersion(stateText.value)
       : undefined;
     const installedBaseDir = bootServiceBaseDirOf(unit);
-    // COGENLY_TZ is install-time intent: status must not flag a unit as
-    // stale just because this shell's zone differs from the installer's.
+    // COGENLY_TZ and the PATH value are install-time intent: status must not
+    // flag a unit as stale just because this shell's zone or PATH differs
+    // from the installer's. A unit with no PATH at all still needs repair.
     const normalizeUnit = (contents: string) =>
       detectedManager.kind === "launchd"
         ? contents
             .replace(/(<key>PATH<\/key>\n\s*<string>)[^<]*(<\/string>)/, "$1$2")
             .replace(/\n\s*<key>COGENLY_TZ<\/key>\n\s*<string>[^<]*<\/string>/, "")
-        : contents.replace(/\nEnvironment=COGENLY_TZ=.*$/m, "");
+        : contents
+            .replace(/^Environment=PATH=.*$/m, "Environment=PATH=")
+            .replace(/\nEnvironment=COGENLY_TZ=.*$/m, "");
     const problems: BootServiceProblem[] =
       detectedManager.kind === "systemd" ? [...(yield* readSystemdProblems(true))] : [];
     if (yield* fs.exists(restartPendingPath)) problems.push("restart-pending");
@@ -1125,7 +1166,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const managerForKind = (kind: BootServiceManagerKind): BootServiceManager | undefined => {
     if (detectedManager?.kind === kind) return detectedManager;
     if (homeDir === "") return undefined;
-    if (kind === "systemd") return systemdManager({ path, homeDir });
+    if (kind === "systemd") return systemdManager({ path, homeDir, environmentPath });
     if (uid === undefined) return undefined;
     return launchdManager({ path, homeDir, uid, environmentPath });
   };
