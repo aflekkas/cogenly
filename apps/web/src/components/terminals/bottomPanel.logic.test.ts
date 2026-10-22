@@ -6,6 +6,7 @@ import {
   BOTTOM_PANEL_MIN_HEIGHT,
   bottomPanelMaxHeight,
   bottomPanelTabs,
+  bottomPanelTabStatus,
   bottomPanelToggleShowsActivity,
   clampBottomPanelHeight,
   findRunForToolCall,
@@ -114,6 +115,28 @@ describe("bottom panel never opens for an agent", () => {
     expect(bottomPanelToggleShowsActivity(false, running)).toBe(true);
     expect(bottomPanelToggleShowsActivity(true, running)).toBe(false);
     expect(bottomPanelToggleShowsActivity(false, [{ liveRunCount: 0 }])).toBe(false);
+  });
+});
+
+describe("bottomPanelTabStatus", () => {
+  it("runs while any command is live", () => {
+    expect(
+      bottomPanelTabStatus({
+        runs: [run("a", "2026-01-02", { status: "running" }), run("b", "2026-01-01")],
+        liveRunCount: 1,
+      }),
+    ).toBe("running");
+  });
+
+  it("says how the newest command ended once none are live", () => {
+    const status = (overrides: Partial<AgentTerminalEntry>) =>
+      bottomPanelTabStatus({ runs: [run("a", "2026-01-01", overrides)], liveRunCount: 0 });
+    expect(status({})).toBe("done");
+    expect(status({ exitCode: 2 })).toBe("failed");
+    expect(status({ status: "error" })).toBe("failed");
+    // A stopped command is not a success, so no check.
+    expect(status({ exitSignal: 15 })).toBeNull();
+    expect(bottomPanelTabStatus({ runs: [], liveRunCount: 0 })).toBeNull();
   });
 });
 

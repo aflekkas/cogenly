@@ -1,17 +1,19 @@
-import { X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import type { ComponentProps } from "react";
 
 import { cn } from "~/lib/utils";
 
+import type { PanelTabStatus } from "./TabStrip.logic";
+
 /**
- * The look of a closable tab in a panel's tab strip (the right panel's
- * browser, file and device tabs): compact and as wide as its title, text
- * first, the selected one a quiet fill, and its × showing on hover and,
- * dimmed, on the selected tab. Hover and selection fade on the fast token;
+ * The look of a closable tab in a TabStrip (the right panel's browser, file
+ * and device tabs, the bottom drawer's agent tabs): compact and as wide as
+ * its title, text first, the selected one a quiet fill, and its × showing on
+ * hover and, dimmed, on the selected tab. Hover and selection fade on the fast token;
  * colour changes are opacity-free, so reduced motion needs nothing more.
  *
- * Slots carry the styling; the strip owns behaviour (roles, focus, drag,
- * overflow) and places them. Layout classes go through `className`.
+ * Slots carry the styling; TabStrip owns behaviour (roles, focus, drag,
+ * overflow, close) and places them. Layout classes go through `className`.
  */
 function Body({ active, className, ...props }: ComponentProps<"div"> & { active: boolean }) {
   return (
@@ -86,4 +88,30 @@ function Close({ active, className, ...props }: ComponentProps<"button"> & { act
   );
 }
 
-export const PanelTab = { Body, Icon, Label, Action, Close };
+/**
+ * What the work behind the tab is doing, after its title: a small dot while
+ * it runs, a muted check once done, a red × if it failed. A change fades in
+ * place (swap-motion is opacity only, and off under reduced motion).
+ */
+function Status({ status, className }: { status: PanelTabStatus | null; className?: string }) {
+  if (status === null) return null;
+  return (
+    <span
+      key={status}
+      aria-hidden
+      data-slot="panel-tab-status"
+      data-status={status}
+      className={cn("swap-motion flex size-3.5 shrink-0 items-center justify-center", className)}
+    >
+      {status === "running" ? (
+        <span className="size-1.5 rounded-full bg-success" />
+      ) : status === "done" ? (
+        <Check className="size-3 text-muted-foreground/70" />
+      ) : (
+        <X className="size-3 text-destructive-foreground" />
+      )}
+    </span>
+  );
+}
+
+export const PanelTab = { Body, Icon, Label, Status, Action, Close };

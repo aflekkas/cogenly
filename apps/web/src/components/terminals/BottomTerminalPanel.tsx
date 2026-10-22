@@ -8,6 +8,7 @@ import {
 import { Bot, TerminalSquare, X } from "lucide-react";
 import {
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -37,16 +38,17 @@ import {
   agentTerminalEntries,
   agentTerminalsPanelState,
   resolveSelected,
-  terminalRunState,
   type AgentTerminalEntry,
 } from "../AgentTerminalsPanel.logic";
 import { PanelTab } from "../PanelTab";
+import { TabStrip } from "../TabStrip";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentRunsView } from "./AgentRunsView";
 import {
   bottomPanelMaxHeight,
   bottomPanelTabs,
+  bottomPanelTabStatus,
   bottomPanelToggleShowsActivity,
   clampBottomPanelHeight,
   findRunForToolCall,
@@ -54,7 +56,6 @@ import {
   type BottomPanelAgent,
   type BottomPanelTab,
 } from "./bottomPanel.logic";
-import { RunStateGlyph } from "./terminalParts";
 
 /** Something that glides with the panel's top edge, `shift` of its height (½ for centred content). */
 export interface BottomPanelMotionTarget {
@@ -153,64 +154,45 @@ function PanelMessage({ title, detail }: { title: string; detail?: string }) {
   );
 }
 
-function TabStatus({ tab }: { tab: BottomPanelTab }) {
-  const newest = tab.runs[0];
-  if (!newest) return null;
-  // Keyed by state so a change fades in place (swap-motion).
-  const state = terminalRunState(newest);
-  return (
-    <span key={state.kind} className="swap-motion flex shrink-0">
-      <RunStateGlyph state={state} />
-    </span>
-  );
-}
-
 /**
- * Above the run list once more than one agent has run commands: a compact
- * PanelTab per agent. With one agent there is nothing to switch, so no strip.
+ * Above the run list once more than one agent has run commands: the shared
+ * TabStrip, one tab per agent, its newest run's state after the title. With
+ * one agent there is nothing to switch, so no strip.
  */
 const AgentSwitcher = memo(function AgentSwitcher(props: {
   tabs: ReadonlyArray<BottomPanelTab>;
   activeTabId: string | null;
+  setKey: string;
   onSelect: (tabId: string) => void;
   onCloseTab: (tab: BottomPanelTab) => void;
 }) {
+  const { onSelect } = props;
+  const activate = useCallback((tab: BottomPanelTab) => onSelect(tab.id), [onSelect]);
   return (
-    <div
-      role="tablist"
-      aria-label="Agents"
-      className="flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto px-1 [scrollbar-width:none] @max-[40rem]/terminals:pe-9"
-    >
-      {props.tabs.map((tab) => {
-        const active = tab.id === props.activeTabId;
-        return (
-          <PanelTab.Body key={tab.id} active={active} className="max-w-40 shrink-0 gap-1">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={active}
-              data-bottom-panel-tab={tab.id}
-              onClick={() => props.onSelect(tab.id)}
-              className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-            >
-              <PanelTab.Icon>
-                {tab.primary ? (
-                  <TerminalSquare aria-hidden className="size-3.5" />
-                ) : (
-                  <Bot aria-hidden className="size-3.5" />
-                )}
-              </PanelTab.Icon>
-              <PanelTab.Label>{tab.title}</PanelTab.Label>
-              <TabStatus tab={tab} />
-            </button>
-            <PanelTab.Close
-              active={active}
-              aria-label={`Close ${tab.title} tab`}
-              onClick={() => props.onCloseTab(tab)}
-            />
-          </PanelTab.Body>
-        );
-      })}
+    // Narrow, the strip keeps clear of the panel's corner ×.
+    <div className="flex h-9 shrink-0 items-stretch px-1 @max-[40rem]/terminals:pe-9">
+      <TabStrip
+        aria-label="Agents"
+        items={props.tabs}
+        activeId={props.activeTabId}
+        setKey={props.setKey}
+        getLabel={(tab) => tab.title}
+        onActivate={activate}
+        onClose={props.onCloseTab}
+        renderTab={(tab) => (
+          <>
+            <PanelTab.Icon>
+              {tab.primary ? (
+                <TerminalSquare aria-hidden className="size-3.5" />
+              ) : (
+                <Bot aria-hidden className="size-3.5" />
+              )}
+            </PanelTab.Icon>
+            <PanelTab.Label>{tab.title}</PanelTab.Label>
+            <PanelTab.Status status={bottomPanelTabStatus(tab)} />
+          </>
+        )}
+      />
     </div>
   );
 });
@@ -476,6 +458,7 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
               <AgentSwitcher
                 tabs={tabs}
                 activeTabId={activeTab.id}
+                setKey={threadKey}
                 onSelect={selectTab}
                 onCloseTab={closeTab}
               />

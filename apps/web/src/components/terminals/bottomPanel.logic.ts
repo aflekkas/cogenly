@@ -2,9 +2,11 @@ import { commandDisplayText } from "@t3tools/client-runtime/work-log/command-lab
 
 import {
   commandTitle,
+  terminalRunState,
   terminalSections,
   type AgentTerminalEntry,
 } from "../AgentTerminalsPanel.logic";
+import type { PanelTabStatus } from "../TabStrip.logic";
 
 /** As in T3 Code's terminal drawer: a fresh panel's height, and the floor a drag stops at. */
 export const BOTTOM_PANEL_DEFAULT_HEIGHT = 280;
@@ -107,6 +109,33 @@ export function bottomPanelTabs(input: {
         left.id.localeCompare(right.id),
     )
     .map(({ firstRunKey: _firstRunKey, ...tab }) => tab);
+}
+
+/**
+ * What an agent's tab shows after its title: running while any of its
+ * commands is live, else how its newest command ended. A command the user
+ * stopped, or one that ended without a code, shows nothing rather than a
+ * check that would claim it succeeded.
+ */
+export function bottomPanelTabStatus(
+  tab: Pick<BottomPanelTab, "runs" | "liveRunCount">,
+): PanelTabStatus | null {
+  if (tab.liveRunCount > 0) return "running";
+  const newest = tab.runs[0];
+  if (!newest) return null;
+  switch (terminalRunState(newest).kind) {
+    case "starting":
+    case "running":
+      return "running";
+    case "succeeded":
+      return "done";
+    case "failed":
+    case "error":
+      return "failed";
+    case "killed":
+    case "ended":
+      return null;
+  }
 }
 
 /** The tab with `tabId`, else the first one. */
