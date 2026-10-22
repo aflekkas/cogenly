@@ -146,7 +146,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             onClick={() => {
               if (canOperateThread) onInterrupt();
             }}
-            aria-label="Stop generation"
+            aria-label="Stop agent"
           />
         }
       >
@@ -154,7 +154,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           <rect x="2" y="2" width="8" height="8" rx="1.5" />
         </svg>
       </TooltipTrigger>
-      <TooltipPopup>Interrupt</TooltipPopup>
+      <TooltipPopup>Stop agent</TooltipPopup>
     </Tooltip>
   );
 
@@ -276,7 +276,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const compactsBeforeSend = compactTokens !== null && !keepFullHistory;
 
   const submitLabel = showStop
-    ? "Stop generation"
+    ? "Stop agent"
     : showResume
       ? "Resume thread"
       : isEditingQueuedMessage
@@ -303,7 +303,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 : "Submitting message"
               : null));
   const submitTooltip = showStop
-    ? "Interrupt"
+    ? "Stop agent"
     : (submitStatus ??
       (compactsBeforeSend
         ? `Summarize ${compactTokens} tokens of history, then send`

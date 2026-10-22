@@ -15,10 +15,11 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindin
 import { isPreviewFocused } from "../../lib/previewFocus";
 import { isTerminalFocused } from "../../lib/terminalFocus";
 import { cn } from "../../lib/utils";
-import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import type { ComposerDictationWaveformSize } from "../composerFooterLayout";
+import { ComposerControl } from "./ComposerControl";
 import { ComposerDictationWaveform } from "./ComposerDictationWaveform";
 
 export interface ComposerDictationHandle {
@@ -38,9 +39,16 @@ interface ComposerDictationControlProps {
   /** True from the first click until the last segment lands or the run is cancelled. */
   readonly onActiveChange: (active: boolean) => void;
   readonly handleRef?: Ref<ComposerDictationHandle>;
+  /** True while the microphone is live; the footer reserves the waveform's width. */
+  readonly onRecordingChange?: (recording: boolean) => void;
+  /** How much waveform the footer has room for; see resolveComposerDictationFit. */
+  readonly waveform?: ComposerDictationWaveformSize;
 }
 
-/** Mic button for on-device dictation. Renders nothing where no transcriber exists. */
+/**
+ * Mic button for on-device dictation; while recording it becomes the waveform
+ * and is clicked to stop. Renders nothing where no transcriber exists.
+ */
 export function ComposerDictationControl(props: ComposerDictationControlProps) {
   const available = useDictationAvailable();
   if (!available) return null;
@@ -55,6 +63,8 @@ function ComposerDictationButton({
   onFinal,
   onActiveChange,
   handleRef,
+  onRecordingChange,
+  waveform = "full",
 }: ComposerDictationControlProps) {
   const [phase, setPhase] = useState<LiveDictationPhase>("idle");
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -100,6 +110,13 @@ function ComposerDictationButton({
   useEffect(() => {
     onActiveChangeStable(active);
   }, [active, onActiveChangeStable]);
+  const isRecording = phase === "recording";
+  const onRecordingChangeStable = useStableCallback((recording: boolean) =>
+    onRecordingChange?.(recording),
+  );
+  useEffect(() => {
+    onRecordingChangeStable(isRecording);
+  }, [isRecording, onRecordingChangeStable]);
 
   useEffect(() => {
     if (!session) return;
@@ -155,76 +172,73 @@ function ComposerDictationButton({
   if (!session) return null;
   const shortcutLabel = shortcutLabelForCommand(keybindings, "composer.dictate");
   const busy = phase === "starting" || phase === "finishing";
-  const label =
-    phase === "recording"
-      ? "Dictating — click to stop"
-      : phase === "starting"
-        ? "Starting dictation"
-        : phase === "finishing"
-          ? "Finishing dictation"
-          : "Dictate";
-  const hint =
-    phase === "recording"
-      ? "Click to stop, Enter to send, Esc to cancel"
+  const recording = phase === "recording";
+  const label = recording
+    ? "Stop dictation"
+    : phase === "starting"
+      ? "Starting dictation"
+      : phase === "finishing"
+        ? "Finishing dictation"
+        : "Dictate";
+  const hint = recording
+    ? `Stop dictation${shortcutLabel ? ` (${shortcutLabel})` : ""}. Enter sends, Esc cancels`
+    : busy
+      ? label
       : shortcutLabel
         ? `Dictate (${shortcutLabel})`
         : "Dictate";
 
   return (
-    <span className="flex items-center motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-out motion-safe:starting:opacity-0">
-      <ComposerDictationWaveform
-        recording={phase === "recording"}
-        readLevel={readLevel}
-        onStop={toggle}
-      />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              ref={buttonRef}
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled={disabled && !active}
-              aria-pressed={phase === "recording"}
-              aria-label={label}
-              data-dictation-phase={phase}
-              // Keeps the editor's focus and caret, so dictation lands where the user was typing.
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={() => (phase === "finishing" ? undefined : toggle())}
-            />
-          }
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <ComposerControl
+            ref={buttonRef}
+            type="button"
+            className="px-1.5 motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-out motion-safe:starting:opacity-0"
+            disabled={disabled && !active}
+            aria-pressed={recording}
+            aria-label={label}
+            data-dictation-phase={phase}
+            // Keeps the editor's focus and caret, so dictation lands where the user was typing.
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => (phase === "finishing" ? undefined : toggle())}
+          />
+        }
+      >
+        {/* While recording, the control itself is the waveform and the stop target. */}
+        <span
+          data-composer-dictation-clip
+          className={cn(
+            "relative flex h-4 items-center justify-end overflow-hidden",
+            "transition-[width] duration-(--motion-duration-base) ease-out motion-reduce:transition-none",
+            !recording ? "w-4" : waveform === "full" ? "w-10" : "w-5",
+          )}
         >
-          <span className="relative grid size-4 place-items-center [&>*]:col-start-1 [&>*]:row-start-1">
+          <ComposerDictationWaveform recording={recording} readLevel={readLevel} />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 grid place-items-center [&>*]:col-start-1 [&>*]:row-start-1"
+          >
             <MicIcon
-              aria-hidden
               className={cn(
-                "transition-opacity duration-(--motion-duration-fast) ease-out",
+                "size-4 transition-opacity duration-(--motion-duration-fast) ease-out",
                 phase === "idle" ? "opacity-100" : "opacity-0",
               )}
             />
             <span
-              aria-hidden
               className={cn(
                 "flex transition-opacity duration-(--motion-duration-fast) ease-out",
                 busy ? "opacity-100" : "opacity-0",
               )}
             >
               {/* Paused while hidden so an idle composer never repaints. */}
-              <Spinner style={busy ? undefined : { animationPlayState: "paused" }} />
+              <Spinner size="md" style={busy ? undefined : { animationPlayState: "paused" }} />
             </span>
-            {/* Stop: the waveform beside the button shows the voice. */}
-            <span
-              aria-hidden
-              className={cn(
-                "size-2.5 rounded-xs bg-destructive transition-opacity duration-(--motion-duration-fast) ease-out",
-                phase === "recording" ? "opacity-100" : "opacity-0",
-              )}
-            />
           </span>
-        </TooltipTrigger>
-        <TooltipPopup>{hint}</TooltipPopup>
-      </Tooltip>
-    </span>
+        </span>
+      </TooltipTrigger>
+      <TooltipPopup>{hint}</TooltipPopup>
+    </Tooltip>
   );
 }

@@ -18,19 +18,17 @@ function barHeight(value: number) {
 }
 
 /**
- * The live waveform beside the mic button while dictating. It opens with the
- * recording and closes when it ends; frames write bar heights straight to the
- * DOM, so the composer never re-renders, and the loop stops with the recording.
- * Clicking it stops dictation like the button does; the button carries the label.
+ * The live waveform inside the dictation control while recording. Bars are
+ * right-aligned so a narrower control clips the oldest history and keeps the
+ * newest bars. Frames write bar heights straight to the DOM, so the composer
+ * never re-renders, and the loop stops with the recording.
  */
 export function ComposerDictationWaveform({
   recording,
   readLevel,
-  onStop,
 }: {
   readonly recording: boolean;
   readonly readLevel: () => number;
-  readonly onStop: () => void;
 }) {
   const barsRef = useRef<HTMLSpanElement>(null);
 
@@ -74,28 +72,20 @@ export function ComposerDictationWaveform({
 
   return (
     <span
+      ref={barsRef}
       aria-hidden
-      onPointerDown={(event) => event.preventDefault()}
-      onClick={recording ? onStop : undefined}
       className={cn(
-        "flex h-full shrink-0 cursor-pointer items-center justify-end overflow-hidden text-foreground",
-        // It grows toward the free space on its left, so neighbouring controls stay put.
-        "transition-[width,opacity] duration-(--motion-duration-base) ease-out motion-reduce:transition-opacity",
-        recording ? "w-11 opacity-100" : "pointer-events-none w-0 opacity-0",
+        "flex h-4 w-10 shrink-0 items-center justify-between transition-opacity duration-(--motion-duration-fast) ease-out",
+        recording ? "opacity-100" : "opacity-0",
       )}
     >
-      <span
-        ref={barsRef}
-        className="flex h-4 w-10 shrink-0 items-center justify-between transition-opacity duration-(--motion-duration-fast) ease-out"
-      >
-        {BARS.map((bar) => (
-          <span
-            key={bar.key}
-            className="w-0.5 rounded-full bg-current"
-            style={{ height: BAR_MIN_PX, opacity: bar.opacity }}
-          />
-        ))}
-      </span>
+      {BARS.map((bar) => (
+        <span
+          key={bar.key}
+          className="w-0.5 rounded-full bg-current"
+          style={{ height: BAR_MIN_PX, opacity: bar.opacity }}
+        />
+      ))}
     </span>
   );
 }

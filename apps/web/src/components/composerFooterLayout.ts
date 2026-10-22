@@ -140,6 +140,54 @@ export function resolveRestingComposerControlsLayout(
   return { hiddenCount, ...(input.iconOnlyBlockWidths ? { iconOnlyCount } : {}), visible };
 }
 
+/**
+ * The narrowest the resting controls get: every block in overflow and the
+ * picker at its minimum readable width.
+ */
+export function resolveRestingComposerControlsMinimumWidth(
+  input: RestingComposerControlsMeasurement,
+): number {
+  return restingComposerControlsWidth(input, input.blockWidths.length, input.minimumFixedWidth);
+}
+
+/**
+ * Inner widths of the dictation control (`w-4`, `w-5`, `w-10`): the mic glyph
+ * at rest, the newest five waveform bars, and the full ten-bar history.
+ */
+export const COMPOSER_DICTATION_CLIP_WIDTH_PX = { idle: 16, compact: 20, full: 40 } as const;
+
+export type ComposerDictationWaveformSize = "full" | "compact";
+
+/**
+ * Fit the dictation control and the controls beside it in one footer row.
+ *
+ * The full waveform wins over the controls: they fold into overflow first, and
+ * the waveform drops to its newest bars only when even the folded controls
+ * would not fit beside it. The judgement uses the width the controls would
+ * have at each waveform size, so it does not change when the waveform does.
+ *
+ * Growth is reserved before it animates, so the controls fold before the
+ * waveform reaches them. Room is given back only once the control has shrunk.
+ */
+export function resolveComposerDictationFit(input: {
+  controls: RestingComposerControlsMeasurement;
+  hostWidth: number;
+  renderedClipWidth: number;
+  recording: boolean;
+}): { hostWidth: number; waveform: ComposerDictationWaveformSize } {
+  const hostWidthAt = (clipWidth: number) =>
+    input.hostWidth - (clipWidth - input.renderedClipWidth);
+  const waveform: ComposerDictationWaveformSize =
+    resolveRestingComposerControlsMinimumWidth(input.controls) <=
+    hostWidthAt(COMPOSER_DICTATION_CLIP_WIDTH_PX.full)
+      ? "full"
+      : "compact";
+  const targetClipWidth = input.recording
+    ? COMPOSER_DICTATION_CLIP_WIDTH_PX[waveform]
+    : COMPOSER_DICTATION_CLIP_WIDTH_PX.idle;
+  return { hostWidth: Math.min(input.hostWidth, hostWidthAt(targetClipWidth)), waveform };
+}
+
 export function resolveScrollToEndClearance(input: {
   overlayHeight: number;
   mainSurfaceTop: number;

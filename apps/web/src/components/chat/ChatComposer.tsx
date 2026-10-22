@@ -181,7 +181,9 @@ import { useComposerPathSearch } from "../../lib/composerPathSearchState";
 import { toKindScopedComposerContextId } from "@t3tools/shared/composerContextReferences";
 import {
   getRestingComposerImagePreviewCounts,
+  resolveComposerDictationFit,
   resolveRestingComposerControlsLayout,
+  type ComposerDictationWaveformSize,
   shouldAnimateComposerRestingTransition,
   shouldUseCompactComposerPrimaryActions,
   shouldUseCompactComposerFooter,
@@ -1072,7 +1074,16 @@ const extendReplacementRangeForTrailingSpace = (
   return text[rangeEnd] === " " ? rangeEnd + 1 : rangeEnd;
 };
 
-function useRestingComposerControlsLayout(host: HTMLDivElement | null, useControlsAsHost = false) {
+/**
+ * Decide which resting controls fold into overflow. With `dictationRecording`
+ * set, the dictation control beside the controls is judged in the same pass
+ * (resolveComposerDictationFit): its waveform's width is reserved up front.
+ */
+function useRestingComposerControlsLayout(
+  host: HTMLDivElement | null,
+  useControlsAsHost = false,
+  dictationRecording?: boolean,
+) {
   // Kept while the composer's view is hidden (useElementState), so a mode
   // switch does not re-render the composer to detach and reattach it.
   const [controls, setControls] = useElementState<HTMLDivElement>();
@@ -1091,6 +1102,7 @@ function useRestingComposerControlsLayout(host: HTMLDivElement | null, useContro
     iconOnlyCount?: number;
     visible: boolean;
   }>({ hiddenCount: 0, visible: true });
+  const [dictationWaveform, setDictationWaveform] = useState<ComposerDictationWaveformSize>("full");
 
   const measure = useCallback(() => {
     const currentHost = useControlsAsHost ? controls : hostRef.current;
@@ -1099,10 +1111,24 @@ function useRestingComposerControlsLayout(host: HTMLDivElement | null, useContro
     const measurement = measureRestingComposerControls(controls);
     if (!measurement) return;
     const style = getComputedStyle(currentHost);
-    const hostWidth =
+    let hostWidth =
       currentHost.clientWidth -
       (Number.parseFloat(style.paddingInlineStart) || 0) -
       (Number.parseFloat(style.paddingInlineEnd) || 0);
+    const dictationClip =
+      dictationRecording === undefined
+        ? null
+        : controls.parentElement?.querySelector<HTMLElement>("[data-composer-dictation-clip]");
+    if (dictationClip) {
+      const fit = resolveComposerDictationFit({
+        controls: measurement,
+        hostWidth,
+        renderedClipWidth: dictationClip.getBoundingClientRect().width,
+        recording: dictationRecording === true,
+      });
+      hostWidth = fit.hostWidth;
+      setDictationWaveform(fit.waveform);
+    }
 
     setLayout((current) => {
       const next = resolveRestingComposerControlsLayout({
@@ -1116,7 +1142,7 @@ function useRestingComposerControlsLayout(host: HTMLDivElement | null, useContro
         ? current
         : next;
     });
-  }, [controls, useControlsAsHost]);
+  }, [controls, useControlsAsHost, dictationRecording]);
 
   useLayoutEffect(measure, [measure, host]);
   useEffect(() => {
@@ -1154,6 +1180,7 @@ function useRestingComposerControlsLayout(host: HTMLDivElement | null, useContro
     hiddenBlockCount: layout.hiddenCount,
     iconOnlyBlockCount: layout.iconOnlyCount ?? 0,
     controlsVisible: layout.visible,
+    dictationWaveform,
   };
 }
 
@@ -2865,7 +2892,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     iconOnlyBlockCount: restingControlsIconOnlyBlockCount,
     controlsVisible: restingControlsVisible,
   } = useRestingComposerControlsLayout(restingControlsHost ?? inlineRestingControlsHost);
-  const expandedControlsLayout = useRestingComposerControlsLayout(null, true);
+  const [dictationRecording, setDictationRecording] = useState(false);
+  const expandedControlsLayout = useRestingComposerControlsLayout(
+    null,
+    true,
+    settings.dictationEnabled && !isChoiceOnlyPendingQuestion ? dictationRecording : undefined,
+  );
   const pendingPrimaryAction = useMemo(
     () =>
       activePendingProgress
@@ -4661,8 +4693,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               aria-hidden={hidden || undefined}
               inert={hidden || undefined}
               className={cn(
-                "flex w-max min-w-max shrink-0 items-center gap-1",
-                hidden && "pointer-events-none invisible absolute",
+                // A block coming back out of overflow fades in; folding is immediate so
+                // nothing overlaps while the row tightens.
+                "flex w-max min-w-max shrink-0 items-center gap-1 transition-opacity duration-(--motion-duration-fast) ease-out",
+                hidden && "pointer-events-none invisible absolute opacity-0",
                 index >= restingBlockDefs.length - iconOnlyBlockCount &&
                   "[&_[data-composer-control-label]]:pointer-events-none [&_[data-composer-control-label]]:invisible [&_[data-composer-control-label]]:absolute [&_[data-composer-control-label]]:w-max [&_[data-composer-control-label]]:max-w-none [&_[data-composer-control-compact-icon]]:[visibility:inherit] [&_[data-composer-control-compact-icon]]:relative",
               )}
@@ -4676,8 +4710,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           aria-hidden={hiddenRestingBlockIds.length === 0 || undefined}
           inert={hiddenRestingBlockIds.length === 0 || undefined}
           className={cn(
-            "min-w-0 shrink-0",
-            hiddenRestingBlockIds.length === 0 && "pointer-events-none invisible absolute",
+            "min-w-0 shrink-0 transition-opacity duration-(--motion-duration-fast) ease-out",
+            hiddenRestingBlockIds.length === 0 &&
+              "pointer-events-none invisible absolute opacity-0",
           )}
         >
           <CompactComposerControlsMenu
@@ -6523,6 +6558,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       onPartial={onDictationPartial}
                       onFinal={onDictationFinal}
                       onActiveChange={onDictationActiveChange}
+                      onRecordingChange={setDictationRecording}
+                      waveform={expandedControlsLayout.dictationWaveform}
                     />
                   ) : null}
                   {showComposerAttachAction ? (
