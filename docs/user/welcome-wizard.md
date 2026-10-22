@@ -56,7 +56,7 @@ terminal metadata while the terminal process can use them.
 If Cogenly finds T3 Code on the computer, setup offers **Bring your projects
 and chats over from T3 Code**. It imports each project's full history, subagent
 threads, attachments, and providers, the same as **Settings → Import**. See
-[Importing from T3 Code](./importing-from-t3-code.md). Quit T3 Code first.
+[Importing from T3 Code](./importing-from-t3-code.md). T3 Code can stay open.
 
 In that case setup does not offer the Claude Code and Codex session import
 below by default, because it reads the same conversations and would add a
@@ -100,3 +100,33 @@ remaining history.
 
 You can continue without configuring agents or importing projects, or return to an earlier step
 using the setup progress bar. Navigation pauses while an import is running.
+
+## Set up from the terminal
+
+`cogenly setup` runs the same setup in a terminal: it shows which agents are
+installed and signed in, adds more Claude or Codex accounts with their own
+config folders, picks the default model for new chats, imports from T3 Code,
+and can import raw Claude Code and Codex sessions. It finishes with a summary.
+Run it again any time.
+
+It works whether Cogenly is running or not, and T3 Code can stay open. While
+Cogenly runs, setup makes its changes through it, so nothing restarts and
+running agents aren't interrupted. The raw session import needs Cogenly
+running.
+
+For scripts and agents, `--yes` skips every question and does only what the
+flags say:
+
+```sh
+cogenly setup --yes --import-t3 --projects cogenly,site --settings
+cogenly setup --yes --claude-home claude-personal=~/.claude_personal \
+  --default-model claude-personal:claude-opus-4-1
+```
+
+- `--import-t3` imports from T3 Code; `--projects` picks projects by T3 id,
+  title, or folder (default: every project with threads, except Scratch);
+  `--settings` also brings keybindings and models; `--dry-run` only reports.
+- `--claude-home [id=]folder` and `--codex-home [id=]folder` add an account.
+  Without an id, one is made from the folder, such as `claude-personal`.
+- `--default-model instance:model` sets the default model for new chats.
+- `--sessions all` or `--sessions <folder,folder>` imports raw sessions.

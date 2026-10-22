@@ -10,11 +10,32 @@ T3 Code and Cogenly share migrations 1-62 and then diverge under the same migrat
 T3's `statev2.sqlite` into Cogenly or open it as Cogenly state: Effect migrations are keyed by id, so
 Cogenly would treat its own later migrations as applied and break.
 
-Instead the importer opens T3's database read-only with `immutable=1`, decodes each thread event with
-Cogenly's `OrchestrationV2DomainEvent` schema, and writes it through `EventSinkV2.write`, the path a
-live command takes. Projections, search, and connected clients update normally, so Cogenly does not
-need to restart. `immutable=1` takes no locks and ignores T3's WAL, which is why the import requires
-T3 Code to be quit (`server-runtime.json`) and reports pending WAL bytes.
+Instead the importer reads T3's database, decodes each thread event with Cogenly's
+`OrchestrationV2DomainEvent` schema, and writes it through `EventSinkV2.write`, the path a live
+command takes. Projections, search, and connected clients update normally, so Cogenly does not need
+to restart.
+
+## Reading a T3 that keeps running
+
+T3 Code may stay open, so a scan reads a snapshot, not the live file
+([`T3SourceDatabase.ts`](../../apps/server/src/t3Import/T3SourceDatabase.ts)):
+
+- **One backup step.** The snapshot is SQLite's online backup from a read-only connection, run as a
+  single step. A multi-step backup restarts whenever another process writes the source, so against
+  a busy T3 it may never finish; one step is one read transaction and one consistent moment. T3
+  keeps writing meanwhile (its WAL just can't checkpoint past the reader).
+- **Never create files in T3's directory.** A WAL reader recreates `-wal`/`-shm` files next to a
+  closed database, so the live file is opened as a WAL reader only while its `-wal` exists (T3
+  running) and as `immutable=1` otherwise. Snapshots are always read `immutable=1`.
+- **The scan's snapshot is the import's.** The service holds the snapshot from `scan` until the
+  confirmed `run` ends, so the import writes exactly what the report showed. A new scan, the end of
+  the run, or the service stopping deletes it. An unconfirmed scan keeps its copy until one of those,
+  which costs disk space the size of T3's database.
+- **Free space is checked first** (database plus WAL plus headroom) and a short disk fails the scan
+  with `insufficient-space`, before anything is copied.
+
+T3 changes after the snapshot simply aren't in it; the next run picks them up through the ledger
+below.
 
 Thread ids are kept, so subagent links, forks, context transfers, and attachment file names remain
 valid. Project ids are remapped by normalized workspace root, because the same folder can already be
@@ -75,5 +96,12 @@ The service is `T3ImportService`; RPCs are `t3Import.status`, `.scan`, `.run`, a
 → Import and the onboarding import step render the same flow (`useT3ImportFlow` and
 `T3ImportFlowView` in `apps/web/src/components/settings/T3ImportSettings.tsx`). Onboarding offers
 it instead of the agent-session import when T3 is found, because both read the same native
-sessions and would create duplicate threads under different ids. `cogenly t3-import` runs the same
-service offline against a home no server is using.
+sessions and would create duplicate threads under different ids.
+
+`cogenly setup` and `cogenly t3-import` drive the same job API
+([`cli/setupBackend.ts`](../../apps/server/src/cli/setupBackend.ts)). When a server owns the home and
+answers, they call its RPCs with a short-lived session minted from the home's secrets, scoped to
+`SETUP_CLI_SCOPES` ([`cli/liveServer.ts`](../../apps/server/src/cli/liveServer.ts)), so the server
+runs the job and authorizes it like any client. Otherwise they take server ownership of the home and
+run the service in-process. A recorded server that doesn't answer still holds ownership, so the CLI
+stops rather than write behind it; keep that order when adding CLI writers.
