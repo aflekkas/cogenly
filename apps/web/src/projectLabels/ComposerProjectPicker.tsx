@@ -241,7 +241,8 @@ export function ComposerProjectPicker(props: {
     >
       {isHero ? (
         // Stays mounted without a project, empty and out of reach, so the
-        // name can fade out and the greeting glide back to centre.
+        // name can fade out and the greeting glide back to centre. On its own
+        // line under a stacked heading, it is a size smaller.
         <ComboboxTrigger
           disabled={props.disabled}
           aria-label={current ? `In ${current.label.name}. Change project` : undefined}
@@ -252,7 +253,7 @@ export function ComposerProjectPicker(props: {
             <button
               type="button"
               className={cn(
-                "group/hero-suffix pointer-events-auto inline-block cursor-pointer rounded-sm align-baseline text-muted-foreground/60 outline-none transition-colors duration-(--motion-duration-fast) hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring data-popup-open:text-muted-foreground",
+                "group/hero-suffix pointer-events-auto inline-block cursor-pointer rounded-sm align-baseline text-muted-foreground/60 group-data-stacked/hero-headline:text-base outline-none transition-colors duration-(--motion-duration-fast) hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring data-popup-open:text-muted-foreground",
                 current === null && "pointer-events-none",
               )}
             />

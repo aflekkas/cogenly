@@ -65,6 +65,7 @@ import * as Schema from "effect/Schema";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { chatGreeting } from "./chatGreeting";
 import { FadeSwap } from "./StateTransition";
+import { useHeroHeadlineMotion } from "./useHeroHeadlineMotion";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
   Combobox,
@@ -813,6 +814,13 @@ export function DraftHeroHeadline({
       )?.label.name ?? null)
     : null;
   const greetingSuffix = heroProjectSuffix(chatProjectName);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const measureRef = useRef<HTMLSpanElement>(null);
+  useHeroHeadlineMotion(
+    headingRef,
+    measureRef,
+    isChatDraft && draftThread ? `chat:${draftThread.threadId}` : "heading",
+  );
   // Choosing a project in the hero: one repository is picked outright;
   // several narrow the repository picker to that project's.
   const chooseHeroProject = (project: EnvironmentProjectLabel) => {
@@ -891,11 +899,20 @@ export function DraftHeroHeadline({
   return (
     <div className="@container mx-auto flex w-full max-w-5xl flex-col items-center">
       {/* Sized to the pane, not the window: beside an open right panel the
-          greeting steps down so it and its project stay on one line. */}
+          greeting steps down so it and its project stay on one line. A step
+          rescales smoothly, and a project that no longer fits goes to its own
+          line (useHeroHeadlineMotion). */}
       <h1
+        ref={headingRef}
         aria-label={headingLabel}
-        className="w-full text-center font-normal text-xl text-foreground tracking-tight @xl:text-2xl @2xl:text-3xl"
+        className="group/hero-headline relative w-full origin-bottom text-balance text-center font-normal text-xl text-foreground tracking-tight @xl:text-2xl @2xl:text-3xl"
       >
+        {/* The greeting and its project on one line, to tell whether they fit. */}
+        <span
+          ref={measureRef}
+          aria-hidden
+          className="pointer-events-none invisible absolute start-0 top-0 whitespace-pre"
+        />
         <FadeSwap
           group="draft-heading"
           swapKey={
@@ -909,7 +926,12 @@ export function DraftHeroHeadline({
         >
           {isChatDraft ? (
             <>
-              {greeting}
+              <span
+                data-hero-greeting=""
+                className="inline-block max-w-full group-data-stacked/hero-headline:block"
+              >
+                {greeting}
+              </span>
               {draftThread && draftId ? (
                 <ComposerProjectPicker
                   appearance="hero"
