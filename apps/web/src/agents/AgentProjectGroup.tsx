@@ -1,5 +1,5 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
-import { FolderIcon } from "lucide-react";
+import { FolderMinusIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { SidebarGroupHeader, SidebarList } from "~/components/sidebar/SidebarList";
@@ -56,7 +56,8 @@ export function AgentProjectGroup(props: {
             props.folder ? (
               <ProjectFolderIcon color={props.folder.label.color} className="size-3.5" />
             ) : (
-              <FolderIcon aria-hidden className="size-3.5 shrink-0" />
+              // The composer's project picker marks "No project" the same way.
+              <FolderMinusIcon aria-hidden className="size-3.5 shrink-0" />
             )
           }
           label={name}

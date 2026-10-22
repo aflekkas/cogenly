@@ -66,6 +66,7 @@ import {
   FolderIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
+  MessageSquareDashedIcon,
   PinIcon,
   SettingsIcon,
   ShieldQuestionIcon,
@@ -5129,7 +5130,10 @@ export default function Sidebar() {
                                 }
                                 name={group.name}
                               />
-                            ) : undefined
+                            ) : (
+                              // The same mark as "No repository" in the pickers and palette.
+                              <MessageSquareDashedIcon aria-hidden className="size-3.5 shrink-0" />
+                            )
                           }
                           label={group.name ?? "No repository"}
                           mono
