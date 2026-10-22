@@ -219,6 +219,7 @@ export const ComposerTasksContent = memo(function ComposerTasksContent({
   );
 });
 
+/** The expanded task list's surface; the caller places it in a composer attachment. */
 export const ComposerTasksDrawer = memo(function ComposerTasksDrawer({
   onCollapse,
   ...props
@@ -226,10 +227,8 @@ export const ComposerTasksDrawer = memo(function ComposerTasksDrawer({
   readonly onCollapse: () => void;
 }) {
   return (
-    <ComposerBanner.Attachment>
-      <ComposerBanner.Root>
-        <ComposerTasksContent {...props} expanded onToggle={onCollapse} />
-      </ComposerBanner.Root>
-    </ComposerBanner.Attachment>
+    <ComposerBanner.Root>
+      <ComposerTasksContent {...props} expanded onToggle={onCollapse} />
+    </ComposerBanner.Root>
   );
 });

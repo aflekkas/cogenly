@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
 } from "react";
 
@@ -21,6 +22,9 @@ const DISMISS_TRANSITION_MS = 220;
 // The attached notice opens, closes and swaps on this timing.
 const NOTICE_PRESENCE_MS = 200;
 const NOTICE_PRESENCE_EASING = PANEL_MOTION_EASING;
+// Share of a rise or sink spent fading, so the strip reads as a solid surface
+// sliding behind the composer rather than a floating fade.
+const SOLID_SURFACE_FADE_SHARE = 0.4;
 
 function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -317,8 +321,11 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
 }
 
 /**
- * The attached notice's frame. It grows from no height while the notice fades
- * and rises in, collapses the same way when the last notice goes, and eases
+ * The attached notice's frame. It grows from no height with the content pinned
+ * to its top, so the strip rises out from behind the composer's top edge (the
+ * frame clips at the seam) and sinks back behind it when the last notice goes.
+ * The surface stays solid: opacity only settles in early on the way up and
+ * late on the way down. It eases
  * between two notices' heights on a swap (the new one fading in over the old,
  * see LeavingNotice). Web Animations, so an interrupted change starts from
  * where the frame is. Reduced motion fades only. The queue tray and its rows
@@ -375,6 +382,7 @@ export function NoticePresenceFrame({
           ? [{ opacity: fromOpacity }, { opacity: 0 }]
           : [
               { height: `${fromHeight}px`, opacity: fromOpacity },
+              { opacity: fromOpacity, offset: 1 - SOLID_SURFACE_FADE_SHARE },
               { height: "0px", opacity: 0 },
             ],
         timing,
@@ -406,6 +414,7 @@ export function NoticePresenceFrame({
         ? [{ opacity: fromOpacity }, { opacity: 1 }]
         : [
             { height: `${fromHeight}px`, opacity: fromOpacity },
+            { opacity: 1, offset: SOLID_SURFACE_FADE_SHARE },
             { height: `${naturalHeight}px`, opacity: 1 },
           ],
       timing,
@@ -427,6 +436,76 @@ export function NoticePresenceFrame({
     <div ref={frameRef} className="relative">
       {children}
     </div>
+  );
+}
+
+interface HeldAttachment {
+  readonly key: string | null;
+  readonly node: ReactNode;
+}
+
+/**
+ * One composer attachment that rises out from behind the composer when shown,
+ * sinks back when hidden (still drawing its last content, inert), and keeps
+ * its surface while the content changes: a new `swapKey` crossfades the old
+ * content out over the new one and eases between their heights. Content that
+ * changes under the same key just updates in place, so rapid updates never
+ * retrigger the rise.
+ */
+export function AttachmentPresence({
+  show,
+  swapKey = null,
+  children,
+  ...attachmentProps
+}: Omit<ComponentProps<typeof ComposerBanner.Attachment>, "children"> & {
+  readonly show: boolean;
+  readonly swapKey?: string | null;
+  readonly children: ReactNode;
+}) {
+  const [held, setHeld] = useState<HeldAttachment | null>(() =>
+    show ? { key: swapKey, node: children } : null,
+  );
+  const [leaving, setLeaving] = useState<HeldAttachment | null>(null);
+  if (show && (held === null || held.node !== children || held.key !== swapKey)) {
+    if (held !== null && held.key !== swapKey) setLeaving(held);
+    setHeld({ key: swapKey, node: children });
+  }
+  // Whatever is up when the composer mounts (a thread switch) is just there.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+  }, []);
+  const clearHeld = useCallback(() => {
+    setHeld(null);
+    setLeaving(null);
+  }, []);
+  const clearLeaving = useCallback(() => setLeaving(null), []);
+
+  if (held === null) return null;
+  return (
+    <ComposerBanner.Attachment {...attachmentProps}>
+      <NoticePresenceFrame
+        open={show}
+        swapKey={held.key}
+        animateMountRef={mountedRef}
+        onClosed={clearHeld}
+      >
+        {leaving && show ? (
+          <LeavingNotice key={leaving.key ?? ""} onDone={clearLeaving}>
+            {leaving.node}
+          </LeavingNotice>
+        ) : null}
+        <div
+          key={held.key ?? ""}
+          data-notice-current=""
+          className="relative z-10"
+          aria-hidden={show ? undefined : true}
+          inert={!show}
+        >
+          {held.node}
+        </div>
+      </NoticePresenceFrame>
+    </ComposerBanner.Attachment>
   );
 }
 
