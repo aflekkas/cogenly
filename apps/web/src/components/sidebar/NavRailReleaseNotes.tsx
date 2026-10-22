@@ -230,7 +230,11 @@ export function ReleaseHistoryView({
       </div>
       <div className="h-px bg-border" />
       {releases.length > 0 ? (
-        <div className="scroll-fade-y max-h-[min(24rem,calc(var(--available-height)-7rem))] min-h-0 overflow-y-auto pr-1">
+        // The scroller reaches into the popover's right padding, so its scrollbar
+        // sits in that gutter (always reserved) and the entries' dividers match the
+        // header hairline and footer edge to edge. Its edges fade only toward more
+        // notes, clear right against the hairlines.
+        <div className="scroll-fade-y -mr-2.5 max-h-[min(24rem,calc(var(--available-height)-7rem))] min-h-0 overflow-y-auto pr-1 [--scroll-fade-hold:--spacing(1.5)] [scrollbar-gutter:stable]">
           {releases.map((release) => (
             <ReleaseEntry key={release.version} release={release} tone={toneOf(release)} />
           ))}

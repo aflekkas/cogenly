@@ -1069,7 +1069,9 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
    scroll-fade-y keeps its lane opaque with --scroll-fade-lane (the app's
    scrollbar width; set 0px where the scrollbar is hidden), and its top fade
    can run longer than the bottom with --scroll-fade-start-size, for a header
-   floating over the scroller. */
+   floating over the scroller. --scroll-fade-hold keeps the first stretch of a
+   fading edge fully clear, so a scroller butting against a hairline never
+   shows half-cut glyphs along it. */
 @property --scroll-fade-start-y {
   syntax: "<length>";
   inherits: false;
@@ -1145,8 +1147,14 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
       linear-gradient(
         to bottom,
         transparent,
+        transparent min(var(--scroll-fade-hold, 0px), var(--scroll-fade-start-y)),
         black var(--scroll-fade-start-y),
         black calc(100% - var(--scroll-fade-end-inset) - var(--scroll-fade-end-y)),
+        transparent
+          calc(
+            100% - var(--scroll-fade-end-inset) -
+              min(var(--scroll-fade-hold, 0px), var(--scroll-fade-end-y))
+          ),
         transparent calc(100% - var(--scroll-fade-end-inset))
       ),
       linear-gradient(black, black);
@@ -1154,8 +1162,14 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
       linear-gradient(
         to bottom,
         transparent,
+        transparent min(var(--scroll-fade-hold, 0px), var(--scroll-fade-start-y)),
         black var(--scroll-fade-start-y),
         black calc(100% - var(--scroll-fade-end-inset) - var(--scroll-fade-end-y)),
+        transparent
+          calc(
+            100% - var(--scroll-fade-end-inset) -
+              min(var(--scroll-fade-hold, 0px), var(--scroll-fade-end-y))
+          ),
         transparent calc(100% - var(--scroll-fade-end-inset))
       ),
       linear-gradient(black, black);
