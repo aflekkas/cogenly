@@ -11,6 +11,7 @@ import {
 import { ChevronRightIcon } from "lucide-react";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "../../lib/utils";
+import { observeVisibleAnimation } from "../../lib/visibleAnimation";
 import { useLastPresent } from "../ui/overlay-presence";
 
 const GroupedRows = createContext(false);
@@ -54,6 +55,8 @@ type RowContent = {
   label: ReactNode;
   trailing?: ReactNode;
   wrapLabel?: boolean;
+  /** In progress: the label carries the shared shimmer. The icon stays muted. */
+  active?: boolean | undefined;
   /**
    * Open state of an expandable row. The chevron sits right after the label,
    * so it rotates in one spot instead of riding the row's far edge. Omit it
@@ -62,7 +65,40 @@ type RowContent = {
   disclosure?: boolean | undefined;
 };
 
-function WorkLogLine({ icon, label, trailing, wrapLabel, disclosure }: RowContent) {
+/**
+ * The one in-progress treatment for activity text: a soft light band sweeps
+ * across the muted label. A masked copy in foreground slides on the compositor
+ * (no repaint per frame) and pauses offscreen. Under reduced motion the copy
+ * holds still at half strength, so live text reads brighter without moving.
+ */
+export function WorkLogShimmer({
+  active,
+  children,
+}: {
+  active: boolean | undefined;
+  children: ReactNode;
+}) {
+  if (!active) return children;
+  return (
+    <span ref={observeVisibleAnimation} className="relative block min-w-0 truncate">
+      {children}
+      {/* inert: the copy may hold links, and must never take focus or clicks. */}
+      <span
+        aria-hidden
+        inert
+        className="live-activity-focus pointer-events-none absolute inset-y-0 select-none"
+      >
+        <span className="live-activity-focus-counter block">
+          <span className="live-activity-focus-aligned block truncate text-foreground [&_*]:text-foreground">
+            {children}
+          </span>
+        </span>
+      </span>
+    </span>
+  );
+}
+
+function WorkLogLine({ icon, label, trailing, wrapLabel, active, disclosure }: RowContent) {
   const expandable = disclosure !== undefined;
   return (
     <div
@@ -88,7 +124,7 @@ function WorkLogLine({ icon, label, trailing, wrapLabel, disclosure }: RowConten
             !wrapLabel && "truncate [&_*]:whitespace-nowrap",
           )}
         >
-          {label}
+          <WorkLogShimmer active={active}>{label}</WorkLogShimmer>
         </div>
         {expandable ? (
           <>
@@ -122,6 +158,7 @@ export function WorkLogButton({
   label,
   trailing,
   wrapLabel = false,
+  active,
   disclosure,
   ...buttonProps
 }: RowContent & Omit<ComponentProps<"button">, "className" | "style" | "children">) {
@@ -133,6 +170,7 @@ export function WorkLogButton({
         label={label}
         trailing={trailing}
         wrapLabel={wrapLabel}
+        active={active}
         disclosure={disclosure}
       />
     </button>
@@ -145,6 +183,7 @@ export function WorkLogRow({
   label,
   trailing,
   wrapLabel = false,
+  active,
   disclosure,
   children,
   ...rowProps
@@ -157,6 +196,7 @@ export function WorkLogRow({
         label={label}
         trailing={trailing}
         wrapLabel={wrapLabel}
+        active={active}
         disclosure={disclosure}
       />
       {children}

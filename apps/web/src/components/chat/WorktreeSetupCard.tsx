@@ -14,15 +14,14 @@ import {
   XIcon,
 } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { Spinner } from "~/components/ui/spinner";
 import { MiddleTruncate } from "../ui/middle-truncate";
-import { observeVisibleAnimation } from "~/lib/visibleAnimation";
 import { cn } from "~/lib/utils";
-import { WorkLogRow } from "./WorkLog";
+import { WorkLogRow, WorkLogShimmer } from "./WorkLog";
 
 interface WorktreeSetupCardProps {
   snapshot: WorktreeSetupSnapshot;
@@ -89,20 +88,6 @@ function stageRowClassName(status: WorktreeSetupStage["status"]): string {
   }
 }
 
-/** Same shimmer treatment as the live tool rows in the timeline. */
-function ShimmerOverlay({ children }: { children: ReactNode }) {
-  return (
-    <span
-      aria-hidden
-      className="live-activity-focus pointer-events-none absolute inset-y-0 select-none"
-    >
-      <span className="live-activity-focus-counter block">
-        <span className="live-activity-focus-aligned block text-foreground">{children}</span>
-      </span>
-    </span>
-  );
-}
-
 function headerLabel(snapshot: WorktreeSetupSnapshot): string {
   switch (snapshot.phase) {
     case "running":
@@ -147,12 +132,8 @@ function SetupHeaderRow({
           tone,
         )}
       >
-        <span
-          ref={running ? observeVisibleAnimation : undefined}
-          className="relative min-w-0 shrink overflow-hidden whitespace-nowrap"
-        >
-          <span className="block truncate">{text}</span>
-          {running ? <ShimmerOverlay>{text}</ShimmerOverlay> : null}
+        <span className="min-w-0 shrink truncate">
+          <WorkLogShimmer active={running}>{text}</WorkLogShimmer>
         </span>
         {totalElapsed !== null ? (
           <span className="ml-auto shrink-0 text-xs text-muted-foreground">
@@ -196,12 +177,8 @@ function StageRow({
         </span>
       }
       label={
-        <span
-          ref={running ? observeVisibleAnimation : undefined}
-          className={cn("relative block truncate", stageRowClassName(stage.status))}
-        >
-          {label}
-          {running ? <ShimmerOverlay>{label}</ShimmerOverlay> : null}
+        <span className={cn("block truncate", stageRowClassName(stage.status))}>
+          <WorkLogShimmer active={running}>{label}</WorkLogShimmer>
         </span>
       }
       trailing={

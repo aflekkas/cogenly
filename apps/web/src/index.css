@@ -1255,9 +1255,10 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
 
 /* The in-progress shimmer: one soft band sweeping across live text. Every
    variant shares this band profile and timing so they read as one effect.
-   Peak brightness stays around 65% of the way from muted to foreground. */
+   The band is a few letters wide and peaks near foreground, so the letters
+   under it read lit while the rest of the label stays muted. */
 :root {
-  --shimmer-band: 7rem;
+  --shimmer-band: 4.5rem;
   --shimmer-duration: 2.2s;
   --shimmer-ease: cubic-bezier(0.4, 0.15, 0.6, 0.85);
 }
@@ -1266,15 +1267,15 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   --shimmer-gradient: linear-gradient(
     to right,
     transparent 0%,
-    color-mix(in srgb, var(--shimmer-ink) 4%, transparent) 10%,
-    color-mix(in srgb, var(--shimmer-ink) 14%, transparent) 20%,
-    color-mix(in srgb, var(--shimmer-ink) 33%, transparent) 30%,
-    color-mix(in srgb, var(--shimmer-ink) 55%, transparent) 40%,
-    color-mix(in srgb, var(--shimmer-ink) 65%, transparent) 50%,
-    color-mix(in srgb, var(--shimmer-ink) 55%, transparent) 60%,
-    color-mix(in srgb, var(--shimmer-ink) 33%, transparent) 70%,
-    color-mix(in srgb, var(--shimmer-ink) 14%, transparent) 80%,
-    color-mix(in srgb, var(--shimmer-ink) 4%, transparent) 90%,
+    color-mix(in srgb, var(--shimmer-ink) 6%, transparent) 10%,
+    color-mix(in srgb, var(--shimmer-ink) 20%, transparent) 20%,
+    color-mix(in srgb, var(--shimmer-ink) 45%, transparent) 30%,
+    color-mix(in srgb, var(--shimmer-ink) 75%, transparent) 40%,
+    color-mix(in srgb, var(--shimmer-ink) 90%, transparent) 50%,
+    color-mix(in srgb, var(--shimmer-ink) 75%, transparent) 60%,
+    color-mix(in srgb, var(--shimmer-ink) 45%, transparent) 70%,
+    color-mix(in srgb, var(--shimmer-ink) 20%, transparent) 80%,
+    color-mix(in srgb, var(--shimmer-ink) 6%, transparent) 90%,
     transparent 100%
   );
 }
@@ -1372,7 +1373,19 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   animation-play-state: var(--visible-animation-state, paused);
   will-change: var(--visible-animation-will-change, auto);
 
-  @media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  /* No sweep: the whole copy holds still at half strength, so live text
+     still reads brighter than settled text. */
+  @media (prefers-reduced-motion: reduce) {
+    left: 0;
+    width: 100%;
+    -webkit-mask-image: none;
+    mask-image: none;
+    animation: none;
+    opacity: 0.5;
+    will-change: auto;
+  }
+
+  @media (forced-colors: active) {
     animation: none;
     opacity: 0;
     will-change: auto;
@@ -1394,6 +1407,11 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
 @utility live-activity-focus-aligned {
   width: calc(100% - var(--shimmer-band));
   margin-left: var(--shimmer-band);
+
+  @media (prefers-reduced-motion: reduce) {
+    width: 100%;
+    margin-left: 0;
+  }
 }
 
 @property --assistant-citation-highlight-opacity {

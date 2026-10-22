@@ -12,6 +12,7 @@ import {
   WorkLogRow,
   WorkLogChevron,
   WorkLogExpansion,
+  WorkLogShimmer,
 } from "./WorkLog";
 import {
   isViewportAtRestoreTarget,
@@ -92,7 +93,6 @@ import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { getProjectFaviconCacheKey } from "@t3tools/shared/projectFavicon";
 import { claudeSkillInvocation } from "@t3tools/shared/toolActivity";
-import { observeVisibleAnimation } from "../../lib/visibleAnimation";
 import {
   createContext,
   memo,
@@ -2477,22 +2477,9 @@ function ContextCompactionTimelineRow({
       className="mx-auto flex w-full max-w-(--chat-content-max-width) items-center gap-3 py-1 text-muted-foreground text-xs"
     >
       <span className="h-px flex-1 bg-border/70" />
-      <span
-        ref={row.active ? observeVisibleAnimation : undefined}
-        className="relative shrink-0 overflow-hidden"
-      >
-        <span className="flex items-center gap-1.5">
-          <Minimize2Icon aria-hidden="true" className="size-3" />
-          {row.label}
-        </span>
-        {row.active ? (
-          <ActivityShimmerOverlay>
-            <span className="flex items-center gap-1.5">
-              <Minimize2Icon aria-hidden="true" className="size-3" />
-              {row.label}
-            </span>
-          </ActivityShimmerOverlay>
-        ) : null}
+      <span className="flex shrink-0 items-center gap-1.5">
+        <Minimize2Icon aria-hidden="true" className="size-3" />
+        <WorkLogShimmer active={row.active}>{row.label}</WorkLogShimmer>
       </span>
       <span className="h-px flex-1 bg-border/70" />
     </div>
@@ -4318,17 +4305,8 @@ function WorkEntryRunRow({
           />
         </span>
       }
-      ref={running ? observeVisibleAnimation : undefined}
-      label={
-        <span className="relative block min-w-0 overflow-hidden">
-          <span className="block truncate">{run.label}</span>
-          {running ? (
-            <ActivityShimmerOverlay>
-              <span className="block truncate">{run.label}</span>
-            </ActivityShimmerOverlay>
-          ) : null}
-        </span>
-      }
+      label={run.label}
+      active={running}
       disclosure={expanded}
     >
       <WorkLogCollapse open={expanded}>
@@ -4341,19 +4319,6 @@ function WorkEntryRunRow({
         </div>
       </WorkLogCollapse>
     </WorkLogRow>
-  );
-}
-
-function ActivityShimmerOverlay({ children }: { children: ReactNode }) {
-  return (
-    <span
-      aria-hidden
-      className="live-activity-focus pointer-events-none absolute inset-y-0 select-none"
-    >
-      <span className="live-activity-focus-counter block">
-        <span className="live-activity-focus-aligned block text-foreground">{children}</span>
-      </span>
-    </span>
   );
 }
 
@@ -4384,12 +4349,8 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
   return (
     <div className="border-b border-border/60 pb-2 pt-1">
       <div className="flex h-6 min-w-0 items-baseline gap-2 px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
-        <span
-          ref={shimmer ? observeVisibleAnimation : undefined}
-          className="relative shrink-0 overflow-hidden whitespace-nowrap"
-        >
-          {label}
-          {shimmer ? <ActivityShimmerOverlay>{label}</ActivityShimmerOverlay> : null}
+        <span className="min-w-0 truncate">
+          <WorkLogShimmer active={shimmer}>{label}</WorkLogShimmer>
         </span>
         {backgroundWorktreeSetup ? (
           <BackgroundWorktreeSetupChip snapshot={backgroundWorktreeSetup} />
@@ -4470,6 +4431,10 @@ function ThinkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "think
   );
 }
 
+/**
+ * A live status line ("Thinking", the running tool): the shared work-log row,
+ * sized to its text so the shimmer band spans only the label.
+ */
 function LiveActivityRow({
   label,
   iconName,
@@ -4483,82 +4448,39 @@ function LiveActivityRow({
   failed?: boolean;
   active?: boolean;
 }) {
-  // Every live row shimmers with the compositor overlay, which pauses offscreen
-  // and holds still under reduced motion.
-  const animated = active && !failed;
-  return (
-    <div
-      ref={animated ? observeVisibleAnimation : undefined}
-      className="relative min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed"
-    >
-      <LiveActivityContent
-        label={label}
-        iconName={iconName}
-        toolIcon={toolIcon}
-        failed={failed}
-        announceFailure={failed}
-      />
-      {animated ? (
-        <ActivityShimmerOverlay>
-          <LiveActivityContent label={label} iconName={iconName} toolIcon={toolIcon} highlighted />
-        </ActivityShimmerOverlay>
-      ) : null}
-    </div>
-  );
-}
-
-function LiveActivityContent({
-  label,
-  iconName,
-  toolIcon,
-  failed = false,
-  announceFailure = false,
-  highlighted = false,
-}: {
-  label: ReactNode;
-  iconName: WorkEntryIconName | undefined;
-  toolIcon?: ToolActivityIcon | undefined;
-  failed?: boolean;
-  announceFailure?: boolean;
-  highlighted?: boolean;
-}) {
   const showTrailingFailureMark =
     failed && iconName !== undefined && !toolIconAcceptsTint(toolIcon);
-
   return (
-    <WorkLogRow
-      icon={
-        iconName ? (
-          <span
-            className={cn(
-              "flex size-4 items-center justify-center",
-              failed
-                ? failedToolIconClassName
-                : highlighted
-                  ? "text-foreground"
-                  : "text-icon-muted",
-            )}
-            role={announceFailure ? "img" : undefined}
-            aria-label={announceFailure ? "Tool call failed" : undefined}
-          >
-            <ToolActivityIconView
-              icon={toolIcon}
-              fallbackName={iconName}
-              className="block size-4 shrink-0 stroke-2"
-              muted={!highlighted}
-            />
-          </span>
-        ) : null
-      }
-      label={
-        <span className={cn("block truncate", highlighted && "text-foreground")}>{label}</span>
-      }
-      trailing={
-        showTrailingFailureMark ? (
-          <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
-        ) : null
-      }
-    />
+    <div className="min-h-6 w-fit max-w-full min-w-0 text-sm leading-relaxed">
+      <WorkLogRow
+        active={active && !failed}
+        icon={
+          iconName ? (
+            <span
+              className={cn(
+                "flex size-4 items-center justify-center",
+                failed ? failedToolIconClassName : "text-icon-muted",
+              )}
+              role={failed ? "img" : undefined}
+              aria-label={failed ? "Tool call failed" : undefined}
+            >
+              <ToolActivityIconView
+                icon={toolIcon}
+                fallbackName={iconName}
+                className="block size-4 shrink-0 stroke-2"
+                muted
+              />
+            </span>
+          ) : null
+        }
+        label={label}
+        trailing={
+          showTrailingFailureMark ? (
+            <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
+          ) : null
+        }
+      />
+    </div>
   );
 }
 
@@ -4826,7 +4748,6 @@ function WorkGroupHeader(props: {
 }) {
   return (
     <WorkLogButton
-      ref={props.active && !props.failed ? observeVisibleAnimation : undefined}
       aria-label={props.failed ? `${props.label}, tool call failed` : props.label}
       aria-expanded={props.expanded}
       disclosure={props.expanded}
@@ -4839,16 +4760,8 @@ function WorkGroupHeader(props: {
           muted
         />
       }
-      label={
-        <span className="relative block min-w-0 overflow-hidden">
-          <span className="block truncate">{props.label}</span>
-          {props.active && !props.failed ? (
-            <ActivityShimmerOverlay>
-              <span className="block truncate">{props.label}</span>
-            </ActivityShimmerOverlay>
-          ) : null}
-        </span>
-      }
+      label={props.label}
+      active={props.active && !props.failed}
       trailing={
         <TimelineRowTimestamp createdAt={props.createdAt} timestampFormat={props.timestampFormat} />
       }
@@ -6466,8 +6379,8 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     <WorkLogRow
       data-v2-item-type={workEntry.projectedItem?.item.type}
       data-v2-item-visibility={workEntry.projectedItem?.visibility}
-      ref={shimmering ? observeVisibleAnimation : undefined}
       {...rowToggleProps}
+      active={shimmering}
       icon={
         <span
           className={iconWrapperClass}
@@ -6483,14 +6396,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
         </span>
       }
       label={
-        <div className="relative min-w-0 flex-1 overflow-hidden">
-          {shimmering ? (
-            <ActivityShimmerOverlay>
-              <span className={cn("block truncate", quietNotice ? "text-xs" : "text-sm")}>
-                {accessiblePreview}
-              </span>
-            </ActivityShimmerOverlay>
-          ) : null}
+        <div className="min-w-0 flex-1 overflow-hidden">
           <p
             className={cn(
               "flex min-w-0 w-full items-baseline gap-1.5 leading-relaxed",
