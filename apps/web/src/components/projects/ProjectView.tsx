@@ -1,48 +1,36 @@
 import { useAtomValue } from "@effect/atom-react";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type {
   EnvironmentId,
   ProjectId,
   ProjectLabelId,
   ProjectLabelWithRepositories,
-  ScopedThreadRef,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  FolderGit2Icon,
-  FolderMinusIcon,
-  HammerIcon,
-  MessageCircleIcon,
   MoreHorizontalIcon,
   PaletteIcon,
+  PanelRightIcon,
   PencilIcon,
-  PlusIcon,
   Settings2Icon,
-  SettingsIcon,
   SquarePenIcon,
   TrashIcon,
 } from "lucide-react";
 import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { isElectron } from "../../env";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useScratchProject } from "../../hooks/useScratchProject";
 import { useSidebarProjectGroups } from "../../hooks/useSidebarProjectGroups";
 import { useClientSettings } from "../../hooks/useSettings";
 import { selectProjectGroupingSettings } from "../../logicalProject";
-import { cn } from "../../lib/utils";
 import {
   ProjectLabelEditorDialog,
   useDeleteProjectFolder,
   useEnvironmentRepositories,
 } from "../../projectLabels/ProjectLabelEditorDialog";
 import { ProjectFolderIcon } from "../../projectLabels/ProjectFolderMark";
-import { ProjectRepositoryPicker } from "../../projectLabels/ProjectRepositoryPicker";
-import {
-  ProjectSourceLinkChips,
-  ProjectSourceLinkField,
-} from "../../projectLabels/ProjectSourceLinks";
 import {
   PROJECT_LABEL_COLORS,
   projectLabelKey,
@@ -55,10 +43,6 @@ import { getSidebarProjectSettingsKey } from "../../sidebarProjectGrouping";
 import { useProjects } from "../../state/entities";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { buildThreadRouteParams } from "../../threadRoutes";
-import { formatRelativeTimeLabel } from "../../timestampFormat";
-import { AnimatedHeight } from "../AnimatedHeight";
-import { FadeSwap } from "../chat/StateTransition";
 import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -75,15 +59,22 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { OverlayPresence } from "../ui/overlay-presence";
+import { Sheet, SheetPopup } from "../ui/sheet";
 import { SidebarInset } from "../ui/sidebar";
-import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
-import { ProjectFilesSection } from "./ProjectFilesSection";
-import { ProjectPanelRow, ProjectPanelSection } from "./ProjectPanelSection";
-import { projectPanelSummary, sortRecentFirst } from "./projectPanel.logic";
+import { ProjectChatColumn } from "./ProjectChatColumn";
+import {
+  AgentsCard,
+  FilesCard,
+  InstructionsCard,
+  RecentCard,
+  RepositoriesCard,
+  SourcesCard,
+} from "./ProjectHomeCards";
+import { sortRecentFirst } from "./projectPanel.logic";
+import { useProjectChatThread } from "./useProjectChatThread";
+import { useProjectInstructions } from "./useProjectInstructions";
 import { useProjectResources } from "./useProjectResources";
-
-const NO_PERMISSION = "You don't have permission to change projects here.";
 
 /**
  * The project's name as a heading that edits in place: click it (or pick
@@ -131,7 +122,7 @@ function ProjectNameEditor(props: {
     );
   }
   return (
-    <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">
+    <h1 className="min-w-0 truncate text-card/5 font-semibold tracking-tight">
       <button
         type="button"
         disabled={!props.canEdit}
@@ -207,46 +198,25 @@ function ProjectHeaderMenu(props: {
   );
 }
 
-/** A page frame with a bare top bar; the page's own header sits in the content column. */
-function ProjectPageFrame(props: { readonly children: React.ReactNode }) {
-  return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader electron={isElectron} />
-        <div className="scroll-fade-y min-h-0 flex-1 overflow-x-hidden overflow-y-auto scrollbar-gutter-stable">
-          <WorkspacePageContainer width="readable" className="gap-4">
-            {props.children}
-          </WorkspacePageContainer>
-        </div>
-      </div>
-    </SidebarInset>
-  );
-}
-
 /**
- * One project folder in the main area: its header (folder, name, what it
- * holds, actions, and the way to a new chat in it), then its chats, Work,
- * repositories, files and sources as compact sections. Picking another
- * project crossfades the content in place.
+ * One project in the main area, as its home: a compact header, the project's
+ * own chat in the main column, and the cards it is built from (instructions,
+ * repositories, sources, files, recent threads, agents) in a column that
+ * scrolls on its own. Narrow windows move the cards into a sheet the header
+ * toggles. Picking another project fades the new page in.
  */
 export function ProjectView(props: {
   readonly environmentId: EnvironmentId;
   readonly labelId: ProjectLabelId;
 }) {
   return (
-    <ProjectPageFrame>
-      <FadeSwap
-        group="project-page"
-        swapKey={projectLabelKey(props.environmentId, props.labelId)}
-        className="block w-full"
-      >
-        <ProjectPage
-          key={projectLabelKey(props.environmentId, props.labelId)}
-          environmentId={props.environmentId}
-          labelId={props.labelId}
-        />
-      </FadeSwap>
-    </ProjectPageFrame>
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
+      <ProjectPage
+        key={projectLabelKey(props.environmentId, props.labelId)}
+        environmentId={props.environmentId}
+        labelId={props.labelId}
+      />
+    </SidebarInset>
   );
 }
 
@@ -267,43 +237,20 @@ function ProjectPage(props: {
   const canDelete = useAtomValue(
     serverEnvironment.deleteProjectLabel.permissionAtom(environmentId),
   );
-  const canLink = useAtomValue(
-    serverEnvironment.linkProjectLabelRepository.permissionAtom(environmentId),
-  );
-  const canUnlink = useAtomValue(
-    serverEnvironment.unlinkProjectLabelRepository.permissionAtom(environmentId),
-  );
-  const canLinkSource = useAtomValue(
-    serverEnvironment.linkProjectLabelSource.permissionAtom(environmentId),
-  );
   const updateLabel = useAtomCommand(serverEnvironment.updateProjectLabel, {
     label: "update project",
-    reportFailure: false,
-  });
-  const unlink = useAtomCommand(serverEnvironment.unlinkProjectLabelRepository, {
-    label: "remove repository from project",
     reportFailure: false,
   });
   const deleteFolder = useDeleteProjectFolder();
   const { startScratchThread } = useScratchProject();
   const [renaming, setRenaming] = useState(false);
   const [editingDetails, setEditingDetails] = useState(false);
-  const [linkingSource, setLinkingSource] = useState(false);
+  const [cardsOpen, setCardsOpen] = useState(false);
+  const cardsInline = useMediaQuery("lg");
   const projects = useProjects();
   const projectGroups = useSidebarProjectGroups();
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
 
-  const repositoryNameByKey = useMemo(
-    () =>
-      new Map(
-        projectGroups.flatMap((group) =>
-          group.memberProjects.map(
-            (project) => [`${project.environmentId}:${project.id}`, group.displayName] as const,
-          ),
-        ),
-      ),
-    [projectGroups],
-  );
   const linkedRepositories = useMemo(
     () =>
       label === null
@@ -313,9 +260,14 @@ function ProjectPage(props: {
   );
   const chats = useMemo(() => sortRecentFirst(contents?.chats ?? [], chatActivityAt), [contents]);
   const work = useMemo(() => sortRecentFirst(contents?.work ?? [], chatActivityAt), [contents]);
+  const instructions = useProjectInstructions(environmentId, label);
+  const chat = useProjectChatThread(environmentId, label);
+  const projectChatKey = chat.status === "ready" ? scopedThreadKey(chat.threadRef) : null;
+  const excludeFromRecent = useMemo(
+    () => new Set(projectChatKey === null ? [] : [projectChatKey]),
+    [projectChatKey],
+  );
 
-  const openThread = (threadRef: ScopedThreadRef) =>
-    void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(threadRef) });
   const openRepositorySettings = (repositoryId: ProjectId) => {
     const group = projectGroups.find((candidate) =>
       candidate.memberProjectRefs.some(
@@ -332,12 +284,6 @@ function ProjectPage(props: {
         }),
       },
     });
-  };
-  const removeRepository = async (repositoryId: ProjectId, title: string) => {
-    const result = await unlink({ environmentId, input: { labelId, repositoryId } });
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      reportProjectFolderFailure(`Could not remove ${title}`, result);
-    }
   };
   const update = async (input: { name?: string; color?: string }, failure: string) => {
     const result = await updateLabel({ environmentId, input: { id: labelId, ...input } });
@@ -363,209 +309,124 @@ function ProjectPage(props: {
               "It may have been deleted, or it lives on a machine that is not connected.",
             ];
     return (
-      <div className="flex flex-col gap-1 px-2.5">
-        <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
-        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+        <WorkspacePageHeader electron={isElectron} />
+        <div className="swap-motion flex flex-col gap-1 px-6 pt-4">
+          <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
+          {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+        </div>
       </div>
     );
   }
 
-  const summary = projectPanelSummary({
-    repositories: linkedRepositories.length,
-    chats: chats.length,
-    work: work.length,
-    files: files.resources.filter((resource) => resource.kind === "file").length,
-  });
-
-  const threadRow = (thread: EnvironmentThreadShell, showRepository: boolean) => {
-    const repositoryName = showRepository
-      ? (repositoryNameByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null)
-      : null;
-    return (
-      <ProjectPanelRow
-        key={`${thread.environmentId}:${thread.id}`}
-        icon={showRepository ? <HammerIcon /> : <MessageCircleIcon />}
-        title={thread.title}
-        meta={repositoryName ?? undefined}
-        trailing={formatRelativeTimeLabel(chatActivityAt(thread))}
-        onOpen={() => openThread(scopeThreadRef(thread.environmentId, thread.id))}
+  const cards = (
+    <div className="flex flex-col gap-2 p-3 pb-4">
+      <InstructionsCard instructions={instructions} canEdit={canEdit} />
+      <RepositoriesCard
+        environmentId={environmentId}
+        label={label}
+        folder={entry}
+        repositories={repositories}
+        linkedRepositories={linkedRepositories}
+        folderByRepository={directory.folderByRepository}
+        onOpenRepository={openRepositorySettings}
       />
-    );
-  };
+      <SourcesCard environmentId={environmentId} label={label} />
+      <FilesCard
+        environmentId={environmentId}
+        label={label}
+        resources={files.resources}
+        loaded={files.isLoaded}
+        error={files.error}
+      />
+      <RecentCard
+        environmentId={environmentId}
+        label={label}
+        chats={chats}
+        work={work}
+        exclude={excludeFromRecent}
+      />
+      <AgentsCard environmentId={environmentId} label={label} />
+    </div>
+  );
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2 px-2.5">
-        <div className="flex items-start gap-4">
-          <ProjectFolderIcon color={label.color} className="mt-0.5 size-10" />
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <ProjectNameEditor
-              key={label.name}
-              name={label.name}
-              editing={renaming}
-              canEdit={canEdit}
-              onStartEdit={() => setRenaming(true)}
-              onCancel={() => setRenaming(false)}
-              onSave={async (name) => {
-                setRenaming(false);
-                await update({ name }, `Could not rename ${label.name}`);
-              }}
-            />
-            <p className="truncate text-sm tabular-nums text-muted-foreground">
-              {summary ?? "Empty"}
-            </p>
-          </div>
-          <span className="flex shrink-0 items-center gap-1.5">
-            <Button
-              size="sm"
-              variant="pixel"
-              onClick={() =>
-                void startScratchThread(environmentId, {
-                  surface: "chat",
-                  projectFolderId: labelId,
-                })
-              }
-            >
-              <SquarePenIcon />
-              New chat
-            </Button>
-            <ProjectHeaderMenu
-              label={label}
-              canEdit={canEdit}
-              canDelete={canDelete}
-              onRename={() => setRenaming(true)}
-              onRecolor={(color) => void update({ color }, `Could not recolor ${label.name}`)}
-              onEditDetails={() => setEditingDetails(true)}
-              onDelete={() => void remove()}
-            />
-          </span>
+    <div className="swap-motion flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+      <WorkspacePageHeader electron={isElectron}>
+        <ProjectFolderIcon color={label.color} className="size-6 shrink-0" />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <ProjectNameEditor
+            key={label.name}
+            name={label.name}
+            editing={renaming}
+            canEdit={canEdit}
+            onStartEdit={() => setRenaming(true)}
+            onCancel={() => setRenaming(false)}
+            onSave={async (name) => {
+              setRenaming(false);
+              await update({ name }, `Could not rename ${label.name}`);
+            }}
+          />
+          {label.description ? (
+            <p className="truncate text-xs text-muted-foreground">{label.description}</p>
+          ) : null}
         </div>
-        {label.description ? (
-          <p className="text-sm text-muted-foreground">{label.description}</p>
+        <span className="flex shrink-0 items-center gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              void startScratchThread(environmentId, {
+                surface: "chat",
+                projectFolderId: labelId,
+              })
+            }
+          >
+            <SquarePenIcon />
+            New chat
+          </Button>
+          {cardsInline ? null : (
+            <Button
+              size="icon-sm"
+              variant="ghost-muted"
+              aria-label="Project details"
+              aria-expanded={cardsOpen}
+              onClick={() => setCardsOpen((open) => !open)}
+            >
+              <PanelRightIcon />
+            </Button>
+          )}
+          <ProjectHeaderMenu
+            label={label}
+            canEdit={canEdit}
+            canDelete={canDelete}
+            onRename={() => setRenaming(true)}
+            onRecolor={(color) => void update({ color }, `Could not recolor ${label.name}`)}
+            onEditDetails={() => setEditingDetails(true)}
+            onDelete={() => void remove()}
+          />
+        </span>
+      </WorkspacePageHeader>
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <ProjectChatColumn label={label} chat={chat} />
+        </div>
+        {cardsInline ? (
+          <aside
+            aria-label={`${label.name} details`}
+            className="scroll-fade-y w-82 shrink-0 overflow-y-auto overscroll-contain border-s border-border"
+          >
+            {cards}
+          </aside>
         ) : null}
       </div>
-      <div className="flex flex-col gap-4">
-        <ProjectPanelSection title="Chats" count={chats.length}>
-          {chats.map((thread) => threadRow(thread, false))}
-        </ProjectPanelSection>
-        <ProjectPanelSection
-          title="Work"
-          count={work.length}
-          action={
-            <Button
-              size="xs"
-              variant="ghost-muted"
-              onClick={() =>
-                void startScratchThread(environmentId, {
-                  surface: "work",
-                  projectFolderId: labelId,
-                })
-              }
-            >
-              <PlusIcon />
-              New Work
-            </Button>
-          }
-        >
-          {work.map((thread) => threadRow(thread, true))}
-        </ProjectPanelSection>
-        <ProjectPanelSection
-          title="Repositories"
-          count={linkedRepositories.length}
-          action={
-            <ProjectRepositoryPicker
-              folder={entry}
-              repositories={repositories}
-              folderByRepository={directory.folderByRepository}
-              disabled={!canLink}
-              triggerLabel="Add"
-            />
-          }
-        >
-          {linkedRepositories.map((repository) => (
-            <ProjectPanelRow
-              key={repository.id}
-              icon={<FolderGit2Icon />}
-              title={repository.title}
-              actions={
-                <>
-                  <Button
-                    size="icon-xs"
-                    variant="ghost-muted"
-                    aria-label={`Repository settings for ${repository.title}`}
-                    onClick={() => openRepositorySettings(repository.id)}
-                  >
-                    <SettingsIcon />
-                  </Button>
-                  <Button
-                    size="icon-xs"
-                    variant="ghost-muted"
-                    aria-label={`Remove ${repository.title} from ${label.name}`}
-                    title={canUnlink ? "Remove from project" : NO_PERMISSION}
-                    disabled={!canUnlink}
-                    onClick={() => void removeRepository(repository.id, repository.title)}
-                  >
-                    <FolderMinusIcon />
-                  </Button>
-                </>
-              }
-            />
-          ))}
-        </ProjectPanelSection>
-        <ProjectFilesSection
-          environmentId={environmentId}
-          labelId={labelId}
-          resources={files.resources}
-          loaded={files.isLoaded}
-          error={files.error}
-        />
-        <ProjectPanelSection
-          title="Sources"
-          count={label.sourceLinks.length}
-          action={
-            <Button
-              size="xs"
-              variant="ghost-muted"
-              disabled={!canLinkSource && !linkingSource}
-              title={canLinkSource ? undefined : NO_PERMISSION}
-              aria-expanded={linkingSource}
-              onClick={() => setLinkingSource((current) => !current)}
-            >
-              {linkingSource ? (
-                "Done"
-              ) : (
-                <>
-                  <PlusIcon />
-                  Link GitHub
-                </>
-              )}
-            </Button>
-          }
-        >
-          <AnimatedHeight>
-            <div
-              className={cn(
-                "flex flex-col gap-2 px-2.5",
-                (label.sourceLinks.length > 0 || linkingSource) && "py-1",
-              )}
-            >
-              {label.sourceLinks.length > 0 ? (
-                <ProjectSourceLinkChips environmentId={environmentId} label={label} />
-              ) : null}
-              {linkingSource ? (
-                <div className="reveal-motion">
-                  <ProjectSourceLinkField
-                    environmentId={environmentId}
-                    label={label}
-                    autoFocus
-                    onLinked={() => setLinkingSource(false)}
-                  />
-                </div>
-              ) : null}
-            </div>
-          </AnimatedHeight>
-        </ProjectPanelSection>
-      </div>
+      {cardsInline ? null : (
+        <Sheet open={cardsOpen} onOpenChange={setCardsOpen}>
+          <SheetPopup side="right" aria-label={`${label.name} details`}>
+            <div className="min-h-0 flex-1 overflow-y-auto pt-10">{cards}</div>
+          </SheetPopup>
+        </Sheet>
+      )}
       <OverlayPresence when={editingDetails && label}>
         {(label) => (
           <ProjectLabelEditorDialog

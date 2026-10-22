@@ -40,6 +40,8 @@ export function ProjectRepositoryPicker(props: {
   readonly disabled: boolean;
   /** The trigger's text; "Add repository" unless the surface already says what is added. */
   readonly triggerLabel?: string;
+  /** Show only the "+", with the label as its accessible name (a card header's add). */
+  readonly iconOnly?: boolean;
 }) {
   const { folder } = props;
   const environmentId: EnvironmentId = folder.environmentId;
@@ -99,10 +101,14 @@ export function ProjectRepositoryPicker(props: {
     >
       <ComboboxTrigger
         disabled={props.disabled || busy}
-        render={<Button type="button" size="xs" variant="ghost-muted" />}
+        aria-label={props.iconOnly ? (props.triggerLabel ?? "Add repository") : undefined}
+        title={props.iconOnly ? (props.triggerLabel ?? "Add repository") : undefined}
+        render={
+          <Button type="button" size={props.iconOnly ? "icon-xs" : "xs"} variant="ghost-muted" />
+        }
       >
         <PlusIcon />
-        {props.triggerLabel ?? "Add repository"}
+        {props.iconOnly ? null : (props.triggerLabel ?? "Add repository")}
       </ComboboxTrigger>
       <ComboboxPopup align="end" className="w-72">
         <ComboboxSearchInput
