@@ -1,4 +1,5 @@
 import {
+  clientRpcRequiredScopes,
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
@@ -41,6 +42,15 @@ describe("RPC authorization scopes", () => {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthSettingsWriteScope);
     },
   );
+  it.each([
+    WS_METHODS.t3ImportStatus,
+    WS_METHODS.t3ImportScan,
+    WS_METHODS.t3ImportRun,
+    WS_METHODS.t3ImportCancel,
+  ])("requires the Settings grant for %s, on the client too", (method) => {
+    expect(requiredScopeForRpcMethod(method)).toBe(AuthSettingsWriteScope);
+    expect(clientRpcRequiredScopes(method, {})).toEqual([AuthSettingsWriteScope]);
+  });
   it("protects permanent commitment deletion", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.commitmentsDelete)).toBe(
       AuthOrchestrationOperateScope,

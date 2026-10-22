@@ -53,6 +53,8 @@ export const T3ImportSource = Schema.Struct({
   /** Bytes in T3's write-ahead log, which a read-only snapshot cannot include. */
   pendingWalBytes: NonNegativeInt,
   projects: Schema.Array(T3ImportSourceProject),
+  /** Where the pre-import database backup is written, on the environment's machine. */
+  backupDirectory: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
 });
 export type T3ImportSource = typeof T3ImportSource.Type;
@@ -118,7 +120,7 @@ export const T3ImportTotals = Schema.Struct({
   attachments: NonNegativeInt,
   attachmentBytes: NonNegativeInt,
   skippedEvents: NonNegativeInt,
-  /** Events whose live runtime state (running, pending, ready) is recorded as stopped. */
+  /** Runs, sessions, requests and items T3 left live (running, pending, ready), imported as stopped. */
   normalizedEvents: NonNegativeInt,
 });
 export type T3ImportTotals = typeof T3ImportTotals.Type;
