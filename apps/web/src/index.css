@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "./agents/agents.css";
 @import "./components/projects/projectHome.css";
+@import "./components/ui/pixelButton.sprites.css";
 @import "./components/ui/pixelButton.css";
 
 @custom-variant dark (&:is(.dark, .dark *));

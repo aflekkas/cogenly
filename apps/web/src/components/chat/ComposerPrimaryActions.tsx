@@ -6,6 +6,7 @@ import { formatContextWindowTokens } from "~/lib/contextWindow";
 import { cn } from "~/lib/utils";
 import { useShortcutModifierState } from "../../shortcutModifierState";
 import { Button } from "../ui/button";
+import { PixelToneGhost, type PixelTone } from "../ui/pixelButton";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -54,6 +55,8 @@ interface ComposerPrimaryActionsProps {
   /** The Compact chip is turned off, so the next send keeps full history. */
   keepFullHistory?: boolean;
   onToggleKeepFullHistory?: () => void;
+  /** Changes when the composer shows another thread, so the tile's tone switches without its dissolve. */
+  threadKey?: unknown;
 }
 
 const formatPendingPrimaryActionLabel = (input: {
@@ -110,6 +113,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compactBeforeSendTokens = null,
   keepFullHistory = false,
   onToggleKeepFullHistory,
+  threadKey,
 }: ComposerPrimaryActionsProps) {
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
@@ -125,18 +129,17 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const alternateAction = alternateComposerDispatchAction(followUpBehavior);
   const isSendDisabled = !canOperateThread || sendDisabledReason !== null;
 
-  const renderStopGenerationButton = (insidePendingAction: boolean) => (
+  // Stop beside a pending question's own actions; the main tile below
+  // takes the stop role itself when there is nothing to send.
+  const pendingStopButton = (
     <Tooltip key="interrupt">
       <TooltipTrigger
         render={
           <button
             type="button"
-            className={cn(
-              // The red pixel ramp (pixelButton.css); it only shows while a
-              // run is live, so the pixels always crawl.
-              "pixel-button pixel-button-danger flex shrink-0 cursor-pointer items-center justify-center rounded-tile text-white shadow-xs shadow-black/24 active:shadow-none [&_svg]:pointer-events-none",
-              insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
-            )}
+            // The red pixel mosaic (pixelButton.css); it only shows while a
+            // run is live, so the cells always shimmer.
+            className="pixel-button pixel-button-danger flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-tile text-white shadow-xs shadow-black/24 active:shadow-none sm:size-7 [&_svg]:pointer-events-none"
             data-working=""
             {...pointerFocusProps}
             disabled={!canOperateThread}
@@ -158,7 +161,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   if (pendingAction) {
     return (
       <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
-        {canInterrupt ? renderStopGenerationButton(true) : null}
+        {canInterrupt ? pendingStopButton : null}
         {pendingAction.questionIndex > 0 ? (
           compact ? (
             <Button
@@ -261,90 +264,129 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (canInterrupt && !hasSendableContent && !isEditingQueuedMessage) {
-    return renderStopGenerationButton(false);
-  }
-
-  const showResume = canResume && !hasSendableContent && !isEditingQueuedMessage;
+  // Stop and send are one element so the tile's tone can dissolve between
+  // them (PixelToneGhost) and the glyphs crossfade in place.
+  const showStop = canInterrupt && !hasSendableContent && !isEditingQueuedMessage;
+  const showResume = !showStop && canResume && !hasSendableContent && !isEditingQueuedMessage;
 
   const compactTokens =
-    compactBeforeSendTokens !== null && !showResume && !isEditingQueuedMessage
+    compactBeforeSendTokens !== null && !showStop && !showResume && !isEditingQueuedMessage
       ? formatContextWindowTokens(compactBeforeSendTokens)
       : null;
   const compactsBeforeSend = compactTokens !== null && !keepFullHistory;
 
-  const submitLabel = showResume
-    ? "Resume thread"
-    : isEditingQueuedMessage
-      ? "Update queued message"
-      : compactsBeforeSend
-        ? "Compact and send"
-        : isQueuing
-          ? "Queue message"
-          : isRunning
-            ? "Steer message"
-            : "Submit message";
-  const submitStatus = isEnvironmentUnavailable
-    ? "Environment disconnected"
-    : (sendDisabledReason ??
-      (isConnecting
-        ? "Connecting"
-        : isPreparingWorktree
-          ? "Preparing worktree"
-          : isSendBusy
-            ? isEditingQueuedMessage
-              ? "Updating queued message"
-              : "Submitting message"
-            : null));
-  const submitTooltip =
-    submitStatus ??
-    (compactsBeforeSend
-      ? `Summarize ${compactTokens} tokens of history, then send`
-      : isRunning && !isEditingQueuedMessage
-        ? `Click to ${followUpBehavior}, Ctrl/⌘-click${alternateShortcutLabel ? ` or ${alternateShortcutLabel}` : ""} to ${alternateAction}`
-        : submitLabel);
+  const submitLabel = showStop
+    ? "Stop generation"
+    : showResume
+      ? "Resume thread"
+      : isEditingQueuedMessage
+        ? "Update queued message"
+        : compactsBeforeSend
+          ? "Compact and send"
+          : isQueuing
+            ? "Queue message"
+            : isRunning
+              ? "Steer message"
+              : "Submit message";
+  const submitStatus = showStop
+    ? null
+    : isEnvironmentUnavailable
+      ? "Environment disconnected"
+      : (sendDisabledReason ??
+        (isConnecting
+          ? "Connecting"
+          : isPreparingWorktree
+            ? "Preparing worktree"
+            : isSendBusy
+              ? isEditingQueuedMessage
+                ? "Updating queued message"
+                : "Submitting message"
+              : null));
+  const submitTooltip = showStop
+    ? "Interrupt"
+    : (submitStatus ??
+      (compactsBeforeSend
+        ? `Summarize ${compactTokens} tokens of history, then send`
+        : isRunning && !isEditingQueuedMessage
+          ? `Click to ${followUpBehavior}, Ctrl/⌘-click${alternateShortcutLabel ? ` or ${alternateShortcutLabel}` : ""} to ${alternateAction}`
+          : submitLabel));
+  const sendDisabled = showStop
+    ? !canOperateThread
+    : isSendBusy ||
+      isSendDisabled ||
+      isConnecting ||
+      isEnvironmentUnavailable ||
+      (!hasSendableContent && !showResume);
+  const tone: PixelTone = showStop ? "danger" : sendDisabled ? "idle" : "brand";
 
   const sendButton = (
     <button
-      type={showResume ? "button" : "submit"}
+      type={showStop || showResume ? "button" : "submit"}
       className={cn(
         "flex h-9 w-9 items-center justify-center rounded-tile text-white shadow-xs enabled:cursor-pointer hover:scale-105 active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
-        // The app icon's pixel-dithered ember ramp (pixelButton.css); a flat
-        // grey tile with a dark arrow while there is nothing to send. The
-        // pixels crawl while a run is live and this queues or steers.
+        // The boot splash's pixel mosaic (pixelButton.css): ember to send,
+        // red to stop, a flat grey tile with a dark arrow while there is
+        // nothing to send. The cells shimmer while a run is live.
         "pixel-button enabled:shadow-black/24",
+        showStop && "pixel-button-danger",
       )}
-      data-working={isRunning && !showResume ? "" : undefined}
+      data-working={showStop || (isRunning && !showResume) ? "" : undefined}
       {...pointerFocusProps}
-      onClick={showResume ? onResume : onSubmitMessage}
-      disabled={
-        isSendBusy ||
-        isSendDisabled ||
-        isConnecting ||
-        isEnvironmentUnavailable ||
-        (!hasSendableContent && !showResume)
+      onClick={
+        showStop
+          ? () => {
+              if (canOperateThread) onInterrupt();
+            }
+          : showResume
+            ? onResume
+            : onSubmitMessage
       }
+      disabled={sendDisabled}
       aria-label={submitStatus ?? submitLabel}
     >
-      {isConnecting || isSendBusy ? (
-        <Spinner size="sm" aria-hidden="true" />
-      ) : showResume ? (
-        <PlayIcon className="size-4 fill-current" aria-hidden="true" />
-      ) : isEditingQueuedMessage ? (
-        <CheckIcon className="size-4" aria-hidden="true" />
-      ) : isRunning ? (
-        <MorphIcon className="size-4" icon={isQueuing ? ListPlus : CornerUpRight} />
-      ) : (
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-          <path
-            d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      )}
+      <PixelToneGhost tone={tone} resetKey={threadKey} />
+      <span className="grid *:[grid-area:1/1] *:transition-opacity *:duration-(--motion-duration-fast) *:ease-(--ease-out)">
+        <span
+          className={cn("flex items-center justify-center", showStop ? "opacity-100" : "opacity-0")}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+            <rect x="2" y="2" width="8" height="8" rx="1.5" />
+          </svg>
+        </span>
+        <span
+          className={cn("flex items-center justify-center", showStop ? "opacity-0" : "opacity-100")}
+        >
+          {showStop ? (
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path
+                d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          ) : isConnecting || isSendBusy ? (
+            <Spinner size="sm" aria-hidden="true" />
+          ) : showResume ? (
+            <PlayIcon className="size-4 fill-current" aria-hidden="true" />
+          ) : isEditingQueuedMessage ? (
+            <CheckIcon className="size-4" aria-hidden="true" />
+          ) : isRunning ? (
+            <MorphIcon className="size-4" icon={isQueuing ? ListPlus : CornerUpRight} />
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path
+                d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
+        </span>
+      </span>
     </button>
   );
 

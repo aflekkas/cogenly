@@ -68,10 +68,10 @@ const buttonVariants = cva(
         outline:
           "[--control-icon-color:var(--contrast-muted-foreground)] border-input bg-popover not-dark:bg-clip-padding text-foreground shadow-xs/5 not-disabled:not-active:not-data-pressed:before:shadow-[0_1px_--theme(--color-black/4%)] dark:bg-input/32 dark:not-disabled:before:shadow-[0_-1px_--theme(--color-white/2%)] dark:not-disabled:not-active:not-data-pressed:before:shadow-[0_-1px_--theme(--color-white/6%)] [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:bg-accent/50 dark:[:hover,[data-pressed]]:bg-input/64",
         overlay: "border-transparent bg-black/70 text-white/65 [:hover,[data-pressed]]:bg-black/90",
-        // The app icon's pixel-dithered ember ramp (pixelButton.css). Only the
+        // The boot splash's pixel mosaic (pixelButton.css). Only the
         // composer's primary tile wears it; keep other actions on `brand` or
         // `default`. Set `data-working` while the action's run is live and the
-        // pixels crawl. The focus ring is an outline because the pattern layer
+        // cells shimmer. The focus ring is an outline because the pattern layer
         // would cover an inset ring.
         pixel:
           "pixel-button border-transparent font-semibold text-white shadow-black/24 shadow-xs [:disabled,:active,[data-pressed]]:shadow-none disabled:opacity-100 focus-visible:ring-0 focus-visible:ring-offset-0 [&_svg]:text-white",

@@ -1246,6 +1246,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compactBeforeSendTokens: number | null;
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
+  threadKey: string | null;
 }) {
   return (
     <>
@@ -1287,6 +1288,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         compactBeforeSendTokens={props.compactBeforeSendTokens}
         keepFullHistory={props.keepFullHistory}
         onToggleKeepFullHistory={props.onToggleKeepFullHistory}
+        threadKey={props.threadKey}
       />
     </>
   );
@@ -6615,6 +6617,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     {...(compactCommandAvailable
                       ? { onCompactContext: compactThreadContextStable }
                       : {})}
+                    threadKey={activeThreadId}
                   />
                 </div>
               </div>
