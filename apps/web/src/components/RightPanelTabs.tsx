@@ -67,6 +67,7 @@ import { FaviconImage } from "./preview/PreviewFaviconIcon";
 import { previewBridge } from "./preview/previewBridge";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { PanelTab } from "./PanelTab";
+import { BadgeDot } from "./ui/badge-dot";
 import { TabStrip } from "./TabStrip";
 import { tabStripPanelId, tabStripTabId } from "./TabStrip.logic";
 
@@ -677,12 +678,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     desktopByTabId={props.desktopByTabId}
                     theme={resolvedTheme}
                   />
-                  {pending ? (
-                    <span
-                      className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
-                      aria-hidden
-                    />
-                  ) : null}
+                  <BadgeDot
+                    tone={pending && "current"}
+                    className="absolute -right-0.5 -bottom-0.5"
+                  />
                 </PanelTab.Icon>
                 {renamingDevice === surface.id ? (
                   <input

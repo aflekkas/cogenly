@@ -86,6 +86,7 @@ import {
   restartIntoPostponedUpdate,
   runUpdateEverythingPass,
 } from "./SidebarUpdatePill";
+import { BadgeDot } from "../ui/badge-dot";
 import { UpdateEverythingDialog } from "./UpdateEverythingDialog";
 import { postponeUpdateRestart, useUpdateEverythingRun } from "./updateEverythingRun";
 import { useUpdateEverything } from "./useUpdateEverything";
@@ -817,12 +818,12 @@ export function NavRailUpdates({
               }}
             >
               <DownloadIcon aria-hidden />
-              {updateCount > 0 ? (
-                <span
-                  aria-hidden
-                  className="reveal-motion absolute top-2 right-2 size-2 rounded-full bg-info ring-2 ring-nav-rail"
-                />
-              ) : null}
+              <BadgeDot
+                tone={updateCount > 0 && "info"}
+                size="md"
+                ring="nav-rail"
+                className="absolute top-2 right-2"
+              />
             </button>
           }
         />

@@ -3,6 +3,7 @@ import { Maximize2, Minimize2 } from "lucide";
 import { MorphIcon } from "~/components/MorphIcon";
 import { memo } from "react";
 
+import { BadgeDot } from "../ui/badge-dot";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -57,12 +58,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
             >
               <PanelBottomIcon className="size-4.5" />
             </Toggle>
-            {bottomPanel.activity ? (
-              <span
-                aria-hidden
-                className="swap-motion pointer-events-none absolute top-1 right-1 size-1.5 rounded-full bg-success"
-              />
-            ) : null}
+            <BadgeDot tone={bottomPanel.activity && "success"} className="absolute top-1 right-1" />
           </TooltipTrigger>
           <TooltipPopup side="bottom">
             {`Toggle terminal panel${bottomPanel.shortcutLabel ? ` (${bottomPanel.shortcutLabel})` : ""}`}

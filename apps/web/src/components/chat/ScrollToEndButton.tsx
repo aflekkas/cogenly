@@ -1,6 +1,7 @@
 import { ArrowDownIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
+import { BadgeDot } from "../ui/badge-dot";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /**
@@ -41,12 +42,12 @@ export function ScrollToEndButton({
         }
       >
         <ArrowDownIcon aria-hidden className="size-4" />
-        {hasUnseen ? (
-          <span
-            aria-hidden
-            className="absolute top-0.5 right-0.5 size-2 rounded-full bg-primary ring-2 ring-background"
-          />
-        ) : null}
+        <BadgeDot
+          tone={hasUnseen && "primary"}
+          size="md"
+          ring="background"
+          className="absolute top-0.5 right-0.5"
+        />
       </TooltipTrigger>
       <TooltipPopup side="top">Scroll to end</TooltipPopup>
     </Tooltip>
