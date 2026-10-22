@@ -498,6 +498,8 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
         // A drawer: a raised sheet with rounded top corners, inset from the
         // sidebar and the right panel, that rests on the window's bottom edge.
         // The wrapper keeps the gap and the height; the sheet draws the surface.
+        // The whole sheet is the terminal's own background, so the run list,
+        // the run header and the output read as one surface split by hairlines.
         "z-40 flex min-w-0 flex-col px-2",
         open ? "relative shrink-0" : "pointer-events-none absolute inset-x-0 bottom-0",
       )}
@@ -505,7 +507,9 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
     >
       <div
         className={cn(
-          "group/bottom-panel relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-2xl border border-b-0 bg-card surface-raised dark:bg-surface-raised",
+          "group/bottom-panel relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-2xl border border-b-0 bg-(--terminal-background) surface-raised",
+          // The raised sheen would lift the list above the output; keep the fill flat.
+          "[--surface-raised-sheen-bottom:transparent] [--surface-raised-sheen-top:transparent]",
           // Its shadow falls upward, onto the chat it rises over.
           "[--surface-raised-elevation:0_-1px_2px_rgb(0_0_0/3%),0_-10px_28px_-14px_rgb(0_0_0/14%)] dark:[--surface-raised-elevation:0_-1px_2px_rgb(0_0_0/30%),0_-12px_32px_-12px_rgb(0_0_0/70%)]",
         )}
