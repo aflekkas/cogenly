@@ -18,7 +18,7 @@ import { DisclosureChevron } from "../ui/disclosure";
  * - `SidebarGroupHeader` — a group's heading: optional icon or badge, a label
  *   that truncates, a hairline, and a disclosure chevron when it collapses.
  * - `sidebarRowClassName` / `SidebarRowSubtitle` — a row: one line (32px) or a
- *   title with a muted second line (44px). Chats, Agents and Projects are rows.
+ *   title with a muted second line (40px). Chats, Agents and Projects are rows.
  * - `SIDEBAR_CARD_CLASS_NAME` — Work's cards, which carry live status and
  *   actions, share the rows' focus ring, truncation and selected state.
  * - `SidebarListEmptyState` (its own file) — one quiet line for a list with
@@ -167,7 +167,7 @@ export function sidebarRowClassName(options: {
   return cn(
     "group/sidebar-row relative flex w-full min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-lg px-2.5 text-left",
     ROW_FOCUS_CLASS_NAME,
-    options.lines === 2 ? "h-11" : "h-8",
+    options.lines === 2 ? "h-10" : "h-8",
     options.selected ? "state-selected" : "state-hover",
     options.className,
   );
@@ -175,7 +175,7 @@ export function sidebarRowClassName(options: {
 
 /** The content-visibility placeholder height that matches a row, so offscreen rows never shift the list. */
 export function sidebarRowIntrinsicSizeClassName(lines: 1 | 2): string {
-  return lines === 2 ? "[contain-intrinsic-size:auto_44px]" : "[contain-intrinsic-size:auto_32px]";
+  return lines === 2 ? "[contain-intrinsic-size:auto_40px]" : "[contain-intrinsic-size:auto_32px]";
 }
 
 /** A Work card's surface (callers add the selected and resting tones). */

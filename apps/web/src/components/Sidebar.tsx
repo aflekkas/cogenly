@@ -735,7 +735,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   }
   // A Work card like any other, marked as a draft in the status slot.
   return (
-    <li className="list-none py-1">
+    <li className="list-none py-0.5">
       <div
         role="button"
         tabIndex={0}
@@ -753,14 +753,14 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         onKeyDown={handleKeyDown}
       >
         <span className="sr-only">{preview}</span>
-        <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
-          <div className="flex h-5 min-w-0 items-center gap-1.5">
+        <div className="relative z-10 h-[4.5rem] px-(--sidebar-row-content-inset) py-2">
+          <div className="flex h-[18px] min-w-0 items-center gap-1.5">
             <WorkCardLabel
               folder={props.folder ?? null}
               repositoryName={props.repositoryName ?? null}
               project={props.project}
             />
-            <span className="relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
+            <span className="relative ml-auto flex h-[18px] min-w-8 shrink-0 items-stretch justify-end text-xs">
               <span
                 aria-hidden
                 className="pointer-events-none flex items-center gap-1 self-center font-medium text-warning-foreground transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none group-has-[:focus-visible]/sidebar-row:opacity-0 group-any-hover/sidebar-row:opacity-0"
@@ -771,7 +771,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
               <span className="absolute inset-y-0 right-0 flex items-center">{discardButton}</span>
             </span>
           </div>
-          <div className="mt-1 flex min-w-0">
+          <div className="mt-0.5 flex min-w-0">
             <span
               aria-hidden
               className={cn(
@@ -784,7 +784,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
               {preview}
             </span>
           </div>
-          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
+          <div className="mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
             {props.branch ? (
               <>
                 <GitBranchIcon aria-hidden className="size-3 shrink-0" />
@@ -1173,7 +1173,7 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
     <li
       data-thread-item={threadKey}
       onPointerDown={handleRowPointerDown}
-      // Matches the row's height (h-8, or h-11 with a project line) so
+      // Matches the row's height (h-8, or h-10 with a project line) so
       // unrendered rows never shift the list when they paint.
       className={cn(
         "list-none [content-visibility:auto]",
@@ -1924,8 +1924,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onPointerDown={handleRowPointerDown}
       {...(fileDropHandlers ?? {})}
       className={cn(
-        // The 78px content box plus the py-1 gap between cards.
-        "list-none py-1 [content-visibility:auto] [contain-intrinsic-size:auto_86px]",
+        // The 72px content box plus the py-0.5 gap between cards.
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_76px]",
       )}
     >
       <div
@@ -1944,14 +1944,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         onContextMenu={handleContextMenu}
       >
         {accessibleTitle}
-        <div
-          className={cn(
-            "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
-          )}
-        >
+        <div className={cn("relative z-10 h-[4.5rem] px-(--sidebar-row-content-inset) py-2")}>
           {/* T3's three lines: where it runs and its status, the title, then
               the branch and machine. */}
-          <div className="flex h-5 min-w-0 items-center gap-1.5">
+          <div className="flex h-[18px] min-w-0 items-center gap-1.5">
             <WorkCardLabel
               folder={props.folder}
               repositoryName={props.repositoryName}
@@ -1978,7 +1974,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   there the actions take their own width beside it. */}
             <span
               className={cn(
-                "group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs",
+                "group/sidebar-status-slot relative ml-auto flex h-[18px] min-w-8 shrink-0 items-stretch justify-end text-xs",
                 props.sweepAction !== null && "hidden",
               )}
             >
@@ -2170,7 +2166,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             {sweepBadge}
           </div>
           {/* The hover actions sit on the first line, so the title never fades under them. */}
-          <div className="mt-1 flex h-5 min-w-0 items-center gap-1.5 [--pan-end-inset-target:0px]">
+          <div className="mt-0.5 flex h-[18px] min-w-0 items-center gap-1.5 [--pan-end-inset-target:0px]">
             {draftIndicator}
             {title}
           </div>
@@ -2180,7 +2176,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             </span>
           ) : null}
           {/* Barely there at rest (#2b2c2e on the card), a step up when selected. */}
-          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
+          <div className="mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
             {/* Work an agent started names the agent ahead of the branch. */}
             {props.workAgentName ? (
               <span className="flex min-w-0 max-w-1/2 shrink-0 items-center gap-1">
