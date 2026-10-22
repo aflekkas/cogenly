@@ -2,38 +2,40 @@
 
 Cogenly ships **macOS arm64** DMG and zip artifacts from
 [Release](../../.github/workflows/release.yml). There are two channels:
-**staging** (prerelease) and **prod** (GitHub's latest release). No npm, relay,
+**prod** (GitHub's latest release) and **staging** (prerelease). No npm, relay,
 AUR, Discord, mobile, or hosted-web deployment runs here. Standalone CLI archives
 are not published; `cogenly update`/`t3 update` remains disabled with an explicit
 message. Its channel flag uses `prod` and `staging` for future archive publication;
 CLI binaries bundled in the desktop app update with the app.
 
-## PR → staging → prod
+## Main → prod
 
-1. Open a PR to `main`; require CI's **Lint**, **Typecheck**, and **Test** checks.
-2. Merge. Every successful **push** CI run on `main` triggers a staging release
-   for that CI run's exact SHA. PR CI never publishes. Main CI runs are not
-   cancelled by newer pushes; release runs are queued and never cancelled by
-   newer releases. Failed CI must be fixed or rerun successfully before publishing.
-3. Download the staging DMG, launch it on Apple Silicon, and verify the features
-   and update flow. Record the exact `vX.Y.Z-staging.YYYYMMDD.run` tag you verified.
-4. In Actions → Release → Run workflow, select **main**, enter that
-   **staging_tag**, and optionally a prod **version**. Or:
+Builds happen only when a maintainer dispatches Release to promote a commit.
+Pushes to `main` run CI and nothing else. We decided this because building
+staging on every push was wasteful: each push queued a macOS build behind the
+previous one, and most of those builds were never installed.
+
+1. Land the change on `main`. CI's **Lint**, **Typecheck**, and **Test** checks
+   run on every push to `main`.
+2. Wait for that commit's push CI run to succeed.
+3. In Actions → Release → Run workflow, select **main**, enter the commit as
+   **ref** (full or short SHA, or `main` for its HEAD), and optionally a prod
+   **version**. Leave **channel** at `prod`. Or:
 
    ```sh
-   gh workflow run release.yml --ref main \
-     -f staging_tag=v0.1.0-staging.20261019.42
+   gh workflow run release.yml --ref main -f ref=<sha>
    ```
 
+4. The workflow resolves the full SHA. It refuses to build unless the commit is
+   on `main`'s first-parent history and a push CI run for exactly that SHA
+   succeeded. When several commits are pushed together, only the pushed head
+   has a CI run, so promote that commit.
 5. Inspect the resolved SHA and build artifacts. Approve the **production**
-   deployment when ready. The workflow publishes `vX.Y.Z`, marks it latest, and
-   leaves staging releases as prereleases.
+   deployment when ready. The workflow publishes `vX.Y.Z` and marks it latest.
 
-Promotion rebuilds the selected staging commit with prod version metadata; it
-is not a byte-for-byte asset copy because the app's embedded version and feed
-must change. It never silently chooses a newer staging release. Test the prod
-DMG before wider distribution too. The promotion run's workflow comes from main;
-its source checkout, application code, and packaging script come from staging.
+The run's workflow comes from `main`; its source checkout, application code, and
+packaging script come from the selected commit. Test the prod DMG before wider
+distribution.
 
 The desktop matrix has one macOS arm64 row and can be extended later. The
 workflow checks zip integrity, updater metadata, and checksums, and verifies
@@ -42,21 +44,35 @@ Releases are uploaded as drafts before publication so partial uploads are not
 offered as updates. An interrupted publish can leave a draft; inspect it before
 retrying. Existing releases are never overwritten automatically.
 
+### Staging builds
+
+Staging does not build automatically. The workflow keeps its staging path
+behind the **channel** input, which defaults to `prod`, so the app's Staging
+track can still receive a build on request:
+
+```sh
+gh workflow run release.yml --ref main -f ref=<sha> -f channel=staging
+```
+
+It applies the same commit and CI checks, publishes a prerelease through the
+**staging** environment without approval, and takes no version override.
+
 ## Versions and notes
 
 Keep `apps/desktop/package.json` at the **next intended prod version**, e.g.
-`0.1.0`. Staging becomes `0.1.0-staging.<UTC YYYYMMDD>.<GitHub run_number>`.
-Promotion defaults to that tag's `0.1.0`; an override must be plain `X.Y.Z` and
-advance the current latest prod release. A rerun uses the same tag and cannot
-overwrite a published release. After shipping prod, bump the next package
-versions in a normal PR (use `node scripts/update-release-package-versions.ts 0.1.1`).
+`0.1.0`. Prod defaults to that version at the selected commit; an override must
+be plain `X.Y.Z` and advance the current latest prod release. A staging build
+becomes `0.1.0-staging.<UTC YYYYMMDD>.<GitHub run_number>`. A rerun uses the
+same tag and cannot overwrite a published release. After shipping prod, bump
+the next package versions on `main` (use `node scripts/update-release-package-versions.ts 0.1.1`).
 The workflow stamps server, desktop, web, and contracts versions in its checkout;
 it never commits a version change to main.
 
 Notes are generated against the preceding version tag **in the same channel**.
 The first release in a channel uses the source commit's first-parent history,
 since there is no previous tag. Every release body records the source SHA,
-channel, signing mode, and promotion source when applicable.
+channel, and signing mode; prod bodies also name the main commit they were
+promoted from.
 
 ## Unsigned builds
 
@@ -122,8 +138,8 @@ the publishing environment gate:
    access suitable for notarization. Download its `.p8` once and record its Key ID
    and Issuer ID. See [Apple's API key guide](https://developer.apple.com/help/app-store-connect/get-started/app-store-connect-api/).
 5. Populate the three `APPLE_API_*` secrets. The workflow writes the raw key to a
-   temporary `.p8` file for electron-builder/notarytool. Merge a change and verify
-   the next release logs `signed-and-notarized` and passes the signature checks.
+   temporary `.p8` file for electron-builder/notarytool. Promote a commit and verify
+   the release logs `signed-and-notarized` and passes the signature checks.
 
 Normal Developer ID signing does not require an Associated Domains profile,
 Clerk, or `APPLE_TEAM_ID`. Optional browser-passkey provisioning remains a separate
@@ -147,10 +163,8 @@ Updates also check that an offered version matches the selected track.
 
 **Updates are offered only by promotion.** Day-to-day installs are prod builds
 on the Prod track, so they see a new version only after it passes the
-production gate. Staging publishes on every push to main, often several times
-an hour. Offering those builds would ask for a restart every few minutes and
-ship builds nobody has verified. Staging updates reach only installs that
-chose Staging, or staging builds, which default to it. The app checks its feed
+production gate. Staging builds are published only on request and reach only
+installs that chose Staging, or staging builds, which default to it. The app checks its feed
 at startup and every four minutes, which is cheap because the prod feed changes
 only on promotion.
 
@@ -206,8 +220,8 @@ are maintainer procedures, not part of the agent's targeted test run.
 
 ## Rollback
 
-Prefer a **forward fix**: revert the bad commit in a PR, merge, verify the new
-staging release, then promote with a higher prod version. Automatic prod updates
+Prefer a **forward fix**: revert the bad commit on `main`, wait for its CI, then
+promote it with a higher prod version. Automatic prod updates
 do not downgrade. For an urgent stop, edit the bad release back to a draft and
 mark a known-good prod release latest; this prevents further offers but does not
 downgrade machines already updated. Those users can manually install the older

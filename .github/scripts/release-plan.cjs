@@ -1,18 +1,26 @@
 const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-const STAGING_TAG = /^v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-staging\.\d{8}\.\d+$/;
+// A short or full commit SHA, or `main` for the branch head. Nothing else is
+// accepted, so the input never names an arbitrary branch or tag.
+const SOURCE_REF = /^(main|[0-9a-f]{7,40})$/;
 
-function releasePlan({ channel, packageVersion, stagingTag, version, date, runNumber }) {
+function assertSourceRef(ref) {
+  if (!SOURCE_REF.test(ref || ""))
+    throw new Error("ref must be main or a 7-40 character commit SHA on main.");
+  return ref;
+}
+
+function releasePlan({ channel, packageVersion, version, date, runNumber }) {
+  if (!VERSION.test(packageVersion || "")) {
+    throw new Error("apps/desktop/package.json must hold an X.Y.Z next-version.");
+  }
   if (channel === "prod") {
-    const match = STAGING_TAG.exec(stagingTag || "");
-    if (!match) throw new Error("Promotion requires an explicit vX.Y.Z-staging.YYYYMMDD.run tag.");
-    const resolved = version || match[1];
+    const resolved = version || packageVersion;
     if (!VERSION.test(resolved))
       throw new Error("Prod version must be X.Y.Z without a prefix or prerelease.");
     return { channel, version: resolved, tag: `v${resolved}`, environment: "production" };
   }
-  if (channel !== "staging" || !VERSION.test(packageVersion)) {
-    throw new Error("Staging requires an X.Y.Z next-version in apps/desktop/package.json.");
-  }
+  if (channel !== "staging") throw new Error("Channel must be prod or staging.");
+  if (version) throw new Error("A version override applies only to prod.");
   if (!/^\d{8}$/.test(date) || !/^\d+$/.test(String(runNumber)))
     throw new Error("Invalid staging date/run.");
   const resolved = `${packageVersion}-staging.${date}.${runNumber}`;
@@ -32,4 +40,4 @@ function assertProdVersionAdvances(version, latestTag) {
     );
 }
 
-module.exports = { releasePlan, assertProdVersionAdvances };
+module.exports = { releasePlan, assertProdVersionAdvances, assertSourceRef };

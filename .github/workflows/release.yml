@@ -1,81 +1,89 @@
 name: Release
 
+# Builds happen only on an explicit dispatch from main; pushes publish nothing.
 on:
-  workflow_run:
-    workflows: [CI]
-    branches: [main]
-    types: [completed]
   workflow_dispatch:
     inputs:
-      staging_tag:
-        description: "Verified staging tag to promote (vX.Y.Z-staging.YYYYMMDD.run)"
+      ref:
+        description: "Commit on main to build: full or short SHA, or main for its HEAD"
         required: true
+        default: main
         type: string
       version:
-        description: "Prod X.Y.Z override; defaults to the staging build's base version"
+        description: "Prod X.Y.Z override; defaults to apps/desktop/package.json at that commit"
         required: false
         type: string
+      channel:
+        description: "prod promotes behind the production gate; staging publishes a prerelease for the Staging track"
+        required: true
+        default: prod
+        type: choice
+        options: [prod, staging]
 
 permissions:
   contents: read
 
-# Retain every successful main build and serialize publication.
+# Serialize publication per channel and keep queued runs.
 # Adapted from T3 Code's release queue.
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && 'prod' || 'staging' }}
+  group: release-${{ inputs.channel }}
   cancel-in-progress: false
   queue: max
 
 jobs:
   prepare:
     name: Resolve release
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       sha: ${{ steps.plan.outputs.sha }}
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
       channel: ${{ steps.plan.outputs.channel }}
       environment: ${{ steps.plan.outputs.environment }}
-      source_tag: ${{ steps.plan.outputs.source_tag }}
     steps:
       - uses: actions/checkout@v6
         with:
           ref: main
-      - name: Resolve verified source and version
+          fetch-depth: 0
+      - name: Resolve source commit, CI result, and version
         id: plan
         uses: actions/github-script@v8
         env:
-          STAGING_TAG: ${{ inputs.staging_tag }}
+          SOURCE_REF: ${{ inputs.ref }}
           VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
         with:
           script: |
-            if (context.eventName === 'workflow_dispatch' && context.ref !== 'refs/heads/main') {
-              throw new Error('Promote must be dispatched from main.');
+            if (context.ref !== 'refs/heads/main') throw new Error('Release must be dispatched from main.');
+            const { releasePlan, assertProdVersionAdvances, assertSourceRef } = require('./.github/scripts/release-plan.cjs');
+            const channel = process.env.CHANNEL;
+            // Validate input before using it as a Git argument.
+            const ref = assertSourceRef((process.env.SOURCE_REF || 'main').trim().toLowerCase());
+            const git = async (...args) => (await exec.getExecOutput('git', args, { silent: true })).stdout.trim();
+            // The checkout is main's HEAD; a short SHA must resolve unambiguously.
+            const resolved = await exec.getExecOutput('git', ['rev-parse', '--verify', '--quiet', `${ref === 'main' ? 'HEAD' : ref}^{commit}`], { silent: true, ignoreReturnCode: true });
+            const sha = resolved.stdout.trim();
+            if (resolved.exitCode !== 0 || !/^[a-f0-9]{40}$/.test(sha)) throw new Error(`${ref} does not resolve to exactly one commit.`);
+            const firstParent = (await git('rev-list', '--first-parent', 'HEAD')).split('\n');
+            if (!firstParent.includes(sha)) throw new Error(`${sha} is not on main's first-parent history.`);
+
+            // Build only a commit whose own push CI run on main succeeded.
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { ...context.repo, workflow_id: 'ci.yml', head_sha: sha, event: 'push', per_page: 100 });
+            const mainRuns = runs.filter((run) => run.head_branch === 'main');
+            if (!mainRuns.some((run) => run.conclusion === 'success')) {
+              const seen = mainRuns.map((run) => `${run.html_url} (${run.status}${run.conclusion ? `/${run.conclusion}` : ''})`).join(', ');
+              throw new Error(`CI has not succeeded for ${sha} on main. ${seen ? `Runs: ${seen}` : 'No push CI run exists for this commit; only pushed heads are tested.'}`);
             }
-            const { releasePlan } = require('./.github/scripts/release-plan.cjs');
-            const channel = context.eventName === 'workflow_dispatch' ? 'prod' : 'staging';
-            const stagingTag = process.env.STAGING_TAG;
-            // Validate input before using it as a Git ref or shell argument.
-            let plan = channel === 'prod' ? releasePlan({ channel, stagingTag, version: process.env.VERSION }) : null;
-            let sha = context.payload.workflow_run?.head_sha;
-            if (channel === 'prod') {
-              const { data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag: stagingTag });
-              if (release.draft || !release.prerelease) throw new Error('Source must be a published staging prerelease.');
-              // Our publisher records the exact commit, never a moving branch.
-              sha = release.target_commitish;
-              if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Staging release does not record an exact source commit.');
-            }
-            if (!/^[a-f0-9]{40}$/.test(sha || '')) throw new Error('Missing exact source SHA.');
+
             const { data: manifest } = await github.rest.repos.getContent({ ...context.repo, path: 'apps/desktop/package.json', ref: sha });
             const packageVersion = JSON.parse(Buffer.from(manifest.content, 'base64').toString()).version;
-            plan ??= releasePlan({ channel, packageVersion, date: new Date().toISOString().slice(0, 10).replaceAll('-', ''), runNumber: context.runNumber });
+            const plan = releasePlan({ channel, packageVersion, version: process.env.VERSION, date: new Date().toISOString().slice(0, 10).replaceAll('-', ''), runNumber: context.runNumber });
             if (channel === 'prod') {
               try {
                 const { data: latest } = await github.rest.repos.getLatestRelease(context.repo);
-                const { assertProdVersionAdvances } = require('./.github/scripts/release-plan.cjs');
                 assertProdVersionAdvances(plan.version, latest.tag_name);
               } catch (error) {
                 if (error.status !== 404) throw error;
@@ -87,8 +95,8 @@ jobs:
             } catch (error) {
               if (error.status !== 404) throw error;
             }
-            for (const [key, value] of Object.entries({ ...plan, sha, source_tag: channel === 'prod' ? stagingTag : '' })) core.setOutput(key, value);
-            core.notice(`${channel}: ${plan.tag} from ${sha}${stagingTag ? ` (verified ${stagingTag})` : ''}`);
+            for (const [key, value] of Object.entries({ ...plan, sha })) core.setOutput(key, value);
+            core.notice(`${channel}: ${plan.tag} from ${sha} (CI passed)`);
 
   desktop:
     name: Build macOS arm64
@@ -215,7 +223,6 @@ jobs:
           CHANNEL: ${{ needs.prepare.outputs.channel }}
           TAG: ${{ needs.prepare.outputs.tag }}
           SHA: ${{ needs.prepare.outputs.sha }}
-          SOURCE_TAG: ${{ needs.prepare.outputs.source_tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -234,10 +241,10 @@ jobs:
           # shellcheck disable=SC2016
           printf '\nBuild: `%s` • Channel: **%s** • Signing: **%s**\n' "$SHA" "$CHANNEL" "$mode" >> release-notes.md
           if [[ "$mode" == unsigned ]]; then
-            printf '\n**Unsigned macOS build.** Gatekeeper may block first launch. In-app updates open the DMG download; install it manually.\n' >> release-notes.md
+            printf '\n**Unsigned macOS build.** Gatekeeper may block the first launch of a browser-downloaded copy. Installed apps update themselves in place.\n' >> release-notes.md
           fi
           # shellcheck disable=SC2016
-          if [[ -n "$SOURCE_TAG" ]]; then printf '\nPromoted from verified staging `%s`; rebuilt from the same commit with prod version metadata.\n' "$SOURCE_TAG" >> release-notes.md; fi
+          if [[ "$CHANNEL" == prod ]]; then printf '\nPromoted from main commit `%s` after its CI passed.\n' "$SHA" >> release-notes.md; fi
           rm release-publish/signing-mode.txt
           args=("$TAG" --target "$SHA" --title "Cogenly $TAG ($CHANNEL)" --notes-file release-notes.md)
           if [[ "$CHANNEL" == staging ]]; then args+=(--prerelease --latest=false); else args+=(--latest); fi

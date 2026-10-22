@@ -13,15 +13,15 @@ This checklist does not apply settings automatically.
       the maintainer policy; do not require an unavailable second maintainer for
       a solo repository. Decide explicitly whether administrators may bypass.
 - [ ] Create environment **staging**, with no manual approval requirement.
+      Allow only workflows dispatched from `main`.
 - [ ] Create environment **production**, with a required maintainer reviewer
-      (manual approval). Allow only workflows dispatched from `main`. For staging,
-      allow main-branch runs. Check that the actual `workflow_run` deployment is
-      allowed by the environment's branch rule after the first run.
+      (manual approval). Allow only workflows dispatched from `main`.
 - [ ] Configure production self-review rules to fit the maintainer team: a solo
       maintainer needs to be able to approve their own dispatch. Restrict bypass
       if another reviewer is available. Without environment protection, the
       workflow cannot itself enforce approval.
-- [ ] Allow the workflow's `contents: write` permission for its publish job.
+- [ ] Allow the workflow's `contents: write` permission for its publish job and
+      `actions: read` for its resolve job, which checks the commit's CI run.
       No PAT or npm token is required; `GITHUB_TOKEN` is automatically supplied.
       Keep the default token permission read-only for other jobs.
 - [ ] When Apple enrollment is complete, add **repository Actions secrets**:
@@ -29,12 +29,16 @@ This checklist does not apply settings automatically.
       `APPLE_API_ISSUER`. All five are optional until signing is ready; none is
       required for an unsigned staging/prod release. See [signing setup](./release.md#signing-and-notarization).
 - [ ] No relay, Discord, AUR, npm, mobile, or hosted-web credentials are needed.
-- [ ] Merge a small PR; verify all three CI checks, a staging prerelease with
-      arm64 DMG + zip + `staging-mac.yml` + blockmaps + `SHA256SUMS`, and the
-      unsigned/signed label. Verify a promotion pauses at production approval
-      and publishes `latest-mac.yml` only on the resulting latest prod release.
+- [ ] Push a small change to `main`; verify all three CI checks run and no
+      Release run starts. Promote it with
+      `gh workflow run release.yml --ref main -f ref=<sha>`; verify it pauses at
+      production approval, then publishes arm64 DMG + zip + `latest-mac.yml` +
+      blockmaps + `SHA256SUMS` and the unsigned/signed label on the resulting
+      latest prod release. A `-f channel=staging` dispatch publishes a
+      prerelease with `staging-mac.yml` instead.
 
-The workflow uses GitHub's `concurrency.queue: max` to retain pending releases.
+The workflow uses GitHub's `concurrency.queue: max` to retain pending releases
+per channel.
 Older actionlint versions (including 1.7.12) do not recognize that supported key;
 validate with `actionlint -ignore 'unexpected key "queue" for "concurrency" section'`
 until the validator supports it. Review any other errors normally.
