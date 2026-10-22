@@ -129,6 +129,23 @@ export function describeDesktopUpdateRow(state: DesktopUpdateState): DesktopUpda
   return { ...base, status: "current", detail: null, action: null };
 }
 
+/**
+ * The desktop updater state the popover shows. Starting a check resets the
+ * updater to "checking", which drops a known update (its version, button and
+ * notes) until the check answers, and the popover shrinks and grows back. The
+ * last settled state holds through the check instead, so only a real change
+ * moves the layout. `settled` is the newest state that was not "checking".
+ */
+export function holdDesktopUpdateStateWhileChecking(
+  current: DesktopUpdateState | null,
+  settled: DesktopUpdateState | null,
+): DesktopUpdateState | null {
+  if (current?.status !== "checking" || !settled) return current;
+  // A different build (the app restarted into an update) has nothing to hold.
+  if (settled.currentVersion !== current.currentVersion) return current;
+  return { ...settled, checkedAt: current.checkedAt };
+}
+
 /** This app's row when there is no desktop updater, e.g. in a browser. */
 export function describeAppRow(version: string | null): UpdateRowView {
   return {

@@ -14,6 +14,7 @@ import {
   describeUpdatesHeroStatus,
   describeUpdatesSummary,
   formatCheckedAgo,
+  holdDesktopUpdateStateWhileChecking,
   latestCheckedAt,
   rowNeedsUpdate,
 } from "./navRailUpdates.logic";
@@ -359,5 +360,53 @@ describe("describeUpdatesFooter", () => {
         checkedAgo: "just now",
       }),
     ).toBe("Updating 2 of 2…");
+  });
+});
+
+describe("holdDesktopUpdateStateWhileChecking", () => {
+  const idle: DesktopUpdateState = {
+    enabled: true,
+    status: "idle",
+    channel: "latest",
+    currentVersion: "0.1.5",
+    appArch: "arm64",
+    hostArch: "arm64",
+    runningUnderArm64Translation: false,
+    availableVersion: null,
+    downloadedVersion: null,
+    releaseNotes: [],
+    omittedReleaseCount: 0,
+    downloadPercent: null,
+    checkedAt: "2026-10-22T10:00:00.000Z",
+    message: null,
+    errorContext: null,
+    canRetry: false,
+  };
+  const available: DesktopUpdateState = { ...idle, status: "available", availableVersion: "0.1.9" };
+  const checking: DesktopUpdateState = {
+    ...available,
+    status: "checking",
+    checkedAt: "2026-10-22T10:05:00.000Z",
+  };
+
+  it("keeps a known update, its button and its version through a re-check", () => {
+    const shown = holdDesktopUpdateStateWhileChecking(checking, available);
+    expect(shown).toMatchObject({ status: "available", checkedAt: checking.checkedAt });
+    expect(describeDesktopUpdateRow(shown!)).toMatchObject({
+      status: "available",
+      latestVersion: "0.1.9",
+      action: "download",
+    });
+  });
+
+  it("passes settled states and a first check straight through", () => {
+    expect(holdDesktopUpdateStateWhileChecking(available, idle)).toBe(available);
+    expect(holdDesktopUpdateStateWhileChecking(checking, null)).toBe(checking);
+    expect(holdDesktopUpdateStateWhileChecking(null, available)).toBeNull();
+  });
+
+  it("holds nothing across a different build", () => {
+    const restarted = { ...checking, currentVersion: "0.1.9" };
+    expect(holdDesktopUpdateStateWhileChecking(restarted, available)).toBe(restarted);
   });
 });

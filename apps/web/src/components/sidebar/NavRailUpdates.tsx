@@ -67,6 +67,7 @@ import {
   describeUpdatesFooter,
   describeUpdatesHeroStatus,
   formatCheckedAgo,
+  holdDesktopUpdateStateWhileChecking,
   latestCheckedAt,
   type ProviderUpdateRowView,
   rowNeedsUpdate,
@@ -439,7 +440,14 @@ export function NavRailUpdates({
     () => new Map(),
   );
 
-  const desktopState = useDesktopUpdateState();
+  const liveDesktopState = useDesktopUpdateState();
+  const desktopChecking = liveDesktopState?.status === "checking";
+  // A check holds what the updater last knew, so the popover keeps its shape.
+  const [settledDesktopState, setSettledDesktopState] = useState(liveDesktopState);
+  if (liveDesktopState && !desktopChecking && liveDesktopState !== settledDesktopState) {
+    setSettledDesktopState(liveDesktopState);
+  }
+  const desktopState = holdDesktopUpdateStateWhileChecking(liveDesktopState, settledDesktopState);
   const desktopAction = desktopState ? resolveDesktopUpdateButtonAction(desktopState) : "none";
   const isDownloading = desktopState?.status === "downloading";
   // Remote servers follow this app to the version it is about to install.
@@ -537,7 +545,7 @@ export function NavRailUpdates({
 
   const updateCount = tracked.filter(({ row }) => rowNeedsUpdate(row)).length;
   const updateLabel = `${updateCount} ${updateCount === 1 ? "update" : "updates"} available`;
-  const isChecking = checking || desktopState?.status === "checking";
+  const isChecking = checking || desktopChecking;
   const anyUpdating = tracked.some(({ row }) => row.status === "updating");
 
   // This app's restart countdown can be postponed, so it stays in view.
@@ -594,7 +602,7 @@ export function NavRailUpdates({
 
   const runDesktopAction = (action: "download" | "install" | "check") => {
     const bridge = window.desktopBridge;
-    if (!bridge || !desktopState || desktopPending) return;
+    if (!bridge || !desktopState || desktopPending || desktopChecking) return;
     setDesktopPending(true);
     const pending =
       action === "download"
@@ -644,7 +652,7 @@ export function NavRailUpdates({
     setChecking(true);
     const bridge = window.desktopBridge;
     await Promise.all([
-      bridge && canCheckForUpdate(desktopState) ? checkForLocalUpdate(bridge) : null,
+      bridge && canCheckForUpdate(liveDesktopState) ? checkForLocalUpdate(bridge) : null,
       ...connected
         .filter((environment) =>
           readEnvironmentScope(environment.environmentId, AuthOrchestrationReadScope),
@@ -709,7 +717,8 @@ export function NavRailUpdates({
       }
       const action = shownDesktopRow.action;
       if (!action) return null;
-      const onClick = () => runDesktopAction(action);
+      // Held through a check, the button stays in place but waits for the answer.
+      const onClick = desktopChecking ? null : () => runDesktopAction(action);
       if (shownDesktopRow.status === "failed") return { label: "Retry", filled: false, onClick };
       return action === "install"
         ? { label: "Update & restart", filled: true, onClick }
@@ -756,7 +765,7 @@ export function NavRailUpdates({
       <RefreshButton key="refresh" checking={isChecking} onCheck={() => void checkForUpdates()} />
     ) : null,
     canUpdateAll ? (
-      <Button key="all" size="xs" variant="outline" onClick={updateAll}>
+      <Button key="all" size="xs" variant="outline" disabled={isChecking} onClick={updateAll}>
         Update all
       </Button>
     ) : null,
