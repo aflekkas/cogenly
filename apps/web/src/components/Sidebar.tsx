@@ -276,6 +276,7 @@ import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { SidebarChatStatusSlot } from "./sidebar/SidebarChatStatusSlot";
 import { SidebarListEmptyState } from "./sidebar/SidebarListEmptyState";
+import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
 import { AgentsShelfBar } from "../agents/AgentsShelfBar";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
@@ -287,8 +288,6 @@ import {
   type DraftSessionState,
 } from "../composerDraftStore";
 
-// Settled-tail paging: recent history is the common lookup; the deep tail
-// stays behind an explicit Show more.
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new Map();
 /** The folder a row names (chat subtext, Work meta line); null when unfiled. */
 interface SidebarRowFolder {
@@ -299,6 +298,8 @@ interface SidebarRowFolder {
 // give the sidebar list a new identity.
 const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 
+// Settled-tail paging: recent history is the common lookup, so the deep tail
+// loads a page at a time as the list scrolls toward it.
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
 // Fresh keys deliberately reset both shelves to collapsed for existing users.
@@ -905,34 +906,6 @@ const sweepActionBadge: Record<SidebarSweepAction, ReactNode> = {
     </>
   ),
 };
-
-// How far below the visible list the next page of chats starts rendering.
-const CHAT_LIST_REVEAL_MARGIN_PX = 320;
-
-/** Sits after the last rendered chat and asks for the next page as it nears the viewport. */
-function ChatListRevealSentinel(props: { onReveal: () => void }) {
-  const { onReveal } = props;
-  const [sentinel, setSentinel] = useState<HTMLLIElement | null>(null);
-  useEffect(() => {
-    if (sentinel === null) return;
-    if (typeof IntersectionObserver === "undefined") {
-      onReveal();
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) onReveal();
-      },
-      {
-        root: sentinel.closest<HTMLElement>('[data-slot="scroll-area-viewport"]'),
-        rootMargin: `0px 0px ${CHAT_LIST_REVEAL_MARGIN_PX}px 0px`,
-      },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [onReveal, sentinel]);
-  return <li ref={setSentinel} aria-hidden className="h-px list-none" />;
-}
 
 /**
  * A Chats row: the title, and under it the chat's project when it is in one,
@@ -2724,13 +2697,11 @@ export default function Sidebar() {
   // the next page as it scrolls into view. Every chat summary is already in
   // the shell, so this only bounds rendering. A mode change starts over at
   // the first page.
-  const chatWindowResetKey = sidebarMode;
-  const [chatWindowState, setChatWindowState] = useState({
-    resetKey: chatWindowResetKey,
-    count: CHAT_LIST_PAGE_SIZE,
+  const { count: chatVisibleCount, reveal: revealMoreChats } = useSidebarListReveal({
+    resetKey: sidebarMode,
+    initialCount: CHAT_LIST_PAGE_SIZE,
+    pageCount: CHAT_LIST_PAGE_SIZE,
   });
-  const chatVisibleCount =
-    chatWindowState.resetKey === chatWindowResetKey ? chatWindowState.count : CHAT_LIST_PAGE_SIZE;
   // While a pinned chat is dragged, Pinned previews the drop order; the list
   // motion glides rows between slots as the order changes.
   const [pinDrag, setPinDrag] = useState<{ key: string; order: readonly string[] } | null>(null);
@@ -2752,16 +2723,6 @@ export default function Sidebar() {
     [activeThreads, chatVisibleCount, pinDrag, routeThreadKey, sidebarMode],
   );
   const renderedActiveThreads = chatWindow?.visible ?? activeThreads;
-  const revealMoreChats = useCallback(
-    () =>
-      setChatWindowState((previous) => ({
-        resetKey: chatWindowResetKey,
-        count:
-          (previous.resetKey === chatWindowResetKey ? previous.count : CHAT_LIST_PAGE_SIZE) +
-          CHAT_LIST_PAGE_SIZE,
-      })),
-    [chatWindowResetKey],
-  );
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -2822,20 +2783,18 @@ export default function Sidebar() {
   }, [snoozedThreads]);
 
   // The settled tail renders in pages: history shouldn't dominate the
-  // sidebar, and the common lookups are recent. Expansion resets when the
-  // filter context changes so a scope/search flip never inherits a deep
-  // page state.
-  const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
-  const settledResetKey = sidebarMode;
-  const lastSettledResetKeyRef = useRef(settledResetKey);
-  if (lastSettledResetKeyRef.current !== settledResetKey) {
-    lastSettledResetKeyRef.current = settledResetKey;
-    setSettledVisibleCount(SETTLED_TAIL_INITIAL_COUNT);
-  }
+  // sidebar, and the common lookups are recent. The sentinel above its
+  // oldest row (the list grows upward) reveals the next page as it scrolls
+  // into view. A mode change starts over at the first page.
+  const { count: settledVisibleCount, reveal: revealMoreSettled } = useSidebarListReveal({
+    resetKey: sidebarMode,
+    initialCount: SETTLED_TAIL_INITIAL_COUNT,
+    pageCount: SETTLED_TAIL_PAGE_COUNT,
+  });
   const visibleSettledThreads = useMemo(() => {
     if (settledThreads.length <= settledVisibleCount) return settledThreads;
     const visible = settledThreads.slice(0, settledVisibleCount);
-    // The open thread must never hide under "Show more": navigating into a
+    // The open thread must never hide in the unrevealed tail: navigating into a
     // deep settled thread (search, deep link) pulls its row into the visible
     // tail so the highlight and the un-settle affordance stay reachable.
     if (routeThreadKey !== null) {
@@ -2850,10 +2809,6 @@ export default function Sidebar() {
     return visible;
   }, [routeThreadKey, settledThreads, settledVisibleCount]);
   const hiddenSettledCount = settledThreads.length - visibleSettledThreads.length;
-  const showMoreSettled = useCallback(
-    () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
-    [],
-  );
   const [settledShelfExpanded, setSettledShelfExpanded] = useLocalStorage(
     SETTLED_SHELF_EXPANDED_KEY,
     false,
@@ -2890,7 +2845,7 @@ export default function Sidebar() {
     // The open thread must never vanish behind the collapsed shelf: a
     // snoozed thread reached by route (deep link, open before snoozing
     // elsewhere) keeps its row — with highlight and wake affordance — same
-    // exception the settled tail's "Show more" makes.
+    // exception the settled tail's paging makes.
     if (routeThreadKey === null) return EMPTY_THREADS;
     const routeThread = snoozedThreads.find(
       (thread) =>
@@ -3667,6 +3622,7 @@ export default function Sidebar() {
   const sidebarModeListRef = useRef<HTMLDivElement | null>(null);
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
+  const listMotionRevealRef = useRef({ chats: chatVisibleCount, settled: settledVisibleCount });
   useLayoutEffect(() => {
     // Draft navigation can reveal a frozen row without changing the draft count.
     void sidebarListOrderKey;
@@ -3680,7 +3636,14 @@ export default function Sidebar() {
     // rather than redrawn.
     const shelfChanged = listMotionShelfRef.current !== openShelf;
     listMotionShelfRef.current = openShelf;
-    listMotionRef.current?.update(sidebarListHasRows && !modeChanged && !shelfChanged);
+    // A revealed page fades its rows in where they land; nothing travels.
+    const revealed =
+      chatVisibleCount > listMotionRevealRef.current.chats ||
+      settledVisibleCount > listMotionRevealRef.current.settled;
+    listMotionRevealRef.current = { chats: chatVisibleCount, settled: settledVisibleCount };
+    listMotionRef.current?.update(sidebarListHasRows && !modeChanged && !shelfChanged, {
+      inPlace: revealed,
+    });
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     if (shelfChanged && !modeChanged) {
       // --motion-duration-base on ease-standard.
@@ -3690,8 +3653,10 @@ export default function Sidebar() {
       });
     }
   }, [
+    chatVisibleCount,
     openShelf,
     routeDraftIdForRows,
+    settledVisibleCount,
     sidebarListHasRows,
     sidebarListOrderKey,
     sidebarMode,
@@ -4695,6 +4660,15 @@ export default function Sidebar() {
                   actionSweep !== null && "**:pointer-events-none",
                 )}
               >
+                {sidebarMode === "tasks" && settledShelfExpanded && hiddenSettledCount > 0 ? (
+                  // Settled grows upward from the newest row by the search
+                  // dock, so older pages land above the first row.
+                  <SidebarListRevealSentinel
+                    key={`settled:${settledVisibleCount}`}
+                    edge="top"
+                    onReveal={revealMoreSettled}
+                  />
+                ) : null}
                 {(() => {
                   // Only the row being renamed gets the button, and only when
                   // its server can regenerate and is not already doing so.
@@ -5059,21 +5033,11 @@ export default function Sidebar() {
                   return items;
                 })()}
                 {chatWindow !== null && chatWindow.hiddenCount > 0 ? (
-                  // Remounts after each page, so a sentinel still in view
-                  // after a reveal asks for the next page too.
-                  <ChatListRevealSentinel key={chatVisibleCount} onReveal={revealMoreChats} />
-                ) : null}
-                {settledShelfExpanded && hiddenSettledCount > 0 ? (
-                  <li className="list-none">
-                    <button
-                      type="button"
-                      onClick={showMoreSettled}
-                      className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 state-hover"
-                    >
-                      <PlusIcon aria-hidden className="size-4 shrink-0" />
-                      Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
-                    </button>
-                  </li>
+                  <SidebarListRevealSentinel
+                    key={`chats:${chatVisibleCount}`}
+                    edge="bottom"
+                    onReveal={revealMoreChats}
+                  />
                 ) : null}
               </ul>
             </TooltipProvider>

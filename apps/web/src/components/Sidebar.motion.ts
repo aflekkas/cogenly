@@ -131,7 +131,11 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
   };
 
   return {
-    update(animate: boolean) {
+    /** `inPlace` is for a page reveal: rows that arrive fade in where they
+     * land and nothing travels, so the list reads as having grown rather
+     * than rearranged. Opacity-only fades are cheap, so the fade cap is off. */
+    update(animate: boolean, options?: { readonly inPlace?: boolean }) {
+      const inPlace = options?.inPlace === true;
       if (disposed) return;
       const next = new Map(
         Array.from(parent.children)
@@ -155,9 +159,10 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
           if (!positions.has(node) && position.height > 0) fadeCount++;
         }
       }
-      // Reduced motion keeps the fades and drops every translate.
-      const reduced = reducedMotion?.matches === true;
-      const shouldAnimate = animate && positions !== null && fadeCount <= MAX_FADED_ROWS_PER_UPDATE;
+      // Reduced motion keeps the fades and drops every translate; so does a reveal.
+      const reduced = reducedMotion?.matches === true || inPlace;
+      const shouldAnimate =
+        animate && positions !== null && (inPlace || fadeCount <= MAX_FADED_ROWS_PER_UPDATE);
       const movedDelta = new Map<HTMLElement, number>();
       const nextOrder = [...next.keys()];
       const oldOrder = positions === null ? [] : [...positions.keys()];
