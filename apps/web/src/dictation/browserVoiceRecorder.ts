@@ -4,6 +4,8 @@ import type { VoiceRecorder, VoiceRecorderStatus } from "@t3tools/client-runtime
 import { DICTATION_SAMPLE_RATE, downsample, encodeWav, speechLevel } from "./dictationAudio";
 
 const CAPTURE_BUFFER_FRAMES = 4096;
+// About 21 ms at 48 kHz: one animation frame's worth of signal for the level meter.
+const LEVEL_WINDOW_FRAMES = 1024;
 // A permission prompt nobody answers would otherwise hold the voice session forever.
 const OPEN_MICROPHONE_TIMEOUT_MS = 15_000;
 
@@ -33,23 +35,34 @@ function openMicrophone(): Promise<MediaStream> {
   });
 }
 
+/** What the composer's dictation control drives: a recorder plus its mic lifecycle. */
+export interface DictationRecorder extends VoiceRecorder {
+  configure(): Promise<void>;
+  release(): Promise<void>;
+  readRecording(uri: string): Uint8Array | null;
+  deleteRecording(uri: string): void;
+  /** Current input level in [0, 1] while recording, 0 otherwise. Cheap enough to call every frame. */
+  readLevel(): number;
+}
+
 /**
  * Captures the microphone as PCM with Web Audio and finishes as an in-memory WAV,
  * addressed by a `dictation:` URI the transcriber reads back. Chromium's
  * MediaRecorder only produces WebM/Opus, which AVAudioFile cannot open.
  */
-export class BrowserVoiceRecorder implements VoiceRecorder {
+export class BrowserVoiceRecorder implements DictationRecorder {
   uri: string | null = null;
 
   private stream: MediaStream | null = null;
   private context: AudioContext | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private processor: ScriptProcessorNode | null = null;
+  private analyser: AnalyserNode | null = null;
+  private levelSamples: Float32Array<ArrayBuffer> | null = null;
   private chunks: Float32Array[] = [];
   private limitTimer: ReturnType<typeof setTimeout> | null = null;
   private nextRecordingId = 0;
   private readonly recordings = new Map<string, Uint8Array>();
-  private readonly levelListeners = new Set<(level: number) => void>();
 
   constructor(private readonly onStatus: (status: VoiceRecorderStatus) => void) {}
 
@@ -104,13 +117,18 @@ export class BrowserVoiceRecorder implements VoiceRecorder {
     processor.onaudioprocess = (event) => {
       const samples = event.inputBuffer.getChannelData(0);
       this.chunks.push(downsample(samples, context.sampleRate, DICTATION_SAMPLE_RATE).slice());
-      const level = speechLevel(samples);
-      for (const listener of this.levelListeners) listener(level);
     };
     source.connect(processor);
     // A processor only runs while connected to the destination; it outputs silence.
     processor.connect(context.destination);
     this.processor = processor;
+    // The meter taps the same source, so it needs no second microphone stream. An
+    // analyser keeps its latest window without being wired to the destination.
+    const analyser = context.createAnalyser();
+    analyser.fftSize = LEVEL_WINDOW_FRAMES;
+    source.connect(analyser);
+    this.analyser = analyser;
+    this.levelSamples = new Float32Array(LEVEL_WINDOW_FRAMES);
     this.limitTimer = setTimeout(() => {
       this.finish();
       this.onStatus({ isFinished: true, hasError: false, error: null, url: this.uri });
@@ -129,10 +147,10 @@ export class BrowserVoiceRecorder implements VoiceRecorder {
     this.recordings.delete(uri);
   }
 
-  /** Live input level in [0, 1] while recording, about a dozen times a second. */
-  subscribeLevel(listener: (level: number) => void): () => void {
-    this.levelListeners.add(listener);
-    return () => this.levelListeners.delete(listener);
+  readLevel(): number {
+    if (!this.analyser || !this.levelSamples) return 0;
+    this.analyser.getFloatTimeDomainData(this.levelSamples);
+    return speechLevel(this.levelSamples);
   }
 
   private finish(): void {
@@ -143,12 +161,14 @@ export class BrowserVoiceRecorder implements VoiceRecorder {
     this.recordings.set(uri, encodeWav(this.chunks, DICTATION_SAMPLE_RATE));
     this.chunks = [];
     this.uri = uri;
-    for (const listener of this.levelListeners) listener(0);
   }
 
   private detachProcessor(): void {
     if (this.limitTimer !== null) clearTimeout(this.limitTimer);
     this.limitTimer = null;
+    if (this.analyser) this.source?.disconnect(this.analyser);
+    this.analyser = null;
+    this.levelSamples = null;
     if (!this.processor) return;
     this.processor.onaudioprocess = null;
     this.processor.disconnect();

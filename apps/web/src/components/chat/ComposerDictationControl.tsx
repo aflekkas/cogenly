@@ -8,10 +8,10 @@ import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { MicIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { BrowserVoiceRecorder } from "../../dictation/browserVoiceRecorder";
 import { dictationKeyAction } from "../../dictation/composerDictation.logic";
 import { createDesktopVoiceTranscriber } from "../../dictation/desktopVoiceTranscriber";
 import {
+  createDictationRecorder,
   dictationLocale,
   readDictationBridge,
   useDictationAvailable,
@@ -25,6 +25,7 @@ import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { ComposerDictationWaveform } from "./ComposerDictationWaveform";
 
 interface ComposerDictationControlProps {
   /** The draft being dictated into; a change cancels the run. */
@@ -60,14 +61,13 @@ function ComposerDictationButton({
 }: ComposerDictationControlProps) {
   const [state, setState] = useState<VoiceInputState>(IDLE);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const levelRef = useRef<HTMLSpanElement>(null);
   const ownerKeyStable = useStableCallback(() => ownerKey);
   const readDraftStable = useStableCallback(readDraft);
   const commitDraftStable = useStableCallback(commitDraft);
   const [runtime] = useState(() => {
     const bridge = readDictationBridge();
     if (!bridge) return null;
-    const recorder = new BrowserVoiceRecorder((status) => {
+    const recorder = createDictationRecorder((status) => {
       void controller.handleRecorderStatus(status);
     });
     const transcriber = createDesktopVoiceTranscriber(bridge, {
@@ -93,7 +93,7 @@ function ComposerDictationButton({
       },
       onStateChange: setState,
     });
-    return { controller, recorder };
+    return { controller, readLevel: () => recorder.readLevel() };
   });
 
   const active = voiceInputBlocksSubmission(state);
@@ -113,24 +113,6 @@ function ComposerDictationButton({
     previousOwnerKey.current = ownerKey;
     runtime?.controller.ownerChanged();
   }, [ownerKey, runtime]);
-
-  // The level dot follows the input at audio rate without re-rendering the composer.
-  // Speech drives its scale; under reduced motion only its opacity follows the level.
-  useEffect(() => {
-    if (!runtime || state.phase !== "recording") return;
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const unsubscribe = runtime.recorder.subscribeLevel((level) => {
-      const dot = levelRef.current;
-      if (!dot) return;
-      if (reduceMotion) dot.style.opacity = (0.45 + level * 0.55).toFixed(3);
-      else dot.style.setProperty("--dictation-level", level.toFixed(3));
-    });
-    return () => {
-      unsubscribe();
-      levelRef.current?.style.removeProperty("opacity");
-      levelRef.current?.style.removeProperty("--dictation-level");
-    };
-  }, [runtime, state.phase]);
 
   const toggle = useStableCallback(() => {
     if (!runtime) return;
@@ -203,7 +185,7 @@ function ComposerDictationButton({
   const busy = state.phase === "preparing" || state.phase === "transcribing";
   const label =
     state.phase === "recording"
-      ? "Stop dictation"
+      ? "Dictating — click to stop"
       : state.phase === "preparing"
         ? "Preparing dictation"
         : state.phase === "transcribing"
@@ -217,7 +199,12 @@ function ComposerDictationButton({
         : "Dictate";
 
   return (
-    <span className="flex motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-out motion-safe:starting:opacity-0">
+    <span className="flex items-center motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-out motion-safe:starting:opacity-0">
+      <ComposerDictationWaveform
+        recording={state.phase === "recording"}
+        readLevel={runtime.readLevel}
+        onStop={toggle}
+      />
       <Tooltip>
         <TooltipTrigger
           render={
@@ -253,12 +240,11 @@ function ComposerDictationButton({
               {/* Paused while hidden so an idle composer never repaints. */}
               <Spinner style={busy ? undefined : { animationPlayState: "paused" }} />
             </span>
+            {/* Stop: the waveform beside the button shows the voice. */}
             <span
-              ref={levelRef}
               aria-hidden
               className={cn(
-                "size-2.5 rounded-full bg-destructive transition-[opacity,scale] duration-(--motion-duration-fast) ease-out",
-                "motion-safe:scale-[calc(0.55+var(--dictation-level,0)*0.75)] motion-reduce:transition-opacity",
+                "size-2.5 rounded-xs bg-destructive transition-opacity duration-(--motion-duration-fast) ease-out",
                 state.phase === "recording" ? "opacity-100" : "opacity-0",
               )}
             />
