@@ -11,8 +11,15 @@ import {
   BearerConnectionProfile,
   type ConnectionCatalogEntry,
   type ConnectionRoute,
+  SshConnectionProfile,
 } from "./catalog.ts";
-import { BearerConnectionTarget, type ConnectionTarget } from "./model.ts";
+import {
+  BearerConnectionTarget,
+  type ConnectionTarget,
+  PrimaryConnectionTarget,
+  RelayConnectionTarget,
+  SshConnectionTarget,
+} from "./model.ts";
 
 /**
  * A saved environment can hold several routes: T3 Connect, direct URLs (LAN,
@@ -429,4 +436,51 @@ export function removedWithRelay(entry: ConnectionCatalogEntry): boolean {
 /** One SSH target, as desktop keys its tunnels: alias, host, user, and port. */
 export function sshTargetKey(target: DesktopSshEnvironmentTarget): string {
   return JSON.stringify([target.alias, target.hostname, target.username, target.port]);
+}
+
+/** The route under another display name; its address and credentials stay the same. */
+export function relabelRoute(route: ConnectionRoute, label: string): ConnectionRoute {
+  const profile = Option.map(route.profile, (current) =>
+    current._tag === "BearerConnectionProfile"
+      ? new BearerConnectionProfile({
+          connectionId: current.connectionId,
+          environmentId: current.environmentId,
+          label,
+          httpBaseUrl: current.httpBaseUrl,
+          wsBaseUrl: current.wsBaseUrl,
+          ...(current.learned === undefined ? {} : { learned: current.learned }),
+          ...(current.authorization === undefined ? {} : { authorization: current.authorization }),
+          ...(current.network === undefined ? {} : { network: current.network }),
+        })
+      : new SshConnectionProfile({
+          connectionId: current.connectionId,
+          environmentId: current.environmentId,
+          label,
+          target: current.target,
+        }),
+  );
+  return { target: relabelTarget(route.target, label), profile };
+}
+
+function relabelTarget(target: ConnectionTarget, label: string): ConnectionTarget {
+  const { environmentId } = target;
+  switch (target._tag) {
+    case "PrimaryConnectionTarget":
+      return new PrimaryConnectionTarget({
+        environmentId,
+        label,
+        httpBaseUrl: target.httpBaseUrl,
+        wsBaseUrl: target.wsBaseUrl,
+      });
+    case "BearerConnectionTarget":
+      return new BearerConnectionTarget({
+        environmentId,
+        label,
+        connectionId: target.connectionId,
+      });
+    case "RelayConnectionTarget":
+      return new RelayConnectionTarget({ environmentId, label });
+    case "SshConnectionTarget":
+      return new SshConnectionTarget({ environmentId, label, connectionId: target.connectionId });
+  }
 }

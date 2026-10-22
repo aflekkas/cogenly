@@ -17,6 +17,7 @@ import {
   insertRoute,
   entryWithRoutes,
   mergeLearnedRoutes,
+  relabelRoute,
   removedWithRelay,
   routesAfterRemoving,
   upsertRoute,
@@ -360,5 +361,34 @@ describe("learned routes", () => {
     });
     expect(moved).not.toBeNull();
     expect(profileOf(moved![0]!)).toMatchObject({ httpBaseUrl: "https://desk.local:3773/" });
+  });
+});
+
+describe("relabelRoute", () => {
+  it("renames the route and its profile and keeps how it connects", () => {
+    const route = direct("bearer:one", "http://100.64.0.2:3773/");
+    const renamed = relabelRoute(route, "Contabo VPS");
+    expect(renamed.target).toEqual(
+      new BearerConnectionTarget({
+        environmentId: ENVIRONMENT_ID,
+        label: "Contabo VPS",
+        connectionId: "bearer:one",
+      }),
+    );
+    expect(Option.getOrThrow(renamed.profile)).toMatchObject({
+      label: "Contabo VPS",
+      httpBaseUrl: "http://100.64.0.2:3773/",
+      connectionId: "bearer:one",
+    });
+    const relay = relabelRoute(
+      {
+        target: new RelayConnectionTarget({ environmentId: ENVIRONMENT_ID, label: "Desk" }),
+        profile: Option.none(),
+      },
+      "Studio",
+    );
+    expect(relay.target).toEqual(
+      new RelayConnectionTarget({ environmentId: ENVIRONMENT_ID, label: "Studio" }),
+    );
   });
 });

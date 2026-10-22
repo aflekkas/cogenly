@@ -1,9 +1,11 @@
 import { useLastPresent } from "~/components/ui/overlay-presence";
 import { SessionPermissions } from "./SessionPermissions";
+import { RenameEnvironmentDialog } from "./RenameEnvironmentDialog";
 import { AUTH_SCOPE_OPTIONS as PAIRING_SCOPE_OPTIONS } from "@t3tools/shared/authScopeOptions";
 import {
   ChevronsLeftRightEllipsisIcon,
   EllipsisIcon,
+  PencilIcon,
   PlusIcon,
   QrCodeIcon,
   RouteIcon,
@@ -1439,6 +1441,7 @@ type SavedBackendListRowProps = {
   removingEnvironmentId: EnvironmentId | null;
   onSetEnabled: (environmentId: EnvironmentId, enabled: boolean) => void;
   onRemove: (environment: EnvironmentPresentation) => void;
+  onRename: (environment: EnvironmentPresentation) => void;
   onAddRoute: (environment: EnvironmentPresentation) => void;
 };
 
@@ -1489,6 +1492,7 @@ function SavedBackendListRow({
   removingEnvironmentId,
   onSetEnabled,
   onRemove,
+  onRename,
   onAddRoute,
 }: SavedBackendListRowProps) {
   const [routesOpen, setRoutesOpen] = useState(false);
@@ -1758,6 +1762,10 @@ function SavedBackendListRow({
             environmentId={environmentId}
             serverConfig={environment.serverConfig}
           />
+          <MenuItem onClick={() => onRename(environment)}>
+            <PencilIcon />
+            Rename…
+          </MenuItem>
           <MenuItem onClick={() => setRoutesOpen((open) => !open)}>
             <RouteIcon />
             {routesOpen ? "Hide routes" : "Routes"}
@@ -2810,6 +2818,9 @@ export function ConnectionsSettings() {
   // account registration, so it points to where that can be deregistered.
   const [pendingT3ConnectRemoval, setPendingT3ConnectRemoval] =
     useState<EnvironmentPresentation | null>(null);
+  const [renamingEnvironment, setRenamingEnvironment] = useState<EnvironmentPresentation | null>(
+    null,
+  );
   const handleRemoveSavedBackend = useCallback(
     async (environment: EnvironmentPresentation) => {
       if (environment.relayManaged && hasCloudPublicConfig()) {
@@ -4142,6 +4153,7 @@ export function ConnectionsSettings() {
             removingEnvironmentId={removingSavedEnvironmentId}
             onSetEnabled={handleSetSavedBackendEnabled}
             onRemove={handleRemoveSavedBackend}
+            onRename={setRenamingEnvironment}
             onAddRoute={(target) => {
               setRouteTarget(target);
               setSavedBackendError(null);
@@ -4154,6 +4166,10 @@ export function ConnectionsSettings() {
           savedEnvironments={savedEnvironments}
         />
       </SettingsSection>
+      <RenameEnvironmentDialog
+        environment={renamingEnvironment}
+        onClose={() => setRenamingEnvironment(null)}
+      />
       {hasCloudPublicConfig() ? (
         <RemoveT3ConnectEnvironmentDialog
           environmentLabel={pendingT3ConnectRemoval?.label ?? null}

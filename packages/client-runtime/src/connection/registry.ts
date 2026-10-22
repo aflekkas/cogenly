@@ -1,4 +1,5 @@
 import { EnvironmentId } from "@t3tools/contracts";
+import { parseEnvironmentName } from "@t3tools/shared/environmentLinks";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -51,6 +52,7 @@ import {
   entryWithRoutes,
   findRouteToSameAddress,
   mergeLearnedRoutes,
+  relabelRoute,
   routesAfterRemoving,
   upsertRoute,
   type ReportedEndpoint,
@@ -140,6 +142,21 @@ export class EnvironmentRegistry extends Context.Service<
     ) => Effect.Effect<
       void,
       | Persistence.ConnectionPersistenceError
+      | EnvironmentNotRegisteredError
+      | PlatformEnvironmentRemovalError
+      | ConnectionBlockedError
+    >;
+    /**
+     * Renames a user-saved environment on every route. The connection stays
+     * up, and the name holds until the user changes it again.
+     */
+    readonly rename: (
+      environmentId: EnvironmentId,
+      label: string,
+    ) => Effect.Effect<
+      void,
+      | Persistence.ConnectionPersistenceError
+      | ConnectionAttemptError
       | EnvironmentNotRegisteredError
       | PlatformEnvironmentRemovalError
       | ConnectionBlockedError
@@ -1024,6 +1041,50 @@ export const make = Effect.gen(function* () {
     );
   });
 
+  const rename = Effect.fn("EnvironmentRegistry.rename")(function* (
+    environmentId: EnvironmentId,
+    label: string,
+  ) {
+    const name = parseEnvironmentName(label);
+    if (!name.ok) {
+      return yield* new ConnectionBlockedError({ reason: "configuration", detail: name.error });
+    }
+    yield* withLeaseLock(
+      environmentId,
+      Effect.gen(function* () {
+        const entry = yield* userEntry(environmentId);
+        const routes = connectionRoutes(entry);
+        if (
+          routes.every(
+            (route) =>
+              route.target.label === name.value &&
+              Option.match(route.profile, {
+                onNone: () => true,
+                onSome: (profile) => profile.label === name.value,
+              }),
+          )
+        )
+          return;
+        const renamed = routes.map((route) => relabelRoute(route, name.value));
+        for (const route of renamed) {
+          if (Option.isSome(route.profile)) yield* profiles.put(route.profile.value);
+        }
+        const next = entryWithRoutes(entry, renamed);
+        yield* registrations.setRoutes(environmentId, persistedRoutes(next));
+        // Like `setEnabled`, update the lease in place: a name change is no reason to reconnect.
+        const lease = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+        if (lease !== undefined) {
+          yield* SubscriptionRef.update(serviceScopes, (current) =>
+            new Map(current).set(environmentId, { ...lease, entry: next }),
+          );
+        }
+        yield* SubscriptionRef.update(entries, (current) =>
+          new Map(current).set(environmentId, next),
+        );
+      }),
+    );
+  });
+
   const removeRelayEnvironments = Effect.fn("EnvironmentRegistry.removeRelayEnvironments")(
     function* () {
       const relayEnvironmentIds = [...(yield* SubscriptionRef.get(entries)).values()]
@@ -1197,6 +1258,7 @@ export const make = Effect.gen(function* () {
     remove,
     removeRoute,
     reorderRoutes,
+    rename,
     removeRelayEnvironments,
     retryNow,
     setEnabled,
