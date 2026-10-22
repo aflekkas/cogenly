@@ -9,13 +9,6 @@ export const COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS =
 // Where the fixed sidebar toggle sits beside the macOS traffic lights. The
 // desktop preload keeps it in native points at any zoom level.
 const MACOS_FIXED_TOGGLE_LEFT = "var(--desktop-window-controls-inset, 90px)";
-// Trailing edge of the traffic lights, also kept in native points by the preload.
-const MACOS_WINDOW_CONTROLS_RIGHT = "var(--desktop-window-controls-right, 70px)";
-const MACOS_WINDOW_CONTROLS_CLEARANCE_PX = 10;
-// The rail widens to hold the traffic lights in its titlebar row.
-const MACOS_NAV_RAIL_WIDTH = `max(${NAV_RAIL_WIDTH_PX}px, calc(${MACOS_WINDOW_CONTROLS_RIGHT} + ${MACOS_WINDOW_CONTROLS_CLEARANCE_PX}px))`;
-// The same width at 100% zoom, for layout math done in script.
-const MACOS_NAV_RAIL_WIDTH_PX = 70 + MACOS_WINDOW_CONTROLS_CLEARANCE_PX;
 
 export type SidebarTogglePlacement =
   /** The rail's titlebar row, centred like the mode buttons. */
@@ -36,9 +29,10 @@ export interface WorkspaceTitlebarLayout {
 /**
  * Lays out the titlebar strip around the native window controls. macOS paints
  * the traffic lights over the window's top-left corner unless it is fullscreen.
- * There the rail widens to hold them in its titlebar row, and the sidebar
- * toggle sits fixed just after them, centred on the same row; the rail's
- * buttons start below that row, and collapsed headers start after the toggle.
+ * There the rail keeps its browser width, flush with the window edge: the
+ * lights sit in the titlebar row, over the rail's drag strip and past it, and
+ * the sidebar toggle sits fixed just after them, centred on the same row. The
+ * rail's buttons start below that row, and headers start after the toggle.
  * Without the traffic lights the toggle leads the rail in its titlebar row.
  * Without the rail, a fixed toggle sits after the window controls.
  */
@@ -62,10 +56,12 @@ export function resolveWorkspaceTitlebarLayout(input: {
   if (input.macosWindowControlsVisible) {
     return {
       sidebarToggle: "fixed",
-      navRailWidthPx: MACOS_NAV_RAIL_WIDTH_PX,
-      // Collapsed headers clear the fixed toggle through the sidebar's default
-      // --workspace-titlebar-content-left.
-      style: { "--nav-rail-width": MACOS_NAV_RAIL_WIDTH, ...windowControlsStyle },
+      navRailWidthPx: NAV_RAIL_WIDTH_PX,
+      // Headers clear the lights and the fixed toggle through the sidebar's
+      // default --workspace-titlebar-content-left, so only the titlebar row
+      // makes room for them: widening the rail would inset its buttons from
+      // the window edge and push the main pane right.
+      style: { "--nav-rail-width": `${NAV_RAIL_WIDTH_PX}px`, ...windowControlsStyle },
       windowControlsStyle,
     };
   }

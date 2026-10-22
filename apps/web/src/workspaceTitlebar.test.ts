@@ -15,15 +15,16 @@ describe("resolveWorkspaceTitlebarLayout", () => {
     expect(layout.style["--workspace-controls-left"]).toBeUndefined();
   });
 
-  it("gives the traffic lights the rail's titlebar row and fixes the toggle just after them", () => {
+  it("keeps the rail flush at its browser width beside the traffic lights and fixes the toggle after them", () => {
     const layout = resolveWorkspaceTitlebarLayout({
       navRailVisible: true,
       macosWindowControlsVisible: true,
     });
     expect(layout.sidebarToggle).toBe("fixed");
-    // The lights end 70pt in; the rail clears them.
-    expect(layout.navRailWidthPx).toBeGreaterThan(70);
-    expect(layout.style["--nav-rail-width"]).toContain("--desktop-window-controls-right");
+    // The lights overhang the rail in the titlebar row; the rail does not widen
+    // for them, so its buttons line up with the browser's.
+    expect(layout.navRailWidthPx).toBe(NAV_RAIL_WIDTH_PX);
+    expect(layout.style["--nav-rail-width"]).toBe(`${NAV_RAIL_WIDTH_PX}px`);
     // The toggle sits at the inset after the lights, and collapsed headers clear
     // it through the sidebar's default content inset.
     expect(layout.style["--workspace-controls-left"]).toContain("--desktop-window-controls-inset");

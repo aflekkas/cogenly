@@ -38,7 +38,6 @@ if (clientPlatform === "darwin") {
     const zoomFactor = webFrame.getZoomFactor();
     const style = document.documentElement.style;
     style.setProperty("--desktop-window-controls-inset", `${90 / zoomFactor}px`);
-    style.setProperty("--desktop-window-controls-right", `${70 / zoomFactor}px`);
   };
   window.addEventListener("DOMContentLoaded", syncWindowControlInset, { once: true });
   window.addEventListener("resize", syncWindowControlInset);

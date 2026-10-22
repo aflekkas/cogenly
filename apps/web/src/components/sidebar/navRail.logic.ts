@@ -1,4 +1,4 @@
-/** Rail width in px. Under the macOS traffic lights it widens to hold them (see workspaceTitlebar). */
+/** Rail width in px, the same on every platform: the macOS traffic lights overhang it in the titlebar row (see workspaceTitlebar). */
 export const NAV_RAIL_WIDTH_PX = 57;
 
 /**
