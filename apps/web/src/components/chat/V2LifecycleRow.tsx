@@ -10,7 +10,8 @@ import { environmentThreadDetails } from "../../state/threads";
 import * as DateTime from "effect/DateTime";
 import { WorkLogCollapse, WorkLogRow, WorkLogShimmer } from "./WorkLog";
 import { DisclosureChevron } from "../ui/disclosure";
-import { subagentOutcome, type SubagentOutcome } from "./subagentRow.logic";
+import { subagentOutcome } from "./subagentRow.logic";
+import { SubagentOutcomeGlyph } from "./SubagentOutcomeGlyph";
 import { markdownPreviewText } from "@t3tools/client-runtime/work-log/reasoning-text";
 import ChatMarkdown from "../ChatMarkdown";
 import {
@@ -38,8 +39,6 @@ import {
   ArrowRightIcon,
   ArrowUpRightIcon,
   BotIcon,
-  CheckIcon,
-  CircleSlashIcon,
   GitForkIcon,
   MessageSquareIcon,
   MinusIcon,
@@ -290,24 +289,6 @@ export function SubagentGlyph({
   ) : (
     <BotIcon aria-hidden className={cn(sizeClassName, "text-icon-muted")} />
   );
-}
-
-/**
- * The row's fixed status column. Working rows leave it empty, since the title
- * shimmer already says so; a settled row gets one quiet glyph.
- */
-function SubagentOutcomeGlyph({ outcome }: { outcome: SubagentOutcome }) {
-  switch (outcome) {
-    case "done":
-      return <CheckIcon aria-hidden className="size-3 text-success" />;
-    case "failed":
-      return <XIcon aria-hidden className="size-3 text-destructive" />;
-    case "stopped":
-      return <CircleSlashIcon aria-hidden className="size-3 text-icon-muted" />;
-    case "working":
-    case "idle":
-      return null;
-  }
 }
 
 /** The status a notification reported, frozen at the time it arrived. */

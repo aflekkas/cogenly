@@ -4,6 +4,7 @@ import {
   deriveThreadAgents,
   formatThreadAgentsHeading,
   resolveThreadAgentsWindow,
+  threadAgentRowStatus,
   type ThreadAgentSubagentInput,
   type ThreadAgentThreadInput,
 } from "./threadAgents.logic";
@@ -206,5 +207,44 @@ describe("resolveThreadAgentsWindow", () => {
     expect(resolveThreadAgentsWindow(rows, false).visible).toHaveLength(50);
     expect(resolveThreadAgentsWindow(rows, false).hiddenCount).toBe(10);
     expect(resolveThreadAgentsWindow(rows, true).visible).toHaveLength(60);
+  });
+});
+
+describe("threadAgentRowStatus", () => {
+  it("leaves running rows to the shimmer and names only the finer in-flight states", () => {
+    expect(threadAgentRowStatus({ status: "running", statusLabel: "Running" })).toEqual({
+      outcome: "working",
+      note: null,
+    });
+    expect(threadAgentRowStatus({ status: "running", statusLabel: "Queued" })).toEqual({
+      outcome: "working",
+      note: "Queued",
+    });
+    expect(threadAgentRowStatus({ status: "running", statusLabel: "Waiting" })).toEqual({
+      outcome: "working",
+      note: "Waiting",
+    });
+  });
+
+  it("gives settled rows a glyph instead of a label", () => {
+    expect(threadAgentRowStatus({ status: "done", statusLabel: "Done" })).toEqual({
+      outcome: "done",
+      note: null,
+    });
+    expect(threadAgentRowStatus({ status: "failed", statusLabel: "Failed" })).toEqual({
+      outcome: "failed",
+      note: null,
+    });
+    expect(threadAgentRowStatus({ status: "cancelled", statusLabel: "Cancelled" })).toEqual({
+      outcome: "stopped",
+      note: null,
+    });
+  });
+
+  it("keeps an idle, resumable agent from reading as done", () => {
+    expect(threadAgentRowStatus({ status: "done", statusLabel: "Idle" })).toEqual({
+      outcome: "idle",
+      note: "Idle",
+    });
   });
 });

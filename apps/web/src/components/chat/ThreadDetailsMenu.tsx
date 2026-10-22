@@ -44,8 +44,7 @@ import {
   revealInFileExplorerLabelForOs,
 } from "../preview/fileExplorerLabel";
 import { Button } from "../ui/button";
-import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
-import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
+import { BadgeDot } from "../ui/badge-dot";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
@@ -56,21 +55,20 @@ import { AgentElapsed } from "./AgentElapsed";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { resolveProviderInstanceAccentColors } from "../../providerInstances";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
-import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { SubagentOutcomeGlyph } from "./SubagentOutcomeGlyph";
+import { ThreadDetailsRow, ThreadDetailsSection } from "./ThreadDetailsSection";
+import { WorkLogShimmer } from "./WorkLog";
 import {
   deriveThreadAgents,
   formatThreadAgentsHeading,
   resolveThreadAgentsWindow,
+  threadAgentRowStatus,
   type ThreadAgentRow,
   type ThreadAgentStopTarget,
   type ThreadAgentSubagentInput,
   type ThreadAgentThreadInput,
 } from "./threadAgents.logic";
-import {
-  THREAD_DETAILS_PANEL_ICON_CLASS,
-  THREAD_DETAILS_PANEL_LABEL_CLASS,
-  THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
-} from "./threadDetailsPanelStyles";
+import { THREAD_DETAILS_PANEL_ICON_CLASS } from "./threadDetailsPanelStyles";
 
 function iso(value: DateTime.Utc | null | undefined): string | null {
   return value == null ? null : DateTime.formatIso(value);
@@ -170,12 +168,7 @@ export function ThreadDetailsMenu(props: {
           }
         >
           <ListTreeIcon className="size-4.5" />
-          {summary.running > 0 ? (
-            <span
-              aria-hidden
-              className="swap-motion pointer-events-none absolute top-1 right-1 size-1.5 rounded-full bg-info"
-            />
-          ) : null}
+          <BadgeDot tone={summary.running > 0 && "info"} className="absolute top-1 right-1" />
         </TooltipTrigger>
         <TooltipPopup side="bottom">{label}</TooltipPopup>
       </Tooltip>
@@ -293,26 +286,27 @@ function ThreadDetailsMenuContent(props: {
         title="Environment"
         separated={false}
       >
-        <div className={cn("flex items-center", THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS)}>
-          <EnvironmentMachineIcon
-            kind={resolveEnvironmentMachineKind(serverConfig ?? null)}
-            className={THREAD_DETAILS_PANEL_ICON_CLASS}
-          />
-          <span className={cn("min-w-0 flex-1 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
-            {machineLabel}
-          </span>
-        </div>
+        <ThreadDetailsRow
+          icon={
+            <EnvironmentMachineIcon
+              kind={resolveEnvironmentMachineKind(serverConfig ?? null)}
+              className={THREAD_DETAILS_PANEL_ICON_CLASS}
+            />
+          }
+          label={machineLabel}
+        />
         {revealLabel !== null && workspacePath !== null ? (
           <Tooltip>
             <TooltipTrigger
               delay={300}
-              render={<ThreadDetailsControl part="row" onClick={() => void reveal()} />}
-            >
-              <FolderOpenIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-              <span className={cn("min-w-0 flex-1 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
-                {revealLabel}
-              </span>
-            </TooltipTrigger>
+              render={
+                <ThreadDetailsRow
+                  icon={<FolderOpenIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />}
+                  label={revealLabel}
+                  onClick={() => void reveal()}
+                />
+              }
+            />
             <TooltipPopup side="left">{workspacePath}</TooltipPopup>
           </Tooltip>
         ) : null}
@@ -320,19 +314,13 @@ function ThreadDetailsMenuContent(props: {
       {lineageLinks.length > 0 ? (
         <ThreadDetailsSection headingId="thread-details-lineage-heading" title="Lineage">
           {lineageLinks.map((link) => (
-            <ThreadDetailsControl
+            <ThreadDetailsRow
               key={link.key}
-              part="row"
+              icon={link.icon}
+              label={link.prefix}
+              secondary={link.title}
               onClick={() => openThread(link.threadId)}
-            >
-              {link.icon}
-              <span className={cn("min-w-0 flex-1 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
-                {link.prefix}
-                {link.title ? (
-                  <span className="font-normal text-muted-foreground"> · {link.title}</span>
-                ) : null}
-              </span>
-            </ThreadDetailsControl>
+            />
           ))}
         </ThreadDetailsSection>
       ) : null}
@@ -400,63 +388,74 @@ function ThreadAgentsSection(props: {
   const renderRow = (row: ThreadAgentRow, nested: boolean) => {
     const provider = providers?.find((entry) => entry.instanceId === row.providerInstanceId);
     const driver = (row.driver ?? provider?.driver ?? null) as ProviderDriverKind | null;
-    const relativeAt = row.completedAt ?? row.sortAt;
-    const content = (
-      <>
-        {driver ? (
-          <ProviderInstanceIcon
-            driverKind={driver}
-            displayName={provider?.displayName ?? driver}
-            accentColor={markColorByInstanceId.get(row.providerInstanceId ?? "")}
-            showBadge={markColorByInstanceId.has(row.providerInstanceId ?? "")}
-            iconClassName={THREAD_DETAILS_PANEL_ICON_CLASS}
-          />
-        ) : (
-          <BotIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-        )}
-        <span className={cn("min-w-0 flex-1 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
-          {row.title}
-        </span>
-        <span
-          key={row.status}
-          className={cn(
-            "swap-motion inline-flex shrink-0 items-center gap-1 text-2xs font-normal tabular-nums",
-            row.status === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
-          )}
-        >
-          {row.status === "running" ? <Spinner size="xs" tone="muted" aria-hidden /> : null}
-          {row.statusLabel}
-          <AgentElapsed
-            agent={{
-              status: row.status === "running" ? "running" : "completed",
-              startedAt: row.startedAt,
-              completedAt: row.completedAt,
-            }}
-            compact
-          />
-          {row.status === "running" ? null : (
-            <span className="text-muted-foreground/70">{formatRelativeTimeLabel(relativeAt)}</span>
-          )}
-        </span>
-      </>
+    const { outcome, note } = threadAgentRowStatus(row);
+    const icon = driver ? (
+      <ProviderInstanceIcon
+        driverKind={driver}
+        displayName={provider?.displayName ?? driver}
+        accentColor={markColorByInstanceId.get(row.providerInstanceId ?? "")}
+        showBadge={markColorByInstanceId.has(row.providerInstanceId ?? "")}
+        iconClassName={THREAD_DETAILS_PANEL_ICON_CLASS}
+      />
+    ) : (
+      <BotIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
     );
+    const relativeAt = row.completedAt ?? row.sortAt;
+    const when =
+      row.status === "running"
+        ? row.startedAt === null
+          ? null
+          : `Started ${formatRelativeTimeLabel(row.startedAt)}`
+        : `${row.status === "done" ? "Finished" : row.statusLabel} ${formatRelativeTimeLabel(relativeAt)}`;
+    const rowProps = {
+      icon,
+      label: <WorkLogShimmer active={outcome === "working"}>{row.title}</WorkLogShimmer>,
+      secondary: note,
+      trailing: (
+        <>
+          {/* Fixed columns, so every row's status and duration line up. */}
+          <span
+            key={outcome}
+            className="swap-motion flex size-4 shrink-0 items-center justify-center"
+          >
+            <SubagentOutcomeGlyph outcome={outcome} />
+          </span>
+          <Tooltip>
+            {/* When it ran lives here, so the row itself only carries the duration. */}
+            <TooltipTrigger
+              delay={500}
+              disabled={when === null}
+              render={
+                <span className="min-w-8 shrink-0 text-end text-xs font-normal whitespace-nowrap text-muted-foreground tabular-nums" />
+              }
+            >
+              <AgentElapsed
+                agent={{
+                  status: row.status === "running" ? "running" : "completed",
+                  startedAt: row.startedAt,
+                  completedAt: row.completedAt,
+                }}
+                compact
+              />
+            </TooltipTrigger>
+            <TooltipPopup side="left">{when}</TooltipPopup>
+          </Tooltip>
+        </>
+      ),
+    };
     const { stop: stopTarget, threadId } = row;
     const canAct = stopTarget !== null || threadId !== null;
     return (
       <li key={row.key} className="m-0 list-none p-0">
         <div className="group flex items-center gap-0.5">
           {threadId !== null ? (
-            <ThreadDetailsControl
-              part="row"
+            <ThreadDetailsRow
+              {...rowProps}
               className="flex-1"
               onClick={() => props.onOpenThread(threadId)}
-            >
-              {content}
-            </ThreadDetailsControl>
+            />
           ) : (
-            <div className={cn("flex flex-1 items-center", THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS)}>
-              {content}
-            </div>
+            <ThreadDetailsRow {...rowProps} className="flex-1" />
           )}
           {canAct ? (
             <span className={cn("flex shrink-0", ROW_ACTION_REVEAL_CLASS)}>
@@ -513,39 +512,33 @@ function ThreadAgentsSection(props: {
     <ThreadDetailsSection
       headingId="thread-details-agents-heading"
       title="Agents"
-      showHeading={false}
-    >
-      {summary.total === 0 ? (
-        <>
-          <div className="flex h-8 items-center px-2.5 text-xs font-medium text-muted-foreground">
-            Agents
-          </div>
-          <p className="px-2.5 pb-1 text-sm text-muted-foreground/80">No agents yet</p>
-        </>
-      ) : (
-        <>
-          <CollapsibleSectionHeader
-            variant="panel"
-            expanded={expanded}
-            onClick={() => setExpanded(!expanded)}
-          >
-            Agents ({summary.total})
+      meta={
+        summary.total === 0 ? undefined : (
+          <>
+            {summary.total}
             {summary.failed > 0 ? (
               <span className="text-destructive-foreground"> · {summary.failed} failed</span>
             ) : null}
-          </CollapsibleSectionHeader>
-          <Collapsible open={expanded}>
-            <CollapsiblePanel>
-              <ul aria-label={formatThreadAgentsHeading(summary)} className="m-0 list-none p-0">
-                {visible.map((row) => renderRow(row, false))}
-              </ul>
-              {hiddenCount > 0 ? (
-                <ThreadDetailsControl part="row" tone="muted" onClick={() => setShowAll(true)}>
-                  Show all ({summary.rows.length})
-                </ThreadDetailsControl>
-              ) : null}
-            </CollapsiblePanel>
-          </Collapsible>
+          </>
+        )
+      }
+      collapsible={summary.total === 0 ? undefined : { open: expanded, onOpenChange: setExpanded }}
+    >
+      {summary.total === 0 ? (
+        <ThreadDetailsRow
+          icon={<BotIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />}
+          label={<span className="font-normal text-muted-foreground">No agents yet</span>}
+        />
+      ) : (
+        <>
+          <ul aria-label={formatThreadAgentsHeading(summary)} className="m-0 list-none p-0">
+            {visible.map((row) => renderRow(row, false))}
+          </ul>
+          {hiddenCount > 0 ? (
+            <ThreadDetailsControl part="row" tone="muted" onClick={() => setShowAll(true)}>
+              Show all ({summary.rows.length})
+            </ThreadDetailsControl>
+          ) : null}
         </>
       )}
     </ThreadDetailsSection>

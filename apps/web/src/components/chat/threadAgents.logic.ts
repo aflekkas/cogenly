@@ -9,6 +9,7 @@
  * Forks are lineage, not agents, so they are left out.
  */
 
+import type { SubagentOutcome } from "./subagentRow.logic";
 export type ThreadAgentStatus = "running" | "done" | "failed" | "cancelled";
 export type ThreadAgentKind = "subagent" | "workflow" | "workflow_member" | "task";
 
@@ -338,4 +339,31 @@ export function resolveThreadAgentsWindow<Row>(
 export function formatThreadAgentsHeading(summary: Pick<ThreadAgentsSummary, "total" | "failed">) {
   const base = `Agents (${summary.total})`;
   return summary.failed > 0 ? `${base} · ${summary.failed} failed` : base;
+}
+
+/**
+ * A row in the subagent rows' status language: in-flight rows shimmer and
+ * leave the status column empty, settled rows get one glyph. The finer labels
+ * the glyph cannot carry (Queued, Waiting, Idle) become the row's secondary text.
+ */
+export function threadAgentRowStatus(row: Pick<ThreadAgentRow, "status" | "statusLabel">): {
+  readonly outcome: SubagentOutcome;
+  readonly note: string | null;
+} {
+  const note =
+    row.statusLabel === "Queued" || row.statusLabel === "Waiting" || row.statusLabel === "Idle"
+      ? row.statusLabel
+      : null;
+  switch (row.status) {
+    case "running":
+      return { outcome: "working", note };
+    case "failed":
+      return { outcome: "failed", note: null };
+    case "cancelled":
+      return { outcome: "stopped", note: null };
+    case "done":
+      return row.statusLabel === "Idle"
+        ? { outcome: "idle", note }
+        : { outcome: "done", note: null };
+  }
 }

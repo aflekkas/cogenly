@@ -29,7 +29,6 @@ import {
   DialogTitle,
 } from "~/components/ui/dialog";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "~/components/ui/collapsible";
-import { CollapsibleSectionHeader } from "~/components/ui/collapsible-section-header";
 import { AgentActivity } from "./AgentActivity";
 import { AgentOpenItems } from "./AgentOpenItems";
 import { scheduleInWords } from "./agentBuilder.logic";
@@ -681,18 +680,13 @@ function CollapsibleDetails({
   children: ReactNode;
 }) {
   return (
-    <Collapsible open={open} onOpenChange={onOpenChange}>
-      <section className="border-t border-border/65 px-2 pt-2 pb-2.5" aria-labelledby={id}>
-        <CollapsibleTrigger
-          render={<CollapsibleSectionHeader id={id} expanded={open} variant="panel" />}
-        >
-          {title}
-          {count !== undefined && count > 0 && (
-            <span className="ms-1.5 tabular-nums text-muted-foreground">{count}</span>
-          )}
-        </CollapsibleTrigger>
-        <CollapsiblePanel>{children}</CollapsiblePanel>
-      </section>
-    </Collapsible>
+    <ThreadDetailsSection
+      headingId={id}
+      title={title}
+      meta={count !== undefined && count > 0 ? count : undefined}
+      collapsible={{ open, onOpenChange }}
+    >
+      {children}
+    </ThreadDetailsSection>
   );
 }
