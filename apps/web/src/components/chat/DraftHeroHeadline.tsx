@@ -53,7 +53,7 @@ import {
   workDraftFolderId,
 } from "~/projectLabels/projectMeta.logic";
 import { ComposerProjectPicker } from "~/projectLabels/ComposerProjectPicker";
-import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
+import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import {
   linkedGitHubOwners,
   mergeRemoteRepositorySections,
@@ -92,6 +92,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button, InlineButton } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { GitHubIcon } from "../Icons";
+import { ProjectFavicon } from "../ProjectFavicon";
+import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
 // Picker values for the action rows; repositories are keyed by their group
@@ -600,7 +602,7 @@ export function DraftHeroHeadline({
           {item.value === ADD_PROJECT_VALUE ? (
             <FolderPlusIcon className="size-4" />
           ) : entry ? (
-            <FolderGit2Icon className="size-4" />
+            <ProjectFavicon project={entry.targetProject} className="size-4" />
           ) : null}
         </ComboboxItemIcon>
         <Tooltip>
@@ -735,11 +737,17 @@ export function DraftHeroHeadline({
               atomic inline box and stays clear of the button's underline. */}
           <span className="block">
             {!isScratchDraft && activeProjectDisplayName ? (
-              <FolderGit2Icon
-                aria-hidden
-                className="inline-block text-muted-foreground"
-                style={HERO_INLINE_ICON_STYLE}
-              />
+              activeProject ? (
+                // Work's mark for a repository: its icon, else its initials badge.
+                <ProjectFavicon
+                  project={activeProject}
+                  // Sized in em to the heading, like the hero's other inline icons.
+                  className="inline-block size-[0.78em] align-[-0.06em] me-[0.28em]"
+                  fallback={<RepositoryBadge name={activeProjectDisplayName} size="inline" />}
+                />
+              ) : (
+                <RepositoryBadge name={activeProjectDisplayName} size="inline" />
+              )
             ) : null}
             {isScratchDraft
               ? "in a repository…"

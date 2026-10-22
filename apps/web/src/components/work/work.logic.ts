@@ -21,6 +21,8 @@ export const ADD_REPOSITORY = "add-repository";
 export interface WorkPickerChoice {
   readonly value: WorkRepositoryChoice | typeof ADD_REPOSITORY;
   readonly label: string;
+  /** The repository a repository row starts Work in, for its icon. */
+  readonly repository?: EnvironmentProject;
 }
 
 /**
@@ -29,14 +31,18 @@ export interface WorkPickerChoice {
  * machine offers it, and "Add repository".
  */
 export function listWorkPickerChoices(input: {
-  readonly repositories: ReadonlyArray<Pick<EnvironmentProject, "id" | "title">>;
+  readonly repositories: ReadonlyArray<EnvironmentProject>;
   readonly sourceProjectId: ProjectId | null;
   readonly canRunWithoutRepository: boolean;
 }): WorkPickerChoice[] {
   const own = input.repositories.filter((repository) => repository.id === input.sourceProjectId);
   const others = input.repositories.filter((repository) => repository.id !== input.sourceProjectId);
   return [
-    ...[...own, ...others].map((repository) => ({ value: repository.id, label: repository.title })),
+    ...[...own, ...others].map((repository) => ({
+      value: repository.id,
+      label: repository.title,
+      repository,
+    })),
     ...(input.canRunWithoutRepository
       ? [{ value: NO_REPOSITORY, label: "No repository" } as const]
       : []),

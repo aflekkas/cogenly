@@ -520,6 +520,18 @@ const SIDEBAR_DRAG_DISTANCE = 6;
 
 type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
 
+/**
+ * A Work repository group's mark: the repository's own icon (a picked one or
+ * its favicon), else its tinted initials badge.
+ */
+function RepositoryGroupIcon(props: {
+  readonly project: ProjectFaviconProject | null;
+  readonly name: string;
+}) {
+  const badge = <RepositoryBadge name={props.name} />;
+  return props.project ? <ProjectFavicon project={props.project} fallback={badge} /> : badge;
+}
+
 function SidebarSectionHeader(props: {
   marker: "working-header" | "snoozed-header" | "settled-header";
   label: string;
@@ -5107,7 +5119,18 @@ export default function Sidebar() {
                       items.push(
                         <SidebarGroupHeader
                           key={`repository:${groupKey}`}
-                          icon={group.name ? <RepositoryBadge name={group.name} /> : undefined}
+                          icon={
+                            group.name ? (
+                              <RepositoryGroupIcon
+                                project={
+                                  projectByKey.get(
+                                    `${group.projectRef.environmentId}:${group.projectRef.projectId}`,
+                                  ) ?? null
+                                }
+                                name={group.name}
+                              />
+                            ) : undefined
+                          }
                           label={group.name ?? "No repository"}
                           mono
                           // Right-click opens the repository's own menu (new

@@ -42,6 +42,7 @@ import {
   ComboboxTrigger,
   useComboboxFilter,
 } from "../ui/combobox";
+import { ProjectFavicon } from "../ProjectFavicon";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -306,5 +307,9 @@ export function WorkPickerChoiceIcon({
   if (choice.value === NO_REPOSITORY) {
     return <MessageSquareDashedIcon className={className ?? "size-4"} />;
   }
-  return <FolderGit2Icon className={className ?? "size-4"} />;
+  return choice.repository ? (
+    <ProjectFavicon project={choice.repository} className={className ?? "size-4"} />
+  ) : (
+    <FolderGit2Icon className={className ?? "size-4"} />
+  );
 }

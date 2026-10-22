@@ -56,6 +56,7 @@ import { AnimatedHeight } from "../AnimatedHeight";
 import { avatarFaceProps } from "../agents/face/agentAvatar.logic";
 import { AgentFace } from "../agents/face";
 import { GitHubIcon } from "../Icons";
+import { ProjectFavicon } from "../ProjectFavicon";
 import { resolveSidebarThreadStatus } from "../Sidebar.logic";
 import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
 import { Button } from "../ui/button";
@@ -245,7 +246,7 @@ export function RepositoriesCard(props: {
       {props.linkedRepositories.map((repository) => (
         <ProjectCardRow
           key={repository.id}
-          icon={<FolderGit2Icon />}
+          icon={<ProjectFavicon project={repository} />}
           title={repository.title}
           arrived={arrived.has(repository.id)}
           removing={removing.has(repository.id)}

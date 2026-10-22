@@ -16,7 +16,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { IconName } from "lucide-react/dynamic";
-import { lazy, Suspense, useState } from "react";
+import { lazy, type ReactNode, Suspense, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { projectFaviconUrlAtom } from "../state/assets";
 import {
@@ -58,11 +58,13 @@ export type ProjectFaviconProject = Pick<
 /**
  * A project's icon. Resolution order lives in `resolveProjectIconSource`:
  * the icon picked in project settings, then the repository's favicon, then a
- * neutral glyph. Projects never render as letters.
+ * neutral glyph. `fallback` replaces that glyph where a surface has its own
+ * mark for a repository without an icon (Work's tinted repository badge).
  */
 export function ProjectFavicon(input: {
   project: ProjectFaviconProject;
   className?: string | undefined;
+  fallback?: ReactNode;
 }) {
   const { project } = input;
   const url = useAtomValue(
@@ -90,11 +92,16 @@ export function ProjectFavicon(input: {
         src={source.src}
         className={input.className}
         fallbackProjectName={project.title}
+        fallback={input.fallback}
       />
     );
   }
   if (source.kind === "fallback") {
-    return <ProjectFallbackGlyphIcon projectName={project.title} className={input.className} />;
+    return (
+      input.fallback ?? (
+        <ProjectFallbackGlyphIcon projectName={project.title} className={input.className} />
+      )
+    );
   }
 
   const icon = source.icon;
@@ -168,10 +175,12 @@ function ProjectFaviconImage({
   src,
   className,
   fallbackProjectName,
+  fallback,
 }: {
   readonly src: string;
   readonly className?: string | undefined;
   readonly fallbackProjectName: string;
+  readonly fallback?: ReactNode;
 }) {
   const [displayedSrc, setDisplayedSrc] = useState<string | null>(() =>
     src.startsWith("data:image/") ? src : null,
@@ -183,9 +192,11 @@ function ProjectFaviconImage({
 
   return (
     <>
-      {displayedSrc === null ? (
-        <ProjectFallbackGlyphIcon projectName={fallbackProjectName} className={className} />
-      ) : null}
+      {displayedSrc === null
+        ? (fallback ?? (
+            <ProjectFallbackGlyphIcon projectName={fallbackProjectName} className={className} />
+          ))
+        : null}
       {displayedSrc ? (
         <img
           src={displayedSrc}
