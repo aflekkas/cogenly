@@ -118,13 +118,28 @@ jobs:
         with:
           node-version-file: package.json
           package-manager-cache: false
-      # Corepack (bundled with Node 24) fetches packageManager's pnpm directly;
-      # pnpm/action-setup's npm bootstrap has stalled for minutes.
+      # pnpm comes from Node 24's bundled Corepack, cached per packageManager so a hit
+      # needs no registry; pnpm/action-setup's npm bootstrap has stalled for minutes.
+      - name: Read packageManager
+        id: pm
+        run: echo "spec=$(node -p 'require("./package.json").packageManager')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/node/corepack
+          key: corepack-${{ runner.os }}-${{ runner.arch }}-${{ steps.pm.outputs.spec }}
       - name: Set up pnpm
         id: pnpm
         run: |
+          set -euo pipefail
           corepack enable pnpm
-          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+          # npm's per-version metadata endpoint intermittently answers 5xx.
+          for attempt in 1 2 3 4 5; do
+            corepack install && break
+            if [[ $attempt == 5 ]]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
+          store="$(pnpm store path --silent)"
+          echo "store=$store" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm.outputs.store }}
