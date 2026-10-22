@@ -21,6 +21,8 @@ export function AgentProjectGroup(props: {
   readonly groupKey: string;
   readonly folder: EnvironmentProjectLabel | null;
   readonly heading: boolean;
+  /** Agents in the group, shown on its heading. */
+  readonly count: number;
   readonly open: boolean;
   readonly onToggle: () => void;
   /** Starts the builder filed in this project; absent for No project. */
@@ -61,6 +63,7 @@ export function AgentProjectGroup(props: {
             )
           }
           label={name}
+          count={props.count}
           collapse={{
             open,
             onToggle: props.onToggle,

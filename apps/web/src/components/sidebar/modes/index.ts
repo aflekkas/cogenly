@@ -4,6 +4,8 @@ export { SidebarProjectsList } from "./SidebarProjectsList";
 export {
   CHAT_DATE_GROUP_LABELS,
   CHAT_LIST_PAGE_SIZE,
+  chatListGroupOf,
+  countChatListGroups,
   createChatDateGrouper,
   applyPinnedDragOrder,
   orderChatsWithPins,

@@ -27,6 +27,7 @@ import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import {
   planPinnedReorder,
   resolveSettledThreadTimestamp,
+  sortActiveThreadsByOrderKey,
   sortSettledThreads,
 } from "@t3tools/client-runtime/state/thread-sort";
 import {
@@ -63,7 +64,6 @@ import {
   CircleDashedIcon,
   CircleDotDashedIcon,
   ClockIcon,
-  FolderIcon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
   MessageSquareDashedIcon,
@@ -171,7 +171,6 @@ import {
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
   isSidebarThreadAwaitingUser,
-  sidebarThreadActivityMs,
   isSidebarThreadWorking,
   isTrailingDoubleClick,
   resolveAdjacentThreadId,
@@ -261,6 +260,8 @@ import {
   SidebarProjectsList,
   CHAT_LIST_PAGE_SIZE,
   applyPinnedDragOrder,
+  chatListGroupOf,
+  countChatListGroups,
   createChatDateGrouper,
   orderChatsWithPins,
   pinnedDragOrder,
@@ -271,6 +272,7 @@ import {
 import {
   classifySidebarThreadMode,
   sidebarModeForThread,
+  type ChatListGroup,
 } from "./sidebar/modes/sidebarModes.logic";
 import {
   threadCapabilities,
@@ -289,6 +291,14 @@ import {
   sidebarRowIntrinsicSizeClassName,
 } from "./sidebar/SidebarList";
 import { SidebarListEmptyState } from "./sidebar/SidebarListEmptyState";
+import {
+  applyDrawnOrder,
+  moveInOrder,
+  planWorkCardReorder,
+  rowShowsInSection,
+  toggleCollapsedSection,
+  workCardLabel,
+} from "./sidebar/workCards.logic";
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
 import { useSidebarScrollMemory } from "./sidebar/useSidebarScrollMemory";
 import { AgentsShelfBar } from "../agents/AgentsShelfBar";
@@ -321,6 +331,11 @@ const SETTLED_SHELF_EXPANDED_KEY = "cogenly:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "cogenly:sidebar:snoozed-expanded";
 const WORKING_SHELF_EXPANDED_KEY = "cogenly:sidebar:working-expanded";
 const ATTENTION_FILTER_OPEN_KEY = "cogenly:sidebar:attention-open";
+// Section headings the user folded, per space ("chats", "tasks", ...).
+const COLLAPSED_SECTIONS_KEY = "cogenly:sidebar:collapsed-sections:v1";
+const CollapsedSections = Schema.Record(Schema.String, Schema.Array(Schema.String));
+const EMPTY_COLLAPSED_SECTIONS: Readonly<Record<string, readonly string[]>> = {};
+const EMPTY_SECTION_KEYS: readonly string[] = [];
 
 // Working beta: when this client saw each thread leave the Working shelf.
 // Module scope keeps the inbox order across routes that unmount the sidebar.
@@ -508,7 +523,8 @@ function SnoozeMenuButton(props: {
 
 // Unsent work is marked by a quiet pen, on draft cards and on thread rows
 // with unsent composer text alike; their surface is the plain card's.
-const draftPenClassName = "size-3 shrink-0 text-secondary-label";
+// Drafts read as drafts: the warning (amber) status tone, like Approval.
+const draftPenClassName = "size-3 shrink-0 text-warning-foreground";
 
 // Work's count bar, in order: all tasks, then each filter.
 const WORK_SHELF_ORDER: ReadonlyArray<SidebarShelf | null> = [
@@ -525,20 +541,49 @@ const SIDEBAR_DRAG_DISTANCE = 6;
 type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
 
 /**
- * A Work repository group's mark: the repository's own icon (a picked one or
- * its favicon), else its tinted initials badge.
+ * A Work card's first line, after T3's card (SidebarThreadRow.tsx upstream):
+ * the repository's icon and name, led by its project ("Spawn Partners ·
+ * platform"); the project's folder for repository-less Work in a project; a
+ * dashed mark and "No project" for Work in neither. Hover actions layered over
+ * the status slot fade its end out (useSidebarRowActionsOverlap measures this
+ * line's text, the row's first `.pan-text`).
  */
-function RepositoryGroupIcon(props: {
+function WorkCardLabel(props: {
+  readonly folder: SidebarRowFolder | null;
+  readonly repositoryName: string | null;
   readonly project: ProjectFaviconProject | null;
-  readonly name: string;
+  /** Right-click on the line opens its repository's menu, not the thread's. */
+  readonly onContextMenu?: ((event: ReactMouseEvent) => void) | undefined;
 }) {
-  const badge = <RepositoryBadge name={props.name} />;
-  return props.project ? <ProjectFavicon project={props.project} fallback={badge} /> : badge;
+  const label = workCardLabel({
+    projectName: props.folder?.name ?? null,
+    repositoryName: props.repositoryName,
+  });
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-1.5" onContextMenu={props.onContextMenu}>
+      {props.repositoryName && props.project ? (
+        <ProjectFavicon
+          project={props.project}
+          className="size-4 shrink-0"
+          fallback={<RepositoryBadge name={props.repositoryName} />}
+        />
+      ) : props.folder ? (
+        <ProjectFolderIcon color={props.folder.color} className="size-4" />
+      ) : (
+        // The same mark as "No project" in the pickers and palette.
+        <MessageSquareDashedIcon aria-hidden className="size-4 shrink-0 text-secondary-label" />
+      )}
+      <PanOnHoverText className="min-w-0 flex-1 text-xs font-medium text-secondary-label">
+        {label}
+      </PanOnHoverText>
+    </span>
+  );
 }
 
 function SidebarSectionHeader(props: {
   marker: "working-header" | "snoozed-header" | "settled-header";
   label: string;
+  count: number;
   toggle: { expanded: boolean; onToggle: () => void };
 }) {
   const shelf =
@@ -552,6 +597,7 @@ function SidebarSectionHeader(props: {
       data-thread-selection-safe
       data-testid={`sidebar-${props.marker}`}
       label={props.label}
+      count={props.count}
       tone={shelf === "snoozed" ? "info" : "muted"}
       collapse={{
         open: props.toggle.expanded,
@@ -575,6 +621,8 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   branch?: string | null;
   /** The Work draft's project, named ahead of its branch like a Work card's. */
   folder?: SidebarRowFolder | null;
+  /** Work grouped by project names the repository instead; null for none. */
+  repositoryName?: string | null;
   project: ProjectFaviconProject | null;
   projectDisplayName: string | null;
   isActive: boolean;
@@ -675,7 +723,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
           <span className="relative flex h-5 shrink-0 items-center justify-end">
             <span
               aria-hidden
-              className="text-2xs text-muted-foreground transition-opacity group-focus-within/sidebar-row:opacity-0 group-hover/sidebar-row:opacity-0"
+              className="text-2xs text-warning-foreground transition-opacity group-focus-within/sidebar-row:opacity-0 group-hover/sidebar-row:opacity-0"
             >
               Draft
             </span>
@@ -705,8 +753,25 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         onKeyDown={handleKeyDown}
       >
         <span className="sr-only">{preview}</span>
-        <div className="relative z-10 h-[66px] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
+        <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
           <div className="flex h-5 min-w-0 items-center gap-1.5">
+            <WorkCardLabel
+              folder={props.folder ?? null}
+              repositoryName={props.repositoryName ?? null}
+              project={props.project}
+            />
+            <span className="relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
+              <span
+                aria-hidden
+                className="pointer-events-none flex items-center gap-1 self-center font-medium text-warning-foreground transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none group-has-[:focus-visible]/sidebar-row:opacity-0 group-any-hover/sidebar-row:opacity-0"
+              >
+                <SquarePenIcon className={draftPenClassName} />
+                Draft
+              </span>
+              <span className="absolute inset-y-0 right-0 flex items-center">{discardButton}</span>
+            </span>
+          </div>
+          <div className="mt-1 flex min-w-0">
             <span
               aria-hidden
               className={cn(
@@ -718,30 +783,12 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
             >
               {preview}
             </span>
-            <span className="relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
-              <span
-                aria-hidden
-                className="pointer-events-none flex items-center gap-1 self-center text-secondary-label transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none group-has-[:focus-visible]/sidebar-row:opacity-0 group-any-hover/sidebar-row:opacity-0"
-              >
-                <SquarePenIcon className={draftPenClassName} />
-                Draft
-              </span>
-              <span className="absolute inset-y-0 right-0 flex items-center">{discardButton}</span>
-            </span>
           </div>
-          <div className="mt-1 flex min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
-            {props.folder || props.branch ? (
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
+            {props.branch ? (
               <>
-                {props.folder ? (
-                  <ProjectFolderIcon color={props.folder.color} />
-                ) : (
-                  <GitBranchIcon aria-hidden className="size-3 shrink-0" />
-                )}
-                <span className="min-w-0 flex-1 fade-truncate">
-                  {props.folder ? <span>{props.folder.name}</span> : null}
-                  {props.folder && props.branch ? " · " : null}
-                  {props.branch}
-                </span>
+                <GitBranchIcon aria-hidden className="size-3 shrink-0" />
+                <span className="min-w-0 flex-1 fade-truncate">{props.branch}</span>
               </>
             ) : null}
           </div>
@@ -752,7 +799,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
 });
 
 /**
- * One Work draft, placed in its repository's group by the sidebar. Reads its
+ * One Work draft, listed after the Work cards by the sidebar. Reads its
  * own composer, so typing in another draft repaints nothing here. The open
  * draft's card is frozen at the moment it became the route, and a draft never
  * left has no card at all, as in SidebarDraftBlock.
@@ -763,6 +810,9 @@ const SidebarWorkDraftCard = memo(function SidebarWorkDraftCard(props: {
   project: ProjectFaviconProject | null;
   projectDisplayName: string | null;
   environmentId: EnvironmentId;
+  threadId: ThreadId;
+  /** Its repository, named on the card's first line; null without one. */
+  repositoryName: string | null;
   /** The project the draft's repository is in, which the draft follows. */
   repositoryFolder: SidebarRowFolder | null;
   folderForLabel: (
@@ -794,11 +844,8 @@ const SidebarWorkDraftCard = memo(function SidebarWorkDraftCard(props: {
   );
   const composer = props.isActive ? frozen.composer : withContent(liveComposer);
   // A project picked in the Work hero rides on the draft until its first send.
-  const draftThreadId = useComposerDraftStore(
-    (store) => store.draftThreadsByThreadKey[props.draftId]?.threadId ?? null,
-  );
   const pickedFolderId = usePendingProjectFolderStore((state) => {
-    const entry = draftThreadId === null ? undefined : state.byThreadId[draftThreadId];
+    const entry = state.byThreadId[props.threadId];
     return entry?.environmentId === props.environmentId ? entry.folderId : null;
   });
   const folder =
@@ -811,6 +858,7 @@ const SidebarWorkDraftCard = memo(function SidebarWorkDraftCard(props: {
       composer={composer}
       branch={props.branch}
       folder={folder}
+      repositoryName={props.repositoryName}
       project={props.project}
       projectDisplayName={props.projectDisplayName}
       isActive={props.isActive}
@@ -1215,8 +1263,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   settlementSupported: boolean;
   // Same contract for thread.snooze/unsnooze.
   snoozeSupported: boolean;
-  // The repository label on the meta line; null for scratch work.
+  // The repository named on the card's first line; null for scratch work.
   repositoryName: string | null;
+  // Opens the repository's menu (new thread, its project, settings).
+  onRepositoryContextMenu?: (
+    projectRef: ScopedProjectRef,
+    position: { x: number; y: number },
+  ) => void;
   // The folder the row is filed in, leading its meta line.
   folder: SidebarRowFolder | null;
   // The action this row will take when the sweep is released.
@@ -1871,8 +1924,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onPointerDown={handleRowPointerDown}
       {...(fileDropHandlers ?? {})}
       className={cn(
-        // Matches the h-14 content box; the py-1 gap between cards is added on top.
-        "list-none py-1 [content-visibility:auto] [contain-intrinsic-size:auto_64px]",
+        // The 78px content box plus the py-1 gap between cards.
+        "list-none py-1 [content-visibility:auto] [contain-intrinsic-size:auto_86px]",
       )}
     >
       <div
@@ -1893,17 +1946,34 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         {accessibleTitle}
         <div
           className={cn(
-            "relative z-10 h-[66px] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
+            "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
           )}
         >
+          {/* T3's three lines: where it runs and its status, the title, then
+              the branch and machine. */}
           <div className="flex h-5 min-w-0 items-center gap-1.5">
-            {draftIndicator}
-            {title}
+            <WorkCardLabel
+              folder={props.folder}
+              repositoryName={props.repositoryName}
+              project={props.project}
+              onContextMenu={
+                props.repositoryName && props.onRepositoryContextMenu
+                  ? (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      props.onRepositoryContextMenu?.(
+                        scopeProjectRef(thread.environmentId, thread.projectId),
+                        { x: event.clientX, y: event.clientY },
+                      );
+                    }
+                  : undefined
+              }
+            />
             {/* The status owns this slot's width at all times; the hover
                   actions (on hover, keyboard focus or while the snooze menu
                   is open) cross-fade in over it, absolutely layered, so the
-                  title never reflows. Where the actions are wider they reach
-                  over the title's end, which fades out under them
+                  line never reflows. Where the actions are wider they reach
+                  over the label's end, which fades out under them
                   (--sidebar-row-actions-overlap). Woke keeps its pill, so
                   there the actions take their own width beside it. */}
             <span
@@ -2099,13 +2169,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   release click still fires and is consumed. */}
             {sweepBadge}
           </div>
+          {/* The hover actions sit on the first line, so the title never fades under them. */}
+          <div className="mt-1 flex h-5 min-w-0 items-center gap-1.5 [--pan-end-inset-target:0px]">
+            {draftIndicator}
+            {title}
+          </div>
           {isRegeneratingTitle ? (
             <span role="status" className="sr-only">
               Regenerating title
             </span>
           ) : null}
           {/* Barely there at rest (#2b2c2e on the card), a step up when selected. */}
-          <div className="mt-1 flex min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
             {/* Work an agent started names the agent ahead of the branch. */}
             {props.workAgentName ? (
               <span className="flex min-w-0 max-w-1/2 shrink-0 items-center gap-1">
@@ -2113,34 +2188,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 <span className="truncate">{props.workAgentName}</span>
               </span>
             ) : null}
-            {/* The repository, then always the branch ("server · t3/fix").
-                  The plan step used to take this slot while working, but it
-                  truncated to a half-sentence and dropped the branch, so the
-                  row lost its most stable identifier. A worktree swaps the
-                  folder for its own icon. */}
-            {/* Filed in a project, the line leads with it in its color
-                  ("Spawn Partners / platform · t3/fix"). */}
-            {props.folder || props.repositoryName || thread.branch ? (
+            {/* Always the branch: the plan step used to take this slot while
+                  working, but it truncated to a half-sentence and dropped the
+                  branch, the row's most stable identifier. A worktree swaps
+                  the branch glyph for its own icon. */}
+            {thread.branch ? (
               <>
-                {props.folder ? (
-                  <ProjectFolderIcon color={props.folder.color} />
-                ) : thread.worktreePath?.trim() ? (
+                {thread.worktreePath?.trim() ? (
                   <ThreadWorktreeIndicator thread={thread} />
-                ) : props.repositoryName ? (
-                  <FolderIcon aria-hidden className="size-3 shrink-0" />
-                ) : thread.branch ? (
+                ) : (
                   <GitBranchIcon aria-hidden className="size-3 shrink-0" />
-                ) : null}
-                <span className="min-w-0 flex-1 fade-truncate">
-                  {props.folder ? <span>{props.folder.name}</span> : null}
-                  {props.folder && props.repositoryName ? " / " : null}
-                  {props.repositoryName ? <span>{props.repositoryName}</span> : null}
-                  {(props.folder || props.repositoryName) && thread.branch ? " · " : null}
-                  {thread.branch}
-                </span>
-                {props.folder && thread.worktreePath?.trim() ? (
-                  <ThreadWorktreeIndicator thread={thread} />
-                ) : null}
+                )}
+                <span className="min-w-0 flex-1 fade-truncate">{thread.branch}</span>
               </>
             ) : (
               <span className="flex-1" />
@@ -2345,6 +2404,7 @@ export default function Sidebar() {
     pinThread,
     unpinThread,
     reorderPinnedThread,
+    reorderActiveThread,
     markThreadUnread,
     markThreadRead,
     archiveThread,
@@ -2675,6 +2735,7 @@ export default function Sidebar() {
           session.projectId,
           session.createdAt,
           session.branch ?? "",
+          session.threadId,
         ].join("\t"),
       );
     }
@@ -2685,13 +2746,15 @@ export default function Sidebar() {
       workDraftSignature === ""
         ? []
         : workDraftSignature.split("\n").map((line) => {
-            const [draftId, environmentId, projectId, createdAt, branch] = line.split("\t");
+            const [draftId, environmentId, projectId, createdAt, branch, threadId] =
+              line.split("\t");
             return {
               draftId: DraftId.make(draftId!),
               environmentId: environmentId as EnvironmentId,
               projectId: projectId as ProjectId,
               createdAtMs: Date.parse(createdAt!) || 0,
               branch: branch || null,
+              threadId: threadId as ThreadId,
             };
           }),
     [workDraftSignature],
@@ -2780,14 +2843,16 @@ export default function Sidebar() {
         );
       }
       // Chats lead with their pins, then read newest first under date
-      // headings. Work is one flat list in inbox order; each row names its
-      // repository and projects itself.
+      // headings. Work follows the order the user arranged by dragging
+      // (activeOrderKey, synced through the server), new work first.
       const sortedActive =
         sidebarMode === "chats"
           ? orderChatsWithPins(active)
-          : workingShelfEnabled
-            ? sortInboxThreadsByReturn(active, inboxReturns.returnedAt)
-            : sortThreadsForSidebar(active);
+          : sidebarMode === "tasks"
+            ? sortActiveThreadsByOrderKey(active)
+            : workingShelfEnabled
+              ? sortInboxThreadsByReturn(active, inboxReturns.returnedAt)
+              : sortThreadsForSidebar(active);
       return {
         activeThreads: sortedActive,
         // Newest send first; finishing and waking again do not move a row.
@@ -2825,6 +2890,9 @@ export default function Sidebar() {
   // While a pinned chat is dragged, Pinned previews the drop order; the list
   // motion glides rows between slots as the order changes.
   const [pinDrag, setPinDrag] = useState<{ key: string; order: readonly string[] } | null>(null);
+  // While a Work card is dragged (or moved from the keyboard and saving), the
+  // Working list draws this order; the list motion glides cards between slots.
+  const [workDrag, setWorkDrag] = useState<{ key: string; order: readonly string[] } | null>(null);
   const chatWindow = useMemo(
     () =>
       sidebarMode === "chats"
@@ -3034,6 +3102,37 @@ export default function Sidebar() {
     (index) => openSidebarShelf(WORK_SHELF_ORDER[index] ?? null),
   );
   const openShelf: SidebarShelf | null = WORK_SHELF_ORDER[shelfIndex] ?? null;
+  // Folded group headings, per space: Chats' date groups, Work's projects.
+  const [collapsedSections, setCollapsedSections] = useLocalStorage(
+    COLLAPSED_SECTIONS_KEY,
+    EMPTY_COLLAPSED_SECTIONS,
+    CollapsedSections,
+  );
+  const collapsedInSpace = collapsedSections[sidebarMode] ?? EMPTY_SECTION_KEYS;
+  const toggleSection = useCallback(
+    (key: string) =>
+      setCollapsedSections((current) => toggleCollapsedSection(current, sidebarMode, key)),
+    [setCollapsedSections, sidebarMode],
+  );
+  // Chats' date headings count every chat they hold, not just the rendered page.
+  const { chatDateGroupCounts, chatDateGroupByKey } = useMemo(() => {
+    void nowMinute;
+    const byKey = new Map<string, ChatListGroup>();
+    if (sidebarMode !== "chats")
+      return { chatDateGroupCounts: new Map<ChatListGroup, number>(), chatDateGroupByKey: byKey };
+    const now = new Date();
+    for (const thread of activeThreads) {
+      byKey.set(
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        chatListGroupOf(thread, now),
+      );
+    }
+    return {
+      chatDateGroupCounts: countChatListGroups(activeThreads, now),
+      chatDateGroupByKey: byKey,
+    };
+  }, [activeThreads, nowMinute, sidebarMode]);
+
   const visibleWorkingThreads = useMemo(() => {
     if (workingShelfExpanded) return workingThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
@@ -3549,14 +3648,92 @@ export default function Sidebar() {
       }
     });
   };
+  // Work cards reorder when their server keeps a manual active order and this
+  // client may operate threads there. Pinned threads keep the pinned order.
+  const canReorderWorkIn = (environmentId: EnvironmentId) =>
+    serverConfigs.get(environmentId)?.environment.capabilities.threadActiveReorder === true &&
+    readEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  /** The Working list's reorderable cards as drawn, when `key` is one of at least two. */
+  const workReorderOrder = (key: string): string[] | null => {
+    const rows = workRowsRef.current;
+    if (rows === null || rows.shown !== "active") return null;
+    const order = rows.threads.flatMap(({ key: candidate }) => {
+      const thread = threadByKeyRef.current.get(candidate);
+      return thread && thread.pinnedAt == null && canReorderWorkIn(thread.environmentId)
+        ? [candidate]
+        : [];
+    });
+    return order.length > 1 && order.includes(key) ? order : null;
+  };
+  const [workReorderAnnouncement, setWorkReorderAnnouncement] = useState("");
+  const commitWorkReorder = (key: string, order: readonly string[]) => {
+    const keysById = new Map(
+      [...threadByKeyRef.current].map(([id, thread]) => [id, thread.activeOrderKey ?? null]),
+    );
+    const writes = planWorkCardReorder({ drawnOrder: order, keysById, movedId: key });
+    if (writes.length === 0) {
+      setWorkDrag(null);
+      return;
+    }
+    // The preview holds until the writes land, so the card never jumps back.
+    setWorkDrag({ key, order });
+    void Promise.all(
+      writes.flatMap(({ id, orderKey }) => {
+        const ref = parseScopedThreadKey(id);
+        return ref ? [reorderActiveThread(ref, orderKey)] : [];
+      }),
+    ).then((results) => {
+      setWorkDrag((current) => (current?.key === key ? null : current));
+      for (const result of results) {
+        if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) continue;
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to reorder Work",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+        return;
+      }
+    });
+  };
+  /** alt+ArrowUp / alt+ArrowDown on a focused Working card moves it one place. */
+  const handleWorkListKeyDown = (event: ReactKeyboardEvent<HTMLUListElement>) => {
+    if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    const key = (event.target as HTMLElement).closest<HTMLElement>("[data-thread-item]")?.dataset
+      .threadItem;
+    if (key === undefined) return;
+    const order = workReorderOrder(key);
+    if (order === null) return;
+    event.preventDefault();
+    const next = moveInOrder(order, key, event.key === "ArrowUp" ? -1 : 1);
+    if (next === null) return;
+    const position = next.indexOf(key) + 1;
+    setWorkReorderAnnouncement(
+      `${threadByKeyRef.current.get(key)?.title ?? "Work"} moved to ${position} of ${next.length}`,
+    );
+    commitWorkReorder(key, next);
+    // Moving a row can drop focus from it; keep it on the card that moved.
+    const focused = event.target as HTMLElement;
+    requestAnimationFrame(() => {
+      if (focused.isConnected && document.activeElement !== focused) focused.focus();
+    });
+  };
   const startThreadContextDrag = useStableCallback(
     (threadRef: ScopedThreadRef, event: PointerEvent) => {
       if (dragSensorRef.current !== null) return;
       const key = scopedThreadKey(threadRef);
-      // A pinned chat also drags within Pinned to reorder it. Positions are
-      // read once at the start, against the list, so the preview's own
-      // motion and scrolling never feed back into the drop slot.
-      const pinOrder = pinnedReorderOrder(key);
+      // A pinned chat drags within Pinned to reorder it, and a Working card
+      // within Work. Positions are read once at the start, against the list,
+      // so the preview's own motion and scrolling never feed back into the
+      // drop slot.
+      const pinnedOrder = pinnedReorderOrder(key);
+      const workOrder = pinnedOrder === null ? workReorderOrder(key) : null;
+      const pinOrder = pinnedOrder ?? workOrder;
+      const setPreview = (next: { key: string; order: readonly string[] } | null) =>
+        workOrder !== null ? setWorkDrag(next) : setPinDrag(next);
       let pinStart: { pointerY: number; center: number; midpoints: number[] } | null = null;
       let pinPreview: readonly string[] | null = null;
       const listY = (y: number) => y - (threadListRef.current?.getBoundingClientRect().top ?? 0);
@@ -3604,15 +3781,16 @@ export default function Sidebar() {
           );
           if (pinPreview !== null && next.join("\0") === pinPreview.join("\0")) return;
           pinPreview = next;
-          setPinDrag({ key, order: next });
+          setPreview({ key, order: next });
         },
         onEnd: () => {
           if (pinPreview === null) return;
-          if (pinPreview.join("\0") === pinOrder?.join("\0")) setPinDrag(null);
+          if (pinPreview.join("\0") === pinOrder?.join("\0")) setPreview(null);
+          else if (workOrder !== null) commitWorkReorder(key, pinPreview);
           else commitPinDrag(key, pinPreview);
         },
         onCancel: () => {
-          if (pinPreview !== null) setPinDrag(null);
+          if (pinPreview !== null) setPreview(null);
         },
         onAbort: () => {},
       });
@@ -3743,6 +3921,43 @@ export default function Sidebar() {
     visibleWorkingThreads,
     workingThreads.length,
   ]);
+  // Work's cards as drawn, top to bottom: the filter's threads in reverse of
+  // their order (new work lowest, by the dock), then the unsent drafts, newest
+  // lowest. While a card is dragged the Working list previews the drop.
+  const workRows = useMemo(() => {
+    if (sidebarMode !== "tasks") return null;
+    const shown = openShelf ?? "active";
+    const threads: { key: string; section: SidebarSection }[] = [];
+    for (const item of sidebarListItems) {
+      if (item.kind !== "thread") continue;
+      if (shown === "attention") {
+        if (item.section !== "active" || !attentionThreadKeys.has(item.key)) continue;
+      } else if (item.section !== shown) {
+        continue;
+      }
+      threads.push({ key: item.key, section: item.section });
+    }
+    threads.reverse();
+    const previewed =
+      workDrag !== null && shown === "active"
+        ? (() => {
+            const byKey = new Map(threads.map((entry) => [entry.key, entry]));
+            return applyDrawnOrder(
+              threads.map((entry) => entry.key),
+              workDrag.order,
+            ).map((key) => byKey.get(key)!);
+          })()
+        : threads;
+    return {
+      shown,
+      threads: previewed,
+      drafts:
+        shown === "active" ? workDrafts.toSorted((a, b) => a.createdAtMs - b.createdAtMs) : [],
+    };
+  }, [attentionThreadKeys, openShelf, sidebarListItems, sidebarMode, workDrafts, workDrag]);
+  const workRowsRef = useRef(workRows);
+  workRowsRef.current = workRows;
+  const workRowsOrderKey = workRows?.threads.map((entry) => entry.key).join("\0") ?? "";
   // Every shell event rebuilds sidebarListItems, but rows only move when the
   // rendered order or a row's section changes. Keying the motion pass on that
   // keeps ordinary updates from forcing a layout read and animating rows
@@ -3764,6 +3979,9 @@ export default function Sidebar() {
   useLayoutEffect(() => {
     // Draft navigation can reveal a frozen row without changing the draft count.
     void sidebarListOrderKey;
+    // A drag preview or a folded heading moves rows without changing the items.
+    void workRowsOrderKey;
+    void collapsedInSpace;
     // A mode switch replaces the whole list. Fading every row out (each as a
     // deep clone) and back in cost a long frame, so the list snaps to the new
     // mode; AppSidebarLayout plays the switch's one enter motion on the column.
@@ -3799,6 +4017,8 @@ export default function Sidebar() {
     sidebarListOrderKey,
     sidebarMode,
     visibleDraftSessionCount,
+    workRowsOrderKey,
+    collapsedInSpace,
   ]);
   // One snooze per thread at a time — same double-dispatch guard as settle.
   const snoozingThreadKeysRef = useRef(new Set<string>());
@@ -4835,6 +5055,10 @@ export default function Sidebar() {
               timeout={400}
             >
               <SidebarDragLifecycle onUnmount={cancelThreadDrag} />
+              {/* Announces keyboard reorders (alt+arrow) in Work. */}
+              <span role="status" aria-live="polite" className="sr-only">
+                {sidebarMode === "tasks" ? workReorderAnnouncement : ""}
+              </span>
               <SidebarList
                 ref={attachListMotionRef}
                 // VoiceOver treats an exposed list as an interaction boundary,
@@ -4844,6 +5068,7 @@ export default function Sidebar() {
                 role="presentation"
                 // Row padding (4px each side) plus the cards' gap spaces Work cards 10px apart.
                 density={sidebarMode === "tasks" ? "cards" : "rows"}
+                onKeyDown={sidebarMode === "tasks" ? handleWorkListKeyDown : undefined}
                 grow={sidebarListItems.length > 0}
                 className={cn(
                   // An action sweep owns the pointer: rows it passes over
@@ -4932,13 +5157,9 @@ export default function Sidebar() {
                           serverConfigs.get(thread.environmentId)?.environment.capabilities
                             .threadSnooze === true
                         }
-                        // The group heading names the repository in Work; the
-                        // flat Settled list names it on the card.
-                        repositoryName={
-                          sidebarMode === "tasks" && section !== "settled"
-                            ? null
-                            : repositoryNameFor(thread)
-                        }
+                        // Work cards name their project and repository on their first line.
+                        repositoryName={repositoryNameFor(thread)}
+                        onRepositoryContextMenu={handleRepositoryContextMenu}
                         folder={sidebarMode === "tasks" ? workFolderFor(thread) : folderFor(thread)}
                         sweepAction={actionSweep?.keys.has(threadKey) ? actionSweep.action : null}
                         snoozeWakeLabelText={
@@ -5005,7 +5226,39 @@ export default function Sidebar() {
                   // shows active work (and drafts), each other one only its shelf.
                   const shownSection = sidebarMode === "tasks" ? (openShelf ?? "active") : null;
                   const items: ReactNode[] = [];
-                  // Work's drafts go into their repository groups below.
+                  // Work is one flat list of cards in the order the user
+                  // arranged (workRows), drafts newest at the bottom by the
+                  // dock; each card names its project and repository itself.
+                  if (workRows !== null) {
+                    for (const entry of workRows.threads) {
+                      const thread = threadByKey.get(entry.key);
+                      if (thread) items.push(renderThreadRow(thread, entry.section));
+                    }
+                    for (const draft of workRows.drafts) {
+                      const projectKey = `${draft.environmentId}:${draft.projectId}` as const;
+                      items.push(
+                        <SidebarWorkDraftCard
+                          key={`draft:${draft.draftId}`}
+                          draftId={draft.draftId}
+                          branch={draft.branch}
+                          project={projectByKey.get(projectKey) ?? null}
+                          projectDisplayName={projectDisplayNameByKey.get(projectKey) ?? null}
+                          environmentId={draft.environmentId}
+                          threadId={draft.threadId}
+                          repositoryName={repositoryNameFor(draft)}
+                          repositoryFolder={repositoryFolderFor(
+                            draft.environmentId,
+                            draft.projectId,
+                          )}
+                          folderForLabel={folderForLabel}
+                          isActive={draft.draftId === routeDraftIdForRows}
+                          onNavigate={navigateToDraft}
+                          onContextMenu={handleDraftContextMenu}
+                        />,
+                      );
+                    }
+                    return items;
+                  }
                   if (shownSection === null)
                     items.push(
                       <SidebarDraftBlock
@@ -5021,61 +5274,46 @@ export default function Sidebar() {
                     );
                   const chatDateGroupOf =
                     sidebarMode === "chats" ? createChatDateGrouper(new Date()) : null;
-                  // Work groups its cards under their repository, newest at the
-                  // bottom beside the search dock: groups by latest activity, rows
-                  // within a group oldest to newest.
                   // Settled is one flat list, newest settled at the bottom.
-                  const repositoryGroups =
-                    shownSection !== null && shownSection !== "settled"
-                      ? new Map<
-                          string,
-                          {
-                            name: string | null;
-                            /** The repository its heading's menu acts on. */
-                            projectRef: ScopedProjectRef;
-                            rows: ReactNode[];
-                            times: number[];
-                          }
-                        >()
-                      : null;
                   const flatShelfRows: ReactNode[] | null = shownSection === "settled" ? [] : null;
                   for (const item of sidebarListItems) {
                     if (item.kind === "thread") {
-                      if (shownSection === "attention") {
-                        if (item.section !== "active" || !attentionThreadKeys.has(item.key)) {
-                          continue;
-                        }
-                      } else if (shownSection !== null && item.section !== shownSection) {
-                        continue;
-                      }
+                      if (shownSection !== null && item.section !== shownSection) continue;
                       const thread = threadByKey.get(item.key)!;
                       if (flatShelfRows) {
                         flatShelfRows.push(renderThreadRow(thread, item.section));
                         continue;
                       }
-                      if (repositoryGroups) {
-                        const name = repositoryNameFor(thread);
-                        const groupKey = name ?? "";
-                        const group = repositoryGroups.get(groupKey) ?? {
-                          name,
-                          projectRef: scopeProjectRef(thread.environmentId, thread.projectId),
-                          rows: [],
-                          times: [],
-                        };
-                        group.rows.push(renderThreadRow(thread, item.section));
-                        group.times.push(sidebarThreadActivityMs(thread));
-                        repositoryGroups.set(groupKey, group);
-                        continue;
-                      }
                       const dateGroup =
                         item.section === "active" ? chatDateGroupOf?.(thread) : null;
                       if (dateGroup) {
+                        const collapsed = collapsedInSpace.includes(dateGroup);
                         items.push(
                           <SidebarGroupHeader
                             key={`chat-date:${dateGroup}`}
                             label={CHAT_DATE_GROUP_LABELS[dateGroup]}
+                            count={chatDateGroupCounts.get(dateGroup) ?? 0}
+                            collapse={{
+                              open: !collapsed,
+                              onToggle: () => toggleSection(dateGroup),
+                              ariaLabel: `${CHAT_DATE_GROUP_LABELS[dateGroup]}, ${collapsed ? "expand" : "collapse"}`,
+                            }}
                           />,
                         );
+                      }
+                      // A folded date group keeps only the open chat.
+                      const chatGroup =
+                        item.section === "active" && sidebarMode === "chats"
+                          ? chatDateGroupByKey.get(item.key)
+                          : undefined;
+                      if (
+                        chatGroup !== undefined &&
+                        !rowShowsInSection({
+                          collapsed: collapsedInSpace.includes(chatGroup),
+                          isOpen: item.key === routeThreadKey,
+                        })
+                      ) {
+                        continue;
                       }
                       items.push(renderThreadRow(thread, item.section));
                       continue;
@@ -5088,11 +5326,8 @@ export default function Sidebar() {
                           <SidebarSectionHeader
                             key="working-shelf-header"
                             marker="working-header"
-                            label={
-                              workingShelfExpanded
-                                ? "Working"
-                                : `Working (${workingThreads.length})`
-                            }
+                            label="Working"
+                            count={workingThreads.length}
                             toggle={{
                               expanded: workingShelfExpanded,
                               onToggle: toggleWorkingShelf,
@@ -5107,11 +5342,8 @@ export default function Sidebar() {
                           <SidebarSectionHeader
                             key="snoozed-shelf-header"
                             marker="snoozed-header"
-                            label={
-                              snoozedShelfExpanded
-                                ? "Snoozed"
-                                : `Snoozed (${snoozedThreads.length})`
-                            }
+                            label="Snoozed"
+                            count={snoozedThreads.length}
                             toggle={{
                               expanded: snoozedShelfExpanded,
                               onToggle: toggleSnoozedShelf,
@@ -5126,11 +5358,8 @@ export default function Sidebar() {
                           <SidebarSectionHeader
                             key="settled-shelf-header"
                             marker="settled-header"
-                            label={
-                              settledShelfExpanded
-                                ? "Settled"
-                                : `Settled (${settledThreads.length})`
-                            }
+                            label="Settled"
+                            count={settledThreads.length}
                             toggle={{
                               expanded: settledShelfExpanded,
                               onToggle: toggleSettledShelf,
@@ -5138,92 +5367,6 @@ export default function Sidebar() {
                           />,
                         );
                         break;
-                    }
-                  }
-                  if (repositoryGroups && shownSection === "active") {
-                    // Drafts join their repository's group as cards, placed
-                    // by when they were started among the group's tasks
-                    // (rows run newest first until the group is reversed).
-                    for (const draft of workDrafts) {
-                      const name = repositoryNameFor(draft);
-                      const groupKey = name ?? "";
-                      const projectKey = `${draft.environmentId}:${draft.projectId}` as const;
-                      const card = (
-                        <SidebarWorkDraftCard
-                          key={`draft:${draft.draftId}`}
-                          draftId={draft.draftId}
-                          branch={draft.branch}
-                          project={projectByKey.get(projectKey) ?? null}
-                          projectDisplayName={projectDisplayNameByKey.get(projectKey) ?? null}
-                          environmentId={draft.environmentId}
-                          repositoryFolder={repositoryFolderFor(
-                            draft.environmentId,
-                            draft.projectId,
-                          )}
-                          folderForLabel={folderForLabel}
-                          isActive={draft.draftId === routeDraftIdForRows}
-                          onNavigate={navigateToDraft}
-                          onContextMenu={handleDraftContextMenu}
-                        />
-                      );
-                      const group = repositoryGroups.get(groupKey);
-                      if (!group) {
-                        // A draft's own group sits with the newest groups.
-                        const entries = [...repositoryGroups];
-                        repositoryGroups.clear();
-                        repositoryGroups.set(groupKey, {
-                          name,
-                          projectRef: scopeProjectRef(draft.environmentId, draft.projectId),
-                          rows: [card],
-                          times: [draft.createdAtMs],
-                        });
-                        for (const [key, value] of entries) repositoryGroups.set(key, value);
-                        continue;
-                      }
-                      const index = group.times.findIndex((time) => time < draft.createdAtMs);
-                      const at = index === -1 ? group.rows.length : index;
-                      group.rows.splice(at, 0, card);
-                      group.times.splice(at, 0, draft.createdAtMs);
-                    }
-                  }
-                  if (repositoryGroups) {
-                    for (const [groupKey, group] of [...repositoryGroups].toReversed()) {
-                      items.push(
-                        <SidebarGroupHeader
-                          key={`repository:${groupKey}`}
-                          icon={
-                            group.name ? (
-                              <RepositoryGroupIcon
-                                project={
-                                  projectByKey.get(
-                                    `${group.projectRef.environmentId}:${group.projectRef.projectId}`,
-                                  ) ?? null
-                                }
-                                name={group.name}
-                              />
-                            ) : (
-                              // The same mark as "No repository" in the pickers and palette.
-                              <MessageSquareDashedIcon aria-hidden className="size-3.5 shrink-0" />
-                            )
-                          }
-                          label={group.name ?? "No repository"}
-                          mono
-                          // Right-click opens the repository's own menu (new
-                          // thread, folder, settings); scratch Work has none.
-                          onContextMenu={
-                            group.name
-                              ? (event) => {
-                                  event.preventDefault();
-                                  handleRepositoryContextMenu(group.projectRef, {
-                                    x: event.clientX,
-                                    y: event.clientY,
-                                  });
-                                }
-                              : undefined
-                          }
-                        />,
-                        ...group.rows.toReversed(),
-                      );
                     }
                   }
                   if (flatShelfRows) items.push(...flatShelfRows.toReversed());

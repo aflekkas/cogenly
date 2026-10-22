@@ -53,6 +53,7 @@ export function SidebarList({
   );
 }
 
+// T3's section tones: muted at rest, info for states like Snoozed.
 const headerTones = {
   muted: { label: "text-sidebar-muted-foreground/60", line: "bg-sidebar-border/60" },
   info: { label: "text-blue-600 dark:text-blue-400", line: "bg-blue-500/20 dark:bg-blue-400/15" },
@@ -61,13 +62,18 @@ const headerTones = {
 const headerContentClassName = "flex h-full min-w-0 flex-1 items-center gap-2 px-2";
 
 /**
- * A group heading in a sidebar list ("Today", a repository, a project, the
- * Working shelf). With `collapse` the whole heading is the disclosure button
- * and ends in the shared `DisclosureChevron`; without, it is a static label. Right-click
- * goes to `onContextMenu`, where a group's actions live (no inline buttons).
+ * A section heading in a sidebar list ("Today", an Agents project, Snoozed),
+ * after T3's collapsible sections: label, "(N)" count, a hairline, and with
+ * `collapse` a disclosure chevron, the whole heading being the button; without,
+ * it is a static label. The count updates with the rows it counts and stays
+ * visible while the group is shut. Right-click goes to `onContextMenu`, where a
+ * group's actions live (no inline buttons). Collapsing hides the group's rows
+ * from the flat list; the list's own motion fades them out while the rows
+ * below glide up (opacity only under reduced motion).
  */
 export function SidebarGroupHeader({
   label,
+  count,
   icon,
   mono = false,
   tone = "muted",
@@ -78,6 +84,8 @@ export function SidebarGroupHeader({
   ...rest
 }: Omit<HTMLAttributes<HTMLElement>, "children" | "onContextMenu"> & {
   label: ReactNode;
+  /** How many rows the group holds, shown as "(N)" after the label. */
+  count?: number | undefined;
   /** A leading glyph or badge, sized by the caller (size-3.5 icons). */
   icon?: ReactNode;
   /** Code names (repositories) read in monospace. */
@@ -105,6 +113,7 @@ export function SidebarGroupHeader({
       <span className={cn("min-w-0 shrink truncate", mono && "font-mono font-normal")}>
         {label}
       </span>
+      {count !== undefined ? <span className="-ms-1 shrink-0 tabular-nums">({count})</span> : null}
       <span aria-hidden className={cn("h-px min-w-2 flex-1", tones.line)} />
     </>
   );

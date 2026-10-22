@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   chatDateGroup,
   classifySidebarThreadMode,
+  countChatListGroups,
   createChatDateGrouper,
   orderChatsWithPins,
   applyPinnedDragOrder,
@@ -223,6 +224,19 @@ describe("sortChatsByActivity and createChatDateGrouper", () => {
   it("labels only the first row of each date group", () => {
     const groupOf = createChatDateGrouper(now);
     expect(sortChatsByActivity(chats).map(groupOf)).toEqual(["today", null, "yesterday", "older"]);
+  });
+
+  it("counts every chat under its heading, pinned ones under Pinned", () => {
+    const pinned = {
+      ...chat("pinned", null, new Date(2026, 9, 15, 10).toISOString()),
+      pinnedAt: "x",
+    };
+    expect(Object.fromEntries(countChatListGroups([...chats, pinned], now))).toEqual({
+      older: 1,
+      today: 2,
+      yesterday: 1,
+      pinned: 1,
+    });
   });
 });
 

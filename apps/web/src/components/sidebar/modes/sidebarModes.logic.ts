@@ -148,6 +148,38 @@ export function chatDateGroup(timestamp: string, now: Date): ChatDateGroup {
   return "older";
 }
 
+/** The heading a chat sits under: Pinned whatever its date, else its date group. */
+export function chatListGroupOf(
+  thread: {
+    readonly latestUserMessageAt: string | null;
+    readonly updatedAt: string;
+    readonly pinnedAt?: string | null;
+  },
+  now: Date,
+): ChatListGroup {
+  return thread.pinnedAt != null ? "pinned" : chatDateGroup(chatActivityAt(thread), now);
+}
+
+/**
+ * Each heading's chat count, for the counts on the Chats date headings. Reads
+ * the whole list, not the rendered page, so a heading counts every chat it holds.
+ */
+export function countChatListGroups(
+  threads: ReadonlyArray<{
+    readonly latestUserMessageAt: string | null;
+    readonly updatedAt: string;
+    readonly pinnedAt?: string | null;
+  }>,
+  now: Date,
+): Map<ChatListGroup, number> {
+  const counts = new Map<ChatListGroup, number>();
+  for (const thread of threads) {
+    const group = chatListGroupOf(thread, now);
+    counts.set(group, (counts.get(group) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /**
  * The Chats list order: pinned chats first in their arranged order
  * (`pinOrderKey`), then every other chat newest first. A pinned chat is
@@ -230,8 +262,7 @@ export function createChatDateGrouper(now: Date) {
     readonly updatedAt: string;
     readonly pinnedAt?: string | null;
   }): ChatListGroup | null => {
-    const group: ChatListGroup =
-      thread.pinnedAt != null ? "pinned" : chatDateGroup(chatActivityAt(thread), now);
+    const group = chatListGroupOf(thread, now);
     if (group === previous) return null;
     previous = group;
     return group;

@@ -304,6 +304,9 @@ export function useThreadActions() {
   const reorderPinnedThreadMutation = useOrchestrationCommand(threadEnvironment.reorderPin, {
     reportFailure: false,
   });
+  const reorderActiveThreadMutation = useOrchestrationCommand(threadEnvironment.reorderActive, {
+    reportFailure: false,
+  });
   const snoozeThreadMutation = useOrchestrationCommand(threadEnvironment.snooze, {
     reportFailure: false,
   });
@@ -801,6 +804,16 @@ export function useThreadActions() {
     [reorderPinnedThreadMutation],
   );
 
+  /** Moves an active Work card to `orderKey`, a key between its new neighbours. */
+  const reorderActiveThread = useCallback(
+    async (target: ScopedThreadRef, orderKey: string) =>
+      reorderActiveThreadMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId, orderKey },
+      }),
+    [reorderActiveThreadMutation],
+  );
+
   const unsnoozeThread = useCallback(
     async (target: ScopedThreadRef) => {
       if (!readEnvironmentSupportsSnooze(target.environmentId)) {
@@ -914,6 +927,7 @@ export function useThreadActions() {
       pinThread,
       unpinThread,
       reorderPinnedThread,
+      reorderActiveThread,
       markThreadUnread,
       markThreadRead,
     }),
@@ -924,6 +938,7 @@ export function useThreadActions() {
       markThreadRead,
       markThreadUnread,
       pinThread,
+      reorderActiveThread,
       reorderPinnedThread,
       settleThread,
       snoozeThread,

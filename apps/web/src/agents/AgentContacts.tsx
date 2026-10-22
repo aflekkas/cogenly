@@ -192,6 +192,7 @@ export function AgentContacts({
             groupKey={group.key}
             folder={group.folder}
             heading={grouped}
+            count={group.agents.length}
             open={!collapsedGroupKeys.includes(group.key)}
             onToggle={() => setCollapsedGroupKeys((keys) => toggleCollapsedGroup(keys, group.key))}
             onCreate={

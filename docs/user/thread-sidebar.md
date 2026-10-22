@@ -53,8 +53,8 @@ asks, and you **Approve** or **Reject**. Approvals expire after seven days.
 
 **Start Work…** at the top of Details starts a coding session in any repository, its
 home repository first. Without the start Work permission the agent would ask you
-first; starting it yourself approves that one session. The session runs in a new worktree and appears in **Work** under its
-repository, marked with the agent's name.
+first; starting it yourself approves that one session. The session runs in a new worktree and appears in **Work**, named by its
+repository and marked with the agent's name.
 The command palette also has **Start Work with …** and **Open items for …** for
 each agent.
 
@@ -78,7 +78,7 @@ waits a little longer before the next one. To stop a trigger, turn it off under
 **Schedule**. Messages sent while an agent is busy use its normal queue or steering
 behavior.
 
-Coding work an agent starts appears in **Work** with your own threads, under its
+Coding work an agent starts appears in **Work** with your own threads, named by its
 repository and marked with the agent's name.
 
 ## Start Work from a chat
@@ -119,7 +119,8 @@ if that project exists there. Otherwise it selects an environment that has it.
 ### Chats
 
 The **Chats** tab lists threads without a project, newest first under **Today**,
-**Yesterday**, **Previous 7 days** and **Older**. **New chat** beside search, `mod+n`
+**Yesterday**, **Previous 7 days** and **Older**. Each heading shows how many chats it
+holds; click it to fold the group away, and the sidebar remembers that per tab. **New chat** beside search, `mod+n`
 while Chats is open, and **New chat** in the command palette all start one without a
 project; they never open a repository. Opening **Chats** returns to the chat you last
 had open there; the first time, or once that chat is archived or deleted, it shows your
@@ -210,10 +211,12 @@ edge to pin a thread. Section labels stay readable for the whole drag, and the s
 thread is over takes the accent color. Section labels also
 identify empty sections and a collapsed settled shelf.
 
-Drag within the pinned or active section to change its order. Other rows slide aside to show the
-spot where the thread will land. Drops into either section keep the position you choose.
-**Move up** and **Move down** are also available in the thread menu. The server
-saves the order, so it survives a refresh and appears on your other connected devices.
+In **Work**, drag a card up or down in the first filter to change its place; the other cards
+slide aside to show where it will land. With a card focused, `Alt+Up` and `Alt+Down` move it one
+place. New Work arrives at the bottom, beside search. The server saves the order, so it survives
+a refresh and appears on your other connected devices. **Needs you** lists its tasks in the same
+order; **Snoozed** lists them by when they come back and **Settled** by when they settled, so
+cards don't move there.
 
 On web and desktop, the list also animates section changes made with thread actions such as
 **Pin**, **Settle**, and **Snooze**. These transitions respect your system's reduced-motion
@@ -323,10 +326,10 @@ To file a thread, right-click it and choose **Move to folder**, or run **Move to
 project. A filed chat also gets
 [project context](./memory-and-export.md#project-context-in-chats).
 
-**Chats** stays one list of titles by date. **Work** is one list, newest activity
-first. Hover a row to see its project, or right-click it and open the project from
-**Move to folder**. Right-click a repository heading in **Work** for a new thread in that
-repository, its project, and **Repository settings**. In **Agents**, right-click a project
+**Chats** stays one list of titles by date. **Work** is one list of cards in the order you
+arrange. Each card's first line names its project and repository ("Spawn Partners ·
+platform"), the project alone for Work without a repository, or **No project**. Right-click
+that line for a new thread in the repository, its project, and **Repository settings**. In **Agents**, right-click a project
 heading for **New Agent in** that project. To start a thread on the open
 thread's branch, run **New thread on** _branch_ from the command palette.
 
