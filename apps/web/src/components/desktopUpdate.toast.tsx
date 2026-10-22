@@ -54,7 +54,7 @@ export function showDesktopUpdateDownloadedToast(
     toastManager.add({
       type: "success",
       title: "Update download opened",
-      description: "Install the DMG manually to update this unsigned macOS app.",
+      description: "Install the DMG manually to update this Mac.",
     });
     return;
   }

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   desktopUpdateDownloadUrl,
   isStagingDesktopVersion,
-  requiresManualMacUpdate,
+  usesUnsignedMacInstall,
+  desktopUpdateAssetUrl,
   resolveDefaultDesktopUpdateChannel,
   resolveDesktopUpdateFeed,
 } from "./updateChannels.ts";
@@ -26,10 +27,13 @@ describe("desktop update channels", () => {
     expect(isStagingDesktopVersion("1.2.3-foo-staging.20261019.42")).toBe(false);
     expect(isStagingDesktopVersion("1.2.3-staging.42")).toBe(false);
   });
-  it("uses the DMG download for unsigned macOS apps and keeps signed installs automatic", () => {
-    expect(requiresManualMacUpdate("darwin", false)).toBe(true);
-    expect(requiresManualMacUpdate("darwin", true)).toBe(false);
-    expect(requiresManualMacUpdate("linux", false)).toBe(false);
+  it("installs unsigned macOS updates in-app and keeps Squirrel for signed installs", () => {
+    expect(usesUnsignedMacInstall("darwin", false)).toBe(true);
+    expect(usesUnsignedMacInstall("darwin", true)).toBe(false);
+    expect(usesUnsignedMacInstall("linux", false)).toBe(false);
+    expect(desktopUpdateAssetUrl("1.2.3", "Cogenly-1.2.3-arm64.zip")).toBe(
+      "https://github.com/aflekkas/cogenly/releases/download/v1.2.3/Cogenly-1.2.3-arm64.zip",
+    );
     expect(desktopUpdateDownloadUrl("1.2.3", "http://localhost:3000/")).toBe(
       "http://localhost:3000/Cogenly-1.2.3-arm64.dmg",
     );

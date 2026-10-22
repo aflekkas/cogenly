@@ -2,7 +2,7 @@ import { expect, it } from "vite-plus/test";
 import { nextRemoteDesktopUpdateStep } from "./remoteUpdateFlow.ts";
 import { createInitialDesktopUpdateState } from "./updateMachine.ts";
 
-it("ends remote updates with actionable guidance when unsigned macOS needs a DMG", () => {
+it("ends remote updates with actionable guidance when an unsigned Mac needs a manual DMG install", () => {
   const state = {
     ...createInitialDesktopUpdateState(
       "1.2.2",
@@ -19,6 +19,6 @@ it("ends remote updates with actionable guidance when unsigned macOS needs a DMG
     action: "done",
     outcome: "failed",
     reason:
-      "This macOS app is unsigned. Download and install the update from Settings on that Mac.",
+      "This Mac cannot install the update in place. Download and install it from Settings on that Mac.",
   });
 });

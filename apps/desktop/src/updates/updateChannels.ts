@@ -19,13 +19,23 @@ export function resolveDesktopUpdateFeed(channel: DesktopUpdateChannel) {
   };
 }
 
-export function requiresManualMacUpdate(platform: NodeJS.Platform, signed: boolean): boolean {
+/** Unsigned macOS apps cannot use Squirrel.Mac, so they install updates themselves. */
+export function usesUnsignedMacInstall(platform: NodeJS.Platform, signed: boolean): boolean {
   return platform === "darwin" && !signed;
 }
 
-export function desktopUpdateDownloadUrl(version: string, genericFeedUrl?: string): string {
+/** URL of one release asset, from the GitHub release or a generic (mock) feed. */
+export function desktopUpdateAssetUrl(
+  version: string,
+  fileName: string,
+  genericFeedUrl?: string,
+): string {
   const baseUrl =
     genericFeedUrl?.replace(/\/+$/, "") ??
     `https://github.com/aflekkas/cogenly/releases/download/v${encodeURIComponent(version)}`;
-  return `${baseUrl}/Cogenly-${encodeURIComponent(version)}-arm64.dmg`;
+  return `${baseUrl}/${encodeURIComponent(fileName)}`;
+}
+
+export function desktopUpdateDownloadUrl(version: string, genericFeedUrl?: string): string {
+  return desktopUpdateAssetUrl(version, `Cogenly-${version}-arm64.dmg`, genericFeedUrl);
 }

@@ -82,7 +82,7 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
     return `Update ${state.notAppliedVersion} did not apply. Click to retry.`;
   }
   if (state.status === "available" && state.manualDownloadUrl) {
-    return "Update available — download. Install the DMG manually; this macOS app is unsigned.";
+    return state.message ?? "Update available — download. Install the DMG manually.";
   }
   if (state.status === "available") {
     return `Update ${state.availableVersion ?? "available"} ready to download`;

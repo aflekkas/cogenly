@@ -29,6 +29,7 @@ import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -38,9 +39,22 @@ import { normalizeDesktopUpdateReleaseNotes } from "./releaseNotes.ts";
 import {
   resolveDefaultDesktopUpdateChannel,
   resolveDesktopUpdateFeed,
-  requiresManualMacUpdate,
+  usesUnsignedMacInstall,
+  desktopUpdateAssetUrl,
   desktopUpdateDownloadUrl,
 } from "./updateChannels.ts";
+import {
+  DESKTOP_UPDATE_LAUNCHED_MARKER_FILE,
+  isWritableMacInstall,
+  prepareUnsignedMacUpdate,
+  resolveMacAppBundlePath,
+  selectMacUpdateZip,
+  startUnsignedMacSwap,
+  UnsignedMacUpdateError,
+  unsignedMacInstallBlocker,
+  type MacUpdateZip,
+  type PreparedMacUpdate,
+} from "./unsignedMacUpdate.ts";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -357,8 +371,9 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const electronShell = yield* ElectronShell.ElectronShell;
-  // Build metadata is deliberately conservative: old/unmarked macOS apps
-  // must download a DMG rather than attempt Squirrel's signed-only install.
+  const electronApp = yield* ElectronApp.ElectronApp;
+  // Build metadata is deliberately conservative: old/unmarked macOS apps are
+  // treated as unsigned and never attempt Squirrel's signed-only install.
   const updatesSigned = yield* fileSystem
     .readFileString(environment.path.join(environment.appPath, "package.json"))
     .pipe(
@@ -370,7 +385,19 @@ export const make = Effect.gen(function* () {
       Effect.map((metadata) => metadata.cogenlyUpdatesSigned),
       Effect.orElseSucceed(() => false),
     );
-  const manualMacUpdate = requiresManualMacUpdate(environment.platform, updatesSigned);
+  const unsignedMacInstall = usesUnsignedMacInstall(environment.platform, updatesSigned);
+  const macBundlePath = resolveMacAppBundlePath(environment.resourcesPath);
+  const unsignedUpdateWorkDir = environment.path.join(
+    environment.baseDir,
+    "caches",
+    "desktop-update",
+  );
+  // The zip the feed offers for the available version, and the extracted
+  // bundle once downloaded. Unsigned macOS only.
+  const unsignedZipRef = yield* Ref.make(
+    Option.none<{ version: string; url: string; zip: MacUpdateZip }>(),
+  );
+  const preparedMacUpdateRef = yield* Ref.make(Option.none<PreparedMacUpdate>());
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
   const activeUpdateActionRef = yield* Ref.make<Option.Option<UpdateAction>>(Option.none());
@@ -549,6 +576,28 @@ export const make = Effect.gen(function* () {
         );
   });
 
+  const downloadUnsignedMacUpdate = Effect.gen(function* () {
+    const offered = yield* Ref.get(unsignedZipRef);
+    if (Option.isNone(offered) || macBundlePath === null) {
+      return yield* new UnsignedMacUpdateError({
+        step: "download",
+        detail: "the update feed listed no zip for this Mac",
+      });
+    }
+    yield* Ref.set(preparedMacUpdateRef, Option.none());
+    yield* logUpdaterInfo("downloading unsigned macOS update", { version: offered.value.version });
+    const prepared = yield* prepareUnsignedMacUpdate({
+      version: offered.value.version,
+      url: offered.value.url,
+      zip: offered.value.zip,
+      workDir: unsignedUpdateWorkDir,
+      currentBundlePath: macBundlePath,
+      onProgress: (percent) => handleDownloadProgress({ percent }),
+    });
+    yield* Ref.set(preparedMacUpdateRef, Option.some(prepared));
+    yield* handleUpdateDownloaded({ version: prepared.version });
+  });
+
   const downloadAvailableUpdate = Effect.gen(function* () {
     const state = yield* Ref.get(updateStateRef);
     if (!(yield* Ref.get(updaterConfiguredRef)) || state.status !== "available") {
@@ -571,6 +620,10 @@ export const make = Effect.gen(function* () {
 
     return yield* Effect.gen(function* () {
       yield* setState(reduceDesktopUpdateStateOnDownloadStart(state));
+      if (unsignedMacInstall) {
+        yield* downloadUnsignedMacUpdate;
+        return { accepted: true, completed: true };
+      }
       yield* electronUpdater.setDisableDifferentialDownload(
         isArm64HostRunningIntelBuild(environment.runtimeInfo),
       );
@@ -579,6 +632,19 @@ export const make = Effect.gen(function* () {
       return { accepted: true, completed: true };
     }).pipe(
       Effect.catchTags({
+        UnsignedMacUpdateError: Effect.fn("desktop.updates.handleUnsignedDownloadFailure")(
+          function* (error) {
+            yield* updateState((current) =>
+              reduceDesktopUpdateStateOnDownloadFailure(current, error.message),
+            );
+            yield* logUpdaterError(error.message, {
+              errorTag: error._tag,
+              step: error.step,
+              cause: describeUpdateErrorCause(error.cause),
+            });
+            return { accepted: true, completed: false };
+          },
+        ),
         ElectronUpdaterDownloadUpdateError: Effect.fn("desktop.updates.handleDownloadFailure")(
           function* (error) {
             yield* updateState((current) =>
@@ -655,6 +721,19 @@ export const make = Effect.gen(function* () {
         logUpdaterWarning("Could not record the update install.", { errorTag: error._tag }),
       ),
     );
+  const launchedMarkerPath = environment.path.join(
+    updateRestartMarkerDir,
+    DESKTOP_UPDATE_LAUNCHED_MARKER_FILE,
+  );
+  // Tells a waiting unsigned-update helper that this version got through startup.
+  const writeLaunchedMarker = fileSystem
+    .makeDirectory(updateRestartMarkerDir, { recursive: true })
+    .pipe(
+      Effect.andThen(fileSystem.writeFileString(launchedMarkerPath, environment.appVersion)),
+      Effect.catch((error) =>
+        logUpdaterWarning("Could not write the update launch marker.", { errorTag: error._tag }),
+      ),
+    );
   const removeInstallRecord = fileSystem
     .remove(installRecordPath, { force: true })
     .pipe(Effect.ignore);
@@ -728,6 +807,39 @@ export const make = Effect.gen(function* () {
     );
   });
 
+  const hasPreparedMacUpdate = (version: string | null) =>
+    Ref.get(preparedMacUpdateRef).pipe(
+      Effect.map((prepared) => Option.isSome(prepared) && prepared.value.version === version),
+    );
+
+  // Hands the swap to the detached helper, then quits normally. The helper
+  // starts the new bundle with this app's environment once this process is
+  // gone, and restores and restarts the old bundle the same way if the new
+  // one never reports a started launch.
+  const installUnsignedMacUpdate = Effect.gen(function* () {
+    const prepared = yield* Ref.get(preparedMacUpdateRef);
+    if (Option.isNone(prepared) || macBundlePath === null) {
+      return yield* new UnsignedMacUpdateError({
+        step: "install",
+        detail: "no downloaded update is ready",
+      });
+    }
+    yield* startUnsignedMacSwap({
+      prepared: prepared.value,
+      appPid: process.pid,
+      bundlePath: macBundlePath,
+      currentExecutable: environment.path.relative(macBundlePath, process.execPath),
+      workDir: unsignedUpdateWorkDir,
+      launchedMarkerPath: launchedMarkerPath,
+      logPath: environment.path.join(environment.logDir, "desktop-update-helper.log"),
+      env: process.env,
+    });
+    yield* logUpdaterInfo("quitting for unsigned macOS update", {
+      version: prepared.value.version,
+    });
+    yield* electronApp.quit;
+  });
+
   const installDownloadedUpdate = (expectedVersion?: string) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -744,7 +856,7 @@ export const make = Effect.gen(function* () {
               if (
                 (yield* Ref.get(desktopState.quitting)) ||
                 !(yield* Ref.get(updaterConfiguredRef)) ||
-                manualMacUpdate ||
+                (unsignedMacInstall && !(yield* hasPreparedMacUpdate(state.downloadedVersion))) ||
                 !hasExpectedDownload
               ) {
                 return "refused" as const;
@@ -796,6 +908,10 @@ export const make = Effect.gen(function* () {
             (instance) => instance.stop({ timeout: Duration.seconds(5) }),
             { concurrency: "unbounded" },
           );
+          if (unsignedMacInstall) {
+            yield* installUnsignedMacUpdate;
+            return { accepted: true, completed: false, failed: false };
+          }
           yield* electronUpdater.quitAndInstall({
             isSilent: true,
             isForceRunAfter: true,
@@ -803,6 +919,17 @@ export const make = Effect.gen(function* () {
           return { accepted: true, completed: false, failed: false };
         }).pipe(
           Effect.catchTags({
+            UnsignedMacUpdateError: Effect.fn("desktop.updates.handleUnsignedInstallFailure")(
+              function* (error) {
+                yield* recoverFailedInstall(error.message);
+                yield* logUpdaterError(error.message, {
+                  errorTag: error._tag,
+                  step: error.step,
+                  cause: describeUpdateErrorCause(error.cause),
+                });
+                return { accepted: true, completed: false, failed: true };
+              },
+            ),
             ElectronUpdaterQuitAndInstallError: Effect.fn("desktop.updates.handleInstallFailure")(
               function* (error) {
                 yield* recoverFailedInstall(error.message);
@@ -891,6 +1018,29 @@ export const make = Effect.gen(function* () {
     );
   }).pipe(Effect.withSpan("desktop.updates.startPollers"));
 
+  // Records the zip to install in place, or returns why this app has to fall
+  // back to a manual DMG install.
+  const planUnsignedMacUpdate = Effect.fn("desktop.updates.planUnsignedMacUpdate")(function* (
+    info: unknown,
+    version: string,
+    downloadBaseUrl: string | undefined,
+  ) {
+    const writable = macBundlePath === null ? false : yield* isWritableMacInstall(macBundlePath);
+    const blocker = unsignedMacInstallBlocker({ bundlePath: macBundlePath, writable });
+    const zip = selectMacUpdateZip(info, environment.runtimeInfo.hostArch);
+    if (blocker !== null || zip === null) {
+      yield* Ref.set(unsignedZipRef, Option.none());
+      const reason = blocker ?? "The update feed listed no zip for this Mac.";
+      yield* logUpdaterInfo("unsigned macOS update needs a manual install", { reason });
+      return reason;
+    }
+    yield* Ref.set(
+      unsignedZipRef,
+      Option.some({ version, url: desktopUpdateAssetUrl(version, zip.url, downloadBaseUrl), zip }),
+    );
+    return null;
+  });
+
   const handleUpdateAvailable = Effect.fn("desktop.updates.handleUpdateAvailable")(function* (
     raw: unknown,
   ) {
@@ -921,19 +1071,23 @@ export const make = Effect.gen(function* () {
             info.version,
             state.channel,
           );
-          yield* setState({
-            ...reduceDesktopUpdateStateOnUpdateAvailable(
+          const { manualDownloadUrl: _previousManualUrl, ...available } =
+            reduceDesktopUpdateStateOnUpdateAvailable(
               state,
               info.version,
               checkedAt,
               releaseNotes,
               omittedReleaseCount,
-            ),
-            ...(manualMacUpdate
+            );
+          const manualReason = unsignedMacInstall
+            ? yield* planUnsignedMacUpdate(raw, info.version, downloadBaseUrl)
+            : null;
+          yield* setState({
+            ...available,
+            ...(manualReason !== null
               ? {
                   manualDownloadUrl: desktopUpdateDownloadUrl(info.version, downloadBaseUrl),
-                  message:
-                    "Update available — download. Unsigned macOS builds require installing the DMG manually.",
+                  message: `Update available — download. ${manualReason}`,
                 }
               : {}),
           });
@@ -1090,6 +1244,7 @@ export const make = Effect.gen(function* () {
       const appUpdateYmlConfig = yield* readAppUpdateYml;
       yield* Ref.set(appUpdateYmlConfigRef, appUpdateYmlConfig);
 
+      if (unsignedMacInstall && environment.isPackaged) yield* writeLaunchedMarker;
       const notAppliedVersion = yield* readNotAppliedInstallVersion;
       yield* Ref.set(notAppliedVersionRef, notAppliedVersion);
       if (Option.isSome(notAppliedVersion)) {

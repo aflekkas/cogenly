@@ -57,7 +57,7 @@ export function nextRemoteDesktopUpdateStep(
       action: "done",
       outcome: "failed",
       reason:
-        "This macOS app is unsigned. Download and install the update from Settings on that Mac.",
+        "This Mac cannot install the update in place. Download and install it from Settings on that Mac.",
     };
   }
   // An install of this version already failed to apply here. Installing it

@@ -39,6 +39,15 @@ The confirmation counts the running threads that the restarts will interrupt,
 and how many can resume afterwards. See **Continue threads after restarts**
 below.
 
+## Desktop app on Mac
+
+The Mac app installs its own updates and restarts into the new version. To do
+that, it must run from a folder you can write to, such as Applications. If you
+open it straight from the disk image, or macOS runs it from a temporary copy,
+the update button opens the new disk image instead. Drag Cogenly to
+Applications and open it from there. If the new version cannot start, Cogenly
+puts the previous version back and tells you the update did not apply.
+
 ## Before you update
 
 Server updates restart the connection and can interrupt active agents and

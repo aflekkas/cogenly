@@ -58,6 +58,35 @@ The first release in a channel uses the source commit's first-parent history,
 since there is no previous tag. Every release body records the source SHA,
 channel, signing mode, and promotion source when applicable.
 
+## Unsigned builds
+
+Cogenly has no Apple Developer account yet, so releases build unsigned.
+electron-builder runs with `identity: null`. That keeps the ad-hoc signatures
+the linker gave Electron's binaries and does not seal the bundle. What that
+costs on macOS:
+
+- **Gatekeeper.** A zip or DMG downloaded by a browser is quarantined, and its
+  first launch is blocked until it is allowed in System Settings → Privacy &
+  Security. Files the app downloads itself, or that `gh` and `curl` download,
+  carry no quarantine and launch without a prompt. The app does not set
+  `LSFileQuarantineEnabled`.
+- **Identity.** The designated requirement is the cdhash of the main
+  executable, which is Electron's stock binary. It stays the same from one
+  Cogenly build to the next, so the "Cogenly Safe Storage" keychain item and
+  privacy grants survive normal updates. An Electron upgrade changes it: macOS
+  asks again for keychain access, and grants such as Screen Recording must be
+  given again. Any other unsigned app on the same Electron version has the
+  same identity.
+- **No Squirrel.Mac.** Squirrel refuses bundles without a valid signature, so
+  unsigned apps install updates themselves (see below).
+- **No restricted entitlements.** Browser passkeys and associated domains need
+  a provisioning profile.
+
+A self-signed code-signing certificate would make the designated requirement
+stable across Electron upgrades too (identifier plus certificate leaf). It is
+not used. It would need a new secret, and the workflow's signing branch
+requires all five Apple secrets and always notarizes.
+
 ## Signing and notarization
 
 With only `GITHUB_TOKEN`, releases build **unsigned**. If any of the five Apple
@@ -100,6 +129,12 @@ Normal Developer ID signing does not require an Associated Domains profile,
 Clerk, or `APPLE_TEAM_ID`. Optional browser-passkey provisioning remains a separate
 packager capability; it is not required by this release workflow.
 
+Once the secrets exist, builds record `cogenlyUpdatesSigned: true` and install
+updates through Squirrel.Mac. The last unsigned build still updates itself with
+the in-app installer, so it can move to the first signed build without a manual
+DMG install. The signing identity changes at that point, so macOS asks once
+for keychain access and privacy grants must be given again.
+
 ## Channels and update verification
 
 In desktop Settings → About → Update track, choose **Prod** or **Staging**.
@@ -108,13 +143,44 @@ prereleases disallowed. Staging uses ID `staging`, allows prereleases, and reads
 `staging-mac.yml`. Existing explicit nightly preferences migrate to staging.
 Prod installs never receive staging unless the user switches tracks. Staging
 and prod have distinct app names, but share the same saved channel preference.
+Updates also check that an offered version matches the selected track.
+
+**Updates are offered only by promotion.** Day-to-day installs are prod builds
+on the Prod track, so they see a new version only after it passes the
+production gate. Staging publishes on every push to main, often several times
+an hour. Offering those builds would ask for a restart every few minutes and
+ship builds nobody has verified. Staging updates reach only installs that
+chose Staging, or staging builds, which default to it. The app checks its feed
+at startup and every four minutes, which is cheap because the prod feed changes
+only on promotion.
 
 Signed macOS builds download the zip and use Squirrel.Mac to install. Unsigned
-builds have baked-in signing metadata: they still check their selected channel,
-but show **Update available — download** and open the release's arm64 DMG.
-Install that DMG manually. An unsigned app also needs a manual DMG installation
-to move to the first signed build. Remote update requests explain that manual
-installation is required instead of attempting Squirrel or waiting indefinitely.
+builds carry baked-in signing metadata and install updates themselves
+([`unsignedMacUpdate.ts`](../../apps/desktop/src/updates/unsignedMacUpdate.ts)):
+
+1. electron-updater checks the channel feed as usual.
+2. **Download** fetches the feed's arm64 zip directly and checks its size and
+   sha512 against the feed. It extracts the zip with `ditto` into
+   `<Cogenly home>/caches/desktop-update/` and checks that the bundle has the
+   offered version and the running app's bundle identifier.
+3. **Install** asks for confirmation as usual. It then stops the backends,
+   starts a detached shell helper, and quits normally. The helper waits for the
+   app's PID to exit, moves the installed bundle into the cache, and moves the
+   new bundle into its place. It starts the new executable directly, with the
+   environment the app had, so `COGENLY_HOME` and similar settings carry over.
+   `ELECTRON_RUN_AS_NODE` is dropped.
+4. Every unsigned macOS start writes `runtime/desktop-update-launched` once
+   Electron is ready. If the new app exits first, or the marker has not
+   appeared after 90 seconds, the helper stops that process. It then restores
+   the old bundle and starts it the same way. The old app reports that the
+   version did not apply. The helper logs to `desktop-update-helper.log` in
+   the desktop log directory.
+
+The app falls back to opening the DMG when it cannot replace itself: macOS is
+running a translocated copy, it runs from the disk image, the bundle or its
+folder is not writable, or the feed lists no zip. Its update message says which.
+Remote update requests install unsigned updates like signed ones. They stop
+with an explanation only in that fallback.
 
 For an end-to-end local check (no GitHub publication), on an Apple Silicon Mac:
 
@@ -128,8 +194,9 @@ COGENLY_DESKTOP_MOCK_UPDATE_SERVER_ROOT="$PWD/release-mock" \
 ```
 
 Install and launch the older DMG from `/Applications`, check for updates, and
-confirm Download opens `http://localhost:3000/Cogenly-0.1.1-arm64.dmg` without
-quitting the app. Install it and verify the new version. Repeat using versions
+confirm Download fetches `http://localhost:3000/Cogenly-0.1.1-arm64.zip` without
+quitting the app. Install and confirm it restarts into the new version. Run the
+older app from the mounted DMG and confirm Download opens the DMG instead. Repeat using versions
 `0.1.1-staging.20261019.1` and `.2`, selecting Staging and checking
 `staging-mac.yml`. Verify Prod does not offer either staging version. To test a
 real automatic installation, build **both** artifacts with `--signed` and local
