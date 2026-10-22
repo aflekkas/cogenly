@@ -87,6 +87,9 @@ export function ThreadNotificationCoordinator() {
   ));
 }
 
+/** Clock skew between server and client should not swallow a real completion. */
+const HISTORY_GRACE_MS = 60_000;
+
 interface NotificationState {
   readonly raw: OrchestrationV2ThreadShell;
   readonly subagentRequest: PendingSubagentRequest | null;
@@ -115,8 +118,13 @@ function EnvironmentNotifications({
     strict: false,
   });
   const previous = useRef(new Map<ThreadId, NotificationState>());
+  // Runs that ended before this client started watching are history, not news:
+  // an import (Settings → Import from T3 Code) replays thousands of them.
+  const watchingSince = useRef<number | null>(null);
 
   useEffect(() => {
+    watchingSince.current ??= Date.now();
+    const since = watchingSince.current;
     if (threads === null) {
       previous.current.clear();
       return;
@@ -150,6 +158,7 @@ function EnvironmentNotifications({
           : (prior?.completion ?? null);
       next.set(thread.id, { raw: rawThread, subagentRequest, attention, completion });
       if (!prior || thread.archivedAt !== null) continue;
+      if (completedAt < since - HISTORY_GRACE_MS) continue;
       const kind =
         attention && attention !== prior.attention
           ? "input"

@@ -16,7 +16,8 @@ import type {
  * does not carry it yet, so the page reads it when present and otherwise
  * names the folder in words.
  */
-export type T3ImportSourceWithBackup = T3ImportSource & { readonly backupDirectory?: string };
+/** The source info; `backupDirectory` is part of the contract now. */
+export type T3ImportSourceWithBackup = T3ImportSource;
 
 /** The screen the import page shows, derived from the server's job and the local selection. */
 export type T3ImportView =
