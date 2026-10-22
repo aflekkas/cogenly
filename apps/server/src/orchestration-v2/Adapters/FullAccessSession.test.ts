@@ -1,3 +1,4 @@
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -191,6 +192,161 @@ it.effect("starts a legacy Claude thread with full access and never emits a tool
         (event) => event.type === "turn_item.updated" && event.turnItem.type === "approval_request",
       ),
     );
+  }).pipe(Effect.provide([McpProviderSessions.layer, IdAllocator.layer, NodeServices.layer])),
+);
+
+// The CLI can report `default` on init although it was opened in bypass
+// (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 forces this), as in pingdotgg/t3code#22483.
+const runClaudeTurnWhereInitReportsDefault = (input: { readonly rejectBypass: boolean }) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-full-access-init-" });
+    const opened = yield* Deferred.make<ClaudeAdapter.ClaudeAgentSdkQueryOpenInput>();
+    const offered = yield* Deferred.make<void>();
+    const modeRequested = yield* Deferred.make<void>();
+    const closed = yield* Deferred.make<void>();
+    const requestedModes: Array<string> = [];
+    const init = {
+      type: "system",
+      subtype: "init",
+      permissionMode: "default",
+      session_id: "native-full-access-init",
+      uuid: "00000000-0000-4000-8000-000000000001",
+    } as unknown as SDKMessage;
+    const queryRunner: ClaudeAdapter.ClaudeAgentSdkQueryRunnerShape = {
+      allocateSessionId: Effect.succeed("native-full-access-init"),
+      open: (openInput) =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(opened, openInput);
+          return {
+            messages: Stream.concat(
+              Stream.fromEffect(Deferred.await(offered).pipe(Effect.as(init))),
+              Stream.fromEffect(Deferred.await(closed)).pipe(Stream.drain),
+            ),
+            offer: () => Deferred.succeed(offered, undefined).pipe(Effect.asVoid),
+            setModel: () => Effect.void,
+            applyFlagSettings: () => Effect.void,
+            setPermissionMode: (mode) =>
+              Effect.gen(function* () {
+                requestedModes.push(mode);
+                yield* Deferred.succeed(modeRequested, undefined);
+                if (input.rejectBypass) {
+                  return yield* new ClaudeAdapter.ClaudeAgentSdkQueryRunnerError({
+                    method: "setPermissionMode",
+                    cause: new Error("bypassPermissions is disabled"),
+                  });
+                }
+              }),
+            stopTask: () => Effect.void,
+            backgroundTasks: () => Effect.succeed(false),
+            interrupt: Effect.void,
+            close: Deferred.succeed(closed, undefined).pipe(Effect.asVoid),
+          };
+        }),
+      forkSession: () => Effect.die("unexpected fork"),
+      subagentLaunchToolUseId: () => Effect.succeed(null),
+      assertComplete: Effect.void,
+    };
+    const instanceId = ProviderInstanceId.make("claude");
+    const threadId = ThreadId.make("full-access-init");
+    const modelSelection = { instanceId, model: "claude-sonnet-4-6" };
+    const runtimePolicy = {
+      runtimeMode: yield* decodeRuntimeMode("full-access"),
+      interactionMode: "default" as const,
+      cwd: root,
+    };
+    const adapter = yield* ClaudeAdapter.makeClaudeAdapterV2({
+      instanceId,
+      settings: yield* decodeClaudeSettings({}),
+      environment: { HOME: root },
+      attachmentsDir: root,
+      fileSystem: fs,
+      path,
+      crypto: yield* Crypto.Crypto,
+      idAllocator: yield* IdAllocator.IdAllocatorV2,
+      queryRunner,
+    });
+    const session = yield* adapter.openSession({
+      threadId,
+      providerSessionId: ProviderSessionId.make("full-access-init"),
+      modelSelection,
+      runtimePolicy,
+    });
+    const events: ProviderAdapter.ProviderAdapterV2Event[] = [];
+    const boundary = yield* Deferred.make<void>();
+    yield* session.events.pipe(
+      Stream.runForEach((event) =>
+        Effect.gen(function* () {
+          events.push(event);
+          if (event.type === "turn.terminal") yield* Deferred.succeed(boundary, undefined);
+        }),
+      ),
+      Effect.forkChild,
+    );
+    const providerThread = yield* session.ensureThread({ threadId, modelSelection, runtimePolicy });
+    yield* session.startTurn({
+      appThread: yield* legacyThread(threadId, modelSelection),
+      threadId,
+      runId: RunId.make("test-init"),
+      runOrdinal: 1,
+      providerTurnOrdinal: 1,
+      attemptId: RunAttemptId.make("test-init"),
+      rootNodeId: NodeId.make("test-init"),
+      providerThread,
+      modelSelection,
+      runtimePolicy,
+      message: {
+        messageId: MessageId.make("test-init"),
+        text: "Run a command",
+        attachments: [],
+        createdBy: "user",
+        creationSource: "web",
+      },
+    });
+    const { options } = yield* Deferred.await(opened);
+    assert.equal(options.permissionMode, "bypassPermissions");
+    yield* Deferred.await(modeRequested);
+    // While Claude runs below bypass, every tool call reaches the callback.
+    const toolInput = { command: "printf ok" };
+    const result = yield* Effect.promise(() =>
+      options.canUseTool!("Bash", toolInput, {
+        signal: new AbortController().signal,
+        toolUseID: "bash-test",
+        requestId: "request-test",
+        suggestions: [],
+      }),
+    );
+    yield* Deferred.succeed(closed, undefined);
+    yield* Deferred.await(boundary);
+    return { requestedModes, result, toolInput, events };
+  });
+
+it.effect("puts a Claude query back in bypass when init reports a lower mode", () =>
+  Effect.gen(function* () {
+    const { requestedModes, result, toolInput } = yield* runClaudeTurnWhereInitReportsDefault({
+      rejectBypass: false,
+    });
+    assert.deepEqual(requestedModes, ["bypassPermissions"]);
+    assert.deepEqual(result, {
+      behavior: "allow",
+      updatedInput: toolInput,
+      toolUseID: "bash-test",
+    });
+  }).pipe(Effect.provide([McpProviderSessions.layer, IdAllocator.layer, NodeServices.layer])),
+);
+
+it.effect("keeps approving tool calls when Claude refuses the bypass restore", () =>
+  Effect.gen(function* () {
+    const { requestedModes, result, toolInput, events } =
+      yield* runClaudeTurnWhereInitReportsDefault({ rejectBypass: true });
+    assert.deepEqual(requestedModes, ["bypassPermissions"]);
+    assert.deepEqual(result, {
+      behavior: "allow",
+      updatedInput: toolInput,
+      toolUseID: "bash-test",
+    });
+    assert.isFalse(events.some((event) => event.type === "runtime_request.updated"));
   }).pipe(Effect.provide([McpProviderSessions.layer, IdAllocator.layer, NodeServices.layer])),
 );
 

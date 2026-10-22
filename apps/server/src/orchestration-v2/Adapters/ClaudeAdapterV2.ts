@@ -3077,9 +3077,11 @@ interface ClaudeLiveQueryContext {
   promptEchoMode: "unknown" | "acknowledged" | "early" | "result_only";
   // The mode this process was opened in, and the mode the CLI last reported
   // (init and status frames). Claude changes the latter itself through
-  // EnterPlanMode.
-  readonly openedPermissionMode: PermissionMode;
+  // EnterPlanMode. The opened mode drops to the reported one when the CLI
+  // refuses bypass at startup, so reuse does not retry a refused mode.
+  openedPermissionMode: PermissionMode;
   permissionMode: PermissionMode;
+  receivedInit: boolean;
   // Stop, rollback or fork is closing this process; its work is ending.
   stopping: boolean;
   // Registry entries still running when this process opened. Their process
@@ -8580,6 +8582,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             promptEchoMode: "unknown",
             openedPermissionMode: queryOptions.permissionMode,
             permissionMode: queryOptions.permissionMode,
+            receivedInit: false,
             stopping: false,
             subagentsFromEarlierProcesses: new Set(
               [...(yield* Ref.get(sessionSubagentsByTaskId)).values()].filter(
@@ -8588,10 +8591,43 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ),
           };
           yield* Ref.set(queryContext, context);
+          // The CLI can start below the bypass it was asked for (for example
+          // CLAUDE_CODE_SUBPROCESS_ENV_SCRUB forces `default`), and then sends
+          // every tool call through canUseTool. Init only arrives after the
+          // first prompt, so that is the earliest bypass can be put back. If
+          // Claude refuses, keep its mode: canUseTool still approves.
+          const restoreRequestedBypass = (reportedMode: PermissionMode) =>
+            querySession.setPermissionMode("bypassPermissions").pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  context.permissionMode = "bypassPermissions";
+                }),
+              ),
+              Effect.catch(() =>
+                Effect.sync(() => {
+                  context.openedPermissionMode = reportedMode;
+                }),
+              ),
+            );
           yield* querySession.messages.pipe(
             Stream.runForEach((message) =>
               sdkMessageLock.withPermits(1)(
                 Effect.suspend(() => {
+                  let restoreFrom: PermissionMode | null = null;
+                  if (
+                    message.type === "system" &&
+                    message.subtype === "init" &&
+                    !context.receivedInit
+                  ) {
+                    context.receivedInit = true;
+                    if (
+                      queryOptions.permissionMode === "bypassPermissions" &&
+                      message.permissionMode !== undefined &&
+                      message.permissionMode !== "bypassPermissions"
+                    ) {
+                      restoreFrom = message.permissionMode;
+                    }
+                  }
                   if (
                     message.type === "system" &&
                     (message.subtype === "init" || message.subtype === "status") &&
@@ -8599,7 +8635,14 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   ) {
                     context.permissionMode = message.permissionMode;
                   }
-                  return handleSdkMessage({ query: querySession, message });
+                  const handled = handleSdkMessage({ query: querySession, message });
+                  // Forked so the control request does not wait behind the message lock.
+                  return restoreFrom === null
+                    ? handled
+                    : restoreRequestedBypass(restoreFrom).pipe(
+                        Effect.forkIn(sessionScope),
+                        Effect.andThen(handled),
+                      );
                 }),
               ),
             ),
