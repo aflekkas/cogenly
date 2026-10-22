@@ -435,7 +435,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "update-track",
     title: "Update track",
     to: "/settings/general",
-    searchTerms: ["release channel prod latest staging prerelease"],
+    searchTerms: ["release channel latest nightly prerelease"],
     releaseChannelOnly: true,
   },
   {

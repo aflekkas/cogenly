@@ -4,7 +4,7 @@ import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
 import { Spinner } from "~/components/ui/spinner";
 import { NotificationSettings } from "./NotificationSettings";
-import { ArchiveIcon, ArchiveX, CheckIcon, SettingsIcon } from "lucide-react";
+import { ArchiveIcon, ArchiveX, CheckIcon, RotateCcwIcon, SettingsIcon } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -1033,7 +1033,30 @@ function LegacyFeaturesSection() {
   );
 }
 
-export function GeneralSettingsPanel() {
+function RestoreDefaultsSection({ onRestored }: { onRestored: () => void }) {
+  const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
+  return (
+    <SettingsSection id="reset" title="Reset">
+      <SettingsRow
+        title="Restore device defaults"
+        description="Reset the settings on this page to their defaults. You confirm before anything changes."
+        control={
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={changedSettingLabels.length === 0}
+            onClick={() => void restoreDefaults()}
+          >
+            <RotateCcwIcon className="size-3.5" />
+            Restore defaults
+          </Button>
+        }
+      />
+    </SettingsSection>
+  );
+}
+
+export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void }) {
   const dictationSupported = useDictationAvailable();
   const modifierLabel = isMacPlatform(navigator.platform) ? "⌘" : "Ctrl";
   const sendShortcutOptions = [
@@ -2068,6 +2091,7 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <LegacyFeaturesSection />
+      <RestoreDefaultsSection onRestored={onRestored} />
     </SettingsPageContainer>
   );
 }

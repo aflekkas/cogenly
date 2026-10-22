@@ -167,20 +167,16 @@ for keychain access and privacy grants must be given again.
 
 ## Channels and update verification
 
-In desktop Settings → About → Update track, choose **Prod** or **Staging**.
-Prod retains internal/persisted ID `latest` and reads `latest-mac.yml` with
-prereleases disallowed. Staging uses ID `staging`, allows prereleases, and reads
-`staging-mac.yml`. Existing explicit nightly preferences migrate to staging.
-Prod installs never receive staging unless the user switches tracks. Staging
-and prod have distinct app names, but share the same saved channel preference.
-Updates also check that an offered version matches the selected track.
+Releases are prod-only. The app has no update track setting: it uses ID
+`latest`, reads `latest-mac.yml`, and disallows prereleases. A stored `staging`
+or `nightly` preference from an older build is ignored and falls back to prod.
+Updates also check that an offered version is a prod version.
 
 **Updates are offered only by promotion.** Day-to-day installs are prod builds
 on the Prod track, so they see a new version only after it passes the
-production gate. The Release workflow no longer publishes staging builds. The
-app's Staging track and its `staging-mac.yml` code remain, but receive no new
-builds, so installs on that track stay on the last staging prerelease until
-the user switches to Prod. The app checks its feed
+production gate. The Release workflow no longer publishes staging builds, and
+installs still on a staging prerelease move to prod on their next update. The
+app checks its feed
 at startup and every four minutes, which is cheap because the prod feed changes
 only on promotion.
 
@@ -226,12 +222,10 @@ COGENLY_DESKTOP_MOCK_UPDATE_SERVER_ROOT="$PWD/release-mock" \
 Install and launch the older DMG from `/Applications`, check for updates, and
 confirm Download fetches `http://localhost:3000/Cogenly-0.1.1-arm64.zip` without
 quitting the app. Install and confirm it restarts into the new version. Run the
-older app from the mounted DMG and confirm Download opens the DMG instead. Repeat using versions
-`0.1.1-staging.20261019.1` and `.2`, selecting Staging and checking
-`staging-mac.yml`. Verify Prod does not offer either staging version. To test a
+older app from the mounted DMG and confirm Download opens the DMG instead. To test a
 real automatic installation, build **both** artifacts with `--signed` and local
 signing/notary credentials; confirm Download → Install restarts into the new
-version. Also verify a signed build can switch Staging → Prod. These commands
+version. These commands
 are maintainer procedures, not part of the agent's targeted test run.
 
 ## Rollback

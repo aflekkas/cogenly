@@ -1308,8 +1308,10 @@ export const make = Effect.gen(function* () {
       yield* startUpdatePollers;
     }).pipe(Effect.withSpan("desktop.updates.configure")),
     setChannel: Effect.fn("desktop.updates.setChannel")(function* (
-      nextChannel: DesktopUpdateChannel,
+      _requestedChannel: DesktopUpdateChannel,
     ) {
+      // Staging builds no longer exist, so any request resolves to prod.
+      const nextChannel: DesktopUpdateChannel = "latest";
       yield* Effect.annotateCurrentSpan({ channel: nextChannel });
       const activeAction = yield* tryStartChannelChange;
       if (Option.isSome(activeAction)) {
