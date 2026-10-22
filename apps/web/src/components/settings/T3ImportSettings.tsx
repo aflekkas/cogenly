@@ -15,6 +15,7 @@ import { useState, type ReactNode } from "react";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { formatBytes } from "../../lib/formatBytes";
+import { readLocalApi } from "../../localApi";
 import { t3ImportRpc } from "../../rpc/t3Import";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { WorkLogDisclosure } from "../chat/WorkLog";
@@ -27,6 +28,7 @@ import { Checkbox } from "../ui/checkbox";
 import { Spinner } from "../ui/spinner";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
+  T3_IMPORT_DOCS_URL,
   T3_IMPORT_PHASE_LABELS,
   T3_PROVIDER_STATUS_LABELS,
   deriveT3ImportView,
@@ -43,6 +45,8 @@ import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsL
 /**
  * Settings → Import. Brings T3 Code's projects, threads and a few settings
  * into the environment in the scope sentence: pick projects, check, import.
+ * Onboarding renders the same flow through {@link useT3ImportFlow} and
+ * {@link T3ImportFlowView}.
  */
 export function T3ImportSettings() {
   const { environment } = useSettingsScope();
@@ -67,10 +71,36 @@ function T3ImportGate({ environmentId }: { environmentId: EnvironmentId | null }
       </SettingsPageContainer>
     );
   }
-  return <T3ImportPanel environmentId={environmentId} />;
+  return <T3ImportSettingsPanel environmentId={environmentId} />;
 }
 
-function T3ImportPanel({ environmentId }: { environmentId: EnvironmentId }) {
+function T3ImportSettingsPanel({ environmentId }: { environmentId: EnvironmentId }) {
+  const flow = useT3ImportFlow(environmentId);
+  return (
+    <SettingsPageContainer>
+      <T3ImportFlowView flow={flow} presentation="settings" />
+    </SettingsPageContainer>
+  );
+}
+
+/** Opens the user guide for Import from T3 Code in the system browser. */
+export function T3ImportLearnMoreLink() {
+  return (
+    <button
+      type="button"
+      className="link inline cursor-pointer"
+      onClick={() => void readLocalApi()?.shell.openExternal(T3_IMPORT_DOCS_URL)}
+    >
+      Learn more
+    </button>
+  );
+}
+
+/**
+ * State and actions of one Import from T3 Code flow against an environment.
+ * The caller must hold the scan permission (`t3ImportRpc.scan.permissionAtom`).
+ */
+export function useT3ImportFlow(environmentId: EnvironmentId) {
   const statusAtom = t3ImportRpc.status({ environmentId, input: {} });
   const result = useAtomValue(statusAtom);
   const refreshStatus = useAtomRefresh(statusAtom);
@@ -106,11 +136,6 @@ function T3ImportPanel({ environmentId }: { environmentId: EnvironmentId }) {
       setRequestError(describeT3ImportFailure(squashAtomCommandFailure(stopped)));
     }
   };
-  const cancelButton = (
-    <Button size="sm" variant="outline" disabled={cancelling} onClick={() => void stopJob()}>
-      {cancelling ? "Stopping…" : "Cancel"}
-    </Button>
-  );
 
   const startScan = async () => {
     if (pending !== null) return;
@@ -149,8 +174,67 @@ function T3ImportPanel({ environmentId }: { environmentId: EnvironmentId }) {
     }
   };
 
+  const toggleProject = (sourceProjectId: string, checked: boolean) => {
+    const next = new Set(selection);
+    if (checked) next.add(sourceProjectId);
+    else next.delete(sourceProjectId);
+    setPicked(next);
+  };
+
+  return {
+    environmentId,
+    status,
+    statusError,
+    refreshStatus,
+    view,
+    blocked,
+    selection,
+    toggleProject,
+    includeSettings,
+    setIncludeSettings,
+    pending,
+    requestError,
+    cancelling,
+    busy: pending !== null || jobRunning,
+    startScan,
+    startImport,
+    stopJob,
+  };
+}
+
+export type T3ImportFlow = ReturnType<typeof useT3ImportFlow>;
+
+/**
+ * The import flow's sections. Settings shows them on its page; onboarding
+ * shows them inside its wizard step, where the step heading names the flow
+ * and the wizard's own footer moves on once the import is done.
+ */
+export function T3ImportFlowView({
+  flow,
+  presentation,
+}: {
+  flow: T3ImportFlow;
+  presentation: "settings" | "onboarding";
+}) {
+  const {
+    status,
+    statusError,
+    refreshStatus,
+    view,
+    blocked,
+    selection,
+    pending,
+    busy,
+    cancelling,
+    requestError,
+  } = flow;
+  const cancelButton = (
+    <Button size="sm" variant="outline" disabled={cancelling} onClick={() => void flow.stopJob()}>
+      {cancelling ? "Stopping…" : "Cancel"}
+    </Button>
+  );
+
   const { panelProps, contentRef } = useAnimatedPanelHeight();
-  const busy = pending !== null || view.kind === "scanning" || view.kind === "importing";
   const selectable =
     view.kind === "intro" ||
     view.kind === "report" ||
@@ -158,122 +242,118 @@ function T3ImportPanel({ environmentId }: { environmentId: EnvironmentId }) {
     view.kind === "cancelled" ||
     view.kind === "scanning";
 
-  return (
-    <SettingsPageContainer>
-      {statusError !== null ? (
-        <SettingsSection id="t3-import" title="Import from T3 Code">
-          <SettingsRow
-            title="Couldn't reach the importer"
-            description={statusError}
-            control={
-              <Button size="sm" variant="outline" onClick={refreshStatus}>
+  return statusError !== null ? (
+    <SettingsSection id="t3-import" title="Import from T3 Code">
+      <SettingsRow
+        title="Couldn't reach the importer"
+        description={statusError}
+        control={
+          <Button size="sm" variant="outline" onClick={refreshStatus}>
+            Retry
+          </Button>
+        }
+      />
+    </SettingsSection>
+  ) : view.kind === "loading" ? (
+    <SettingsSection id="t3-import" title="Import from T3 Code">
+      <SettingsRow title="Looking for T3 Code…" status={<Spinner size="xs" tone="muted" />} />
+    </SettingsSection>
+  ) : view.kind === "unavailable" ? (
+    <SettingsSection id="t3-import" title="Import from T3 Code">
+      <SettingsRow
+        title="T3 Code wasn't found"
+        description={view.message}
+        control={
+          <Button size="sm" variant="outline" onClick={refreshStatus}>
+            Check again
+          </Button>
+        }
+      />
+    </SettingsSection>
+  ) : (
+    <>
+      {blocked ? (
+        <div className="swap-motion">
+          <Alert variant="warning" controlAlignment="first-line">
+            <PowerIcon />
+            <AlertTitle>Quit T3 Code to continue.</AlertTitle>
+            <AlertDescription>
+              {presentation === "onboarding"
+                ? "This ends any T3 session in progress. Setup checks again on its own."
+                : "This ends any T3 session in progress. This page checks again on its own."}
+            </AlertDescription>
+            <AlertAction>
+              <Button size="xs" variant="outline" onClick={refreshStatus}>
                 Retry
               </Button>
-            }
-          />
-        </SettingsSection>
-      ) : view.kind === "loading" ? (
-        <SettingsSection id="t3-import" title="Import from T3 Code">
-          <SettingsRow title="Looking for T3 Code…" status={<Spinner size="xs" tone="muted" />} />
-        </SettingsSection>
-      ) : view.kind === "unavailable" ? (
-        <SettingsSection id="t3-import" title="Import from T3 Code">
-          <SettingsRow
-            title="T3 Code wasn't found"
-            description={view.message}
-            control={
-              <Button size="sm" variant="outline" onClick={refreshStatus}>
-                Check again
+            </AlertAction>
+          </Alert>
+        </div>
+      ) : null}
+
+      <IntroSection
+        source={status!.source}
+        hideTitle={presentation === "onboarding"}
+        selection={selection}
+        selectable={selectable}
+        disabled={busy}
+        onToggle={flow.toggleProject}
+        checkAction={
+          view.kind === "scanning" ? (
+            <>
+              <Button size="sm" disabled>
+                <Spinner size="xs" />
+                Checking…
               </Button>
-            }
-          />
-        </SettingsSection>
-      ) : (
-        <>
-          {blocked ? (
-            <div className="swap-motion">
-              <Alert variant="warning" controlAlignment="first-line">
-                <PowerIcon />
-                <AlertTitle>Quit T3 Code to continue.</AlertTitle>
-                <AlertDescription>
-                  This ends any T3 session in progress. This page checks again on its own.
-                </AlertDescription>
-                <AlertAction>
-                  <Button size="xs" variant="outline" onClick={refreshStatus}>
-                    Retry
-                  </Button>
-                </AlertAction>
-              </Alert>
-            </div>
-          ) : null}
-
-          <IntroSection
-            source={status!.source}
-            selection={selection}
-            selectable={selectable}
-            disabled={busy}
-            onToggle={(id, checked) => {
-              const next = new Set(selection);
-              if (checked) next.add(id);
-              else next.delete(id);
-              setPicked(next);
-            }}
-            checkAction={
-              view.kind === "scanning" ? (
+              {cancelButton}
+            </>
+          ) : view.kind === "intro" || (view.kind === "report" && view.stale) ? (
+            <Button
+              size="sm"
+              disabled={blocked || busy || selection.size === 0}
+              onClick={() => void flow.startScan()}
+            >
+              {pending === "scan" ? (
                 <>
-                  <Button size="sm" disabled>
-                    <Spinner size="xs" />
-                    Checking…
-                  </Button>
-                  {cancelButton}
+                  <Spinner size="xs" />
+                  Checking…
                 </>
-              ) : view.kind === "intro" || (view.kind === "report" && view.stale) ? (
-                <Button
-                  size="sm"
-                  disabled={blocked || busy || selection.size === 0}
-                  onClick={() => void startScan()}
-                >
-                  {pending === "scan" ? (
-                    <>
-                      <Spinner size="xs" />
-                      Checking…
-                    </>
-                  ) : view.kind === "report" ? (
-                    "Check again"
-                  ) : (
-                    "Check what will be imported"
-                  )}
-                </Button>
-              ) : null
-            }
-            scanPercent={view.kind === "scanning" ? view.percent : undefined}
-            error={requestError}
-          />
+              ) : view.kind === "report" ? (
+                "Check again"
+              ) : (
+                "Check what will be imported"
+              )}
+            </Button>
+          ) : null
+        }
+        scanPercent={view.kind === "scanning" ? view.percent : undefined}
+        error={requestError}
+      />
 
-          <div className="panel-height-motion" {...panelProps}>
-            <div ref={contentRef} className="flex shrink-0 flex-col gap-8">
-              <StageSection
-                view={view}
-                source={status!.source}
-                blocked={blocked}
-                busy={busy}
-                pending={pending}
-                includeSettings={includeSettings}
-                onIncludeSettingsChange={setIncludeSettings}
-                onImport={(report) => void startImport(report)}
-                onCheckAgain={() => void startScan()}
-                cancelButton={cancelButton}
-              />
-            </div>
-          </div>
-        </>
-      )}
-    </SettingsPageContainer>
+      <div className="panel-height-motion" {...panelProps}>
+        <div ref={contentRef} className="flex shrink-0 flex-col gap-8">
+          <StageSection
+            view={view}
+            presentation={presentation}
+            source={status!.source}
+            blocked={blocked}
+            busy={busy}
+            pending={pending}
+            includeSettings={flow.includeSettings}
+            onIncludeSettingsChange={flow.setIncludeSettings}
+            onImport={(report) => void flow.startImport(report)}
+            onCheckAgain={() => void flow.startScan()}
+            cancelButton={cancelButton}
+          />
+        </div>
+      </div>
+    </>
   );
 }
 
 function IntroSection({
   source,
+  hideTitle,
   selection,
   selectable,
   disabled,
@@ -283,6 +363,7 @@ function IntroSection({
   error,
 }: {
   source: T3ImportSourceWithBackup;
+  hideTitle: boolean;
   selection: ReadonlySet<string>;
   selectable: boolean;
   disabled: boolean;
@@ -292,10 +373,16 @@ function IntroSection({
   error: string | null;
 }) {
   return (
-    <SettingsSection id="t3-import" title="Import from T3 Code">
+    <SettingsSection id="t3-import" title="Import from T3 Code" hideTitle={hideTitle}>
       <SettingsRow
         title="What comes over"
-        description="Each project's full history, subagent threads included, as chats you can continue here. Keybindings and default models come too. Sign-ins and tokens are never copied, so providers ask you to sign in again."
+        description={
+          <>
+            Each project's full history, subagent threads included, as chats you can continue here.
+            Keybindings and default models come too. Sign-ins and tokens are never copied, so
+            providers ask you to sign in again. <T3ImportLearnMoreLink />
+          </>
+        }
       />
       {selectable && source.projects.length > 0 ? (
         <SettingsRow
@@ -385,6 +472,7 @@ function ProjectOption({
 
 function StageSection({
   view,
+  presentation,
   source,
   blocked,
   busy,
@@ -396,6 +484,7 @@ function StageSection({
   cancelButton,
 }: {
   view: T3ImportView;
+  presentation: "settings" | "onboarding";
   source: T3ImportSourceWithBackup;
   blocked: boolean;
   busy: boolean;
@@ -503,6 +592,7 @@ function StageSection({
         <div key="done" className="swap-motion">
           <DoneSection
             result={view.result}
+            presentation={presentation}
             blocked={blocked}
             busy={busy}
             onCheckAgain={onCheckAgain}
@@ -701,11 +791,13 @@ function ReportSections({
 
 function DoneSection({
   result,
+  presentation,
   blocked,
   busy,
   onCheckAgain,
 }: {
   result: T3ImportResult;
+  presentation: "settings" | "onboarding";
   blocked: boolean;
   busy: boolean;
   onCheckAgain: () => void;
@@ -730,10 +822,13 @@ function DoneSection({
           .filter((part) => part !== null)
           .join(" · ")}
         control={
-          // Imported T3 threads are repository work, listed under Work.
-          <Button size="sm" onClick={() => selectMode("tasks", { leaveUtilityPage: true })}>
-            Open imported projects
-          </Button>
+          // Onboarding moves on with its own footer instead.
+          presentation === "settings" ? (
+            // Imported T3 threads are repository work, listed under Work.
+            <Button size="sm" onClick={() => selectMode("tasks", { leaveUtilityPage: true })}>
+              Open imported projects
+            </Button>
+          ) : null
         }
       />
       <SettingsRow
@@ -751,7 +846,11 @@ function DoneSection({
       />
       <SettingsRow
         title="Run it again any time"
-        description="Re-running is safe: nothing is duplicated, and only what changed in T3 Code since is added."
+        description={
+          presentation === "settings"
+            ? "Re-running is safe: nothing is duplicated, and only what changed in T3 Code since is added."
+            : "Re-running is safe: nothing is duplicated, and only what changed in T3 Code since is added. Find it later in Settings → Import."
+        }
         control={
           <Button size="sm" variant="outline" disabled={blocked || busy} onClick={onCheckAgain}>
             Check again

@@ -11,11 +11,10 @@ import type {
   T3ImportStatus,
 } from "@t3tools/contracts";
 
-/**
- * The server may also report where the pre-import backup goes. The contract
- * does not carry it yet, so the page reads it when present and otherwise
- * names the folder in words.
- */
+/** The user guide, linked from Settings → Import and from onboarding. */
+export const T3_IMPORT_DOCS_URL =
+  "https://github.com/aflekkas/cogenly/blob/main/docs/user/importing-from-t3-code.md";
+
 /** The source info; `backupDirectory` is part of the contract now. */
 export type T3ImportSourceWithBackup = T3ImportSource;
 
