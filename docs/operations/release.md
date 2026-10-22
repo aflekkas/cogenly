@@ -1,12 +1,32 @@
-# Desktop releases
+# Releases
 
-Cogenly ships **macOS arm64** DMG and zip artifacts from
-[Release](../../.github/workflows/release.yml). It publishes **prod** only,
-GitHub's latest release, behind the **production** approval gate. No npm, relay,
-AUR, Discord, mobile, or hosted-web deployment runs here. Standalone CLI archives
-are not published; `cogenly update`/`t3 update` remains disabled with an explicit
-message. Its channel flag uses `prod` and `staging` for future archive publication;
-CLI binaries bundled in the desktop app update with the app.
+Each release from [Release](../../.github/workflows/release.yml) ships the
+**macOS arm64** desktop app (DMG and zip) and the **Linux server** for x64 and
+arm64. It publishes **prod** only, GitHub's latest release, behind the
+**production** approval gate. No npm, relay, AUR, Discord, mobile, or
+hosted-web deployment runs here.
+
+## Release assets
+
+| Asset                                                            | Consumer                                                                                                           |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `Cogenly-X.Y.Z-arm64.dmg`, `.zip`, `.blockmap`, `latest-mac.yml` | Mac first install and the desktop updater                                                                          |
+| `t3-X.Y.Z-linux-x64.tar.gz`, `t3-X.Y.Z-linux-arm64.tar.gz`       | Desktop SSH provisioning, `scripts/install.sh`, `cogenly update`, `cogenly service install`, remote server updates |
+| `SHA256SUMS`                                                     | One `<sha256>  <file>` line per asset, bare file names; every downloader verifies against it                       |
+
+A Linux archive holds one directory, `t3-X.Y.Z-linux-<arch>/`, containing the
+`t3` single executable (Node is embedded), `client/` (the web app),
+`resource-monitor/`, and `node_modules/` with the native externals. Installers
+unpack it into `~/.cogenly/runtime/versions/X.Y.Z/` and write
+`.install-complete`. The names are spelled in
+[`cliRelease.ts`](../../packages/shared/src/cliRelease.ts),
+[`release-plan.cjs`](../../.github/scripts/release-plan.cjs), the SSH runner in
+[`tunnel.ts`](../../packages/ssh/src/tunnel.ts), and
+[`install.sh`](../../scripts/install.sh); renaming one breaks every installer.
+
+The desktop app provisions an SSH host with the archive of its own version, so a
+release without Linux archives leaves desktop SSH unable to install on a fresh
+host. Publish refuses a `SHA256SUMS` that lacks either archive.
 
 ## Main → prod
 
@@ -40,14 +60,19 @@ distribution.
 The desktop matrix has one macOS arm64 row and can be extended later. The
 workflow checks zip integrity, updater metadata, and checksums, and verifies
 code signature, notarization ticket, and Gatekeeper assessment in signed mode.
+The `cli` matrix builds each Linux archive on a native runner (`ubuntu-24.04`,
+`ubuntu-24.04-arm`) and smoke-tests it: the extracted executable runs
+`--version` and a real `serve` with an empty `PATH`. Each job uploads its
+archive with a `SHA256SUMS.linux-<arch>`; publish merges those with the Mac
+checksums into the single `SHA256SUMS`.
 Releases are uploaded as drafts before publication so partial uploads are not
 offered as updates. An interrupted publish can leave a draft; inspect it before
 retrying. Existing releases are never overwritten automatically.
 
 ### Build speed
 
-A run takes about five minutes of machine time before the approval wait. Most
-of it is the macOS packaging step: the web build, the Rust resource monitor, and
+A run takes about five minutes of wall time before the approval wait; the
+Linux jobs run beside the macOS one. Most of it is the macOS packaging step: the web build, the Rust resource monitor, and
 electron-builder producing the zip and DMG in parallel. Both artifacts ship:
 the DMG is the first-install download and the zip is the update payload.
 
@@ -68,6 +93,30 @@ the DMG is the first-install download and the zip is the update payload.
 - The publish job installs no toolchain. The resolve job passes the previous
   prod tag to it, so after approval it only downloads the artifact, writes the
   notes, and publishes.
+
+- The Linux jobs install with `ELECTRON_SKIP_BINARY_DOWNLOAD=1`, build the
+  web client and server, then switch to Node 26.8.2 only for `build-exe`,
+  because `--build-sea` needs Node 25.7+ on the host. Staging the archive and
+  the smoke test run on the workspace Node, as macOS packaging does.
+
+### Publishing by hand
+
+If the publish job fails after approval (for example HTTP 403 "Resource not
+accessible by integration" when creating the release), publish from the run's
+artifacts. Download `desktop-mac-arm64`, `cli-linux-x64`, and `cli-linux-arm64`
+into one directory, then merge the checksums exactly as the job does:
+
+```sh
+cd release-publish
+node -e 'const fs=require("node:fs");const {mergeChecksums,assertReleaseAssets}=require(process.argv[1]);
+  const parts=fs.readdirSync(".").filter(n=>/^SHA256SUMS(\.|$)/.test(n)).sort();
+  const merged=mergeChecksums(parts.map(n=>fs.readFileSync(n,"utf8")));assertReleaseAssets(merged,process.argv[2]);
+  parts.forEach(n=>fs.rmSync(n));fs.writeFileSync("SHA256SUMS",merged)' "$REPO/.github/scripts/release-plan.cjs" X.Y.Z
+shasum -a 256 -c SHA256SUMS
+rm -f signing-mode.txt
+gh release create vX.Y.Z --target <sha> --title "Cogenly vX.Y.Z" --notes-file notes.md --draft ./*
+gh release edit vX.Y.Z --draft=false --latest
+```
 
 These steps are inlined in each workflow rather than shared through a local
 composite action, because the build job checks out the selected commit, and

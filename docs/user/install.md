@@ -8,101 +8,88 @@ desktop or web app. Set up the machine where the agents will work first.
 You need an installed, authenticated provider before starting a thread. You can
 launch Cogenly and configure providers afterwards.
 
-## Command line
+## Desktop app (Mac)
+
+Download the `.dmg` from [Cogenly releases](https://github.com/aflekkas/cogenly/releases/latest).
+It is built for Apple Silicon Macs and updates itself.
+
+The app includes the `cogenly` command-line tool. To run it from any terminal,
+open **Settings → General → About** and choose **Install** next to the
+`cogenly` command. Open a new terminal afterwards. **Remove** takes it off
+again.
+
+## Linux server (command line)
+
+On a Linux machine (x64 or arm64), install the server and the `cogenly` command:
 
 ```bash
-curl -fsSL https://t3.codes/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/aflekkas/cogenly/main/scripts/install.sh | sh
 ```
 
-On Windows, in PowerShell:
-
-```powershell
-irm https://t3.codes/install.ps1 | iex
-```
-
-This installs the `t3` binary to `~/.local/bin`. If your shell reports `command not found`
+This puts `cogenly` in `~/.local/bin`. If your shell reports `command not found`
 afterwards, that directory is not on your `PATH` yet; the installer prints the
-line to add. Set `COGENLY_CHANNEL=nightly` to install the nightly train, or
-`COGENLY_VERSION` to pin an exact version.
+line to add. Set `COGENLY_VERSION` to install an exact version, such as the one
+your desktop app runs. The download is self-contained: the host needs no Node.js.
 
-| Task                                             | Command                                                                 |
-| ------------------------------------------------ | ----------------------------------------------------------------------- |
-| Start the server and open the web app            | `t3`                                                                    |
-| Start the server without a browser               | `t3 serve`                                                              |
-| Keep it running in the background (macOS, Linux) | `t3 service install` ([details](./background-service.md))               |
-| Move to the newest release                       | `t3 update`                                                             |
-| Reclaim database space                           | `t3 doctor` ([details](./background-service.md#reclaim-database-space)) |
-| Remove it again                                  | `t3 uninstall`                                                          |
+| Task                                  | Command                                                                           |
+| ------------------------------------- | --------------------------------------------------------------------------------- |
+| Start the server and open the web app | `cogenly`                                                                         |
+| Start the server without a browser    | `cogenly serve`                                                                   |
+| Keep it running in the background     | `cogenly service install` ([details](./background-service.md))                    |
+| Pair another device                   | `cogenly pair` ([details](./remote-access.md#pair-over-a-lan-or-private-network)) |
+| Move to the newest release            | `cogenly update`                                                                  |
+| Reclaim database space                | `cogenly doctor` ([details](./background-service.md#reclaim-database-space))      |
+| Remove it again                       | `cogenly uninstall`                                                               |
 
-Run `t3 help` or `t3 --help` for the full reference. To start in a new working
-directory, use an explicit path such as `t3 ./my-project`. A bare directory name
-is accepted only if it already exists.
+Run `cogenly --help` for the full reference. If `cogenly` reports an already
+running server, connect to that server instead. Stop it before starting a
+replacement, or use a different `--base-dir` for an independent server.
 
-If `t3` or `t3 start` reports an already running server, connect to that server
-instead. Stop it before starting a replacement, or use a different `--base-dir`
-for an independent server.
+To run a server from source instead, see the
+[README](https://github.com/aflekkas/cogenly#readme). `cogenly update` does not
+apply to a source checkout; update it with `git pull` and a rebuild.
 
-To try Cogenly once without installing it, run `npx t3@latest` instead (needs
-Node.js for `npx`).
+## Run Cogenly on a VPS
 
-### Intel Macs
+Agents, projects, and provider logins live on the VPS; your Mac only drives
+them. Sign in to the providers on the VPS first (`claude auth login`,
+`codex login`, `gh auth login`).
 
-There is no `t3` executable for Intel Macs (the desktop app is available). To
-run a server there, build it from source with Node.js 24 and `vp`
-([Install vp](https://github.com/pingdotgg/t3code#install-vp)):
+**Recommended: desktop SSH.** In the desktop app, open **Settings → Connections
+→ Add environment**, choose **SSH**, and pick the host from your `~/.ssh/config`.
+Cogenly connects and pairs without a token to copy. If the VPS has no Cogenly
+yet, it downloads the release that matches your desktop app; if it already runs
+one, it uses that. See [Desktop-managed SSH](./remote-access.md#desktop-managed-ssh).
+
+To keep the server running when no desktop is connected, run
+`cogenly service install` on the VPS once. The service listens on
+`127.0.0.1:4773`; desktop SSH finds it and connects through the SSH tunnel.
+
+**Manual fallback.** Install the server with the command above, then:
 
 ```bash
-git clone https://github.com/pingdotgg/t3code
-cd t3code && vp i && vp run build:desktop
-node apps/server/dist/bin.mjs
+cogenly service install
+cogenly auth pairing create --base-url http://127.0.0.1:14773
 ```
 
-`t3 update` and the background service do not apply to a server run this way;
-update it with `git pull` and a rebuild.
-
-## Desktop app
-
-Download a release from [GitHub Releases](https://github.com/pingdotgg/t3code/releases),
-or use a package manager:
-
-| Platform           | Install                            |
-| ------------------ | ---------------------------------- |
-| Windows            | `winget install T3Tools.T3Code`    |
-| macOS              | `brew install --cask t3-code`      |
-| Debian, Ubuntu     | `sudo apt install ./T3-Code-*.deb` |
-| Arch Linux         | `yay -S t3code-bin`                |
-| Arch Linux nightly | `yay -S t3code-nightly-bin`        |
-
-The `.deb` updates itself like the other desktop builds. It asks for your
-password to install each update. If your desktop has no password prompt, the
-update fails. Download the new `.deb` and install it the same way.
-
-### The `t3` command
-
-The desktop app includes the `t3` command-line tool. To run it from any
-terminal, open **Settings → General → About** and choose **Install** next to
-**t3 command**. On macOS and Linux it adds a `t3` link to a folder on your
-`PATH`; on Windows it adds the app's command folder to your `PATH`. Open a new
-terminal afterwards. **Remove** takes it off again. If you already have `t3`
-from npm, it stays as it is.
-
-### Windows Subsystem for Linux
-
-Choose a WSL distro in **Settings → Connections** to run agents and projects
-there. Install the provider CLIs inside that distro. Cogenly installs its own
-server runtime there automatically; the first launch after an app update can
-take longer.
+On your Mac, forward that port with `ssh -N -L 14773:127.0.0.1:4773 your-vps`
+and paste the printed pairing URL into **Add environment**. (`cogenly pair`
+prints the same kind of link for the server's own address, `127.0.0.1:4773`;
+change its port to `14773` if you use it instead.) The environment connects
+while the tunnel runs.
+Keep port 4773 closed to the internet: it is plain HTTP. For a route that does
+not need the tunnel, see [Tailscale HTTPS](./remote-access.md#tailscale-https).
 
 ### Open a project from a terminal
 
 With the desktop app already running on the same machine:
 
 ```bash
-t3 app
+cogenly app
 ```
 
 This opens a new thread for the current directory, adding the project if needed.
-Pass a path, such as `t3 app ../my-project`, to open another directory. It requires
+Pass a path, such as `cogenly app ../my-project`, to open another directory. It requires
 the desktop app, so a standalone server or an SSH session is not enough. If the
 command cannot reach the app, start or update the desktop app and try again.
 

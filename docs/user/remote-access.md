@@ -3,7 +3,13 @@
 Connect a phone, browser, or another desktop app to Cogenly running on a different
 machine. That machine must stay running and reachable while you work.
 
+For a VPS, start with [Run Cogenly on a VPS](./install.md#run-cogenly-on-a-vps).
+
 ## T3 Connect
+
+Cogenly releases do not include T3 Connect yet. Use
+[desktop-managed SSH](#desktop-managed-ssh), [pairing](#pair-over-a-lan-or-private-network),
+or [Tailscale HTTPS](#tailscale-https) instead.
 
 T3 Connect makes an environment available to your other devices without setting
 up router forwarding. In the desktop app on the host, open **Settings →
@@ -17,7 +23,7 @@ t3 connect
 
 Follow the sign-in instructions. Setup offers a
 [background service](./background-service.md); if you decline it, start the
-server with `t3 serve`. Saving your sign-in alone does not make the machine
+server with `cogenly serve`. Saving your sign-in alone does not make the machine
 reachable.
 
 On your other device, sign in to the same T3 Connect account and choose the
@@ -42,13 +48,13 @@ For a command-line host, replace `<private-ip>` with the host's LAN or tailnet
 address:
 
 ```bash
-t3 serve --host <private-ip>
+cogenly serve --host <private-ip>
 ```
 
 If a server is already running, generate a fresh link without restarting it:
 
 ```bash
-t3 pair
+cogenly pair
 ```
 
 Scan the QR code on your phone or paste the pairing URL into **Add environment**
@@ -124,13 +130,13 @@ HTTPS** in **Settings → Connections**. Turn it off there to remove that route.
 To start a command-line server with Tailscale HTTPS:
 
 ```bash
-t3 serve --tailscale-serve
+cogenly serve --tailscale-serve
 ```
 
 For an already-running server:
 
 ```bash
-t3 pair --tailscale
+cogenly pair --tailscale
 ```
 
 The pairing link uses an address such as `https://machine.tailnet.ts.net/`.
@@ -142,7 +148,7 @@ tailscale serve --https=443 off
 ```
 
 If that port is already in use, choose another with
-`--tailscale-serve-port`. See `t3 pair --help` for other pairing options.
+`--tailscale-serve-port`. See `cogenly pair --help` for other pairing options.
 
 ### Hosted web app
 
@@ -157,19 +163,35 @@ open it, or pair from the desktop app.
 
 In the desktop app, open **Settings → Connections → Add environment**, choose
 **SSH**, and enter a host or SSH alias such as `user@example.com`. Cogenly starts
-or reuses a server there and opens the port forward for you. Projects, provider
-credentials, and agent work stay on the remote machine.
+or reuses a server there, opens the port forward, and pairs for you. Projects,
+provider credentials, and agent work stay on the remote machine.
 
-The remote host must be Linux or an Apple Silicon Mac with `curl` or `wget`,
-`tar`, `sha256sum` or `shasum`, and [provider setup](./install.md#providers).
-The first launch downloads Cogenly's server to `~/.cogenly/runtime` on the host, so
-it takes longer than later ones.
+What Cogenly runs on the host:
+
+- A Cogenly server that is already running there, such as the
+  [background service](./background-service.md), is used as is.
+- Otherwise it starts the server from a Cogenly the host already has: the
+  `cogenly` command, or a version installed under `~/.cogenly/runtime`.
+- On a host with no Cogenly, it downloads the release matching your desktop app
+  from [Cogenly releases](https://github.com/aflekkas/cogenly/releases) to
+  `~/.cogenly/runtime`. The first launch takes longer than later ones. The host
+  needs Linux (x64 or arm64) with `curl` or `wget`, `tar`, and `sha256sum` or
+  `shasum`; it does not need Node.js.
+
+When the host runs an older Cogenly than your desktop app, the app shows a
+server version notice. A background service updates from that notice; for other
+installs run `cogenly update <version>` on the host
+([Updating Cogenly](./updating.md#update-a-connected-server)).
+
 Provider CLIs must be on the `PATH` of a non-interactive login shell there;
 check with:
 
 ```bash
 ssh user@example.com 'sh -lc "command -v claude codex"'
 ```
+
+A background service sets its own `PATH`; see
+[Running in the background](./background-service.md#platform-support).
 
 If SSH reconnecting fails after an app update, retry the launch once. Removing
 the connection stops a server that Cogenly launched; a server that was already
@@ -208,12 +230,12 @@ the server says so at startup, and browser tabs and HTML previews show the
 command to run on the host:
 
 ```sh
-sudo t3 browser setup
+sudo cogenly browser setup
 ```
 
 The server shows the exact line for how you started it, such as
-`sudo npx t3 browser setup`, and keeps your `PATH` when Node is installed only
-for your user. Where `t3` is not on your `PATH`, such as with only the
+`sudo cogenly browser setup`, and keeps your `PATH` when Node is installed only
+for your user. Where `cogenly` is not on your `PATH`, such as with only the
 desktop app installed, it names the full path of the app's own `t3` instead. It allows Chrome's sandbox with an AppArmor profile and installs
 any missing libraries with apt. It is safe to run again. Without `sudo`, it
 only reports what it would change.
@@ -232,7 +254,7 @@ threads on an environment through its MCP server. See
 On the host, **Settings → Connections** lets authorized administrators create
 pairing links and revoke client sessions. Revoking an unused link prevents new
 pairings; revoke a device's session to remove its existing access. Command-line
-management is available through `t3 auth --help`.
+management is available through `cogenly auth --help`.
 
 A session with an open connection stays listed after its access credential
 expires.
@@ -240,11 +262,11 @@ expires.
 To choose a token's permissions, pass `--scope` once for each scope you want:
 
 ```sh
-npx t3 pair --scope orchestration:read --scope relay:read
+cogenly pair --scope orchestration:read --scope relay:read
 ```
 
 The selected scopes replace the default permissions. The same option works with
-`npx t3 auth pairing create` and `npx t3 auth session issue`; each command's
+`cogenly auth pairing create` and `cogenly auth session issue`; each command's
 `--help` lists the available scopes. Without `--scope`, pairing tokens retain
 standard client permissions and issued bearer sessions retain administrative
 permissions.
@@ -311,7 +333,7 @@ screenshots, logs, or bug reports.
 
 Run `t3 connect status` on the host to inspect saved authorization and link
 configuration. It is not a live reachability check. If the environment appears
-offline, run `t3 service status` and read the displayed log. If it disappears
+offline, run `cogenly service status` and read the displayed log. If it disappears
 when SSH closes, see [background-service troubleshooting](./background-service.md#troubleshooting).
 
 | Error                                                     | Recovery                                                                                                                                    |
@@ -324,7 +346,7 @@ when SSH closes, see [background-service troubleshooting](./background-service.m
 
 After fixing a permanent rejection, restart the host's server. On Linux, use
 `systemctl --user restart t3code.service` for the background service. For a
-foreground server, stop it and run `t3 serve` again with your usual options.
+foreground server, stop it and run `cogenly serve` again with your usual options.
 Include the diagnostic message and trace ID when reporting a persistent failure.
 
 For a connection that still fails after linking, check the date and time on both

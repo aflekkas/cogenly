@@ -1,8 +1,8 @@
 # Always-on server
 
 Run the Cogenly server headless so agents keep working with no terminal or
-desktop app open: as a background service on your Mac today, on a VPS later.
-All commands below use the `cogenly` CLI from a checkout or install.
+desktop app open: as a background service on your Mac or a Linux VPS. All
+commands below use the `cogenly` CLI from a release install or a checkout.
 
 ## On the Mac
 
@@ -26,31 +26,29 @@ state; quit the desktop app or point one of them at another `--base-dir`.
 
 ### Install
 
-On the server, as the user that will run Cogenly:
+The user-facing steps are in [Run Cogenly on a VPS](../user/install.md#run-cogenly-on-a-vps):
+desktop SSH provisions the matching release itself, or `scripts/install.sh`
+installs it by hand. Either way the release archive lands in
+`~/.cogenly/runtime/versions/<version>`, and then:
 
 ```sh
-# Node 24 (see engines in package.json), git, and a C compiler for native modules.
-git clone <cogenly-repo> /opt/cogenly
-cd /opt/cogenly
-vp i
-vp run --filter @t3tools/web build
-vp run --filter t3 build:bundle
-```
-
-`cogenly` is `apps/server/dist/bin.mjs`; add an alias or symlink it onto PATH.
-Then install the systemd user service:
-
-```sh
-cogenly service install
-sudo loginctl enable-linger "$(id -un)"   # survive logout, start at boot
+cogenly service install   # systemd user unit cogenly.service, lingering enabled
 cogenly service status
 ```
 
-Cogenly publishes no release archives yet, so install pins a small wrapper
-that execs this checkout's built CLI: updating means `git pull`, rebuilding,
-and `cogenly service restart`. If the checkout moves, reinstall. Preview the
-unit without installing with `cogenly service install --print`, or render the
-other platform's file with `--print --format launchd|systemd`.
+To run a source checkout instead (Node 24 and `vp`):
+
+```sh
+git clone https://github.com/aflekkas/cogenly /opt/cogenly
+cd /opt/cogenly && vp i && vp run build:desktop
+node apps/server/dist/bin.mjs service install
+```
+
+Run from a checkout, install pins a small wrapper that execs the checkout's
+built CLI: updating means `git pull`, rebuilding, and `cogenly service
+restart`. If the checkout moves, reinstall. Preview the unit without
+installing with `cogenly service install --print`, or render the other
+platform's file with `--print --format launchd|systemd`.
 
 Data lives under `COGENLY_HOME` (`~/.cogenly` by default): `userdata/statev2.sqlite`
 is the state database, plus `settings.json`, `secrets/`, `logs/`, and
@@ -145,15 +143,11 @@ and start again.
 
 ### Upgrades and health
 
-```sh
-cd /opt/cogenly && git pull && vp i
-vp run --filter @t3tools/web build
-vp run --filter t3 build:bundle
-cogenly service restart
-```
+A release install updates with `cogenly update` (it asks before restarting the
+service), or from the desktop app's server version notice. A checkout updates
+with `git pull && vp i && vp run build:desktop && cogenly service restart`.
 
-(`cogenly update` tracks release trains and reports unavailable until Cogenly
-publishes releases.) `GET /health` is an unauthenticated liveness probe
+`GET /health` is an unauthenticated liveness probe
 returning `ok`, `version`, `uptimeSeconds`, and `schedulerHeartbeatAgeSeconds`;
 point uptime monitors at it over loopback or the tailnet. The scheduler ticks
 every 5 seconds, so a heartbeat age far beyond that means the event loop

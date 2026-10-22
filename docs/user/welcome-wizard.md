@@ -16,7 +16,7 @@ The hosted app has no computer of its own, so setup starts by connecting one.
 Select one or more computers to set up.
 
 - **Cogenly Connect** connects computers that are signed in to your account.
-  [Install the CLI](./install.md#command-line) and run `cogenly connect` on each
+  [Install the CLI](./install.md#linux-server-command-line) and run `cogenly connect` on each
   computer you want to add, then start Cogenly or run `cogenly serve` so the
   computer stays available.
 - **Add a computer** connects directly to a server on your network or tailnet.
