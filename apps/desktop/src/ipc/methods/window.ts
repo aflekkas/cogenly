@@ -320,7 +320,7 @@ export const openSystemSettings = DesktopIpc.makeIpcMethod({
     if (environment.platform !== "darwin") return false;
     const owner = Electron.BrowserWindow.getFocusedWindow();
     const opened = yield* shell.openSystemSettings(pane);
-    if (opened && environment.isPackaged) {
+    if (opened && environment.isPackaged && pane === "full-disk-access") {
       const permissions = yield* MacPermissions.MacPermissions;
       const isGranted = yield* safariPermissionCheck;
       yield* permissions.showHelper(pane, owner, isGranted);

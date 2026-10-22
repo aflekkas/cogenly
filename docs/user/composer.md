@@ -137,6 +137,19 @@ This removes the selected message and later conversation from the active thread
 and provider history. It does not undo external actions or separate provider
 memory. The action is available only when the provider supports rewind.
 
+## Voice input on Mac
+
+In the desktop app on macOS 26 or later, click the composer's microphone or press
+`mod+shift+d` to dictate. Press Enter, the shortcut, or the button again to insert
+the text where your caret was; press Escape to cancel and keep your draft as it was.
+Recordings can be up to five minutes long.
+
+Transcription runs on your Mac, so no audio leaves it and no API key is needed. The
+first use of a language may download Apple's speech model. Dictation uses your Mac's
+language. macOS asks for microphone access the first time; if you declined, allow
+Cogenly under **System Settings → Privacy & Security → Microphone**. Turn dictation
+off under **Settings → General → Dictation**.
+
 ## Voice input on iPhone
 
 On supported iPhones with iOS 26 or later, use the composer's microphone to record,

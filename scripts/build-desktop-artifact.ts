@@ -978,6 +978,11 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/resources/browser-secret/**/*",
   "!apps/desktop/prod-resources/browser-secret",
   "!apps/desktop/prod-resources/browser-secret/**/*",
+  // Ships once at resources/speech-helper; a copy inside app.asar cannot be signed.
+  "!apps/desktop/resources/speech-helper",
+  "!apps/desktop/resources/speech-helper/**/*",
+  "!apps/desktop/prod-resources/speech-helper",
+  "!apps/desktop/prod-resources/speech-helper/**/*",
   // Windows stages the server sidecar below prod-resources so electron-builder
   // can copy it using project-relative extraResources matchers. Keep those
   // staging inputs out of app.asar; they are emitted once at resources/.
@@ -1102,6 +1107,10 @@ export const DESKTOP_EXTRA_RESOURCES = [
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
   },
+] as const;
+// On-device dictation helper (native/speech-helper), built by stageSpeechHelper.
+export const MAC_SPEECH_HELPER_EXTRA_RESOURCES = [
+  { from: "apps/desktop/prod-resources/speech-helper", to: "speech-helper" },
 ] as const;
 export const LINUX_BROWSER_SECRET_EXTRA_RESOURCES = [
   { from: "apps/desktop/prod-resources/browser-secret", to: "browser-secret" },
@@ -1349,6 +1358,12 @@ export function resolveMacWebAuthnEntitlements(
   };
 }
 
+// The hardened runtime blocks microphone capture (dictation) without this.
+export const MAC_AUDIO_INPUT_ENTITLEMENT = "com.apple.security.device.audio-input";
+// electron-builder's default entitlements plus audio input, for signed builds
+// without a passkey provisioning profile.
+export const MAC_DEFAULT_ENTITLEMENTS_PATH = "apps/desktop/entitlements.mac.plist";
+
 export function renderMacPasskeyEntitlements(
   configuration: MacPasskeySigningConfiguration,
   webAuthn: MacWebAuthnEntitlements,
@@ -1386,6 +1401,8 @@ ${associatedDomains}
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
     <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>${MAC_AUDIO_INPUT_ENTITLEMENT}</key>
     <true/>
   </dict>
 </plist>
@@ -2291,6 +2308,32 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   }
 });
 
+export const stageSpeechHelper = Effect.fn("stageSpeechHelper")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+  readonly verbose: boolean;
+}) {
+  if (input.platform !== "mac") return;
+  const path = yield* Path.Path;
+  yield* runCommand(
+    ChildProcess.make(
+      "node",
+      [
+        path.join(input.repoRoot, "apps/desktop/scripts/build-speech-helper.mjs"),
+        "--require",
+        "--arch",
+        input.arch,
+        "--output",
+        path.join(input.stageResourcesDir, "speech-helper", "cogenly-speech"),
+      ],
+      { cwd: input.repoRoot },
+    ),
+    { label: "build macOS speech helper", verbose: input.verbose },
+  );
+});
+
 export const stageBrowserSecret = Effect.fn("stageBrowserSecret")(function* (input: {
   readonly repoRoot: string;
   readonly stageResourcesDir: string;
@@ -2660,6 +2703,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       : {}),
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
+      ...(platform === "mac" ? MAC_SPEECH_HELPER_EXTRA_RESOURCES : []),
       ...(platform === "linux" ? LINUX_BROWSER_SECRET_EXTRA_RESOURCES : []),
       ...(platform === "win" ? WINDOWS_SERVER_EXTRA_RESOURCES : []),
       ...(platform === "win" && wslRuntimeBundled ? WSL_RUNTIME_EXTRA_RESOURCES : []),
@@ -2698,6 +2742,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         NSAutoFillRequiresTextContentTypeForOneTimeCodeOnMac: true,
         NSLocalNetworkUsageDescription:
           "Cogenly connects to devices on your local network for remote environments and commands run by terminals and coding agents.",
+        // Composer dictation. Transcription runs on device (SpeechTranscriber), which
+        // needs no Speech Recognition permission.
+        NSMicrophoneUsageDescription:
+          "Cogenly uses the microphone for dictation. Speech is transcribed on this Mac and never leaves it.",
         // macOS lists an app under Default web browser only when it opens web
         // pages as documents as well as http and https links (see protocols).
         CFBundleDocumentTypes: [
@@ -2734,7 +2782,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
             entitlements: macPasskeySigning.entitlementsPath,
             provisioningProfile: macPasskeySigning.provisioningProfilePath,
           }
-        : {}),
+        : signed
+          ? { entitlements: path.join(repoRoot, MAC_DEFAULT_ENTITLEMENTS_PATH) }
+          : {}),
     };
   }
 
@@ -3626,6 +3676,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
   }
   yield* stageResourceMonitor({
+    repoRoot,
+    stageResourcesDir,
+    platform: options.platform,
+    arch: options.arch,
+    verbose: options.verbose,
+  });
+  yield* stageSpeechHelper({
     repoRoot,
     stageResourcesDir,
     platform: options.platform,

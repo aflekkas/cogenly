@@ -47,6 +47,11 @@ NodeChildProcess.execFileSync(
   [NodePath.join(desktopDir, "scripts/build-browser-secret.mjs")],
   { stdio: "inherit" },
 );
+NodeChildProcess.execFileSync(
+  process.execPath,
+  [NodePath.join(desktopDir, "scripts/build-speech-helper.mjs")],
+  { stdio: "inherit" },
+);
 
 await waitForResources({
   baseDir: desktopDir,

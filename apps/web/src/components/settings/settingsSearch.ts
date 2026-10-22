@@ -312,6 +312,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["composer rich text tiptap bold italic markdown styled wysiwyg"],
   },
   {
+    id: "composer-dictation",
+    title: "Dictation",
+    to: "/settings/general",
+    searchTerms: ["voice speech microphone mic dictate transcribe talk speak"],
+    desktopOnly: true,
+    macOnly: true,
+  },
+  {
     id: "send-shortcut",
     title: "Send shortcut",
     to: "/settings/general",

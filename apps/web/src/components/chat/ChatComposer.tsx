@@ -375,6 +375,8 @@ import { useDelayedStatus } from "../../hooks/useDelayedStatus";
 import { useElementState } from "../../hooks/useElementState";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { transcriptEdit } from "../../dictation/composerDictation.logic";
+import { ComposerDictationControl } from "./ComposerDictationControl";
 import { PANEL_ANIMATION_DURATION, readPanelAnimationsActive } from "../../panelAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { readEnvironmentScope } from "../../state/session";
@@ -2281,6 +2283,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     names: new Set(),
   });
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  // Dictation freezes the draft so its transcript lands where the caret was.
+  const [dictationActive, setDictationActive] = useState(false);
+  const dictationActiveRef = useRef(false);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerSurfaceRef = useRef<HTMLDivElement>(null);
   const providerInputRejectedRef = useRef(false);
@@ -2719,6 +2724,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const isChoiceOnlyPendingQuestion =
     activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
+  const composerEditorLocked =
+    isConnecting ||
+    projectSelectionRequired ||
+    isChoiceOnlyPendingQuestion ||
+    activePendingIsResponding;
   const showComposerTopDrawer =
     pendingUserInputs.length > 0 ||
     (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
@@ -4035,6 +4045,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (
       noProviderAvailable ||
       isSendDisabled ||
+      dictationActiveRef.current ||
       !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)
     ) {
       event?.preventDefault();
@@ -5099,6 +5110,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (
       text.length === 0 ||
       isConnecting ||
+      dictationActiveRef.current ||
       pendingUserInputs.length > 0 ||
       projectSelectionRequired ||
       (options?.citationCommentAnchor && !composerEditorRef.current)
@@ -5133,6 +5145,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     );
   };
   const insertComposerTextStable = useStableCallback(insertComposerText);
+
+  const readDictationDraft = () => {
+    const snapshot = readComposerSnapshot();
+    const selection = composerEditorRef.current?.readSelectionRange() ?? {
+      start: snapshot.expandedCursor,
+      end: snapshot.expandedCursor,
+    };
+    return { text: snapshot.value, selection };
+  };
+  const commitDictationDraft = (previous: ReturnType<typeof readDictationDraft>, text: string) => {
+    const edit = transcriptEdit(previous.text, previous.selection, text);
+    if (!edit) return;
+    // Unfreeze first: the replacement focuses the editor at the new caret.
+    dictationActiveRef.current = false;
+    setDictationActive(false);
+    applyPromptReplacement(edit.start, edit.end, edit.insertion, {
+      expectedText: previous.text.slice(edit.start, edit.end),
+    });
+  };
+  const onDictationActiveChange = (active: boolean) => {
+    dictationActiveRef.current = active;
+    setDictationActive(active);
+    if (!active) window.requestAnimationFrame(() => composerEditorRef.current?.focus());
+  };
 
   const insertComposerTextAtEnd: ChatComposerHandle["insertTextAtEnd"] = (text, options) => {
     const inserted = insertComposerText(text, "end", options);
@@ -6386,12 +6422,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                   ? DISCONNECTED_COMPOSER_PLACEHOLDER
                                   : "Ask anything, @tag files/folders, $use skills, or / for commands"
                     }
-                    disabled={
-                      isConnecting ||
-                      projectSelectionRequired ||
-                      isChoiceOnlyPendingQuestion ||
-                      activePendingIsResponding
-                    }
+                    disabled={composerEditorLocked || dictationActive}
                   />
                 </ComposerContextActionsContext>
                 {showMobilePendingAnswerActions ? (
@@ -6466,6 +6497,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-1"
                 >
+                  {settings.dictationEnabled && !isChoiceOnlyPendingQuestion ? (
+                    <ComposerDictationControl
+                      ownerKey={composerDraftTargetKey}
+                      disabled={composerEditorLocked}
+                      keybindings={keybindings}
+                      readDraft={readDictationDraft}
+                      commitDraft={commitDictationDraft}
+                      onActiveChange={onDictationActiveChange}
+                    />
+                  ) : null}
                   {showComposerAttachAction ? (
                     <>
                       <input

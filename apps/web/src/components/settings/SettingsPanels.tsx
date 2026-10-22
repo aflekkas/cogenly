@@ -1,3 +1,4 @@
+import { useDictationAvailable } from "~/dictation/dictationAvailability";
 import { SettingsGroup } from "./SettingsGroup";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
@@ -530,6 +531,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.composerRichTextEnabled !== DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled
         ? ["Rich text composer"]
         : []),
+      ...(settings.dictationEnabled !== DEFAULT_UNIFIED_SETTINGS.dictationEnabled
+        ? ["Dictation"]
+        : []),
       ...(settings.sendShortcut !== DEFAULT_UNIFIED_SETTINGS.sendShortcut ? ["Send shortcut"] : []),
       ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
         ? ["Follow-up behavior"]
@@ -592,6 +596,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.composerRichTextEnabled,
+      settings.dictationEnabled,
       settings.sendShortcut,
       settings.followUpBehavior,
       settings.addProjectBaseDirectory,
@@ -645,6 +650,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       persistComposerContextStrip: DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
       composerRichTextEnabled: DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled,
+      dictationEnabled: DEFAULT_UNIFIED_SETTINGS.dictationEnabled,
       sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut,
       followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
       contextWindowMeterEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled,
@@ -1092,6 +1098,7 @@ function LegacyFeaturesSection() {
 }
 
 export function GeneralSettingsPanel() {
+  const dictationSupported = useDictationAvailable();
   const modifierLabel = isMacPlatform(navigator.platform) ? "⌘" : "Ctrl";
   const sendShortcutOptions = [
     { value: "enter", label: "Enter" },
@@ -1492,6 +1499,32 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        {dictationSupported ? (
+          <SettingsRow
+            {...searchableSetting("composer-dictation")}
+            description="Show the composer's mic button and its shortcut. Speech is transcribed on this Mac."
+            resetAction={
+              settings.dictationEnabled !== DEFAULT_UNIFIED_SETTINGS.dictationEnabled ? (
+                <SettingResetButton
+                  label="dictation"
+                  onClick={() =>
+                    updateSettings({ dictationEnabled: DEFAULT_UNIFIED_SETTINGS.dictationEnabled })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.dictationEnabled}
+                onCheckedChange={(checked) =>
+                  updateSettings({ dictationEnabled: Boolean(checked) })
+                }
+                aria-label="Dictation"
+              />
+            }
+          />
+        ) : null}
 
         <SettingsRow
           {...searchableSetting("send-shortcut")}

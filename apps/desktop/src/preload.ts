@@ -170,6 +170,20 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   openSystemSettings: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.OPEN_SYSTEM_SETTINGS_CHANNEL, pane),
   pasteAsText: () => ipcRenderer.invoke(IpcChannels.PASTE_AS_TEXT_CHANNEL, undefined),
+  ...(clientPlatform === "darwin"
+    ? {
+        dictation: {
+          isAvailable: () => ipcRenderer.invoke(IpcChannels.DICTATION_IS_AVAILABLE_CHANNEL),
+          requestMicrophoneAccess: () =>
+            ipcRenderer.invoke(IpcChannels.DICTATION_REQUEST_MICROPHONE_CHANNEL),
+          prepare: (input) => ipcRenderer.invoke(IpcChannels.DICTATION_PREPARE_CHANNEL, input),
+          transcribe: (input) =>
+            ipcRenderer.invoke(IpcChannels.DICTATION_TRANSCRIBE_CHANNEL, input),
+          cancel: (requestId) =>
+            ipcRenderer.invoke(IpcChannels.DICTATION_CANCEL_CHANNEL, requestId),
+        },
+      }
+    : {}),
   onMenuAction: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {
       if (typeof action !== "string") return;

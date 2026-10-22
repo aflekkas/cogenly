@@ -60,6 +60,9 @@ the DMG is the first-install download and the zip is the update payload.
   isn't used either, because its npm-based bootstrap has stalled for minutes.
 - The resource monitor's crates and Cargo target dir are cached with
   `Swatinem/rust-cache`.
+- The dictation helper (`native/speech-helper`) needs the macOS 26 SDK, so the
+  job points `COGENLY_SPEECH_DEVELOPER_DIR` at the runner's newest Xcode 26 for
+  `swiftc` only; the rest of the build keeps the image's default Xcode.
 - The build job checks out the commit shallowly, since packaging reads only
   `HEAD`. The artifact uploads without recompressing the DMG and zip.
 - The publish job installs no toolchain. The resolve job passes the previous

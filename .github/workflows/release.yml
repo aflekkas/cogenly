@@ -156,6 +156,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native/resource-monitor
+      # The dictation helper needs the macOS 26 SDK; macos-15 defaults to Xcode 16.
+      # Only swiftc uses it (via COGENLY_SPEECH_DEVELOPER_DIR), not the rest of the build.
+      - name: Select Xcode 26 for the speech helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcode="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)"
+          echo "COGENLY_SPEECH_DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="$xcode/Contents/Developer" xcrun swiftc --version
       - run: vp run --filter @t3tools/desktop ensure:electron
       - name: Stamp package versions
         env:

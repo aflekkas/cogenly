@@ -2,7 +2,8 @@ import { NodeServices } from "@effect/platform-node";
 import { it } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
-import { createBuildConfig } from "./build-desktop-artifact.ts";
+import * as NodeFS from "node:fs";
+import { createBuildConfig, MAC_AUDIO_INPUT_ENTITLEMENT } from "./build-desktop-artifact.ts";
 
 const configFor = (version: string, signed = false, mock = false) =>
   createBuildConfig("mac", "dmg", version, signed, mock, 3000, undefined).pipe(
@@ -36,6 +37,21 @@ describe("desktop release packaging", () => {
       const config = yield* configFor("1.2.3", true);
       expect(config.mac).toMatchObject({ notarize: true, hardenedRuntime: true });
       expect(config.mac).not.toHaveProperty("provisioningProfile");
+      // Dictation needs microphone capture under the hardened runtime.
+      const entitlements = (config.mac as { entitlements: string }).entitlements;
+      expect(NodeFS.readFileSync(entitlements, "utf8")).toContain(MAC_AUDIO_INPUT_ENTITLEMENT);
+    }),
+  );
+  it.effect("ships the dictation helper and a microphone usage description on macOS", () =>
+    Effect.gen(function* () {
+      const config = yield* configFor("1.2.3");
+      expect(config.extraResources).toContainEqual({
+        from: "apps/desktop/prod-resources/speech-helper",
+        to: "speech-helper",
+      });
+      expect(config.mac).toMatchObject({
+        extendInfo: { NSMicrophoneUsageDescription: expect.any(String) },
+      });
     }),
   );
   it.effect("keeps local update testing on localhost and retired previews without a feed", () =>

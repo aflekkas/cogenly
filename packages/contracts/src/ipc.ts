@@ -982,8 +982,62 @@ export const DesktopPreviewRecordingSaveInputSchema = Schema.Struct({
  * A System Settings pane the app can deep-link to. The identifier crosses IPC
  * rather than a URL, so the renderer can only reach these known destinations.
  */
-export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
+export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access", "microphone"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
+
+/** Mirrors VoiceTranscriptionErrorCode in @t3tools/client-runtime/voice-input. */
+export const DesktopDictationErrorCodeSchema = Schema.Literals([
+  "unavailable",
+  "unsupported-locale",
+  "preparation-failed",
+  "transcription-failed",
+  "cancelled",
+]);
+export type DesktopDictationErrorCode = typeof DesktopDictationErrorCodeSchema.Type;
+
+/** `requestId` names the run so `cancel` can stop it. */
+export const DesktopDictationPrepareInputSchema = Schema.Struct({
+  requestId: Schema.String,
+  locale: Schema.String,
+});
+export type DesktopDictationPrepareInput = typeof DesktopDictationPrepareInputSchema.Type;
+
+/** `audio` is a WAV file's bytes. */
+export const DesktopDictationTranscribeInputSchema = Schema.Struct({
+  requestId: Schema.String,
+  locale: Schema.String,
+  audio: Schema.Uint8Array,
+});
+export type DesktopDictationTranscribeInput = typeof DesktopDictationTranscribeInputSchema.Type;
+
+/** Failures are values: Electron flattens a rejected invoke into a bare message. */
+export const DesktopDictationResultSchema = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true), value: Schema.String }),
+  Schema.Struct({
+    ok: Schema.Literal(false),
+    code: DesktopDictationErrorCodeSchema,
+    message: Schema.String,
+  }),
+]);
+export type DesktopDictationResult = typeof DesktopDictationResultSchema.Type;
+
+export const DesktopMicrophoneAccessSchema = Schema.Struct({
+  granted: Schema.Boolean,
+  canAskAgain: Schema.Boolean,
+});
+export type DesktopMicrophoneAccess = typeof DesktopMicrophoneAccessSchema.Type;
+
+/** On-device dictation through the bundled macOS speech helper. */
+export interface DesktopDictationBridge {
+  /** False below macOS 26, on unsupported hardware, or when the helper is missing. */
+  isAvailable: () => Promise<boolean>;
+  requestMicrophoneAccess: () => Promise<DesktopMicrophoneAccess>;
+  /** Resolves the locale and downloads its model on first use; `value` is the locale. */
+  prepare: (input: DesktopDictationPrepareInput) => Promise<DesktopDictationResult>;
+  /** `value` is the transcript. */
+  transcribe: (input: DesktopDictationTranscribeInput) => Promise<DesktopDictationResult>;
+  cancel: (requestId: string) => Promise<void>;
+}
 
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
@@ -1067,6 +1121,8 @@ export interface DesktopBridge {
    */
   openSystemSettings?: (pane: SystemSettingsPane) => Promise<boolean>;
   checkSystemPermission?: (pane: SystemSettingsPane) => Promise<boolean>;
+  /** Present only on macOS desktop builds that bundle the speech helper. */
+  dictation?: DesktopDictationBridge;
   /** Present when the desktop shell can perform an ordered plain-text paste. */
   pasteAsText?: () => Promise<void>;
   onMenuAction: (listener: (action: string) => void) => () => void;
