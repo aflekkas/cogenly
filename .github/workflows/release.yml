@@ -1,6 +1,7 @@
 name: Release
 
 # Builds happen only on an explicit dispatch from main; pushes publish nothing.
+# Every run promotes to prod behind the production environment gate.
 on:
   workflow_dispatch:
     inputs:
@@ -13,20 +14,14 @@ on:
         description: "Prod X.Y.Z override; defaults to apps/desktop/package.json at that commit"
         required: false
         type: string
-      channel:
-        description: "prod promotes behind the production gate; staging publishes a prerelease for the Staging track"
-        required: true
-        default: prod
-        type: choice
-        options: [prod, staging]
 
 permissions:
   contents: read
 
-# Serialize publication per channel and keep queued runs.
+# Serialize publication and keep queued runs.
 # Adapted from T3 Code's release queue.
 concurrency:
-  group: release-${{ inputs.channel }}
+  group: release-prod
   cancel-in-progress: false
   queue: max
 
@@ -41,8 +36,7 @@ jobs:
       sha: ${{ steps.plan.outputs.sha }}
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
-      channel: ${{ steps.plan.outputs.channel }}
-      environment: ${{ steps.plan.outputs.environment }}
+      previous_tag: ${{ steps.plan.outputs.previous_tag }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -54,12 +48,10 @@ jobs:
         env:
           SOURCE_REF: ${{ inputs.ref }}
           VERSION: ${{ inputs.version }}
-          CHANNEL: ${{ inputs.channel }}
         with:
           script: |
             if (context.ref !== 'refs/heads/main') throw new Error('Release must be dispatched from main.');
             const { releasePlan, assertProdVersionAdvances, assertSourceRef } = require('./.github/scripts/release-plan.cjs');
-            const channel = process.env.CHANNEL;
             // Validate input before using it as a Git argument.
             const ref = assertSourceRef((process.env.SOURCE_REF || 'main').trim().toLowerCase());
             const git = async (...args) => (await exec.getExecOutput('git', args, { silent: true })).stdout.trim();
@@ -80,14 +72,15 @@ jobs:
 
             const { data: manifest } = await github.rest.repos.getContent({ ...context.repo, path: 'apps/desktop/package.json', ref: sha });
             const packageVersion = JSON.parse(Buffer.from(manifest.content, 'base64').toString()).version;
-            const plan = releasePlan({ channel, packageVersion, version: process.env.VERSION, date: new Date().toISOString().slice(0, 10).replaceAll('-', ''), runNumber: context.runNumber });
-            if (channel === 'prod') {
-              try {
-                const { data: latest } = await github.rest.repos.getLatestRelease(context.repo);
-                assertProdVersionAdvances(plan.version, latest.tag_name);
-              } catch (error) {
-                if (error.status !== 404) throw error;
-              }
+            const plan = releasePlan({ packageVersion, version: process.env.VERSION });
+            // The latest prod release is also the base for the release notes.
+            let previous_tag = '';
+            try {
+              const { data: latest } = await github.rest.repos.getLatestRelease(context.repo);
+              assertProdVersionAdvances(plan.version, latest.tag_name);
+              previous_tag = latest.tag_name;
+            } catch (error) {
+              if (error.status !== 404) throw error;
             }
             try {
               await github.rest.repos.getReleaseByTag({ ...context.repo, tag: plan.tag });
@@ -95,8 +88,8 @@ jobs:
             } catch (error) {
               if (error.status !== 404) throw error;
             }
-            for (const [key, value] of Object.entries({ ...plan, sha })) core.setOutput(key, value);
-            core.notice(`${channel}: ${plan.tag} from ${sha} (CI passed)`);
+            for (const [key, value] of Object.entries({ ...plan, sha, previous_tag })) core.setOutput(key, value);
+            core.notice(`prod: ${plan.tag} from ${sha} (CI passed)`);
 
   desktop:
     name: Build macOS arm64
@@ -112,10 +105,10 @@ jobs:
             arch: arm64
             target: dmg
     steps:
+      # Packaging reads only HEAD (`git rev-parse`), so a shallow checkout is enough.
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.sha }}
-          fetch-depth: 0
       # vp is the lockfile's vite-plus; the viteplus.dev installer fails when npm per-version metadata 502s.
       - uses: actions/setup-node@v6
         with:
@@ -131,6 +124,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
+      # Packaging cargo-builds the resource monitor; reuse its crates and target dir.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/resource-monitor
       - run: vp run --filter @t3tools/desktop ensure:electron
       - name: Stamp package versions
         env:
@@ -165,11 +162,7 @@ jobs:
           echo "::notice::macOS release mode: $mode"
           vp run dist:desktop:artifact "${args[@]}"
           mkdir -p release-publish
-          cp release/*.dmg release/*.zip release/*.blockmap release-publish/
-          channel='${{ needs.prepare.outputs.channel }}'
-          manifest=latest-mac.yml
-          if [[ "$channel" == staging ]]; then manifest=staging-mac.yml; fi
-          cp "release/$manifest" release-publish/
+          cp release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml release-publish/
           printf '%s\n' "$mode" > release-publish/signing-mode.txt
           cd release-publish
           shasum -a 256 ./*.dmg ./*.zip ./*.blockmap ./*.yml > SHA256SUMS
@@ -177,14 +170,11 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
           set -euo pipefail
           (cd release-publish && shasum -a 256 -c SHA256SUMS)
           unzip -t "release-publish/Cogenly-$VERSION-arm64.zip" > /dev/null
-          manifest=latest-mac.yml
-          if [[ "$CHANNEL" == staging ]]; then manifest=staging-mac.yml; fi
-          grep -F "version: $VERSION" "release-publish/$manifest"
+          grep -F "version: $VERSION" release-publish/latest-mac.yml
           # The same zip is consumed by Squirrel.Mac on signed installs.
           if [[ "$(cat release-publish/signing-mode.txt)" == signed-and-notarized ]]; then
             check_dir="$RUNNER_TEMP/release-signature-check"
@@ -201,71 +191,55 @@ jobs:
           name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
           path: release-publish/*
           if-no-files-found: error
+          # The DMG and zip are already compressed.
+          compression-level: 0
 
   publish:
     name: Publish release
     needs: [prepare, desktop]
     runs-on: ubuntu-latest
-    environment: ${{ needs.prepare.outputs.environment }}
+    environment: production
     permissions:
       contents: write
     steps:
+      # History only feeds the first-release notes; commits without trees are enough.
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
-      # vp is the lockfile's vite-plus; the viteplus.dev installer fails when npm per-version metadata 502s.
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: package.json
-          package-manager-cache: false
-      - uses: pnpm/action-setup@v6
-        with:
-          cache: true
-      - name: Install dependencies
-        run: |
-          echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
-          PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH" pnpm install --frozen-lockfile
+          filter: tree:0
       - uses: actions/download-artifact@v4
         with:
           pattern: desktop-*
           path: release-publish
           merge-multiple: true
-      - name: Generate same-channel notes and publish
+      - name: Generate notes and publish
         env:
           GH_TOKEN: ${{ github.token }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
           TAG: ${{ needs.prepare.outputs.tag }}
           SHA: ${{ needs.prepare.outputs.sha }}
+          PREVIOUS_TAG: ${{ needs.prepare.outputs.previous_tag }}
         shell: bash
         run: |
           set -euo pipefail
-          previous="$(node scripts/resolve-previous-release-tag.ts --channel "$CHANNEL" --current-tag "$TAG")"
-          previous="${previous#previous_tag=}"
-          if [[ -n "$previous" ]]; then
+          if [[ -n "$PREVIOUS_TAG" ]]; then
             gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
               -f "tag_name=$TAG" -f "target_commitish=$SHA" \
-              -f "previous_tag_name=$previous" --jq .body > release-notes.md
+              -f "previous_tag_name=$PREVIOUS_TAG" --jq .body > release-notes.md
           else
-            # GitHub otherwise guesses a previous tag from a different channel.
-            printf 'First %s release.\n\n' "$CHANNEL" > release-notes.md
+            # GitHub otherwise guesses a previous tag from an old staging prerelease.
+            printf 'First prod release.\n\n' > release-notes.md
             git log --first-parent --format="* %s (%h)" "$SHA" >> release-notes.md
           fi
           mode="$(cat release-publish/signing-mode.txt)"
           # shellcheck disable=SC2016
-          printf '\nBuild: `%s` • Channel: **%s** • Signing: **%s**\n' "$SHA" "$CHANNEL" "$mode" >> release-notes.md
+          printf '\nBuild: `%s` • Signing: **%s**\n' "$SHA" "$mode" >> release-notes.md
           if [[ "$mode" == unsigned ]]; then
             printf '\n**Unsigned macOS build.** Gatekeeper may block the first launch of a browser-downloaded copy. Installed apps update themselves in place.\n' >> release-notes.md
           fi
           # shellcheck disable=SC2016
-          if [[ "$CHANNEL" == prod ]]; then printf '\nPromoted from main commit `%s` after its CI passed.\n' "$SHA" >> release-notes.md; fi
+          printf '\nPromoted from main commit `%s` after its CI passed.\n' "$SHA" >> release-notes.md
           rm release-publish/signing-mode.txt
-          args=("$TAG" --target "$SHA" --title "Cogenly $TAG ($CHANNEL)" --notes-file release-notes.md)
-          if [[ "$CHANNEL" == staging ]]; then args+=(--prerelease --latest=false); else args+=(--latest); fi
           # Upload to a draft first: a failed upload never exposes a partial feed.
-          gh release create "${args[@]}" --draft release-publish/*
-          if [[ "$CHANNEL" == staging ]]; then
-            gh release edit "$TAG" --draft=false --prerelease --latest=false
-          else
-            gh release edit "$TAG" --draft=false --prerelease=false --latest
-          fi
+          gh release create "$TAG" --target "$SHA" --title "Cogenly $TAG" --notes-file release-notes.md --latest --draft release-publish/*
+          gh release edit "$TAG" --draft=false --prerelease=false --latest

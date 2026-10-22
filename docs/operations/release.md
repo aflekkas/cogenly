@@ -1,8 +1,8 @@
 # Desktop releases
 
 Cogenly ships **macOS arm64** DMG and zip artifacts from
-[Release](../../.github/workflows/release.yml). There are two channels:
-**prod** (GitHub's latest release) and **staging** (prerelease). No npm, relay,
+[Release](../../.github/workflows/release.yml). It publishes **prod** only,
+GitHub's latest release, behind the **production** approval gate. No npm, relay,
 AUR, Discord, mobile, or hosted-web deployment runs here. Standalone CLI archives
 are not published; `cogenly update`/`t3 update` remains disabled with an explicit
 message. Its channel flag uses `prod` and `staging` for future archive publication;
@@ -20,7 +20,7 @@ previous one, and most of those builds were never installed.
 2. Wait for that commit's push CI run to succeed.
 3. In Actions → Release → Run workflow, select **main**, enter the commit as
    **ref** (full or short SHA, or `main` for its HEAD), and optionally a prod
-   **version**. Leave **channel** at `prod`. Or:
+   **version**. Or:
 
    ```sh
    gh workflow run release.yml --ref main -f ref=<sha>
@@ -44,35 +44,45 @@ Releases are uploaded as drafts before publication so partial uploads are not
 offered as updates. An interrupted publish can leave a draft; inspect it before
 retrying. Existing releases are never overwritten automatically.
 
-### Staging builds
+### Build speed
 
-Staging does not build automatically. The workflow keeps its staging path
-behind the **channel** input, which defaults to `prod`, so the app's Staging
-track can still receive a build on request:
+A run takes about five minutes of machine time before the approval wait. Most
+of it is the macOS packaging step: the web build, the Rust resource monitor, and
+electron-builder producing the zip and DMG in parallel. Both artifacts ship:
+the DMG is the first-install download and the zip is the update payload.
 
-```sh
-gh workflow run release.yml --ref main -f ref=<sha> -f channel=staging
-```
+- Every job sets up Node from `engines` in package.json and pnpm from
+  `packageManager`, then runs `pnpm install --frozen-lockfile` with the pnpm
+  store cached on the lockfile. `vp` is the lockfile's `vite-plus`, from
+  `node_modules/.bin`. CI and Release don't use `voidzero-dev/setup-vp`: its
+  installer resolves the Vite+ CLI through npm's per-version metadata endpoint,
+  and that endpoint has failed for every version at once.
+- The resource monitor's crates and Cargo target dir are cached with
+  `Swatinem/rust-cache`.
+- The build job checks out the commit shallowly, since packaging reads only
+  `HEAD`. The artifact uploads without recompressing the DMG and zip.
+- The publish job installs no toolchain. The resolve job passes the previous
+  prod tag to it, so after approval it only downloads the artifact, writes the
+  notes, and publishes.
 
-It applies the same commit and CI checks, publishes a prerelease through the
-**staging** environment without approval, and takes no version override.
+These steps are inlined in each workflow rather than shared through a local
+composite action, because the build job checks out the selected commit, and
+older commits do not contain the shared action.
 
 ## Versions and notes
 
 Keep `apps/desktop/package.json` at the **next intended prod version**, e.g.
 `0.1.0`. Prod defaults to that version at the selected commit; an override must
-be plain `X.Y.Z` and advance the current latest prod release. A staging build
-becomes `0.1.0-staging.<UTC YYYYMMDD>.<GitHub run_number>`. A rerun uses the
+be plain `X.Y.Z` and advance the current latest prod release. A rerun uses the
 same tag and cannot overwrite a published release. After shipping prod, bump
 the next package versions on `main` (use `node scripts/update-release-package-versions.ts 0.1.1`).
 The workflow stamps server, desktop, web, and contracts versions in its checkout;
 it never commits a version change to main.
 
-Notes are generated against the preceding version tag **in the same channel**.
-The first release in a channel uses the source commit's first-parent history,
-since there is no previous tag. Every release body records the source SHA,
-channel, and signing mode; prod bodies also name the main commit they were
-promoted from.
+Notes are generated against the latest prod release, ignoring old staging
+prereleases. The first prod release uses the source commit's first-parent
+history, since there is no previous tag. Every release body records the source
+SHA, the signing mode, and the main commit it was promoted from.
 
 ## Unsigned builds
 
@@ -163,8 +173,10 @@ Updates also check that an offered version matches the selected track.
 
 **Updates are offered only by promotion.** Day-to-day installs are prod builds
 on the Prod track, so they see a new version only after it passes the
-production gate. Staging builds are published only on request and reach only
-installs that chose Staging, or staging builds, which default to it. The app checks its feed
+production gate. The Release workflow no longer publishes staging builds. The
+app's Staging track and its `staging-mac.yml` code remain, but receive no new
+builds, so installs on that track stay on the last staging prerelease until
+the user switches to Prod. The app checks its feed
 at startup and every four minutes, which is cheap because the prod feed changes
 only on promotion.
 
