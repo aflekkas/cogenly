@@ -3349,6 +3349,38 @@ code {
   margin: 0;
 }
 
+/* A progressive blur behind a header that floats over a scroller, under the
+   scroller's own top fade (scroll-fade-y): one backdrop-filter layer, masked
+   from full strength at the top edge down to none at the header's bottom, so
+   text passing under the controls turns to mush instead of colliding with
+   them. The header must be positioned with a z-index (a stacking context),
+   so the layer paints under its controls. Nothing on it animates, and it
+   emits no drag rectangle of its own. Reduced transparency trades it for the
+   canvas fill. */
+@utility header-scroll-blur {
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    -webkit-app-region: initial;
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    -webkit-mask-image: linear-gradient(to bottom, black 35%, transparent);
+    mask-image: linear-gradient(to bottom, black 35%, transparent);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    &::before {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      background: var(--background);
+      -webkit-mask-image: none;
+      mask-image: none;
+    }
+  }
+}
+
 @layer components {
   .chat-composer-lane {
     padding-inline-start: calc(

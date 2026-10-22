@@ -9071,15 +9071,16 @@ export default function ChatView(props: ChatViewProps) {
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
         {/* Top bar. It floats over the transcript, which scrolls up under it and
-            fades out across its height (.messages-timeline-scroll), so it reserves
-            no dead band and has no fill of its own. On desktop it stays the
+            fades out across its height (.messages-timeline-scroll) behind a
+            progressive blur (header-scroll-blur), so it reserves no dead band
+            and has no fill of its own. On desktop it stays the
             window's drag region and keeps clear of the traffic lights; in the
             browser it lets pointer events through to the transcript except on
             its controls. */}
         <header
           data-chat-header
           className={cn(
-            "relative z-30",
+            "header-scroll-blur relative z-30",
             embedded && "hidden",
             !isElectron && "pointer-events-none *:pointer-events-auto",
             isElectron
