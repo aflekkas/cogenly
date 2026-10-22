@@ -1,5 +1,4 @@
 export { SidebarAgentsList } from "./SidebarAgentsList";
-export { SidebarModeGroupLabel } from "./SidebarModeGroupLabel";
 export { SidebarModeSwitcher } from "./SidebarModeSwitcher";
 export { SidebarProjectsList } from "./SidebarProjectsList";
 export {

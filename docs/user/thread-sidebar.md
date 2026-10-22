@@ -109,7 +109,7 @@ agent tells you how it went.
 On web and desktop, a new thread keeps the current project and carries your model
 and mode selections, unless the destination project has its own model default.
 Its branch and workspace mode come from your configured defaults. In **Work**,
-**New work** starts in a new worktree unless the project, its `t3.json`, or
+**New task** starts in a new worktree unless the project, its `t3.json`, or
 Settings choose a workspace mode. To continue in an existing worktree, use
 **New thread in this worktree** from the branch toolbar.
 
@@ -242,7 +242,8 @@ of the active list when it finishes, fails, or needs an approval or answer. The 
 lists the thread you last sent work to first. Pinned threads stay in the pinned section. Each
 device keeps its own choice. Work does not fold: its first filter lists all tasks, running ones
 included, and **Needs attention** lists the tasks waiting on you for an approval, an answer, or a
-plan decision.
+plan decision. A filter with nothing in it is dimmed and cannot be chosen; when the one you
+are on empties, the list switches to the first filter that still has something.
 
 While this is on, the active list is ordered by when each thread last came back to you, so you
 cannot drag or move threads within it. Your saved order returns when you turn it off.
@@ -312,7 +313,8 @@ project. A filed chat also gets
 **Chats** stays one list of titles by date. **Work** is one list, newest activity
 first. Hover a row to see its project, or right-click it and open the project from
 **Move to folder**. Right-click a repository heading in **Work** for a new thread in that
-repository, its project, and **Repository settings**. To start a thread on the open
+repository, its project, and **Repository settings**. In **Agents**, right-click a project
+heading for **New Agent in** that project. To start a thread on the open
 thread's branch, run **New thread on** _branch_ from the command palette.
 
 ## Find and reference work

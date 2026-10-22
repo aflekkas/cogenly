@@ -9,15 +9,15 @@ import type { SidebarMode } from "./sidebarModes.logic";
 
 const NEW_ITEM_LABELS: Record<SidebarMode, string> = {
   chats: "New chat",
-  tasks: "New work",
+  tasks: "New task",
   agents: "New agent",
   projects: "New project",
 };
 
 /**
- * Creation and navigation that differ by mode: the header's new button makes a
- * scratch chat in Chats, an agent in Agents and a project in Projects (Work keeps the
- * sidebar's own new-thread flow).
+ * Creation and navigation that differ by mode: the search dock's new button
+ * makes a scratch chat in Chats, an agent in Agents and a project in Projects
+ * (Work keeps the sidebar's own new-thread flow).
  */
 export function useSidebarModeActions(input: {
   readonly mode: SidebarMode;
@@ -60,15 +60,6 @@ export function useSidebarModeActions(input: {
 
   return {
     newItemLabel: NEW_ITEM_LABELS[mode],
-    /** Null in Work, where the sidebar's existing new-thread handler applies. */
-    createInMode:
-      mode === "chats"
-        ? startChat
-        : mode === "agents"
-          ? createAgent
-          : mode === "projects"
-            ? createProject
-            : null,
     startChat,
     createAgent,
     createProject,

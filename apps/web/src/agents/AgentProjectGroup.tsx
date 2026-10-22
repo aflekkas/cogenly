@@ -1,18 +1,21 @@
-import { FolderIcon, PlusIcon } from "lucide-react";
+import type { ContextMenuItem } from "@t3tools/contracts";
+import { FolderIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { Button } from "~/components/ui/button";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { DisclosureChevron } from "~/components/ui/disclosure";
+import { SidebarGroupHeader, SidebarList } from "~/components/sidebar/SidebarList";
+import { readLocalApi } from "~/localApi";
 import type { EnvironmentProjectLabel } from "~/projectLabels/projectLabels.logic";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 
+type GroupMenuAction = "new-agent" | "toggle";
+
 /**
- * One project's agents in the Agents list: a quiet header with the project's
- * folder in its colour (a plain folder for No project), its name and a chevron,
- * and the cards under it. The header toggles the group; the cards grow and fade
- * open or shut and stay mounted while shut, invisible and inert. Without
- * `heading` (no agent is in a project) only the cards render, as a flat list.
+ * One project's agents in the Agents list: the shared group header with the
+ * project's folder in its colour (a plain folder for No project), its name and
+ * a chevron, and the rows under it. The header toggles the group; right-click
+ * offers New Agent in the project. The rows grow and fade open or shut and stay
+ * mounted while shut, invisible and inert. Without `heading` (no agent is in a
+ * project) only the rows render, as a flat list.
  */
 export function AgentProjectGroup(props: {
   readonly groupKey: string;
@@ -26,57 +29,50 @@ export function AgentProjectGroup(props: {
 }) {
   const name = props.folder?.label.name ?? "No project";
   const open = props.open || !props.heading;
+  const openMenu = async (position: { x: number; y: number }) => {
+    const api = readLocalApi();
+    if (!api) return;
+    const items: ContextMenuItem<GroupMenuAction>[] = [
+      ...(props.onCreate
+        ? [{ id: "new-agent" as const, label: `New Agent in ${name}`, icon: "message-square-plus" }]
+        : []),
+      {
+        id: "toggle",
+        label: open ? "Collapse" : "Expand",
+        separatorBefore: props.onCreate !== undefined,
+      },
+    ];
+    const clicked = await api.contextMenu.show(items, position);
+    if (clicked === "new-agent") props.onCreate?.();
+    else if (clicked === "toggle") props.onToggle();
+  };
   return (
-    <li className="flex list-none flex-col" data-agent-group={props.groupKey}>
+    <li className="flex min-w-0 list-none flex-col" data-agent-group={props.groupKey}>
       {props.heading ? (
-        <div
+        <SidebarGroupHeader
+          as="div"
           data-agent-flip={`group:${props.groupKey}`}
-          className="group/agent-group mx-0.5 flex h-8 items-center gap-0.5 text-xs font-medium text-sidebar-muted-foreground/60"
-        >
-          <button
-            type="button"
-            aria-expanded={open}
-            aria-label={`${name}, ${open ? "collapse" : "expand"}`}
-            onClick={props.onToggle}
-            className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-none transition-colors duration-(--motion-duration-fast) ease-standard hover:text-sidebar-muted-foreground focus-visible:text-sidebar-muted-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none"
-          >
-            {props.folder ? (
+          icon={
+            props.folder ? (
               <ProjectFolderIcon color={props.folder.label.color} className="size-3.5" />
             ) : (
               <FolderIcon aria-hidden className="size-3.5 shrink-0" />
-            )}
-            <span className="min-w-0 shrink truncate">{name}</span>
-            <span aria-hidden className="h-px min-w-2 flex-1 bg-sidebar-border/60" />
-            <DisclosureChevron open={open} />
-          </button>
-          {props.onCreate ? (
-            <span className="flex shrink-0 pointer-fine:opacity-0 pointer-fine:transition-opacity pointer-fine:duration-(--motion-duration-fast) pointer-fine:group-hover/agent-group:opacity-100 pointer-fine:focus-within:opacity-100">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost-muted"
-                      size="icon-xs"
-                      aria-label={`New agent in ${name}`}
-                      onClick={props.onCreate}
-                    />
-                  }
-                >
-                  <PlusIcon />
-                </TooltipTrigger>
-                <TooltipPopup side="top">New agent in {name}</TooltipPopup>
-              </Tooltip>
-            </span>
-          ) : (
-            // Holds the add button's place so every group's chevron lines up.
-            <span aria-hidden className="size-7 shrink-0 sm:size-6" />
-          )}
-        </div>
+            )
+          }
+          label={name}
+          collapse={{
+            open,
+            onToggle: props.onToggle,
+            ariaLabel: `${name}, ${open ? "collapse" : "expand"}`,
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            void openMenu({ x: event.clientX, y: event.clientY });
+          }}
+        />
       ) : null}
       <GroupCollapse open={open}>
-        <ul aria-label={props.heading ? name : undefined} className="flex flex-col gap-0.5">
-          {props.children}
-        </ul>
+        <SidebarList aria-label={props.heading ? name : undefined}>{props.children}</SidebarList>
       </GroupCollapse>
     </li>
   );

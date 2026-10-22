@@ -1,12 +1,11 @@
 /**
- * The sidebar search dock: one boxed row holding search, add repository and
- * new thread, pinned under the list.
- *
- * Search owns the row's text and spans it; add-repository and new-thread sit
- * as a pair of icons at the end, after any mode-specific filter. Chats has no
- * add-repository: repositories belong to Work.
+ * The sidebar search dock: one boxed row pinned under every tab's list
+ * (Chats, Work, Agents, Projects, Settings). Search owns the row's text and
+ * spans it; the tab's own primary actions sit as icons at its end, after any
+ * mode-specific filter: new chat, new task and add repository, new agent, new
+ * project. Settings has none.
  */
-import { FolderPlusIcon, SquarePenIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -19,53 +18,60 @@ import { SearchInput } from "../ui/search-input";
 import { SidebarMenuButton } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-export interface SidebarThreadHeaderProps {
-  /** Add repository only shows once one exists; the empty state offers it otherwise. */
-  hasProjects: boolean;
-  /** Optional mode-specific control before the add/new pair, such as the Chats project filter. */
+/** One of a tab's primary actions at the end of the search dock. */
+export interface SidebarDockAction {
+  readonly id: string;
+  /** Accessible name and tooltip ("New project"). */
+  readonly label: string;
+  /** The keyboard shortcut, shown in the tooltip. */
+  readonly shortcutLabel?: string | null | undefined;
+  readonly icon: LucideIcon;
+  readonly onClick: () => void;
+  readonly disabled?: boolean | undefined;
+}
+
+export interface SidebarSearchDockProps {
+  /** Optional mode-specific control before the actions, such as the Chats project filter. */
   filterControl?: ReactNode;
-  /** Null hides add repository (Chats); the command palette still offers it. */
-  onNewProject: (() => void) | null;
-  onNewThread: () => void;
-  /** What the new button makes in the current sidebar mode; defaults to "New thread". */
-  newThreadLabel?: string;
-  newThreadDisabled: boolean;
-  newThreadShortcutLabel: string | null | undefined;
+  actions: ReadonlyArray<SidebarDockAction>;
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
   onSearchKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void;
-  isSearching: boolean;
-  searchResultCount: number;
-  activeSearchResultIndex: number;
+  /** What the field searches, for its accessible name ("Search threads"). */
+  searchLabel: string;
+  clearLabel: string;
+  /** A shortcut hint shown while the field is empty, such as `/`. */
+  shortcut?: string | undefined;
+  /** The results list the field drives as a combobox, while it shows. */
+  results: {
+    readonly listId: string;
+    readonly optionId: (index: number) => string;
+    readonly visible: boolean;
+    readonly count: number;
+    readonly activeIndex: number;
+  };
   onClearSearch: () => void;
 }
 
-export function SidebarThreadHeader({
-  hasProjects,
+export function SidebarSearchDock({
   filterControl,
-  onNewProject,
-  onNewThread,
-  newThreadLabel: newItemLabel = "New thread",
-  newThreadDisabled,
-  newThreadShortcutLabel,
+  actions,
   searchInputRef,
   searchQuery,
   onSearchQueryChange,
   onSearchKeyDown,
-  isSearching,
-  searchResultCount,
-  activeSearchResultIndex,
+  searchLabel,
+  clearLabel,
+  shortcut,
+  results,
   onClearSearch,
-}: SidebarThreadHeaderProps) {
-  const resultsVisible = isSearching && searchResultCount > 0;
+}: SidebarSearchDockProps) {
+  const resultsVisible = results.visible && results.count > 0;
   // Results shrink as the query narrows, so the active index can outrun the
   // list; pointing aria-activedescendant at a removed option strands the
   // screen reader on nothing.
-  const activeResultExists = resultsVisible && activeSearchResultIndex < searchResultCount;
-  const newThreadLabel = newThreadShortcutLabel
-    ? `${newItemLabel} (${newThreadShortcutLabel})`
-    : newItemLabel;
+  const activeResultExists = resultsVisible && results.activeIndex < results.count;
 
   return (
     <SearchInput
@@ -75,15 +81,14 @@ export function SidebarThreadHeader({
       onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
       onKeyDown={onSearchKeyDown}
       placeholder="Search"
-      aria-label="Search threads"
+      aria-label={searchLabel}
       role="combobox"
       aria-autocomplete="list"
       aria-expanded={resultsVisible}
-      aria-controls={resultsVisible ? "sidebar-thread-search-results" : undefined}
-      aria-activedescendant={
-        activeResultExists ? `sidebar-thread-search-result-${activeSearchResultIndex}` : undefined
-      }
-      clearLabel="Clear thread search"
+      aria-controls={resultsVisible ? results.listId : undefined}
+      aria-activedescendant={activeResultExists ? results.optionId(results.activeIndex) : undefined}
+      clearLabel={clearLabel}
+      shortcut={shortcut}
       onClear={() => {
         onClearSearch();
         searchInputRef.current?.focus();
@@ -92,22 +97,29 @@ export function SidebarThreadHeader({
       // a background well reads far louder on themed palettes than on the base light and dark
       // ones.
       actions={
-        <>
-          {filterControl}
-          {hasProjects && onNewProject ? (
-            <SidebarHeaderIconButton label="Add repository" onClick={onNewProject}>
-              <FolderPlusIcon />
-            </SidebarHeaderIconButton>
-          ) : null}
-          <SidebarHeaderIconButton
-            label={newItemLabel}
-            tooltip={newThreadLabel}
-            disabled={newThreadDisabled}
-            onClick={onNewThread}
-          >
-            <SquarePenIcon />
-          </SidebarHeaderIconButton>
-        </>
+        filterControl || actions.length > 0 ? (
+          <>
+            {filterControl}
+            {actions.map((action) => {
+              const Icon = action.icon;
+              return (
+                <SidebarHeaderIconButton
+                  key={action.id}
+                  label={action.label}
+                  tooltip={
+                    action.shortcutLabel
+                      ? `${action.label} (${action.shortcutLabel})`
+                      : action.label
+                  }
+                  disabled={action.disabled}
+                  onClick={action.onClick}
+                >
+                  <Icon />
+                </SidebarHeaderIconButton>
+              );
+            })}
+          </>
+        ) : undefined
       }
     />
   );

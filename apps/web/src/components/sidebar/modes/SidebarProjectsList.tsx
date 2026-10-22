@@ -1,5 +1,4 @@
 import { useNavigate } from "@tanstack/react-router";
-import { FolderPlusIcon } from "lucide-react";
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { cn } from "~/lib/utils";
@@ -14,8 +13,13 @@ import type {
 import { ProjectFolderIcon } from "../../../projectLabels/ProjectFolderMark";
 import { useProjectContents } from "../../../projectLabels/useProjectContents";
 import { OverlayPresence } from "../../ui/overlay-presence";
+import {
+  SidebarList,
+  SidebarRowSubtitle,
+  sidebarRowClassName,
+  sidebarRowIntrinsicSizeClassName,
+} from "../SidebarList";
 import { SidebarListEmptyState } from "../SidebarListEmptyState";
-import { SIDEBAR_MODE_ICONS } from "./SidebarModeSwitcher";
 
 /**
  * One project in the list, at a Chats row's density: the folder and name,
@@ -49,7 +53,7 @@ function ProjectRow(props: {
     }
   };
   return (
-    <li className="list-none">
+    <li className={cn("list-none [content-visibility:auto]", sidebarRowIntrinsicSizeClassName(2))}>
       <button
         type="button"
         aria-current={props.active ? "page" : undefined}
@@ -60,11 +64,11 @@ function ProjectRow(props: {
           event.preventDefault();
           void menu.openMenu({ x: event.clientX, y: event.clientY });
         }}
-        className={cn(
-          "group/sidebar-project flex h-11 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg px-2.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          props.active || menu.menuOpen ? "state-selected" : "state-hover",
-          menu.menuOpen && "focus-visible:ring-0",
-        )}
+        className={sidebarRowClassName({
+          selected: props.active || menu.menuOpen,
+          lines: 2,
+          className: menu.menuOpen && "focus-visible:ring-0",
+        })}
       >
         <span className="flex min-w-0 flex-1 flex-col justify-center">
           <span className="flex min-w-0 items-center gap-2 text-sm">
@@ -78,12 +82,12 @@ function ProjectRow(props: {
               {label.name}
             </span>
           </span>
-          <span className="flex h-4 min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground group-[.state-selected]/sidebar-project:text-secondary-label">
+          <SidebarRowSubtitle>
             <span className="min-w-0 flex-1 truncate tabular-nums">{summary ?? "Empty"}</span>
             {props.environmentLabel ? (
               <span className="max-w-1/3 shrink-0 truncate">{props.environmentLabel}</span>
             ) : null}
-          </span>
+          </SidebarRowSubtitle>
         </span>
       </button>
     </li>
@@ -110,21 +114,15 @@ export function SidebarProjectsList(props: {
   };
   if (directory.labels.length === 0) {
     return (
-      <SidebarListEmptyState icon={SIDEBAR_MODE_ICONS.projects} label="No projects yet">
-        <button
-          type="button"
-          onClick={props.onCreateProject}
-          className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
-        >
-          <FolderPlusIcon className="-mx-0.5 size-3" />
-          New project
-        </button>
-      </SidebarListEmptyState>
+      <SidebarListEmptyState
+        label="No projects yet"
+        action={{ label: "New project", onClick: props.onCreateProject }}
+      />
     );
   }
   return (
     <>
-      <ul aria-label="Projects" className="flex flex-col gap-1">
+      <SidebarList aria-label="Projects" grow>
         {directory.labels.map((entry) => (
           <ProjectRow
             key={entry.key}
@@ -139,7 +137,7 @@ export function SidebarProjectsList(props: {
             onDeleted={() => leaveIfActive(entry)}
           />
         ))}
-      </ul>
+      </SidebarList>
       <OverlayPresence when={renaming}>
         {(entry) => (
           <ProjectLabelEditorDialog

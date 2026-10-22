@@ -4,7 +4,6 @@ import {
   type ProjectLabelId,
   type ScopedProjectRef,
 } from "@t3tools/contracts";
-import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { ThreadTerminalStatusButton } from "./ThreadStatusIndicators";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import {
@@ -68,9 +67,9 @@ import {
   GitBranchIcon,
   MessageCircleQuestionIcon,
   PinIcon,
-  PlusIcon,
   SettingsIcon,
   ShieldQuestionIcon,
+  FolderPlusIcon,
   SquarePenIcon,
   Undo2Icon,
   XIcon,
@@ -222,13 +221,14 @@ import {
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
-import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { SidebarSearchDock, type SidebarDockAction } from "./sidebar/SidebarSearchDock";
 import { PanOnHoverText } from "./sidebar/PanOnHoverText";
 import { PendingTitleSlot } from "./sidebar/PendingTitleSlot";
 import { useSidebarRowActionsOverlap } from "./sidebar/useSidebarRowActionsOverlap";
-import { SIDEBAR_SHELF_ICONS, SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
+import { SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
+import { useSegmentSelection } from "./sidebar/sidebarSegments.logic";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
-import { RepositoryGroupHeading } from "./sidebar/modes/RepositoryGroupHeading";
+import { RepositoryBadge } from "./sidebar/modes/RepositoryBadge";
 import { SidebarRenameField } from "./sidebar/SidebarRenameField";
 import {
   projectLabelKey,
@@ -251,7 +251,6 @@ import { useNavRailBadgeStore } from "./sidebar/navRailState";
 import {
   CHAT_DATE_GROUP_LABELS,
   SidebarAgentsList,
-  SidebarModeGroupLabel,
   SidebarModeSwitcher,
   SidebarProjectsList,
   CHAT_LIST_PAGE_SIZE,
@@ -276,6 +275,13 @@ import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { SidebarChatStatusSlot } from "./sidebar/SidebarChatStatusSlot";
+import {
+  SIDEBAR_CARD_CLASS_NAME,
+  SidebarGroupHeader,
+  SidebarList,
+  sidebarRowClassName,
+  sidebarRowIntrinsicSizeClassName,
+} from "./sidebar/SidebarList";
 import { SidebarListEmptyState } from "./sidebar/SidebarListEmptyState";
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
 import { AgentsShelfBar } from "../agents/AgentsShelfBar";
@@ -497,6 +503,14 @@ function SnoozeMenuButton(props: {
 // with unsent composer text alike; their surface is the plain card's.
 const draftPenClassName = "size-3 shrink-0 text-secondary-label";
 
+// Work's count bar, in order: all tasks, then each filter.
+const WORK_SHELF_ORDER: ReadonlyArray<SidebarShelf | null> = [
+  null,
+  "attention",
+  "snoozed",
+  "settled",
+];
+
 // Pointer travel before a press on a row starts a context drag, or a press on
 // its action button starts a sweep. Shorter presses stay clicks.
 const SIDEBAR_DRAG_DISTANCE = 6;
@@ -506,7 +520,6 @@ type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
 function SidebarSectionHeader(props: {
   marker: "working-header" | "snoozed-header" | "settled-header";
   label: string;
-  className?: string;
   toggle: { expanded: boolean; onToggle: () => void };
 }) {
   const shelf =
@@ -515,22 +528,18 @@ function SidebarSectionHeader(props: {
       : props.marker === "snoozed-header"
         ? "snoozed"
         : "settled";
-  const snoozed = shelf === "snoozed";
   return (
-    <li
+    <SidebarGroupHeader
       data-thread-selection-safe
       data-testid={`sidebar-${props.marker}`}
-      className={cn("mx-0.5 h-8 list-none", props.className)}
-    >
-      <CollapsibleSectionHeader
-        onClick={props.toggle.onToggle}
-        expanded={props.toggle.expanded}
-        tone={snoozed ? "info" : "muted"}
-        data-testid={`sidebar-${shelf}-shelf-toggle`}
-      >
-        {props.label}
-      </CollapsibleSectionHeader>
-    </li>
+      label={props.label}
+      tone={shelf === "snoozed" ? "info" : "muted"}
+      collapse={{
+        open: props.toggle.expanded,
+        onToggle: props.toggle.onToggle,
+        testId: `sidebar-${shelf}-shelf-toggle`,
+      }}
+    />
   );
 }
 
@@ -636,10 +645,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
           aria-label={accessibility.label}
           aria-current={accessibility.current}
           data-testid="sidebar-draft-row"
-          className={cn(
-            "group/sidebar-row relative flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-            props.isActive ? "state-selected" : "state-hover",
-          )}
+          className={sidebarRowClassName({ selected: props.isActive })}
           onClick={handleActivate}
           onContextMenu={handleContextMenu}
           onKeyDown={handleKeyDown}
@@ -668,7 +674,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         aria-current={accessibility.current}
         data-testid="sidebar-draft-row"
         className={cn(
-          "group/sidebar-row sidebar-row-motion relative w-full cursor-pointer overflow-hidden rounded-rail text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          SIDEBAR_CARD_CLASS_NAME,
           props.isActive
             ? "state-selected"
             : "state-hover bg-(--sidebar-card) text-sidebar-foreground",
@@ -1075,7 +1081,7 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
       // unrendered rows never shift the list when they paint.
       className={cn(
         "list-none [content-visibility:auto]",
-        props.folder ? "[contain-intrinsic-size:auto_44px]" : "[contain-intrinsic-size:auto_32px]",
+        sidebarRowIntrinsicSizeClassName(props.folder ? 2 : 1),
       )}
     >
       <div
@@ -1085,14 +1091,15 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
         aria-current={accessibility.current}
         data-testid="sidebar-row-chat"
         aria-busy={thread.titleRegeneration != null || undefined}
-        className={cn(
-          "group/sidebar-chat relative flex w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg px-2.5 text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          props.folder ? "h-11" : "h-8",
-          props.animateFolder &&
-            "transition-[height] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
-          props.isActive || isSelected || isContextMenuOpen ? "state-selected" : "state-hover",
-          isContextMenuOpen && "focus-visible:ring-0",
-        )}
+        className={sidebarRowClassName({
+          selected: props.isActive || isSelected || isContextMenuOpen,
+          lines: props.folder ? 2 : 1,
+          className: cn(
+            props.animateFolder &&
+              "transition-[height] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
+            isContextMenuOpen && "focus-visible:ring-0",
+          ),
+        })}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
@@ -1553,7 +1560,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     // The selected card is the same plain lighter surface as a selected chat
     // row. sidebar-row-motion fades the state change and fades the title out
     // under the hover actions (useSidebarRowActionsOverlap).
-    "group/sidebar-row sidebar-row-motion relative w-full cursor-pointer overflow-hidden rounded-rail text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+    SIDEBAR_CARD_CLASS_NAME,
     variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     props.isActive || isSelected || isContextMenuOpen || props.sweepAction !== null
       ? "state-selected"
@@ -2895,7 +2902,7 @@ export default function Sidebar() {
     Schema.Boolean,
   );
   // The count bar shows one filter at a time; opening one closes the others.
-  const openShelf: SidebarShelf | null = attentionFilterOpen
+  const requestedShelf: SidebarShelf | null = attentionFilterOpen
     ? "attention"
     : snoozedShelfExpanded
       ? "snoozed"
@@ -2920,6 +2927,21 @@ export default function Sidebar() {
     }
     return keys;
   }, [activeThreads, sidebarMode]);
+  // A filter never opens onto nothing: an empty one falls back to the first
+  // filter in bar order that holds something (see useSegmentSelection).
+  const shelfIndex = useSegmentSelection(
+    sidebarMode === "tasks"
+      ? [
+          activeThreads.length,
+          attentionThreadKeys.size,
+          snoozedThreads.length,
+          settledThreads.length,
+        ]
+      : [null, null, null, null],
+    WORK_SHELF_ORDER.indexOf(requestedShelf),
+    (index) => openSidebarShelf(WORK_SHELF_ORDER[index] ?? null),
+  );
+  const openShelf: SidebarShelf | null = WORK_SHELF_ORDER[shelfIndex] ?? null;
   const visibleWorkingThreads = useMemo(() => {
     if (workingShelfExpanded) return workingThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
@@ -4497,20 +4519,64 @@ export default function Sidebar() {
 
   // The button does what chat.newLocal does, so it advertises that shortcut.
   const newThreadShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  // Each tab's own primary actions at the end of the search dock.
+  const dockActions = ((): SidebarDockAction[] => {
+    switch (sidebarMode) {
+      case "chats":
+        return [
+          {
+            id: "new-chat",
+            label: sidebarModeActions.newItemLabel,
+            shortcutLabel: shortcutLabelForCommand(keybindings, "chat.newWithoutProject"),
+            icon: SquarePenIcon,
+            onClick: sidebarModeActions.startChat,
+          },
+        ];
+      case "tasks":
+        return [
+          // Add repository only shows once one exists; the empty state offers it otherwise.
+          ...(projectGroups.length > 0
+            ? [
+                {
+                  id: "add-repository",
+                  label: "Add repository",
+                  icon: FolderPlusIcon,
+                  onClick: openAddProjectCommandPalette,
+                },
+              ]
+            : []),
+          {
+            id: "new-task",
+            label: sidebarModeActions.newItemLabel,
+            shortcutLabel: newThreadShortcutLabel,
+            icon: SquarePenIcon,
+            onClick: handleNewThreadClick,
+            disabled: projects.length === 0,
+          },
+        ];
+      case "agents":
+        return [
+          {
+            id: "new-agent",
+            label: sidebarModeActions.newItemLabel,
+            icon: SquarePenIcon,
+            onClick: sidebarModeActions.createAgent,
+          },
+        ];
+      case "projects":
+        return [
+          {
+            id: "new-project",
+            label: sidebarModeActions.newItemLabel,
+            icon: FolderPlusIcon,
+            onClick: sidebarModeActions.createProject,
+          },
+        ];
+    }
+  })();
   const threadHeader = (
-    <SidebarThreadHeader
-      hasProjects={projectGroups.length > 0}
-      onNewProject={sidebarMode === "tasks" ? openAddProjectCommandPalette : null}
-      onNewThread={sidebarModeActions.createInMode ?? handleNewThreadClick}
-      newThreadLabel={sidebarModeActions.newItemLabel}
-      newThreadDisabled={sidebarMode === "tasks" && projects.length === 0}
-      newThreadShortcutLabel={
-        sidebarMode === "tasks"
-          ? newThreadShortcutLabel
-          : sidebarMode === "chats"
-            ? shortcutLabelForCommand(keybindings, "chat.newWithoutProject")
-            : null
-      }
+    <SidebarSearchDock
+      actions={dockActions}
       searchInputRef={threadSearchInputRef}
       searchQuery={threadSearchQuery}
       onSearchQueryChange={(value) => {
@@ -4518,9 +4584,15 @@ export default function Sidebar() {
         setActiveSearchResultIndex(0);
       }}
       onSearchKeyDown={handleThreadSearchKeyDown}
-      isSearching={isSearchingThreads}
-      searchResultCount={threadSearchResults.length}
-      activeSearchResultIndex={activeSearchResultIndex}
+      searchLabel="Search threads"
+      clearLabel="Clear thread search"
+      results={{
+        listId: "sidebar-thread-search-results",
+        optionId: (index) => `sidebar-thread-search-result-${index}`,
+        visible: isSearchingThreads,
+        count: threadSearchResults.length,
+        activeIndex: activeSearchResultIndex,
+      }}
       onClearSearch={clearThreadSearch}
     />
   );
@@ -4554,6 +4626,7 @@ export default function Sidebar() {
               <SidebarShelfBar
                 activeIcon={SIDEBAR_MODE_ICONS.tasks}
                 activeLabel="All tasks"
+                activeEmptyLabel="Nothing in progress"
                 activeCount={activeThreads.length}
                 attentionCount={attentionThreadKeys.size}
                 snoozedCount={snoozedThreads.length}
@@ -4576,11 +4649,10 @@ export default function Sidebar() {
                 closeDelay={0}
                 timeout={400}
               >
-                <ul
+                <SidebarList
                   id="sidebar-thread-search-results"
                   role="listbox"
                   aria-label="Thread search results"
-                  className="flex flex-col gap-1"
                 >
                   {threadSearchResults.map((thread, index) => {
                     const threadKey = scopedThreadKey(
@@ -4629,7 +4701,7 @@ export default function Sidebar() {
                       />
                     );
                   })}
-                </ul>
+                </SidebarList>
               </TooltipProvider>
             ) : (
               <p
@@ -4669,19 +4741,17 @@ export default function Sidebar() {
               timeout={400}
             >
               <SidebarDragLifecycle onUnmount={cancelThreadDrag} />
-              <ul
+              <SidebarList
                 ref={attachListMotionRef}
                 // VoiceOver treats an exposed list as an interaction boundary,
                 // which hides its rows from ordinary linear navigation. A
                 // presentational list also makes its implicit listitems
                 // presentational while preserving every descendant control.
                 role="presentation"
+                // Row padding (4px each side) plus the cards' gap spaces Work cards 10px apart.
+                density={sidebarMode === "tasks" ? "cards" : "rows"}
+                grow={sidebarListItems.length > 0}
                 className={cn(
-                  "relative flex flex-col",
-                  // Row padding (4px each side) plus this gap spaces Work cards 10px apart.
-                  sidebarMode === "tasks" ? "gap-0.5" : "gap-1",
-                  // The list stacks up from the bottom, against the search dock.
-                  sidebarListItems.length > 0 && "flex-1 justify-end",
                   // An action sweep owns the pointer: rows it passes over
                   // neither show hover actions nor open tooltips, even
                   // controls that opt back in, like the Woke pill.
@@ -4907,9 +4977,10 @@ export default function Sidebar() {
                         item.section === "active" ? chatDateGroupOf?.(thread) : null;
                       if (dateGroup) {
                         items.push(
-                          <SidebarModeGroupLabel key={`chat-date:${dateGroup}`}>
-                            {CHAT_DATE_GROUP_LABELS[dateGroup]}
-                          </SidebarModeGroupLabel>,
+                          <SidebarGroupHeader
+                            key={`chat-date:${dateGroup}`}
+                            label={CHAT_DATE_GROUP_LABELS[dateGroup]}
+                          />,
                         );
                       }
                       items.push(renderThreadRow(thread, item.section));
@@ -5018,46 +5089,30 @@ export default function Sidebar() {
                   if (repositoryGroups) {
                     for (const [groupKey, group] of [...repositoryGroups].toReversed()) {
                       items.push(
-                        <RepositoryGroupHeading
+                        <SidebarGroupHeader
                           key={`repository:${groupKey}`}
-                          name={group.name}
-                          projectRef={group.projectRef}
-                          // Scratch Work has no repository to act on.
-                          onContextMenu={group.name ? handleRepositoryContextMenu : undefined}
+                          icon={group.name ? <RepositoryBadge name={group.name} /> : undefined}
+                          label={group.name ?? "No repository"}
+                          mono
+                          // Right-click opens the repository's own menu (new
+                          // thread, folder, settings); scratch Work has none.
+                          onContextMenu={
+                            group.name
+                              ? (event) => {
+                                  event.preventDefault();
+                                  handleRepositoryContextMenu(group.projectRef, {
+                                    x: event.clientX,
+                                    y: event.clientY,
+                                  });
+                                }
+                              : undefined
+                          }
                         />,
                         ...group.rows.toReversed(),
                       );
                     }
                   }
                   if (flatShelfRows) items.push(...flatShelfRows.toReversed());
-                  if (shownSection !== null && shownSection !== "active") {
-                    const shelfCount =
-                      shownSection === "attention"
-                        ? attentionThreadKeys.size
-                        : shownSection === "snoozed"
-                          ? snoozedThreads.length
-                          : settledThreads.length;
-                    if (shelfCount === 0) {
-                      items.push(
-                        <li
-                          key="empty-shelf"
-                          // Fills the bottom-anchored list, so it sits centred in the column.
-                          className="flex flex-1 list-none"
-                        >
-                          <SidebarListEmptyState
-                            icon={SIDEBAR_SHELF_ICONS[shownSection]}
-                            label={
-                              shownSection === "attention"
-                                ? "Nothing needs you right now"
-                                : shownSection === "snoozed"
-                                  ? "Nothing snoozed"
-                                  : "Nothing settled yet"
-                            }
-                          />
-                        </li>,
-                      );
-                    }
-                  }
                   return items;
                 })()}
                 {chatWindow !== null && chatWindow.hiddenCount > 0 ? (
@@ -5067,7 +5122,7 @@ export default function Sidebar() {
                     onReveal={revealMoreChats}
                   />
                 ) : null}
-              </ul>
+              </SidebarList>
             </TooltipProvider>
           ) : null}
           {!isSearchingThreads &&
@@ -5079,7 +5134,6 @@ export default function Sidebar() {
             settledThreads.length ===
             0 ? (
             <SidebarListEmptyState
-              icon={SIDEBAR_MODE_ICONS[sidebarMode]}
               label={
                 sidebarMode === "chats"
                   ? "No chats yet"
@@ -5087,28 +5141,15 @@ export default function Sidebar() {
                     ? "No repositories yet"
                     : "No work yet"
               }
-            >
-              {sidebarMode === "chats" ? (
-                // Chats need no repository, so the empty list offers a chat.
-                <button
-                  type="button"
-                  onClick={sidebarModeActions.startChat}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
-                >
-                  <SquarePenIcon className="-mx-0.5 size-3" />
-                  New chat
-                </button>
-              ) : projects.length === 0 ? (
-                <button
-                  type="button"
-                  onClick={openAddProjectCommandPalette}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors state-hover"
-                >
-                  <PlusIcon className="-mx-0.5 size-3" />
-                  Add repository
-                </button>
-              ) : null}
-            </SidebarListEmptyState>
+              action={
+                sidebarMode === "chats"
+                  ? // Chats need no repository, so the empty list offers a chat.
+                    { label: "New chat", onClick: sidebarModeActions.startChat }
+                  : projects.length === 0
+                    ? { label: "Add repository", onClick: openAddProjectCommandPalette }
+                    : undefined
+              }
+            />
           ) : null}
         </SidebarGroup>
       </SidebarContent>

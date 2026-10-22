@@ -1,22 +1,18 @@
-import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 /**
- * A sidebar list with nothing to show (Chats, Work and its filters, Agents,
- * Projects): the list's glyph over one muted line, an optional dimmer second
- * line, then any action. Give it the list's remaining height (a `flex-1`
- * parent): it centres in the space between the list's top and the dock below,
- * lifted a little above true centre, the same in every mode. It fades in place
- * on mount (opacity only), so switching to an empty filter eases instead of
- * popping.
+ * A sidebar list with nothing to show (Chats, Work, Agents, Projects): one
+ * quiet line, and an optional action read as part of it ("No chats yet ·
+ * New chat"). Filters never land here (an empty filter cannot be chosen, see
+ * `useSegmentSelection`); only a list with nothing at all does. Give it the
+ * list's remaining height (a `flex-1` parent): it centres in the space between
+ * the list's top and the dock below, lifted a little above true centre, the
+ * same in every mode. It fades in place on mount (opacity only).
  */
 export function SidebarListEmptyState(props: {
-  icon: LucideIcon;
   label: ReactNode;
-  description?: ReactNode;
-  children?: ReactNode;
+  action?: { readonly label: string; readonly onClick: () => void } | undefined;
 }) {
-  const Icon = props.icon;
   return (
     <div
       data-sidebar-empty-state
@@ -25,14 +21,23 @@ export function SidebarListEmptyState(props: {
       {/* Unequal spacers (44% above, 56% below) give the optical lift: about
           6% above the centre of the free space, at any list height. */}
       <span aria-hidden className="grow-11" />
-      <Icon aria-hidden className="size-5 shrink-0 text-muted-foreground opacity-65" />
-      <p className="mt-2.5 text-xs text-muted-foreground">{props.label}</p>
-      {props.description ? (
-        <p className="mt-1 text-2xs text-muted-foreground/70">{props.description}</p>
-      ) : null}
-      {props.children ? (
-        <div className="mt-3 flex flex-col items-center gap-2">{props.children}</div>
-      ) : null}
+      <p className="text-xs text-muted-foreground">
+        {props.label}
+        {props.action ? (
+          <>
+            <span aria-hidden className="mx-1.5 text-muted-foreground/50">
+              ·
+            </span>
+            <button
+              type="button"
+              onClick={props.action.onClick}
+              className="cursor-pointer rounded-sm font-medium text-sidebar-foreground/80 outline-none transition-colors duration-(--motion-duration-fast) ease-standard hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none"
+            >
+              {props.action.label}
+            </button>
+          </>
+        ) : null}
+      </p>
       <span aria-hidden className="grow-14" />
     </div>
   );

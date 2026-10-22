@@ -29,7 +29,7 @@ export function SidebarChatProjectLine(props: {
         "flex min-w-0 items-center gap-1.5 overflow-hidden text-muted-foreground text-xs",
         props.animate &&
           "transition-[height,opacity] duration-(--motion-duration-base) ease-standard motion-reduce:transition-opacity starting:h-0 starting:opacity-0",
-        "group-[.state-selected]/sidebar-chat:text-secondary-label",
+        "group-[.state-selected]/sidebar-row:text-secondary-label",
         visible ? "h-4 opacity-100" : "h-0 opacity-0",
       )}
     >

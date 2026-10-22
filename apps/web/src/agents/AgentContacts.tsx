@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type { ContextMenuItem, EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import * as Schema from "effect/Schema";
-import { BellDotIcon, EllipsisIcon, PlusIcon } from "lucide-react";
+import { EllipsisIcon } from "lucide-react";
 import {
   useMemo,
   useRef,
@@ -15,6 +15,12 @@ import { AgentFace } from "~/components/agents/face";
 import { ProviderInstanceIcon } from "~/components/chat/ProviderInstanceIcon";
 import { PanOnHoverText } from "~/components/sidebar/PanOnHoverText";
 import { SidebarChatStatusSlot } from "~/components/sidebar/SidebarChatStatusSlot";
+import {
+  SidebarList,
+  SidebarRowSubtitle,
+  sidebarRowClassName,
+  sidebarRowIntrinsicSizeClassName,
+} from "~/components/sidebar/SidebarList";
 import { SidebarListEmptyState } from "~/components/sidebar/SidebarListEmptyState";
 import { useSidebarRowActionsOverlap } from "~/components/sidebar/useSidebarRowActionsOverlap";
 import {
@@ -46,12 +52,11 @@ import { deriveProviderInstanceEntries } from "~/providerInstances";
 import { agentsRpc } from "~/rpc/agents";
 import { useServerConfigs } from "~/state/entities";
 import { formatRelativeTime } from "~/timestampFormat";
-import { SIDEBAR_MODE_ICONS } from "~/components/sidebar/modes/SidebarModeSwitcher";
 import { takeAgentArrival } from "./agentArrivals";
 import { groupAgentsByProject } from "./agentGroups.logic";
 import { AgentProjectGroup } from "./AgentProjectGroup";
 import { requestAgentCreation } from "./AgentsCreateHost";
-import { useAgentListFilter } from "./agentListFilter";
+import { useShownAgentListFilter } from "./AgentsShelfBar";
 import { AgentAvatarPicker } from "./AgentAvatarPicker";
 import { agentViewKey, requestAgentView } from "./agentViewIntent";
 import { agentContactKey, agentDraft, agentStatusLabel } from "./agents.logic";
@@ -81,11 +86,13 @@ const EMPTY_FOLDERS: ReadonlyArray<EnvironmentProjectLabel> = [];
 const flipKey = (agent: AgentContact) => `agent:${agentContactKey(agent)}`;
 
 /**
- * The Agents list: one card per agent, with Work's card geometry and surfaces. Like
- * Chats and Work it stacks up from the bottom of the column against the search dock.
- * Once any agent is filed in a project, cards group under their project folders (in
- * name order, No project last), each group collapsible. The Needs attention filter
- * keeps only agents waiting on you, inside their groups.
+ * The Agents list: one two-line row per agent (its face and name, then its
+ * latest reply), the same row as Chats and Projects. Like them it stacks up
+ * from the bottom of the column against the search dock. Once any agent is
+ * filed in a project, rows group under their project folders (in name order,
+ * No project last), each group collapsible; a group's right-click menu starts
+ * a new agent in it. The Needs attention filter keeps only agents waiting on
+ * you, inside their groups.
  */
 export function AgentContacts({
   activeKey,
@@ -98,7 +105,7 @@ export function AgentContacts({
 }) {
   const { agents, loading, reconnecting, error } = useAgents();
   const client = useAgentsClient();
-  const filter = useAgentListFilter();
+  const { filter } = useShownAgentListFilter();
   const environmentKey = [...new Set(agents.map((agent) => agent.environmentId))].join("\0");
   const environmentIds = useMemo(
     () => (environmentKey === "" ? [] : (environmentKey.split("\0") as EnvironmentId[])),
@@ -157,35 +164,26 @@ export function AgentContacts({
       )}
       {/* With no agents at all the list column is hidden and the index route shows
           the one empty state; only the attention filter can be empty here. */}
-      <ul
+      <SidebarList
         ref={listRef}
         key={filter}
         aria-label={filter === "attention" ? "Agents needing attention" : "Agents"}
         data-agents-list
-        className={cn(
-          "reveal-motion relative flex flex-col",
-          grouped ? "gap-1" : "gap-0.5",
-          // The list stacks up from the bottom, against the search dock.
-          (shownCount > 0 || !loading) && "flex-1 justify-end",
-        )}
+        className="reveal-motion"
+        grow={shownCount > 0 || !loading}
         onTransitionEnd={onTransitionEnd}
       >
         {shownCount === 0 && !loading && !reconnecting ? (
+          // A filter never lands on nothing (see useShownAgentListFilter), so
+          // only a list with no agents at all gets here.
           <li className="flex flex-1 list-none">
-            {filter === "attention" ? (
-              <SidebarListEmptyState icon={BellDotIcon} label="No agent needs you right now" />
-            ) : (
-              <SidebarListEmptyState icon={SIDEBAR_MODE_ICONS.agents} label="No agents yet">
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={() => requestAgentCreation(agents[0]?.environmentId ?? null)}
-                >
-                  <PlusIcon />
-                  New agent
-                </Button>
-              </SidebarListEmptyState>
-            )}
+            <SidebarListEmptyState
+              label="No agents yet"
+              action={{
+                label: "New agent",
+                onClick: () => requestAgentCreation(agents[0]?.environmentId ?? null),
+              }}
+            />
           </li>
         ) : null}
         {groups.map((group) => (
@@ -206,7 +204,7 @@ export function AgentContacts({
             }
           >
             {group.agents.map((agent) => (
-              <AgentCard
+              <AgentRow
                 key={agentContactKey(agent)}
                 agent={agent}
                 active={activeKey === agentContactKey(agent)}
@@ -216,7 +214,7 @@ export function AgentContacts({
             ))}
           </AgentProjectGroup>
         ))}
-      </ul>
+      </SidebarList>
     </>
   );
 }
@@ -227,7 +225,7 @@ function summaryLine(agent: AgentContact): string {
   return text.split("\n")[0] ?? "";
 }
 
-function AgentCard({
+function AgentRow({
   agent,
   active,
   folders,
@@ -250,7 +248,7 @@ function AgentCard({
   // Only decisions waiting on the owner earn a count; unread replies get a dot.
   const attention = agentAttentionCount(agent);
   const running = agent.state === "thinking" || agent.state === "working";
-  // A card for an agent made in this session rises into place once, when it first mounts.
+  // A row for an agent made in this session fades in once, when it first mounts.
   const [arrived] = useState(() => takeAgentArrival(agentContactKey(agent)));
   const setRowElement = useSidebarRowActionsOverlap();
   const rowRef = useRef<HTMLDivElement | null>(null);
@@ -416,7 +414,10 @@ function AgentCard({
   return (
     <li
       data-agent-flip={flipKey(agent)}
-      className="relative list-none py-1 [content-visibility:auto] [contain-intrinsic-size:auto_64px]"
+      className={cn(
+        "relative list-none [content-visibility:auto]",
+        sidebarRowIntrinsicSizeClassName(2),
+      )}
     >
       <div
         ref={(node) => {
@@ -429,11 +430,11 @@ function AgentCard({
         aria-current={active ? "page" : undefined}
         data-testid="sidebar-row-agent"
         data-actions-pinned={facePicker || undefined}
-        className={cn(
-          "group/sidebar-row sidebar-row-motion relative w-full cursor-pointer overflow-hidden rounded-rail text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          active ? "state-selected" : "state-hover bg-(--sidebar-card) text-sidebar-foreground",
-          arrived && "swap-motion",
-        )}
+        className={sidebarRowClassName({
+          selected: active,
+          lines: 2,
+          className: cn("sidebar-row-motion", arrived && "swap-motion"),
+        })}
         onClick={() => {
           if (renaming === null) onOpen(agent);
         }}
@@ -445,8 +446,8 @@ function AgentCard({
         onKeyDown={onKeyDown}
         onContextMenu={onContextMenu}
       >
-        <div className="relative z-10 h-[66px] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
-          <div className="flex h-5 min-w-0 items-center gap-1.5">
+        <span className="flex min-w-0 flex-1 flex-col justify-center">
+          <span className="flex h-5 min-w-0 items-center gap-2">
             <AgentAvatarPicker
               avatar={agent.avatar}
               open={facePicker}
@@ -551,10 +552,10 @@ function AgentCard({
                 </Tooltip>
               </span>
             </span>
-          </div>
-          {/* Barely there at rest, a step up when selected, like a Work card's meta line. */}
-          <div className="mt-1 flex min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
-            <span className="min-w-0 flex-1 fade-truncate">{summary || status}</span>
+          </span>
+          {/* The latest reply (or the agent's job), the muted second line every row shares. */}
+          <SidebarRowSubtitle>
+            <span className="min-w-0 flex-1 truncate">{summary || status}</span>
             {providerEntry ? (
               <Tooltip>
                 <TooltipTrigger
@@ -577,8 +578,8 @@ function AgentCard({
                 <TooltipPopup side="top">{modelLabel}</TooltipPopup>
               </Tooltip>
             ) : null}
-          </div>
-        </div>
+          </SidebarRowSubtitle>
+        </span>
       </div>
       <OverlayPresence when={confirmingDelete}>
         {() => (
