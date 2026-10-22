@@ -27,6 +27,7 @@ import { APP_VERSION } from "~/branding";
 import { isElectron } from "~/env";
 import { cn } from "~/lib/utils";
 import { observeVisibleAnimation } from "~/lib/visibleAnimation";
+import { useCogenlyReleases } from "~/state/cogenlyReleases";
 import { useDesktopUpdateState } from "~/state/desktopUpdate";
 import { useEnvironments } from "~/state/environments";
 import { serverEnvironment } from "~/state/server";
@@ -46,6 +47,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { ReleaseHistoryView, UpdateReleaseNotes } from "./NavRailReleaseNotes";
 import {
   collectProviderUpdateRows,
   describeAppRow,
@@ -58,6 +60,7 @@ import {
   type UpdateRowStatus,
   type UpdateRowView,
 } from "./navRailUpdates.logic";
+import { releaseHistory, releasesBetween } from "./releaseNotes.logic";
 import {
   checkForLocalUpdate,
   confirmAndInstallLocalUpdate,
@@ -340,6 +343,8 @@ export function NavRailUpdates({
   // Pinned by a click (or by using a control inside); a hover preview is not.
   const [pinned, setPinned] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
+  // The popover's main list, or the release history sub-view.
+  const [view, setView] = useState<"updates" | "releases">("updates");
   const [confirmingAll, setConfirmingAll] = useState(false);
   const [checking, setChecking] = useState(false);
   const [desktopPending, setDesktopPending] = useState(false);
@@ -456,6 +461,15 @@ export function NavRailUpdates({
   // This app's restart countdown can be postponed, so it stays in view.
   const countdown = run?.phase === "countdown";
   const popoverOpen = open || countdown;
+
+  const releasesSnapshot = useCogenlyReleases(popoverOpen);
+  const releases = releasesSnapshot.releases ?? [];
+  const installedVersion = appRow.currentVersion;
+  // What the app's pending update brings, while there is one to take.
+  const incomingReleases =
+    appRow.latestVersion && appRow.status !== "current"
+      ? releasesBetween(releases, installedVersion, appRow.latestVersion)
+      : [];
 
   const closePopover = () => {
     setOpen(false);
@@ -585,11 +599,21 @@ export function NavRailUpdates({
     countdown && run?.restartAt != null
       ? { ...appRow, status: "updating" as const, detail: "Restarting soon", percent: null }
       : appRow;
-  const appRowAction = desktopRow
-    ? desktopRowAction
-    : appServerGroup
-      ? serverAction(appServerGroup, appRow)
-      : null;
+  const showReleases = () => {
+    setPinned(true);
+    setView("releases");
+  };
+  const appRowAction =
+    (desktopRow
+      ? desktopRowAction
+      : appServerGroup
+        ? serverAction(appServerGroup, appRow)
+        : null) ??
+    (shownAppRow.status === "current" ? (
+      <Button size="xs" variant="ghost-muted" onClick={showReleases}>
+        What's new
+      </Button>
+    ) : null);
 
   // Name the machines when there are several, or when the desktop app's own
   // row sits above the one machine's providers.
@@ -601,6 +625,8 @@ export function NavRailUpdates({
         open={popoverOpen}
         onOpenChange={(next, details) => {
           if (next) {
+            // Each opening starts on the update list, not the last sub-view.
+            if (!popoverOpen) setView("updates");
             setOpen(true);
             if (details.reason === "trigger-press") setPinned(true);
             return;
@@ -670,89 +696,101 @@ export function NavRailUpdates({
               if (event.key === "Enter" || event.key === " ") setPinned(true);
             }}
           >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 flex-col">
-                <span className="text-sm font-medium">Updates</span>
-                <span
-                  key={summary}
-                  className="swap-motion truncate text-xs text-muted-foreground tabular-nums"
-                  aria-live="polite"
-                >
-                  {summary}
-                </span>
-              </div>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-xs"
-                      variant="ghost-muted"
-                      aria-label={isChecking ? "Checking for updates" : "Check for updates"}
-                      aria-busy={isChecking}
-                      disabled={isChecking}
-                      onClick={() => void checkForUpdates()}
-                    >
-                      <RefreshIcon refreshing={isChecking} />
-                    </Button>
-                  }
-                />
-                <TooltipPopup side="top">
-                  {isChecking ? "Checking for updates…" : "Check for updates"}
-                </TooltipPopup>
-              </Tooltip>
-            </div>
-            <div className="flex flex-col">
-              <UpdateRow
-                prominent
-                row={shownAppRow}
-                updated={updated.has(appRowId)}
-                action={appRowAction}
+            {view === "releases" ? (
+              <ReleaseHistoryView
+                snapshot={releasesSnapshot}
+                releases={releaseHistory(releases, installedVersion)}
+                installedVersion={installedVersion}
+                onBack={() => setView("updates")}
               />
-              {groups.length > 0 ? (
-                <>
-                  <Separator className="mt-1" />
-                  <span className="mt-2 mb-0.5 truncate text-2xs font-medium text-muted-foreground select-none">
-                    Providers
-                  </span>
-                </>
-              ) : null}
-              {groups.map((group) => (
-                <section key={group.environmentId} className="flex flex-col">
-                  {showMachineLabels ? (
-                    <span className="mt-1.5 truncate text-xs text-muted-foreground">
-                      {group.label}
+            ) : (
+              <div key="updates" className="swap-motion flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 flex-col">
+                    <span className="text-sm font-medium">Updates</span>
+                    <span
+                      key={summary}
+                      className="swap-motion truncate text-xs text-muted-foreground tabular-nums"
+                      aria-live="polite"
+                    >
+                      {summary}
+                    </span>
+                  </div>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          size="icon-xs"
+                          variant="ghost-muted"
+                          aria-label={isChecking ? "Checking for updates" : "Check for updates"}
+                          aria-busy={isChecking}
+                          disabled={isChecking}
+                          onClick={() => void checkForUpdates()}
+                        >
+                          <RefreshIcon refreshing={isChecking} />
+                        </Button>
+                      }
+                    />
+                    <TooltipPopup side="top">
+                      {isChecking ? "Checking for updates…" : "Check for updates"}
+                    </TooltipPopup>
+                  </Tooltip>
+                </div>
+                <div className="flex flex-col">
+                  <UpdateRow
+                    prominent
+                    row={shownAppRow}
+                    updated={updated.has(appRowId)}
+                    action={appRowAction}
+                  />
+                  <UpdateReleaseNotes releases={incomingReleases} onShowHistory={showReleases} />
+                  {groups.length > 0 ? (
+                    <>
+                      <Separator className="mt-1" />
+                      <span className="mt-2 mb-0.5 truncate text-2xs font-medium text-muted-foreground select-none">
+                        Providers
+                      </span>
+                    </>
+                  ) : null}
+                  {groups.map((group) => (
+                    <section key={group.environmentId} className="flex flex-col">
+                      {showMachineLabels ? (
+                        <span className="mt-1.5 truncate text-xs text-muted-foreground">
+                          {group.label}
+                        </span>
+                      ) : null}
+                      {group.server ? (
+                        <UpdateRow
+                          row={group.server}
+                          updated={updated.has(`${group.environmentId}:server`)}
+                          action={serverAction(group, group.server)}
+                        />
+                      ) : null}
+                      {group.providers.map((row) => (
+                        <UpdateRow
+                          key={row.key}
+                          row={row}
+                          updated={updated.has(`${group.environmentId}:${row.key}`)}
+                          action={providerAction(group, row)}
+                        />
+                      ))}
+                    </section>
+                  ))}
+                  {groups.length === 0 && connected.length === 0 ? (
+                    <span className="py-1 text-xs text-muted-foreground">
+                      No connected machines to check.
                     </span>
                   ) : null}
-                  {group.server ? (
-                    <UpdateRow
-                      row={group.server}
-                      updated={updated.has(`${group.environmentId}:server`)}
-                      action={serverAction(group, group.server)}
-                    />
-                  ) : null}
-                  {group.providers.map((row) => (
-                    <UpdateRow
-                      key={row.key}
-                      row={row}
-                      updated={updated.has(`${group.environmentId}:${row.key}`)}
-                      action={providerAction(group, row)}
-                    />
-                  ))}
-                </section>
-              ))}
-              {groups.length === 0 && connected.length === 0 ? (
-                <span className="py-1 text-xs text-muted-foreground">
-                  No connected machines to check.
-                </span>
-              ) : null}
-            </div>
-            {canUpdateAll ? (
-              <div className="reveal-motion flex justify-end pt-1">
-                <Button size="xs" variant="outline" onClick={updateAll}>
-                  Update all
-                </Button>
+                </div>
+                {canUpdateAll ? (
+                  <div className="reveal-motion flex justify-end pt-1">
+                    <Button size="xs" variant="outline" onClick={updateAll}>
+                      Update all
+                    </Button>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
+            )}
           </div>
         </PopoverPopup>
       </Popover>
