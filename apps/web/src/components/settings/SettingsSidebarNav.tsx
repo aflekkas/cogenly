@@ -18,6 +18,7 @@ import {
   CalendarClockIcon,
   GitBranchIcon,
   HardDriveIcon,
+  ImportIcon,
   PanelsTopLeftIcon,
   KeyboardIcon,
   Link2Icon,
@@ -75,6 +76,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/source-control": GitBranchIcon,
   "/settings/storage": HardDriveIcon,
   "/settings/data": DatabaseIcon,
+  "/settings/import": ImportIcon,
   "/settings/connections": Link2Icon,
   "/settings/archived": ArchiveIcon,
 };

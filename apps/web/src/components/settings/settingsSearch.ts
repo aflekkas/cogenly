@@ -24,6 +24,7 @@ export type SettingsPath =
   | "/settings/source-control"
   | "/settings/storage"
   | "/settings/data"
+  | "/settings/import"
   | "/settings/connections"
   | "/settings/archived";
 
@@ -102,6 +103,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/source-control": "Source Control",
   "/settings/storage": "Storage",
   "/settings/data": "Data",
+  "/settings/import": "Import",
   "/settings/connections": "Connections",
   "/settings/archived": "Archive",
 };
@@ -222,6 +224,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Export",
     to: "/settings/data",
     searchTerms: ["export backup download portable data jsonl validate bundle"],
+  },
+  {
+    id: "t3-import",
+    title: "Import from T3 Code",
+    to: "/settings/import",
+    searchTerms: ["import migrate t3 code move projects threads history keybindings"],
   },
   {
     id: "project-overview",
@@ -802,6 +810,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/general": null,
   "/settings/memory": null,
   "/settings/data": null,
+  "/settings/import": null,
   "/settings/appearance": null,
   // Keybindings fan out to the selection; Providers shows the representative
   // environment at any selection. Neither needs a particular scope to render.

@@ -27,6 +27,7 @@ import { Route as SettingsOpenSourceLicensesRouteImport } from './routes/setting
 import { Route as SettingsMemoryRouteImport } from './routes/settings.memory'
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings.integrations'
+import { Route as SettingsImportRouteImport } from './routes/settings.import'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
 import { Route as SettingsDataRouteImport } from './routes/settings.data'
@@ -131,6 +132,11 @@ const SettingsIntegrationsRoute = SettingsIntegrationsRouteImport.update({
   path: '/integrations',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsImportRoute = SettingsImportRouteImport.update({
+  id: '/import',
+  path: '/import',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
   id: '/general',
   path: '/general',
@@ -215,6 +221,7 @@ export interface FileRoutesByFullPath {
   '/settings/data': typeof SettingsDataRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/import': typeof SettingsImportRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/memory': typeof SettingsMemoryRoute
@@ -246,6 +253,7 @@ export interface FileRoutesByTo {
   '/settings/data': typeof SettingsDataRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/import': typeof SettingsImportRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/memory': typeof SettingsMemoryRoute
@@ -280,6 +288,7 @@ export interface FileRoutesById {
   '/settings/data': typeof SettingsDataRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/import': typeof SettingsImportRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/memory': typeof SettingsMemoryRoute
@@ -315,6 +324,7 @@ export interface FileRouteTypes {
     | '/settings/data'
     | '/settings/diagnostics'
     | '/settings/general'
+    | '/settings/import'
     | '/settings/integrations'
     | '/settings/keybindings'
     | '/settings/memory'
@@ -346,6 +356,7 @@ export interface FileRouteTypes {
     | '/settings/data'
     | '/settings/diagnostics'
     | '/settings/general'
+    | '/settings/import'
     | '/settings/integrations'
     | '/settings/keybindings'
     | '/settings/memory'
@@ -379,6 +390,7 @@ export interface FileRouteTypes {
     | '/settings/data'
     | '/settings/diagnostics'
     | '/settings/general'
+    | '/settings/import'
     | '/settings/integrations'
     | '/settings/keybindings'
     | '/settings/memory'
@@ -536,6 +548,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsIntegrationsRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/import': {
+      id: '/settings/import'
+      path: '/import'
+      fullPath: '/settings/import'
+      preLoaderRoute: typeof SettingsImportRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/general': {
       id: '/settings/general'
       path: '/general'
@@ -659,6 +678,7 @@ interface SettingsRouteChildren {
   SettingsDataRoute: typeof SettingsDataRoute
   SettingsDiagnosticsRoute: typeof SettingsDiagnosticsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
+  SettingsImportRoute: typeof SettingsImportRoute
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
   SettingsMemoryRoute: typeof SettingsMemoryRoute
@@ -678,6 +698,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsDataRoute: SettingsDataRoute,
   SettingsDiagnosticsRoute: SettingsDiagnosticsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
+  SettingsImportRoute: SettingsImportRoute,
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
   SettingsMemoryRoute: SettingsMemoryRoute,
