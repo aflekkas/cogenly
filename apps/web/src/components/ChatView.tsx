@@ -307,6 +307,7 @@ import {
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
 import {
+  LAYOUT_MOTION_DURATION,
   PANEL_ANIMATION_DURATION,
   readPanelAnimationsActive,
   usePanelPresence,
@@ -3373,7 +3374,7 @@ export default function ChatView(props: ChatViewProps) {
     attachTransitionGroup: attachDraftHeroTransitionGroup,
     attachComposerAnchor: attachDraftHeroComposerAnchor,
     captureComposerRect: captureDraftHeroComposerRect,
-  } = useDraftHeroLayoutTransition(isDraftHeroState, panelAnimationDurationMs);
+  } = useDraftHeroLayoutTransition(isDraftHeroState, LAYOUT_MOTION_DURATION);
   const { turnDiffSummaries } = useTurnDiffSummaries(serverProjection);
 
   /**
@@ -7276,7 +7277,7 @@ export default function ChatView(props: ChatViewProps) {
         },
         {
           active: readPanelAnimationsActive(),
-          durationMs: panelAnimationDurationMs,
+          durationMs: LAYOUT_MOTION_DURATION,
         },
       );
       void dockTransition.catch(() => resolveDockStarted?.());

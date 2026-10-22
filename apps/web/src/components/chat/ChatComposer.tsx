@@ -377,7 +377,7 @@ import { useElementState } from "../../hooks/useElementState";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { ComposerDictationControl, type ComposerDictationHandle } from "./ComposerDictationControl";
-import { PANEL_ANIMATION_DURATION, readPanelAnimationsActive } from "../../panelAnimations";
+import { LAYOUT_MOTION_DURATION, readPanelAnimationsActive } from "../../panelAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { readEnvironmentScope } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
@@ -4461,7 +4461,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerControlsCollapsed,
     restingComposerControlsRef,
     onComposerOverlayHeightChange,
-    PANEL_ANIMATION_DURATION,
+    LAYOUT_MOTION_DURATION,
   );
   const restingHiddenBlockCount = composerControlsCollapsed
     ? restingControlsHiddenBlockCount

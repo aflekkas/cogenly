@@ -379,7 +379,7 @@ function Sidebar({
                   // lifts above it so the column slides out from under it.
                   "z-[45] shadow-(--surface-raised-shadow-floating) transition-[translate,visibility] motion-reduce:translate-x-0 motion-reduce:transition-[opacity,visibility]",
                   peek === "open"
-                    ? "visible translate-x-0 duration-(--motion-duration-base) ease-drawer"
+                    ? "visible translate-x-0 duration-(--motion-duration-panel) ease-drawer"
                     : cn(
                         "invisible duration-(--motion-duration-fast) ease-popup-exit motion-reduce:opacity-0",
                         side === "left" ? "-translate-x-full" : "translate-x-full",

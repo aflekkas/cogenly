@@ -149,12 +149,17 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* Top-anchored toasts sit this far below the window's top edge. */
   --toast-top-offset: 0.75rem;
   /* Motion durations, tuned toward Apple's feel. fast: hover, press and color
-     feedback. base: selection, status swaps, popovers and toasts, and the
-     sidebar and right panel (open and close alike, see panelFlip). slow:
-     sheets and other large spatial moves. Pair them with ease-standard;
+     feedback. base: selection, status swaps, popovers and toasts. panel: the
+     sidebar, right panel and bottom drawer opening and closing (see panelFlip).
+     slow: sheets and other large spatial moves. Pair them with ease-standard;
      reduced motion zeroes the transitions that use them. */
   --motion-duration-fast: 150ms;
   --motion-duration-base: 220ms;
+  /* Deliberately past the 150-220ms guideline (AGENTS.md, Motion): the
+     maintainer asked for panel open/close to be slightly slower. Mirrored by
+     PANEL_ANIMATION_DURATION_MS in panelAnimations.ts, which the scripted
+     panel motion reads; change both together. */
+  --motion-duration-panel: 270ms;
   --motion-duration-slow: 400ms;
   /* The mode switch crossfade (modeSwitchMotion.ts). */
   --motion-duration-mode-switch: 150ms;

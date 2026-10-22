@@ -5,14 +5,21 @@ import { useMediaQuery } from "./hooks/useMediaQuery";
 import { PANEL_MOTION_SETTLE_MS } from "./lib/panelFlip";
 
 /**
- * Panels, including the sidebar, always animate open and close at this
- * duration: --motion-duration-base, the upper end of the short, purposeful
- * motion every state change gets (AGENTS.md, Motion).
+ * The sidebar and list column, right panel and bottom drawer all open and
+ * close at this duration: --motion-duration-panel in index.css, kept in step
+ * by hand. Slightly past the 150-220ms guideline at the maintainer's request.
  */
-const PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 220;
+const PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 270;
 
 /** The panel motion's duration, for a caller that reads whether it plays at event time. */
 export const PANEL_ANIMATION_DURATION = PANEL_ANIMATION_DURATION_MS;
+
+/**
+ * --motion-duration-base, for layout glides on the panel motion's curve that
+ * are not a panel opening or closing: the draft hero docking on send and the
+ * composer's resting controls.
+ */
+export const LAYOUT_MOTION_DURATION = 220;
 
 /**
  * Whether the first painted frame of a navigation is still pending. An
