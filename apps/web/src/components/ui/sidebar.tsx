@@ -723,7 +723,10 @@ function SidebarContent({
         // Base UI's viewport out of the tab order lets its presentational role
         // flatten in WebKit instead of becoming a VoiceOver interaction group.
         viewportTabIndex={-1}
-        className="h-auto min-h-0 flex-1 [&>[data-slot=scroll-area-viewport]]:[--fade-size:0.75rem]"
+        // The list only scrolls vertically. Rows truncate to the column, and
+        // the viewport clips sideways too, so a stray wide child can never
+        // make the list pan.
+        className="h-auto min-h-0 flex-1 [&>[data-slot=scroll-area-viewport]]:overflow-x-hidden [&>[data-slot=scroll-area-viewport]]:overscroll-x-none [&>[data-slot=scroll-area-viewport]]:[--fade-size:0.75rem]"
       >
         <div
           // Reordered rows must not pull the viewport to their new position.

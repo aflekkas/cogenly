@@ -581,6 +581,10 @@
    fade only. */
 .agent-group-collapse {
   display: grid;
+  /* minmax(0, 1fr): the one column is the list's width. An auto column would
+     grow to the rows' unwrapped text (min-content) and scroll the whole
+     sidebar sideways. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 1fr;
   transition:
     grid-template-rows var(--motion-duration-base) --theme(--ease-standard),
@@ -594,6 +598,7 @@
 }
 .agent-group-collapse > * {
   min-height: 0;
+  min-width: 0;
 }
 .agent-group-collapse:is([data-closed], [data-moving]) > * {
   overflow: hidden;

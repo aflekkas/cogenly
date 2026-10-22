@@ -172,7 +172,9 @@ export function DisclosurePanel({
       data-slot="disclosure-panel"
       style={disclosureDuration(open)}
       className={cn(
-        "grid transition-[grid-template-rows,padding] ease-standard",
+        // minmax(0, 1fr) keeps the column at the panel's width; an auto column
+        // grows to unwrapped content and overflows the parent sideways.
+        "grid grid-cols-[minmax(0,1fr)] transition-[grid-template-rows,padding] ease-standard",
         open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         animateEnter && "starting:grid-rows-[0fr]",
         animateEnter && layout === "group-content" && !continues && "starting:pb-2",
