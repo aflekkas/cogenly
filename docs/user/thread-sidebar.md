@@ -297,6 +297,10 @@ repositories. A project can hold several repositories, but each repository and e
 thread is in at most one project. Work goes in its repository's project unless you move
 it. Projects are context only; they never change what an agent can access.
 
+A new task can start in a project: pick it in the task's heading or the composer's
+project control, and the task moves to that project's most recently used repository.
+The line under the heading changes the repository, listing the project's own first.
+
 Projects have their own sidebar view: pick **Projects** in the navigation rail (or the
 mobile switcher), or press `mod+alt+4`. Open a project to see its repositories, chats
 and Work. Use **Add repository** to bring one in (a repository already in another

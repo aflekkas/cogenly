@@ -10,12 +10,12 @@ import { projectLabelKey, type EnvironmentProjectLabel } from "./projectLabels.l
 import {
   composerProjectFolderId,
   groupRepositoriesByProject,
-  heroProjectKey,
   heroProjectSuffix,
   isRepositoryGroupOpen,
-  soleRepositoryOf,
+  projectDefaultRepository,
   threadProjectMeta,
   toggleCollapsedGroup,
+  workDraftFolderId,
 } from "./projectMeta.logic";
 
 const env = "env" as EnvironmentId;
@@ -141,39 +141,104 @@ describe("groupRepositoriesByProject", () => {
     expect(group(mind.key)).toEqual([[mind.key, []]]);
   });
 
-  it("selects a project's repository on its own only when it is the only one", () => {
-    const narrowed = (key: (typeof spawn)["key"]) =>
-      groupRepositoriesByProject({
-        items,
-        refsOf: (item) => item.refs,
-        projects,
-        onlyProject: key,
-      });
-    expect(soleRepositoryOf(narrowed(bartr.key))).toBe(shared);
-    expect(soleRepositoryOf(narrowed(spawn.key))).toBeNull();
-    expect(soleRepositoryOf(narrowed(mind.key))).toBeNull();
+  it("leads with the draft's project, the rest keeping their order", () => {
+    const lead = groupRepositoriesByProject({
+      items,
+      refsOf: (item) => item.refs,
+      projects,
+      leadProject: spawn.key,
+    }).map((entry) => entry.key);
+    expect(lead).toEqual([spawn.key, bartr.key, "other"]);
   });
 });
 
-describe("heroProjectKey", () => {
-  const sharedRepo = [{ environmentId: env, projectId: ProjectId.make("shared") }];
+describe("projectDefaultRepository", () => {
+  const repo = (name: string, activeAt: number, environmentId: EnvironmentId = env) => ({
+    name,
+    activeAt,
+    refs: [{ environmentId, projectId: ProjectId.make(name) }],
+  });
+  const platform = repo("platform", 10);
+  const shared = repo("shared", 30);
+  const loose = repo("loose", 99);
+  const items = [loose, platform, shared];
+  const pick = (project: EnvironmentProjectLabel, current: string | null) =>
+    projectDefaultRepository({
+      items,
+      refsOf: (item) => item.refs,
+      project,
+      isCurrent: (item) => item.name === current,
+      lastActiveAt: (item) => item.activeAt,
+    })?.name ?? null;
 
-  it("names the project the repository was picked under", () => {
-    expect(heroProjectKey({ chosen: spawn.key, repository: sharedRepo, projects })).toBe(spawn.key);
+  it("keeps the current repository while the project holds it", () => {
+    expect(pick(spawn, "platform")).toBe("platform");
   });
 
-  it("falls back to the first project holding the repository", () => {
-    expect(heroProjectKey({ chosen: null, repository: sharedRepo, projects })).toBe(bartr.key);
-    // A choice that no longer holds the repository does not stick.
-    expect(heroProjectKey({ chosen: mind.key, repository: sharedRepo, projects })).toBe(bartr.key);
+  it("otherwise picks the project's most recently active repository", () => {
+    // "loose" is the most recent overall, but in no project.
+    expect(pick(spawn, "loose")).toBe("shared");
+    expect(pick(bartr, null)).toBe("shared");
   });
 
-  it("is null for a repository in no project", () => {
+  it("takes the first on a tie, and only repositories on the project's machine", () => {
+    const tied = projectDefaultRepository({
+      items: [repo("platform", 5), repo("shared", 5)],
+      refsOf: (item) => item.refs,
+      project: spawn,
+      isCurrent: () => false,
+      lastActiveAt: (item) => item.activeAt,
+    });
+    expect(tied?.name).toBe("platform");
+    const elsewhere = projectDefaultRepository({
+      items: [repo("platform", 1, other)],
+      refsOf: (item) => item.refs,
+      project: spawn,
+      isCurrent: () => false,
+      lastActiveAt: (item) => item.activeAt,
+    });
+    expect(elsewhere).toBeNull();
+  });
+
+  it("is null for a project with no repositories", () => {
+    expect(pick(mind, "loose")).toBeNull();
+  });
+});
+
+describe("workDraftFolderId", () => {
+  const folderByRepository = new Map([
+    [`${env}:platform`, spawn],
+    [`${other}:platform`, remote],
+  ]);
+  const repository = (projectId: string, environmentId: EnvironmentId = env) => ({
+    environmentId,
+    projectId: ProjectId.make(projectId),
+  });
+
+  it("records nothing when Work follows its repository's own project", () => {
     expect(
-      heroProjectKey({
-        chosen: null,
-        repository: [{ environmentId: env, projectId: ProjectId.make("loose") }],
-        projects,
+      workDraftFolderId({ repository: repository("platform"), project: spawn, folderByRepository }),
+    ).toBeNull();
+    expect(
+      workDraftFolderId({ repository: repository("loose"), project: null, folderByRepository }),
+    ).toBeNull();
+  });
+
+  it("files Work in a project that is not its repository's", () => {
+    expect(
+      workDraftFolderId({ repository: repository("loose"), project: mind, folderByRepository }),
+    ).toBe(mind.label.id);
+    expect(
+      workDraftFolderId({ repository: repository("platform"), project: bartr, folderByRepository }),
+    ).toBe(bartr.label.id);
+  });
+
+  it("drops a project on another machine than the repository", () => {
+    expect(
+      workDraftFolderId({
+        repository: repository("loose", other),
+        project: mind,
+        folderByRepository,
       }),
     ).toBeNull();
   });

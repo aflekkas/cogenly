@@ -16,6 +16,11 @@ export interface PendingProjectFolder {
   readonly folderId: ProjectLabelId;
   /** Set while the first send is creating the chat in this project. */
   readonly launching?: boolean;
+  /**
+   * Set by a pick on a Work draft until its hero answers it: it moves the
+   * draft to one of the project's repositories, then clears this.
+   */
+  readonly chosen?: boolean;
 }
 
 interface PendingProjectFolderState {

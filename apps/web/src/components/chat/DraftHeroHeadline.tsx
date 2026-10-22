@@ -5,11 +5,12 @@ import {
   type ProjectLabelOwnerRepository,
   resolveEnvironmentMachineKind,
   type ScopedProjectRef,
+  type ThreadId,
   type ThreadSurface,
 } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import { FolderGit2Icon, FolderIcon, FolderPlusIcon, ListIcon, LockIcon } from "lucide-react";
+import { FolderGit2Icon, FolderIcon, FolderPlusIcon, LockIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -32,24 +33,27 @@ import {
 import { useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
-import { HERO_INLINE_ICON_STYLE, HeroProjectPicker } from "~/projectLabels/HeroProjectPicker";
-import { usePendingProjectFolderStore } from "~/projectLabels/pendingProjectFolders";
+import {
+  setPendingProjectFolder,
+  usePendingProjectFolderStore,
+} from "~/projectLabels/pendingProjectFolders";
 import {
   projectLabelKey,
+  scopedRepositoryKey,
   type EnvironmentProjectLabel,
   type ProjectLabelKey,
 } from "~/projectLabels/projectLabels.logic";
 import {
   groupRepositoriesByProject,
-  heroProjectKey,
   heroProjectSuffix,
   isRepositoryGroupOpen,
   OTHER_REPOSITORIES_GROUP_KEY,
-  soleRepositoryOf,
+  projectDefaultRepository,
   toggleCollapsedGroup,
+  workDraftFolderId,
 } from "~/projectLabels/projectMeta.logic";
 import { ComposerProjectPicker } from "~/projectLabels/ComposerProjectPicker";
-import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
+import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import {
   linkedGitHubOwners,
   mergeRemoteRepositorySections,
@@ -93,7 +97,6 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 // Picker values for the action rows; repositories are keyed by their group
 // and logical project key, since one can show under several projects.
 const ADD_PROJECT_VALUE = "add-project";
-const ALL_REPOSITORIES_VALUE = "all-repositories";
 const ACTIONS_GROUP_KEY = "actions";
 const COLLAPSED_GROUPS_STORAGE_KEY = "cogenly:repository-picker:collapsed-projects";
 const CollapsedGroupKeys = Schema.mutable(Schema.Array(Schema.String));
@@ -279,10 +282,28 @@ export function DraftHeroHeadline({
     [environments],
   );
   const projectDirectory = useProjectLabelDirectory(environmentIds);
-  // The project the repository was picked under, so the hero names it.
-  const [chosenProjectKey, setChosenProjectKey] = useState<ProjectLabelKey | null>(null);
-  // Picking a project with several repositories narrows the picker to them.
-  const [pickerProjectKey, setPickerProjectKey] = useState<ProjectLabelKey | null>(null);
+  const draftThread = useComposerDraftStore((store) =>
+    draftId ? store.draftThreadsByThreadKey[draftId] : undefined,
+  );
+  const pendingFolder = usePendingProjectFolderStore((store) =>
+    draftThread ? store.byThreadId[draftThread.threadId] : undefined,
+  );
+  const pendingProject =
+    pendingFolder && pendingFolder.environmentId === draftThread?.environmentId
+      ? (projectDirectory.byKey.get(
+          projectLabelKey(pendingFolder.environmentId, pendingFolder.folderId),
+        ) ?? null)
+      : null;
+  // Work's project: the one picked for the draft, else its repository's own,
+  // which Work follows. It leads the sentence; the repository is picked in it.
+  const repositoryFolder =
+    activeProjectRef === null || isScratchDraft
+      ? null
+      : (projectDirectory.folderByRepository.get(
+          scopedRepositoryKey(activeProjectRef.environmentId, activeProjectRef.projectId),
+        ) ?? null);
+  const workProject = isChatDraft ? null : (pendingProject ?? repositoryFolder);
+  const workProjectKey = workProject?.key ?? null;
   const repositoryItems = useMemo(
     () =>
       menuEntries.map(({ group }) => ({
@@ -300,7 +321,7 @@ export function DraftHeroHeadline({
   const buildPickerGroups = useCallback(
     (
       items: readonly PickerItem[],
-      onlyProject: ProjectLabelKey | null,
+      leadProject: ProjectLabelKey | null,
       withActions: boolean,
       remote: ReadonlyMap<ProjectLabelKey, OwnerSearchState> | null = null,
     ) => {
@@ -308,7 +329,7 @@ export function DraftHeroHeadline({
         items,
         refsOf: refsOfRepository,
         projects: projectDirectory.labels,
-        onlyProject,
+        leadProject,
       });
       const sections =
         remote === null || remote.size === 0
@@ -361,16 +382,6 @@ export function DraftHeroHeadline({
           color: undefined,
           isProject: false,
           items: [
-            ...(onlyProject
-              ? [
-                  {
-                    value: ALL_REPOSITORIES_VALUE,
-                    label: "All repositories",
-                    projectKey: "",
-                    groupKey: ACTIONS_GROUP_KEY,
-                  },
-                ]
-              : []),
             {
               value: ADD_PROJECT_VALUE,
               label: "Add repository",
@@ -385,8 +396,8 @@ export function DraftHeroHeadline({
     [projectDirectory.labels, refsOfRepository],
   );
   const pickerGroups = useMemo(
-    () => buildPickerGroups(repositoryItems, null, true),
-    [buildPickerGroups, repositoryItems],
+    () => buildPickerGroups(repositoryItems, workProjectKey, true),
+    [buildPickerGroups, repositoryItems, workProjectKey],
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const keepPickerOpenRef = useRef(false);
@@ -403,15 +414,15 @@ export function DraftHeroHeadline({
     projectDirectory.labels,
     pickerOpen ? pickerQuery : "",
   );
-  // Search runs across every repository, whatever project the list was narrowed to.
+  // The project's own repositories lead, searching or not.
   const filteredPickerGroups = useMemo(() => {
     const query = pickerQuery.trim();
-    if (query.length === 0) return buildPickerGroups(repositoryItems, pickerProjectKey, true);
+    if (query.length === 0) return pickerGroups;
     return buildPickerGroups(
       repositoryItems.filter((item) =>
         pickerFilter.contains(item, query, (candidate) => candidate.label),
       ),
-      null,
+      workProjectKey,
       false,
       ownerSearch,
     );
@@ -419,9 +430,10 @@ export function DraftHeroHeadline({
     buildPickerGroups,
     ownerSearch,
     pickerFilter,
-    pickerProjectKey,
+    pickerGroups,
     pickerQuery,
     repositoryItems,
+    workProjectKey,
   ]);
   const searchingGitHub = filteredPickerGroups.some((group) => group.remote !== undefined);
   const remoteClone = useRemoteRepositoryClone(
@@ -435,19 +447,9 @@ export function DraftHeroHeadline({
         ),
       ),
   );
-  const activeRepositoryRefs = activeProjectGroup?.memberProjectRefs;
-  const heroProject = useMemo(() => {
-    if (isScratchDraft || !activeRepositoryRefs) return null;
-    const key = heroProjectKey({
-      chosen: chosenProjectKey,
-      repository: activeRepositoryRefs,
-      projects: projectDirectory.labels,
-    });
-    return key === null ? null : (projectDirectory.byKey.get(key) ?? null);
-  }, [activeRepositoryRefs, chosenProjectKey, isScratchDraft, projectDirectory]);
   const selectedPickerItem =
     pickerGroups
-      .find((group) => group.value === (heroProject?.key ?? OTHER_REPOSITORIES_GROUP_KEY))
+      .find((group) => group.value === (repositoryFolder?.key ?? OTHER_REPOSITORIES_GROUP_KEY))
       ?.items.find((item) => item.projectKey === activeProjectKey) ??
     pickerGroups
       .flatMap((group) => group.items)
@@ -465,7 +467,13 @@ export function DraftHeroHeadline({
   // draft instead opens the chosen project's own draft, like starting a new
   // thread there: moving it would replace that draft and strand whatever it
   // holds, such as the browser tabs of the no-project draft.
-  const selectProject = (project: (typeof projects)[number], logicalProjectKey: string) => {
+  // `folder` is the project the Work lands in; the draft records it unless
+  // the repository's own project is that one, which Work follows anyway.
+  const selectProject = (
+    project: (typeof projects)[number],
+    logicalProjectKey: string,
+    folder: EnvironmentProjectLabel | null,
+  ) => {
     if (!draftId) {
       return;
     }
@@ -474,10 +482,29 @@ export function DraftHeroHeadline({
       activeProjectKey: logicalProjectKey,
       scratchTargetEnvironmentId: project.environmentId,
     };
+    const folderId = workDraftFolderId({
+      repository: { environmentId: project.environmentId, projectId: project.id },
+      project: folder,
+      folderByRepository: projectDirectory.folderByRepository,
+    });
+    const fileDraft = (threadId: ThreadId) =>
+      setPendingProjectFolder(
+        threadId,
+        folderId === null ? null : { environmentId: project.environmentId, folderId },
+      );
+    const leavingThreadId = draftThread?.threadId ?? null;
     const currentDraft = getComposerDraft(draftId);
     if (!composerDraftHasUserContent(currentDraft)) {
-      void openProjectDraft(scopeProjectRef(project.environmentId, project.id), {
-        ...(surface ? { surface } : {}),
+      void openProjectDraft(
+        scopeProjectRef(project.environmentId, project.id),
+        surface ? { surface } : {},
+      ).then((started) => {
+        if (!started || isChatDraft) return;
+        // The project moves with the pick; the empty draft left behind keeps none.
+        if (leavingThreadId !== null && leavingThreadId !== started.threadId) {
+          setPendingProjectFolder(leavingThreadId, null);
+        }
+        fileDraft(started.threadId);
       });
       return;
     }
@@ -486,6 +513,7 @@ export function DraftHeroHeadline({
       scopeProjectRef(project.environmentId, project.id),
       draftId,
     );
+    if (!isChatDraft && leavingThreadId !== null) fileDraft(leavingThreadId);
     if (!hasExplicitComposerModelSelection(currentDraft)) {
       applyStickyState(draftId);
       const environmentSettings = environments.find(
@@ -517,7 +545,11 @@ export function DraftHeroHeadline({
     ) {
       return false;
     }
-    selectProject(project, deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings));
+    selectProject(
+      project,
+      deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
+      workProject,
+    );
     return true;
   };
 
@@ -539,9 +571,8 @@ export function DraftHeroHeadline({
     if (clonedEntry === null || clonedProject === null) return;
     // Waits for the new repository to reach the project list.
     if (cloneStartedForRef.current === activeProjectKey) {
-      setChosenProjectKey(clonedProject.key);
       if (clonedEntry.group.projectKey !== activeProjectKey) {
-        selectProject(clonedEntry.targetProject, clonedEntry.group.projectKey);
+        selectProject(clonedEntry.targetProject, clonedEntry.group.projectKey, clonedProject);
       }
       setPickerOpen(false);
       setPickerQuery("");
@@ -568,8 +599,6 @@ export function DraftHeroHeadline({
         <ComboboxItemIcon>
           {item.value === ADD_PROJECT_VALUE ? (
             <FolderPlusIcon className="size-4" />
-          ) : item.value === ALL_REPOSITORIES_VALUE ? (
-            <ListIcon className="size-4" />
           ) : entry ? (
             <FolderGit2Icon className="size-4" />
           ) : null}
@@ -635,23 +664,17 @@ export function DraftHeroHeadline({
       isItemEqualToValue={(a: PickerItem, b: PickerItem) => a.value === b.value}
       open={pickerOpen}
       onOpenChange={(open, details) => {
-        // "All repositories" widens the list in place.
+        // A GitHub result clones in place, with the picker still up.
         if (!open && details.reason === "item-press" && keepPickerOpenRef.current) {
           keepPickerOpenRef.current = false;
           return;
         }
         setPickerOpen(open);
         setPickerQuery("");
-        if (!open) setPickerProjectKey(null);
       }}
       value={selectedPickerItem}
       onValueChange={(item: PickerItem | null) => {
         if (!item) return;
-        if (item.value === ALL_REPOSITORIES_VALUE) {
-          keepPickerOpenRef.current = true;
-          setPickerProjectKey(null);
-          return;
-        }
         // A GitHub result clones into its project with the picker still up,
         // its row showing the progress; the repository is picked once it lands.
         if (item.remote) {
@@ -667,11 +690,10 @@ export function DraftHeroHeadline({
           void remoteClone.start(target);
           return;
         }
-        const addInto = pickerProjectKey ? projectDirectory.byKey.get(pickerProjectKey) : undefined;
+        const addInto = workProject;
         setPickerOpen(false);
-        setPickerProjectKey(null);
         if (item.value === ADD_PROJECT_VALUE) {
-          // Narrowed to one project, the new repository goes into it.
+          // With a project, the new repository goes into it.
           if (addInto) {
             openCommandPalette({
               open: "add-project",
@@ -682,17 +704,17 @@ export function DraftHeroHeadline({
           }
           return;
         }
-        // Picking a repository under a project also picks that project.
-        setChosenProjectKey(
+        // A repository in a project brings its project; one in none keeps the
+        // draft's, so Work about it is still filed there.
+        const folder =
           item.groupKey === OTHER_REPOSITORIES_GROUP_KEY
-            ? null
-            : (item.groupKey as ProjectLabelKey),
-        );
+            ? workProject
+            : (projectDirectory.byKey.get(item.groupKey as ProjectLabelKey) ?? null);
         const entry = projectEntryByKey.get(item.projectKey);
         if (!entry || item.projectKey === activeProjectKey) {
           return;
         }
-        selectProject(entry.targetProject, entry.group.projectKey);
+        selectProject(entry.targetProject, entry.group.projectKey, folder);
       }}
     >
       <Tooltip>
@@ -802,18 +824,7 @@ export function DraftHeroHeadline({
   // Fixed when the screen opens, so the line holds still while the user types.
   const [greeting] = useState(() => chatGreeting(new Date()));
   // A chat picked into a project says so after the greeting, quietly.
-  const draftThread = useComposerDraftStore((store) =>
-    draftId ? store.draftThreadsByThreadKey[draftId] : undefined,
-  );
-  const pendingFolder = usePendingProjectFolderStore((store) =>
-    draftThread ? store.byThreadId[draftThread.threadId] : undefined,
-  );
-  const chatProjectName = pendingFolder
-    ? (projectDirectory.byKey.get(
-        projectLabelKey(pendingFolder.environmentId, pendingFolder.folderId),
-      )?.label.name ?? null)
-    : null;
-  const greetingSuffix = heroProjectSuffix(chatProjectName);
+  const greetingSuffix = heroProjectSuffix(pendingProject?.label.name ?? null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   useHeroHeadlineMotion(
@@ -821,53 +832,74 @@ export function DraftHeroHeadline({
     measureRef,
     isChatDraft && draftThread ? `chat:${draftThread.threadId}` : "heading",
   );
-  // Choosing a project in the hero: one repository is picked outright;
-  // several narrow the repository picker to that project's.
-  const chooseHeroProject = (project: EnvironmentProjectLabel) => {
-    setChosenProjectKey(project.key);
-    const narrowed = groupRepositoriesByProject({
+  // A project picked for this Work draft, in the hero or the toolbar, moves it
+  // to one of the project's repositories: the current one if the project holds
+  // it, else its most recently active. A project with none, or a draft started
+  // without a repository, keeps where the Work runs and is filed in the project.
+  useEffect(() => {
+    if (!draftThread || pendingFolder?.chosen !== true || pendingProject === null) return;
+    const answered = {
+      environmentId: pendingFolder.environmentId,
+      folderId: pendingFolder.folderId,
+    };
+    setPendingProjectFolder(draftThread.threadId, answered);
+    if (isChatDraft || isScratchDraft) return;
+    const lastActive = new Map<string, number>();
+    for (const thread of threads) {
+      if (thread.archivedAt !== null) continue;
+      const key = scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId));
+      const at = Date.parse(thread.updatedAt);
+      if (at > (lastActive.get(key) ?? Number.NEGATIVE_INFINITY)) lastActive.set(key, at);
+    }
+    const target = projectDefaultRepository({
       items: repositoryItems,
       refsOf: refsOfRepository,
-      projects: projectDirectory.labels,
-      onlyProject: project.key,
+      project: pendingProject,
+      isCurrent: (item) => item.projectKey === activeProjectKey,
+      lastActiveAt: (item) =>
+        Math.max(
+          Number.NEGATIVE_INFINITY,
+          ...refsOfRepository(item).map(
+            (ref) => lastActive.get(scopedProjectKey(ref)) ?? Number.NEGATIVE_INFINITY,
+          ),
+        ),
     });
-    const sole = soleRepositoryOf(narrowed);
-    if (sole) {
-      const entry = projectEntryByKey.get(sole.projectKey);
-      if (entry && sole.projectKey !== activeProjectKey) {
-        selectProject(entry.targetProject, entry.group.projectKey);
-      }
+    const entry = target ? projectEntryByKey.get(target.projectKey) : undefined;
+    if (entry && target?.projectKey !== activeProjectKey) {
+      selectProject(entry.targetProject, entry.group.projectKey, pendingProject);
       return;
     }
-    setPickerProjectKey(project.key);
-    setPickerOpen(true);
-  };
-  const heroProjectPart = heroProject ? (
-    <>
-      <HeroProjectPicker
-        projects={projectDirectory.labels.filter((entry) =>
-          groupRepositoriesByProject({
-            items: repositoryItems,
-            refsOf: refsOfRepository,
-            projects: [entry],
-            onlyProject: entry.key,
-          }).some((group) => group.items.length > 0),
-        )}
-        current={heroProject}
-        onChoose={chooseHeroProject}
+    // Staying put: Work already follows its repository's own project.
+    if (activeProject !== null) {
+      const folderId = workDraftFolderId({
+        repository: { environmentId: activeProject.environmentId, projectId: activeProject.id },
+        project: pendingProject,
+        folderByRepository: projectDirectory.folderByRepository,
+      });
+      if (folderId === null) setPendingProjectFolder(draftThread.threadId, null);
+    }
+  });
+  const projectHeadline =
+    workProject && draftThread && draftId ? (
+      <ComposerProjectPicker
+        appearance="headline"
+        environmentId={draftThread.environmentId}
+        threadId={draftThread.threadId}
+        draftId={draftId}
+        size="sm"
       />
-      <span className="text-muted-foreground/60"> / </span>
-    </>
-  ) : null;
+    ) : null;
   const headingLabel = isChatDraft
     ? `${greeting}${greetingSuffix ?? ""}`
-    : isScratchDraft
-      ? "What should we build?"
-      : hasResolvedProject
-        ? `What should we build in ${heroProject ? `${heroProject.label.name} / ` : ""}${activeProjectDisplayName}?`
-        : canChooseProject
-          ? `${activeProjectDisplayName ?? "Choose a repository"} to start`
-          : "Add a repository to start";
+    : workProject
+      ? `What should we build in ${workProject.label.name}?`
+      : isScratchDraft
+        ? "What should we build?"
+        : hasResolvedProject
+          ? `What should we build in ${activeProjectDisplayName}?`
+          : canChooseProject
+            ? `${activeProjectDisplayName ?? "Choose a repository"} to start`
+            : "Add a repository to start";
 
   // One click out of the project, phrased as the alternative to the question
   // above it. Focus moves to the project picker once this line has gone.
@@ -919,9 +951,11 @@ export function DraftHeroHeadline({
             // A chat's project changes in place (the tail glides), not by a swap.
             isChatDraft
               ? "chat"
-              : isScratchDraft
-                ? "no-repository"
-                : `repository:${heroProject?.key ?? ""}:${activeProjectKey}`
+              : workProject
+                ? `project:${workProject.key}`
+                : isScratchDraft
+                  ? "no-repository"
+                  : `repository:${activeProjectKey}`
           }
         >
           {isChatDraft ? (
@@ -942,13 +976,12 @@ export function DraftHeroHeadline({
                 />
               ) : null}
             </>
+          ) : projectHeadline ? (
+            <>What should we build in {projectHeadline}?</>
           ) : isScratchDraft ? (
             <>What should we build?</>
           ) : hasResolvedProject ? (
-            <>
-              What should we build in {heroProjectPart}
-              {projectSelector}?
-            </>
+            <>What should we build in {projectSelector}?</>
           ) : canChooseProject ? (
             <>{projectSelector} to start</>
           ) : (
@@ -958,10 +991,30 @@ export function DraftHeroHeadline({
       </h1>
       {/* Reserved whenever threads can skip a project, so the heading does not
           move. Without a project, the picker moves here to choose one. */}
-      {isChatDraft || (scratchWorkspaceRoot === null && !isScratchDraft) ? null : (
+      {isChatDraft ||
+      (projectHeadline === null && scratchWorkspaceRoot === null && !isScratchDraft) ? null : (
         <p className="mt-2 flex h-6 items-center text-sm">
-          <FadeSwap group="draft-subline" swapKey={isScratchDraft ? "picker" : "start-without"}>
-            {isScratchDraft ? projectSelector : orStartWithoutProject}
+          <FadeSwap
+            group="draft-subline"
+            swapKey={
+              projectHeadline && !isScratchDraft
+                ? "project-repository"
+                : isScratchDraft
+                  ? "picker"
+                  : "start-without"
+            }
+          >
+            {projectHeadline && !isScratchDraft ? (
+              // In a project, the repository is the second choice, picked within it.
+              <span className="text-muted-foreground">
+                in {projectSelector}
+                {orStartWithoutProject ? <> · {orStartWithoutProject}</> : null}
+              </span>
+            ) : isScratchDraft ? (
+              projectSelector
+            ) : (
+              orStartWithoutProject
+            )}
           </FadeSwap>
         </p>
       )}

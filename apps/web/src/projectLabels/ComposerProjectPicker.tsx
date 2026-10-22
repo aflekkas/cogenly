@@ -20,6 +20,7 @@ import {
   ComboboxSearchInput,
   ComboboxTrigger,
 } from "../components/ui/combobox";
+import { InlineButton } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { cn } from "../lib/utils";
@@ -31,13 +32,14 @@ import {
   PROJECT_LABEL_COLORS,
   priorFiling,
   projectLabelKey,
+  scopedRepositoryKey,
   threadFolderState,
   threadForksIntoProjects,
   threadProjectFolderId,
 } from "./projectLabels.logic";
 import { composerProjectFolderId } from "./projectMeta.logic";
 import { HeroProjectSuffixText } from "./HeroProjectSuffix";
-import { ProjectFolderIcon } from "./ProjectFolderMark";
+import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
 import { reportProjectFolderFailure, useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
 
@@ -70,6 +72,10 @@ function optionText(option: ProjectOption): string {
  * The composer toolbar's project control: which project this chat belongs to.
  * A draft keeps its pick until it is sent (PendingProjectFolderCoordinator
  * files the new thread); an existing chat moves right away, with Undo.
+ *
+ * A Work draft can be given a project too. Until one is picked it shows its
+ * repository's project, which Work follows; the Work hero answers a pick by
+ * moving the draft to one of the project's repositories.
  */
 export function ComposerProjectPicker(props: {
   readonly environmentId: EnvironmentId;
@@ -81,8 +87,9 @@ export function ComposerProjectPicker(props: {
   /**
    * `hero` is the new-chat greeting's " · in <project>" tail: the same picker,
    * opened from the project's name, and nothing to click without a project.
+   * `headline` is the Work hero's "What should we build in <project>?".
    */
-  readonly appearance?: "toolbar" | "hero";
+  readonly appearance?: "toolbar" | "hero" | "headline";
 }) {
   const { environmentId, threadId } = props;
   const environmentIds = useMemo(() => [environmentId], [environmentId]);
@@ -116,10 +123,24 @@ export function ComposerProjectPicker(props: {
     () => directory.labels.filter((entry) => entry.environmentId === environmentId),
     [directory.labels, environmentId],
   );
-  const currentId = composerProjectFolderId({
-    pendingFolderId: pending?.folderId ?? null,
-    threadFolderId: thread ? threadProjectFolderId(thread) : null,
-  });
+  const draft = useComposerDraftStore((store) =>
+    props.draftId === null ? undefined : store.draftThreadsByThreadKey[props.draftId],
+  );
+  const draftSurface = draft?.surface;
+  const isWorkDraft = thread === null && draftSurface === "work";
+  // The project a Work draft's repository is in, which it follows unless another is picked.
+  const repositoryFolder =
+    isWorkDraft && draft
+      ? (directory.folderByRepository.get(scopedRepositoryKey(environmentId, draft.projectId)) ??
+        null)
+      : null;
+  const currentId =
+    composerProjectFolderId({
+      pendingFolderId: pending?.folderId ?? null,
+      threadFolderId: thread ? threadProjectFolderId(thread) : null,
+    }) ??
+    repositoryFolder?.label.id ??
+    null;
   const current =
     currentId === null
       ? null
@@ -129,7 +150,9 @@ export function ComposerProjectPicker(props: {
     // "No project" is a choice like any project, so it leads the list;
     // creating one is the lone action at the end.
     const needle = query.trim().toLowerCase();
-    const result: ProjectOption[] = needle === "" ? [{ kind: "none", key: "none" }] : [];
+    // Work in a repository's project cannot leave it, only go to another.
+    const result: ProjectOption[] =
+      needle === "" && repositoryFolder === null ? [{ kind: "none", key: "none" }] : [];
     for (const entry of projects) {
       if (needle !== "" && !entry.label.name.toLowerCase().includes(needle)) continue;
       result.push({
@@ -147,23 +170,38 @@ export function ComposerProjectPicker(props: {
       }
     }
     return result;
-  }, [canCreate, projects, query]);
+  }, [canCreate, projects, query, repositoryFolder]);
 
-  const draftSurface = useComposerDraftStore((store) =>
-    props.draftId === null ? undefined : store.draftThreadsByThreadKey[props.draftId]?.surface,
-  );
-  // Chats only: Work names its project in the hero and follows its
-  // repository, and an agent's conversation belongs to the agent.
+  // Chats, and Work drafts: existing Work follows its repository (moved from
+  // its row's menu), and an agent's conversation belongs to the agent.
   const surface = thread ? thread.source.surface : draftSurface;
   const isChat = surface !== "work" && surface !== "builder" && thread?.source.agent === undefined;
 
-  if (!canMove || !isChat) return null;
+  const isHeadline = props.appearance === "headline";
+  if (!canMove || !(isChat || isWorkDraft)) {
+    // The Work hero still names its project when it cannot be changed here.
+    return isHeadline && current ? (
+      <span className="inline-block max-w-64 truncate align-baseline">
+        <ProjectFolderIcon
+          color={current.label.color}
+          className="inline-block"
+          style={HERO_INLINE_ICON_STYLE}
+        />
+        {current.label.name}
+      </span>
+    ) : null;
+  }
   // A chat with turns goes into another project as a fork; the picker says so.
   const forks = thread !== null && threadForksIntoProjects(thread);
 
   const assign = async (folder: { id: ProjectLabelId; name: string } | null) => {
     if (thread === null) {
-      setPendingProjectFolder(threadId, folder ? { environmentId, folderId: folder.id } : null);
+      setPendingProjectFolder(
+        threadId,
+        folder
+          ? { environmentId, folderId: folder.id, ...(isWorkDraft ? { chosen: true } : {}) }
+          : null,
+      );
       return;
     }
     setPendingProjectFolder(threadId, null);
@@ -238,7 +276,24 @@ export function ComposerProjectPicker(props: {
         if (option) void choose(option);
       }}
     >
-      {isHero ? (
+      {isHeadline ? (
+        // Named mid-sentence: the visible project name is the accessible name.
+        <ComboboxTrigger
+          disabled={props.disabled}
+          data-hero-project-picker=""
+          render={<InlineButton tone="picker" />}
+          className="pointer-events-auto max-w-64 align-baseline"
+        >
+          <span className="block truncate">
+            <ProjectFolderIcon
+              color={current?.label.color}
+              className="inline-block"
+              style={HERO_INLINE_ICON_STYLE}
+            />
+            {current?.label.name ?? "a project"}
+          </span>
+        </ComboboxTrigger>
+      ) : isHero ? (
         // Stays mounted without a project, empty and out of reach, so the
         // name can fade out and the greeting glide back to centre. On its own
         // line under a stacked heading, it is a size smaller.
@@ -293,9 +348,9 @@ export function ComposerProjectPicker(props: {
         </Tooltip>
       )}
       <ComboboxPopup
-        align={isHero ? "center" : "start"}
+        align={isHero || isHeadline ? "center" : "start"}
         // Under the hero sentence, clear of its underline, as the Work hero's pickers sit.
-        {...(isHero ? { sideOffset: 8 } : {})}
+        {...(isHero || isHeadline ? { sideOffset: 8 } : {})}
         className="w-64"
       >
         <ComboboxSearchInput

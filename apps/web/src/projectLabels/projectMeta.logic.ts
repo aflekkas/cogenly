@@ -7,6 +7,7 @@ import type { EnvironmentId, ProjectId, ProjectLabelId } from "@t3tools/contract
 
 import {
   projectLabelKey,
+  scopedRepositoryKey,
   threadProjectFolderId,
   type EnvironmentProjectLabel,
   type ProjectLabelKey,
@@ -79,6 +80,7 @@ export function groupRepositoriesByProject<Item>(input: {
   /** Folders, alphabetical (as the directory holds them). */
   readonly projects: ReadonlyArray<EnvironmentProjectLabel>;
   readonly onlyProject?: ProjectLabelKey | null;
+  readonly leadProject?: ProjectLabelKey | null;
 }): RepositoryProjectGroup<Item>[] {
   const memberKeys = new Map<string, ProjectLabelKey[]>();
   for (const project of input.projects) {
@@ -117,17 +119,14 @@ export function groupRepositoriesByProject<Item>(input: {
   const groups: RepositoryProjectGroup<Item>[] = [];
   for (const project of input.projects) {
     const items = itemsByProject.get(project.key);
-    if (items) groups.push({ key: project.key, project, items });
+    if (!items) continue;
+    if (project.key === input.leadProject) groups.unshift({ key: project.key, project, items });
+    else groups.push({ key: project.key, project, items });
   }
   if (other.length > 0) {
     groups.push({ key: OTHER_REPOSITORIES_GROUP_KEY, project: null, items: other });
   }
   return groups;
-}
-
-/** The repository to select on its own when a project holds exactly one; else null. */
-export function soleRepositoryOf<Item>(groups: ReadonlyArray<RepositoryProjectGroup<Item>>) {
-  return groups.length === 1 && groups[0]?.items.length === 1 ? (groups[0].items[0] ?? null) : null;
 }
 
 function holdsRepository(project: EnvironmentProjectLabel, refs: ReadonlyArray<RepositoryRef>) {
@@ -139,21 +138,49 @@ function holdsRepository(project: EnvironmentProjectLabel, refs: ReadonlyArray<R
 }
 
 /**
- * The project the Work hero names for its repository: the one the user picked
- * the repository under, while it still holds the repository, else the first
- * project that does. Null when no project holds it, which hides the project
- * part.
+ * The repository a Work draft moves to when its project is picked: the
+ * current one while the project holds it, else the project's most recently
+ * active one (the first on a tie). Null when the project holds none, and the
+ * draft keeps its repository.
  */
-export function heroProjectKey(input: {
-  readonly chosen: ProjectLabelKey | null;
-  readonly repository: ReadonlyArray<RepositoryRef>;
-  readonly projects: ReadonlyArray<EnvironmentProjectLabel>;
-}): ProjectLabelKey | null {
-  const chosen = input.chosen
-    ? input.projects.find((entry) => entry.key === input.chosen)
-    : undefined;
-  if (chosen && holdsRepository(chosen, input.repository)) return chosen.key;
-  return input.projects.find((project) => holdsRepository(project, input.repository))?.key ?? null;
+export function projectDefaultRepository<Item>(input: {
+  readonly items: ReadonlyArray<Item>;
+  readonly refsOf: (item: Item) => ReadonlyArray<RepositoryRef>;
+  readonly project: EnvironmentProjectLabel;
+  readonly isCurrent: (item: Item) => boolean;
+  /** Latest thread activity in the repository, as epoch ms; -Infinity when none. */
+  readonly lastActiveAt: (item: Item) => number;
+}): Item | null {
+  let best: Item | null = null;
+  let bestAt = Number.NEGATIVE_INFINITY;
+  for (const item of input.items) {
+    if (!holdsRepository(input.project, input.refsOf(item))) continue;
+    if (input.isCurrent(item)) return item;
+    const at = input.lastActiveAt(item);
+    if (best === null || at > bestAt) {
+      best = item;
+      bestAt = at;
+    }
+  }
+  return best;
+}
+
+/**
+ * The project a Work draft records for its thread once it targets
+ * `repository`: none when that is the repository's own project, which Work
+ * follows anyway, else `project` while it is on the repository's machine.
+ */
+export function workDraftFolderId(input: {
+  readonly repository: RepositoryRef;
+  readonly project: EnvironmentProjectLabel | null;
+  readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
+}): ProjectLabelId | null {
+  const { project, repository } = input;
+  if (project === null || project.environmentId !== repository.environmentId) return null;
+  const own = input.folderByRepository.get(
+    scopedRepositoryKey(repository.environmentId, repository.projectId),
+  );
+  return own?.key === project.key ? null : project.label.id;
 }
 
 /**
