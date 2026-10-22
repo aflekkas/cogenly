@@ -107,4 +107,11 @@ describe("CONVERSATION_MODE_INSTRUCTIONS", () => {
     expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("image_search");
     expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("never invent URLs");
   });
+
+  it("hands tool work to a task instead of the user", () => {
+    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("work_task");
+    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("do not tell the user to do it by hand");
+    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain('mode "propose"');
+    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("A subagent is different");
+  });
 });

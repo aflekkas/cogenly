@@ -266,7 +266,7 @@ const smokeCases = [
   },
   {
     toolkit: "work",
-    names: ["work_start", "work_propose_handoff"],
+    names: ["work_start", "work_propose_handoff", "work_task"],
     tool: "work_propose_handoff",
     args: {},
     expected: {

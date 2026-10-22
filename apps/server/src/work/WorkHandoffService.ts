@@ -1,6 +1,7 @@
 import {
   CommandId,
   WorkHandoffError,
+  WorkTaskId,
   type AgentId,
   type MessageId,
   type ModelSelection,
@@ -10,6 +11,11 @@ import {
   type WorkStartInput,
   type WorkStartResult,
   type WorkHandoffDraft,
+  type ProjectId,
+  type RunId,
+  type WorkTask,
+  type WorkTaskHandoffResult,
+  type WorkTaskMode,
   type OrchestrationV2ThreadLaunchWorkspaceStrategy,
   type OrchestrationV2ThreadProjection,
   type Project,
@@ -38,7 +44,28 @@ export interface WorkHandoffActor {
   readonly sourceAgentRunId?: string;
   readonly runtimeMode?: RuntimeMode;
   readonly interactionMode?: ProviderInteractionMode;
+  /** A chat's own agent started this on the user's behalf, so the thread records an agent creator. */
+  readonly createdByAgent?: boolean;
 }
+
+/** A chat agent's request to hand work off as a task card. */
+export interface WorkTaskHandoffInput {
+  /** Stable across retries: one request makes one card and at most one Work thread. */
+  readonly commandId: CommandId;
+  readonly sourceThreadId: ThreadId;
+  readonly mode: WorkTaskMode;
+  readonly title: string;
+  readonly brief: string;
+  /** Absent: "No project", the scratch project on this machine. */
+  readonly targetProjectId?: ProjectId | undefined;
+  readonly workspace?: "worktree" | "local" | undefined;
+  readonly modelSelection?: ModelSelection | undefined;
+  /** The chat run asking, so the card sits after its turn. */
+  readonly runId?: RunId | undefined;
+}
+
+/** The card brief: the scope, cut to what a card carries. */
+const cardBrief = (text: string) => text.trim().slice(0, 4000);
 type ChatMessages = OrchestrationV2ThreadProjection["messages"];
 
 const settledText = (messages: ChatMessages) =>
@@ -60,10 +87,20 @@ const handoffArtifactItemTypes = [
 export class WorkHandoffService extends Context.Service<
   WorkHandoffService,
   {
+    /** `task` records a new card for this Work, started, as an agent's direct start does. */
     readonly start: (
       input: WorkStartInput,
       actor?: WorkHandoffActor,
+      task?: WorkTask,
     ) => Effect.Effect<WorkStartResult, WorkHandoffError>;
+    /**
+     * A chat agent hands work off as a task card: `propose` waits for the
+     * user's approval on the card, `start` launches the Work at once.
+     */
+    readonly handoffTask: (
+      input: WorkTaskHandoffInput,
+      actor: WorkHandoffActor,
+    ) => Effect.Effect<WorkTaskHandoffResult, WorkHandoffError>;
     /** `throughMessageId` drafts from the chat up to and including that message. */
     readonly proposeHandoff: (
       sourceThreadId: ThreadId,
@@ -97,8 +134,52 @@ const make = Effect.gen(function* () {
     return source;
   });
   const start: WorkHandoffService["Service"]["start"] = Effect.fn("WorkHandoffService.start")(
-    function* (input, actor) {
-      const source = yield* sourceThread(input.sourceThreadId);
+    function* (startInput, actor, newTask) {
+      const source = yield* sourceThread(startInput.sourceThreadId);
+      // Approving a proposed card starts what it describes, with the user's edits on top.
+      const proposed =
+        startInput.taskId === undefined
+          ? undefined
+          : (source.thread.workTasks ?? []).find((task) => task.id === startInput.taskId);
+      if (startInput.taskId !== undefined) {
+        if (proposed?.status === "started" && proposed.threadId !== undefined) {
+          return { threadId: proposed.threadId };
+        }
+        if (proposed?.status !== "proposed") {
+          return yield* new WorkHandoffError({
+            sourceThreadId: startInput.sourceThreadId,
+            stage: "task-unavailable",
+          });
+        }
+      }
+      const input: WorkStartInput =
+        proposed === undefined
+          ? startInput
+          : {
+              ...startInput,
+              title: startInput.title ?? proposed.title,
+              scopeSummary: startInput.scopeSummary ?? proposed.brief,
+              ...((startInput.workspace ?? proposed.workspace) === undefined
+                ? {}
+                : { workspace: startInput.workspace ?? proposed.workspace }),
+              ...((startInput.modelSelection ?? proposed.modelSelection) === undefined
+                ? {}
+                : { modelSelection: startInput.modelSelection ?? proposed.modelSelection }),
+            };
+      const task: WorkTask | undefined =
+        newTask ??
+        (proposed === undefined
+          ? undefined
+          : {
+              ...proposed,
+              title: input.title ?? proposed.title,
+              brief: cardBrief(input.scopeSummary ?? proposed.brief),
+              targetProjectId: input.targetProjectId,
+              ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
+              ...(input.modelSelection === undefined
+                ? {}
+                : { modelSelection: input.modelSelection }),
+            });
       const origin = actor?.origin ?? "chat";
       const sourceAgentId =
         origin === "agent"
@@ -178,8 +259,8 @@ const make = Effect.gen(function* () {
           runtimeMode: actor?.runtimeMode ?? source.thread.runtimeMode,
           interactionMode: actor?.interactionMode ?? source.thread.interactionMode,
           workspaceStrategy,
-          createdBy: origin === "agent" ? "agent" : "user",
-          creationSource: origin === "agent" ? "mcp" : "web",
+          createdBy: origin === "agent" || actor?.createdByAgent === true ? "agent" : "user",
+          creationSource: origin === "agent" || actor?.createdByAgent === true ? "mcp" : "web",
           initialMessage: {
             text: `${scopeSummary}\n\nSource conversation: [${source.thread.title}](cogenly-thread://v1/${input.sourceThreadId})\nSource thread ID: ${input.sourceThreadId}${cutOff}\n${input.scopeSummary === undefined ? "The chat's transcript was carried as handoff context; consult it before asking about anything already discussed." : "Use this approved scope; follow the source reference if more context is needed."}`,
             senderThreadId: input.sourceThreadId,
@@ -209,6 +290,7 @@ const make = Effect.gen(function* () {
             ? {}
             : { throughMessageId: input.throughMessageId }),
           handoffContext,
+          ...(task === undefined ? {} : { task }),
         })
         .pipe(
           Effect.mapError(
@@ -511,6 +593,81 @@ const make = Effect.gen(function* () {
       suggestedProjectId: suggested?.id ?? null,
     };
   });
-  return WorkHandoffService.of({ start, proposeHandoff });
+  const handoffTask: WorkHandoffService["Service"]["handoffTask"] = Effect.fn(
+    "WorkHandoffService.handoffTask",
+  )(function* (input, actor) {
+    yield* sourceThread(input.sourceThreadId);
+    const resolveError = (cause?: unknown) =>
+      new WorkHandoffError({
+        sourceThreadId: input.sourceThreadId,
+        stage: "resolve-project",
+        cause,
+      });
+    // "No project" is the scratch project, created on first use as the web does.
+    const targetProjectId =
+      input.targetProjectId ??
+      (yield* folders.ensureScratchProject.pipe(Effect.mapError(resolveError))).projectId;
+    const project = yield* projects.getById(targetProjectId).pipe(Effect.mapError(resolveError));
+    if (Option.isNone(project)) return yield* resolveError("No such project.");
+    const taskId = WorkTaskId.make(`task:${input.commandId}`);
+    const now = DateTime.formatIso(yield* DateTime.now);
+    const task: WorkTask = {
+      id: taskId,
+      status: input.mode === "start" ? "started" : "proposed",
+      requestedMode: input.mode,
+      title: input.title.trim().slice(0, 200),
+      brief: cardBrief(input.brief),
+      targetProjectId,
+      ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
+      ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
+      ...(input.runId === undefined ? {} : { runId: input.runId }),
+      createdAt: now,
+      updatedAt: now,
+    };
+    if (input.mode === "propose") {
+      yield* threads
+        .dispatch({
+          type: "work.task.propose",
+          commandId: CommandId.make(`${input.commandId}:work-task`),
+          threadId: input.sourceThreadId,
+          task,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new WorkHandoffError({
+                sourceThreadId: input.sourceThreadId,
+                stage: "record-link",
+                cause,
+              }),
+          ),
+        );
+      return {
+        taskId,
+        status: "proposed" as const,
+        note: "A task card is waiting in the chat for the user to approve, edit or dismiss. Nothing has started. Tell them briefly what it will do; you hear back when the task finishes.",
+      };
+    }
+    const result = yield* start(
+      {
+        commandId: input.commandId,
+        sourceThreadId: input.sourceThreadId,
+        targetProjectId,
+        title: task.title,
+        scopeSummary: input.brief.trim().slice(0, 16000),
+        ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
+        ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
+      },
+      actor,
+      task,
+    );
+    return {
+      taskId,
+      status: "started" as const,
+      threadId: result.threadId,
+      note: "The task started in its own Work thread, shown as a card in this chat. Tell the user briefly; you hear back here when it finishes, so do not poll it.",
+    };
+  });
+  return WorkHandoffService.of({ start, proposeHandoff, handoffTask });
 });
 export const layer = Layer.effect(WorkHandoffService, make);

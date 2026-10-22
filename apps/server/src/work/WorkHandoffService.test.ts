@@ -33,6 +33,7 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 import * as Ids from "@t3tools/provider-core/server/IdAllocator";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Work from "./WorkHandoffService.ts";
+import { workTaskReportFor } from "./WorkTaskReportReactor.ts";
 import * as Launch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
@@ -245,6 +246,7 @@ const makeHarness = (
         scratchRoot: Effect.succeed(
           options.scratch ? Option.some(scratch.workspaceRoot) : Option.none(),
         ),
+        ensureScratchProject: Effect.succeed({ projectId: scratch.id }),
         folderForThread: (request) =>
           Effect.succeed(
             options.scratch && request.projectId === scratch.id
@@ -1009,6 +1011,144 @@ it.effect("starts in the checkout when the repository has no git and no workspac
       const projection = yield* h.orchestrator.getThreadProjection(result.threadId);
       expect(projection.runs[0]?.workspacePreparation?.type).toBe("root");
       expect(h.worktrees).toEqual([]);
+      yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+const chatTasks = (h: { orchestrator: Orchestrator.OrchestratorV2["Service"] }) =>
+  h.orchestrator.getThreadProjection(sourceId).pipe(Effect.map((p) => p.thread.workTasks ?? []));
+
+it.effect("proposes a task card that waits, dismisses and restores, then starts on approval", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      const proposed = yield* service.handoffTask(
+        {
+          commandId: CommandId.make("task:propose"),
+          sourceThreadId: sourceId,
+          mode: "propose",
+          title: "Fix audit",
+          brief: "Implement booking-audit validation with focused tests.",
+          targetProjectId: targetId,
+        },
+        { origin: "chat", createdByAgent: true },
+      );
+      expect(proposed.status).toBe("proposed");
+      expect(proposed.threadId).toBeUndefined();
+      expect(h.worktrees).toEqual([]);
+      expect((yield* chatTasks(h))[0]).toMatchObject({
+        id: proposed.taskId,
+        status: "proposed",
+        requestedMode: "propose",
+        targetProjectId: targetId,
+      });
+
+      const dismiss = (dismissed: boolean, id: string) =>
+        h.orchestrator.dispatch({
+          type: "work.task.dismiss",
+          commandId: CommandId.make(id),
+          threadId: sourceId,
+          taskId: proposed.taskId,
+          dismissed,
+        });
+      yield* dismiss(true, "dismiss:1");
+      expect((yield* chatTasks(h))[0]?.status).toBe("dismissed");
+      const refused = yield* service
+        .start({ ...input, commandId: CommandId.make("approve:early"), taskId: proposed.taskId })
+        .pipe(Effect.flip);
+      expect(refused.stage).toBe("task-unavailable");
+      yield* dismiss(false, "restore:1");
+      expect((yield* chatTasks(h))[0]?.status).toBe("proposed");
+
+      // Approving with an edited brief starts what the card describes, with the edit.
+      const approve = {
+        commandId: CommandId.make("approve:one"),
+        sourceThreadId: sourceId,
+        targetProjectId: targetId,
+        scopeSummary: "Implement booking-audit validation; keep URL handling.",
+        taskId: proposed.taskId,
+      };
+      const started = yield* service.start(approve);
+      yield* Deferred.await(h.finished);
+      const card = (yield* chatTasks(h))[0];
+      expect(card).toMatchObject({
+        status: "started",
+        threadId: started.threadId,
+        brief: approve.scopeSummary,
+        title: "Fix audit",
+      });
+      const work = yield* h.orchestrator.getThreadProjection(started.threadId);
+      expect(work.thread.title).toBe("Fix audit");
+      expect(work.messages[0]?.text).toContain(approve.scopeSummary);
+      // A started card is no longer the user's to dismiss, and approving again changes nothing.
+      expect(yield* Effect.flip(dismiss(true, "dismiss:2"))).toBeTruthy();
+      expect(
+        (yield* service.start({ ...approve, commandId: CommandId.make("approve:two") })).threadId,
+      ).toBe(started.threadId);
+      expect(yield* chatTasks(h)).toHaveLength(1);
+      yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("starts a task in No project at once and reports its result back to the chat once", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness({ scratch: true });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      const started = yield* service.handoffTask(
+        {
+          commandId: CommandId.make("task:start"),
+          sourceThreadId: sourceId,
+          mode: "start",
+          title: "Uninstall Nook and Ora",
+          brief: "Uninstall the Nook and Ora browsers from this Mac.",
+        },
+        { origin: "chat", createdByAgent: true },
+      );
+      expect(started.status).toBe("started");
+      yield* Deferred.await(h.finished);
+      const threadId = started.threadId!;
+      const work = yield* h.orchestrator.getThreadProjection(threadId);
+      expect(work.thread.projectId).toBe(scratch.id);
+      expect(work.thread.createdBy).toBe("agent");
+      const card = (yield* chatTasks(h))[0]!;
+      expect(card).toMatchObject({ status: "started", requestedMode: "start", threadId });
+
+      const report = workTaskReportFor({
+        chatThreadId: sourceId,
+        task: card,
+        workThreadId: threadId,
+        run: { id: work.runs[0]!.id, status: "completed" },
+        finalReply: "Removed Nook.app and Ora.app from /Applications.",
+        reportedAt: "2026-10-22T00:00:00.000Z",
+      })!;
+      yield* h.orchestrator.dispatch(report);
+      // A replay of the same report is the receipt, not a second wake.
+      yield* h.orchestrator.dispatch(report);
+      const chat = yield* h.orchestrator.getThreadProjection(sourceId);
+      expect(chat.thread.workTasks?.[0]?.outcome).toMatchObject({
+        status: "completed",
+        summary: "Removed Nook.app and Ora.app from /Applications.",
+      });
+      const wakes = chat.messages.filter((message) => message.notification !== undefined);
+      expect(wakes).toHaveLength(1);
+      expect(wakes[0]?.text).toContain("Removed Nook.app");
+      expect(wakes[0]?.notification?.source).toMatchObject({
+        kind: "work_task",
+        childThreadId: threadId,
+      });
+      // The idle chat starts a turn for the report.
+      expect(chat.runs.some((run) => run.userMessageId === wakes[0]?.id)).toBe(true);
+      // Each task reports once.
+      const again = yield* h.orchestrator
+        .dispatch({ ...report, commandId: CommandId.make("server:work-task-report:again") })
+        .pipe(Effect.flip);
+      expect(again).toBeTruthy();
       yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
     }).pipe(Effect.provide(h.work));
   }).pipe(Effect.provide(runtime)),

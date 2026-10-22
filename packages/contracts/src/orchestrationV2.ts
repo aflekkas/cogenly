@@ -76,6 +76,7 @@ import {
 } from "./providerRuntime.ts";
 import { ThreadTokenUsageSnapshot } from "./providerRuntime.ts";
 import { VisualState, VisualStateJson } from "./visual.ts";
+import { WorkTask, WorkTaskId, WorkTaskOutcome } from "./work.ts";
 
 export const OrchestrationV2Actor = Schema.Literals(["user", "agent", "system"]);
 export type OrchestrationV2Actor = typeof OrchestrationV2Actor.Type;
@@ -403,6 +404,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   projectFolderSource: Schema.optional(ProjectFolderSource),
   ...WorkMetadataFields,
   workHandoffs: Schema.optional(Schema.Array(WorkHandoffLink)),
+  /** Tasks this chat's agent proposed or started, each shown as a card in the chat. */
+  workTasks: Schema.optional(Schema.Array(WorkTask)),
   /** Agent identity is provenance; work threads remain ordinary visible coding threads. */
   agent: Schema.optional(AgentThreadIdentity),
   ...OrchestrationV2CreationFields,
@@ -1245,6 +1248,12 @@ export const OrchestrationV2NotificationSource = kindUnionWithFallback(
     Schema.Struct({ kind: Schema.Literal("background_task") }),
     /** T3 Code itself, such as a restart continuing an interrupted turn. */
     Schema.Struct({ kind: Schema.Literal("system") }),
+    /** A Work task this chat handed off, reporting how it ended. */
+    Schema.Struct({
+      kind: Schema.Literal("work_task"),
+      taskId: WorkTaskId,
+      childThreadId: ThreadId,
+    }),
   ],
   (kind) => Schema.Struct({ kind }),
   () => ({ kind: "background_task" }),
@@ -2052,6 +2061,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   projectFolderSource: Schema.optional(ProjectFolderSource),
   ...WorkMetadataFields,
   workHandoffs: Schema.optional(Schema.Array(WorkHandoffLink)),
+  workTasks: Schema.optional(Schema.Array(WorkTask)),
   agent: Schema.optional(AgentThreadIdentity),
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -2952,6 +2962,14 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
   }),
+  /** Dismisses a proposed task card in a chat, or restores a dismissed one. */
+  Schema.Struct({
+    type: Schema.Literal("work.task.dismiss"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    taskId: WorkTaskId,
+    dismissed: Schema.Boolean,
+  }),
   Schema.Struct({
     type: Schema.Literal("thread.metadata.update"),
     commandId: CommandId,
@@ -3313,6 +3331,31 @@ const OrchestrationV2InternalCommand = Schema.Union([
     scopeSummary: TrimmedNonEmptyString,
     throughMessageId: Schema.optional(MessageId),
     handoffContext: Schema.optional(OrchestrationV2WorkHandoffContext),
+    /** The task card this Work answers: upserted as started, linked to the Work thread. */
+    task: Schema.optional(WorkTask),
+  }),
+  /** Adds a task card the chat's agent proposed; it waits for the user to approve it. */
+  Schema.Struct({
+    type: Schema.Literal("work.task.propose"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    task: WorkTask,
+  }),
+  /**
+   * Records how a started task's Work ended on its card, and wakes the chat's
+   * agent with `wake` so it can tell the user. An archived chat records only.
+   */
+  Schema.Struct({
+    type: Schema.Literal("work.task.report"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    taskId: WorkTaskId,
+    outcome: WorkTaskOutcome,
+    wake: Schema.Struct({
+      messageId: MessageId,
+      text: Schema.String,
+      notification: OrchestrationV2Notification,
+    }),
   }),
   /**
    * Records what a pull request watch saw, and wakes the agent in the same transaction when

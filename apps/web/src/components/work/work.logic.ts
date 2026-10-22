@@ -130,6 +130,11 @@ export function describeWorkStartFailure(stage: WorkHandoffError["stage"] | null
         message: "Work started, but this chat's link to it was not saved. Try again to repair it.",
         retryWithSameCommand: true,
       };
+    case "task-unavailable":
+      return {
+        message: "This task was dismissed or already started.",
+        retryWithSameCommand: false,
+      };
     case null:
       return { message: "Work could not start. Try again.", retryWithSameCommand: true };
   }

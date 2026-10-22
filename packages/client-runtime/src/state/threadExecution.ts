@@ -433,13 +433,14 @@ export function presentProviderGoal(
   };
 }
 
-/** The thread a notification row opens: that of the one subagent or delegated task it reports. */
+/** The thread a notification row opens: that of the one subagent, delegated task or Work task it reports. */
 export function notificationChildThreadId(
   source: OrchestrationV2NotificationSource,
 ): ThreadId | undefined {
   switch (source.kind) {
     case "subagent":
     case "delegated_task":
+    case "work_task":
       return source.childThreadId;
     case "command":
     case "monitor":

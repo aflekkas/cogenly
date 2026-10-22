@@ -1092,6 +1092,8 @@ export const WORK_LOG_NOTICES: {
         return { icon: "terminal", label, tone: "quiet" };
       case "monitor":
         return { icon: "eye", label, tone: "quiet" };
+      case "work_task":
+        return { icon: "wrench", label, tone: "quiet" };
       default:
         return {
           icon: item.outcome === "cancelled" ? "square-stop" : "bell",

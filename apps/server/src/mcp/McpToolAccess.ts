@@ -190,7 +190,7 @@ export const assertWorkCaller = (
         new OrchestratorMcpFailure({
           code: "capability_denied",
           message:
-            "This thread runs in conversation mode: it cannot change files, run commands, or start work sessions. Suggest Start Work, or draft the handoff with work_propose_handoff.",
+            "This thread runs in conversation mode: it cannot change files, run commands, or start work sessions itself. Hand the work to a task with work_task instead.",
         }),
       )
     : Effect.void;

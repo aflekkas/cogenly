@@ -1,8 +1,13 @@
 import {
   CommandId,
   OrchestratorMcpFailure,
+  ProjectId,
   WorkStartInput,
   WorkStartResult,
+  WorkTaskBrief,
+  WorkTaskHandoffResult,
+  WorkTaskMode,
+  WorkTaskWorkspace,
   WorkHandoffDraft,
   WorkScopeSummary,
   WorkTitle,
@@ -50,7 +55,28 @@ const Propose = Tool.make("work_propose_handoff", {
   }),
   success: WorkHandoffDraft,
 });
-export const toolkit = Toolkit.make(Start, Propose);
+/**
+ * The one way a chat's agent gets things done that need tools: it hands them
+ * to a task, a new top-level Work thread the user sees, shown as a card in the
+ * chat. Unlike work_start it serves chat callers, since the card keeps the user
+ * in charge, and the result comes back to the chat as a notification turn.
+ */
+const Task = Tool.make("work_task", {
+  ...shared,
+  description:
+    "Hand a request that needs commands, files, code or other tools to a new Work task: a top-level coding thread the user can see and follow, with its own project or machine environment, shown as a task card in this chat. It is not a subagent; the task runs on its own and its result comes back to this chat as a notification, so never poll it. mode=propose shows the card with Approve, Edit and Dismiss and starts nothing; mode=start launches at once. Use start only when the user explicitly asked for this action and it is unambiguous and low-risk, or clearly instructed destructive work such as uninstalling or deleting; otherwise propose. Pick targetProjectId from t3_project_list when the work belongs to one of the user's projects; omit it for work on this machine itself, such as installing or uninstalling apps, which runs in No project. Write brief as complete instructions for the task agent: the goal, what to do, constraints, and what done looks like. Omit modelSelection to use this chat's model. Reuse commandId when retrying.",
+  parameters: Schema.Struct({
+    commandId: WorkStartInput.fields.commandId,
+    mode: WorkTaskMode,
+    title: WorkTitle,
+    brief: WorkTaskBrief,
+    targetProjectId: Schema.optional(ProjectId),
+    workspace: Schema.optional(WorkTaskWorkspace),
+    modelSelection: WorkStartInput.fields.modelSelection,
+  }),
+  success: WorkTaskHandoffResult,
+});
+export const toolkit = Toolkit.make(Start, Propose, Task);
 const source = Invocation.McpInvocationContext.pipe(
   Effect.flatMap((scope) => Invocation.requireThreadScope(scope, "Work handoff")),
 );
@@ -63,6 +89,26 @@ export const handlers = Access.toLayer(toolkit, {
         .proposeHandoff(scope.thread.threadId, { throughMessageId: input.throughMessageId })
         .pipe(Effect.mapError(unavailable));
     }),
+  ),
+  work_task: Access.startsThreads(
+    () => ({}),
+    (input, modes) =>
+      Effect.gen(function* () {
+        const scope = yield* source;
+        const { caller } = yield* readCaller();
+        const work = yield* Work.WorkHandoffService;
+        return yield* work
+          .handoffTask(
+            {
+              ...input,
+              commandId: CommandId.make(`work-task:${scope.requestNamespace}:${input.commandId}`),
+              sourceThreadId: scope.thread.threadId,
+              runId: caller?.activeRunId ?? undefined,
+            },
+            { origin: "chat", createdByAgent: true, ...modes },
+          )
+          .pipe(Effect.mapError(unavailable));
+      }),
   ),
   work_start: Access.startsThreads(
     () => ({}),

@@ -1270,6 +1270,7 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
 export const CLAUDE_CONVERSATION_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   ...CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
   "mcp__cogenly__work_propose_handoff",
+  "mcp__cogenly__work_task",
   "mcp__cogenly__memory_read",
   "mcp__cogenly__fact_search",
   "mcp__cogenly__t3_project_label_list",

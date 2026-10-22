@@ -395,6 +395,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     assert.deepEqual(overrides.allowedTools, [
       ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
       "mcp__cogenly__work_propose_handoff",
+      "mcp__cogenly__work_task",
       "mcp__cogenly__memory_read",
       "mcp__cogenly__fact_search",
       "mcp__cogenly__t3_project_label_list",

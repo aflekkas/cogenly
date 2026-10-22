@@ -1,4 +1,10 @@
-import { EnvironmentId, ProjectLabelId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectLabelId,
+  ProviderInstanceId,
+  ThreadId,
+  WorkTaskId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -106,6 +112,12 @@ const serverLayer = Layer.mergeAll(
   Layer.provideMerge(
     Layer.mock(WorkHandoff.WorkHandoffService)({
       start: () => neverCall("work service"),
+      handoffTask: (input) =>
+        Effect.succeed({
+          taskId: WorkTaskId.make(`task:${input.commandId}`),
+          status: input.mode === "start" ? ("started" as const) : ("proposed" as const),
+          note: `${input.sourceThreadId}`,
+        }),
       proposeHandoff: () =>
         Effect.succeed({
           title: "Chat draft",
@@ -273,6 +285,21 @@ describe("conversation-mode MCP boundary", () => {
     callText("work_propose_handoff", chatThreadId, {}).pipe(
       Effect.map((text) => {
         assert.equal((JSON.parse(text) as { title: string }).title, "Chat draft");
+      }),
+    ),
+  );
+
+  it.effect("work_task hands a chat's request to a task card", () =>
+    callText("work_task", chatThreadId, {
+      commandId: "probe-task",
+      mode: "propose",
+      title: "Uninstall browsers",
+      brief: "Uninstall Nook and Ora.",
+    }).pipe(
+      Effect.map((text) => {
+        const result = JSON.parse(text) as { status: string; note: string };
+        assert.equal(result.status, "proposed");
+        assert.equal(result.note, chatThreadId);
       }),
     ),
   );
