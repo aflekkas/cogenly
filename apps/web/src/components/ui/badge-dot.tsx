@@ -3,7 +3,14 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "~/lib/utils";
 import { useLastPresent } from "./overlay-presence";
 
-export type BadgeDotTone = "info" | "success" | "warning" | "destructive" | "primary" | "current";
+export type BadgeDotTone =
+  | "info"
+  | "success"
+  | "warning"
+  | "destructive"
+  | "primary"
+  | "muted"
+  | "current";
 
 const toneClassName: Record<BadgeDotTone, string> = {
   info: "bg-info",
@@ -11,6 +18,7 @@ const toneClassName: Record<BadgeDotTone, string> = {
   warning: "bg-warning",
   destructive: "bg-destructive",
   primary: "bg-primary",
+  muted: "bg-muted-foreground/45",
   current: "bg-current",
 };
 
@@ -28,6 +36,7 @@ const badgeDotVariants = cva(
         none: "",
         background: "ring-2 ring-background",
         "nav-rail": "ring-2 ring-nav-rail",
+        popover: "ring-2 ring-popover",
       },
     },
   },

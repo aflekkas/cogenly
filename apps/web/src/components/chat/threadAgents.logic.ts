@@ -1,6 +1,6 @@
 /**
- * The thread details "Agents" list: every agent a thread spawned or handed
- * work to, normalized into one roster. Sources:
+ * The thread details lineage roster: every agent a thread spawned or handed
+ * work to directly, normalized into one list. Sources:
  *  - the thread projection's subagents (provider-native tasks and app-owned
  *    delegations, including workflow coordinators and their members);
  *  - child thread shells whose lineage names this thread as their subagent
@@ -9,7 +9,6 @@
  * Forks are lineage, not agents, so they are left out.
  */
 
-import type { SubagentOutcome } from "./subagentRow.logic";
 export type ThreadAgentStatus = "running" | "done" | "failed" | "cancelled";
 export type ThreadAgentKind = "subagent" | "workflow" | "workflow_member" | "task";
 
@@ -81,14 +80,19 @@ export interface ThreadAgentRow {
   /** When the row last began: its start, else when it was created or seen. */
   readonly sortAt: string;
   readonly stop: ThreadAgentStopTarget | null;
-  readonly children: ReadonlyArray<ThreadAgentRow>;
+  /** A workflow's own agents, shown when its row is expanded; empty otherwise. */
+  readonly members: ReadonlyArray<ThreadAgentRow>;
 }
 
 export interface ThreadAgentsSummary {
-  readonly rows: ReadonlyArray<ThreadAgentRow>;
-  /** Every row, nested ones included. */
+  /** In-flight agents (running, queued, waiting), newest first. */
+  readonly active: ReadonlyArray<ThreadAgentRow>;
+  /** Settled agents, newest first; shown folded as "Previous agents". */
+  readonly previous: ReadonlyArray<ThreadAgentRow>;
   readonly total: number;
+  /** Failed agents among the previous ones. */
   readonly failed: number;
+  /** Agents actually running now; queued and waiting ones are active but not counted. */
   readonly running: number;
 }
 
@@ -156,11 +160,7 @@ export function sortThreadAgentRows(rows: ReadonlyArray<ThreadAgentRow>): Thread
   return [...rows].sort(compareRows);
 }
 
-function threadRow(
-  thread: ThreadAgentThreadInput,
-  kind: ThreadAgentKind,
-  children: ReadonlyArray<ThreadAgentRow>,
-): ThreadAgentRow {
+function threadRow(thread: ThreadAgentThreadInput, kind: ThreadAgentKind): ThreadAgentRow {
   const status = resolveThreadAgentStatus(thread.status);
   return {
     key: `thread:${thread.id}`,
@@ -175,7 +175,7 @@ function threadRow(
     completedAt: status === "running" ? null : thread.completedAt,
     sortAt: thread.startedAt ?? thread.createdAt,
     stop: status === "running" ? { type: "thread", threadId: thread.id } : null,
-    children,
+    members: [],
   };
 }
 
@@ -205,8 +205,11 @@ function stopTargetForSubagent(
 }
 
 /**
- * Builds the roster for `threadId`. Children of a child conversation nest one
- * level below it; deeper descendants are reachable by opening that child.
+ * Builds the roster for `threadId`: only its direct agents. A child's own
+ * agents show when that child is opened, never nested here. Each agent appears
+ * once: a follow-up delegated to the same child conversation records another
+ * subagent for it, and the child's latest record stands for all of them.
+ * In-flight agents go to `active`; settled ones to `previous`, newest first.
  */
 export function deriveThreadAgents(input: {
   readonly threadId: string;
@@ -217,41 +220,28 @@ export function deriveThreadAgents(input: {
   for (const thread of input.threads) {
     if (!threadsById.has(thread.id)) threadsById.set(thread.id, thread);
   }
-  const childrenOf = (parentId: string) =>
-    [...threadsById.values()].filter(
-      (thread) =>
-        thread.id !== parentId &&
-        ((thread.parentThreadId === parentId && thread.relationshipToParent === "subagent") ||
-          thread.sourceThreadId === parentId),
-    );
-  const kindOf = (thread: ThreadAgentThreadInput, parentId: string): ThreadAgentKind =>
-    thread.parentThreadId === parentId && thread.relationshipToParent === "subagent"
-      ? "subagent"
-      : "task";
+  const subagents = dedupeSubagents(
+    input.subagents.filter((subagent) => subagent.threadId === input.threadId),
+  );
 
   // Threads a subagent or workflow member already stands for, so they appear once.
   const claimed = new Set<string>([input.threadId]);
-  for (const subagent of input.subagents) {
+  for (const subagent of subagents) {
     if (subagent.childThreadId !== null) claimed.add(subagent.childThreadId);
     for (const member of subagent.workflow?.agents ?? []) {
       if (member.childThreadId !== undefined) claimed.add(member.childThreadId);
     }
   }
 
-  const nestedThreadRows = (parentId: string, exclude: ReadonlySet<string>) =>
-    childrenOf(parentId)
-      .filter((thread) => !exclude.has(thread.id))
-      .map((thread) => threadRow(thread, kindOf(thread, parentId), []));
-
   const rows: ThreadAgentRow[] = [];
-  for (const subagent of input.subagents) {
+  for (const subagent of subagents) {
     const child =
       subagent.childThreadId === null ? undefined : threadsById.get(subagent.childThreadId);
     // The child conversation is the live record once it has run, including
     // follow-ups after the original task settled.
     const rawStatus = child?.hasRun ? child.status : subagent.status;
     const status = resolveThreadAgentStatus(rawStatus);
-    const memberRows: ThreadAgentRow[] = (subagent.workflow?.agents ?? []).map((member) => {
+    const members: ThreadAgentRow[] = (subagent.workflow?.agents ?? []).map((member) => {
       const memberRaw =
         (member.state === "queued" || member.state === "running") && !RUNNING.has(subagent.status)
           ? subagent.status
@@ -277,13 +267,9 @@ export function deriveThreadAgents(input: {
         completedAt,
         sortAt: startedAt ?? isoFromMillis(member.queuedAt) ?? subagent.updatedAt,
         stop: null,
-        children: [],
+        members: [],
       } satisfies ThreadAgentRow;
     });
-    const nested =
-      subagent.childThreadId === null
-        ? []
-        : nestedThreadRows(subagent.childThreadId, new Set([...claimed, input.threadId]));
     const liveStart = child?.hasRun ? (child.startedAt ?? subagent.startedAt) : subagent.startedAt;
     rows.push({
       key: `subagent:${subagent.id}`,
@@ -303,67 +289,93 @@ export function deriveThreadAgents(input: {
             : subagent.completedAt,
       sortAt: liveStart ?? subagent.startedAt ?? child?.createdAt ?? subagent.updatedAt,
       stop: stopTargetForSubagent(subagent, rawStatus),
-      children: sortThreadAgentRows([...memberRows, ...nested]),
+      members: sortThreadAgentRows(members),
     });
   }
 
-  for (const thread of childrenOf(input.threadId)) {
+  for (const thread of threadsById.values()) {
     if (claimed.has(thread.id)) continue;
+    const delegated =
+      thread.parentThreadId === input.threadId && thread.relationshipToParent === "subagent";
+    if (!delegated && thread.sourceThreadId !== input.threadId) continue;
     claimed.add(thread.id);
-    const nested = nestedThreadRows(thread.id, new Set([...claimed, input.threadId]));
-    rows.push(threadRow(thread, kindOf(thread, input.threadId), sortThreadAgentRows(nested)));
+    rows.push(threadRow(thread, delegated ? "subagent" : "task"));
   }
 
   const sorted = sortThreadAgentRows(rows);
-  const flat = sorted.flatMap((row) => [row, ...row.children]);
+  const active = sorted.filter((row) => row.status === "running");
+  const previous = sorted.filter((row) => row.status !== "running");
   return {
-    rows: sorted,
-    total: flat.length,
-    failed: flat.filter((row) => row.status === "failed").length,
-    running: flat.filter((row) => row.status === "running").length,
+    active,
+    previous,
+    total: sorted.length,
+    failed: previous.filter((row) => row.status === "failed").length,
+    running: active.filter((row) => row.statusLabel === "Running").length,
   };
 }
 
-/** Long rosters show this many top-level rows until the user asks for all. */
-export const THREAD_AGENTS_VISIBLE_CAP = 50;
-
-export function resolveThreadAgentsWindow<Row>(
-  rows: ReadonlyArray<Row>,
-  showAll: boolean,
-  cap: number = THREAD_AGENTS_VISIBLE_CAP,
-): { readonly visible: ReadonlyArray<Row>; readonly hiddenCount: number } {
-  if (showAll || rows.length <= cap) return { visible: rows, hiddenCount: 0 };
-  return { visible: rows.slice(0, cap), hiddenCount: rows.length - cap };
-}
-
-export function formatThreadAgentsHeading(summary: Pick<ThreadAgentsSummary, "total" | "failed">) {
-  const base = `Agents (${summary.total})`;
-  return summary.failed > 0 ? `${base} · ${summary.failed} failed` : base;
+/** The latest of several records for one agent: started last, else updated last. */
+function newerSubagent(
+  left: ThreadAgentSubagentInput,
+  right: ThreadAgentSubagentInput,
+): ThreadAgentSubagentInput {
+  const at = (subagent: ThreadAgentSubagentInput) =>
+    Date.parse(subagent.startedAt ?? subagent.updatedAt);
+  const leftAt = at(left);
+  const rightAt = at(right);
+  if (leftAt !== rightAt) return rightAt > leftAt ? right : left;
+  return Date.parse(right.updatedAt) > Date.parse(left.updatedAt) ? right : left;
 }
 
 /**
- * A row in the subagent rows' status language: in-flight rows shimmer and
- * leave the status column empty, settled rows get one glyph. The finer labels
- * the glyph cannot carry (Queued, Waiting, Idle) become the row's secondary text.
+ * One record per agent: by id, then by child conversation, since each
+ * follow-up delegated to a child records a new subagent pointing at it.
  */
-export function threadAgentRowStatus(row: Pick<ThreadAgentRow, "status" | "statusLabel">): {
-  readonly outcome: SubagentOutcome;
-  readonly note: string | null;
-} {
-  const note =
-    row.statusLabel === "Queued" || row.statusLabel === "Waiting" || row.statusLabel === "Idle"
-      ? row.statusLabel
-      : null;
+export function dedupeSubagents(
+  subagents: ReadonlyArray<ThreadAgentSubagentInput>,
+): ThreadAgentSubagentInput[] {
+  const byKey = new Map<string, ThreadAgentSubagentInput>();
+  for (const subagent of subagents) {
+    const key =
+      subagent.childThreadId === null ? `id:${subagent.id}` : `thread:${subagent.childThreadId}`;
+    const existing = byKey.get(key);
+    byKey.set(key, existing === undefined ? subagent : newerSubagent(existing, subagent));
+  }
+  return [...byKey.values()];
+}
+
+/** Rows a group shows at first, and how many more each "Show more" adds. */
+export const THREAD_AGENTS_INITIAL_COUNT = 6;
+export const THREAD_AGENTS_PAGE_COUNT = 12;
+
+export function resolveThreadAgentsWindow<Row>(
+  rows: ReadonlyArray<Row>,
+  visibleCount: number,
+): { readonly visible: ReadonlyArray<Row>; readonly hiddenCount: number } {
+  const visible = rows.slice(0, visibleCount);
+  return { visible, hiddenCount: rows.length - visible.length };
+}
+
+/** "Lineage · 3 running", or plain "Lineage" when nothing runs. */
+export function formatThreadAgentsHeading(summary: Pick<ThreadAgentsSummary, "running">) {
+  return summary.running > 0 ? `Lineage · ${summary.running} running` : "Lineage";
+}
+
+/**
+ * The status dot on an agent's provider glyph, as in the subagent rows: blue
+ * while in flight, red when failed, green when done, grey when stopped or idle.
+ */
+export function threadAgentDotTone(
+  row: Pick<ThreadAgentRow, "status" | "statusLabel">,
+): "info" | "destructive" | "success" | "muted" {
   switch (row.status) {
     case "running":
-      return { outcome: "working", note };
+      return "info";
     case "failed":
-      return { outcome: "failed", note: null };
+      return "destructive";
     case "cancelled":
-      return { outcome: "stopped", note: null };
+      return "muted";
     case "done":
-      return row.statusLabel === "Idle"
-        ? { outcome: "idle", note }
-        : { outcome: "done", note: null };
+      return row.statusLabel === "Idle" ? "muted" : "success";
   }
 }
