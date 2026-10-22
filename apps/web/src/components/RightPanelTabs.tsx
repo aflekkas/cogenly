@@ -55,7 +55,6 @@ import {
   MenuTrigger,
 } from "~/components/ui/menu";
 import { useBrowserDefaults } from "~/browser/browserDefaults";
-import { PanOnHoverText } from "~/components/sidebar/PanOnHoverText";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { useTheme } from "~/hooks/useTheme";
 import { useDeviceState } from "~/state/device";
@@ -640,6 +639,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           idPrefix={tabIdPrefix}
           setKey={activeGroup ?? undefined}
           getLabel={(surface) => surfaceTitle(surface, props.previewSessions)}
+          renderTooltip={(surface) => (
+            <SurfaceTabTooltip
+              surface={surface}
+              title={surfaceTitle(surface, props.previewSessions)}
+              sessions={props.previewSessions}
+              environmentId={props.environmentId}
+            />
+          )}
           onActivate={props.onActivate}
           onClose={props.onCloseSurface}
           onMove={handleMoveTab}
@@ -705,22 +712,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       }
                     }}
                   />
-                ) : surface.kind === "device" ? (
-                  // A device's tooltip adds its host and OS version.
-                  <Tooltip>
-                    <TooltipTrigger render={<PanelTab.Label />}>{title}</TooltipTrigger>
-                    <TooltipPopup>
-                      <DeviceTabTooltip
-                        surface={surface}
-                        environmentId={props.environmentId}
-                        title={title}
-                      />
-                    </TooltipPopup>
-                  </Tooltip>
                 ) : (
-                  // A truncated title pans on hover so it can be read in
-                  // place, like a sidebar row; no tooltip repeats it.
-                  <PanOnHoverText className="min-w-0 flex-1 text-left">{title}</PanOnHoverText>
+                  <PanelTab.Label>{title}</PanelTab.Label>
                 )}
                 {audio === "none" || !audioRuntimeTabId ? null : (
                   <Tooltip>
@@ -789,6 +782,35 @@ function activeTabDomId(
 ): string | undefined {
   const index = surfaces.findIndex((surface) => surface.id === activeSurfaceId);
   return index < 0 ? undefined : tabStripTabId(prefix, index);
+}
+
+/**
+ * A tab's tooltip: its full title, and under it what the title leaves out:
+ * a page's URL, a file's path, a device's host and OS version.
+ */
+function SurfaceTabTooltip(props: {
+  surface: RightPanelSurface;
+  title: string;
+  sessions: Readonly<Record<string, PreviewSessionSnapshot>>;
+  environmentId: EnvironmentId | null;
+}) {
+  const { surface, title } = props;
+  if (surface.kind === "device") {
+    return <DeviceTabTooltip surface={surface} environmentId={props.environmentId} title={title} />;
+  }
+  let detail: string | null = null;
+  if (surface.kind === "file") detail = surface.relativePath;
+  if (surface.kind === "preview") {
+    const snapshot = surface.resourceId ? props.sessions[surface.resourceId] : null;
+    if (snapshot && snapshot.navStatus._tag !== "Idle") detail = snapshot.navStatus.url;
+  }
+  if (!detail || detail === title) return title;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span>{title}</span>
+      <span className="text-muted-foreground">{detail}</span>
+    </div>
+  );
 }
 
 function DeviceTabTooltip(props: {

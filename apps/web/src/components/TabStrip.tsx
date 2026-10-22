@@ -26,8 +26,9 @@ import {
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { ScrollArea } from "~/components/ui/scroll-area";
+import { TooltipProvider } from "~/components/ui/tooltip";
 
-import { PanelTab } from "./PanelTab";
+import { PanelTab, PanelTabContext } from "./PanelTab";
 import {
   interleaveLeavingTabs,
   type LeavingTabSlot,
@@ -53,12 +54,14 @@ export interface TabStripProps<T extends { readonly id: string }> {
   readonly items: ReadonlyArray<T>;
   readonly activeId: string | null;
   readonly "aria-label": string;
-  /** The tab's accessible name, also used for its close button. */
+  /** The tab's accessible name, also used for its close button and its title's tooltip. */
   readonly getLabel: (item: T) => string;
-  /** What sits in the tab before its ×: PanelTab.Icon, .Label, .Status, .Action. */
+  /** What the title's tooltip shows instead of the label, such as a page's URL under its title. */
+  readonly renderTooltip?: ((item: T) => ReactNode) | undefined;
+  /** The tab's slots: PanelTab.Icon, .Label, .Status, .Action. */
   readonly renderTab: (item: T, state: { readonly active: boolean }) => ReactNode;
   readonly onActivate: (item: T) => void;
-  /** Shows the ×, and closes on middle-click, Delete and Backspace. */
+  /** Turns the icon slot into a × on hover, and closes on middle-click, Delete and Backspace. */
   readonly onClose?: (item: T) => void;
   /** Enables drag reorder: `item` was dropped on `over`'s place. */
   readonly onMove?: ((item: T, over: T) => void) | undefined;
@@ -89,16 +92,18 @@ export interface TabStripProps<T extends { readonly id: string }> {
 
 /**
  * The one strip of closable, document-style tabs: browser, file and device
- * tabs in the right panel, agent tabs in the bottom drawer. Each tab is a
- * PanelTab, as wide as its title up to a cap; a strip with more tabs than
- * room scrolls sideways (wheel included) with a fade on the clipped edge, and
- * keeps the selected tab in view.
+ * tabs in the right panel, agent tabs in the bottom drawer, after T3 Code's
+ * panel tabs. Each tab is a PanelTab, as wide as its title up to a cap, its
+ * × in the icon slot and its full title in a tooltip; a strip with more tabs
+ * than room scrolls sideways (wheel included) with a fade on the clipped
+ * edge, and keeps the selected tab in view.
  *
  * Keyboard: one tab stop; arrows, Home and End move focus without switching
  * (so walking past a terminal never mounts it), Enter or Space switches,
  * Delete or Backspace closes and lands focus on the tab that takes its place.
- * Middle-click closes. Arrivals open their place and fade in, departures fold
- * shut so neighbours slide rather than jump; reduced motion fades only.
+ * Middle-click closes. Only keyboard focus draws a ring. Arrivals open their
+ * place and fade in, departures fold shut so neighbours slide rather than
+ * jump; reduced motion fades only.
  */
 export function TabStrip<T extends { readonly id: string }>(props: TabStripProps<T>) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -186,6 +191,14 @@ export function TabStrip<T extends { readonly id: string }>(props: TabStripProps
   );
   const entries = useMemo(() => interleaveLeavingTabs(items, leavingTabs), [items, leavingTabs]);
 
+  // Set while focus in the strip came from the pointer, cleared by a key in
+  // it or by focus arriving from elsewhere in the page; PanelTab and the
+  // tab's ring read it so a clicked tab never takes the keyboard look.
+  const markPointerFocus = (pointer: boolean, element: HTMLElement) => {
+    if (pointer) element.dataset.pointerFocus = "";
+    else delete element.dataset.pointerFocus;
+  };
+
   const tabElements = () =>
     Array.from(rootRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []);
   // Set when the keyboard closed a tab, so focus lands on the tab that takes
@@ -199,6 +212,7 @@ export function TabStrip<T extends { readonly id: string }>(props: TabStripProps
   });
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    markPointerFocus(false, event.currentTarget);
     if (event.defaultPrevented || event.nativeEvent.isComposing) return;
     const tab = event.target;
     if (!(tab instanceof HTMLElement) || tab.getAttribute("role") !== "tab") return;
@@ -293,91 +307,102 @@ export function TabStrip<T extends { readonly id: string }>(props: TabStripProps
         onDragEnd={handleDragEnd}
       >
         <SortableContext items={ids} strategy={horizontalListSortingStrategy}>
-          <div
-            role="tablist"
-            aria-label={props["aria-label"]}
-            aria-orientation="horizontal"
-            className="relative flex h-full w-full items-center gap-0.5"
-            onKeyDown={handleKeyDown}
-          >
-            {entries.map((entry) => {
-              if (entry.kind === "leaving") {
-                const { slot } = entry;
+          <TooltipProvider delay={500} closeDelay={0} timeout={400}>
+            <div
+              role="tablist"
+              aria-label={props["aria-label"]}
+              aria-orientation="horizontal"
+              className="relative flex h-full w-full items-center gap-1"
+              onKeyDown={handleKeyDown}
+              onPointerDownCapture={(event) => markPointerFocus(true, event.currentTarget)}
+              onFocus={(event) => {
+                // From another control (a Tab press); a null origin is the
+                // window refocusing, which keeps how focus last arrived.
+                const from = event.relatedTarget;
+                if (from instanceof Node && !event.currentTarget.contains(from)) {
+                  markPointerFocus(false, event.currentTarget);
+                }
+              }}
+            >
+              {entries.map((entry) => {
+                if (entry.kind === "leaving") {
+                  const { slot } = entry;
+                  return (
+                    <LeavingTab
+                      key={`leaving:${slot.id}`}
+                      width={slot.width}
+                      onDone={() => dismissLeaving(slot.id)}
+                    />
+                  );
+                }
+                const { item, index } = entry;
+                const active = item.id === activeId;
+                const label = props.getLabel(item);
+                // One tab stop for the whole strip: the selected tab, or the
+                // first one while nothing is selected.
+                const tabStop = active || (!anyActive && index === 0);
                 return (
-                  <LeavingTab
-                    key={`leaving:${slot.id}`}
-                    width={slot.width}
-                    onDone={() => dismissLeaving(slot.id)}
-                  />
+                  <SortableTab
+                    key={item.id}
+                    tabId={item.id}
+                    disabled={!onMove || (props.isDragDisabled?.(item) ?? false)}
+                    role="tab"
+                    id={props.idPrefix ? tabStripTabId(props.idPrefix, index) : undefined}
+                    aria-selected={active}
+                    aria-controls={
+                      active && props.idPrefix ? tabStripPanelId(props.idPrefix) : undefined
+                    }
+                    aria-label={label}
+                    tabIndex={tabStop ? 0 : -1}
+                    onClick={(event) => {
+                      // The buttons inside the tab act on their own.
+                      if (event.target instanceof Element && event.target.closest("button")) return;
+                      props.onActivate(item);
+                    }}
+                    onDoubleClick={
+                      props.onTabDoubleClick ? () => props.onTabDoubleClick?.(item) : undefined
+                    }
+                    // Middle-click closes, and never starts the autoscroll cursor.
+                    onMouseDown={(event) => {
+                      if (event.button === 1) event.preventDefault();
+                    }}
+                    onAuxClick={(event) => {
+                      if (event.button !== 1 || !props.onClose) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      props.onClose(item);
+                    }}
+                    onContextMenu={
+                      props.onTabContextMenu
+                        ? (event) => props.onTabContextMenu?.(event, item)
+                        : undefined
+                    }
+                    className={cn(
+                      // As wide as its title, up to a cap past which the title
+                      // truncates. Only keyboard focus draws a ring, an outline
+                      // so the selected tab's fill does not cover it; PanelTab
+                      // draws the rest.
+                      "relative h-6 max-w-36 shrink-0 cursor-pointer overflow-hidden rounded-md outline-none [[role=tablist]:not([data-pointer-focus])_&:focus-visible]:outline-2 [[role=tablist]:not([data-pointer-focus])_&:focus-visible]:outline-solid [[role=tablist]:not([data-pointer-focus])_&:focus-visible]:outline-ring",
+                      props.tabClassName,
+                    )}
+                  >
+                    <PanelTabContext
+                      value={{
+                        label,
+                        onClose: props.onClose ? () => props.onClose?.(item) : undefined,
+                        tooltip: props.renderTooltip?.(item) ?? label,
+                      }}
+                    >
+                      <PanelTab.Body active={active}>
+                        {props.renderTab(item, { active })}
+                      </PanelTab.Body>
+                    </PanelTabContext>
+                  </SortableTab>
                 );
-              }
-              const { item, index } = entry;
-              const active = item.id === activeId;
-              const label = props.getLabel(item);
-              // One tab stop for the whole strip: the selected tab, or the
-              // first one while nothing is selected.
-              const tabStop = active || (!anyActive && index === 0);
-              return (
-                <SortableTab
-                  key={item.id}
-                  tabId={item.id}
-                  disabled={!onMove || (props.isDragDisabled?.(item) ?? false)}
-                  role="tab"
-                  id={props.idPrefix ? tabStripTabId(props.idPrefix, index) : undefined}
-                  aria-selected={active}
-                  aria-controls={
-                    active && props.idPrefix ? tabStripPanelId(props.idPrefix) : undefined
-                  }
-                  aria-label={label}
-                  tabIndex={tabStop ? 0 : -1}
-                  onClick={(event) => {
-                    // The buttons inside the tab act on their own.
-                    if (event.target instanceof Element && event.target.closest("button")) return;
-                    props.onActivate(item);
-                  }}
-                  onDoubleClick={
-                    props.onTabDoubleClick ? () => props.onTabDoubleClick?.(item) : undefined
-                  }
-                  // Middle-click closes, and never starts the autoscroll cursor.
-                  onMouseDown={(event) => {
-                    if (event.button === 1) event.preventDefault();
-                  }}
-                  onAuxClick={(event) => {
-                    if (event.button !== 1 || !props.onClose) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    props.onClose(item);
-                  }}
-                  onContextMenu={
-                    props.onTabContextMenu
-                      ? (event) => props.onTabContextMenu?.(event, item)
-                      : undefined
-                  }
-                  className={cn(
-                    // As wide as its title, up to a cap past which the title
-                    // truncates. Only keyboard focus draws a ring; PanelTab
-                    // draws the rest.
-                    "relative h-7 max-w-44 shrink-0 cursor-pointer overflow-hidden rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                    props.tabClassName,
-                  )}
-                >
-                  <PanelTab.Body active={active}>
-                    {props.renderTab(item, { active })}
-                    {props.onClose ? (
-                      // Not a tab stop, since Delete closes the focused tab.
-                      <PanelTab.Close
-                        active={active}
-                        tabIndex={-1}
-                        aria-label={`Close ${label}`}
-                        onClick={() => props.onClose?.(item)}
-                      />
-                    ) : null}
-                  </PanelTab.Body>
-                </SortableTab>
-              );
-            })}
-            {props.trailing}
-          </div>
+              })}
+              {props.trailing}
+            </div>
+          </TooltipProvider>
         </SortableContext>
       </DndContext>
     </ScrollArea>
@@ -433,5 +458,5 @@ function LeavingTab({ width, onDone }: { width: number; onDone: () => void }) {
     // Plays once, for the width it closed at.
     // eslint-disable-next-line react/exhaustive-effect-dependencies -- a mount-only animation
   }, []);
-  return <div ref={ref} aria-hidden className="h-7 shrink-0 overflow-hidden" />;
+  return <div ref={ref} aria-hidden className="h-6 shrink-0 overflow-hidden" />;
 }
