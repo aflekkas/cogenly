@@ -29,13 +29,20 @@ import {
 } from "./terminalParts";
 import { runListTitle, shortenHomePath } from "./bottomPanel.logic";
 
-function IconAction(props: { label: string; onClick: () => void; children: React.ReactNode }) {
+type IconActionSize = "icon-micro" | "icon-xs";
+
+function IconAction(props: {
+  label: string;
+  size?: IconActionSize;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <Button
-            size="icon-micro"
+            size={props.size ?? "icon-micro"}
             variant="ghost"
             aria-label={props.label}
             onClick={(event) => {
@@ -84,6 +91,8 @@ function LiveRunActions(props: {
   threadRef: ScopedThreadRef;
   entry: AgentTerminalEntry;
   canOperate: boolean;
+  /** Rows use micro icons; the run header matches the panel's corner ×. */
+  size?: IconActionSize;
   onStop: (entry: AgentTerminalEntry) => void;
 }) {
   const url = useDetectedRunUrl(props.threadRef, props.entry.terminalId, true);
@@ -91,7 +100,11 @@ function LiveRunActions(props: {
     <>
       {url ? <OpenUrlButton threadRef={props.threadRef} url={url} /> : null}
       {props.canOperate ? (
-        <IconAction label="Stop" onClick={() => props.onStop(props.entry)}>
+        <IconAction
+          label="Stop"
+          {...(props.size ? { size: props.size } : {})}
+          onClick={() => props.onStop(props.entry)}
+        >
           <Square className="size-2.5 fill-current" />
         </IconAction>
       ) : null}
@@ -200,7 +213,7 @@ function GroupLabel({ children }: { children: string }) {
   return (
     <div
       role="presentation"
-      className="flex h-7 shrink-0 items-end px-3 pb-1 text-3xs text-muted-foreground/55 @max-[40rem]/terminals:pe-9"
+      className="flex h-7 shrink-0 items-end px-3 pb-1 text-3xs text-muted-foreground/55 @max-[40rem]/terminals:pe-10"
     >
       {children}
     </div>
@@ -270,7 +283,9 @@ function RunCommandHeader({
     setExpanded((value) => !value);
   };
   return (
-    <div className="flex shrink-0 flex-col gap-0.5 border-b border-border/50 px-3 pt-1.5 pb-2 @min-[40rem]/terminals:pe-9">
+    // Wide, the actions end where the panel's corner × begins: its 0.75rem inset,
+    // 1.5rem button and the same 0.25rem gap the actions keep between themselves.
+    <div className="flex shrink-0 flex-col gap-0.5 border-b border-border/50 px-3 pt-1.5 pb-2 @min-[40rem]/terminals:pe-10">
       <div className="flex min-w-0 items-start gap-2">
         <code
           role="button"
@@ -294,18 +309,19 @@ function RunCommandHeader({
           </span>
           {entry.label}
         </code>
-        <div className="flex h-6 shrink-0 items-center gap-0.5">
+        <div className="flex h-6 shrink-0 items-center gap-1">
           {live ? (
             <LiveRunActions
               threadRef={threadRef}
               entry={entry}
               canOperate={canOperate}
+              size="icon-xs"
               onStop={onStop}
             />
           ) : null}
           <CopyButton
             label="Copy command"
-            size="icon-micro"
+            size="icon-xs"
             target="command"
             value={entry.label}
             variant="ghost"

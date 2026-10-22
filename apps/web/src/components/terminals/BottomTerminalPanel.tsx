@@ -43,6 +43,7 @@ import {
 import { PanelTab } from "../PanelTab";
 import { TabStrip } from "../TabStrip";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
+import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentRunsView } from "./AgentRunsView";
 import {
@@ -169,8 +170,8 @@ const AgentSwitcher = memo(function AgentSwitcher(props: {
   const { onSelect } = props;
   const activate = useCallback((tab: BottomPanelTab) => onSelect(tab.id), [onSelect]);
   return (
-    // Narrow, the strip keeps clear of the panel's corner ×.
-    <div className="flex h-9 shrink-0 items-stretch px-1 @max-[40rem]/terminals:pe-9">
+    // Narrow, the strip keeps clear of the panel's corner × (inset, size and gap).
+    <div className="flex h-9 shrink-0 items-stretch px-1 @max-[40rem]/terminals:pe-10">
       <TabStrip
         aria-label="Agents"
         items={props.tabs}
@@ -526,24 +527,28 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
           {/* The grabber: faint at rest, brighter while the edge is hovered or dragged. */}
           <span className="pointer-events-none absolute top-[3px] left-1/2 h-[3px] w-8 -translate-x-1/2 rounded-full bg-foreground/10 transition-colors duration-(--motion-duration-fast) ease-out group-hover/resize:bg-foreground/25 group-active/resize:bg-foreground/35" />
         </div>
-        {/* No header row: the × sits in the top-right corner, beside the run's actions. */}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                aria-label="Close panel"
-                onClick={() => useBottomPanelStore.getState().setOpen(threadRef, false)}
-                className="absolute end-1.5 top-1.5 z-30 flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-(--motion-duration-fast) ease-out hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-              />
-            }
-          >
-            <X className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipPopup side="top">
-            {`Close panel${props.toggleShortcutLabel ? ` (${props.toggleShortcutLabel})` : ""}`}
-          </TooltipPopup>
-        </Tooltip>
+        {/* No header row: the × sits in the top-right corner, beside the run's actions.
+            Its h-6 box at top-1.5 centres it on the run header's command line, and
+            end-3 matches the header's left text inset. */}
+        <div className="absolute end-3 top-1.5 z-30 flex h-6 items-center">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="Close panel"
+                  onClick={() => useBottomPanelStore.getState().setOpen(threadRef, false)}
+                />
+              }
+            >
+              <X />
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              {`Close panel${props.toggleShortcutLabel ? ` (${props.toggleShortcutLabel})` : ""}`}
+            </TooltipPopup>
+          </Tooltip>
+        </div>
         {body}
       </div>
     </div>
