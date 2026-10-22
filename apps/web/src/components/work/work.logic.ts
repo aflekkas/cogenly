@@ -240,7 +240,7 @@ export function anchorWorkHandoffs(
     const anchor =
       link.throughMessageId !== undefined && messageIds.has(link.throughMessageId)
         ? link.throughMessageId
-        : fallbackAnchor(link.createdAt, messages);
+        : anchorAtTurnEnd(link.createdAt, messages);
     if (anchor === null) {
       unanchored.push(link);
       continue;
@@ -250,7 +250,11 @@ export function anchorWorkHandoffs(
   return { byMessageId, unanchored };
 }
 
-function fallbackAnchor(
+/**
+ * The message that ended the last turn before `createdAt`: that turn's last
+ * reply, or the user message when no reply came. Null before any message.
+ */
+export function anchorAtTurnEnd(
   createdAt: string,
   messages: Parameters<typeof anchorWorkHandoffs>[1],
 ): MessageId | null {

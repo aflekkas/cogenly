@@ -449,6 +449,7 @@ import {
   formatWorkHandoffSourceDetail,
 } from "./work/WorkHandoffMarkers";
 import { anchorWorkHandoffs } from "./work/work.logic";
+import { anchorWorkTasks, handoffsWithoutTasks } from "./work/workTask.logic";
 import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
@@ -5616,17 +5617,27 @@ export default function ChatView(props: ChatViewProps) {
   ]);
   // Work this chat started: a marker after the message each was started from.
   // Links with no such message fall to the footer, ahead of the thread's state line.
+  // Tasks the chat's agent handed off show as cards; their Work skips the plain marker.
   const activeThreadWorkHandoffs = activeThreadShell?.source.workHandoffs;
-  const workHandoffAnchors = useMemo(
+  const activeThreadWorkTasks = activeThreadShell?.source.workTasks;
+  const workHandoffAnchors = useMemo(() => {
+    const links = handoffsWithoutTasks(activeThreadWorkHandoffs ?? [], activeThreadWorkTasks ?? []);
+    return links.length ? anchorWorkHandoffs(links, timelineMessages) : null;
+  }, [activeThreadWorkHandoffs, activeThreadWorkTasks, timelineMessages]);
+  const activeThreadIdForTasks = activeThreadShell?.id ?? null;
+  const workTaskAnchors = useMemo(
     () =>
-      activeThreadWorkHandoffs?.length
-        ? anchorWorkHandoffs(activeThreadWorkHandoffs, timelineMessages)
+      activeThreadWorkTasks?.length && activeThreadIdForTasks !== null
+        ? {
+            chatThreadId: activeThreadIdForTasks,
+            anchors: anchorWorkTasks(activeThreadWorkTasks, timelineMessages),
+          }
         : null,
-    [activeThreadWorkHandoffs, timelineMessages],
+    [activeThreadIdForTasks, activeThreadWorkTasks, timelineMessages],
   );
   const threadFooterLines = useMemo(
     () =>
-      workHandoffAnchors?.unanchored.length ? (
+      workHandoffAnchors?.unanchored.length || workTaskAnchors?.anchors.unanchored.length ? (
         <>
           <UnanchoredWorkHandoffMarkers />
           {threadStatusLine}
@@ -5634,7 +5645,7 @@ export default function ChatView(props: ChatViewProps) {
       ) : (
         threadStatusLine
       ),
-    [threadStatusLine, workHandoffAnchors],
+    [threadStatusLine, workHandoffAnchors, workTaskAnchors],
   );
   // Work started from a chat links back above its first message, as a subagent does.
   const workSourceChatThreadId =
@@ -9155,6 +9166,7 @@ export default function ChatView(props: ChatViewProps) {
               <WorkHandoffMarkersProvider
                 environmentId={activeThreadShell?.environmentId ?? null}
                 anchors={paintOnlyDisplayedTimeline ? null : workHandoffAnchors}
+                tasks={paintOnlyDisplayedTimeline ? null : workTaskAnchors}
                 onOpenThread={onOpenRelatedThreadStable}
               >
                 <MessagesTimeline

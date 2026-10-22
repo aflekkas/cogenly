@@ -1,6 +1,12 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import type { EnvironmentId, MessageId, ThreadId, WorkHandoffLink } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  MessageId,
+  ThreadId,
+  WorkHandoffLink,
+  WorkTask,
+} from "@t3tools/contracts";
 import { CheckIcon, CircleAlertIcon, CircleSlashIcon, HammerIcon } from "lucide-react";
 import { createContext, use, useMemo, type ReactNode } from "react";
 
@@ -14,27 +20,36 @@ import {
   type WorkHandoffAnchors,
   type WorkHandoffStatus,
 } from "./work.logic";
+import { WorkTaskCard } from "./WorkTaskCard";
+import type { WorkTaskAnchors } from "./workTask.logic";
 
 interface WorkHandoffMarkersState {
   readonly environmentId: EnvironmentId;
   readonly anchors: WorkHandoffAnchors;
+  /** The chat's task cards, when it has any. */
+  readonly tasks: { readonly chatThreadId: ThreadId; readonly anchors: WorkTaskAnchors } | null;
   readonly onOpenThread: (threadId: ThreadId) => void;
 }
 
+const NO_HANDOFFS: WorkHandoffAnchors = { byMessageId: new Map(), unanchored: [] };
+
 const WorkHandoffMarkersCtx = createContext<WorkHandoffMarkersState | null>(null);
 
-/** Gives the chat timeline's rows the Work this chat handed off, by anchor message. */
+/** Gives the chat timeline's rows the Work and task cards this chat handed off, by anchor message. */
 export function WorkHandoffMarkersProvider(props: {
   readonly environmentId: EnvironmentId | null;
   readonly anchors: WorkHandoffAnchors | null;
+  readonly tasks: WorkHandoffMarkersState["tasks"];
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly children: ReactNode;
 }) {
-  const { environmentId, anchors, onOpenThread } = props;
+  const { environmentId, anchors, tasks, onOpenThread } = props;
   const value = useMemo(
     () =>
-      environmentId === null || anchors === null ? null : { environmentId, anchors, onOpenThread },
-    [anchors, environmentId, onOpenThread],
+      environmentId === null || (anchors === null && tasks === null)
+        ? null
+        : { environmentId, anchors: anchors ?? NO_HANDOFFS, tasks, onOpenThread },
+    [anchors, environmentId, onOpenThread, tasks],
   );
   return <WorkHandoffMarkersCtx value={value}>{props.children}</WorkHandoffMarkersCtx>;
 }
@@ -52,22 +67,54 @@ function rowEndsMessage(row: MessagesTimelineRow): MessageId | null {
   return row.message.role === "assistant" && row.showAssistantMeta ? row.message.id : null;
 }
 
-/** The Work started from the message this row ends, one marker per handoff. */
+/** The tasks and Work started from the message this row ends: task cards, then markers. */
 export function WorkHandoffMarkersAfterRow(props: { readonly row: MessagesTimelineRow }) {
   const state = use(WorkHandoffMarkersCtx);
   const messageId = rowEndsMessage(props.row);
-  const links = state && messageId !== null ? state.anchors.byMessageId.get(messageId) : undefined;
-  if (!state || !links) return null;
-  return <WorkHandoffMarkerList links={links} state={state} />;
+  if (!state || messageId === null) return null;
+  const tasks = state.tasks?.anchors.byMessageId.get(messageId);
+  const links = state.anchors.byMessageId.get(messageId);
+  if (!tasks && !links) return null;
+  return (
+    <>
+      {tasks ? <WorkTaskCardList tasks={tasks} state={state} /> : null}
+      {links ? <WorkHandoffMarkerList links={links} state={state} /> : null}
+    </>
+  );
 }
 
-/** Handoffs with no message to sit beside, after the last message. */
+/** Tasks and handoffs with no message to sit beside, after the last message. */
 export function UnanchoredWorkHandoffMarkers() {
   const state = use(WorkHandoffMarkersCtx);
-  if (!state || state.anchors.unanchored.length === 0) return null;
+  const tasks = state?.tasks?.anchors.unanchored ?? [];
+  if (!state || (state.anchors.unanchored.length === 0 && tasks.length === 0)) return null;
   return (
     <div className="mx-auto w-full min-w-0 max-w-(--chat-content-max-width) pb-2">
-      <WorkHandoffMarkerList links={state.anchors.unanchored} state={state} />
+      {tasks.length === 0 ? null : <WorkTaskCardList tasks={tasks} state={state} />}
+      {state.anchors.unanchored.length === 0 ? null : (
+        <WorkHandoffMarkerList links={state.anchors.unanchored} state={state} />
+      )}
+    </div>
+  );
+}
+
+function WorkTaskCardList(props: {
+  readonly tasks: ReadonlyArray<WorkTask>;
+  readonly state: WorkHandoffMarkersState;
+}) {
+  const chatThreadId = props.state.tasks?.chatThreadId;
+  if (chatThreadId === undefined) return null;
+  return (
+    <div className="flex flex-col gap-2 pt-3">
+      {props.tasks.map((task) => (
+        <WorkTaskCard
+          key={task.id}
+          environmentId={props.state.environmentId}
+          chatThreadId={chatThreadId}
+          task={task}
+          onOpenThread={props.state.onOpenThread}
+        />
+      ))}
     </div>
   );
 }

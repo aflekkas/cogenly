@@ -25,6 +25,7 @@ import {
   type RuntimeMode,
   type RuntimeRequestId,
   type ThreadId,
+  type WorkTaskId,
   type ThreadEnvMode,
   type UploadChatAttachment,
   type ThreadSurface,
@@ -126,6 +127,11 @@ export interface VisitThreadInput extends ThreadCommandInput {
 }
 
 export type MarkThreadUnreadInput = ThreadCommandInput;
+export interface DismissWorkTaskInput extends ThreadCommandInput {
+  readonly taskId: WorkTaskId;
+  /** False restores a dismissed card to proposed. */
+  readonly dismissed: boolean;
+}
 
 export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly limitRecovery?: import("@t3tools/contracts").OrchestrationV2LimitRecoveryUpdate | null;
@@ -554,6 +560,19 @@ export const markThreadUnread = Effect.fn("EnvironmentCommands.markThreadUnread"
     type: "thread.mark-unread",
     commandId: yield* allocateCommandId(input),
     threadId: input.threadId,
+  });
+});
+
+/** Dismisses a chat's proposed task card, or restores a dismissed one. */
+export const dismissWorkTask = Effect.fn("EnvironmentCommands.dismissWorkTask")(function* (
+  input: DismissWorkTaskInput,
+) {
+  return yield* dispatch({
+    type: "work.task.dismiss",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    taskId: input.taskId,
+    dismissed: input.dismissed,
   });
 });
 
