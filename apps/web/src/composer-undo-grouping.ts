@@ -17,20 +17,25 @@ export const COMPOSER_UNDO_GROUP_DELAY = 1000;
 export type ComposerChangeKind = "insert" | "delete" | "other";
 
 /**
- * Tags a transaction as a paste or cut, so it becomes its own undo step.
+ * Tags a transaction as a paste, cut or dictated segment, so it becomes its own undo step.
  * ProseMirror tags these itself only on its built-in clipboard paths; the
  * composer's `handlePaste` and cut handler replace those paths, so each of
  * their dispatches must call this, or the change merges with the typing or
  * deleting around it.
  */
-export function markAsClipboardEdit(tr: Transaction, event: "paste" | "cut"): Transaction {
+export function markAsClipboardEdit(
+  tr: Transaction,
+  event: "paste" | "cut" | "dictation",
+): Transaction {
   return tr.setMeta("uiEvent", event);
 }
 
 function changeKindOf(tr: Transaction): ComposerChangeKind | null {
   if (!tr.docChanged) return null;
   const uiEvent = tr.getMeta("uiEvent");
-  if (uiEvent === "paste" || uiEvent === "drop" || uiEvent === "cut") return "other";
+  if (uiEvent === "paste" || uiEvent === "drop" || uiEvent === "cut" || uiEvent === "dictation") {
+    return "other";
+  }
   // IME input replaces its own range on each keystroke; it is still typing.
   if (tr.getMeta("composition") != null) return "insert";
   let kind: ComposerChangeKind | null = null;

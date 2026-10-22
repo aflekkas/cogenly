@@ -176,9 +176,26 @@ contextBridge.exposeInMainWorld("desktopBridge", {
           isAvailable: () => ipcRenderer.invoke(IpcChannels.DICTATION_IS_AVAILABLE_CHANNEL),
           requestMicrophoneAccess: () =>
             ipcRenderer.invoke(IpcChannels.DICTATION_REQUEST_MICROPHONE_CHANNEL),
-          prepare: (input) => ipcRenderer.invoke(IpcChannels.DICTATION_PREPARE_CHANNEL, input),
-          transcribe: (input) =>
-            ipcRenderer.invoke(IpcChannels.DICTATION_TRANSCRIBE_CHANNEL, input),
+          startStream: (input) =>
+            ipcRenderer.invoke(IpcChannels.DICTATION_STREAM_START_CHANNEL, input),
+          // Fire-and-forget: audio arrives about a dozen times a second.
+          sendStreamAudio: (requestId, audio) =>
+            ipcRenderer.send(IpcChannels.DICTATION_STREAM_AUDIO_CHANNEL, requestId, audio),
+          finishStream: (requestId) =>
+            ipcRenderer.invoke(IpcChannels.DICTATION_STREAM_FINISH_CHANNEL, requestId),
+          onStreamEvent: (listener) => {
+            const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+              if (typeof payload !== "object" || payload === null) return;
+              listener(payload as Parameters<typeof listener>[0]);
+            };
+            ipcRenderer.on(IpcChannels.DICTATION_STREAM_EVENT_CHANNEL, wrappedListener);
+            return () => {
+              ipcRenderer.removeListener(
+                IpcChannels.DICTATION_STREAM_EVENT_CHANNEL,
+                wrappedListener,
+              );
+            };
+          },
           cancel: (requestId) =>
             ipcRenderer.invoke(IpcChannels.DICTATION_CANCEL_CHANNEL, requestId),
         },

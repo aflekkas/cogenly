@@ -16,36 +16,13 @@ export function downsample(input: Float32Array, inputRate: number, outputRate: n
   return output;
 }
 
-/** A mono 16-bit PCM WAV file of `chunks`, which AVAudioFile reads directly. */
-export function encodeWav(chunks: ReadonlyArray<Float32Array>, sampleRate: number): Uint8Array {
-  const frameCount = chunks.reduce((total, chunk) => total + chunk.length, 0);
-  const bytes = new Uint8Array(44 + frameCount * 2);
+/** Little-endian 16-bit PCM bytes of `samples`, the format the speech helper streams. */
+export function encodePcm16(samples: Float32Array): Uint8Array {
+  const bytes = new Uint8Array(samples.length * 2);
   const view = new DataView(bytes.buffer);
-  const writeAscii = (offset: number, text: string) => {
-    for (let index = 0; index < text.length; index += 1) {
-      view.setUint8(offset + index, text.charCodeAt(index));
-    }
-  };
-  writeAscii(0, "RIFF");
-  view.setUint32(4, 36 + frameCount * 2, true);
-  writeAscii(8, "WAVE");
-  writeAscii(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM
-  view.setUint16(22, 1, true); // mono
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeAscii(36, "data");
-  view.setUint32(40, frameCount * 2, true);
-  let offset = 44;
-  for (const chunk of chunks) {
-    for (const sample of chunk) {
-      const clamped = Math.max(-1, Math.min(1, sample));
-      view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
-      offset += 2;
-    }
+  for (let index = 0; index < samples.length; index += 1) {
+    const clamped = Math.max(-1, Math.min(1, samples[index]!));
+    view.setInt16(index * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
   }
   return bytes;
 }

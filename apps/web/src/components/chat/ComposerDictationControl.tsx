@@ -1,21 +1,15 @@
-import {
-  VoiceInputController,
-  voiceInputBlocksSubmission,
-  type VoiceDraftSnapshot,
-  type VoiceInputState,
-} from "@t3tools/client-runtime/voice-input";
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { MicIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 
 import { dictationKeyAction } from "../../dictation/composerDictation.logic";
-import { createDesktopVoiceTranscriber } from "../../dictation/desktopVoiceTranscriber";
 import {
-  createDictationRecorder,
+  createDictationMicrophone,
   dictationLocale,
   readDictationBridge,
   useDictationAvailable,
 } from "../../dictation/dictationAvailability";
+import { LiveDictationSession, type LiveDictationPhase } from "../../dictation/liveDictation";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindings";
 import { isPreviewFocused } from "../../lib/previewFocus";
@@ -27,19 +21,23 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerDictationWaveform } from "./ComposerDictationWaveform";
 
+export interface ComposerDictationHandle {
+  /** Stops listening; resolves true once the last segment has landed, false if cancelled. */
+  finish: () => Promise<boolean>;
+}
+
 interface ComposerDictationControlProps {
   /** The draft being dictated into; a change cancels the run. */
   readonly ownerKey: string;
   readonly disabled: boolean;
   readonly keybindings: ResolvedKeybindingsConfig;
-  /** Plain draft text and selection in the prompt's expanded (Markdown) coordinates. */
-  readonly readDraft: () => Omit<VoiceDraftSnapshot, "ownerKey" | "revision"> | null;
-  readonly commitDraft: (
-    previous: Omit<VoiceDraftSnapshot, "ownerKey" | "revision">,
-    text: string,
-  ) => void;
-  /** True from the first click until the transcript lands or the run is cancelled. */
+  /** Volatile text to show at the caret, or null to clear it. */
+  readonly onPartial: (text: string | null) => void;
+  /** A settled segment to insert at the caret. */
+  readonly onFinal: (text: string) => void;
+  /** True from the first click until the last segment lands or the run is cancelled. */
   readonly onActiveChange: (active: boolean) => void;
+  readonly handleRef?: Ref<ComposerDictationHandle>;
 }
 
 /** Mic button for on-device dictation. Renders nothing where no transcriber exists. */
@@ -49,89 +47,92 @@ export function ComposerDictationControl(props: ComposerDictationControlProps) {
   return <ComposerDictationButton {...props} />;
 }
 
-const IDLE: VoiceInputState = { phase: "idle", error: null, errorAction: null };
-
 function ComposerDictationButton({
   ownerKey,
   disabled,
   keybindings,
-  readDraft,
-  commitDraft,
+  onPartial,
+  onFinal,
   onActiveChange,
+  handleRef,
 }: ComposerDictationControlProps) {
-  const [state, setState] = useState<VoiceInputState>(IDLE);
+  const [phase, setPhase] = useState<LiveDictationPhase>("idle");
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const ownerKeyStable = useStableCallback(() => ownerKey);
-  const readDraftStable = useStableCallback(readDraft);
-  const commitDraftStable = useStableCallback(commitDraft);
-  const [runtime] = useState(() => {
+  const onPartialStable = useStableCallback(onPartial);
+  const onFinalStable = useStableCallback(onFinal);
+  const [session] = useState(() => {
     const bridge = readDictationBridge();
     if (!bridge) return null;
-    const recorder = createDictationRecorder((status) => {
-      void controller.handleRecorderStatus(status);
-    });
-    const transcriber = createDesktopVoiceTranscriber(bridge, {
-      locale: dictationLocale,
-      readRecording: (uri) => recorder.readRecording(uri),
-    });
-    const controller: VoiceInputController = new VoiceInputController({
-      recorder,
-      getTranscriber: () => transcriber,
-      requestPermission: () => bridge.requestMicrophoneAccess(),
-      configureRecording: () => recorder.configure(),
-      releaseRecording: () => recorder.release(),
-      deleteRecording: (uri) => recorder.deleteRecording(uri),
-      readDraft: () => {
-        const draft = readDraftStable();
-        // The editor is frozen while dictation runs, so text equality is the revision.
-        return draft ? { ...draft, ownerKey: ownerKeyStable(), revision: 0 } : null;
+    return new LiveDictationSession(bridge, createDictationMicrophone(), dictationLocale, {
+      onPhase: setPhase,
+      onPartial: (text) => onPartialStable(text),
+      onFinal: (text) => onFinalStable(text),
+      onError: (error, retry) => {
+        const settings = error.action === "settings";
+        toastManager.add({
+          type: settings ? "warning" : "error",
+          title: settings ? "Microphone access is off" : error.message,
+          ...(settings
+            ? {
+                description:
+                  "Allow Cogenly in System Settings > Privacy & Security > Microphone, then try again.",
+                actionProps: {
+                  children: "Open System Settings",
+                  onClick: () => void window.desktopBridge?.openSystemSettings?.("microphone"),
+                },
+              }
+            : error.action === "retry"
+              ? { actionProps: { children: "Try again", onClick: retry } }
+              : {}),
+        });
       },
-      commitDraft: (text) => {
-        // The controller commits only when the draft still matches its capture.
-        const current = readDraftStable();
-        if (current) commitDraftStable(current, text);
-      },
-      onStateChange: setState,
     });
-    return { controller, readLevel: () => recorder.readLevel() };
   });
 
-  const active = voiceInputBlocksSubmission(state);
+  useImperativeHandle(
+    handleRef,
+    () => ({ finish: () => session?.finish() ?? Promise.resolve(true) }),
+    [session],
+  );
+
+  const active = phase !== "idle";
   const onActiveChangeStable = useStableCallback(onActiveChange);
   useEffect(() => {
     onActiveChangeStable(active);
   }, [active, onActiveChangeStable]);
 
   useEffect(() => {
-    if (!runtime) return;
-    return () => runtime.controller.dispose();
-  }, [runtime]);
+    if (!session) return;
+    return () => session.dispose();
+  }, [session]);
 
   const previousOwnerKey = useRef(ownerKey);
   useEffect(() => {
     if (previousOwnerKey.current === ownerKey) return;
     previousOwnerKey.current = ownerKey;
-    runtime?.controller.ownerChanged();
-  }, [ownerKey, runtime]);
+    session?.cancel();
+  }, [ownerKey, session]);
 
   const toggle = useStableCallback(() => {
-    if (!runtime) return;
-    const { controller } = runtime;
-    if (controller.currentState.phase === "recording") void controller.stop();
-    else if (controller.currentState.phase === "idle" || controller.currentState.phase === "error")
-      void controller.start();
+    if (!session) return;
+    if (session.phase === "idle") void session.start();
+    else void session.finish();
   });
 
   useEffect(() => {
-    if (!runtime) return;
+    if (!session) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      const phase = runtime.controller.currentState.phase;
-      const action = dictationKeyAction(phase, event);
-      if (action) {
+      const form = buttonRef.current?.closest("form");
+      const focused = document.activeElement;
+      const focusedHere = form != null && form.contains(focused);
+      // Escape belongs to whatever else has focus; it cancels only from this composer.
+      if (
+        dictationKeyAction(session.phase, event) === "cancel" &&
+        (focusedHere || focused === document.body)
+      ) {
         event.preventDefault();
         event.stopPropagation();
-        if (action === "cancel") runtime.controller.cancel();
-        else void runtime.controller.stop();
+        session.cancel();
         return;
       }
       const command = resolveShortcutCommand(event, keybindings, {
@@ -140,60 +141,31 @@ function ComposerDictationButton({
       if (command !== "composer.dictate") return;
       // Several composers can be mounted; start only in the focused one, but let
       // the shortcut stop whichever is recording.
-      const running = phase !== "idle" && phase !== "error";
-      const form = buttonRef.current?.closest("form");
-      const focusedHere = form != null && form.contains(document.activeElement);
-      if (!running && (!focusedHere || disabled)) return;
+      if (session.phase === "idle" && (!focusedHere || disabled)) return;
       event.preventDefault();
       event.stopPropagation();
       if (!event.repeat) toggle();
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [disabled, keybindings, runtime, toggle]);
+  }, [disabled, keybindings, session, toggle]);
 
-  useEffect(() => {
-    if (!runtime || state.phase !== "error" || !state.error) return;
-    const { controller } = runtime;
-    const settings = state.errorAction === "settings";
-    toastManager.add({
-      type: settings ? "warning" : "error",
-      title: settings ? "Microphone access is off" : state.error,
-      ...(settings
-        ? {
-            description:
-              "Allow Cogenly in System Settings > Privacy & Security > Microphone, then try again.",
-          }
-        : {}),
-      ...(settings
-        ? {
-            actionProps: {
-              children: "Open System Settings",
-              onClick: () => void window.desktopBridge?.openSystemSettings?.("microphone"),
-            },
-          }
-        : state.errorAction === "retry"
-          ? { actionProps: { children: "Try again", onClick: () => void controller.start() } }
-          : {}),
-    });
-    // The toast carries the message; the button returns to its resting state.
-    controller.cancel();
-  }, [runtime, state]);
+  const readLevel = useStableCallback(() => session?.readLevel() ?? 0);
 
-  if (!runtime) return null;
+  if (!session) return null;
   const shortcutLabel = shortcutLabelForCommand(keybindings, "composer.dictate");
-  const busy = state.phase === "preparing" || state.phase === "transcribing";
+  const busy = phase === "starting" || phase === "finishing";
   const label =
-    state.phase === "recording"
+    phase === "recording"
       ? "Dictating — click to stop"
-      : state.phase === "preparing"
-        ? "Preparing dictation"
-        : state.phase === "transcribing"
-          ? "Transcribing"
+      : phase === "starting"
+        ? "Starting dictation"
+        : phase === "finishing"
+          ? "Finishing dictation"
           : "Dictate";
   const hint =
-    state.phase === "recording"
-      ? "Enter or click to insert, Esc to cancel"
+    phase === "recording"
+      ? "Click to stop, Enter to send, Esc to cancel"
       : shortcutLabel
         ? `Dictate (${shortcutLabel})`
         : "Dictate";
@@ -201,8 +173,8 @@ function ComposerDictationButton({
   return (
     <span className="flex items-center motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-out motion-safe:starting:opacity-0">
       <ComposerDictationWaveform
-        recording={state.phase === "recording"}
-        readLevel={runtime.readLevel}
+        recording={phase === "recording"}
+        readLevel={readLevel}
         onStop={toggle}
       />
       <Tooltip>
@@ -214,11 +186,12 @@ function ComposerDictationButton({
               variant="ghost"
               size="icon-sm"
               disabled={disabled && !active}
-              aria-pressed={state.phase === "recording"}
+              aria-pressed={phase === "recording"}
               aria-label={label}
-              data-dictation-phase={state.phase}
+              data-dictation-phase={phase}
+              // Keeps the editor's focus and caret, so dictation lands where the user was typing.
               onPointerDown={(event) => event.preventDefault()}
-              onClick={() => (state.phase === "transcribing" ? undefined : toggle())}
+              onClick={() => (phase === "finishing" ? undefined : toggle())}
             />
           }
         >
@@ -227,7 +200,7 @@ function ComposerDictationButton({
               aria-hidden
               className={cn(
                 "transition-opacity duration-(--motion-duration-fast) ease-out",
-                state.phase === "idle" || state.phase === "error" ? "opacity-100" : "opacity-0",
+                phase === "idle" ? "opacity-100" : "opacity-0",
               )}
             />
             <span
@@ -245,7 +218,7 @@ function ComposerDictationButton({
               aria-hidden
               className={cn(
                 "size-2.5 rounded-xs bg-destructive transition-opacity duration-(--motion-duration-fast) ease-out",
-                state.phase === "recording" ? "opacity-100" : "opacity-0",
+                phase === "recording" ? "opacity-100" : "opacity-0",
               )}
             />
           </span>

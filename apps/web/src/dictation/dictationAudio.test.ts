@@ -1,22 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { downsample, encodeWav, speechLevel } from "./dictationAudio";
+import { downsample, encodePcm16, speechLevel } from "./dictationAudio";
 
-describe("encodeWav", () => {
-  it("writes a mono 16-bit PCM file AVAudioFile can open", () => {
-    const bytes = encodeWav([new Float32Array([0, 1, -1]), new Float32Array([0.5, 2])], 16_000);
+describe("encodePcm16", () => {
+  it("writes little-endian 16-bit samples and clips out-of-range input", () => {
+    const bytes = encodePcm16(new Float32Array([0, 1, -1, 0.5, 2]));
+    expect(bytes.length).toBe(10);
     const view = new DataView(bytes.buffer);
-    const ascii = (offset: number) => String.fromCharCode(...bytes.subarray(offset, offset + 4));
-    expect([ascii(0), ascii(8), ascii(12), ascii(36)]).toEqual(["RIFF", "WAVE", "fmt ", "data"]);
-    expect(view.getUint32(4, true)).toBe(bytes.length - 8);
-    expect(view.getUint16(20, true)).toBe(1);
-    expect(view.getUint16(22, true)).toBe(1);
-    expect(view.getUint32(24, true)).toBe(16_000);
-    expect(view.getUint32(28, true)).toBe(32_000);
-    expect(view.getUint16(34, true)).toBe(16);
-    expect(view.getUint32(40, true)).toBe(10);
-    // Out-of-range input clips instead of wrapping.
-    const samples = [0, 1, 2, 3, 4].map((index) => view.getInt16(44 + index * 2, true));
+    const samples = [0, 1, 2, 3, 4].map((index) => view.getInt16(index * 2, true));
     expect(samples).toEqual([0, 32767, -32768, 16383, 32767]);
   });
 });

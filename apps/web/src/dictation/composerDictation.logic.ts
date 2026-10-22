@@ -1,42 +1,42 @@
-import type { VoiceInputPhase } from "@t3tools/client-runtime/voice-input";
+import type { LiveDictationPhase } from "./liveDictation";
+
+// Scripts written without spaces between words.
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u;
+// U+FFFC stands in for a chip, which reads as a word.
+const ENDS_WORD = /[\p{L}\p{N}.!?,:;)\]}'"￼]/u;
+const STARTS_WORD = /[\p{L}\p{N}([{'"￼]/u;
 
 /**
- * Recovers the edit the voice controller committed: it hands back the whole
- * draft, but the composer applies text as a range replacement so chips, undo
- * grouping and the caret follow its usual insert path.
+ * Dictated `text` as it should land between the characters `before` and
+ * `after` the caret: trimmed, with a space on either side where it would
+ * otherwise run into a neighbouring word.
  */
-export function transcriptEdit(
-  before: string,
-  selection: { readonly start: number; readonly end: number },
-  after: string,
-): { start: number; end: number; insertion: string } | null {
-  const suffixLength = before.length - selection.end;
-  const insertionEnd = after.length - suffixLength;
-  if (
-    insertionEnd < selection.start ||
-    after.slice(0, selection.start) !== before.slice(0, selection.start) ||
-    after.slice(insertionEnd) !== before.slice(selection.end)
-  ) {
-    return null;
-  }
-  return {
-    start: selection.start,
-    end: selection.end,
-    insertion: after.slice(selection.start, insertionEnd),
-  };
+export function spaceDictatedText(before: string, after: string, text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return "";
+  const left = before.at(-1);
+  const right = after[0];
+  const first = trimmed[0]!;
+  const last = trimmed.at(-1)!;
+  const needsLeft =
+    left !== undefined &&
+    ENDS_WORD.test(left) &&
+    !UNSPACED.test(left) &&
+    !UNSPACED.test(first) &&
+    !/^[.!?,:;)\]}]/.test(trimmed);
+  const needsRight =
+    right !== undefined && STARTS_WORD.test(right) && !UNSPACED.test(right) && !UNSPACED.test(last);
+  return `${needsLeft ? " " : ""}${trimmed}${needsRight ? " " : ""}`;
 }
 
-export type DictationKeyAction = "cancel" | "stop" | null;
-
-/** Escape cancels any active run; a bare Enter finishes recording instead of sending. */
+/**
+ * Escape cancels an active run. Enter is left to the composer, which finishes
+ * the dictation before it sends.
+ */
 export function dictationKeyAction(
-  phase: VoiceInputPhase,
-  event: Pick<KeyboardEvent, "key" | "shiftKey" | "metaKey" | "ctrlKey" | "altKey" | "isComposing">,
-): DictationKeyAction {
+  phase: LiveDictationPhase,
+  event: Pick<KeyboardEvent, "key" | "isComposing">,
+): "cancel" | null {
   if (event.isComposing) return null;
-  const active = phase === "preparing" || phase === "recording" || phase === "transcribing";
-  if (event.key === "Escape" && active) return "cancel";
-  const bare = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
-  if (event.key === "Enter" && bare && phase === "recording") return "stop";
-  return null;
+  return event.key === "Escape" && phase !== "idle" ? "cancel" : null;
 }

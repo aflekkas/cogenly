@@ -119,6 +119,11 @@ import { resolveAssistantCitationCommentDismissal } from "./chat/assistantCitati
 import { composerCodeBlockHighlight } from "./composerCodeBlockHighlight";
 import { importPastedComposerText } from "./composerInlineTokenPaste";
 import { didComposerSelectionChangeVisibly } from "./composerSelection";
+import {
+  ComposerDictationExtension,
+  insertDictatedText,
+  setDictationPreview,
+} from "./composerDictationPreview";
 import type { ComposerDraftContextRecords } from "./composerContextPresentation";
 
 export interface ComposerPromptEditorHandle {
@@ -140,6 +145,10 @@ export interface ComposerPromptEditorHandle {
    * text.
    */
   isCaretOnVisualEdge: (edge: "start" | "end") => boolean;
+  /** Volatile dictation shown at the caret without entering the draft; null clears it. */
+  setDictationPreview: (text: string | null) => void;
+  /** Inserts a settled dictation segment at the caret as its own undo step. */
+  insertDictatedText: (text: string) => boolean;
 }
 
 export interface ComposerPromptEditorProps {
@@ -1097,6 +1106,7 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
         ComposerCitationExtension,
         ComposerContextReferenceExtension,
         ComposerMarkersExtension,
+        ComposerDictationExtension,
         ...(richText
           ? [
               ComposerCodeExtension,
@@ -1767,6 +1777,11 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
         }
       },
       readSnapshot,
+      setDictationPreview: (text) => {
+        if (editor && !editor.isDestroyed) setDictationPreview(editor.view, text);
+      },
+      insertDictatedText: (text) =>
+        editor != null && !editor.isDestroyed && insertDictatedText(editor.view, text),
       isCaretOnVisualEdge: (edge) => {
         const snapshot = readSnapshot();
         if (snapshot.value.length === 0) return true;

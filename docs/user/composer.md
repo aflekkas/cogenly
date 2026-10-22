@@ -140,9 +140,12 @@ memory. The action is available only when the provider supports rewind.
 ## Voice input on Mac
 
 In the desktop app on macOS 26 or later, click the composer's microphone or press
-`mod+shift+d` to dictate. Press Enter, the shortcut, or the button again to insert
-the text where your caret was; press Escape to cancel and keep your draft as it was.
-Recordings can be up to five minutes long.
+`mod+shift+d` to dictate. Text appears as you speak, at your caret: words still
+being recognized show dimmed and settle into your draft a phrase at a time. Keep
+typing, click to move the caret, or select text while you talk, and later phrases
+land wherever the caret is. Press the shortcut or the button again to stop, or press
+Enter to stop and send. Escape stops and drops the words still being recognized;
+text already in the draft stays, and Undo removes it a phrase at a time.
 
 Transcription runs on your Mac, so no audio leaves it and no API key is needed. The
 first use of a language may download Apple's speech model. Dictation uses your Mac's

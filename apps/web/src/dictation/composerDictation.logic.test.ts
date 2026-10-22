@@ -1,51 +1,41 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { dictationKeyAction, transcriptEdit } from "./composerDictation.logic";
+import { dictationKeyAction, spaceDictatedText } from "./composerDictation.logic";
 
-describe("transcriptEdit", () => {
-  it("recovers the inserted transcript at a caret", () => {
-    expect(transcriptEdit("fix  bug", { start: 4, end: 4 }, "fix the login bug")).toEqual({
-      start: 4,
-      end: 4,
-      insertion: "the login",
-    });
+describe("spaceDictatedText", () => {
+  it("trims the segment and separates it from the words around the caret", () => {
+    expect(spaceDictatedText("", "", " Hello there. ")).toBe("Hello there.");
+    expect(spaceDictatedText("fix", "", " the login bug")).toBe(" the login bug");
+    expect(spaceDictatedText("fix ", "", " the login bug")).toBe("the login bug");
+    expect(spaceDictatedText("fix ", "bug", "the login")).toBe("the login ");
+    expect(spaceDictatedText("fix ", " bug", "the login")).toBe("the login");
   });
 
-  it("recovers a transcript that replaced a selection", () => {
-    expect(transcriptEdit("say OLD now", { start: 4, end: 7 }, "say new words now")).toEqual({
-      start: 4,
-      end: 7,
-      insertion: "new words",
-    });
+  it("keeps punctuation and line starts tight", () => {
+    expect(spaceDictatedText("done", "", ".")).toBe(".");
+    expect(spaceDictatedText("\n", "", "Next")).toBe("Next");
+    expect(spaceDictatedText("(", "", "aside")).toBe("aside");
   });
 
-  it("refuses a commit that changed text outside the selection", () => {
-    expect(transcriptEdit("abc", { start: 1, end: 1 }, "xbc!")).toBeNull();
+  it("treats a chip as a word and leaves unspaced scripts alone", () => {
+    expect(spaceDictatedText("￼", "", "check this")).toBe(" check this");
+    expect(spaceDictatedText("日本", "", "語です")).toBe("語です");
+  });
+
+  it("drops a segment with no text", () => {
+    expect(spaceDictatedText("a", "b", "   ")).toBe("");
   });
 });
 
 describe("dictationKeyAction", () => {
-  const key = (value: string, modifiers: Partial<KeyboardEvent> = {}) => ({
-    key: value,
-    shiftKey: false,
-    metaKey: false,
-    ctrlKey: false,
-    altKey: false,
-    isComposing: false,
-    ...modifiers,
-  });
+  const key = (value: string, isComposing = false) => ({ key: value, isComposing });
 
-  it("cancels on Escape while any run is active, and leaves idle Escape alone", () => {
-    expect(dictationKeyAction("preparing", key("Escape"))).toBe("cancel");
+  it("cancels on Escape while a run is active, and leaves other keys to the composer", () => {
+    expect(dictationKeyAction("starting", key("Escape"))).toBe("cancel");
     expect(dictationKeyAction("recording", key("Escape"))).toBe("cancel");
-    expect(dictationKeyAction("transcribing", key("Escape"))).toBe("cancel");
+    expect(dictationKeyAction("finishing", key("Escape"))).toBe("cancel");
     expect(dictationKeyAction("idle", key("Escape"))).toBeNull();
-  });
-
-  it("finishes on a bare Enter while recording instead of sending", () => {
-    expect(dictationKeyAction("recording", key("Enter"))).toBe("stop");
-    expect(dictationKeyAction("recording", key("Enter", { shiftKey: true }))).toBeNull();
-    expect(dictationKeyAction("idle", key("Enter"))).toBeNull();
-    expect(dictationKeyAction("recording", key("Enter", { isComposing: true }))).toBeNull();
+    expect(dictationKeyAction("recording", key("Enter"))).toBeNull();
+    expect(dictationKeyAction("recording", key("Escape", true))).toBeNull();
   });
 });

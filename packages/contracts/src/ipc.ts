@@ -1002,19 +1002,21 @@ export const DesktopDictationErrorCodeSchema = Schema.Literals([
 export type DesktopDictationErrorCode = typeof DesktopDictationErrorCodeSchema.Type;
 
 /** `requestId` names the run so `cancel` can stop it. */
-export const DesktopDictationPrepareInputSchema = Schema.Struct({
+export const DesktopDictationStreamInputSchema = Schema.Struct({
   requestId: Schema.String,
   locale: Schema.String,
 });
-export type DesktopDictationPrepareInput = typeof DesktopDictationPrepareInputSchema.Type;
+export type DesktopDictationStreamInput = typeof DesktopDictationStreamInputSchema.Type;
 
-/** `audio` is a WAV file's bytes. */
-export const DesktopDictationTranscribeInputSchema = Schema.Struct({
-  requestId: Schema.String,
-  locale: Schema.String,
-  audio: Schema.Uint8Array,
-});
-export type DesktopDictationTranscribeInput = typeof DesktopDictationTranscribeInputSchema.Type;
+/**
+ * What a live dictation run reports while it listens. A `partial` is volatile
+ * text that replaces the previous partial; a `final` is a settled segment that
+ * clears it. `ready` arrives once the model is loaded (it may download first).
+ */
+export type DesktopDictationStreamEvent =
+  | { readonly requestId: string; readonly type: "ready"; readonly locale: string }
+  | { readonly requestId: string; readonly type: "partial"; readonly text: string }
+  | { readonly requestId: string; readonly type: "final"; readonly text: string };
 
 /** Failures are values: Electron flattens a rejected invoke into a bare message. */
 export const DesktopDictationResultSchema = Schema.Union([
@@ -1038,10 +1040,17 @@ export interface DesktopDictationBridge {
   /** False below macOS 26, on unsupported hardware, or when the helper is missing. */
   isAvailable: () => Promise<boolean>;
   requestMicrophoneAccess: () => Promise<DesktopMicrophoneAccess>;
-  /** Resolves the locale and downloads its model on first use; `value` is the locale. */
-  prepare: (input: DesktopDictationPrepareInput) => Promise<DesktopDictationResult>;
-  /** `value` is the transcript. */
-  transcribe: (input: DesktopDictationTranscribeInput) => Promise<DesktopDictationResult>;
+  /**
+   * Starts a live run: the helper transcribes audio sent with `sendStreamAudio`
+   * and reports through `onStreamEvent`. Settles when the run ends, after
+   * `finishStream` has flushed the last segment or `cancel` stopped it.
+   */
+  startStream: (input: DesktopDictationStreamInput) => Promise<DesktopDictationResult>;
+  /** Raw little-endian PCM16 mono 16 kHz samples for a started run. */
+  sendStreamAudio: (requestId: string, audio: Uint8Array) => void;
+  /** Ends the run's audio; the helper finalizes what it heard, then the run settles. */
+  finishStream: (requestId: string) => Promise<void>;
+  onStreamEvent: (listener: (event: DesktopDictationStreamEvent) => void) => () => void;
   cancel: (requestId: string) => Promise<void>;
 }
 

@@ -375,8 +375,7 @@ import { useDelayedStatus } from "../../hooks/useDelayedStatus";
 import { useElementState } from "../../hooks/useElementState";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useStableCallback } from "../../hooks/useStableCallback";
-import { transcriptEdit } from "../../dictation/composerDictation.logic";
-import { ComposerDictationControl } from "./ComposerDictationControl";
+import { ComposerDictationControl, type ComposerDictationHandle } from "./ComposerDictationControl";
 import { PANEL_ANIMATION_DURATION, readPanelAnimationsActive } from "../../panelAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { readEnvironmentScope } from "../../state/session";
@@ -2283,9 +2282,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     names: new Set(),
   });
   const attachmentInputRef = useRef<HTMLInputElement>(null);
-  // Dictation freezes the draft so its transcript lands where the caret was.
-  const [dictationActive, setDictationActive] = useState(false);
+  // Dictation streams into the editable draft; a send waits for its last segment.
   const dictationActiveRef = useRef(false);
+  const dictationRef = useRef<ComposerDictationHandle>(null);
+  const submitAfterDictationRef = useRef<
+    | ((
+        event: undefined,
+        dispatchMode?: ComposerDispatchMode,
+        submissionIntent?: ComposerSubmissionIntent,
+      ) => void)
+    | null
+  >(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerSurfaceRef = useRef<HTMLDivElement>(null);
   const providerInputRejectedRef = useRef(false);
@@ -4042,10 +4049,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     dispatchMode?: ComposerDispatchMode,
     submissionIntent?: ComposerSubmissionIntent,
   ) => {
+    if (dictationActiveRef.current && dictationRef.current) {
+      // Enter or Send while dictating: settle what was said, then send it with the draft.
+      event?.preventDefault();
+      void dictationRef.current.finish().then((completed) => {
+        if (!completed) return;
+        // A frame lets the draft render with the last segment before the send reads it.
+        window.requestAnimationFrame(() => {
+          if (dictationActiveRef.current) return;
+          submitAfterDictationRef.current?.(undefined, dispatchMode, submissionIntent);
+        });
+      });
+      return;
+    }
     if (
       noProviderAvailable ||
       isSendDisabled ||
-      dictationActiveRef.current ||
       !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)
     ) {
       event?.preventDefault();
@@ -4104,6 +4123,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
   };
   const submitComposerStable = useStableCallback(submitComposer);
+  useEffect(() => {
+    submitAfterDictationRef.current = submitComposerStable;
+  }, [submitComposerStable]);
   const handleSubmitMessage = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     submitComposer(
@@ -5110,7 +5132,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (
       text.length === 0 ||
       isConnecting ||
-      dictationActiveRef.current ||
       pendingUserInputs.length > 0 ||
       projectSelectionRequired ||
       (options?.citationCommentAnchor && !composerEditorRef.current)
@@ -5146,28 +5167,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
   const insertComposerTextStable = useStableCallback(insertComposerText);
 
-  const readDictationDraft = () => {
-    const snapshot = readComposerSnapshot();
-    const selection = composerEditorRef.current?.readSelectionRange() ?? {
-      start: snapshot.expandedCursor,
-      end: snapshot.expandedCursor,
-    };
-    return { text: snapshot.value, selection };
+  const onDictationPartial = (text: string | null) => {
+    composerEditorRef.current?.setDictationPreview(text);
   };
-  const commitDictationDraft = (previous: ReturnType<typeof readDictationDraft>, text: string) => {
-    const edit = transcriptEdit(previous.text, previous.selection, text);
-    if (!edit) return;
-    // Unfreeze first: the replacement focuses the editor at the new caret.
-    dictationActiveRef.current = false;
-    setDictationActive(false);
-    applyPromptReplacement(edit.start, edit.end, edit.insertion, {
-      expectedText: previous.text.slice(edit.start, edit.end),
-    });
+  const onDictationFinal = (text: string) => {
+    composerEditorRef.current?.insertDictatedText(text);
   };
   const onDictationActiveChange = (active: boolean) => {
     dictationActiveRef.current = active;
-    setDictationActive(active);
-    if (!active) window.requestAnimationFrame(() => composerEditorRef.current?.focus());
   };
 
   const insertComposerTextAtEnd: ChatComposerHandle["insertTextAtEnd"] = (text, options) => {
@@ -6422,7 +6429,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                   ? DISCONNECTED_COMPOSER_PLACEHOLDER
                                   : "Ask anything, @tag files/folders, $use skills, or / for commands"
                     }
-                    disabled={composerEditorLocked || dictationActive}
+                    disabled={composerEditorLocked}
                   />
                 </ComposerContextActionsContext>
                 {showMobilePendingAnswerActions ? (
@@ -6502,8 +6509,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       ownerKey={composerDraftTargetKey}
                       disabled={composerEditorLocked}
                       keybindings={keybindings}
-                      readDraft={readDictationDraft}
-                      commitDraft={commitDictationDraft}
+                      handleRef={dictationRef}
+                      onPartial={onDictationPartial}
+                      onFinal={onDictationFinal}
                       onActiveChange={onDictationActiveChange}
                     />
                   ) : null}

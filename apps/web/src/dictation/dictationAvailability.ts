@@ -1,11 +1,10 @@
-import type { VoiceRecorderStatus } from "@t3tools/client-runtime/voice-input";
 import type { DesktopDictationBridge } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
-import { BrowserVoiceRecorder, type DictationRecorder } from "./browserVoiceRecorder";
-import { SyntheticVoiceRecorder, createDevDictationBridge } from "./devDictationBridge";
+import { BrowserDictationMicrophone, type DictationMicrophone } from "./browserDictationMicrophone";
+import { SyntheticDictationMicrophone, createDevDictationBridge } from "./devDictationBridge";
 
-/** Set to "1" in localStorage on a dev build to try the composer UI with a canned transcript. */
+/** Set to "1" in localStorage on a dev build to try live dictation with canned speech. */
 export const DEV_DICTATION_MOCK_STORAGE_KEY = "cogenly:dev-dictation-mock";
 
 let devBridge: DesktopDictationBridge | null = null;
@@ -20,14 +19,10 @@ export function readDictationBridge(): DesktopDictationBridge | null {
   return null;
 }
 
-/** The microphone recorder, or a synthetic one alongside the dev mock bridge. */
-export function createDictationRecorder(
-  onStatus: (status: VoiceRecorderStatus) => void,
-): DictationRecorder {
-  if (devBridge && readDictationBridge() === devBridge) {
-    return new SyntheticVoiceRecorder(onStatus);
-  }
-  return new BrowserVoiceRecorder(onStatus);
+/** The real microphone, or a synthetic one alongside the dev mock bridge. */
+export function createDictationMicrophone(): DictationMicrophone {
+  if (devBridge && readDictationBridge() === devBridge) return new SyntheticDictationMicrophone();
+  return new BrowserDictationMicrophone();
 }
 
 let availability: Promise<boolean> | null = null;

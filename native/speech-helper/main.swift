@@ -3,10 +3,19 @@
 //   cogenly-speech status                            -> {"available":true}
 //   cogenly-speech prepare [--locale <id>]          -> {"locale":"en_US"}
 //   cogenly-speech transcribe [--locale <id>] <file> -> {"text":"..."}
+//   cogenly-speech stream [--locale <id>]            -> JSON lines, see below
 //
-// Every command prints exactly one JSON object on stdout. Failures print
-// {"error":{"code":"...","message":"..."}} and exit 1. Codes match
+// status, prepare and transcribe print exactly one JSON object on stdout.
+// Failures print {"error":{"code":"...","message":"..."}} and exit 1. Codes match
 // VoiceTranscriptionErrorCode in packages/client-runtime/src/voice-input.
+//
+// stream reads raw little-endian PCM16 mono 16 kHz audio from stdin until EOF and
+// writes one JSON object per line as it transcribes:
+//   {"type":"ready","locale":"en_US"}     the model is loaded and listening
+//   {"type":"partial","text":"..."}       volatile text; replaces the previous partial
+//   {"type":"final","text":"..."}         a finalized segment; clears the partial
+//   {"type":"done"}                       stdin closed and every segment is final
+// A failure prints {"type":"error","code":"...","message":"..."} and exits 1.
 //
 // SpeechAnalyzer + SpeechTranscriber (macOS 26) run fully on device and need no
 // Speech Recognition authorization, so this helper never shows a privacy prompt.
@@ -24,9 +33,10 @@ struct HelperError: Error {
 }
 
 func emit(_ object: [String: Any]) {
-  let data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data("{}".utf8)
+  var data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data("{}".utf8)
+  data.append(0x0A)
+  // One write per line, so lines from the result task and the main task never interleave.
   FileHandle.standardOutput.write(data)
-  FileHandle.standardOutput.write(Data("\n".utf8))
 }
 
 func fail(_ error: HelperError) -> Never {
@@ -50,9 +60,10 @@ let unavailable = HelperError(
       return locale
     }
 
-    static func makeTranscriber(_ locale: Locale) -> SpeechTranscriber {
+    static func makeTranscriber(_ locale: Locale, volatile: Bool = false) -> SpeechTranscriber {
       SpeechTranscriber(
-        locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: [])
+        locale: locale, transcriptionOptions: [],
+        reportingOptions: volatile ? [.volatileResults, .fastResults] : [], attributeOptions: [])
     }
 
     /// Downloads the locale's model the first time; later calls return immediately.
@@ -104,6 +115,112 @@ let unavailable = HelperError(
           message: "Transcription failed: \(error.localizedDescription)")
       }
     }
+
+    /// The format the renderer streams: PCM16 mono 16 kHz, interleaved.
+    static let streamFormat = AVAudioFormat(
+      commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true)!
+
+    /// Transcribes stdin live until EOF, printing partial and final results as JSON lines.
+    static func stream(_ requested: Locale) async throws {
+      let locale = try await prepare(requested)
+      let transcriber = makeTranscriber(locale, volatile: true)
+      let analyzer = SpeechAnalyzer(modules: [transcriber])
+      let analyzerFormat =
+        await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+        ?? streamFormat
+      let converter =
+        analyzerFormat == streamFormat ? nil : AVAudioConverter(from: streamFormat, to: analyzerFormat)
+      converter?.primeMethod = .none
+
+      let (inputs, inputSink) = AsyncStream.makeStream(of: AnalyzerInput.self)
+      let collector = Task {
+        for try await result in transcriber.results {
+          let text = String(result.text.characters)
+          emit(["type": result.isFinal ? "final" : "partial", "text": text])
+        }
+      }
+      do {
+        try await analyzer.start(inputSequence: inputs)
+      } catch {
+        collector.cancel()
+        throw HelperError(
+          code: "transcription-failed",
+          message: "Could not start transcription: \(error.localizedDescription)")
+      }
+      emit(["type": "ready", "locale": locale.identifier])
+
+      // availableData blocks, so stdin is read on its own thread.
+      let (chunks, chunkSink) = AsyncStream.makeStream(of: Data.self)
+      Thread.detachNewThread {
+        while true {
+          let data = FileHandle.standardInput.availableData
+          if data.isEmpty { break }
+          chunkSink.yield(data)
+        }
+        chunkSink.finish()
+      }
+      var carry = Data()
+      for await data in chunks {
+        carry.append(data)
+        let usable = carry.count - carry.count % 2
+        if usable == 0 { continue }
+        let frames = carry.prefix(usable)
+        carry = Data(carry.dropFirst(usable))
+        if let buffer = try pcmBuffer(frames, converter: converter, to: analyzerFormat) {
+          inputSink.yield(AnalyzerInput(buffer: buffer))
+        }
+      }
+      inputSink.finish()
+
+      do {
+        try await analyzer.finalizeAndFinishThroughEndOfInput()
+        try await collector.value
+      } catch {
+        collector.cancel()
+        throw HelperError(
+          code: "transcription-failed",
+          message: "Transcription failed: \(error.localizedDescription)")
+      }
+      emit(["type": "done"])
+    }
+
+    /// Wraps PCM16 bytes as a buffer in the analyzer's format.
+    static func pcmBuffer(
+      _ bytes: Data, converter: AVAudioConverter?, to format: AVAudioFormat
+    ) throws -> AVAudioPCMBuffer? {
+      let frameCount = AVAudioFrameCount(bytes.count / 2)
+      guard
+        let input = AVAudioPCMBuffer(pcmFormat: streamFormat, frameCapacity: frameCount),
+        let channel = input.int16ChannelData?[0]
+      else { return nil }
+      bytes.withUnsafeBytes { raw in
+        _ = raw.copyBytes(to: UnsafeMutableRawBufferPointer(start: channel, count: bytes.count))
+      }
+      input.frameLength = frameCount
+      guard let converter else { return input }
+      let ratio = format.sampleRate / streamFormat.sampleRate
+      let capacity = AVAudioFrameCount((Double(frameCount) * ratio).rounded(.up)) + 16
+      guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
+        return nil
+      }
+      var supplied = false
+      var conversionError: NSError?
+      let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
+        if supplied {
+          inputStatus.pointee = .noDataNow
+          return nil
+        }
+        supplied = true
+        inputStatus.pointee = .haveData
+        return input
+      }
+      if status == .error {
+        throw HelperError(
+          code: "transcription-failed",
+          message: "Could not convert audio: \(conversionError?.localizedDescription ?? "unknown")")
+      }
+      return output.frameLength > 0 ? output : nil
+    }
   }
 #endif
 
@@ -137,6 +254,9 @@ func run(_ command: String, _ positionals: [String], _ requested: Locale) async 
       return ["available": SpeechTranscriber.isAvailable]
     case "prepare":
       return ["locale": try await Engine.prepare(requested).identifier]
+    case "stream":
+      try await Engine.stream(requested)
+      return [:]
     case "transcribe":
       guard positionals.count == 2 else {
         throw HelperError(code: "usage", message: "usage: cogenly-speech transcribe <file>")
@@ -157,16 +277,23 @@ struct CogenlySpeech {
   static func main() async {
     let parsed = parse(Array(CommandLine.arguments.dropFirst()))
     guard let command = parsed.positionals.first else {
-      fail(HelperError(code: "usage", message: "usage: cogenly-speech prepare|transcribe"))
+      fail(HelperError(code: "usage", message: "usage: cogenly-speech status|prepare|transcribe|stream"))
     }
     let requested = Locale(identifier: parsed.locale ?? Locale.current.identifier)
+    let streaming = command == "stream"
     do {
-      emit(try await run(command, parsed.positionals, requested))
+      let output = try await run(command, parsed.positionals, requested)
+      if !streaming { emit(output) }
       exit(0)
-    } catch let error as HelperError {
-      fail(error)
     } catch {
-      fail(HelperError(code: "transcription-failed", message: error.localizedDescription))
+      let failure =
+        error as? HelperError
+        ?? HelperError(code: "transcription-failed", message: error.localizedDescription)
+      if streaming {
+        emit(["type": "error", "code": failure.code, "message": failure.message])
+        exit(1)
+      }
+      fail(failure)
     }
   }
 }

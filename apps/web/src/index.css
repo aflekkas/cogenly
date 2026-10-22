@@ -3203,6 +3203,43 @@ code {
   pointer-events: none;
 }
 
+/* Dictation: volatile text rides at the caret until a final segment replaces it. */
+.composer-dictation-preview {
+  color: var(--muted-foreground);
+  user-select: none;
+  pointer-events: none;
+  animation: composer-dictation-fade-in var(--motion-duration-fast) var(--ease-out);
+}
+
+/* A final segment settles from the preview's muted color into normal text. */
+.composer-dictation-settle {
+  animation: composer-dictation-settle var(--motion-duration-base) var(--ease-out);
+}
+
+@keyframes composer-dictation-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes composer-dictation-settle {
+  from {
+    color: var(--muted-foreground);
+  }
+}
+
+@keyframes composer-dictation-settle-opacity {
+  from {
+    opacity: 0.6;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-dictation-settle {
+    animation-name: composer-dictation-settle-opacity;
+  }
+}
+
 /* Selected chips (node selection from arrowing into or clicking a chip). */
 .composer-tiptap .ProseMirror-selectednode {
   outline: 2px solid var(--ring);

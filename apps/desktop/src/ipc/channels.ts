@@ -101,8 +101,10 @@ export const MAC_PERMISSION_HELPER_CHANNEL = "desktop:mac-permission-helper";
 export const CHECK_SYSTEM_PERMISSION_CHANNEL = "desktop:check-system-permission";
 export const DICTATION_IS_AVAILABLE_CHANNEL = "desktop:dictation-is-available";
 export const DICTATION_REQUEST_MICROPHONE_CHANNEL = "desktop:dictation-request-microphone";
-export const DICTATION_PREPARE_CHANNEL = "desktop:dictation-prepare";
-export const DICTATION_TRANSCRIBE_CHANNEL = "desktop:dictation-transcribe";
+export const DICTATION_STREAM_START_CHANNEL = "desktop:dictation-stream-start";
+export const DICTATION_STREAM_AUDIO_CHANNEL = "desktop:dictation-stream-audio";
+export const DICTATION_STREAM_FINISH_CHANNEL = "desktop:dictation-stream-finish";
+export const DICTATION_STREAM_EVENT_CHANNEL = "desktop:dictation-stream-event";
 export const DICTATION_CANCEL_CHANNEL = "desktop:dictation-cancel";
 
 export const PREVIEW_RECORDING_INPUT_CHANNEL = "desktop:preview-recording-input";
