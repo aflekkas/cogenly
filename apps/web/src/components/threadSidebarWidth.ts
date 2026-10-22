@@ -1,9 +1,9 @@
 export const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
-const THREAD_SIDEBAR_DEFAULT_WIDTH = 16 * 16;
+const THREAD_SIDEBAR_DEFAULT_WIDTH = 19 * 16;
 // A list column, not a pane: about iMessage's width, growing a little on
-// wide windows and never past 296px.
-const THREAD_SIDEBAR_MAX_DEFAULT_WIDTH = 296;
-const THREAD_SIDEBAR_VIEWPORT_SHARE = 0.19;
+// wide windows and never past 344px.
+const THREAD_SIDEBAR_MAX_DEFAULT_WIDTH = 344;
+const THREAD_SIDEBAR_VIEWPORT_SHARE = 0.22;
 
 function proportionalThreadSidebarWidth(viewportWidth: number): number {
   return Math.min(
