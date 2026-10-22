@@ -8,12 +8,15 @@ import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { environmentThreadDetails } from "../../state/threads";
 import * as DateTime from "effect/DateTime";
-import { WorkLogCollapse, WorkLogRow, WorkLogShimmer } from "./WorkLog";
-import { DisclosureChevron } from "../ui/disclosure";
-import { subagentOutcome } from "./subagentRow.logic";
-import { SubagentOutcomeGlyph } from "./SubagentOutcomeGlyph";
-import { markdownPreviewText } from "@t3tools/client-runtime/work-log/reasoning-text";
-import ChatMarkdown from "../ChatMarkdown";
+import { WorkLogRow } from "./WorkLog";
+import { BadgeDot } from "../ui/badge-dot";
+import { MiddleTruncate } from "../ui/middle-truncate";
+import {
+  latestSubagentForChild,
+  subagentResumedSince,
+  subagentRowLines,
+  subagentStatusVisual,
+} from "./subagentRow.logic";
 import {
   resolveHandoffEndpoints,
   type HandoffEndpoints,
@@ -37,8 +40,8 @@ import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   ArrowRightLeftIcon,
   ArrowRightIcon,
-  ArrowUpRightIcon,
   BotIcon,
+  ChevronRightIcon,
   GitForkIcon,
   MessageSquareIcon,
   MinusIcon,
@@ -87,8 +90,6 @@ export function V2LifecycleRow(props: {
   readonly providerStatuses: ReadonlyArray<ServerProvider>;
   readonly runs: ReadonlyArray<HandoffTimelineRun>;
   readonly onOpenThread: (threadId: ThreadId) => void;
-  /** Keeps a subagent row's open state across virtualized remounts and holds the scroll anchor. */
-  readonly disclosure?: SubagentRowDisclosure | undefined;
 }) {
   const { item } = props;
   if (item.type === "run_interrupt_request") {
@@ -219,42 +220,12 @@ export function V2LifecycleRow(props: {
         startedAt={item.startedAt}
         completedAt={item.completedAt}
         threadId={item.childThreadId}
-        prompt={item.prompt}
         onOpenThread={props.onOpenThread}
-        disclosure={props.disclosure}
       />
     );
   }
   return null;
 }
-
-/**
- * In-flight states all present as Working, the way the agents fleet view did:
- * detail belongs in the activity line, and a waiting or queued subagent is
- * still the fleet doing its job. Only settled states differentiate. Idle reads
- * as settled rather than in progress, since a resting child looks done unless
- * resumed.
- */
-const STATUS_LABELS: Record<OrchestrationV2TurnItem["status"], string> = {
-  pending: "Queued",
-  running: "Running",
-  waiting: "Waiting",
-  idle: "Idle · resumable",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Stopped",
-  interrupted: "Stopped",
-};
-
-const SETTLED_SUBAGENT_STATUSES = new Set<OrchestrationV2TurnItem["status"]>([
-  "completed",
-  "failed",
-  "cancelled",
-  "interrupted",
-]);
-
-/** The server's placeholder when a child ends without output; the status dot already says it. */
-const GENERIC_CHILD_END = /^Child task ended with status\b/i;
 
 function isoOrNull(value: DateTime.Utc | null | undefined): string | null {
   return value ? DateTime.formatIso(value) : null;
@@ -265,29 +236,40 @@ export function SubagentElapsed({ agent }: { agent: Parameters<typeof AgentElaps
 }
 
 /**
- * A subagent's provider mark, bare and small, in the timeline's icon column.
- * No tile or ring: the row's text carries the state, the glyph only says who.
+ * A subagent's avatar in the timeline: its provider mark on a small round tile,
+ * with a status dot in the corner. Ported from T3 Code (MIT).
  */
-export function SubagentGlyph({
+function SubagentAvatar({
   driver,
   provider,
-  size = "row",
+  status,
 }: {
   driver?: ProviderDriverKind | undefined;
   provider?: ServerProvider | undefined;
-  /** `group` is the work-log icon size; `row` is a step smaller for members under a group. */
-  size?: "row" | "group";
+  status: OrchestrationV2TurnItem["status"] | null;
 }) {
-  const sizeClassName = size === "group" ? "size-4" : "size-3.5";
-  return driver ? (
-    <ProviderInstanceIcon
-      driverKind={driver}
-      displayName={provider?.displayName ?? driver}
-      className="z-auto"
-      iconClassName={sizeClassName}
-    />
-  ) : (
-    <BotIcon aria-hidden className={cn(sizeClassName, "text-icon-muted")} />
+  return (
+    <span
+      aria-hidden
+      className="relative inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-border/70 bg-muted ring-2 ring-background"
+    >
+      {driver ? (
+        <ProviderInstanceIcon
+          driverKind={driver}
+          displayName={provider?.displayName ?? driver}
+          className="z-auto"
+          iconClassName="size-3.5"
+        />
+      ) : (
+        <BotIcon className="size-3.5 text-muted-foreground" />
+      )}
+      <BadgeDot
+        tone={status ? subagentStatusVisual(status).tone : null}
+        size="md"
+        ring="background"
+        className="absolute -right-px -bottom-px"
+      />
+    </span>
   );
 }
 
@@ -340,13 +322,19 @@ export function SubagentNotificationLink(props: {
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly fallback: ReactNode;
 }) {
-  const agent = useAtomValue(
-    environmentThreadDetails.threadAtom(props.parentRef),
-    (thread) =>
-      thread?.projection.subagents.find((agent) => agent.childThreadId === props.childThreadId) ??
-      null,
+  const agent = useAtomValue(environmentThreadDetails.threadAtom(props.parentRef), (thread) =>
+    latestSubagentForChild(thread?.projection.subagents ?? [], props.childThreadId, (agent) =>
+      DateTime.toEpochMillis(agent.startedAt ?? agent.updatedAt),
+    ),
   );
   if (agent === null) return props.fallback;
+  // A subagent resumed since this notification shows its live status, not the outcome reported then.
+  const resumed =
+    NOTIFICATION_OUTCOME_STATUS[props.outcome] !== null &&
+    subagentResumedSince(
+      { status: agent.status, startedAt: isoOrNull(agent.startedAt) },
+      props.createdAt,
+    );
   return (
     <SubagentTimelineLink
       parentRef={props.parentRef}
@@ -366,22 +354,19 @@ export function SubagentNotificationLink(props: {
       completedAt={agent.completedAt}
       threadId={props.childThreadId}
       onOpenThread={props.onOpenThread}
-      event={{
-        status: NOTIFICATION_OUTCOME_STATUS[props.outcome],
-        label: props.failure
-          ? delegatedFailureLabel(props.failure, props.timestampFormat)
-          : NOTIFICATION_OUTCOME_LABEL[props.outcome],
-        timestamp: formatShortTimestamp(props.createdAt, props.timestampFormat),
-      }}
+      {...(resumed
+        ? {}
+        : {
+            event: {
+              status: NOTIFICATION_OUTCOME_STATUS[props.outcome],
+              label: props.failure
+                ? delegatedFailureLabel(props.failure, props.timestampFormat)
+                : NOTIFICATION_OUTCOME_LABEL[props.outcome],
+              timestamp: formatShortTimestamp(props.createdAt, props.timestampFormat),
+            },
+          })}
     />
   );
-}
-
-/** Where a subagent row keeps its open state, keyed by subagent id. */
-export interface SubagentRowDisclosure {
-  readonly isOpen: (subagentId: string) => boolean;
-  /** Called before the row flips; `collapsed` is true when it closes. */
-  readonly onToggle: (subagentId: string, collapsed: boolean) => void;
 }
 
 type SubagentHoverPayload = Parameters<typeof SubagentTimelineLink>[0];
@@ -431,9 +416,10 @@ function SubagentHoverContent(props: SubagentHoverPayload) {
 
 /**
  * A subagent's one row, whatever launched it (a native subagent, a
- * delegate-task call): provider avatar, title, status, elapsed time and a
- * plain one-line preview of its result or progress. Expanding it shows the
- * task brief and the full result; Open goes to the child thread.
+ * delegate-task call), after T3 Code: avatar with status dot, the title over a
+ * one-line preview of its progress or result, and the elapsed time (or when a
+ * notification arrived). The row opens the child thread; the hover card has
+ * the rest.
  */
 function SubagentTimelineLink(props: {
   readonly parentRef: ScopedThreadRef;
@@ -450,9 +436,7 @@ function SubagentTimelineLink(props: {
   readonly startedAt: DateTime.Utc | null;
   readonly completedAt: DateTime.Utc | null;
   readonly threadId: ThreadId | null;
-  readonly prompt?: string | undefined;
   readonly onOpenThread: (threadId: ThreadId) => void;
-  readonly disclosure?: SubagentRowDisclosure | undefined;
   /** Draws a past event about the subagent: its status then, and when it happened instead of elapsed time. */
   readonly event?: {
     readonly status: OrchestrationV2TurnItem["status"] | null;
@@ -479,158 +463,93 @@ function SubagentRow({
     environmentThreadDetails.threadAtom(props.parentRef),
     (thread) => thread?.projection.subagents.find((agent) => agent.id === props.subagentId) ?? null,
   );
-  const [localOpen, setLocalOpen] = useState(false);
-  const [persistedOpen, setPersistedOpen] = useState(
-    () => props.disclosure?.isOpen(props.subagentId) ?? false,
-  );
-  const open = props.disclosure ? persistedOpen : localOpen;
   const threadId = props.threadId;
   const liveStatus = agent?.status ?? props.status;
   const status = props.event ? props.event.status : liveStatus;
-  const statusLabel = props.event?.label ?? STATUS_LABELS[liveStatus];
-  const outcome = subagentOutcome(status ?? liveStatus);
-  const fullResult = (agent?.result ?? props.result)?.trim() ?? "";
-  const result = GENERIC_CHILD_END.test(fullResult) ? "" : fullResult;
-  const progress = (agent?.progress ?? props.progress)?.trim();
-  const settled = SETTLED_SUBAGENT_STATUSES.has(status ?? liveStatus);
-  const rawDetail = settled ? result || progress : progress || result;
-  const detail = rawDetail ? markdownPreviewText(rawDetail) || null : null;
-  const brief = props.prompt?.trim() ?? "";
-  const expandable = brief !== "" || result !== "";
-  const failed = outcome === "failed";
-  const working = outcome === "working";
+  const statusLabel = props.event?.label ?? subagentStatusVisual(liveStatus).label;
+  const { detail, titleStatus } = subagentRowLines({
+    status,
+    liveStatus,
+    statusLabel,
+    result: agent?.result ?? props.result,
+    progress: agent?.progress ?? props.progress,
+    event: props.event !== undefined,
+  });
+  const failed = status === "failed";
   const timing = {
     status: liveStatus,
     startedAt: isoOrNull(agent?.startedAt ?? props.startedAt),
     completedAt: isoOrNull(agent?.completedAt ?? props.completedAt),
   };
-  const toggle = () => {
-    if (!expandable) return;
-    if (props.disclosure) {
-      props.disclosure.onToggle(props.subagentId, open);
-      setPersistedOpen(!open);
-    } else {
-      setLocalOpen(!open);
-    }
-  };
-  // The row opens the child thread; without one it expands the brief instead.
-  const activate = threadId !== null ? () => props.onOpenThread(threadId) : toggle;
-  const interactive = threadId !== null || expandable;
-  const markdownThreadRef = threadId
-    ? scopeThreadRef(props.parentRef.environmentId, threadId)
-    : undefined;
+  const className =
+    "group/subagent flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left";
   return (
-    <div
-      data-v2-item-type="subagent"
-      className="group/timeline-row flex min-w-0 flex-col rounded-md"
-    >
-      <TooltipTrigger
-        handle={hoverHandle}
-        payload={props}
-        delay={200}
-        render={
-          <div
-            role={interactive ? "button" : undefined}
-            tabIndex={interactive ? 0 : undefined}
-            aria-expanded={threadId === null && expandable ? open : undefined}
-            aria-label={threadId !== null ? `Open ${props.title}` : props.title}
+    <TooltipTrigger
+      handle={hoverHandle}
+      payload={props}
+      delay={200}
+      render={
+        threadId === null ? (
+          <div data-v2-item-type="subagent" aria-description={statusLabel} className={className} />
+        ) : (
+          <button
+            type="button"
+            data-v2-item-type="subagent"
+            aria-label={`Open ${props.title}`}
             aria-description={statusLabel}
-            onClick={interactive ? activate : undefined}
-            onKeyDown={(event) => {
-              if (event.target !== event.currentTarget) return;
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                activate();
-              }
-            }}
+            onClick={() => props.onOpenThread(threadId)}
             className={cn(
-              "flex min-h-6 w-full min-w-0 items-center gap-1.5 rounded-md px-0.5 text-left text-sm leading-relaxed select-none [&_*]:select-none",
-              interactive &&
-                "cursor-pointer state-hover state-fade focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+              className,
+              "cursor-pointer state-hover state-fade focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
             )}
           />
-        }
-      >
-        <span className="flex w-6 shrink-0 items-center justify-center" aria-hidden>
-          <SubagentGlyph driver={props.driver} provider={props.provider} />
-        </span>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="min-w-0 truncate text-secondary-label">
-            <WorkLogShimmer active={working}>{props.title}</WorkLogShimmer>
+        )
+      }
+    >
+      <SubagentAvatar driver={props.driver} provider={props.provider} status={status} />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <span className="min-w-0 truncate text-xs font-medium text-foreground">
+            {props.title}
           </span>
-          {detail !== null ? (
+          {titleStatus !== null ? (
             <span
-              key={settled ? "result" : "progress"}
+              key={titleStatus}
               className={cn(
-                "min-w-0 shrink-[4] truncate text-xs swap-motion",
+                "shrink-0 text-3xs swap-motion",
                 failed ? "text-destructive" : "text-muted-foreground",
               )}
             >
-              <span aria-hidden>· </span>
-              {detail}
+              {titleStatus}
             </span>
           ) : null}
-          {expandable ? (
-            <Button
-              variant="ghost-muted"
-              size="icon-tiny"
-              aria-label={open ? "Hide details" : "Show details"}
-              aria-expanded={open}
-              onClick={(event) => {
-                event.stopPropagation();
-                toggle();
-              }}
-              onKeyDown={(event) => event.stopPropagation()}
-            >
-              <DisclosureChevron open={open} reveal />
-            </Button>
-          ) : null}
         </span>
-        <span className="flex size-4 shrink-0 items-center justify-center">
-          <SubagentOutcomeGlyph outcome={outcome} />
+        <span
+          key={detail === null ? "status" : "detail"}
+          className={cn(
+            "block text-2xs leading-relaxed swap-motion",
+            failed ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {detail === null ? (
+            statusLabel
+          ) : detail.includes("/") && !detail.includes(" ") ? (
+            <MiddleTruncate value={detail} showTitle={false} className="flex" />
+          ) : (
+            <span className="block truncate">{detail}</span>
+          )}
         </span>
-        <span className="min-w-8 shrink-0 text-end text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-          {props.event ? props.event.timestamp : <SubagentElapsed agent={timing} />}
-        </span>
-        <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
-          {threadId !== null ? (
-            <ArrowUpRightIcon className="size-3.5 text-icon-muted opacity-0 transition-opacity duration-(--motion-duration-fast) ease-standard group-hover/timeline-row:opacity-70 group-focus-visible/timeline-row:opacity-70 motion-reduce:transition-none" />
-          ) : null}
-        </span>
-      </TooltipTrigger>
-      <WorkLogCollapse open={open}>
-        {/* Aligned under the title, past the glyph column. */}
-        <div className="ms-7 flex min-w-0 flex-col gap-2.5 pt-0.5 pb-2 text-xs select-text">
-          {brief ? (
-            <section className="flex min-w-0 flex-col gap-0.5" aria-label="Task">
-              <h4 className="text-2xs font-medium text-muted-foreground">Task</h4>
-              <p className="line-clamp-6 break-words whitespace-pre-wrap text-secondary-label">
-                {brief}
-              </p>
-            </section>
-          ) : null}
-          {result ? (
-            <section className="flex min-w-0 flex-col gap-0.5" aria-label="Result">
-              <h4 className="text-2xs font-medium text-muted-foreground">Result</h4>
-              <div
-                className={cn(
-                  "max-h-80 overflow-auto text-secondary-label",
-                  failed && "text-destructive",
-                )}
-              >
-                <ChatMarkdown
-                  text={result}
-                  cwd={undefined}
-                  threadRef={markdownThreadRef}
-                  headingLevelOffset={3}
-                  lineBreaks
-                />
-              </div>
-            </section>
-          ) : null}
-        </div>
-      </WorkLogCollapse>
-    </div>
+      </span>
+      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+        {props.event ? props.event.timestamp : <SubagentElapsed agent={timing} />}
+      </span>
+      {threadId !== null ? (
+        <ChevronRightIcon
+          aria-hidden
+          className="size-3.5 shrink-0 text-muted-foreground/60 transition-colors duration-(--motion-duration-fast) ease-out group-hover/subagent:text-foreground"
+        />
+      ) : null}
+    </TooltipTrigger>
   );
 }
 

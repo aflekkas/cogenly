@@ -4,7 +4,6 @@ import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { DisclosureChevron } from "../ui/disclosure";
-import { sharedSubagentDriver, subagentGroupLabel } from "./subagentRow.logic";
 import {
   WorkLogBlock,
   WorkLogButton,
@@ -53,8 +52,6 @@ import {
   type ToolActivityIcon,
 } from "@t3tools/contracts";
 import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { useAtomValue } from "@effect/atom-react";
-import { environmentThreadDetails } from "../../state/threads";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
@@ -81,7 +78,6 @@ import {
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
 import { turnItemHasDetail } from "@t3tools/client-runtime/work-log/item-detail";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
-import { subagentGroupSummary } from "@t3tools/client-runtime/state/subagent-display";
 import { observeResize } from "~/lib/observeResize";
 
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
@@ -316,11 +312,8 @@ import { useLastPresent } from "../ui/overlay-presence";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import {
   isV2LifecycleItem,
-  SubagentGlyph,
-  SubagentElapsed,
   SubagentNotificationLink,
   SubagentHoverCardGroup,
-  type SubagentRowDisclosure,
   V2LifecycleRow,
   type HandoffTimelineRun,
 } from "./V2LifecycleRow";
@@ -329,7 +322,6 @@ import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import { WorkHandoffMarkersAfterRow } from "../work/WorkHandoffMarkers";
 
 import { SkillChipIcon, SkillInlineText } from "./SkillInlineText";
-import * as DateTime from "effect/DateTime";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { forwardWheelToTimeline } from "./timelineMinimapWheel";
 import {
@@ -3562,9 +3554,6 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
 function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event" }> }) {
   const ctx = use(TimelineRowCtx);
   const { item, visibility, sourceThreadId } = row.projectedItem;
-  if (item.type === "subagent" && (row.subagents?.length ?? 1) > 1) {
-    return <V2SubagentGroup key={row.id} row={row} />;
-  }
   if (item.type === "secret_request") {
     return (
       <SecretRequestCard
@@ -3575,7 +3564,7 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
     );
   }
   if (item.type === "subagent") {
-    return <V2SubagentRow row={row} />;
+    return <V2SubagentRows row={row} />;
   }
   if (isV2LifecycleItem(item)) {
     return (
@@ -3751,185 +3740,36 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
   );
 }
 
-/** A turn's only subagent: its own row, open state kept by the timeline. */
-function V2SubagentRow({ row }: { row: Extract<TimelineRow, { kind: "event" }> }) {
-  const ctx = use(TimelineRowCtx);
-  const disclosure = useSubagentRowDisclosure(row.id);
-  return (
-    <V2LifecycleRow
-      environmentId={ctx.activeThreadEnvironmentId}
-      item={row.projectedItem.item}
-      createdAt={row.createdAt}
-      timestampFormat={ctx.timestampFormat}
-      providerStatuses={ctx.providerStatuses}
-      runs={ctx.runs}
-      onOpenThread={ctx.onOpenThread}
-      disclosure={disclosure}
-    />
-  );
-}
-
 /**
- * One elapsed span for the whole group: first launch to last settle, ticking
- * while any member works. A settled member without a completion time leaves
- * the end unknown, so the span is withheld rather than cut short.
+ * A turn's subagents, native or delegated, each its own row as in T3 Code,
+ * stacked under one shared hover card so moving between rows glides it.
  */
-function subagentGroupTiming(
-  agents: ReadonlyArray<{
-    status: OrchestrationV2TurnItem["status"];
-    startedAt: DateTime.Utc | null;
-    completedAt: DateTime.Utc | null;
-  }>,
-) {
-  let startMs: number | null = null;
-  let endMs: number | null = null;
-  let endUnknown = false;
-  for (const agent of agents) {
-    if (agent.startedAt) {
-      const ms = DateTime.toEpochMillis(agent.startedAt);
-      startMs = startMs === null ? ms : Math.min(startMs, ms);
-    }
-    if (agent.completedAt) {
-      const ms = DateTime.toEpochMillis(agent.completedAt);
-      endMs = endMs === null ? ms : Math.max(endMs, ms);
-    } else {
-      endUnknown = true;
-    }
-  }
-  const live = agents.some(
-    ({ status }) => status === "pending" || status === "running" || status === "waiting",
-  );
-  return {
-    status: live ? ("running" as const) : ("completed" as const),
-    startedAt: startMs === null ? null : new Date(startMs).toISOString(),
-    completedAt: live || endUnknown || endMs === null ? null : new Date(endMs).toISOString(),
-  };
-}
-
-/** Subagent rows keep their open state in the timeline's view state and hold its scroll anchor. */
-function useSubagentRowDisclosure(anchorKey: string): SubagentRowDisclosure {
-  const { workGroupViewState, onToggleWorkEntry } = use(TimelineRowCtx);
-  return useMemo(
-    () => ({
-      isOpen: (subagentId) => workGroupViewState.expandedEntries.has(`subagent:${subagentId}`),
-      onToggle: (subagentId, collapsed) => {
-        onToggleWorkEntry(anchorKey, collapsed);
-        if (collapsed) workGroupViewState.expandedEntries.delete(`subagent:${subagentId}`);
-        else workGroupViewState.expandedEntries.add(`subagent:${subagentId}`);
-      },
-    }),
-    [anchorKey, onToggleWorkEntry, workGroupViewState],
-  );
-}
-
-/**
- * Every subagent one turn launched, native or delegated, as one work-log row:
- * a provider glyph, "N subagents · counts", and the span from first launch to
- * last settle. It opens smoothly to each agent's row.
- */
-const V2SubagentGroup = memo(function V2SubagentGroup({
+const V2SubagentRows = memo(function V2SubagentRows({
   row,
 }: {
   row: Extract<TimelineRow, { kind: "event" }>;
 }) {
   const ctx = use(TimelineRowCtx);
-  const groupId = `subagent-group:${row.id}`;
-  const [expanded, setExpanded] = useState(() =>
-    ctx.workGroupViewState.expandedEntries.has(groupId),
-  );
-  const disclosure = useSubagentRowDisclosure(row.id);
   const members = (row.subagents ?? [row.projectedItem]).flatMap(({ item }) =>
     item.type === "subagent" ? [item] : [],
   );
-  const liveAgents = useAtomValue(
-    environmentThreadDetails.threadAtom(
-      scopeThreadRef(ctx.activeThreadEnvironmentId, row.projectedItem.item.threadId),
-    ),
-    (thread) => thread?.projection.subagents,
-  );
-  const agents = members.map((item) => {
-    const live = liveAgents?.find((agent) => agent.id === item.subagentId);
-    return {
-      item,
-      status: live?.status ?? item.status,
-      startedAt: live?.startedAt ?? item.startedAt,
-      completedAt: live?.completedAt ?? item.completedAt,
-    };
-  });
-  const summary = subagentGroupSummary(agents);
-  const label = subagentGroupLabel(agents.map(({ status }) => status));
-  const driver = sharedSubagentDriver(members.map((item) => item.driver));
-  const provider =
-    driver === undefined
-      ? undefined
-      : ctx.providerStatuses.find(
-          (candidate) => candidate.instanceId === members[0]?.providerInstanceId,
-        );
-  const toggle = () => {
-    ctx.onToggleWorkEntry(row.id, expanded);
-    if (expanded) ctx.workGroupViewState.expandedEntries.delete(groupId);
-    else ctx.workGroupViewState.expandedEntries.add(groupId);
-    setExpanded(!expanded);
-  };
   return (
     <WorkLogBlock continues={row.continuesWorkLog}>
-      <div data-subagent-group className="flex min-w-0 flex-col">
-        <WorkLogButton
-          aria-label={label.count}
-          aria-description={label.summary}
-          aria-expanded={expanded}
-          onClick={toggle}
-          icon={<SubagentGlyph driver={driver} provider={provider} size="group" />}
-          label={
-            <span key={label.text} className="swap-motion">
-              {label.count}
-              {label.summary ? (
-                <>
-                  <span aria-hidden className="text-muted-foreground">
-                    {" · "}
-                  </span>
-                  <span
-                    className={summary.failed && !summary.active ? "text-destructive" : undefined}
-                  >
-                    {label.summary}
-                  </span>
-                </>
-              ) : null}
-            </span>
-          }
-          active={summary.active}
-          disclosure={expanded}
-          trailing={
-            <>
-              {/* Same columns as the member rows, so elapsed times line up. */}
-              <span className="size-4 shrink-0" aria-hidden />
-              <span className="min-w-8 shrink-0 text-end text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                <SubagentElapsed agent={subagentGroupTiming(agents)} />
-              </span>
-              <span className="size-4 shrink-0" aria-hidden />
-            </>
-          }
-        />
-        <WorkLogCollapse open={expanded}>
-          {/* Indented under the glyph, so each agent reads as a child of the turn's spawn. */}
-          <div className="ms-3 flex min-w-0 flex-col border-s border-border/60 ps-1.5 pt-0.5 pb-1">
-            <SubagentHoverCardGroup>
-              {members.map((item) => (
-                <V2LifecycleRow
-                  environmentId={ctx.activeThreadEnvironmentId}
-                  key={item.id}
-                  item={item}
-                  createdAt={row.createdAt}
-                  timestampFormat={ctx.timestampFormat}
-                  providerStatuses={ctx.providerStatuses}
-                  runs={ctx.runs}
-                  onOpenThread={ctx.onOpenThread}
-                  disclosure={disclosure}
-                />
-              ))}
-            </SubagentHoverCardGroup>
-          </div>
-        </WorkLogCollapse>
+      <div className="flex min-w-0 flex-col">
+        <SubagentHoverCardGroup>
+          {members.map((item) => (
+            <V2LifecycleRow
+              key={item.id}
+              environmentId={ctx.activeThreadEnvironmentId}
+              item={item}
+              createdAt={row.createdAt}
+              timestampFormat={ctx.timestampFormat}
+              providerStatuses={ctx.providerStatuses}
+              runs={ctx.runs}
+              onOpenThread={ctx.onOpenThread}
+            />
+          ))}
+        </SubagentHoverCardGroup>
       </div>
     </WorkLogBlock>
   );
