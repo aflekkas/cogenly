@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
   type MutableRefObject,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
@@ -39,6 +40,7 @@ import {
   terminalRunState,
   type AgentTerminalEntry,
 } from "../AgentTerminalsPanel.logic";
+import { PanelTab } from "../PanelTab";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentRunsView } from "./AgentRunsView";
@@ -163,59 +165,50 @@ function TabStatus({ tab }: { tab: BottomPanelTab }) {
   );
 }
 
-const AgentTabStrip = memo(function AgentTabStrip(props: {
+/**
+ * Above the run list once more than one agent has run commands: a compact
+ * PanelTab per agent. With one agent there is nothing to switch, so no strip.
+ */
+const AgentSwitcher = memo(function AgentSwitcher(props: {
   tabs: ReadonlyArray<BottomPanelTab>;
   activeTabId: string | null;
   onSelect: (tabId: string) => void;
   onCloseTab: (tab: BottomPanelTab) => void;
 }) {
   return (
-    <div role="tablist" aria-label="Agents" className="flex min-w-0 flex-1 items-center gap-0.5">
+    <div
+      role="tablist"
+      aria-label="Agents"
+      className="flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto px-1 [scrollbar-width:none] @max-[40rem]/terminals:pe-9"
+    >
       {props.tabs.map((tab) => {
         const active = tab.id === props.activeTabId;
         return (
-          <div
-            key={tab.id}
-            className={cn(
-              "group/agent-tab relative flex h-7 min-w-0 max-w-56 shrink items-center rounded-md transition-colors duration-(--motion-duration-fast) ease-out",
-              active
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-            )}
-          >
+          <PanelTab.Body key={tab.id} active={active} className="max-w-40 shrink-0 gap-1">
             <button
               type="button"
               role="tab"
               aria-selected={active}
               data-bottom-panel-tab={tab.id}
               onClick={() => props.onSelect(tab.id)}
-              className="flex h-full min-w-0 items-center gap-1.5 rounded-md ps-2 pe-6 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
             >
-              {tab.primary ? (
-                <TerminalSquare aria-hidden className="size-3.5 shrink-0" />
-              ) : (
-                <Bot aria-hidden className="size-3.5 shrink-0" />
-              )}
-              <span className="min-w-0 truncate">{tab.title}</span>
-              {tab.liveRunCount > 0 ? (
-                <span className="shrink-0 text-2xs tabular-nums text-success">
-                  {tab.liveRunCount}
-                </span>
-              ) : null}
+              <PanelTab.Icon>
+                {tab.primary ? (
+                  <TerminalSquare aria-hidden className="size-3.5" />
+                ) : (
+                  <Bot aria-hidden className="size-3.5" />
+                )}
+              </PanelTab.Icon>
+              <PanelTab.Label>{tab.title}</PanelTab.Label>
               <TabStatus tab={tab} />
             </button>
-            <button
-              type="button"
+            <PanelTab.Close
+              active={active}
               aria-label={`Close ${tab.title} tab`}
               onClick={() => props.onCloseTab(tab)}
-              className={cn(
-                "absolute end-1 flex size-4 items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-none transition-opacity duration-(--motion-duration-fast) ease-out hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset group-hover/agent-tab:opacity-100",
-                active && "opacity-60",
-              )}
-            >
-              <X className="size-3" />
-            </button>
-          </div>
+            />
+          </PanelTab.Body>
         );
       })}
     </div>
@@ -238,8 +231,9 @@ export interface BottomTerminalPanelProps {
 }
 
 /**
- * The resizable panel under the chat, as in T3 Code: one tab per agent that
- * ran commands, each showing that agent's command list and live output. It
+ * The resizable panel under the chat, as in T3 Code: each agent that ran
+ * commands gets its command list and live output, with a switcher above the
+ * list once there is more than one agent and the close × in the corner. It
  * opens only when the user asks (header toggle, shortcut, a run in the
  * timeline); an agent starting a command updates its tab in the background.
  *
@@ -475,9 +469,18 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
     case "runs":
       body = activeTab ? (
         <AgentTabContent
-          key={activeTab.id}
           parentRef={threadRef}
           tab={activeTab}
+          agentSwitcher={
+            tabs.length > 1 ? (
+              <AgentSwitcher
+                tabs={tabs}
+                activeTabId={activeTab.id}
+                onSelect={selectTab}
+                onCloseTab={closeTab}
+              />
+            ) : null
+          }
           selectedRunId={panelState.selectedRunByTabId?.[activeTab.id]}
           canOperate={canOperate}
           visible={open}
@@ -536,31 +539,24 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
           {/* The grabber: faint at rest, brighter while the edge is hovered or dragged. */}
           <span className="pointer-events-none absolute top-[3px] left-1/2 h-[3px] w-8 -translate-x-1/2 rounded-full bg-foreground/10 transition-colors duration-(--motion-duration-fast) ease-out group-hover/resize:bg-foreground/25 group-active/resize:bg-foreground/35" />
         </div>
-        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/60 ps-2 pe-1.5 pt-1">
-          <AgentTabStrip
-            tabs={tabs}
-            activeTabId={activeTab?.id ?? null}
-            onSelect={selectTab}
-            onCloseTab={closeTab}
-          />
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label="Close panel"
-                  onClick={() => useBottomPanelStore.getState().setOpen(threadRef, false)}
-                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-(--motion-duration-fast) ease-out hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                />
-              }
-            >
-              <X className="size-3.5" />
-            </TooltipTrigger>
-            <TooltipPopup side="top">
-              {`Close panel${props.toggleShortcutLabel ? ` (${props.toggleShortcutLabel})` : ""}`}
-            </TooltipPopup>
-          </Tooltip>
-        </div>
+        {/* No header row: the × sits in the top-right corner, beside the run's actions. */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label="Close panel"
+                onClick={() => useBottomPanelStore.getState().setOpen(threadRef, false)}
+                className="absolute end-1.5 top-1.5 z-30 flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-(--motion-duration-fast) ease-out hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              />
+            }
+          >
+            <X className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            {`Close panel${props.toggleShortcutLabel ? ` (${props.toggleShortcutLabel})` : ""}`}
+          </TooltipPopup>
+        </Tooltip>
         {body}
       </div>
     </div>
@@ -570,6 +566,7 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
 const AgentTabContent = memo(function AgentTabContent(props: {
   parentRef: ScopedThreadRef;
   tab: BottomPanelTab;
+  agentSwitcher: ReactNode;
   selectedRunId: string | undefined;
   canOperate: boolean;
   visible: boolean;
@@ -600,8 +597,8 @@ const AgentTabContent = memo(function AgentTabContent(props: {
   }
 
   return (
-    // Keyed by tab: a tab switch fades the new agent's runs in.
-    <div className="reveal-motion @container/terminals flex min-h-0 min-w-0 flex-1 flex-col">
+    // Not keyed by tab, so the switcher stays put; AgentRunsView fades the new agent's runs in.
+    <div className="@container/terminals flex min-h-0 min-w-0 flex-1 flex-col">
       <AgentRunsView
         threadRef={tabThreadRef}
         runs={runs}
@@ -620,6 +617,7 @@ const AgentTabContent = memo(function AgentTabContent(props: {
         }}
         onStop={props.onStop}
         onAddTerminalContext={props.onAddTerminalContext}
+        listHeader={props.agentSwitcher}
       />
     </div>
   );

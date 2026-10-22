@@ -1,4 +1,10 @@
-import { terminalSections, type AgentTerminalEntry } from "../AgentTerminalsPanel.logic";
+import { commandDisplayText } from "@t3tools/client-runtime/work-log/command-label";
+
+import {
+  commandTitle,
+  terminalSections,
+  type AgentTerminalEntry,
+} from "../AgentTerminalsPanel.logic";
 
 /** As in T3 Code's terminal drawer: a fresh panel's height, and the floor a drag stops at. */
 export const BOTTOM_PANEL_DEFAULT_HEIGHT = 280;
@@ -173,4 +179,48 @@ export function findRunForToolCall(
     }
   }
   return best ? { tabId: best.tabId, terminalId: best.terminalId } : null;
+}
+
+// Steps that only make room for the real one, as `mkdir -p repos && cd repos && git clone …` does.
+const SCAFFOLD_STEP = /^(?:mkdir|touch)(?:\s|$)/;
+const STEP_SEPARATOR = /^\s*(?:&&|\|\||;)\s*/;
+// `https://github.com/owner/repo(.git)` and `git@github.com:owner/repo(.git)`.
+const HOSTED_REPO =
+  /(?:https?:\/\/(?:www\.)?|git@)(?:github\.com|gitlab\.com|bitbucket\.org)[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?(?=[\s/'"]|$)/g;
+const CLONE_SOURCE = /^(?:[a-z+]+:\/\/|git@|[\w.-]+\/[\w.-]+$)/;
+
+function condenseRepoUrls(title: string): string {
+  const condensed = title.replace(HOSTED_REPO, "$1");
+  // `git clone -q --depth 1 <repo> dir` reads as `git clone <repo>`.
+  const clone = /^git\s+clone\s+(.*)$/.exec(condensed);
+  if (!clone) return condensed;
+  const source = clone[1]!.split(/\s+/).find((token) => CLONE_SOURCE.test(token));
+  return source ? `git clone ${source}` : condensed;
+}
+
+/**
+ * A run list row's title: `commandTitle`, past any `mkdir`/`touch` scaffolding,
+ * with hosted repository URLs shortened to `owner/repo`. The row's tooltip and
+ * the detail pane keep the full command.
+ */
+export function runListTitle(command: string): string {
+  let rest = commandDisplayText(command).trim();
+  let title = commandTitle(rest);
+  for (let step = 0; step < 8 && SCAFFOLD_STEP.test(title); step += 1) {
+    const at = rest.indexOf(title);
+    if (at === -1) break;
+    const after = rest.slice(at + title.length).replace(STEP_SEPARATOR, "");
+    if (after.length === 0 || after === rest) break;
+    const next = commandTitle(after);
+    // A heredoc body or a stray quote is not a step of its own.
+    if (!/^[\w./~]/.test(next)) break;
+    rest = after;
+    title = next;
+  }
+  return condenseRepoUrls(title);
+}
+
+/** A path with the user's home folder written as `~`. */
+export function shortenHomePath(path: string): string {
+  return path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
 }

@@ -7,7 +7,6 @@ import { Ban, Check, CircleAlert, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { readLocalApi } from "~/localApi";
-import { cn } from "~/lib/utils";
 import { previewEnvironment } from "../../state/preview";
 import { useEnvironmentQuery } from "../../state/query";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
@@ -37,33 +36,33 @@ export const RUN_TONE_TEXT: Record<TerminalRunTone, string> = {
   danger: "text-destructive-foreground",
 };
 
-/** A static marker for how a run stands. Live is a dot, never a spinner. */
+/**
+ * A static marker for how a run stands. Live is a dot, never a spinner. Every
+ * state sits in the same box, so a column of them lines up.
+ */
 export function RunStateGlyph({ state }: { state: TerminalRunState }) {
-  const box = "flex size-3.5 shrink-0 items-center justify-center";
+  return (
+    <span aria-hidden className="flex size-3.5 shrink-0 items-center justify-center">
+      <RunStateMark state={state} />
+    </span>
+  );
+}
+
+function RunStateMark({ state }: { state: TerminalRunState }) {
   switch (state.kind) {
     case "starting":
     case "running":
-      return (
-        <span aria-hidden className={box}>
-          <span className="size-1.5 rounded-full bg-success ring-3 ring-success/15" />
-        </span>
-      );
+      return <span className="size-1.5 rounded-full bg-success ring-3 ring-success/15" />;
     case "ended":
-      return (
-        <span aria-hidden className={box}>
-          <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-        </span>
-      );
+      return <span className="size-1.5 rounded-full bg-muted-foreground/40" />;
     case "succeeded":
-      return <Check aria-hidden className={cn(box, "size-3.5 text-success/75")} />;
+      return <Check className="size-3.5 text-success/75" />;
     case "failed":
-      return <X aria-hidden className={cn(box, "size-3.5 text-destructive-foreground")} />;
+      return <X className="size-3.5 text-destructive-foreground" />;
     case "killed":
-      return <Ban aria-hidden className={cn(box, "size-3 text-muted-foreground")} />;
+      return <Ban className="size-3 text-muted-foreground" />;
     case "error":
-      return (
-        <CircleAlert aria-hidden className={cn(box, "size-3.5 text-destructive-foreground")} />
-      );
+      return <CircleAlert className="size-3.5 text-destructive-foreground" />;
   }
 }
 

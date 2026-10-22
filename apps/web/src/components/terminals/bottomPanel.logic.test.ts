@@ -10,6 +10,8 @@ import {
   clampBottomPanelHeight,
   findRunForToolCall,
   resolveActiveBottomPanelTab,
+  runListTitle,
+  shortenHomePath,
 } from "./bottomPanel.logic";
 
 function run(
@@ -186,5 +188,37 @@ describe("bottom panel height", () => {
     expect(bottomPanelMaxHeight({ viewportHeight: 200, columnHeight: 200 })).toBe(
       BOTTOM_PANEL_MIN_HEIGHT,
     );
+  });
+});
+
+describe("runListTitle", () => {
+  it("names the step that does the work, not the folder made for it", () => {
+    expect(
+      runListTitle(
+        "mkdir -p repos && cd repos && git clone -q --depth 1 https://github.com/the-ora/browser ora && git clone -q --depth 1 https://github.com/nook/nook",
+      ),
+    ).toBe("git clone the-ora/browser");
+    expect(runListTitle(`bash -lc 'mkdir -p out && touch out/a && pnpm build'`)).toBe("pnpm build");
+  });
+
+  it("shortens hosted repository URLs and keeps other commands as commandTitle has them", () => {
+    expect(runListTitle("git clone git@github.com:acme/app.git")).toBe("git clone acme/app");
+    expect(runListTitle("curl -sL https://github.com/acme/app/releases")).toBe(
+      "curl -sL acme/app/releases",
+    );
+    expect(runListTitle("cd /tmp && ls -la ~/Library")).toBe("ls -la ~/Library");
+    expect(runListTitle("mkdir -p build")).toBe("mkdir -p build");
+    expect(runListTitle(`cd /tmp/x mkdir app cat > package.json <<'EOF' { } EOF`)).toBe(
+      "mkdir app cat > package.json",
+    );
+  });
+});
+
+describe("shortenHomePath", () => {
+  it("writes the home folder as ~", () => {
+    expect(shortenHomePath("/Users/ada/.cogenly/scratch/repo")).toBe("~/.cogenly/scratch/repo");
+    expect(shortenHomePath("/home/ada")).toBe("~");
+    expect(shortenHomePath("/Users")).toBe("/Users");
+    expect(shortenHomePath("/repo")).toBe("/repo");
   });
 });
