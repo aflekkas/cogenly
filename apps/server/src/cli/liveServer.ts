@@ -108,5 +108,3 @@ export const makeLiveRpcClient = (url: string) =>
     );
     return yield* RpcClient.make(WsRpcGroup).pipe(Effect.provideContext(protocol));
   });
-
-export type LiveRpcClient = Effect.Success<ReturnType<typeof makeLiveRpcClient>>;
