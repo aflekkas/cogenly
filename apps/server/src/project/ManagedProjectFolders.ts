@@ -3,7 +3,8 @@
  * rather than ones the user picks:
  *
  * - `<baseDir>/scratch`: the Scratch project ("No project"), with a folder of
- *   its own for each thread;
+ *   its own for each thread (a thread filed in a project runs in the
+ *   project's folder instead);
  * - `<projectsRoot>/Repositories/<slug>`: projects started from just a name,
  *   each a new Git repository with a README, an icon, and a first commit;
  * - `<projectsRoot>/<Project>/<slug>`: the same, filed in a project.
@@ -117,13 +118,17 @@ export class ManagedProjectFolders extends Context.Service<
     /** Finds or creates the Scratch project and (re)creates its folder. */
     readonly ensureScratchProject: Effect.Effect<{ readonly projectId: ProjectId }, ScratchError>;
     /**
-     * Claims a fresh folder for a new thread in the Scratch project, named from
-     * the date, its first message, and its id. None for every other project.
+     * The folder a new thread in the Scratch project runs in. Filed in a
+     * project (`labelId`), that is the project's own folder, made if missing,
+     * so repository-less work keeps its files with the project. Otherwise it
+     * claims a fresh folder named from the date, its first message, and its
+     * id. None for every other project.
      */
     readonly folderForThread: (input: {
       readonly projectId: ProjectId;
       readonly threadId: ThreadId;
       readonly text: string;
+      readonly labelId?: ProjectLabelId | undefined;
     }) => Effect.Effect<Option.Option<string>, ScratchFolderError>;
     /** The folder that holds projects started from just a name, under the projects root. */
     readonly namedProjectsRoot: Effect.Effect<string, NamedProjectFolderError>;
@@ -264,6 +269,10 @@ const make = Effect.gen(function* () {
   const labels = yield* ProjectLabelService.ProjectLabelService;
   const home = yield* HostProcess.HomeDirectory;
   const crypto = yield* Crypto.Crypto;
+  // Optional like in ProjectLabelService: without it the label's folder is
+  // `<root>/<sanitized name>/`, with it the reconciled folder (which a
+  // Finder rename may have moved).
+  const labelFolders = yield* Effect.serviceOption(ProjectLabelFolders.ProjectLabelFolders);
 
   /**
    * Claims the first free folder among `folderFor(1)`, `folderFor(2)`, ...,
@@ -376,12 +385,38 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => false),
     );
 
+  // A project's own folder, made (with its id file and Resources/) when it
+  // went missing, so the thread's files land beside the project's.
+  const labelDirFor = Effect.fn("ManagedProjectFolders.labelDirFor")(function* (
+    labelId: ProjectLabelId,
+  ) {
+    const fallback = `<project ${labelId}>`;
+    const label = (yield* labels
+      .read(labelId)
+      .pipe(Effect.mapError((cause) => new ScratchFolderError({ folder: fallback, cause })))).label;
+    if (Option.isSome(labelFolders)) {
+      return (yield* labelFolders.value
+        .ensureForLabel(label)
+        .pipe(Effect.mapError((cause) => new ScratchFolderError({ folder: fallback, cause })))).dir;
+    }
+    const projectsRoot = yield* serverSettings.getSettings.pipe(
+      Effect.map((settings) =>
+        resolveProjectsRootDirectory(settings.projectsRoot, home, config.baseDir, path),
+      ),
+      Effect.mapError((cause) => new ScratchFolderError({ folder: fallback, cause })),
+    );
+    const dir = path.join(projectsRoot, sanitizePathSegment(label.name, "project"));
+    yield* makeScratchFolder(dir);
+    return dir;
+  });
+
   const folderForThread: ManagedProjectFolders["Service"]["folderForThread"] = Effect.fn(
     "ManagedProjectFolders.folderForThread",
   )(function* (input) {
     const root = yield* scratchRoot;
     if (Option.isNone(root)) return Option.none();
     if (!(yield* isScratchProject(input.projectId, root.value))) return Option.none();
+    if (input.labelId !== undefined) return Option.some(yield* labelDirFor(input.labelId));
     const date = DateTime.formatIso(yield* DateTime.now).slice(0, 10);
     const words = folderWords(input.text);
     const id = input.threadId.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -421,11 +456,6 @@ const make = Effect.gen(function* () {
     ),
     Effect.mapError((cause) => new NamedProjectFolderError({ folder: "<projects root>", cause })),
   );
-
-  // Optional like in ProjectLabelService: without it the label's folder is
-  // `<root>/<sanitized name>/`, with it the reconciled folder (which a
-  // Finder rename may have moved).
-  const labelFolders = yield* Effect.serviceOption(ProjectLabelFolders.ProjectLabelFolders);
 
   const claimNamedFolder = Effect.fn("ManagedProjectFolders.claimNamedFolder")(function* (
     name: string,

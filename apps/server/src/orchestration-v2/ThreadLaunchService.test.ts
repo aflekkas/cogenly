@@ -44,6 +44,7 @@ type Step =
 
 function harness(options: { readonly labelMissing?: boolean } = {}) {
   const steps: Step[] = [];
+  const createdWorktreePaths: Array<string | null> = [];
   const projection = {
     thread: { id: threadId, projectId, worktreePath: "/scratch/draft" },
     runs: [{ id: runId, status: "running" }],
@@ -69,13 +70,20 @@ function harness(options: { readonly labelMissing?: boolean } = {}) {
         // Ids come from the input; nothing is allocated.
         Layer.succeed(IdAllocator.IdAllocatorV2, {} as IdAllocator.IdAllocatorV2["Service"]),
         Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-          folderForThread: () => Effect.succeedSome("/scratch/draft"),
+          // Scratch threads filed in a project run in its folder.
+          folderForThread: (input) =>
+            Effect.succeedSome(
+              input.labelId === undefined ? "/scratch/draft" : `/projects/${input.labelId}`,
+            ),
         }),
         Layer.mock(ThreadManagement.ThreadManagementService)({
           assertProviderInstanceEnabled: () => Effect.void,
           dispatch: (command) =>
             Effect.sync(() => {
               steps.push({ kind: "dispatch", type: command.type });
+              if (command.type === "thread.create") {
+                createdWorktreePaths.push(command.worktreePath ?? null);
+              }
               const event =
                 command.type === "message.dispatch"
                   ? { type: "run.created", threadId, payload: { id: runId } }
@@ -101,7 +109,7 @@ function harness(options: { readonly labelMissing?: boolean } = {}) {
       ),
     ),
   );
-  return { steps, layer };
+  return { steps, createdWorktreePaths, layer };
 }
 
 const launchInput = (overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {}) =>
@@ -136,6 +144,24 @@ describe("ThreadLaunchService project filing", () => {
         { kind: "file", threadId, folderId },
         { kind: "dispatch", type: "message.dispatch" },
       ]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("runs repository-less Work filed in a project in the project's folder", () => {
+    const { createdWorktreePaths, layer } = harness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      yield* launches.launch(launchInput({ surface: "work", projectFolderId: folderId }));
+      expect(createdWorktreePaths).toEqual([`/projects/${folderId}`]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("runs unfiled repository-less Work in a scratch folder of its own", () => {
+    const { createdWorktreePaths, layer } = harness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      yield* launches.launch(launchInput({ surface: "work" }));
+      expect(createdWorktreePaths).toEqual(["/scratch/draft"]);
     }).pipe(Effect.provide(layer));
   });
 

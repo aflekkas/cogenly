@@ -4,7 +4,9 @@ import {
   Project,
   ProjectLabelError,
   ProjectLabelId,
+  ProjectId,
   ProjectLabelWithRepositories,
+  ThreadId,
   type ProjectLabelRepository,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -54,6 +56,11 @@ const nodeFileSystem: Layer.Layer<FileSystem.FileSystem, never, never> = NodeFil
 const nodePath: Layer.Layer<Path.Path, never, never> = NodePath.layer;
 const nodeCrypto: Layer.Layer<Crypto.Crypto, never, never> = NodeCrypto.layer;
 
+const scratchProjectId = ProjectId.make("project:scratch");
+const repositoryProjectId = ProjectId.make("project:acme");
+/** Set by `useProjectsRoot` from the test config's base dir. */
+let scratchWorkspaceRoot: string | null = null;
+
 const layerTest = ManagedProjectFolders.layer.pipe(
   Layer.provideMerge(
     Layer.mock(ProjectService.ProjectService)({
@@ -71,6 +78,24 @@ const layerTest = ManagedProjectFolders.layer.pipe(
           }),
         ),
       getByWorkspaceRoot: () => Effect.succeed(Option.none()),
+      // The Scratch project ("No project") lives at `<baseDir>/scratch`.
+      getById: (projectId) =>
+        Effect.succeed(
+          projectId === scratchProjectId && scratchWorkspaceRoot !== null
+            ? Option.some(
+                Project.make({
+                  id: scratchProjectId,
+                  title: "No project",
+                  workspaceRoot: scratchWorkspaceRoot,
+                  defaultModelSelection: null,
+                  scripts: [],
+                  createdAt: "2026-01-01T00:00:00.000Z",
+                  updatedAt: "2026-01-01T00:00:00.000Z",
+                  deletedAt: null,
+                }),
+              )
+            : Option.none(),
+        ),
     }),
   ),
   Layer.provideMerge(
@@ -113,6 +138,7 @@ const useProjectsRoot = Effect.fn("useProjectsRoot")(function* () {
   );
   const projectsRoot = path.join(home, "Cogenly");
   yield* settings.updateSettings({ projectsRoot });
+  scratchWorkspaceRoot = path.resolve((yield* ServerConfig.ServerConfig).baseDir, "scratch");
   return projectsRoot;
 });
 
@@ -185,6 +211,68 @@ it.layer(layerTest)("ManagedProjectFolders", (it) => {
         expect(yield* fileSystem.exists(path.join(projectsRoot, "Spawn Partners", "acme"))).toBe(
           false,
         );
+      }),
+    );
+  });
+
+  describe("folderForThread", () => {
+    const threadId = ThreadId.make("thread:0123456789abcdef");
+
+    it.effect("claims a dated folder of its own for unfiled Scratch threads", () =>
+      Effect.gen(function* () {
+        const folders = yield* ManagedProjectFolders.ManagedProjectFolders;
+        const config = yield* ServerConfig.ServerConfig;
+        const path = yield* Path.Path;
+        yield* useProjectsRoot();
+
+        const folder = yield* folders.folderForThread({
+          projectId: scratchProjectId,
+          threadId,
+          text: "Convert these PNGs",
+        });
+
+        const claimed = Option.getOrThrow(folder);
+        expect(path.dirname(claimed)).toBe(path.resolve(config.baseDir, "scratch"));
+        expect(path.basename(claimed)).toMatch(/^\d{4}-\d{2}-\d{2}-convert-these-pngs-/);
+      }),
+    );
+
+    it.effect(
+      "runs Scratch threads filed in a project in the project's folder, made if missing",
+      () =>
+        Effect.gen(function* () {
+          const folders = yield* ManagedProjectFolders.ManagedProjectFolders;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const projectsRoot = yield* useProjectsRoot();
+          const projectDir = path.join(projectsRoot, "Spawn Partners");
+          expect(yield* fileSystem.exists(projectDir)).toBe(false);
+
+          const folder = yield* folders.folderForThread({
+            projectId: scratchProjectId,
+            threadId,
+            text: "Draft the brief",
+            labelId,
+          });
+
+          expect(folder).toEqual(Option.some(projectDir));
+          expect(yield* fileSystem.exists(projectDir)).toBe(true);
+        }),
+    );
+
+    it.effect("leaves repositories alone, filed or not", () =>
+      Effect.gen(function* () {
+        const folders = yield* ManagedProjectFolders.ManagedProjectFolders;
+        yield* useProjectsRoot();
+
+        const folder = yield* folders.folderForThread({
+          projectId: repositoryProjectId,
+          threadId,
+          text: "Fix the build",
+          labelId,
+        });
+
+        expect(Option.isNone(folder)).toBe(true);
       }),
     );
   });

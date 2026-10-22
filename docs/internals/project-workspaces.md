@@ -24,7 +24,11 @@ it does not own a copy.
 - Links and notes are files too (`.url` / `.md`), so the folder stays complete
   without the database.
 - A chat in a project runs with the project directory as its working directory.
-  Work in a repository runs in that repository (its worktree), as today.
+  Work in a repository runs in that repository (its worktree), as today. Work
+  started in a project with no repository runs in the project directory too:
+  the launch records it as the thread's worktree path (made if missing), so its
+  cwd stays put when the Work is later re-filed, and provider sessions, which
+  are keyed by cwd, keep resuming.
 - Moving a chat to a project forks it: the new chat is created in the project,
   carries the history (context handoff), and starts in the project directory.
   The original chat is left where it was. Chats with turns are never

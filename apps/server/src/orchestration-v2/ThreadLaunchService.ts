@@ -942,7 +942,8 @@ const make = Effect.gen(function* () {
         }
 
         // A Scratch thread launched at the project root runs in a folder of its
-        // own. Only the first attempt claims one; a retry replays its create.
+        // own, or in its project's folder when it is filed in one. Only the
+        // first attempt claims one; a retry replays its create.
         const workspaceStrategy: ThreadLaunchWorkspaceStrategy =
           input.workspaceStrategy.type === "root" && Option.isNone(launchReceipt)
             ? Option.match(
@@ -951,6 +952,9 @@ const make = Effect.gen(function* () {
                     projectId: input.projectId,
                     threadId: candidateThreadId,
                     text: input.initialMessage?.text ?? input.title,
+                    ...(input.projectFolderId === undefined
+                      ? {}
+                      : { labelId: input.projectFolderId }),
                   })
                   .pipe(Effect.mapError(mapError(input, "provision-worktree", candidateThreadId))),
                 {

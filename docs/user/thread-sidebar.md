@@ -148,6 +148,10 @@ palette, or press `mod+alt+n`. It starts on your current machine; before sending
 from the machine menu to move it there. To move a draft into a project, pick the
 project in the heading.
 
+Work started in a project without a repository (**No repository** under the
+heading) runs in the project's own folder, so the files the agent makes sit with
+the project's other files.
+
 Each thread without a project works in its own folder under `~/.cogenly/scratch` (the
 `scratch` folder of your T3 data directory), named after its date, the first words
 of its first message, and a short id, like
