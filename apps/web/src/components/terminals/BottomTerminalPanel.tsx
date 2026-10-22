@@ -244,8 +244,8 @@ export interface BottomTerminalPanelProps {
  * timeline); an agent starting a command updates its tab in the background.
  *
  * Open and close lay the chat out once, at its final size, then glide: the
- * panel slides on a translate while the content above follows its top edge,
- * so nothing resizes per frame. Reduced motion fades the panel only.
+ * drawer slides solid on a translate while the content above follows its top
+ * edge, so nothing resizes per frame. Reduced motion fades the panel only.
  */
 export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
   const { threadRef, threadStarted } = props;
@@ -324,16 +324,11 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
       easing: PANEL_MOTION_EASING,
       fill: "both",
     };
-    const slide = motion.reduced ? [] : [`0 ${distance}px`, "0 0"];
-    const panelFrames: Keyframe[] = motion.opening
-      ? [
-          { opacity: 0, ...(slide[0] ? { translate: slide[0] } : {}) },
-          { opacity: 1, ...(slide[1] ? { translate: slide[1] } : {}) },
-        ]
-      : [
-          { opacity: 1, ...(slide[1] ? { translate: slide[1] } : {}) },
-          { opacity: 0, ...(slide[0] ? { translate: slide[0] } : {}) },
-        ];
+    // The sheet rises solid from the window's bottom edge (clipped there by the
+    // workspace) and sinks back the same way; reduced motion fades it instead.
+    const hidden: Keyframe = motion.reduced ? { opacity: 0 } : { translate: `0 ${distance}px` };
+    const shown: Keyframe = motion.reduced ? { opacity: 1 } : { translate: "0 0" };
+    const panelFrames = motion.opening ? [hidden, shown] : [shown, hidden];
     const animations = [panel.animate(panelFrames, timing)];
     for (const target of motion.targets) {
       const offset = distance * target.shift * (motion.opening ? 1 : -1);
@@ -514,46 +509,60 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
       aria-hidden={!open}
       inert={!open}
       className={cn(
-        "z-40 flex min-w-0 flex-col border-t border-border/80 bg-background",
+        // A drawer: a raised sheet with rounded top corners, inset from the
+        // sidebar and the right panel, that rests on the window's bottom edge.
+        // The wrapper keeps the gap and the height; the sheet draws the surface.
+        "z-40 flex min-w-0 flex-col px-2",
         open ? "relative shrink-0" : "pointer-events-none absolute inset-x-0 bottom-0",
       )}
       style={{ height }}
     >
       <div
-        aria-hidden
-        className="absolute inset-x-0 -top-1 z-20 h-2 cursor-row-resize"
-        onPointerDown={onResizePointerDown}
-        onPointerMove={onResizePointerMove}
-        onPointerUp={onResizePointerEnd}
-        onPointerCancel={onResizePointerEnd}
-        onLostPointerCapture={onResizePointerEnd}
-      />
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border/60 ps-2 pe-1">
-        <AgentTabStrip
-          tabs={tabs}
-          activeTabId={activeTab?.id ?? null}
-          onSelect={selectTab}
-          onCloseTab={closeTab}
-        />
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                aria-label="Close panel"
-                onClick={() => useBottomPanelStore.getState().setOpen(threadRef, false)}
-                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-(--motion-duration-fast) ease-out hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-              />
-            }
-          >
-            <X className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipPopup side="top">
-            {`Close panel${props.toggleShortcutLabel ? ` (${props.toggleShortcutLabel})` : ""}`}
-          </TooltipPopup>
-        </Tooltip>
+        className={cn(
+          "group/bottom-panel relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-2xl border border-b-0 bg-card surface-raised dark:bg-surface-raised",
+          // Its shadow falls upward, onto the chat it rises over.
+          "[--surface-raised-elevation:0_-1px_2px_rgb(0_0_0/3%),0_-10px_28px_-14px_rgb(0_0_0/14%)] dark:[--surface-raised-elevation:0_-1px_2px_rgb(0_0_0/30%),0_-12px_32px_-12px_rgb(0_0_0/70%)]",
+        )}
+      >
+        <div
+          aria-hidden
+          className="group/resize absolute inset-x-0 top-0 z-20 h-2 cursor-row-resize"
+          onPointerDown={onResizePointerDown}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={onResizePointerEnd}
+          onPointerCancel={onResizePointerEnd}
+          onLostPointerCapture={onResizePointerEnd}
+        >
+          {/* The grabber: faint at rest, brighter while the edge is hovered or dragged. */}
+          <span className="pointer-events-none absolute top-[3px] left-1/2 h-[3px] w-8 -translate-x-1/2 rounded-full bg-foreground/10 transition-colors duration-(--motion-duration-fast) ease-out group-hover/resize:bg-foreground/25 group-active/resize:bg-foreground/35" />
+        </div>
+        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/60 ps-2 pe-1.5 pt-1">
+          <AgentTabStrip
+            tabs={tabs}
+            activeTabId={activeTab?.id ?? null}
+            onSelect={selectTab}
+            onCloseTab={closeTab}
+          />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Close panel"
+                  onClick={() => useBottomPanelStore.getState().setOpen(threadRef, false)}
+                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-(--motion-duration-fast) ease-out hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                />
+              }
+            >
+              <X className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              {`Close panel${props.toggleShortcutLabel ? ` (${props.toggleShortcutLabel})` : ""}`}
+            </TooltipPopup>
+          </Tooltip>
+        </div>
+        {body}
       </div>
-      {body}
     </div>
   );
 }
@@ -592,7 +601,7 @@ const AgentTabContent = memo(function AgentTabContent(props: {
 
   return (
     // Keyed by tab: a tab switch fades the new agent's runs in.
-    <div className="reveal-motion @container/terminals flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+    <div className="reveal-motion @container/terminals flex min-h-0 min-w-0 flex-1 flex-col">
       <AgentRunsView
         threadRef={tabThreadRef}
         runs={runs}
