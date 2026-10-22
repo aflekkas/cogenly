@@ -95,7 +95,7 @@ describe("unsigned macOS swap helper", () => {
   };
 
   // The quitting app: a process that exits shortly after the helper starts.
-  const runHelper = async (paths: Awaited<ReturnType<typeof setup>>) => {
+  const runHelper = async (paths: Awaited<ReturnType<typeof setup>>, final?: string) => {
     const app = NodeChildProcess.spawn("/bin/sh", ["-c", "sleep 0.3"]);
     const env = unsignedMacHelperEnvironment({
       PATH: process.env.PATH,
@@ -118,6 +118,7 @@ describe("unsigned macOS swap helper", () => {
           "Contents/MacOS/Cogenly",
           paths.marker,
           paths.log,
+          ...(final === undefined ? [] : [final]),
         ],
         { env },
         (error) => resolve(error === null ? 0 : (error.code as number)),
@@ -171,5 +172,29 @@ describe("unsigned macOS swap helper", () => {
     );
     expect(installed).toContain("old");
     expect(await NodeFSP.readFile(paths.log, "utf8")).toContain("rolling back");
+  });
+
+  it("installs a renamed bundle beside the old one and removes the old one", async () => {
+    const paths = await setup(
+      `echo "new home=$COGENLY_HOME node=\${ELECTRON_RUN_AS_NODE:-unset}" >> "$RECORD"; echo 1.0.1 > "$MARKER"`,
+    );
+    const renamed = NodePath.join(NodePath.dirname(paths.target), "Cogenly Renamed.app");
+    expect(await runHelper(paths, renamed)).toBe(0);
+    expect(await readLaunches(paths.record, 1)).toEqual(["new home=/users/me/.cogenly node=unset"]);
+    expect(
+      await NodeFSP.readFile(NodePath.join(renamed, "Contents", "MacOS", "Cogenly"), "utf8"),
+    ).toContain("new");
+    await expect(NodeFSP.access(paths.target)).rejects.toThrow();
+    await expect(NodeFSP.access(paths.backup)).rejects.toThrow();
+  });
+
+  it("restores the old bundle at its own path when a renamed update fails to start", async () => {
+    const paths = await setup(`echo "new" >> "$RECORD"; exit 1`);
+    const renamed = NodePath.join(NodePath.dirname(paths.target), "Cogenly Renamed.app");
+    expect(await runHelper(paths, renamed)).toBe(2);
+    expect(
+      await NodeFSP.readFile(NodePath.join(paths.target, "Contents", "MacOS", "Cogenly"), "utf8"),
+    ).toContain("old");
+    await expect(NodeFSP.access(renamed)).rejects.toThrow();
   });
 });

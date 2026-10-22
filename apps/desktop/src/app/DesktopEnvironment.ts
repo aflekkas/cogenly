@@ -103,7 +103,7 @@ function resolveDesktopAppStageLabel(input: {
     return "Dev";
   }
 
-  return isStagingDesktopVersion(input.appVersion) ? "Staging" : "Beta";
+  return isStagingDesktopVersion(input.appVersion) ? "Staging" : "Latest";
 }
 
 export function resolveDesktopAppBranding(input: {
@@ -114,7 +114,8 @@ export function resolveDesktopAppBranding(input: {
   return {
     baseName: APP_BASE_NAME,
     stageLabel,
-    displayName: `${APP_BASE_NAME} (${stageLabel})`,
+    // Production ("Latest") carries no suffix: plain "Cogenly".
+    displayName: stageLabel === "Latest" ? APP_BASE_NAME : `${APP_BASE_NAME} (${stageLabel})`,
   };
 }
 

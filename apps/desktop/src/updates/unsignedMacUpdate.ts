@@ -107,12 +107,14 @@ export function unsignedMacHelperEnvironment(
 /**
  * The detached swap helper. Arguments: app PID, install path, staged bundle,
  * backup path, new executable, old executable (both bundle-relative), launch
- * marker, log file. The update and the rollback start the app through the
+ * marker, log file, final path. The final path is where the update lands: the
+ * install path, or a sibling with the update's own bundle name when a release
+ * renames the app (Cogenly (Beta).app to Cogenly.app). The update and the rollback start the app through the
  * same `launch`, with the environment the app gave this helper.
  */
 export const UNSIGNED_MAC_UPDATE_HELPER_SCRIPT = `#!/bin/sh
 set -u
-app_pid=$1 target=$2 staged=$3 backup=$4 new_exe=$5 old_exe=$6 marker=$7 log=$8
+app_pid=$1 target=$2 staged=$3 backup=$4 new_exe=$5 old_exe=$6 marker=$7 log=$8 final=\${9:-$2}
 quit_timeout=\${COGENLY_UPDATE_QUIT_TIMEOUT:-120}
 start_timeout=\${COGENLY_UPDATE_START_TIMEOUT:-90}
 exec >>"$log" 2>&1
@@ -132,12 +134,12 @@ rm -rf "$backup" "$backup.failed"
 if ! mv "$target" "$backup"; then
   say "could not move the current app aside; update abandoned"; launch "$target" "$old_exe"; exit 1
 fi
-if ! mv "$staged" "$target"; then
+if ! mv "$staged" "$final"; then
   say "could not move the update into place; restoring"
   mv "$backup" "$target" && launch "$target" "$old_exe"; exit 1
 fi
 rm -f "$marker"
-launch "$target" "$new_exe"; new_pid=$launched_pid
+launch "$final" "$new_exe"; new_pid=$launched_pid
 ticks=0
 while [ ! -f "$marker" ]; do
   if ! kill -0 "$new_pid" 2>/dev/null; then say "the update exited while starting"; break; fi
@@ -151,7 +153,7 @@ while [ ! -f "$marker" ]; do
 done
 if [ -f "$marker" ]; then say "update started"; rm -rf "$backup"; exit 0; fi
 say "rolling back"
-if mv "$target" "$backup.failed" && mv "$backup" "$target"; then
+if mv "$final" "$backup.failed" && mv "$backup" "$target"; then
   rm -rf "$backup.failed"; launch "$target" "$old_exe"; exit 2
 fi
 say "rollback failed; the previous app is at $backup"; exit 3
@@ -326,6 +328,20 @@ export const startUnsignedMacSwap = Effect.fn("desktop.updates.unsignedMac.start
     yield* fsStep("install", "could not write the update helper", () =>
       NodeFSP.writeFile(scriptPath, UNSIGNED_MAC_UPDATE_HELPER_SCRIPT, { mode: 0o755 }),
     );
+    // A release that renames the app installs under the new name beside the old
+    // bundle, which the swap removes. If that name is taken, update in place.
+    const stagedName = NodePath.basename(input.prepared.stagedBundlePath);
+    const renamedPath = NodePath.join(NodePath.dirname(input.bundlePath), stagedName);
+    const finalPath =
+      renamedPath === input.bundlePath ||
+      (yield* Effect.promise(() =>
+        NodeFSP.access(renamedPath).then(
+          () => true,
+          () => false,
+        ),
+      ))
+        ? input.bundlePath
+        : renamedPath;
     const args = [
       scriptPath,
       String(input.appPid),
@@ -336,6 +352,7 @@ export const startUnsignedMacSwap = Effect.fn("desktop.updates.unsignedMac.start
       input.currentExecutable,
       input.launchedMarkerPath,
       input.logPath,
+      finalPath,
     ];
     yield* Effect.callback<void, UnsignedMacUpdateError>((resume) => {
       const child = NodeChildProcess.spawn("/bin/sh", args, {
