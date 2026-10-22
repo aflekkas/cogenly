@@ -27,8 +27,9 @@ export const hiddenToastActionProps = {
 
 /**
  * Builds a toast payload from flat options. Every toast renders through the
- * same card (text, then an end-aligned action row); this only shapes the
- * options, it does not pick a different style.
+ * same card (text with the actions beside it, or below with
+ * `data.actionLayout: "stacked-end"`); this only shapes the options, it does
+ * not pick a different style.
  */
 export function stackedThreadToast(
   options: StackedThreadToastOptions,

@@ -56,6 +56,8 @@ export type ThreadToastData = {
   expandableLabels?: { expand?: string; collapse?: string };
   /** When set with `expandableContent`, the summary + label act as one text disclosure (no separate chevron row). */
   expandableDescriptionTrigger?: boolean;
+  /** Actions sit beside the text by default; `stacked-end` puts them on their own end-aligned row below it. */
+  actionLayout?: "inline" | "stacked-end";
   actionVariant?:
     | "default"
     | "destructive"
@@ -91,26 +93,28 @@ function errorDescriptionClampClass(type: unknown, description: unknown): string
 }
 
 /**
- * The one dismiss control every toast shares: a plain × inside the card's
- * top-right corner. It stays out of the way until the toast is hovered or
- * holds focus, and is always shown on touch screens, where there is no hover.
+ * The one dismiss control every toast shares, as in T3 Code: a small round ×
+ * "orb" that sits on the card's top-right corner, overhanging it by 6px. It is
+ * always visible; the inline action layout leaves end padding so text and
+ * actions stay clear of it.
  */
 function ToastDismissButton({ onDismiss }: { onDismiss: () => void }) {
   return (
-    <button
-      aria-label="Dismiss notification"
-      className={cn(
-        "absolute top-2 right-2 z-20 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none",
-        "opacity-0 transition-[color,opacity] duration-(--motion-duration-base) ease-standard hover:text-foreground motion-reduce:transition-none",
-        "group-hover/toast:opacity-100 group-focus-within/toast:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100",
-        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-      )}
-      data-slot="toast-close"
-      onClick={onDismiss}
-      type="button"
-    >
-      <XIcon className="size-3.5" strokeWidth={2.25} />
-    </button>
+    <div className="absolute -top-1.5 -right-1.5 z-20">
+      <button
+        aria-label="Dismiss notification"
+        className={cn(
+          "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/60 bg-popover text-muted-foreground shadow-sm outline-none",
+          "transition-[color,box-shadow] duration-(--motion-duration-fast) ease-standard hover:text-foreground motion-reduce:transition-none",
+          "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+        )}
+        data-slot="toast-close"
+        onClick={onDismiss}
+        type="button"
+      >
+        <XIcon className="size-3" strokeWidth={2.25} />
+      </button>
+    </div>
   );
 }
 
@@ -276,10 +280,10 @@ type ToastCardToast = {
 };
 
 /**
- * The single toast card: icon slot, title, description, an end-aligned row of
- * actions below the text, and the hover-revealed × in the corner. Every
- * notice in the app renders through it, with the same padding, typography
- * and controls.
+ * The single toast card: icon slot, title, description, the actions beside the
+ * text (or on an end-aligned row below it with `actionLayout: "stacked-end"`),
+ * and the × orb on the corner. Every notice in the app renders through it,
+ * with the same padding, typography and controls.
  */
 function ToastCard({
   toast,
@@ -308,6 +312,7 @@ function ToastCard({
     hasPrimaryAction ||
     additionalActions.length > 0 ||
     secondaryActionProps !== undefined;
+  const stackedActionLayout = hasActions && data?.actionLayout === "stacked-end";
 
   return (
     <>
@@ -316,12 +321,18 @@ function ToastCard({
         className={cn(
           // `overflow-x: clip` avoids the CSS quirk where pairing `hidden` + `y: visible`
           // forces `y` to `auto`. Expandable detail panels can extend below without being cut off.
-          "pointer-events-auto flex min-h-0 flex-col gap-2.5 overflow-y-visible px-3.5 py-3 text-sm [overflow-x:clip]",
+          "pointer-events-auto flex min-h-0 overflow-y-visible pl-3.5 text-sm [overflow-x:clip]",
+          // Inline: text and actions share one row. The end padding keeps
+          // whatever sits last clear of the corner orb (which overhangs 18px).
+          stackedActionLayout
+            ? "flex-col gap-2 py-2.5 pr-3.5"
+            : cn("items-center justify-between gap-1.5 py-3", hasActions ? "pr-6" : "pr-10"),
           className,
         )}
       >
-        {/* The end padding keeps the text clear of the corner ×. */}
-        <div className="flex min-w-0 flex-col gap-0.5 pr-6">
+        <div
+          className={cn("flex min-w-0 flex-col gap-0.5", stackedActionLayout ? "pr-5" : "flex-1")}
+        >
           <div className="flex min-w-0 gap-2">
             {leadingIcon || Icon ? (
               <div
@@ -348,7 +359,12 @@ function ToastCard({
           </div>
         </div>
         {hasActions ? (
-          <div className="flex w-full flex-wrap items-center justify-end gap-1.5">
+          <div
+            className={cn(
+              "flex items-center gap-1.5",
+              stackedActionLayout ? "w-full flex-wrap justify-end" : "shrink-0",
+            )}
+          >
             {copyErrorText !== null ? <CopyErrorButton text={copyErrorText} /> : null}
             {additionalActions.map(({ id, props: { className: actionClassName, ...props } }) => (
               <Button
@@ -562,7 +578,7 @@ function Toasts({ position }: { position: ToastPosition }) {
           return (
             <Toast.Root
               className={cn(
-                "group/toast dropdown-glass surface-raised surface-raised-floating absolute z-[calc(9999-var(--toast-index))] w-full overflow-visible select-none rounded-lg text-popover-foreground [transition:transform_var(--motion-duration-slow)_var(--motion-ease-standard),opacity_var(--motion-duration-slow)_var(--motion-ease-standard),height_.15s] motion-reduce:transition-none",
+                "dropdown-glass surface-raised surface-raised-floating absolute z-[calc(9999-var(--toast-index))] w-full overflow-visible select-none rounded-lg text-popover-foreground [transition:transform_var(--motion-duration-slow)_var(--motion-ease-standard),opacity_var(--motion-duration-slow)_var(--motion-ease-standard),height_.15s] motion-reduce:transition-none",
                 // Base positioning using data-position
                 "data-[position*=right]:right-0 data-[position*=right]:left-auto",
                 "data-[position*=left]:right-auto data-[position*=left]:left-0",
