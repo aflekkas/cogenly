@@ -12,6 +12,8 @@ import {
   type DesktopAppActivationResponse,
 } from "@t3tools/contracts";
 import { resolveDesktopAppControlAddress } from "@t3tools/shared/desktopAppControl";
+import type { AddEnvironmentRequest } from "@t3tools/shared/environmentLinks";
+import type { PromptLinkResult } from "@t3tools/shared/promptLinks";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -23,6 +25,8 @@ import * as Scope from "effect/Scope";
 
 import type * as Electron from "electron";
 
+import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { DESKTOP_APP_ACTIVATION_REQUEST_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
@@ -32,6 +36,8 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 
 const MAX_REQUEST_BYTES = 64 * 1024;
 const REQUEST_TIMEOUT_MS = 15_000;
+// Connecting a host can wait on an SSH password prompt and a first-time download.
+const ADD_ENVIRONMENT_TIMEOUT_MS = 10 * 60_000;
 const isDesktopAppActivationRequest = Schema.is(DesktopAppActivationRequest);
 
 export class DesktopAppActivationStartError extends Schema.TaggedError<DesktopAppActivationStartError>()(
@@ -304,8 +310,31 @@ export class DesktopAppActivation extends Context.Service<
     readonly start: Effect.Effect<void, DesktopAppActivationStartError, Scope.Scope>;
     readonly setRendererReady: (ready: boolean) => Effect.Effect<void>;
     readonly complete: (response: DesktopAppActivationResponse) => Effect.Effect<void>;
+    /**
+     * A `cogenly://environments/add` link the OS handed over. Any web page can open one, so
+     * the user confirms it in a native dialog before it runs as an `add-environment`
+     * request. The control socket's requests come from this user's own CLI or agents and
+     * skip the dialog.
+     */
+    readonly receiveEnvironmentLink: (
+      link: PromptLinkResult<AddEnvironmentRequest>,
+    ) => Effect.Effect<void>;
   }
 >()("@t3tools/desktop/app/DesktopAppActivation") {}
+
+/** The native confirmation for a deep link, worded for a request the user may not have made. */
+export function environmentLinkConfirmation(request: AddEnvironmentRequest) {
+  const named = request.name === null ? "" : ` and save it as "${request.name}"`;
+  return {
+    type: "question" as const,
+    buttons: ["Connect", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+    message: `Connect ${request.name ?? request.ssh} to Cogenly?`,
+    detail: `A link asked Cogenly to connect to the SSH host "${request.ssh}" from your SSH config${named}. Cogenly signs in with your SSH keys, starts Cogenly on that host if needed, and pairs this app with it.\n\nOnly connect if you opened this link yourself.`,
+  };
+}
 
 const { logWarning } = makeComponentLogger("desktop-app-activation");
 
@@ -313,6 +342,8 @@ const { logWarning } = makeComponentLogger("desktop-app-activation");
 export const make = Effect.gen(function* () {
   const desktopEnvironment = yield* DesktopEnvironment.DesktopEnvironment;
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
+  const electronApp = yield* ElectronApp.ElectronApp;
+  const electronDialog = yield* ElectronDialog.ElectronDialog;
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const path = yield* Path.Path;
   const userId = yield* HostProcess.UserId;
@@ -328,7 +359,8 @@ export const make = Effect.gen(function* () {
   let detachRendererListeners: (() => void) | null = null;
 
   const broker = new DesktopAppActivationBroker({
-    requestTimeoutMs: REQUEST_TIMEOUT_MS,
+    requestTimeoutMs: (request) =>
+      request.type === "add-environment" ? ADD_ENVIRONMENT_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
     activate: () => {
       void runPromise(
         desktopWindow.activate.pipe(
@@ -401,6 +433,45 @@ export const make = Effect.gen(function* () {
       });
     }),
     complete: (response) => Effect.sync(() => broker.complete(response)),
+    receiveEnvironmentLink: Effect.fn("DesktopAppActivation.receiveEnvironmentLink")(
+      function* (link) {
+        yield* electronApp.whenReady;
+        const owner = Option.getOrUndefined(yield* electronWindow.main);
+        if (!link.ok) {
+          yield* electronDialog.showMessageBox(
+            {
+              type: "warning",
+              message: "Cogenly could not use this link",
+              detail: link.error,
+            },
+            owner,
+          );
+          return;
+        }
+        const choice = yield* electronDialog.showMessageBox(
+          environmentLinkConfirmation(link.value),
+          owner,
+        );
+        if (choice.response !== 0) return;
+        // The renderer reports progress and failures itself, with a toast.
+        const response = yield* Effect.promise(() =>
+          broker.request({
+            version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
+            requestId: NodeCrypto.randomUUID(),
+            type: "add-environment",
+            ssh: link.value.ssh,
+            ...(link.value.name === null ? {} : { name: link.value.name }),
+          }),
+        );
+        if (!response.ok) {
+          yield* logWarning("environment link did not add an environment", {
+            code: response.code,
+            message: response.message,
+          });
+        }
+      },
+      Effect.catchCause((cause) => logWarning("failed to handle an environment link", { cause })),
+    ),
   });
 });
 

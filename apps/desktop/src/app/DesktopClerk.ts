@@ -13,12 +13,14 @@ import { receiveCodexAuthCallback, CodexAuthCallbackError } from "./CodexAuthCal
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
 import { promptLinkAppPath } from "@t3tools/shared/promptLinks";
+import { parseAddEnvironmentLink } from "@t3tools/shared/environmentLinks";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopUserData from "./DesktopUserData.ts";
+import * as DesktopAppActivation from "./DesktopAppActivation.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopWebLinks from "./DesktopWebLinks.ts";
 
@@ -59,6 +61,7 @@ export class DesktopClerk extends Context.Service<
       | ElectronApp.ElectronApp
       | ElectronWindow.ElectronWindow
       | DesktopWebLinks.DesktopWebLinks
+      | DesktopAppActivation.DesktopAppActivation
       | Scope.Scope
     >;
   }
@@ -132,6 +135,7 @@ export const make = Effect.gen(function* () {
       const electronApp = yield* ElectronApp.ElectronApp;
       const electronWindow = yield* ElectronWindow.ElectronWindow;
       const webLinks = yield* DesktopWebLinks.DesktopWebLinks;
+      const activation = yield* DesktopAppActivation.DesktopAppActivation;
       const context = yield* Effect.context<ElectronWindow.ElectronWindow>();
       const runPromise = Effect.runPromiseWith(context);
 
@@ -196,8 +200,18 @@ export const make = Effect.gen(function* () {
         void runPromise(webLinks.receive(value));
         return true;
       };
+      // `cogenly://environments/add?ssh=…` asks to connect an SSH host; the user confirms it.
+      const openEnvironmentLink = (value: string | undefined) => {
+        const link = value === undefined ? null : parseAddEnvironmentLink(value);
+        if (link === null) return false;
+        void runPromise(activation.receiveEnvironmentLink(link));
+        return true;
+      };
       const args = yield* HostProcess.Arguments;
-      args.some((value) => startProviderAuthHandoff(value) || openAppLink(value));
+      args.some(
+        (value) =>
+          startProviderAuthHandoff(value) || openEnvironmentLink(value) || openAppLink(value),
+      );
       // As the default browser, macOS hands T3 Code every web link through the same event.
       const openWebLink = (url: string) => {
         if (!DesktopWebLinks.isWebLink(url)) return false;
@@ -209,6 +223,7 @@ export const make = Effect.gen(function* () {
           startProviderAuthHandoff(url) ||
           resumeProviderAuth(url) ||
           openWebLink(url) ||
+          openEnvironmentLink(url) ||
           openAppLink(url)
         )
           event.preventDefault();
@@ -223,7 +238,10 @@ export const make = Effect.gen(function* () {
         if (
           argv?.some(
             (value) =>
-              startProviderAuthHandoff(value) || resumeProviderAuth(value) || openAppLink(value),
+              startProviderAuthHandoff(value) ||
+              resumeProviderAuth(value) ||
+              openEnvironmentLink(value) ||
+              openAppLink(value),
           )
         )
           return;

@@ -169,6 +169,7 @@ import {
   connectPairing as connectPairingAtom,
   connectSshEnvironment as connectSshEnvironmentAtom,
 } from "~/connection/onboarding";
+import { formatDesktopSshConnectionError } from "~/connection/sshConnectionError";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useEnvironmentQuery } from "~/state/query";
 import {
@@ -377,17 +378,6 @@ function parseRemotePairingFields(input: { readonly host: string; readonly pairi
     throw new Error("Enter a pairing code.");
   }
   return { host, pairingCode };
-}
-
-function formatDesktopSshConnectionError(error: unknown): string {
-  const fallback = "Failed to connect SSH host.";
-  const rawMessage = error instanceof Error ? error.message : fallback;
-  const withoutIpcPrefix = rawMessage.replace(
-    /^Error invoking remote method 'desktop:ensure-ssh-environment':\s*/u,
-    "",
-  );
-  const withoutTaggedErrorPrefix = withoutIpcPrefix.replace(/^Ssh[A-Za-z]+Error:\s*/u, "");
-  return withoutTaggedErrorPrefix.trim() || fallback;
 }
 
 const ENDPOINT_ROW_CLASSNAME = "first:rounded-t-xl last:rounded-b-xl px-3 py-2.5 sm:px-4";
@@ -2582,7 +2572,7 @@ export function ConnectionsSettings() {
         title: routeTarget ? "Route added" : "Environment connected",
         description: routeTarget
           ? `${routeTarget.label} can now be reached over SSH ${target.alias}.`
-          : `${target.alias} is ready over an SSH-managed tunnel.`,
+          : `${result.value.label} is ready over an SSH-managed tunnel.`,
       });
       setIsAddingSavedBackend(false);
     },

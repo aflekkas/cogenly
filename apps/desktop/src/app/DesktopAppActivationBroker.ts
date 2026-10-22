@@ -32,12 +32,16 @@ function failure(
 /** Holds CLI requests until the real desktop renderer is ready to handle them. */
 export class DesktopAppActivationBroker {
   readonly #pending = new Map<string, PendingActivation>();
-  readonly #requestTimeoutMs: number;
+  readonly #requestTimeoutMs: (request: DesktopAppActivationRequest) => number;
   readonly #activate: () => void;
   #renderer: RendererSender | null = null;
   #closed = false;
 
-  constructor(input: { readonly requestTimeoutMs: number; readonly activate: () => void }) {
+  constructor(input: {
+    /** How long the renderer gets for a request; adding an environment can take minutes. */
+    readonly requestTimeoutMs: (request: DesktopAppActivationRequest) => number;
+    readonly activate: () => void;
+  }) {
     this.#requestTimeoutMs = input.requestTimeoutMs;
     this.#activate = input.activate;
   }
@@ -60,10 +64,12 @@ export class DesktopAppActivationBroker {
           failure(
             request.requestId,
             "request-timeout",
-            "The desktop app did not finish opening the project in time.",
+            request.type === "add-environment"
+              ? "The desktop app did not finish adding the environment in time."
+              : "The desktop app did not finish opening the project in time.",
           ),
         );
-      }, this.#requestTimeoutMs);
+      }, this.#requestTimeoutMs(request));
       this.#pending.set(request.requestId, {
         request,
         resolve,
@@ -90,7 +96,7 @@ export class DesktopAppActivationBroker {
           failure(
             pending.request.requestId,
             "renderer-unavailable",
-            "The Cogenly window closed before it opened the project.",
+            "The Cogenly window closed before it finished the request.",
           ),
         );
       }

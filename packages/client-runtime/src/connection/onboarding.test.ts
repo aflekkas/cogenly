@@ -645,4 +645,36 @@ describe("connection onboarding", () => {
       });
     }),
   );
+
+  it.effect("names an SSH environment for people, not after its alias", () =>
+    Effect.gen(function* () {
+      const target = { alias: "t3vps", hostname: "203.0.113.7", username: "root", port: null };
+      const register = (serverLabel: string, label?: string) =>
+        prepareSshRegistration({ target, ...(label === undefined ? {} : { label }) }).pipe(
+          Effect.provideService(
+            ClientCapabilities.SshEnvironmentGateway,
+            ClientCapabilities.SshEnvironmentGateway.of({
+              provision: () =>
+                Effect.succeed({
+                  environmentId: EnvironmentId.make("environment-vps"),
+                  label: serverLabel,
+                  bootstrap: {
+                    target,
+                    httpBaseUrl: "http://127.0.0.1:3201",
+                    wsBaseUrl: "ws://127.0.0.1:3201",
+                    pairingToken: "pairing-token",
+                  },
+                  bearerToken: "bearer-token",
+                }),
+              prepare: () => Effect.die("unused"),
+              disconnect: () => Effect.die("unused"),
+            }),
+          ),
+          Effect.map((registration) => registration.target.label),
+        );
+      expect(yield* register("vmi2345678")).toBe("Contabo VPS");
+      expect(yield* register("t3vps")).toBe("VPS");
+      expect(yield* register("t3vps", "Contabo VPS")).toBe("Contabo VPS");
+    }),
+  );
 });

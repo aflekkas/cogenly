@@ -1,4 +1,5 @@
 import type { DesktopSshEnvironmentTarget, EnvironmentId } from "@t3tools/contracts";
+import { defaultSshEnvironmentName } from "@t3tools/shared/environmentLinks";
 import { resolveRemotePairingTarget } from "@t3tools/shared/remote";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -47,6 +48,7 @@ export interface PairingConnectionInput {
 
 export interface SshConnectionInput {
   readonly target: DesktopSshEnvironmentTarget;
+  /** The name to save; blank picks one from the host (see `defaultSshEnvironmentName`). */
   readonly label?: string;
   /** Set when adding a route to a saved machine; see `PairingConnectionInput`. */
   readonly expectedEnvironmentId?: EnvironmentId;
@@ -70,7 +72,7 @@ export class ConnectionOnboarding extends Context.Service<
     readonly registerSsh: (
       input: SshConnectionInput,
     ) => Effect.Effect<
-      EnvironmentId,
+      { readonly environmentId: EnvironmentId; readonly label: string },
       ConnectionAttemptError | Persistence.ConnectionPersistenceError
     >;
     readonly updateBearer: (
@@ -272,7 +274,12 @@ export const prepareSshRegistration = Effect.fn(
   // One id per SSH target, so a second host or alias for the same machine
   // adds a route instead of replacing the first.
   const connectionId = `ssh:${provisioned.environmentId}:${sshTargetKey(provisioned.bootstrap.target)}`;
-  const label = input.label?.trim() || provisioned.label || provisioned.bootstrap.target.alias;
+  const label = defaultSshEnvironmentName({
+    requestedName: input.label,
+    serverLabel: provisioned.label,
+    sshAlias: provisioned.bootstrap.target.alias,
+    sshHostname: provisioned.bootstrap.target.hostname,
+  });
 
   return new SshConnectionRegistration({
     target: new SshConnectionTarget({
@@ -301,7 +308,7 @@ const registerSshConnection = Effect.fn(
   }
   const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
   yield* registry.register(registration);
-  return registration.target.environmentId;
+  return { environmentId: registration.target.environmentId, label: registration.target.label };
 });
 
 /** @public Service construction is part of the canonical Effect module API. */

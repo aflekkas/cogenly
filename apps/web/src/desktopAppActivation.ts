@@ -1,13 +1,16 @@
 import type {
   DesktopAppActivationFailure,
-  DesktopAppActivationRequest,
+  DesktopAppAddEnvironmentRequest,
+  DesktopAppOpenWorkspaceRequest,
   DesktopAppActivationResponse,
+  DesktopSshEnvironmentTarget,
   EnvironmentId,
   ExecutionEnvironmentPlatformOs,
   ProjectId,
   ScopedProjectRef,
   ThreadId,
 } from "@t3tools/contracts";
+import { parseAddEnvironmentRequest } from "@t3tools/shared/environmentLinks";
 
 export interface DesktopAppActivationProject {
   readonly id: ProjectId;
@@ -45,7 +48,7 @@ function failure(
 }
 
 function desktopPlatformToEnvironmentOs(
-  platform: DesktopAppActivationRequest["platform"],
+  platform: DesktopAppOpenWorkspaceRequest["platform"],
 ): ExecutionEnvironmentPlatformOs {
   return platform === "win32" ? "windows" : platform;
 }
@@ -55,7 +58,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export async function handleDesktopAppActivationRequest(
-  request: DesktopAppActivationRequest,
+  request: DesktopAppOpenWorkspaceRequest,
   dependencies: DesktopAppActivationDependencies,
 ): Promise<DesktopAppActivationResponse> {
   const target = dependencies.getTarget();
@@ -115,5 +118,50 @@ export async function handleDesktopAppActivationRequest(
       "thread-open-failed",
       errorMessage(error, "Cogenly could not open a new thread for the repository."),
     );
+  }
+}
+
+export interface DesktopAddEnvironmentDependencies {
+  readonly resolveHost: (alias: string) => Promise<DesktopSshEnvironmentTarget>;
+  /** Runs the SSH flow Settings uses: provision, pair, and save. A blank label picks a name. */
+  readonly connect: (input: {
+    readonly target: DesktopSshEnvironmentTarget;
+    readonly label: string;
+  }) => Promise<{ readonly environmentId: EnvironmentId; readonly label: string }>;
+  /** Progress the user sees while it runs. */
+  readonly onStart: (displayName: string) => void;
+  readonly onConnected: (label: string) => void;
+  readonly onFailed: (displayName: string, message: string) => void;
+}
+
+/**
+ * Adds an SSH environment for `cogenly environment add`, `t3_environment_add`, or a deep link
+ * the user confirmed. It reuses the host's Cogenly, starts its service when stopped, pairs,
+ * and saves the environment, the same as Settings → Connections → Add environment → SSH.
+ */
+export async function handleDesktopAddEnvironmentRequest(
+  request: DesktopAppAddEnvironmentRequest,
+  dependencies: DesktopAddEnvironmentDependencies,
+): Promise<DesktopAppActivationResponse> {
+  const parsed = parseAddEnvironmentRequest({ ssh: request.ssh, name: request.name });
+  if (!parsed.ok) return failure(request.requestId, "invalid-request", parsed.error);
+  const { ssh, name } = parsed.value;
+  const displayName = name ?? "your server";
+  dependencies.onStart(displayName);
+  try {
+    const target = await dependencies.resolveHost(ssh);
+    const added = await dependencies.connect({ target, label: name ?? "" });
+    dependencies.onConnected(added.label);
+    return {
+      version: 1,
+      requestId: request.requestId,
+      ok: true,
+      environmentId: added.environmentId,
+      label: added.label,
+    };
+  } catch (error) {
+    const message = errorMessage(error, `Cogenly could not connect to ${ssh}.`);
+    dependencies.onFailed(displayName, message);
+    return failure(request.requestId, "environment-add-failed", message);
   }
 }
