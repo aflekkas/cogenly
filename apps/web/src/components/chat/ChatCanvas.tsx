@@ -8,7 +8,11 @@ import {
   type CSSProperties,
 } from "react";
 import { ChatCanvasContext } from "./ChatCanvasContext";
-import { resolveChatCanvasLayout, type ChatCanvasDetailsCard } from "./chatCanvasLayout";
+import {
+  resolveChatCanvasLayout,
+  resolveChatLaneGutter,
+  type ChatCanvasDetailsCard,
+} from "./chatCanvasLayout";
 import { observeResize } from "../../lib/observeResize";
 import { notifyPanelMotion } from "../../lib/panelFlip";
 import { readPanelAnimationsActive } from "../../panelAnimations";
@@ -69,7 +73,6 @@ export function ChatCanvas({
   const [measurements, setMeasurements] = useState({
     width: 0,
     height: 0,
-    padding: 48,
     maxChatWidth: 768,
     minChatWidth: 640,
     timelineGutter: 0,
@@ -83,7 +86,6 @@ export function ChatCanvas({
       const next = {
         width: element.clientWidth,
         height: element.clientHeight,
-        padding: Number.parseFloat(styles.paddingLeft),
         maxChatWidth: Number.parseFloat(styles.width),
         minChatWidth: Number.parseFloat(styles.minWidth),
         timelineGutter: timelineElement
@@ -105,12 +107,13 @@ export function ChatCanvas({
   }, [timelineElement]);
   const context = useMemo(() => {
     const container = { width: measurements.width, height: measurements.height };
+    const padding = resolveChatLaneGutter(measurements.width);
     return {
       container,
-      lane: { padding: measurements.padding, minChatWidth: measurements.minChatWidth },
+      lane: { padding, minChatWidth: measurements.minChatWidth },
       layout: resolveChatCanvasLayout({
         container,
-        padding: measurements.padding,
+        padding,
         maxChatWidth: measurements.maxChatWidth,
         detailsCard,
       }),
@@ -141,6 +144,8 @@ export function ChatCanvas({
         className="relative flex min-h-0 min-w-0 flex-1 flex-col"
         style={
           {
+            // Before the first measure the lanes keep index.css's fallbacks.
+            ...(measurements.width > 0 && { "--chat-gutter": `${context.lane.padding}px` }),
             "--chat-timeline-gutter": `${measurements.timelineGutter}px`,
             "--chat-lane-inset-start": `${layout.chat.insetStart}px`,
             "--chat-lane-inset-end": `${layout.chat.insetEnd}px`,
@@ -150,9 +155,9 @@ export function ChatCanvas({
         <div
           ref={widthProbeRef}
           aria-hidden
-          // The chat column's width, for panel motion (panelFlip).
+          // The chat column's width and gutter, for panel motion (panelFlip).
           data-panel-flip-column=""
-          className="pointer-events-none invisible absolute h-0 w-(--chat-content-max-width) min-w-[40rem] box-content ps-3 sm:ps-12"
+          className="pointer-events-none invisible absolute h-0 w-(--chat-content-max-width) min-w-[40rem] box-content ps-(--chat-gutter)"
         />
         {children}
       </div>

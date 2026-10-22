@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { DETAILS_CARD_CLEARANCE, resolveChatCanvasLayout } from "./chatCanvasLayout";
+import {
+  DETAILS_CARD_CLEARANCE,
+  resolveChatCanvasLayout,
+  resolveChatLaneGutter,
+} from "./chatCanvasLayout";
 
 const base = { padding: 48, maxChatWidth: 853 } as const;
 const container = { width: 1511, height: 1000 };
@@ -32,5 +36,28 @@ describe("resolveChatCanvasLayout", () => {
     });
     expect(chat.left).toBe(48);
     expect(chat.left + chat.width).toBeLessThanOrEqual(card.left - DETAILS_CARD_CLEARANCE);
+  });
+});
+
+describe("resolveChatLaneGutter", () => {
+  it("keeps tight gutters in a narrow chat column", () => {
+    expect(resolveChatLaneGutter(0)).toBe(12);
+    expect(resolveChatLaneGutter(480)).toBe(12);
+    expect(resolveChatLaneGutter(640)).toBe(16);
+  });
+
+  it("ramps to the wide gutter and holds it", () => {
+    expect(resolveChatLaneGutter(760)).toBe(32);
+    expect(resolveChatLaneGutter(880)).toBe(48);
+    expect(resolveChatLaneGutter(1511)).toBe(48);
+  });
+
+  it("never shrinks as the column widens", () => {
+    let previous = 0;
+    for (let width = 0; width <= 1200; width += 7) {
+      const gutter = resolveChatLaneGutter(width);
+      expect(gutter).toBeGreaterThanOrEqual(previous);
+      previous = gutter;
+    }
   });
 });
