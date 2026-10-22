@@ -23,6 +23,7 @@ import {
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "~/components/ui/input-group";
 import { Toggle } from "~/components/ui/toggle";
+import { useLastPresent } from "~/components/ui/overlay-presence";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
 
@@ -76,6 +77,37 @@ function PreviewControlToggle({ control }: { control: PreviewControlState }) {
   );
 }
 
+/**
+ * Says an agent drives a tab the desktop renders natively. Those tabs have no
+ * stream, so no control toggle; the person takes over by using the page. Once
+ * shown it keeps its slot and fades, so the toolbar never shifts.
+ */
+function AgentUsingTabIndicator({ active }: { active: boolean }) {
+  const shownOnce = useLastPresent(active || null);
+  if (!shownOnce) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            role="status"
+            aria-label={active ? "Agent is using this tab" : undefined}
+            aria-hidden={active ? undefined : true}
+            data-agent-using-tab={active ? "" : undefined}
+            className={cn(
+              "flex size-7 shrink-0 items-center justify-center text-muted-foreground transition-opacity duration-(--motion-duration-base) ease-out",
+              active ? "opacity-100" : "pointer-events-none opacity-0",
+            )}
+          />
+        }
+      >
+        <Bot className="size-4" />
+      </TooltipTrigger>
+      <TooltipPopup>Agent is using this tab</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 /** The resting address: a lock or globe, the host bright, the rest of the URL muted. */
 function parseAddress(url: string): { secure: boolean; host: string; rest: string } | null {
   if (!URL.canParse(url)) return null;
@@ -117,6 +149,8 @@ interface Props {
   pickNotice?: { readonly message: string; readonly leaving: boolean } | null | undefined;
   /** Present on a streamed tab once its control state is known. */
   control?: PreviewControlState | null | undefined;
+  /** A natively rendered tab an agent drives; streamed tabs show `control` instead. */
+  agentUsingTab?: boolean | undefined;
   /**
    * Trailing slot rendered after the URL input. Used by the preview view
    * to mount the three-dot menu (hard reload, devtools, zoom, clear data).
@@ -193,6 +227,7 @@ export function PreviewChromeRow({
   pickDisabledReason,
   pickNotice,
   control,
+  agentUsingTab,
   trailingActions,
   leadingActions,
 }: Props) {
@@ -334,7 +369,11 @@ export function PreviewChromeRow({
               {pickNotice.message}
             </span>
           ) : null}
-          {control ? <PreviewControlToggle control={control} /> : null}
+          {control ? (
+            <PreviewControlToggle control={control} />
+          ) : (
+            <AgentUsingTabIndicator active={agentUsingTab === true} />
+          )}
           {onPickElement ? (
             <ToolbarButton
               label={pickActive ? "Cancel annotation" : "Annotate preview"}

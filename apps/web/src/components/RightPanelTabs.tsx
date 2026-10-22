@@ -685,8 +685,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     desktopByTabId={props.desktopByTabId}
                     theme={resolvedTheme}
                   />
+                  {/* An agent driving the tab marks it, so the user sees which tab it uses. */}
                   <BadgeDot
-                    tone={pending && "current"}
+                    tone={
+                      pending
+                        ? "current"
+                        : previewTabId !== null &&
+                          props.previewSessions[previewTabId]?.agentDriving === true &&
+                          "info"
+                    }
                     className="absolute -right-0.5 -bottom-0.5"
                   />
                 </PanelTab.Icon>

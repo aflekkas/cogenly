@@ -22,6 +22,7 @@ import { HostedBrowserWebview } from "./HostedBrowserWebview";
 import { openUrlInPreview } from "./openFileInPreview";
 import { rendersServerTabNatively } from "./previewRuntime";
 import { previewRuntimeTabId } from "./previewRuntimeTabId";
+import { ShownServerTabReporter } from "./ShownServerTabReporter";
 
 export function ElectronBrowserHost() {
   const { resolvedTheme } = useTheme();
@@ -123,9 +124,25 @@ export function ElectronBrowserHost() {
     });
   }, [openPreview]);
 
+  // Only this desktop's own server renders tabs here, so only it hears which show.
+  const nativeServerTabs = useMemo(
+    () =>
+      sessions
+        .filter(({ snapshot }) => snapshot.runtime === "server")
+        .map(({ threadRef, snapshot, runtimeTabId }) => ({
+          threadId: threadRef.threadId,
+          tabId: snapshot.tabId,
+          runtimeTabId,
+        })),
+    [sessions],
+  );
+
   if (!isElectron) return null;
   return (
     <div className="contents" data-electron-browser-host>
+      {primaryEnvironmentId ? (
+        <ShownServerTabReporter environmentId={primaryEnvironmentId} tabs={nativeServerTabs} />
+      ) : null}
       {sessions.map(({ threadRef, snapshot, runtimeTabId, pictureInPicture, zoomFactor }) => {
         const url = snapshot.navStatus._tag === "Idle" ? null : snapshot.navStatus.url;
         return (

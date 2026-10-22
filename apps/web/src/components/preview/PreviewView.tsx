@@ -1091,6 +1091,7 @@ export function PreviewView({
               }
             : null
         }
+        agentUsingTab={nativeServerTab && snapshot?.agentDriving === true}
         leadingActions={
           // Only when it differs from the default: labelling every tab
           // "Default" would be noise on the common case, while a tab in
