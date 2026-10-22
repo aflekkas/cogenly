@@ -35,6 +35,7 @@ import {
   mergeThreadEvents,
   type T3SourceDatabase,
   type T3SourceThreadRow,
+  type T3SourceThreadStats,
 } from "./T3SourceDatabase.ts";
 
 export type T3ThreadMode =
@@ -62,17 +63,25 @@ export interface T3ThreadPlan {
 /** Replacement id for a T3 thread whose id an unrelated Cogenly thread already uses. */
 export const collisionThreadId = (sourceThreadId: string) => `t3-${sourceThreadId}`;
 
+/** Threads whose T3 stats are read between yields to the event loop. */
+const THREAD_STATS_CHUNK = 50;
+
 export const classifyThreads = Effect.fn("T3Import.classifyThreads")(function* (input: {
   readonly source: Pick<T3SourceDatabase, "threadStats">;
   readonly threads: ReadonlyArray<T3SourceThreadRow>;
   readonly projectIds: ReadonlyMap<string, ProjectId>;
 }) {
   const sql = yield* SqlClient.SqlClient;
-  const stats = new Map(
-    input.source
-      .threadStats(input.threads.map((thread) => thread.threadId))
-      .map((row) => [row.threadId, row]),
-  );
+  // T3's reads are synchronous; on a 12 GB database all threads at once held
+  // the event loop for seconds, long enough to drop every client's socket.
+  const stats = new Map<string, T3SourceThreadStats>();
+  for (let index = 0; index < input.threads.length; index += THREAD_STATS_CHUNK) {
+    const ids = input.threads
+      .slice(index, index + THREAD_STATS_CHUNK)
+      .map((thread) => thread.threadId);
+    for (const row of input.source.threadStats(ids)) stats.set(row.threadId, row);
+    yield* Effect.yieldNow;
+  }
   const ledger = new Map(
     (yield* sql<{
       readonly source_thread_id: string;
@@ -83,7 +92,8 @@ export const classifyThreads = Effect.fn("T3Import.classifyThreads")(function* (
     ),
   );
   const plans: Array<T3ThreadPlan> = [];
-  for (const thread of input.threads) {
+  for (const [index, thread] of input.threads.entries()) {
+    if (index > 0 && index % THREAD_STATS_CHUNK === 0) yield* Effect.yieldNow;
     const projectId = input.projectIds.get(thread.projectId);
     if (projectId === undefined) continue;
     const stat = stats.get(thread.threadId);

@@ -72,7 +72,11 @@ export function created(
   };
 }
 
-export function message(threadId: string, n: number): OrchestrationV2DomainEvent {
+export function message(
+  threadId: string,
+  n: number,
+  text = `synthetic ${n}`,
+): OrchestrationV2DomainEvent {
   return {
     id: `evt-${threadId}-msg-${n}` as OrchestrationV2DomainEvent["id"],
     type: "message.updated",
@@ -86,7 +90,7 @@ export function message(threadId: string, n: number): OrchestrationV2DomainEvent
       runId: null,
       nodeId: null,
       role: "user",
-      text: `synthetic ${n}`,
+      text,
       attachments: [],
       streaming: false,
       createdAt: at,

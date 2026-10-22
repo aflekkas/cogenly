@@ -5,18 +5,27 @@ import * as NodePath from "node:path";
 
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { T3_IMPORT_RUNNING_NOTE, type T3ImportStatus } from "@t3tools/contracts";
+import {
+  T3_IMPORT_RUNNING_NOTE,
+  T3_IMPORT_STATUS_HEARTBEAT_MS,
+  type T3ImportJob,
+  type T3ImportStatus,
+} from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerConfig from "../config.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { layerOffline } from "./T3ImportOfflineLayer.ts";
-import { T3ImportService } from "./T3ImportService.ts";
+import { T3ImportService, withStatusHeartbeat } from "./T3ImportService.ts";
 import { created, makeT3Fixture, message, run, T3_PROJECT } from "./T3Import.testkit.ts";
 
 const fixture = makeT3Fixture();
@@ -154,5 +163,46 @@ describe("T3ImportService", () => {
       expect(failed.job.message).toMatch(/needs .* free in .* but only 0\.0 GB is free/);
       expect(NodeFS.readdirSync(snapshotRoot)).toEqual([]);
     }).pipe(Effect.provide(makeLayer({ freeBytes: () => 0 }))),
+  );
+});
+
+describe("the status heartbeat", () => {
+  const status = (job: T3ImportJob): T3ImportStatus => ({
+    source: { available: true, databasePath: "/t3/statev2.sqlite", running: false, projects: [] },
+    job,
+  });
+  const scanning = status({
+    _tag: "Scanning",
+    progress: { phase: "snapshot", processedEvents: 0, totalEvents: 0 },
+  });
+
+  it.effect("keeps a long, unchanging scan talking well past the old 60-second drop", () =>
+    Effect.gen(function* () {
+      const current = yield* Ref.make(scanning);
+      const sentAt: Array<number> = [];
+      yield* withStatusHeartbeat(Stream.never, Ref.get(current)).pipe(
+        Stream.runForEach(() =>
+          Clock.currentTimeMillis.pipe(Effect.map((now) => sentAt.push(now))),
+        ),
+        Effect.forkScoped,
+      );
+      // The clock moves in small steps; a tick that resumes during one step
+      // re-arms when its fiber next runs, so a gap may carry one step of slack.
+      const stepMs = 250;
+      const advance = (seconds: number) =>
+        Effect.repeat(TestClock.adjust(Duration.millis(stepMs)), {
+          times: (seconds * 1000) / stepMs - 1,
+        });
+      yield* advance(180);
+      expect(sentAt.length).toBeGreaterThanOrEqual(180_000 / T3_IMPORT_STATUS_HEARTBEAT_MS);
+      const gaps = sentAt.slice(1).map((at, index) => at - (sentAt[index] ?? 0));
+      expect(Math.max(...gaps)).toBeLessThanOrEqual(T3_IMPORT_STATUS_HEARTBEAT_MS + stepMs);
+
+      // Once the job settles, the change goes out once and the stream goes quiet.
+      yield* Ref.set(current, status({ _tag: "Idle" }));
+      const before = sentAt.length;
+      yield* advance(60);
+      expect(sentAt.length).toBe(before + 1);
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
 });

@@ -69,6 +69,11 @@ directory directly. `cogenly t3-import --source <dir>` reads T3 Code's data
 from another folder than `~/.t3/userdata`; it works only while Cogenly isn't
 running.
 
+A running Cogenly does the work itself, so a check or import keeps going if the
+command loses its connection (Ctrl-C stops an import). The command reconnects
+on its own; if it gives up, run it again and it follows the job that is already
+running instead of starting another.
+
 In the app, pick your projects, then select **Check what will be imported**.
 This dry run reads T3 Code's data and lists the threads, messages, attachments,
 providers, and settings that would change. Nothing is written. Review it, then

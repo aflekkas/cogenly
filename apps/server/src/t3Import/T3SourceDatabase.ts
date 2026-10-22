@@ -8,9 +8,10 @@
  * T3 Code may be running while Cogenly reads it. Detection reads the live file
  * (see `openLive`). A scan or import reads a snapshot instead:
  * `snapshotT3SourceDatabase` copies the live database with SQLite's online
- * backup API, in one step so the copy is a single consistent read
- * transaction, into a private temp directory. The snapshot is then opened
- * with `immutable=1`. Nothing in T3's userdata is ever opened for writing.
+ * backup API into a private temp directory, in small steps inside one held
+ * read transaction, so the copy is consistent and the server stays
+ * responsive. The snapshot is then opened with `immutable=1`. Nothing in
+ * T3's userdata is ever opened for writing.
  *
  * @module T3SourceDatabase
  */
@@ -297,8 +298,12 @@ export interface T3SourceSnapshot {
 
 /** Room a snapshot needs on top of the database itself, for the copy's journal and slack. */
 const SNAPSHOT_HEADROOM_BYTES = 256 * 1024 * 1024;
-/** The backup's pages per step. One step copies everything inside one read transaction. */
-const SNAPSHOT_ONE_STEP = 2_147_483_647;
+/**
+ * Pages per backup step (16 MB at 4 KB pages). Each step runs on Node's
+ * thread pool and the event loop runs between steps, so a 12 GB copy never
+ * blocks the server; it only sets how often progress is reported.
+ */
+const SNAPSHOT_PAGES_PER_STEP = 4096;
 
 const fileBytes = (path: string) => {
   try {
@@ -335,22 +340,51 @@ export function checkT3SnapshotSpace(input: {
 
 export const defaultT3SnapshotRoot = () => NodeOS.tmpdir();
 
+/** How far a snapshot copy has got, reported between backup steps. */
+export interface T3SnapshotProgress {
+  readonly copiedBytes: number;
+  readonly totalBytes: number;
+}
+
 /**
  * Copy the live database at `dbPath` into a new directory under `tempRoot`.
- * The source is opened read-only, and the copy runs as a single backup step,
- * so it reflects one moment even while T3 keeps writing; later T3 changes
- * are simply not in it. Check space with `checkT3SnapshotSpace` first, and
- * remove the snapshot with `removeT3SourceSnapshot`.
+ * The source is opened read-only and one read transaction is held across
+ * every backup step: SQLite's backup reuses it, so the copy reflects one
+ * moment even while T3 keeps writing, and T3's writes never restart it.
+ * Later T3 changes are simply not in it. `onProgress` runs between steps.
+ * Check space with `checkT3SnapshotSpace` first, and remove the snapshot
+ * with `removeT3SourceSnapshot`.
  */
 export async function snapshotT3SourceDatabase(input: {
   readonly dbPath: string;
   readonly tempRoot: string;
+  readonly onProgress?: (progress: T3SnapshotProgress) => void;
+  /** Pages per step; tests shrink it to exercise stepping on a small database. */
+  readonly pagesPerStep?: number;
 }): Promise<T3SourceSnapshot> {
   const source = openLive(input.dbPath);
   const directory = NodeFS.mkdtempSync(NodePath.join(input.tempRoot, "cogenly-t3-import-"));
   const path = NodePath.join(directory, "statev2.sqlite");
   try {
-    await NodeSqlite.backup(source, path, { rate: SNAPSHOT_ONE_STEP });
+    const pageSize = integer(source.prepare("PRAGMA page_size").get()?.page_size);
+    // A deferred BEGIN takes its read lock at the first read (the page count); every step then shares it.
+    source.exec("BEGIN");
+    const totalBytes = integer(source.prepare("PRAGMA page_count").get()?.page_count) * pageSize;
+    await NodeSqlite.backup(source, path, {
+      rate: input.pagesPerStep ?? SNAPSHOT_PAGES_PER_STEP,
+      ...(input.onProgress === undefined
+        ? {}
+        : {
+            progress: ({ totalPages, remainingPages }: NodeSqlite.BackupProgressInfo) =>
+              input.onProgress?.({
+                copiedBytes: (totalPages - remainingPages) * pageSize,
+                totalBytes: totalPages * pageSize,
+              }),
+          }),
+    });
+    // Node reports between steps only, so the last step's completion is reported here.
+    input.onProgress?.({ copiedBytes: totalBytes, totalBytes });
+    source.exec("ROLLBACK");
     // The copy inherits WAL mode; fold it into one file so `immutable` reads are exact.
     const copy = new NodeSqlite.DatabaseSync(path);
     try {

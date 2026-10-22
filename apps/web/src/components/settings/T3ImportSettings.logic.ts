@@ -131,8 +131,12 @@ export function t3ImportProgressPercent(progress: T3ImportProgress): number {
   return Math.min(99, start + (end - start) * fraction);
 }
 
-/** A scan only has a meaningful fraction while it decodes events. */
+/** A scan has a meaningful fraction while it copies T3's database and while it decodes events. */
 export function t3ScanProgressPercent(progress: T3ImportProgress): number | null {
+  if (progress.phase === "snapshot") {
+    const { copiedBytes = 0, totalBytes = 0 } = progress;
+    return totalBytes > 0 ? Math.min(99, (copiedBytes / totalBytes) * 100) : null;
+  }
   if (progress.totalEvents <= 0) return null;
   return Math.min(99, (progress.processedEvents / progress.totalEvents) * 100);
 }

@@ -218,6 +218,14 @@ describe("T3ImportSettings.logic", () => {
     );
   });
 
+  it("follows the snapshot copy by bytes before any events are known", () => {
+    const copying = { phase: "snapshot", processedEvents: 0, totalEvents: 0 } as const;
+    expect(t3ScanProgressPercent(copying)).toBeNull();
+    expect(
+      t3ScanProgressPercent({ ...copying, copiedBytes: 3 * 1024 ** 3, totalBytes: 12 * 1024 ** 3 }),
+    ).toBe(25);
+  });
+
   it("words import errors by reason", () => {
     expect(
       describeT3ImportFailure({

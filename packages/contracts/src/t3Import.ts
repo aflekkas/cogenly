@@ -12,8 +12,11 @@ import { NonNegativeInt, ProjectId } from "./baseSchemas.ts";
  *   (`source`: found?, T3 running?, its projects with
  *   default selection and the Cogenly project each merges into) plus the
  *   server-side job (`job`: Idle | Scanning | Scanned | Importing | Completed |
- *   Cancelled | Failed, with progress). Jobs run on the server, so a reload resumes the
- *   view. `source.running` re-polls every few seconds while subscribed.
+ *   Cancelled | Failed, with progress). Jobs run on the server, so a reload or a
+ *   reconnecting CLI resumes the view. `source.running` re-polls every few
+ *   seconds while subscribed, and while a job runs the current status is re-sent
+ *   at least every `T3_IMPORT_STATUS_HEARTBEAT_MS`, so a follower can tell a
+ *   slow phase from a dead stream.
  * - `t3Import.scan` (`T3ImportScanInput`): snapshots T3's database (T3 may
  *   stay open) and starts a dry run for the selected T3 project ids. Writes
  *   nothing to Cogenly; the job ends as `Scanned` with a report.
@@ -24,6 +27,9 @@ import { NonNegativeInt, ProjectId } from "./baseSchemas.ts";
  * - `t3Import.cancel`: stops a running scan or import between batches. What was
  *   already written stays; re-running continues where it stopped.
  */
+
+/** While a scan or import runs, `t3Import.status` emits at least this often. */
+export const T3_IMPORT_STATUS_HEARTBEAT_MS = 5_000;
 
 /**
  * Shown while T3 Code is open, by every client and as a report warning: a scan
@@ -172,6 +178,9 @@ export const T3ImportProgress = Schema.Struct({
   phase: T3ImportPhase,
   processedEvents: NonNegativeInt,
   totalEvents: NonNegativeInt,
+  /** The `snapshot` phase's copy of T3's database, in bytes; absent in other phases. */
+  copiedBytes: Schema.optional(NonNegativeInt),
+  totalBytes: Schema.optional(NonNegativeInt),
 });
 export type T3ImportProgress = typeof T3ImportProgress.Type;
 

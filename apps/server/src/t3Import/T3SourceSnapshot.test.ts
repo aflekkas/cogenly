@@ -47,6 +47,53 @@ describe("T3 source snapshots", () => {
     }
   });
 
+  it("copies in steps that let the event loop run, from one moment of a database T3 keeps writing", async () => {
+    const fixture = makeT3Fixture({ wal: true });
+    fixture.append(created("thread-a"));
+    for (let sequence = 1; sequence <= 40; sequence += 1) {
+      fixture.append(message("thread-a", sequence, "x".repeat(4000)));
+    }
+    try {
+      // Counts event loop turns: each runs the next immediate.
+      let loopTurns = 0;
+      let ticking = true;
+      const tick = () => {
+        loopTurns += 1;
+        if (ticking) setImmediate(tick);
+      };
+      setImmediate(tick);
+      const seen: Array<{ copiedBytes: number; totalBytes: number; loopTurns: number }> = [];
+      const snapshot = await snapshotT3SourceDatabase({
+        dbPath: fixture.dbPath,
+        tempRoot: tempRoot(),
+        pagesPerStep: 4,
+        onProgress: (progress) => {
+          seen.push({ ...progress, loopTurns });
+          // T3 writes mid-copy; the copy neither restarts nor picks it up.
+          if (seen.length === 2) fixture.append(message("thread-a", 41));
+        },
+      }).finally(() => {
+        ticking = false;
+      });
+
+      expect(eventCount(snapshot.path, false)).toBe(41);
+      expect(seen.length).toBeGreaterThan(3);
+      const last = seen.at(-1);
+      expect(last?.copiedBytes).toBe(last?.totalBytes);
+      // Bytes only grow: a restarted backup would start over from zero.
+      expect(
+        seen.every(
+          (step, index) => index === 0 || step.copiedBytes > (seen[index - 1]?.copiedBytes ?? 0),
+        ),
+      ).toBe(true);
+      // The loop kept turning while the copy was under way, not only after it.
+      expect((last?.loopTurns ?? 0) - (seen[0]?.loopTurns ?? 0)).toBeGreaterThan(0);
+      removeT3SourceSnapshot(snapshot);
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("leaves a closed T3 install's files untouched", async () => {
     const fixture = makeT3Fixture({ wal: true });
     fixture.append(created("thread-a"));

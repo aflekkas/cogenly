@@ -96,8 +96,44 @@ export const liveWebSocketUrl = (origin: string, token: string) =>
     Effect.mapError((cause) => new LiveServerConnectError({ origin, cause })),
   );
 
-/** An RPC client on the server's WebSocket, open until the surrounding scope closes. */
-export const makeLiveRpcClient = (url: string) =>
+/**
+ * Where the RPC client connects, evaluated on every (re)connect. A ticket is
+ * single use, so after the first URL each reconnect trades `token` for a
+ * fresh one; if that fails the last URL is reused, its open is refused, and
+ * the client's socket retries on its own schedule.
+ */
+export const liveWebSocketUrlSource = (input: {
+  readonly origin: string;
+  readonly token: string;
+  /** A URL already minted (by the reachability probe) and not yet used. */
+  readonly first: string;
+}) => {
+  let pending: string | null = input.first;
+  let last = input.first;
+  return Effect.suspend(() => {
+    if (pending !== null) {
+      last = pending;
+      pending = null;
+      return Effect.succeed(last);
+    }
+    return liveWebSocketUrl(input.origin, input.token).pipe(
+      Effect.tap((url) =>
+        Effect.sync(() => {
+          last = url;
+        }),
+      ),
+      Effect.orElseSucceed(() => last),
+    );
+  });
+};
+
+/**
+ * An RPC client on the server's WebSocket, open until the surrounding scope
+ * closes. With a URL source (`liveWebSocketUrlSource`) it reconnects after a
+ * drop; calls in flight at the drop fail, and callers that follow a stream
+ * subscribe again.
+ */
+export const makeLiveRpcClient = (url: string | Effect.Effect<string>) =>
   Effect.gen(function* () {
     const protocol = yield* Layer.build(
       RpcClient.layerProtocolSocket().pipe(

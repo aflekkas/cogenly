@@ -50,6 +50,7 @@ import { layerOffline } from "../t3Import/T3ImportOfflineLayer.ts";
 import * as T3Import from "../t3Import/T3ImportService.ts";
 import {
   liveWebSocketUrl,
+  liveWebSocketUrlSource,
   makeLiveRpcClient,
   resolveCliServerRoute,
   SETUP_CLI_SCOPES,
@@ -78,6 +79,19 @@ export class SetupBackendError extends Schema.TaggedError<SetupBackendError>()(
 }
 
 const isT3ImportError = Schema.is(T3ImportError);
+const isSetupBackendError = Schema.is(SetupBackendError);
+
+/**
+ * The connection to the running server dropped (a socket error or a missed
+ * ping, e.g. while the server was busy), as opposed to the server refusing
+ * the call. Jobs run on the server, so a follower can subscribe again.
+ */
+export const isConnectionLoss = (error: unknown): boolean =>
+  isSetupBackendError(error) &&
+  typeof error.cause === "object" &&
+  error.cause !== null &&
+  "_tag" in error.cause &&
+  error.cause._tag === "RpcClientError";
 
 type Operation = SetupBackendError["operation"];
 
@@ -125,7 +139,7 @@ export interface SetupBackend {
 
 const makeLive = Effect.fn("cli.setup.makeLiveBackend")(function* (input: {
   readonly origin: string;
-  readonly url: string;
+  readonly url: Effect.Effect<string>;
 }) {
   const client = yield* makeLiveRpcClient(input.url);
   const crypto = yield* Crypto.Crypto;
@@ -256,7 +270,8 @@ export const openSetupBackend = Effect.fn("cli.setup.openBackend")(function* (
   );
   const environmentAuth = Context.get(authContext, EnvironmentAuth.EnvironmentAuth);
   const recorded = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
-  let liveUrl: string | null = null;
+  // Set by the probe below; a cast keeps TS from narrowing it to null.
+  let liveUrl = null as { readonly token: string; readonly first: string } | null;
   const route = yield* resolveCliServerRoute({
     recordedOrigin: Option.map(recorded, (state) => state.origin),
     reachable: (origin) =>
@@ -276,7 +291,7 @@ export const openSetupBackend = Effect.fn("cli.setup.openBackend")(function* (
           yield* Effect.logDebug("The recorded Cogenly server did not answer.", { origin });
           return false;
         }
-        liveUrl = url.value;
+        liveUrl = { token: issued.token, first: url.value };
         return true;
       }),
     acquireOwnership: ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath).pipe(
@@ -290,6 +305,11 @@ export const openSetupBackend = Effect.fn("cli.setup.openBackend")(function* (
     ...(snapshotRoot === undefined ? {} : { snapshotRoot }),
   };
   return route._tag === "live" && liveUrl !== null
-    ? yield* makeLive({ origin: route.origin, url: liveUrl })
+    ? yield* makeLive({
+        origin: route.origin,
+        url: liveWebSocketUrlSource({ origin: route.origin, ...liveUrl }).pipe(
+          Effect.provideContext(authContext),
+        ),
+      })
     : yield* makeOffline(config, serviceOptions);
 });

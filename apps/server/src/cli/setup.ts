@@ -24,16 +24,24 @@ import {
   type T3ImportResult,
   type T3ImportStatus,
   T3_IMPORT_RUNNING_NOTE,
+  T3_IMPORT_STATUS_HEARTBEAT_MS,
 } from "@t3tools/contracts";
 import * as Console from "effect/Console";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
-import { openSetupBackend, type SetupBackend, type SetupBackendError } from "./setupBackend.ts";
+import {
+  isConnectionLoss,
+  openSetupBackend,
+  type SetupBackend,
+  type SetupBackendError,
+} from "./setupBackend.ts";
 import {
   deriveInstanceId,
   matchT3Projects,
@@ -295,33 +303,75 @@ const providersStep = Effect.fn("cli.setup.providers")(function* (
 
 // ── Import from T3 Code ─────────────────────────────────────────────────
 
-/** The first status satisfying `done`, printing progress along the way. */
-const followJob = (
+/** The status stream is quiet this long while a job runs: treat the stream as dead and re-attach. */
+const STATUS_STALE_MS = T3_IMPORT_STATUS_HEARTBEAT_MS * 6;
+/** Re-attach attempts after a drop, two seconds apart: about three minutes of a busy or restarting server. */
+const REATTACH_ATTEMPTS = 90;
+
+class StatusStaleError extends Schema.TaggedError<StatusStaleError>()("StatusStaleError", {}) {}
+const isStatusStale = Schema.is(StatusStaleError);
+/** The stream died or went quiet; the server's job is unaffected, so subscribe again. */
+const lostStatus = (error: unknown) => isStatusStale(error) || isConnectionLoss(error);
+
+const progressLine = (job: T3ImportJob) => {
+  if (job._tag !== "Scanning" && job._tag !== "Importing") return null;
+  const { phase, processedEvents, totalEvents, copiedBytes, totalBytes } = job.progress;
+  // The snapshot advances by bytes copied; reading and writing events through a count.
+  const percent =
+    phase === "snapshot" && totalBytes !== undefined && totalBytes > 0
+      ? ` ${Math.floor(((copiedBytes ?? 0) / totalBytes) * 10) * 10}% of ${formatBytes(totalBytes)}`
+      : (phase === "reading" || phase === "events") && totalEvents > 0
+        ? ` ${Math.floor((processedEvents / totalEvents) * 10) * 10}%`
+        : "";
+  return `  ${PHASE_LABELS[phase]}…${percent}`;
+};
+
+/**
+ * The first status satisfying `done`, printing progress along the way. The
+ * job runs on the server, so when the connection drops (or the stream goes
+ * quiet past several missed heartbeats) this subscribes again and carries on
+ * from the job's current state.
+ */
+export const followJob = (
   backend: SetupBackend,
   output: SetupOutput,
   done: (job: T3ImportJob) => boolean,
 ) => {
   let lastLine = "";
   return backend.t3Import.status.pipe(
+    Stream.timeoutOrElse({
+      duration: Duration.millis(STATUS_STALE_MS),
+      orElse: () => Stream.fail(new StatusStaleError()),
+    }),
+    Stream.tapError((error) =>
+      lostStatus(error)
+        ? output.log("  Lost the connection to Cogenly; reconnecting…")
+        : Effect.void,
+    ),
+    Stream.retry(
+      Schedule.spaced(Duration.seconds(2)).pipe(
+        Schedule.while(({ input, attempt }) => lostStatus(input) && attempt <= REATTACH_ATTEMPTS),
+      ),
+    ),
     Stream.tap((status) => {
-      const { job } = status;
-      if (job._tag !== "Scanning" && job._tag !== "Importing") return Effect.void;
-      const { phase, processedEvents, totalEvents } = job.progress;
-      // Only reading and writing events advance through a count.
-      const percent =
-        (phase === "reading" || phase === "events") && totalEvents > 0
-          ? ` ${Math.floor((processedEvents / totalEvents) * 10) * 10}%`
-          : "";
-      const line = `  ${PHASE_LABELS[phase]}…${percent}`;
-      if (line === lastLine) return Effect.void;
+      const line = progressLine(status.job);
+      if (line === null || line === lastLine) return Effect.void;
       lastLine = line;
       return output.log(line);
     }),
     Stream.filter((status) => done(status.job)),
     Stream.runHead,
     Effect.map(Option.getOrThrow),
+    Effect.catchTags({ StatusStaleError: () => Effect.fail(connectionLost()) }),
+    Effect.mapError((error) => (isConnectionLoss(error) ? connectionLost() : error)),
   );
 };
+
+const connectionLost = () =>
+  new SetupStoppedError({
+    reason:
+      "Lost the connection to Cogenly. The job keeps running there; run the same command again to follow it.",
+  });
 
 const settled = (job: T3ImportJob) =>
   job._tag === "Scanned" ||
@@ -417,8 +467,18 @@ export const runT3ImportStep = Effect.fn("cli.setup.t3Import")(function* (
     );
   }
 
-  yield* log("  Checking what will be imported (nothing is written yet)…");
-  yield* backend.t3Import.scan({ scope: { sourceProjectIds: [...projectIds] } });
+  // A job already running on the server (an earlier run lost its connection,
+  // or Settings → Import started it) is followed instead of refused as busy.
+  if (first.job._tag === "Importing") {
+    yield* log("  An import is already running; following it.");
+    return yield* followImport(backend, options.output);
+  }
+  if (first.job._tag === "Scanning") {
+    yield* log("  A check is already running; following it.");
+  } else {
+    yield* log("  Checking what will be imported (nothing is written yet)…");
+    yield* backend.t3Import.scan({ scope: { sourceProjectIds: [...projectIds] } });
+  }
   const scanned = yield* followJob(backend, options.output, settled);
   if (scanned.job._tag === "Failed") {
     return yield* new SetupStoppedError({ reason: scanned.job.message });
@@ -451,9 +511,17 @@ export const runT3ImportStep = Effect.fn("cli.setup.t3Import")(function* (
   }
 
   yield* backend.t3Import.run({ reportId: report.reportId, includeSettings });
+  return yield* followImport(backend, options.output);
+});
+
+/** Follow a started import to its end. */
+const followImport = Effect.fn("cli.setup.t3Import.follow")(function* (
+  backend: SetupBackend,
+  output: SetupOutput,
+) {
   const finished = yield* followJob(
     backend,
-    options.output,
+    output,
     (job) => job._tag === "Completed" || job._tag === "Failed" || job._tag === "Cancelled",
   ).pipe(
     // Ctrl-C stops the server's job between batches instead of leaving it running.
@@ -461,7 +529,7 @@ export const runT3ImportStep = Effect.fn("cli.setup.t3Import")(function* (
   );
   switch (finished.job._tag) {
     case "Completed":
-      for (const line of describeT3Result(finished.job.result)) yield* log(line);
+      for (const line of describeT3Result(finished.job.result)) yield* output.log(line);
       return { _tag: "Imported", result: finished.job.result } satisfies T3ImportStepOutcome;
     case "Failed":
       return yield* new SetupStoppedError({

@@ -37,12 +37,14 @@ import {
   type T3ImportStatus,
   T3ImportError,
   T3_IMPORT_RUNNING_NOTE,
+  T3_IMPORT_STATUS_HEARTBEAT_MS,
 } from "@t3tools/contracts";
 import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -88,6 +90,7 @@ import {
   snapshotT3SourceDatabase,
   type T3SourceDatabase,
   type T3SourceProjectRow,
+  type T3SnapshotProgress,
   type T3SourceSnapshot,
 } from "./T3SourceDatabase.ts";
 
@@ -177,6 +180,37 @@ function errorSummary(error: unknown): string {
 const decodeKeybindings = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown));
 const decodeRule = Schema.decodeUnknownOption(KeybindingRule);
 
+/**
+ * The status a subscriber sees: `current` sampled on each trigger, sent when
+ * it changed, and re-sent at least every `T3_IMPORT_STATUS_HEARTBEAT_MS`
+ * while a scan or import runs. A long snapshot or replay can go minutes
+ * without a visible change; the heartbeat lets a follower (the CLI) tell
+ * that apart from a dead stream. Idle states stay quiet.
+ */
+export const withStatusHeartbeat = <E, R>(
+  triggers: Stream.Stream<void, E, R>,
+  current: Effect.Effect<T3ImportStatus>,
+): Stream.Stream<T3ImportStatus, E, R> =>
+  Stream.suspend(() => {
+    let lastSent = "";
+    const shouldSend = (status: T3ImportStatus, beat: boolean) => {
+      const encoded = JSON.stringify(status);
+      const active = status.job._tag === "Scanning" || status.job._tag === "Importing";
+      if (encoded === lastSent && !(beat && active)) return false;
+      lastSent = encoded;
+      return true;
+    };
+    return Stream.merge(
+      triggers.pipe(Stream.as(false)),
+      // The first tick is immediate; heartbeats proper follow it.
+      Stream.tick(Duration.millis(T3_IMPORT_STATUS_HEARTBEAT_MS)).pipe(Stream.as(true)),
+    ).pipe(
+      Stream.mapEffect((beat) => current.pipe(Effect.map((status) => ({ status, beat })))),
+      Stream.filter(({ status, beat }) => shouldSend(status, beat)),
+      Stream.map(({ status }) => status),
+    );
+  });
+
 const make = (options: T3ImportServiceOptions = {}) =>
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
@@ -239,6 +273,15 @@ const make = (options: T3ImportServiceOptions = {}) =>
     );
     yield* Effect.addFinalizer(() => dropSnapshot);
 
+    const setProgress = (progress: T3ImportProgress) =>
+      SubscriptionRef.update(job, (current) =>
+        current._tag === "Scanning"
+          ? { _tag: "Scanning" as const, progress }
+          : current._tag === "Importing"
+            ? { ...current, progress }
+            : current,
+      );
+
     /** Copy T3's live database into a temp snapshot, after checking there is room for it. */
     const takeSnapshot = Effect.fn("T3Import.takeSnapshot")(function* () {
       yield* dropSnapshot;
@@ -256,9 +299,27 @@ const make = (options: T3ImportServiceOptions = {}) =>
           `Copying T3 Code's data needs ${formatGigabytes(space.requiredBytes)} free in ${snapshotRoot}, but only ${formatGigabytes(space.availableBytes)} is free. Free up space and try again.`,
         );
       }
+      // Progress arrives from Node's backup callback, between copy steps.
+      const runFork = Effect.runForkWith(yield* Effect.context<never>());
+      let lastPercent = -1;
+      const onProgress = ({ copiedBytes, totalBytes }: T3SnapshotProgress) => {
+        const percent = totalBytes > 0 ? Math.floor((copiedBytes / totalBytes) * 100) : 0;
+        if (percent === lastPercent) return;
+        lastPercent = percent;
+        runFork(
+          setProgress({
+            phase: "snapshot",
+            processedEvents: 0,
+            totalEvents: 0,
+            copiedBytes,
+            totalBytes,
+          }),
+        );
+      };
       // A backup cannot be stopped halfway; let it finish, then clean up.
       const snapshot = yield* Effect.tryPromise({
-        try: () => snapshotT3SourceDatabase({ dbPath: sourceDbPath, tempRoot: snapshotRoot }),
+        try: () =>
+          snapshotT3SourceDatabase({ dbPath: sourceDbPath, tempRoot: snapshotRoot, onProgress }),
         catch: (cause) =>
           failed("source-unavailable", `Couldn't copy T3 Code's data: ${errorSummary(cause)}`),
       }).pipe(Effect.uninterruptible);
@@ -314,15 +375,6 @@ const make = (options: T3ImportServiceOptions = {}) =>
             error: listed.failure.detail,
           } satisfies T3ImportSource);
     });
-
-    const setProgress = (progress: T3ImportProgress) =>
-      SubscriptionRef.update(job, (current) =>
-        current._tag === "Scanning"
-          ? { _tag: "Scanning" as const, progress }
-          : current._tag === "Importing"
-            ? { ...current, progress }
-            : current,
-      );
 
     const resolveScope = (scope: T3ImportScope, available: ReadonlyArray<T3ImportSourceProject>) =>
       scope.sourceProjectIds.length > 0
@@ -813,23 +865,21 @@ const make = (options: T3ImportServiceOptions = {}) =>
           ),
         );
         let lastJob: T3ImportJob = yield* SubscriptionRef.get(job);
-        return Stream.merge(
-          jobs.pipe(
-            Stream.tap((current) =>
-              Effect.sync(() => {
-                lastJob = current;
-              }),
+        return withStatusHeartbeat(
+          Stream.merge(
+            jobs.pipe(
+              Stream.tap((current) =>
+                Effect.sync(() => {
+                  lastJob = current;
+                }),
+              ),
+              Stream.as(undefined),
             ),
-            Stream.as(undefined),
+            polls.pipe(Stream.as(undefined)),
           ),
-          polls.pipe(Stream.as(undefined)),
-        ).pipe(
-          Stream.mapEffect(() =>
-            Ref.get(sourceRef).pipe(
-              Effect.map((source): T3ImportStatus => ({ source, job: lastJob })),
-            ),
+          Ref.get(sourceRef).pipe(
+            Effect.map((source): T3ImportStatus => ({ source, job: lastJob })),
           ),
-          Stream.changesWith((a, b) => JSON.stringify(a) === JSON.stringify(b)),
         );
       }),
     );

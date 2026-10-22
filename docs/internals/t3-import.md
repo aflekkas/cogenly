@@ -20,10 +20,17 @@ to restart.
 T3 Code may stay open, so a scan reads a snapshot, not the live file
 ([`T3SourceDatabase.ts`](../../apps/server/src/t3Import/T3SourceDatabase.ts)):
 
-- **One backup step.** The snapshot is SQLite's online backup from a read-only connection, run as a
-  single step. A multi-step backup restarts whenever another process writes the source, so against
-  a busy T3 it may never finish; one step is one read transaction and one consistent moment. T3
+- **Small backup steps inside one held read transaction.** The snapshot is SQLite's online backup
+  from a read-only connection. Unaided, a multi-step backup restarts whenever another process writes
+  the source, so against a busy T3 it may never finish. The source connection therefore opens a read
+  transaction first; `sqlite3_backup_step` reuses an open one, so every step reads the same moment
+  and T3's writes never restart it. Steps run on Node's thread pool with the event loop free between
+  them, which is what keeps a 12 GB copy from stalling the server, and they report progress. T3
   keeps writing meanwhile (its WAL just can't checkpoint past the reader).
+- **Never hold the event loop.** The T3 source is read through synchronous `node:sqlite`; a read
+  over every thread at once stalled the server for seconds on a large database, long enough for
+  every client's socket to miss its ping and drop. Per-thread reads are chunked with yields between
+  chunks; keep new whole-database reads chunked the same way.
 - **Never create files in T3's directory.** A WAL reader recreates `-wal`/`-shm` files next to a
   closed database, so the live file is opened as a WAL reader only while its `-wal` exists (T3
   running) and as `immutable=1` otherwise. Snapshots are always read `immutable=1`.
