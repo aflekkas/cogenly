@@ -1,6 +1,7 @@
 import { type RefObject, useLayoutEffect, useState } from "react";
 
 import { type ResizableWidthHandlers, useResizableWidth } from "./useResizableWidth";
+import { THREAD_MAIN_CONTENT_MIN_WIDTH } from "../components/threadSidebarWidth";
 import { observeResize } from "../lib/observeResize";
 
 export interface PreviewPanelInlineSize {
@@ -9,7 +10,7 @@ export interface PreviewPanelInlineSize {
 }
 
 const PREVIEW_PANEL_WIDTH_STORAGE_KEY = "cogenly:preview-panel-width";
-const PREVIEW_PANEL_MIN_WIDTH = 360;
+export const PREVIEW_PANEL_MIN_WIDTH = 360;
 /**
  * Upper bound as a fraction of the viewport; only binds on wide screens.
  * On narrow windows the container clamp below is what preserves the
@@ -17,10 +18,10 @@ const PREVIEW_PANEL_MIN_WIDTH = 360;
  */
 const PREVIEW_PANEL_MAX_WIDTH_FRACTION = 0.7;
 /**
- * Floor for the column beside the panel: below this the chat column's
- * composer overflows, so the panel yields instead.
+ * Floor for the column beside the panel: the panel shrinks toward its own
+ * minimum before the chat column drops under this.
  */
-const SIBLING_COLUMN_MIN_WIDTH = 360;
+const SIBLING_COLUMN_MIN_WIDTH = THREAD_MAIN_CONTENT_MIN_WIDTH;
 const PREVIEW_PANEL_DEFAULT_WIDTH = 540;
 
 export function usePreviewPanelInlineSize(

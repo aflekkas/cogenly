@@ -16,6 +16,7 @@ import {
   shortcutLabelForCommand,
 } from "../keybindings";
 import { useRightPanelStore } from "../rightPanelStore";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
@@ -37,6 +38,8 @@ import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
 import { settingsReturnHref, SpaceRouteMemoryTracker } from "./sidebar/modes/spaceRouteMemory";
 import {
   mainColumnCrampedBesidePanel,
+  rightPanelFitsAgain,
+  shouldReopenAutoClosedPanel,
   useListColumnLayoutStore,
 } from "./sidebar/listColumnLayoutStore";
 import { modeSwitchCrossfadeRunning } from "./sidebar/modes/modeSwitchMotion";
@@ -226,13 +229,15 @@ function ListColumnAutoCollapse({
 }
 
 /**
- * Closes the open inline right panel beside the main column: the project
- * panel in Projects mode, otherwise the routed thread's panel (browser,
- * preview, files).
+ * The open inline right panel beside the main column: the project panel in
+ * Projects mode, otherwise the routed thread's panel (browser, preview,
+ * files). `closeForRoom` closes it as a last resort and remembers that, so
+ * `ReopenAutoClosedPanel` can bring it back; the user's own close never does.
  */
-function useCloseInlineRightPanel() {
+function useInlineRightPanelRoom() {
   const navigate = useNavigate();
   const sidebarMode = useUiStateStore((store) => store.sidebarMode);
+  const href = useLocation({ select: (location) => location.href });
   const routeThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
@@ -241,13 +246,46 @@ function useCloseInlineRightPanel() {
     strict: false,
     select: (params) => "labelId" in params && Boolean(params.labelId),
   });
-  return () => {
+  const threadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
+  const closeForRoom = () => {
+    const { setAutoClosedPanel } = useListColumnLayoutStore.getState();
     if (sidebarMode === "projects" && projectPanelOpen) {
+      setAutoClosedPanel({
+        scope: "project",
+        reopen: () => void navigate({ href }),
+      });
       void navigate({ to: "/project" });
     } else if (routeThreadRef) {
+      setAutoClosedPanel({
+        scope: threadKey ?? "",
+        reopen: () => useRightPanelStore.getState().show(routeThreadRef),
+      });
       useRightPanelStore.getState().close(routeThreadRef);
     }
   };
+  // What a remembered auto-close would reopen from the page shown now.
+  const scopeShown = sidebarMode === "projects" && !projectPanelOpen ? "project" : threadKey;
+  return { closeForRoom, scopeShown };
+}
+
+/**
+ * Brings back a right panel that closed for lack of room, once it fits again
+ * (the list column closes or the window grows) and the same page is shown.
+ */
+function ReopenAutoClosedPanel({
+  scopeShown,
+  roomAgain,
+}: {
+  scopeShown: string | null;
+  roomAgain: boolean;
+}) {
+  const autoClosed = useListColumnLayoutStore((store) => store.autoClosedPanel);
+  useEffect(() => {
+    if (!autoClosed || !shouldReopenAutoClosedPanel(autoClosed, scopeShown, roomAgain)) return;
+    useListColumnLayoutStore.getState().setAutoClosedPanel(null);
+    autoClosed.reopen();
+  }, [autoClosed, roomAgain, scopeShown]);
+  return null;
 }
 
 /**
@@ -342,17 +380,32 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     viewportWidth,
     navRailWidth: titlebarLayout.navRailWidthPx,
     listColumnWidth,
-    rightPanelWidth: inlineRightPanelWidth,
+    rightPanelOpen: inlineRightPanelWidth !== null,
   });
   const peekAvailable = listColumnPeekAvailable({
     navRailVisible,
     listColumnOpen,
     listColumnHidden: listSidebarHidden,
   });
-  // Docking the column beside the right panel would cramp the main column:
-  // the toggle closes the panel to make room.
-  const closeRightPanel = useCloseInlineRightPanel();
-  const makeRoomToDock = mainColumnCramped && !listSidebarHidden ? closeRightPanel : null;
+  // Docking the column beside the right panel would leave the main column
+  // under its minimum even with the panel at its narrowest: only then does the
+  // toggle close the panel, remembered so it returns when there is room.
+  const { closeForRoom, scopeShown } = useInlineRightPanelRoom();
+  const dismissed = useListColumnLayoutStore((store) => store.autoCollapseDismissed);
+  const makeRoomToDock = mainColumnCramped && !listSidebarHidden ? closeForRoom : null;
+  const roomForPanelAgain = rightPanelFitsAgain({
+    viewportWidth,
+    navRailWidth: titlebarLayout.navRailWidthPx,
+    listColumnWidth,
+    listColumnOpen: listColumnOpen && !listSidebarHidden,
+  });
+  // The column was docked by hand beside the panel and the window has since
+  // shrunk past what both can share: the panel gives way, not the column.
+  const panelOutOfRoom =
+    mainColumnCramped && !listSidebarHidden && listColumnOpen && dismissed && !isMobile;
+  useEffect(() => {
+    if (panelOutOfRoom) closeForRoom();
+  }, [panelOutOfRoom, closeForRoom]);
   const onListColumnOpenChange = (open: boolean) =>
     useListColumnLayoutStore.getState().applyOpenChange(sidebarMode, open);
   const sidebarProviderStyle = {
@@ -413,6 +466,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         cramped={mainColumnCramped && !listSidebarHidden}
         preferredOpen={preferredOpen}
       />
+      <ReopenAutoClosedPanel scopeShown={scopeShown} roomAgain={roomForPanelAgain} />
       <ListColumnPeekController
         available={peekAvailable}
         pathname={pathname}

@@ -1,14 +1,28 @@
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 
+import { PREVIEW_PANEL_MIN_WIDTH } from "../../hooks/usePreviewPanelInlineSize";
+import { THREAD_MAIN_CONTENT_MIN_WIDTH } from "../threadSidebarWidth";
 import type { SidebarMode } from "./modes/sidebarModes.logic";
 
 /**
- * The narrowest the main column gets beside an inline right panel before the
- * list column steps aside: the composer at its reference width
- * (--chat-content-max-width, 53.8125rem) plus the lane's narrow padding.
+ * Space negotiation between the list column, the main chat column and the
+ * inline right panel. Opening one never closes another while they fit at their
+ * minimums. The right panel shrinks toward RIGHT_PANEL_MIN_WIDTH_PX first
+ * (usePreviewPanelInlineSize clamps it against the main column's minimum);
+ * only when even that leaves the main column under MAIN_COLUMN_MIN_WIDTH_PX
+ * does one of them give way: the list column when the panel opens, the panel
+ * when the column is docked by hand. A panel closed that way comes back once
+ * there is room again.
  */
-export const MAIN_COLUMN_COMFORTABLE_MIN_WIDTH_PX = 885;
+export const MAIN_COLUMN_MIN_WIDTH_PX = THREAD_MAIN_CONTENT_MIN_WIDTH;
+export const RIGHT_PANEL_MIN_WIDTH_PX = PREVIEW_PANEL_MIN_WIDTH;
+
+export interface AutoClosedPanel {
+  /** What was closed: a thread key, or "project" for the Projects panel. */
+  readonly scope: string;
+  readonly reopen: () => void;
+}
 
 interface ListColumnLayoutState {
   /** The user's open or closed list column, per mode. Restored on a mode switch. */
@@ -22,6 +36,12 @@ interface ListColumnLayoutState {
   readonly autoCollapseDismissed: boolean;
   /** The open inline right panel's width, or null when none is open inline. */
   readonly inlineRightPanelWidth: number | null;
+  /**
+   * The right panel closed on its own for lack of room (never by the user).
+   * Reopened by `reopen` once the panels fit again, while `scope` is still shown.
+   */
+  readonly autoClosedPanel: AutoClosedPanel | null;
+  readonly setAutoClosedPanel: (panel: AutoClosedPanel | null) => void;
   /** Applies a change from the sidebar toggle (or an automatic one, see beginAutomaticChange). */
   readonly applyOpenChange: (mode: SidebarMode, open: boolean) => void;
   /** Marks the next applyOpenChange as the automatic collapse (true) or its restore (false). */
@@ -36,6 +56,8 @@ export const useListColumnLayoutStore = create<ListColumnLayoutState>((set) => (
   autoCollapsed: false,
   autoCollapseDismissed: false,
   inlineRightPanelWidth: null,
+  autoClosedPanel: null,
+  setAutoClosedPanel: (panel) => set((state) => ({ ...state, autoClosedPanel: panel })),
   applyOpenChange: (mode, open) => {
     const automaticCollapse = pendingAutomaticCollapse;
     pendingAutomaticCollapse = null;
@@ -62,24 +84,54 @@ export const useListColumnLayoutStore = create<ListColumnLayoutState>((set) => (
         ...state,
         inlineRightPanelWidth: width,
         autoCollapseDismissed: opened ? false : state.autoCollapseDismissed,
+        // A panel open again, by the user or by the restore, settles the memory.
+        autoClosedPanel: width !== null ? null : state.autoClosedPanel,
       };
     }),
 }));
 
 /**
- * Whether the main column would be cramped with the list column open beside
- * the inline right panel.
+ * Whether the main column would fall under its minimum with the list column
+ * open beside the inline right panel at its own minimum width.
  */
 export function mainColumnCrampedBesidePanel(input: {
   readonly viewportWidth: number;
   readonly navRailWidth: number;
   readonly listColumnWidth: number;
-  readonly rightPanelWidth: number | null;
+  readonly rightPanelOpen: boolean;
 }): boolean {
-  if (input.rightPanelWidth === null) return false;
-  const mainWidth =
-    input.viewportWidth - input.navRailWidth - input.listColumnWidth - input.rightPanelWidth;
-  return mainWidth < MAIN_COLUMN_COMFORTABLE_MIN_WIDTH_PX;
+  if (!input.rightPanelOpen) return false;
+  return (
+    input.viewportWidth - input.navRailWidth - input.listColumnWidth - RIGHT_PANEL_MIN_WIDTH_PX <
+    MAIN_COLUMN_MIN_WIDTH_PX
+  );
+}
+
+/** Whether a closed right panel fits again, at its minimum, beside the column as it is now. */
+export function rightPanelFitsAgain(input: {
+  readonly viewportWidth: number;
+  readonly navRailWidth: number;
+  readonly listColumnWidth: number;
+  readonly listColumnOpen: boolean;
+}): boolean {
+  return !mainColumnCrampedBesidePanel({
+    ...input,
+    listColumnWidth: input.listColumnOpen ? input.listColumnWidth : 0,
+    rightPanelOpen: true,
+  });
+}
+
+/**
+ * Whether a panel closed for room should come back: only a panel the layout
+ * itself closed (a user's close leaves no record), on the page it left, with
+ * room for it again.
+ */
+export function shouldReopenAutoClosedPanel(
+  autoClosed: AutoClosedPanel | null,
+  scopeShown: string | null,
+  roomAgain: boolean,
+): boolean {
+  return autoClosed !== null && roomAgain && autoClosed.scope === scopeShown;
 }
 
 // The publisher whose width is current. Several surfaces publish (a chat's
