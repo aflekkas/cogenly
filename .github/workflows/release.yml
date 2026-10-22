@@ -239,7 +239,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      # History only feeds the first-release notes; commits without trees are enough.
+      # History feeds the release notes; commits without trees are enough.
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.sha }}
@@ -259,23 +259,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -n "$PREVIOUS_TAG" ]]; then
-            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-              -f "tag_name=$TAG" -f "target_commitish=$SHA" \
-              -f "previous_tag_name=$PREVIOUS_TAG" --jq .body > release-notes.md
-          else
-            # GitHub otherwise guesses a previous tag from an old staging prerelease.
-            printf 'First prod release.\n\n' > release-notes.md
-            git log --first-parent --format="* %s (%h)" "$SHA" >> release-notes.md
-          fi
+          # Curated notes from the commit subjects since the last prod release. The
+          # app's Updates popover shows the bullets and stops at "## Build".
+          range="$SHA"
+          if [[ -n "$PREVIOUS_TAG" ]]; then range="$PREVIOUS_TAG..$SHA"; fi
+          git log --first-parent --format=%s "$range" \
+            | node -e 'const { renderReleaseNotes } = require("./.github/scripts/release-plan.cjs");
+                let input = "";
+                process.stdin.on("data", (chunk) => (input += chunk));
+                process.stdin.on("end", () => process.stdout.write(renderReleaseNotes(input.split("\n"))));' \
+            > release-notes.md
           mode="$(cat release-publish/signing-mode.txt)"
-          # shellcheck disable=SC2016
-          printf '\nBuild: `%s` • Signing: **%s**\n' "$SHA" "$mode" >> release-notes.md
-          if [[ "$mode" == unsigned ]]; then
-            printf '\n**Unsigned macOS build.** Gatekeeper may block the first launch of a browser-downloaded copy. Installed apps update themselves in place.\n' >> release-notes.md
-          fi
-          # shellcheck disable=SC2016
-          printf '\nPromoted from main commit `%s` after its CI passed.\n' "$SHA" >> release-notes.md
+          {
+            printf '\n## Build\n\n'
+            # shellcheck disable=SC2016
+            printf 'Main commit `%s` • Signing: **%s**\n' "$SHA" "$mode"
+            if [[ "$mode" == unsigned ]]; then
+              printf '\n**Unsigned macOS build.** Gatekeeper may block the first launch of a browser-downloaded copy. Installed apps update themselves in place.\n'
+            fi
+            if [[ -n "$PREVIOUS_TAG" ]]; then
+              printf '\nFull changelog: https://github.com/%s/compare/%s...%s\n' "$GITHUB_REPOSITORY" "$PREVIOUS_TAG" "$TAG"
+            fi
+          } >> release-notes.md
           rm release-publish/signing-mode.txt
           # Upload to a draft first: a failed upload never exposes a partial feed.
           gh release create "$TAG" --target "$SHA" --title "Cogenly $TAG" --notes-file release-notes.md --latest --draft release-publish/*

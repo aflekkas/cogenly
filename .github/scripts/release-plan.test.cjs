@@ -1,6 +1,11 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { releasePlan, assertProdVersionAdvances, assertSourceRef } = require("./release-plan.cjs");
+const {
+  releasePlan,
+  assertProdVersionAdvances,
+  assertSourceRef,
+  renderReleaseNotes,
+} = require("./release-plan.cjs");
 
 test("prod defaults to the package next-version with an optional override", () => {
   const input = { packageVersion: "1.2.3" };
@@ -37,4 +42,46 @@ test("prod versions advance latest instead of silently downgrading users", () =>
   assert.doesNotThrow(() => assertProdVersionAdvances("1.3.0", "v1.2.9"));
   assert.throws(() => assertProdVersionAdvances("1.2.9", "v1.2.9"));
   assert.throws(() => assertProdVersionAdvances("1.2.8", "v1.2.9"));
+});
+
+test("release notes group user-facing commits and drop build noise", () => {
+  const notes = renderReleaseNotes([
+    "feat(desktop): on-device voice dictation in the composer",
+    "fix(server): recover Claude turns whose resume session is missing",
+    "fix(web): the toast's close control is a quiet ghost × inside the card (#12)",
+    "perf(web): opening the right panel restyles the list column once",
+    "Name the prod desktop app plain Cogenly",
+    "chore: bump deps",
+    "ci: cache pnpm",
+    "test(scripts): read the entitlements file through Effect FileSystem",
+    "refactor(web): remove the floating preview mini player",
+    "fix(ci): retry the registry fetch",
+    "feat(release)!: publish prod only",
+    "Merge branch 'main' into feature",
+    "feat(desktop): on-device voice dictation in the composer",
+    "",
+  ]);
+  assert.equal(
+    notes,
+    [
+      "## New",
+      "",
+      "- On-device voice dictation in the composer",
+      "",
+      "## Fixes",
+      "",
+      "- Recover Claude turns whose resume session is missing",
+      "- The toast's close control is a quiet ghost × inside the card",
+      "",
+      "## Improvements",
+      "",
+      "- Opening the right panel restyles the list column once",
+      "- Name the prod desktop app plain Cogenly",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(
+    renderReleaseNotes(["ci: cache pnpm", "chore: tidy"]),
+    "## Improvements\n\n- Behind-the-scenes maintenance\n",
+  );
 });
