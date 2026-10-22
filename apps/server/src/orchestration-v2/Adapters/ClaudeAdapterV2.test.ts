@@ -383,7 +383,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     ]);
   });
 
-  it("adds the handoff draft, memory reads, and project organizers to conversation-mode tools", () => {
+  it("adds the handoff draft, memory reads, and project and thread organizers to conversation-mode tools", () => {
     const threadId = ThreadId.make("thread-claude-mcp-conversation");
     const mcpSession = mcpSessionFor(threadId);
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
@@ -409,6 +409,10 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       "mcp__cogenly__t3_project_label_unlink_repository",
       "mcp__cogenly__t3_thread_move_project_folder",
       "mcp__cogenly__t3_project_label_file_thread",
+      "mcp__cogenly__t3_thread_snooze",
+      "mcp__cogenly__t3_thread_unsnooze",
+      "mcp__cogenly__t3_thread_settle",
+      "mcp__cogenly__t3_thread_unsettle",
       "mcp__cogenly__list_agents",
       "mcp__cogenly__start_agent_builder",
     ]);

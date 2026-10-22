@@ -7,10 +7,13 @@ import {
   OrchestratorMcpFailure,
   type OrchestrationV2Command,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
+import { formatSnoozeTime, resolveSnoozeUntil } from "@t3tools/shared/snooze";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 
+import * as ServerConfig from "../../../config.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
   dispatchFailure,
@@ -296,28 +299,10 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   ),
   t3_thread_organize: writesThread((input) =>
     Effect.gen(function* () {
-      const { threads, projection, caller, shell } = yield* readThread(input.threadId);
+      const { threads, projection, shell } = yield* readThread(input.threadId);
       const common = { commandId: yield* newCommandId(), threadId: projection.thread.id };
-      if (input.action === "settle") {
-        return yield* threads
-          .settleThread({ ...common, byOwnAgent: caller?.id === projection.thread.id })
-          .pipe(Effect.mapError(dispatchFailure));
-      }
       let command: OrchestrationV2Command;
       switch (input.action) {
-        case "snooze":
-          if (input.snoozedUntil === undefined) {
-            return yield* new OrchestratorMcpFailure({
-              code: "invalid_request",
-              message: "snooze requires snoozedUntil.",
-            });
-          }
-          command = { ...common, type: "thread.snooze", snoozedUntil: input.snoozedUntil };
-          break;
-        case "unsnooze":
-        case "unsettle":
-          command = { ...common, type: `thread.${input.action}`, reason: "user" };
-          break;
         case "mark_unread":
           command = { ...common, type: "thread.mark-unread" };
           break;
@@ -338,6 +323,85 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       }
       const result = yield* threads.dispatch(command).pipe(Effect.mapError(dispatchFailure));
       return { sequence: result.sequence };
+    }),
+  ),
+  t3_thread_snooze: writesThread((input) =>
+    Effect.gen(function* () {
+      const { threads, shell, caller } = yield* readThread(input.threadId);
+      const config = yield* ServerConfig.ServerConfig;
+      const clock = {
+        nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+        timeZone: config.serverTimeZone,
+      };
+      let until: { readonly snoozedUntil: string } | "limit_reset" = "limit_reset";
+      if (input.until.toLowerCase() !== "limit_reset") {
+        const resolved = resolveSnoozeUntil(input.until, clock);
+        if (!resolved.ok) {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: resolved.message,
+          });
+        }
+        until = { snoozedUntil: DateTime.formatIso(DateTime.makeUnsafe(resolved.atMs)) };
+      }
+      const result = yield* threads
+        .snoozeThread({
+          commandId: yield* newCommandId(),
+          threadId: shell.id,
+          until,
+          byOwnAgent: caller?.id === shell.id,
+        })
+        .pipe(
+          Effect.mapError((error) =>
+            error._tag === "ThreadManagementNoLimitResetError"
+              ? new OrchestratorMcpFailure({ code: "invalid_request", message: error.message })
+              : dispatchFailure(error),
+          ),
+        );
+      const wake = formatSnoozeTime(Date.parse(result.snoozedUntil), clock, { locale: "en-US" });
+      return {
+        ...result,
+        timeZone: clock.timeZone,
+        receipt:
+          "snoozesWhenTurnEnds" in result
+            ? `Snoozes until ${wake} when this turn ends`
+            : `Snoozed until ${wake}`,
+      };
+    }),
+  ),
+  t3_thread_unsnooze: writesThread((input) =>
+    Effect.gen(function* () {
+      const { threads, shell } = yield* readThread(input.threadId);
+      const result = yield* threads
+        .unsnoozeThread({ commandId: yield* newCommandId(), threadId: shell.id })
+        .pipe(Effect.mapError(dispatchFailure));
+      return { ...result, receipt: "Woke the thread" };
+    }),
+  ),
+  t3_thread_settle: writesThread((input) =>
+    Effect.gen(function* () {
+      const { threads, shell, caller } = yield* readThread(input.threadId);
+      const result = yield* threads
+        .settleThread({
+          commandId: yield* newCommandId(),
+          threadId: shell.id,
+          byOwnAgent: caller?.id === shell.id,
+        })
+        .pipe(Effect.mapError(dispatchFailure));
+      return {
+        ...result,
+        receipt:
+          "settlesWhenTurnEnds" in result ? "Settles when this turn ends" : "Settled the thread",
+      };
+    }),
+  ),
+  t3_thread_unsettle: writesThread((input) =>
+    Effect.gen(function* () {
+      const { threads, shell } = yield* readThread(input.threadId);
+      const result = yield* threads
+        .unsettleThread({ commandId: yield* newCommandId(), threadId: shell.id })
+        .pipe(Effect.mapError(dispatchFailure));
+      return { ...result, receipt: "Moved back to active" };
     }),
   ),
 });

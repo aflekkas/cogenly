@@ -15,6 +15,7 @@
  */
 import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
 import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
+import { formatSnoozeTime, localTimeZone } from "@t3tools/shared/snooze";
 import {
   resolveT3McpToolDefinition,
   resolveT3McpToolId,
@@ -838,11 +839,104 @@ const COGENLY_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
   },
 };
 
+// Snooze and settle tools return a receipt; the row reads as it. Snooze
+// renders its wake time from `snoozedUntil` in the viewer's own zone, which
+// the environment's zone may not match.
+function snoozeWake(call: WorkLogToolCall): string {
+  const atMs = Date.parse(text(call.output.snoozedUntil) ?? "");
+  if (!Number.isFinite(atMs)) return "later";
+  // Only picks between "Fri 9:00 AM" and a dated label; rows have no clock to read.
+  // @effect-diagnostics-next-line globalDate:off
+  return formatSnoozeTime(atMs, { nowMs: Date.now(), timeZone: localTimeZone() });
+}
+
+function threadLifecycleTool(spec: {
+  readonly icon: WorkLogToolIcon;
+  /** Infinitive, for the failed form: `snooze`. */
+  readonly action: string;
+  /** Present participle: `Snoozing`. */
+  readonly running: string;
+  /** The receipt for the calling thread: `Snoozed until Fri 9:00 AM`. */
+  readonly own: (call: WorkLogToolCall) => string;
+  /** Before another thread's title: `Snoozed`. */
+  readonly other: string;
+  /** After another thread's title: `until Fri 9:00 AM`. */
+  readonly otherResult?: (call: WorkLogToolCall) => string;
+}): WorkLogToolDescriptor {
+  const object = (call: WorkLogToolCall, target: WorkLogToolTarget | null) => {
+    const subject = target ? "" : " this thread";
+    if (call.status === "inProgress") return `${spec.running}${subject}`;
+    if (call.status !== "completed") return `${spec.action}${subject}`;
+    return target ? spec.other : spec.own(call);
+  };
+  const { otherResult } = spec;
+  return {
+    icon: spec.icon,
+    verb: null,
+    object,
+    target: threadTarget,
+    ...(otherResult === undefined
+      ? {}
+      : {
+          result: (call: WorkLogToolCall) =>
+            call.status === "completed" && threadTarget(call) ? otherResult(call) : null,
+        }),
+    raw: "collapsed",
+    groupKey: "thread-lifecycle",
+    group: { style: "count", noun: ["thread change", "thread changes"] },
+    // A few changes read as their own rows; more collapse to a count.
+    summarize: (calls) =>
+      calls.length <= 3
+        ? calls.map((call) => resolveWorkLogTool(call)?.label ?? object(call, null)).join(" · ")
+        : null,
+    priority: 0,
+  };
+}
+
+const THREAD_LIFECYCLE_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
+  t3_thread_snooze: threadLifecycleTool({
+    icon: "clock",
+    action: "snooze",
+    running: "Snoozing",
+    own: (call) =>
+      call.output.snoozesWhenTurnEnds === true
+        ? `Snoozes until ${snoozeWake(call)} when this turn ends`
+        : `Snoozed until ${snoozeWake(call)}`,
+    other: "Snoozed",
+    otherResult: (call) => `until ${snoozeWake(call)}`,
+  }),
+  t3_thread_unsnooze: threadLifecycleTool({
+    icon: "bell",
+    action: "wake",
+    running: "Waking",
+    own: () => "Woke this thread",
+    other: "Woke",
+  }),
+  t3_thread_settle: threadLifecycleTool({
+    icon: "shrink",
+    action: "settle",
+    running: "Settling",
+    own: (call) =>
+      call.output.settlesWhenTurnEnds === true
+        ? "Settles when this turn ends"
+        : "Settled this thread",
+    other: "Settled",
+  }),
+  t3_thread_unsettle: threadLifecycleTool({
+    icon: "rotate-ccw",
+    action: "unsettle",
+    running: "Unsettling",
+    own: () => "Moved this thread back to active",
+    other: "Unsettled",
+  }),
+};
+
 /** Every explicit entry, native and Cogenly. Adding a tool means adding one here. */
 export const WORK_LOG_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
   ...NATIVE_TOOLS,
   ...COGENLY_TOOLS,
   ...PROJECT_TOOLS,
+  ...THREAD_LIFECYCLE_TOOLS,
 };
 
 /** Reasoning summaries use the same row; their label is the thought itself. */

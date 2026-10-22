@@ -409,3 +409,73 @@ describe("project change receipts", () => {
     );
   });
 });
+
+describe("thread lifecycle receipts", () => {
+  const snoozedUntil = "2026-10-23T13:00:00.000Z";
+
+  it("reads a snooze of this thread as its wake time", () => {
+    const label = resolveWorkLogTool({
+      toolName: "mcp__cogenly__t3_thread_snooze",
+      input: { until: "tomorrow" },
+      output: { snoozedUntil, timeZone: "UTC", receipt: "Snoozed until Fri 9:00 AM", sequence: 4 },
+      status: "completed",
+    })?.label;
+    expect(label).toMatch(/^Snoozed until \w{3}[, ]/);
+    expect(
+      resolveWorkLogTool({
+        toolName: "cogenly.t3_thread_snooze",
+        input: { until: "tomorrow" },
+        output: { snoozedUntil, timeZone: "UTC", receipt: "", snoozesWhenTurnEnds: true },
+        status: "completed",
+      })?.label,
+    ).toMatch(/^Snoozes until .+ when this turn ends$/);
+  });
+
+  it("names another thread and keeps the wake time as the result", () => {
+    const row = resolveWorkLogTool({
+      toolName: "mcp__cogenly__t3_thread_snooze",
+      input: { threadId: "thread-2", until: "friday" },
+      output: { snoozedUntil, timeZone: "UTC", receipt: "", sequence: 4 },
+      status: "completed",
+      targetTitle: "Release notes",
+    });
+    expect(row?.label).toMatch(/^Snoozed “Release notes” · until /);
+    expect(row?.target).toMatchObject({ kind: "thread", id: "thread-2" });
+  });
+
+  it("reads settle, wake and unsettle, and their attempts", () => {
+    const own = (tool: string, output: Record<string, unknown>) =>
+      resolveWorkLogTool({
+        toolName: `mcp__cogenly__${tool}`,
+        input: {},
+        output,
+        status: "completed",
+      })?.label;
+    expect(own("t3_thread_settle", { sequence: 1, receipt: "" })).toBe("Settled this thread");
+    expect(own("t3_thread_settle", { settlesWhenTurnEnds: true, receipt: "" })).toBe(
+      "Settles when this turn ends",
+    );
+    expect(own("t3_thread_unsnooze", { sequence: 1, receipt: "" })).toBe("Woke this thread");
+    expect(own("t3_thread_unsettle", { sequence: 1, receipt: "" })).toBe(
+      "Moved this thread back to active",
+    );
+    const call = { toolName: "mcp__cogenly__t3_thread_snooze", input: { until: "whenever" } };
+    expect(resolveWorkLogTool({ ...call, status: "inProgress" })?.label).toBe(
+      "Snoozing this thread",
+    );
+    expect(resolveWorkLogTool({ ...call, status: "failed" })?.label).toBe(
+      "Failed: snooze this thread",
+    );
+  });
+
+  it("groups a few changes as their rows", () => {
+    const settle = {
+      toolName: "mcp__cogenly__t3_thread_settle",
+      input: {},
+      output: { sequence: 1, receipt: "" },
+      status: "completed" as const,
+    };
+    const wake = { ...settle, toolName: "mcp__cogenly__t3_thread_unsnooze" };
+    expect(workLogToolGroupLabel([wake, settle])).toBe("Woke this thread · Settled this thread");
+  });
+});

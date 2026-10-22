@@ -1263,10 +1263,11 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
 ];
 
 // Chat-surface turns get the read-only tools plus the handoff draft, the
-// read-only memory tools, and the project organizers, so a conversation can
-// propose Work, recall facts, and set up projects by talking. Project folders
-// are metadata only, so creating and filing them stays conversational; clones
-// and launches still need an approval.
+// read-only memory tools, and the project and thread organizers, so a
+// conversation can propose Work, recall facts, set up projects, and snooze or
+// settle threads by talking. Project folders and thread lifecycle are metadata
+// only, so they stay conversational; clones and launches still need an
+// approval.
 export const CLAUDE_CONVERSATION_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   ...CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
   "mcp__cogenly__work_propose_handoff",
@@ -1284,6 +1285,10 @@ export const CLAUDE_CONVERSATION_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__t3_project_label_unlink_repository",
   "mcp__cogenly__t3_thread_move_project_folder",
   "mcp__cogenly__t3_project_label_file_thread",
+  "mcp__cogenly__t3_thread_snooze",
+  "mcp__cogenly__t3_thread_unsnooze",
+  "mcp__cogenly__t3_thread_settle",
+  "mcp__cogenly__t3_thread_unsettle",
   "mcp__cogenly__list_agents",
   "mcp__cogenly__start_agent_builder",
 ];

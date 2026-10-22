@@ -19,6 +19,7 @@ import {
   NonNegativeInt,
   ProjectId,
 } from "@t3tools/contracts";
+import { SNOOZE_PRESET_KEYS } from "@t3tools/shared/snooze";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
@@ -26,32 +27,25 @@ import { Tool, Toolkit } from "effect/ai";
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ScheduledTaskService from "../../../scheduledTasks/ScheduledTaskService.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as ServerConfig from "../../../config.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
   description:
-    "Pin, snooze, settle, archive, or mark a thread unread. Omit threadId for this thread. snooze requires snoozedUntil. For a thread stopped on a usage limit (see usageLimit in t3_thread_list or t3_thread_read), dont_resume cancels its automatic continuation at the reset and resume_at_reset schedules it again. Existing thread lifecycle rules apply. Settling this thread takes effect when your turn completes, returning settlesWhenTurnEnds=true; a turn that fails or is interrupted, or a queued message, leaves it active.",
+    "Pin, archive, or mark a thread unread. Omit threadId for this thread. For a thread stopped on a usage limit (see usageLimit in t3_thread_list or t3_thread_read), dont_resume cancels its automatic continuation at the reset and resume_at_reset schedules it again. Snooze and settle have their own tools. Existing thread lifecycle rules apply.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     action: Schema.Literals([
       "pin",
       "unpin",
-      "snooze",
-      "unsnooze",
-      "settle",
-      "unsettle",
       "archive",
       "unarchive",
       "mark_unread",
       "resume_at_reset",
       "dont_resume",
     ]),
-    snoozedUntil: Schema.optional(IsoDateTime),
   }),
-  success: Schema.Union([
-    OrchestrationV2DispatchCommandResult,
-    Schema.Struct({ settlesWhenTurnEnds: Schema.Literal(true) }),
-  ]),
+  success: OrchestrationV2DispatchCommandResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return" as const,
   dependencies: [
@@ -62,6 +56,66 @@ const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
 })
   .annotate(Tool.Title, "Organize a thread")
   .annotate(Tool.Destructive, true);
+
+/** Every lifecycle receipt: one line the timeline shows and the agent can quote. */
+const lifecycleReceipt = { receipt: Schema.String };
+const lifecycleTool = {
+  failure: OrchestratorMcpFailure,
+  failureMode: "return" as const,
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ThreadManagementService.ThreadManagementService,
+    Crypto.Crypto,
+  ],
+};
+const ThreadSnoozeTool = Tool.make("t3_thread_snooze", {
+  ...lifecycleTool,
+  description: `Snooze a thread: hide it from the user's inbox until a time, as when they say "snooze this until tomorrow". Omit threadId for this thread. until is a preset (${SNOOZE_PRESET_KEYS.join(", ")}), limit_reset (until the usage limit the thread stopped on resets), an ISO time, or a short phrase such as "friday 2pm" or "in 2 days". Presets and phrases resolve in the user's time zone exactly as the snooze menu does. A snoozed thread wakes early when it asks for something, fails, or completes; snoozing this thread therefore lands when your turn completes (snoozesWhenTurnEnds=true). Quote the receipt instead of restating the time.`,
+  parameters: Schema.Struct({
+    threadId: Schema.optional(ThreadId),
+    until: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  }),
+  success: Schema.Struct({
+    ...lifecycleReceipt,
+    snoozedUntil: IsoDateTime,
+    timeZone: Schema.String,
+    sequence: Schema.optional(NonNegativeInt),
+    snoozesWhenTurnEnds: Schema.optional(Schema.Literal(true)),
+  }),
+  dependencies: [...lifecycleTool.dependencies, ServerConfig.ServerConfig],
+})
+  .annotate(Tool.Title, "Snooze a thread")
+  .annotate(Tool.Destructive, false);
+const ThreadUnsnoozeTool = Tool.make("t3_thread_unsnooze", {
+  ...lifecycleTool,
+  description:
+    "Wake a snoozed thread now so it returns to the user's inbox. Omit threadId for this thread.",
+  parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
+  success: Schema.Struct({ ...lifecycleReceipt, sequence: NonNegativeInt }),
+})
+  .annotate(Tool.Title, "Wake a thread")
+  .annotate(Tool.Destructive, false);
+const ThreadSettleTool = Tool.make("t3_thread_settle", {
+  ...lifecycleTool,
+  description:
+    "Settle a thread: move it out of the active list once its work is done. Omit threadId for this thread. Settling this thread takes effect when your turn completes, returning settlesWhenTurnEnds=true; a turn that fails or is interrupted, or a queued message, leaves it active.",
+  parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
+  success: Schema.Struct({
+    ...lifecycleReceipt,
+    sequence: Schema.optional(NonNegativeInt),
+    settlesWhenTurnEnds: Schema.optional(Schema.Literal(true)),
+  }),
+})
+  .annotate(Tool.Title, "Settle a thread")
+  .annotate(Tool.Destructive, false);
+const ThreadUnsettleTool = Tool.make("t3_thread_unsettle", {
+  ...lifecycleTool,
+  description: "Return a settled thread to the user's active list. Omit threadId for this thread.",
+  parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
+  success: Schema.Struct({ ...lifecycleReceipt, sequence: NonNegativeInt }),
+})
+  .annotate(Tool.Title, "Unsettle a thread")
+  .annotate(Tool.Destructive, false);
 
 const queueTarget = { threadId: Schema.optional(ThreadId), queuedRunId: RunId };
 const commandTool = {
@@ -289,6 +343,10 @@ export const ThreadToolkit = Toolkit.make(
   PendingRequestReadTool,
   PendingRequestRespondTool,
   ThreadOrganizeTool,
+  ThreadSnoozeTool,
+  ThreadUnsnoozeTool,
+  ThreadSettleTool,
+  ThreadUnsettleTool,
   QueueListTool,
   QueueReadTool,
   QueueEditTool,

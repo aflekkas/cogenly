@@ -56,6 +56,7 @@ import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimi
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { isLimitResetSnooze, limitSnoozeUpdate } from "./UsageLimitStop.ts";
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 
@@ -298,6 +299,15 @@ export class ThreadManagementProviderInstanceDisabledError extends Schema.Tagged
   }
 }
 
+export class ThreadManagementNoLimitResetError extends Schema.TaggedError<ThreadManagementNoLimitResetError>()(
+  "ThreadManagementNoLimitResetError",
+  { threadId: ThreadId },
+) {
+  override get message(): string {
+    return `Thread ${this.threadId} is not stopped on a usage limit with a reset still ahead.`;
+  }
+}
+
 export const ThreadManagementError = Schema.Union([
   ThreadManagementThreadNotFoundError,
   ThreadManagementRunNotFoundError,
@@ -312,6 +322,10 @@ export const ThreadManagementError = Schema.Union([
 export type ThreadManagementError = typeof ThreadManagementError.Type;
 
 type ThreadManagementFailure = ThreadManagementError | Orchestrator.OrchestratorV2Error;
+/** What a lifecycle command dispatched through `dispatch` can fail with. */
+type ThreadManagementCommandFailure =
+  | Orchestrator.OrchestratorV2Error
+  | ThreadManagementProviderInstanceDisabledError;
 
 export interface ThreadManagementServiceShape {
   readonly searchThreadStream: (
@@ -444,6 +458,39 @@ export interface ThreadManagementServiceShape {
     // gates; the type stays accurate anyway.
     Orchestrator.OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError
   >;
+  /**
+   * Snoozes a thread until an ISO time, or until the reset of the usage limit
+   * it stopped on. Resolve presets and typed phrases with
+   * `@t3tools/shared/snooze` first. A run that completes after the snooze
+   * wakes the thread, so when its own agent asks mid-turn the snooze lands
+   * once that turn completes, like `settleThread`.
+   */
+  readonly snoozeThread: (input: {
+    readonly threadId: ThreadId;
+    readonly commandId: CommandId;
+    readonly until: { readonly snoozedUntil: string } | "limit_reset";
+    readonly byOwnAgent: boolean;
+  }) => Effect.Effect<
+    { readonly snoozedUntil: string } & (
+      | { readonly sequence: number }
+      | { readonly snoozesWhenTurnEnds: true }
+    ),
+    ThreadManagementCommandFailure | ThreadManagementNoLimitResetError
+  >;
+  /**
+   * Wakes a snoozed thread. A snooze its usage-limit reset set is ended
+   * through the recovery record, as the client's Wake does, so the reset does
+   * not snooze it again.
+   */
+  readonly unsnoozeThread: (input: {
+    readonly threadId: ThreadId;
+    readonly commandId: CommandId;
+  }) => Effect.Effect<{ readonly sequence: number }, ThreadManagementCommandFailure>;
+  /** Returns a settled thread to the active list. */
+  readonly unsettleThread: (input: {
+    readonly threadId: ThreadId;
+    readonly commandId: CommandId;
+  }) => Effect.Effect<{ readonly sequence: number }, ThreadManagementCommandFailure>;
   readonly interruptThread: (
     input: ThreadManagementInterruptInput,
   ) => Effect.Effect<ThreadManagementInterruptResult, ThreadManagementFailure>;
@@ -1012,6 +1059,89 @@ const make = Effect.gen(function* () {
     return { sequence: result.sequence };
   });
 
+  const snoozeThread: ThreadManagementServiceShape["snoozeThread"] = Effect.fn(
+    "orchestrationV2.threadManagement.snoozeThread",
+  )(function* (input) {
+    const shell = yield* orchestrator.getThreadShell(input.threadId);
+    let command: OrchestrationV2ServerCommand;
+    let snoozedUntil: string;
+    if (input.until === "limit_reset") {
+      const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+      const limitRecovery = shell === null ? null : limitSnoozeUpdate(shell, true, nowMs);
+      if (limitRecovery === null) {
+        return yield* new ThreadManagementNoLimitResetError({ threadId: input.threadId });
+      }
+      snoozedUntil = limitRecovery.resetAt;
+      command = {
+        type: "thread.metadata.update",
+        commandId: input.commandId,
+        threadId: input.threadId,
+        limitRecovery,
+      };
+    } else {
+      snoozedUntil = input.until.snoozedUntil;
+      command = {
+        type: "thread.snooze",
+        commandId: input.commandId,
+        threadId: input.threadId,
+        snoozedUntil,
+      };
+    }
+    if (input.byOwnAgent && shell !== null && shell.activeRunId !== null) {
+      const runId = shell.activeRunId;
+      yield* Effect.gen(function* () {
+        const { run } = yield* waitForThread({
+          projectId: shell.projectId,
+          threadId: shell.id,
+          runId,
+          timeoutMs: SETTLE_AFTER_RUN_WAIT_MS,
+        });
+        // A failed or interrupted turn stays visible instead.
+        if (run?.status === "completed") yield* dispatch(command);
+      }).pipe(Effect.ignoreCause({ log: true }), Effect.forkIn(layerScope));
+      return { snoozedUntil, snoozesWhenTurnEnds: true } as const;
+    }
+    const result = yield* dispatch(command);
+    return { sequence: result.sequence, snoozedUntil };
+  });
+
+  const unsnoozeThread: ThreadManagementServiceShape["unsnoozeThread"] = Effect.fn(
+    "orchestrationV2.threadManagement.unsnoozeThread",
+  )(function* (input) {
+    const shell = yield* orchestrator.getThreadShell(input.threadId);
+    const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+    const limitRecovery =
+      shell !== null && isLimitResetSnooze(shell) ? limitSnoozeUpdate(shell, false, nowMs) : null;
+    const result = yield* dispatch(
+      limitRecovery === null
+        ? {
+            type: "thread.unsnooze",
+            commandId: input.commandId,
+            threadId: input.threadId,
+            reason: "user",
+          }
+        : {
+            type: "thread.metadata.update",
+            commandId: input.commandId,
+            threadId: input.threadId,
+            limitRecovery,
+          },
+    );
+    return { sequence: result.sequence };
+  });
+
+  const unsettleThread: ThreadManagementServiceShape["unsettleThread"] = Effect.fn(
+    "orchestrationV2.threadManagement.unsettleThread",
+  )(function* (input) {
+    const result = yield* dispatch({
+      type: "thread.unsettle",
+      commandId: input.commandId,
+      threadId: input.threadId,
+      reason: "user",
+    });
+    return { sequence: result.sequence };
+  });
+
   const interruptThread: ThreadManagementServiceShape["interruptThread"] = (input) =>
     Effect.gen(function* () {
       const target = yield* getProjectThreadRecords(input, ["runs", "providerTurns"]);
@@ -1225,6 +1355,9 @@ const make = Effect.gen(function* () {
     waitForThread,
     settleAfterRun,
     settleThread,
+    snoozeThread,
+    unsnoozeThread,
+    unsettleThread,
     interruptThread,
     stopDelegatedTasks,
     stopWorkflow,
