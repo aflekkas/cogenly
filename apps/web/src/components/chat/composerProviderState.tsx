@@ -56,7 +56,6 @@ type TraitsRenderInput = {
   hidden?: boolean;
   triggerClassName?: string;
   isComposerOwned?: boolean;
-  includeFastMode?: boolean;
 };
 
 export function getComposerPromptInjectionState(prompt: string): ComposerPromptInjectionState {
@@ -165,7 +164,6 @@ function renderTraitsControl(
     hidden,
     triggerClassName,
     isComposerOwned,
-    includeFastMode,
   } = input;
   const hasTarget = threadRef !== undefined || draftId !== undefined;
   const { selections: resolvedModelOptions } = resolveComposerOptionSelections(
@@ -205,14 +203,12 @@ function renderTraitsControl(
       {...(hidden !== undefined ? { hidden } : {})}
       {...(triggerClassName !== undefined ? { triggerClassName } : {})}
       {...(isComposerOwned ? { isComposerOwned } : {})}
-      {...(includeFastMode ? { includeFastMode } : {})}
     />
   );
 }
 
 export function renderProviderTraitsMenuContent(input: TraitsRenderInput): ReactNode {
-  // The overflow menu stands in for the hidden toolbar, fast mode toggle included.
-  return renderTraitsControl(TraitsMenuContent, { ...input, includeFastMode: true });
+  return renderTraitsControl(TraitsMenuContent, input);
 }
 
 export function renderProviderTraitsPicker(input: TraitsRenderInput): ReactNode {
