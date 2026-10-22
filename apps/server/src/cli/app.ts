@@ -1,11 +1,8 @@
-// @effect-diagnostics globalTimers:off -- The Node socket client owns its response deadline and clears it on every completion path.
-import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 
 import {
   DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
   DesktopAppActivationErrorCode,
-  DesktopAppActivationResponse,
   type DesktopAppActivationPlatform,
   type DesktopAppActivationRequest,
 } from "@t3tools/contracts";
@@ -20,28 +17,25 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { Argument, Command } from "effect/cli";
 
+import { sendDesktopAppRequest } from "../environment/DesktopAppControl.ts";
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
 import { baseDirFlag } from "./config.ts";
 
-const CLI_RESPONSE_TIMEOUT_MS = 17_000;
-const MAX_RESPONSE_BYTES = 64 * 1024;
-const isDesktopAppActivationResponse = Schema.is(DesktopAppActivationResponse);
-
 export class DesktopAppSshUnsupportedError extends Schema.TaggedError<DesktopAppSshUnsupportedError>()(
   "DesktopAppSshUnsupportedError",
-  {},
+  { command: Schema.String },
 ) {
   override get message(): string {
-    return "`cogenly app` only controls a desktop app on the same machine. It cannot run over SSH.";
+    return `\`${this.command}\` only controls a desktop app on the same machine. It cannot run over SSH.`;
   }
 }
 
 export class DesktopAppPlatformUnsupportedError extends Schema.TaggedError<DesktopAppPlatformUnsupportedError>()(
   "DesktopAppPlatformUnsupportedError",
-  { platform: Schema.String },
+  { command: Schema.String, platform: Schema.String },
 ) {
   override get message(): string {
-    return `\`cogenly app\` is not supported on ${this.platform}.`;
+    return `\`${this.command}\` is not supported on ${this.platform}.`;
   }
 }
 
@@ -77,128 +71,33 @@ function isDesktopPlatform(platform: NodeJS.Platform): platform is DesktopAppAct
   return platform === "darwin" || platform === "linux" || platform === "win32";
 }
 
-function sendDesktopAppActivationRequest(input: {
-  readonly address: string;
-  readonly fallbackAddress?: string;
-  readonly request: DesktopAppActivationRequest;
-  readonly timeoutMs?: number;
-}): Promise<DesktopAppActivationResponse> {
-  return new Promise((resolve, reject) => {
-    const socket = NodeNet.createConnection(input.address);
-    socket.setEncoding("utf8");
-    let buffer = "";
-    let settled = false;
-    let connected = false;
-
-    const finish = (
-      result:
-        | { readonly type: "success"; readonly response: DesktopAppActivationResponse }
-        | { readonly type: "failure"; readonly error: Error },
-    ) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      socket.destroy();
-      if (result.type === "success") resolve(result.response);
-      else reject(result.error);
-    };
-
-    const timeout = setTimeout(() => {
-      finish({
-        type: "failure",
-        error: new Error("The desktop app did not respond in time."),
-      });
-    }, input.timeoutMs ?? CLI_RESPONSE_TIMEOUT_MS);
-
-    socket.once("connect", () => {
-      connected = true;
-      socket.write(`${JSON.stringify(input.request)}\n`);
-    });
-    socket.on("data", (chunk) => {
-      buffer += chunk;
-      if (Buffer.byteLength(buffer, "utf8") > MAX_RESPONSE_BYTES) {
-        finish({ type: "failure", error: new Error("The desktop app response is too large.") });
-        return;
-      }
-      const newline = buffer.indexOf("\n");
-      if (newline === -1) return;
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(buffer.slice(0, newline));
-      } catch {
-        finish({
-          type: "failure",
-          error: new Error("The desktop app response is not valid JSON."),
-        });
-        return;
-      }
-      if (!isDesktopAppActivationResponse(parsed)) {
-        finish({ type: "failure", error: new Error("The desktop app response is invalid.") });
-        return;
-      }
-      if (parsed.requestId !== input.request.requestId) {
-        finish({
-          type: "failure",
-          error: new Error("The desktop app response did not match this request."),
-        });
-        return;
-      }
-      finish({ type: "success", response: parsed });
-    });
-    socket.once("error", (error: NodeJS.ErrnoException) => {
-      if (
-        !settled &&
-        !connected &&
-        input.fallbackAddress !== undefined &&
-        (error.code === "ENOENT" || error.code === "ECONNREFUSED")
-      ) {
-        settled = true;
-        clearTimeout(timeout);
-        socket.destroy();
-        resolve(
-          sendDesktopAppActivationRequest({
-            address: input.fallbackAddress,
-            request: input.request,
-            ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-          }),
-        );
-        return;
-      }
-      finish({ type: "failure", error });
-    });
-    socket.once("end", () => {
-      finish({ type: "failure", error: new Error("The desktop app closed the connection.") });
-    });
-  });
-}
-
 const appEnvironment = Config.all({
   t3Home: Config.String("COGENLY_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
   sshConnection: Config.String("SSH_CONNECTION").pipe(Config.option),
   sshTty: Config.String("SSH_TTY").pipe(Config.option),
 });
 
-const runAppCommand = Effect.fn("cli.app")(function* (flags: {
-  readonly baseDir: Option.Option<string>;
-  readonly workspaceRoot: Option.Option<string>;
-}) {
+/**
+ * The control addresses of the desktop app on this machine for a `--base-dir` (default: the
+ * Cogenly home, with the dev build's as a fallback). Refuses SSH sessions, where the desktop
+ * app is on another machine.
+ */
+export const resolveLocalDesktopApp = Effect.fn("cli.app.resolveLocalDesktopApp")(function* (
+  baseDirFlag: Option.Option<string>,
+  command: string,
+) {
   const environment = yield* appEnvironment;
   const hostPlatform = yield* HostProcess.Platform;
   if (Option.isSome(environment.sshConnection) || Option.isSome(environment.sshTty)) {
-    return yield* new DesktopAppSshUnsupportedError({});
+    return yield* new DesktopAppSshUnsupportedError({ command });
   }
   if (!isDesktopPlatform(hostPlatform)) {
-    return yield* new DesktopAppPlatformUnsupportedError({ platform: hostPlatform });
+    return yield* new DesktopAppPlatformUnsupportedError({ command, platform: hostPlatform });
   }
-
   const path = yield* Path.Path;
-  const configuredBaseDir = Option.getOrUndefined(flags.baseDir) ?? environment.t3Home;
+  const configuredBaseDir = Option.getOrUndefined(baseDirFlag) ?? environment.t3Home;
   const baseDir = yield* resolveBaseDir(configuredBaseDir);
-  const allowDevFallback = Option.isNone(flags.baseDir) && !environment.t3Home?.trim();
-  const rawWorkspaceRoot =
-    Option.getOrUndefined(flags.workspaceRoot) ?? (yield* HostProcess.WorkingDirectory);
-  const workspaceRoot = path.resolve(yield* expandHomePath(rawWorkspaceRoot));
+  const allowDevFallback = Option.isNone(baseDirFlag) && !environment.t3Home?.trim();
   const userId = yield* HostProcess.UserId;
   const resolveAddress = (stateSubdirectory: "userdata" | "dev") =>
     resolveDesktopAppControlAddress({
@@ -208,6 +107,25 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
       userId,
       joinPath: path.join,
     }).address;
+  const address = resolveAddress("userdata");
+  return {
+    platform: hostPlatform,
+    addresses: allowDevFallback ? { address, fallbackAddress: resolveAddress("dev") } : { address },
+  };
+});
+
+const runAppCommand = Effect.fn("cli.app")(function* (flags: {
+  readonly baseDir: Option.Option<string>;
+  readonly workspaceRoot: Option.Option<string>;
+}) {
+  const { platform: hostPlatform, addresses } = yield* resolveLocalDesktopApp(
+    flags.baseDir,
+    "cogenly app",
+  );
+  const path = yield* Path.Path;
+  const rawWorkspaceRoot =
+    Option.getOrUndefined(flags.workspaceRoot) ?? (yield* HostProcess.WorkingDirectory);
+  const workspaceRoot = path.resolve(yield* expandHomePath(rawWorkspaceRoot));
   const crypto = yield* Crypto.Crypto;
   const requestId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
   const request: DesktopAppActivationRequest = {
@@ -217,16 +135,10 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
     workspaceRoot,
     platform: hostPlatform,
   };
-  const address = resolveAddress("userdata");
-  const fallbackAddress = allowDevFallback ? resolveAddress("dev") : undefined;
+  const { address, fallbackAddress } = addresses;
 
   const response = yield* Effect.tryPromise({
-    try: () =>
-      sendDesktopAppActivationRequest({
-        address,
-        ...(fallbackAddress === undefined ? {} : { fallbackAddress }),
-        request,
-      }),
+    try: () => sendDesktopAppRequest({ ...addresses, request }),
     catch: (cause) =>
       new DesktopAppUnreachableError({
         candidateAddresses: fallbackAddress === undefined ? [address] : [address, fallbackAddress],

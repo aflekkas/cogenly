@@ -1,5 +1,6 @@
 import { OrchestratorMcpFailure, type ServerSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as Settings from "../../../serverSettings.ts";
@@ -44,6 +45,18 @@ const access = Effect.gen(function* () {
     });
   return { ...context, descriptor, settings: yield* Settings.ServerSettingsService };
 });
+/** How an agent hears why the desktop app did not add the environment. */
+export const addEnvironmentFailure = (error: DesktopAppControl.DesktopAppControlError) =>
+  new OrchestratorMcpFailure({
+    code:
+      error._tag === "DesktopAppControlInvalidInputError"
+        ? "invalid_request"
+        : error._tag === "DesktopAppControlUnreachableError"
+          ? "capability_denied"
+          : "orchestration_error",
+    message: error.message,
+  });
+
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
   t3_environment_read: McpToolAccess.reads(() =>
     Effect.gen(function* () {
@@ -57,6 +70,15 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
         preferences: preferences(current),
       };
     }),
+  ),
+  // Adds a machine the user's own SSH config already reaches, to the user's own desktop app,
+  // which shows it happening. Full-access callers only, like other environment changes.
+  t3_environment_add: McpToolAccess.writesEnvironment((input) =>
+    DesktopAppControl.DesktopAppControl.pipe(
+      Effect.flatMap((control) => control.addEnvironment(input)),
+      Effect.map(({ environmentId, label }) => ({ environmentId, label })),
+      Effect.mapError(addEnvironmentFailure),
+    ),
   ),
   t3_environment_preferences_update: McpToolAccess.writesEnvironment((patch, check) =>
     Effect.gen(function* () {

@@ -511,7 +511,7 @@ const smokeCases = [
   },
   {
     toolkit: "environment",
-    names: ["t3_environment_preferences_update", "t3_environment_read"],
+    names: ["t3_environment_add", "t3_environment_preferences_update", "t3_environment_read"],
     tool: "t3_environment_read",
     args: {},
     expected: {

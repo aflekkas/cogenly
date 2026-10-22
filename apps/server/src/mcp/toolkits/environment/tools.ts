@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
+import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -67,4 +68,31 @@ const EnvironmentPreferencesTool = Tool.make("t3_environment_preferences_update"
   }),
   success: Schema.Struct(PreferenceFields),
 }).annotate(Tool.Destructive, true);
-export const EnvironmentToolkit = Toolkit.make(EnvironmentReadTool, EnvironmentPreferencesTool);
+const EnvironmentAddTool = Tool.make("t3_environment_add", {
+  ...shared,
+  dependencies: [...shared.dependencies, DesktopAppControl.DesktopAppControl],
+  description:
+    "Add the user's server to their Cogenly desktop app over SSH, with no clicks. Use it when the user asks to add or connect a server. The desktop connects to an SSH host from the user's SSH config, uses the Cogenly already installed there (starting its service if stopped, installing it otherwise), pairs, and saves it; the user sees progress in the app. Only works from an environment on the same computer as the desktop app. Requires a live full-access/default calling thread. Can take a few minutes.",
+  parameters: Schema.Struct({
+    ssh: Schema.String.annotate({
+      description: "SSH host alias from the user's SSH config (e.g. `myvps`), or user@host.",
+    }),
+    name: Schema.optionalKey(
+      Schema.String.annotate({
+        description:
+          "Name to show, such as `Contabo VPS`. Omit to use the host's own name, `<Provider> VPS`, or `VPS`.",
+      }),
+    ),
+  }),
+  success: Schema.Struct({
+    environmentId: ExecutionEnvironmentDescriptor.fields.environmentId,
+    label: Schema.String,
+  }),
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false);
+export const EnvironmentToolkit = Toolkit.make(
+  EnvironmentReadTool,
+  EnvironmentPreferencesTool,
+  EnvironmentAddTool,
+);
