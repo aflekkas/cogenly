@@ -234,9 +234,107 @@ jobs:
           # The DMG and zip are already compressed.
           compression-level: 0
 
+  cli:
+    name: Build Linux ${{ matrix.arch }} server
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+          package-manager-cache: false
+      - name: Read packageManager
+        id: pm
+        run: echo "spec=$(node -p 'require("./package.json").packageManager')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/node/corepack
+          key: corepack-${{ runner.os }}-${{ runner.arch }}-${{ steps.pm.outputs.spec }}
+      - name: Set up pnpm
+        id: pnpm
+        run: |
+          set -euo pipefail
+          corepack enable pnpm
+          for attempt in 1 2 3 4 5; do
+            corepack install && break
+            if [[ $attempt == 5 ]]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
+          store="$(pnpm store path --silent)"
+          echo "store=$store" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-${{ runner.arch }}-
+      # The server archive never contains Electron, so skip its binary download.
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: |
+          echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+          # The archive's runtime externals install with this Node and its Corepack pnpm.
+          echo "WORKSPACE_NODE_BIN=$(dirname "$(command -v node)")" >> "$GITHUB_ENV"
+          PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH" pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/resource-monitor
+      - name: Stamp package versions
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: node scripts/update-release-package-versions.ts "$VERSION"
+      # Web client into apps/server/dist/client, plus the resource monitor.
+      - name: Build server, web client, and resource monitor
+        run: |
+          set -euo pipefail
+          vp run --filter t3 build
+          vp run build:resource-monitor
+          mkdir -p "$RUNNER_TEMP/resource-monitor"
+          cp native/resource-monitor/target/release/t3-resource-monitor "$RUNNER_TEMP/resource-monitor/"
+      # `--build-sea` needs Node 25.7+ on the host. The executable embeds the
+      # Node pinned in apps/server/vite.config.ts (SEA_NODE_VERSION) either way.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26.8.2
+          package-manager-cache: false
+      - name: Build the single-executable archive
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          node apps/server/scripts/cli.ts build-exe --target "linux-${{ matrix.arch }}"
+          # Staging and smoke-testing run on the workspace Node, as the macOS packaging does.
+          export PATH="$WORKSPACE_NODE_BIN:$PATH"
+          node scripts/build-cli-archive.ts --platform linux --arch '${{ matrix.arch }}' \
+            --version "$VERSION" --output-dir release-cli --resource-monitor-dir "$RUNNER_TEMP/resource-monitor"
+          archive="t3-$VERSION-linux-${{ matrix.arch }}.tar.gz"
+          test -f "release-cli/$archive"
+          # Runs the extracted executable with an empty PATH: --version, then a real serve.
+          node scripts/smoke-cli-archive.ts --archive "release-cli/$archive" --expect-version "$VERSION"
+          (cd release-cli && sha256sum "$archive" > "SHA256SUMS.linux-${{ matrix.arch }}" && sha256sum -c "SHA256SUMS.linux-${{ matrix.arch }}")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-linux-${{ matrix.arch }}
+          path: release-cli/*
+          if-no-files-found: error
+          compression-level: 0
+
   publish:
     name: Publish release
-    needs: [prepare, desktop]
+    needs: [prepare, desktop, cli]
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -253,6 +351,28 @@ jobs:
           pattern: desktop-*
           path: release-publish
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: release-publish
+          merge-multiple: true
+      # One SHA256SUMS for the whole release, covering the Mac and Linux assets.
+      - name: Merge and verify checksums
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-publish
+          node -e 'const fs = require("node:fs");
+              const { mergeChecksums, assertReleaseAssets } = require(process.argv[1]);
+              const parts = fs.readdirSync(".").filter((name) => /^SHA256SUMS(\.|$)/.test(name)).sort();
+              const merged = mergeChecksums(parts.map((name) => fs.readFileSync(name, "utf8")));
+              assertReleaseAssets(merged, process.env.VERSION);
+              for (const name of parts) fs.rmSync(name);
+              fs.writeFileSync("SHA256SUMS", merged);' "$GITHUB_WORKSPACE/.github/scripts/release-plan.cjs"
+          sha256sum -c SHA256SUMS
+          cat SHA256SUMS
       - name: Generate notes and publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -277,6 +397,8 @@ jobs:
             printf '\n## Build\n\n'
             # shellcheck disable=SC2016
             printf 'Main commit `%s` • Signing: **%s**\n' "$SHA" "$mode"
+            # shellcheck disable=SC2016
+            printf '\nLinux server: `t3-%s-linux-x64.tar.gz` and `t3-%s-linux-arm64.tar.gz`, checksummed in `SHA256SUMS`.\n' "${TAG#v}" "${TAG#v}"
             if [[ "$mode" == unsigned ]]; then
               printf '\n**Unsigned macOS build.** Gatekeeper may block the first launch of a browser-downloaded copy. Installed apps update themselves in place.\n'
             fi

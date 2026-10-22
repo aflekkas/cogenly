@@ -1,6 +1,9 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  cliArchiveAssets,
+  mergeChecksums,
+  assertReleaseAssets,
   releasePlan,
   assertProdVersionAdvances,
   assertSourceRef,
@@ -84,4 +87,32 @@ test("release notes group user-facing commits and drop build noise", () => {
     renderReleaseNotes(["ci: cache pnpm", "chore: tidy"]),
     "## Improvements\n\n- Behind-the-scenes maintenance\n",
   );
+});
+
+test("every release names the Linux server archives the installers download", () => {
+  assert.deepEqual(cliArchiveAssets("1.2.3"), [
+    "t3-1.2.3-linux-x64.tar.gz",
+    "t3-1.2.3-linux-arm64.tar.gz",
+  ]);
+});
+
+test("per-job checksum files merge into one SHA256SUMS with bare names", () => {
+  const mac = `${"a".repeat(64)}  ./Cogenly-1.2.3-arm64.zip\n${"b".repeat(64)}  ./latest-mac.yml\n`;
+  const x64 = `${"C".repeat(64)}  t3-1.2.3-linux-x64.tar.gz\n`;
+  const arm = `${"d".repeat(64)} *t3-1.2.3-linux-arm64.tar.gz\n`;
+  const merged = mergeChecksums([mac, x64, arm]);
+  assert.equal(
+    merged,
+    [
+      `${"a".repeat(64)}  Cogenly-1.2.3-arm64.zip`,
+      `${"b".repeat(64)}  latest-mac.yml`,
+      `${"d".repeat(64)}  t3-1.2.3-linux-arm64.tar.gz`,
+      `${"c".repeat(64)}  t3-1.2.3-linux-x64.tar.gz`,
+      "",
+    ].join("\n"),
+  );
+  assert.doesNotThrow(() => assertReleaseAssets(merged, "1.2.3"));
+  assert.throws(() => assertReleaseAssets(mergeChecksums([mac, x64]), "1.2.3"), /linux-arm64/);
+  assert.throws(() => mergeChecksums([x64, `${"e".repeat(64)}  t3-1.2.3-linux-x64.tar.gz`]));
+  assert.throws(() => mergeChecksums(["not a checksum"]));
 });

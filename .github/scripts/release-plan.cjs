@@ -33,6 +33,45 @@ function assertProdVersionAdvances(version, latestTag) {
     );
 }
 
+// Linux server archives every release attaches. The names are what
+// packages/shared/src/cliRelease.ts, the desktop SSH runner, and
+// scripts/install.sh download, so a rename here breaks every installer.
+const CLI_ARCHIVE_PLATFORMS = ["linux-x64", "linux-arm64"];
+
+function cliArchiveAssets(version) {
+  return CLI_ARCHIVE_PLATFORMS.map((platform) => `t3-${version}-${platform}.tar.gz`);
+}
+
+// Each build job writes a sha256sum file for its own assets. The release gets
+// one SHA256SUMS, with bare file names: installers match ` <name>` at the end
+// of a line, so a `./` prefix would hide an archive from them.
+function mergeChecksums(texts) {
+  const entries = new Map();
+  for (const text of texts) {
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      const match = /^([0-9a-fA-F]{64})\s+\*?(?:\.\/)?(\S.*)$/.exec(line);
+      if (!match) throw new Error(`Not a checksum line: ${line}`);
+      const [, digest, name] = match;
+      const previous = entries.get(name);
+      if (previous && previous !== digest.toLowerCase())
+        throw new Error(`${name} has two different checksums.`);
+      entries.set(name, digest.toLowerCase());
+    }
+  }
+  return [...entries]
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([name, digest]) => `${digest}  ${name}\n`)
+    .join("");
+}
+
+function assertReleaseAssets(checksums, version) {
+  const listed = new Set(checksums.split("\n").map((line) => line.slice(66)));
+  const missing = cliArchiveAssets(version).filter((name) => !listed.has(name));
+  if (missing.length > 0) throw new Error(`SHA256SUMS lacks ${missing.join(", ")}.`);
+}
+
 // Release notes come from the first-parent commit subjects since the previous
 // prod tag. Conventional `type(scope): subject` lines are grouped for users;
 // build, CI and test noise is left out. The app's Updates popover reads these
@@ -90,6 +129,9 @@ function renderReleaseNotes(subjects) {
 }
 
 module.exports = {
+  cliArchiveAssets,
+  mergeChecksums,
+  assertReleaseAssets,
   releasePlan,
   assertProdVersionAdvances,
   assertSourceRef,
