@@ -100,13 +100,22 @@ function errorDescriptionClampClass(type: unknown, description: unknown): string
  */
 function ToastDismissButton({ onDismiss }: { onDismiss: () => void }) {
   return (
-    <div className="absolute -top-1.5 -right-1.5 z-20">
+    <div
+      className={cn(
+        // The orb is its own badge: the popover fill and menu hairline
+        // (dropdown-glass), cut out of the card corner by a 2px ring in the
+        // page colour. The fill stays opaque here so the hover tint on the
+        // button blends over it instead of replacing it.
+        "dropdown-glass absolute -top-1.5 -right-1.5 z-20 size-6 rounded-full shadow-sm ring-2 ring-background",
+        "transition-shadow duration-(--motion-duration-fast) ease-standard hover:shadow-md motion-reduce:transition-none",
+      )}
+    >
       <button
         aria-label="Dismiss notification"
         className={cn(
-          "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/60 bg-popover text-muted-foreground shadow-sm outline-none",
-          "transition-[color,box-shadow] duration-(--motion-duration-fast) ease-standard hover:text-foreground motion-reduce:transition-none",
-          "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+          "inline-flex size-full cursor-pointer items-center justify-center rounded-full text-muted-foreground outline-none",
+          "transition-colors duration-(--motion-duration-fast) ease-standard hover:bg-accent hover:text-foreground motion-reduce:transition-none",
+          "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         )}
         data-slot="toast-close"
         onClick={onDismiss}
