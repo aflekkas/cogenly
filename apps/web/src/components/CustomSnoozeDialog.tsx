@@ -11,6 +11,13 @@ import { Button } from "./ui/button";
 import { CalendarIcon } from "lucide-react";
 import { Calendar } from "./ui/calendar";
 import { weekStartsOn } from "../timestampFormat";
+import { useClientSettings } from "../hooks/useSettings";
+import { cn } from "../lib/utils";
+import {
+  resolveTypedSnooze,
+  snoozeWakeDescription,
+  TYPED_SNOOZE_PLACEHOLDER,
+} from "./Sidebar.snooze";
 import { Popover, PopoverTrigger, PopoverPopup } from "./ui/popover";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -64,8 +71,13 @@ function CustomSnoozeDialog() {
   const [amount, setAmount] = useState("2");
   const [unit, setUnit] = useState<"minutes" | "hours" | "days">("hours");
   const [error, setError] = useState<string | null>(null);
+  const [phrase, setPhrase] = useState("");
+  const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const input: CustomSnoozeInput =
     mode === "date" ? { mode, date: localSnoozeDate(date), time } : { mode, amount, unit };
+  // A typed time wins over the pickers while there is one.
+  const typing = phrase.trim().length > 0;
+  const typed = typing ? resolveTypedSnooze(phrase, new Date()) : null;
   return (
     <Dialog
       open
@@ -78,6 +90,14 @@ function CustomSnoozeDialog() {
           className="flex min-h-0 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
+            if (typing) {
+              if (typed === null) {
+                setError("Try a time like “tomorrow 2pm”, “friday” or “in 2 days”.");
+                return;
+              }
+              finish({ snoozedUntil: typed });
+              return;
+            }
             const snoozedUntil = resolveCustomSnooze(input, new Date());
             if (!snoozedUntil) {
               setError(
@@ -92,10 +112,49 @@ function CustomSnoozeDialog() {
         >
           <DialogHeader>
             <DialogTitle>Custom snooze</DialogTitle>
-            <DialogDescription>Choose when snoozed threads return to your inbox.</DialogDescription>
+            <DialogDescription>
+              Type when snoozed threads return to your inbox, or pick a date or duration.
+            </DialogDescription>
           </DialogHeader>
           <DialogPanel>
-            <div className="flex flex-col gap-4">
+            <div className="mb-4 flex flex-col gap-1.5">
+              <Label htmlFor={`${id}-phrase`}>Snooze until</Label>
+              <Input
+                nativeInput
+                autoFocus
+                id={`${id}-phrase`}
+                className="h-9 sm:h-8"
+                placeholder={TYPED_SNOOZE_PLACEHOLDER}
+                autoComplete="off"
+                aria-describedby={`${id}-phrase-preview`}
+                value={phrase}
+                onChange={(event) => {
+                  setPhrase(event.target.value);
+                  setError(null);
+                }}
+              />
+              {/* Holds its line so typing never shifts the pickers. */}
+              <p
+                id={`${id}-phrase-preview`}
+                aria-live="polite"
+                className={cn(
+                  "min-h-4 text-muted-foreground text-xs transition-opacity duration-(--motion-duration-fast) ease-out",
+                  !typing && "opacity-0",
+                )}
+              >
+                {typing
+                  ? typed === null
+                    ? "Keep typing a time"
+                    : `Snoozes until ${snoozeWakeDescription(typed, new Date(), timestampFormat)}`
+                  : "\u00a0"}
+              </p>
+            </div>
+            <div
+              className={cn(
+                "flex flex-col gap-4 transition-opacity duration-(--motion-duration-fast) ease-out",
+                typing && "opacity-50",
+              )}
+            >
               <ToggleGroup
                 aria-label="Schedule type"
                 className="w-full *:flex-1"

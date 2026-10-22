@@ -157,6 +157,8 @@ sidebar shows **Chats**, it starts a chat without a project instead.
 (`mod+alt+n`) starts a thread [without a project](./thread-sidebar.md#start-without-a-project).
 `thread.startWork` (`mod+alt+s`) hands the open chat to a new
 [Work session](./thread-sidebar.md#start-work-from-a-chat).
+`thread.snooze` (`mod+alt+z`) opens **Snooze thread…** in the command palette,
+where you can type a time such as "friday 2pm" or pick a preset.
 
 ## Reserved shortcuts
 

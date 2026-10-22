@@ -21,14 +21,14 @@ export interface CommandPaletteAddProjectTarget {
 }
 
 export interface CommandPaletteOpenDetail {
-  readonly open?: "add-project" | "new-thread-in" | "start-work";
+  readonly open?: "add-project" | "new-thread-in" | "start-work" | "snooze";
   /**
    * With `open: "add-project"`: add the repository into this project. Clones
    * land in the project's folder under the projects root; new and local
    * repositories are filed in it.
    */
   readonly into?: CommandPaletteAddProjectTarget;
-  /** With `open: "start-work"`: the chat that hands off. */
+  /** With `open: "start-work"`: the chat that hands off. With `open: "snooze"`: the thread to snooze. */
   readonly threadRef?: ScopedThreadRef;
   readonly query?: string;
   readonly linkedThreads?: CommandPaletteLinkedThreads;

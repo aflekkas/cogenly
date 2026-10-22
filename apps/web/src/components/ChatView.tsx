@@ -6001,6 +6001,15 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "thread.snooze") {
+        if (!activeThreadCapabilities.snooze || !isServerThread || !activeThreadRef) return;
+        if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) openCommandPalette({ open: "snooze", threadRef: activeThreadRef });
+        return;
+      }
+
       if (command === "thread.openParent") {
         if (activeThreadOriginId === null) return;
         event.preventDefault();

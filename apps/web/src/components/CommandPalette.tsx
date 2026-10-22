@@ -55,6 +55,8 @@ import {
 } from "@t3tools/contracts";
 import { useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
+  AlarmClockIcon,
+  AlarmClockOffIcon,
   ArrowLeftIcon,
   BotIcon,
   ChartNoAxesColumnIcon,
@@ -83,6 +85,13 @@ import {
   TimerOffIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
+import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import { useThreadActions } from "../hooks/useThreadActions";
+import {
+  buildSnoozeGroups,
+  SNOOZE_VIEW_PLACEHOLDER,
+  SNOOZE_VIEW_VALUE,
+} from "./CommandPalette.snooze";
 import {
   usageLimitAutoResumeUpdate,
   usageLimitMenuState,
@@ -514,6 +523,8 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           openNewThreadIn();
         } else if (detail.open === "start-work" && detail.threadRef) {
           dispatch({ _tag: "OpenStartWork", threadRef: detail.threadRef });
+        } else if (detail.open === "snooze" && detail.threadRef) {
+          dispatch({ _tag: "OpenSnooze", threadRef: detail.threadRef });
         } else if (detail.open === "add-project") {
           openAddProject(detail.into);
         } else if (detail.query !== undefined) {
@@ -703,6 +714,11 @@ function OpenCommandPaletteDialog(props: {
     serverEnvironment.moveThreadProjectFolder.permissionAtom(activeThread?.environmentId ?? null),
   );
   const moveThreadToFolder = useMoveThreadToFolder();
+  const { snoozeThread, unsnoozeThread } = useThreadActions();
+  const canOperateActiveThread = useEnvironmentScope(
+    activeThread?.environmentId ?? null,
+    AuthOrchestrationOperateScope,
+  );
   const activeThreadReferenceCopyTarget =
     referenceThreadRef === null
       ? null
@@ -790,6 +806,9 @@ function OpenCommandPaletteDialog(props: {
   }, [environments, primaryEnvironmentId, providers]);
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
+  /** The thread the "Snooze thread…" view acts on, while that view is open. */
+  const [snoozeTarget, setSnoozeTarget] = useState<ScopedThreadRef | null>(null);
+  const isSnoozeView = snoozeTarget !== null && currentView?.groups[0]?.value === SNOOZE_VIEW_VALUE;
   const environmentIds = useMemo(
     () =>
       environments
@@ -1928,6 +1947,29 @@ function OpenCommandPaletteDialog(props: {
     });
   }, [browseNavigation, clearOpenIntent, openIntent, pushPaletteView, startWorkItems]);
 
+  // The view's rows come from the query (see activeGroups), so it pushes no items.
+  const openSnoozeView = useCallback(
+    (threadRef: ScopedThreadRef) => {
+      setSnoozeTarget(threadRef);
+      pushPaletteView({
+        addonIcon: <AlarmClockIcon className={ADDON_ICON_CLASS} />,
+        groups: [{ value: SNOOZE_VIEW_VALUE, label: "Snooze until", items: [] }],
+      });
+    },
+    [pushPaletteView],
+  );
+
+  useLayoutEffect(() => {
+    if (openIntent?.kind !== "snooze") return;
+    clearOpenIntent();
+    browseNavigation.invalidate();
+    setAddProjectCloneFlow(null);
+    setNewProjectFlow(null);
+    setViewStack([]);
+    setQuery("");
+    openSnoozeView(openIntent.threadRef);
+  }, [browseNavigation, clearOpenIntent, openIntent, openSnoozeView]);
+
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
@@ -2290,6 +2332,33 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  if (activeThread !== null && activeCapabilities?.snooze === true && canOperateActiveThread) {
+    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    if (effectiveSnoozed(activeThread, { now: new Date(nowMinuteMs).toISOString() })) {
+      actionItems.push({
+        kind: "action",
+        value: "action:wake-thread",
+        searchTerms: ["wake", "unsnooze", "snooze", "bring back"],
+        title: "Wake thread",
+        icon: <AlarmClockOffIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          const result = await unsnoozeThread(threadRef);
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        },
+      });
+    }
+    actionItems.push({
+      kind: "action",
+      value: "action:snooze-thread",
+      searchTerms: ["snooze", "remind", "later", "hide until", "tomorrow"],
+      title: "Snooze thread…",
+      icon: <AlarmClockIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "thread.snooze",
+      keepOpen: true,
+      run: async () => openSnoozeView(threadRef),
+    });
+  }
+
   if (activeThread !== null) {
     const thread = activeThread;
     actionItems.push({
@@ -2558,7 +2627,18 @@ function OpenCommandPaletteDialog(props: {
         )
       : currentView?.groups[0]?.value === "appearance"
         ? changeAppearanceItem.groups
-        : (currentView?.groups ?? rootGroups);
+        : isSnoozeView
+          ? buildSnoozeGroups({
+              query: deferredQuery,
+              now: new Date(),
+              timestampFormat: clientSettings.timestampFormat,
+              icon: <AlarmClockIcon className={ITEM_ICON_CLASS} />,
+              snooze: async (snoozedUntil) => {
+                const result = await snoozeThread(snoozeTarget, snoozedUntil);
+                if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+              },
+            })
+          : (currentView?.groups ?? rootGroups);
 
   const filteredGroups = filterCommandPaletteGroups({
     activeGroups,
@@ -3386,8 +3466,9 @@ function OpenCommandPaletteDialog(props: {
   const autoHighlightsFirstRow =
     !isBrowsing && !isRemoteProjectCloneFlow && newProjectFlow === null;
 
-  const inputPlaceholder =
-    newProjectFlow !== null
+  const inputPlaceholder = isSnoozeView
+    ? SNOOZE_VIEW_PLACEHOLDER
+    : newProjectFlow !== null
       ? "Repository name"
       : (remoteProjectInputPlaceholder(addProjectCloneFlow) ??
         getCommandPaletteInputPlaceholder(paletteMode));

@@ -68,6 +68,7 @@ export type CommandPaletteOpenIntent =
   | { readonly kind: "new-thread-in" }
   | { readonly kind: "add-project"; readonly into?: CommandPaletteAddProjectTarget }
   | { readonly kind: "start-work"; readonly threadRef: ScopedThreadRef }
+  | { readonly kind: "snooze"; readonly threadRef: ScopedThreadRef }
   | {
       readonly kind: "search";
       readonly query: string;
@@ -91,6 +92,7 @@ export type CommandPaletteUiAction =
   | { readonly _tag: "OpenAddProject"; readonly into?: CommandPaletteAddProjectTarget }
   | { readonly _tag: "OpenNewThreadIn" }
   | { readonly _tag: "OpenStartWork"; readonly threadRef: ScopedThreadRef }
+  | { readonly _tag: "OpenSnooze"; readonly threadRef: ScopedThreadRef }
   | { readonly _tag: "ClearOpenIntent" };
 
 export function reduceCommandPaletteUiState(
@@ -129,6 +131,12 @@ export function reduceCommandPaletteUiState(
         open: true,
         mode: "command",
         openIntent: { kind: "start-work", threadRef: action.threadRef },
+      };
+    case "OpenSnooze":
+      return {
+        open: true,
+        mode: "command",
+        openIntent: { kind: "snooze", threadRef: action.threadRef },
       };
     case "ClearOpenIntent":
       return state.openIntent ? { ...state, openIntent: null } : state;

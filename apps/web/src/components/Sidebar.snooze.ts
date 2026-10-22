@@ -5,6 +5,8 @@ import {
   type SnoozePreset,
 } from "@t3tools/client-runtime/state/thread-settled";
 
+import { localTimeZone, parseSnoozePhrase } from "@t3tools/shared/snooze";
+
 import { formatShortTimestamp, parseTimestampDate } from "../timestampFormat";
 
 export { snoozeWakeLabel, type SnoozePreset };
@@ -55,3 +57,16 @@ export function snoozeWakeDescription(
   const date = wake.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   return `${date}, ${time}`;
 }
+
+/**
+ * A typed wake time ("tmrw", "friday 2pm", "in 2 days") as an ISO string, read
+ * in this device's zone the way the agent's snooze tool reads it in the
+ * environment's. Null when the phrase is not understood or already past.
+ */
+export function resolveTypedSnooze(text: string, now: Date): string | null {
+  const atMs = parseSnoozePhrase(text, { nowMs: now.getTime(), timeZone: localTimeZone() });
+  return atMs === null ? null : new Date(atMs).toISOString();
+}
+
+/** Example phrases for snooze inputs. */
+export const TYPED_SNOOZE_PLACEHOLDER = "tomorrow 2pm, friday, in 2 days…";

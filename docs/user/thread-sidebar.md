@@ -379,7 +379,13 @@ finishes; the call's own result shows its status.
 
 ## Snooze until later
 
-Choose **Snooze → Custom…** from a thread's menu to pick a date and time in your
-local time zone, or a duration in minutes, hours, or days. Durations start when
+Choose **Snooze → Custom…** from a thread's menu and type when it should come
+back, such as "tmrw", "friday 2pm" or "in 2 days", or pick a date and time in
+your local time zone, or a duration in minutes, hours, or days. A weekday means
+its next occurrence, and a day without a time means 9 AM. **Snooze thread…** in
+the command palette (`mod+alt+z`) takes the same phrases. Durations start when
 you confirm; one day means 24 hours. On web and desktop, you can also snooze
 several selected threads together. Choose **Wake thread** to bring a thread back early.
+
+You can also ask the agent, as in "snooze this until tomorrow" or "settle this",
+and it snoozes, wakes or settles the thread in your environment's time zone.
