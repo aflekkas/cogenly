@@ -1213,6 +1213,7 @@ const make = (options: IntegrationsOptions = {}) =>
                 yield* Ref.update(cache, (entries) =>
                   new Map(entries).set(key, { key, atMs: at, result: tools }),
                 );
+                yield* notify;
               }),
             ),
             Effect.map((tools): IntegrationTestResult => ({
