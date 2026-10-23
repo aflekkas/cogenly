@@ -2343,8 +2343,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       ) {
         forkProcessEventDrain(session, expectedPid);
       }
+      // Bounded: the drain publishes to event listeners, and one that stops
+      // consuming must not keep the process from being killed. Past the bound
+      // the held tail is dropped rather than the stop.
       const drainFiber = session.processEventDrainFiber;
-      if (drainFiber) yield* Fiber.await(drainFiber);
+      if (drainFiber) yield* Fiber.await(drainFiber).pipe(Effect.timeoutOption("2 seconds"));
       if (session.process !== process) {
         // The drain met a queued natural exit and already tore the
         // process down; only the final history is left to persist.
