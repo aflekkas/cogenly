@@ -45,6 +45,39 @@ const CREDENTIAL_REF = /\{\{credential:([^}]*)\}\}/g;
 export const credentialRefsIn = (template: string): ReadonlyArray<string> =>
   [...template.matchAll(CREDENTIAL_REF)].map((match) => (match[1] ?? "").trim());
 
+/** The vault item names a set of headers references, which an owner approves together. */
+const credentialItemsIn = (headers: Readonly<Record<string, string>>): Array<string> => [
+  ...new Set(
+    Object.values(headers).flatMap((template) =>
+      credentialRefsIn(template).flatMap((ref) => {
+        const parsed = Credentials.parseCredentialRef(ref);
+        return parsed === undefined ? [] : [parsed.item];
+      }),
+    ),
+  ),
+];
+
+/**
+ * What clients and agents see in place of a literal header value, which may be
+ * a pasted secret. Credential templates are shown as they are. Sending the
+ * mask back in an update keeps the stored value.
+ */
+export const HEADER_MASK = "••••";
+
+/** Headers as clients and agents may see them. */
+export const redactHeaders = (headers: Readonly<Record<string, string>>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [
+      name,
+      value === "" || credentialRefsIn(value).length > 0 ? value : HEADER_MASK,
+    ]),
+  );
+
+const redactIntegration = (integration: Integration): Integration => ({
+  ...integration,
+  headers: redactHeaders(integration.headers),
+});
+
 /** Treat every header as sensitive: even a static Host header can change routing. */
 export const integrationDestinationChanged = (
   current: Integration,
@@ -54,7 +87,9 @@ export const integrationDestinationChanged = (
   (input.transport !== undefined && input.transport !== current.transport) ||
   (input.headers !== undefined &&
     (Object.keys(input.headers).length !== Object.keys(current.headers).length ||
-      Object.entries(input.headers).some(([name, value]) => current.headers[name] !== value)));
+      Object.entries(input.headers).some(
+        ([name, value]) => value !== HEADER_MASK && current.headers[name] !== value,
+      )));
 
 /**
  * Resolves `{{credential:item.field}}` references in every header value.
@@ -65,7 +100,10 @@ export const resolveHeaderTemplates = (
   headers: Readonly<Record<string, string>>,
   resolve: (
     ref: string,
-  ) => Effect.Effect<Option.Option<string>, Credentials.IntegrationCredentialError>,
+  ) => Effect.Effect<
+    Option.Option<string>,
+    Credentials.IntegrationCredentialError | Credentials.IntegrationCredentialNotAllowedError
+  >,
 ): Effect.Effect<Record<string, string>, IntegrationError> =>
   Effect.gen(function* () {
     const resolved: Record<string, string> = {};
@@ -86,10 +124,13 @@ export const resolveHeaderTemplates = (
         }
         const secret = yield* resolve(ref).pipe(
           Effect.mapError(
-            () =>
+            (error) =>
               new IntegrationError({
                 operation: "resolve credentials",
-                reason: "credential_unresolved",
+                reason:
+                  error._tag === "IntegrationCredentialNotAllowedError"
+                    ? "credential_not_allowed"
+                    : "credential_unresolved",
               }),
           ),
         );
@@ -128,6 +169,15 @@ interface CachedTools {
   readonly result: IntegrationToolsResult;
 }
 
+/**
+ * How a write was authorized. The owner's own writes (Settings, or approving
+ * an agent's proposal) approve the vault items in the headers for the
+ * integration's origin; any other write approves nothing.
+ */
+export interface IntegrationWriteOptions {
+  readonly approveCredentials?: boolean;
+}
+
 export interface IntegrationsOptions {
   readonly toolCacheTtlMs?: number;
   readonly upstreamTimeoutMs?: number;
@@ -144,10 +194,12 @@ export class Integrations extends Context.Service<
     ) => Effect.Effect<IntegrationListResult, IntegrationError>;
     readonly create: (
       input: IntegrationCreateInput,
+      options?: IntegrationWriteOptions,
     ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
+    /** A changed origin drops every credential approval unless this write approves anew. */
     readonly update: (
       input: IntegrationUpdateInput,
-      options?: { readonly preserveCredentialDestination: boolean },
+      options?: IntegrationWriteOptions & { readonly preserveCredentialDestination?: boolean },
     ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
     /** Tombstones the integration; its name becomes reusable. */
     readonly remove: (id: IntegrationId) => Effect.Effect<{ deleted: boolean }, IntegrationError>;
@@ -264,7 +316,7 @@ const make = (options: IntegrationsOptions = {}) =>
           integrations: integrations.map((integration) => {
             const cached = entries.get(`${integration.id}:${integration.updatedAt}`);
             return {
-              integration,
+              integration: redactIntegration(integration),
               status: cached === undefined ? "unknown" : "connected",
               toolCount: cached === undefined ? null : cached.result.tools.length,
             } satisfies IntegrationSummary;
@@ -354,9 +406,10 @@ const make = (options: IntegrationsOptions = {}) =>
     /** One upstream round trip: resolve credentials, handshake, then call. */
     const rpc = (integration: Integration, method: string, params: unknown) =>
       Effect.gen(function* () {
+        const endpoint = new URL(integration.url);
         if (
           integration.credentialOrigin !== undefined &&
-          integration.credentialOrigin !== new URL(integration.url).origin &&
+          integration.credentialOrigin !== endpoint.origin &&
           Object.values(integration.headers).some((value) => credentialRefsIn(value).length > 0)
         ) {
           return yield* new IntegrationError({
@@ -364,7 +417,16 @@ const make = (options: IntegrationsOptions = {}) =>
             reason: "credential_unresolved",
           });
         }
-        const headers = yield* resolveHeaderTemplates(integration.headers, credentials.resolve);
+        const destination: Credentials.CredentialDestination = {
+          host: endpoint.hostname,
+          approvedItems:
+            integration.credentialOrigin === endpoint.origin
+              ? (integration.approvedCredentialItems ?? [])
+              : [],
+        };
+        const headers = yield* resolveHeaderTemplates(integration.headers, (ref) =>
+          credentials.resolve(ref, destination),
+        );
         const initialized = yield* post(
           integration,
           headers,
@@ -462,7 +524,7 @@ const make = (options: IntegrationsOptions = {}) =>
           ),
           Effect.flatMap(summaries),
         ),
-      create: (input) =>
+      create: (input, options) =>
         Effect.gen(function* () {
           yield* validateUrl(input.url);
           for (const template of Object.values(input.headers)) {
@@ -490,6 +552,9 @@ const make = (options: IntegrationsOptions = {}) =>
             url: input.url,
             headers: input.headers,
             credentialOrigin: new URL(input.url).origin,
+            approvedCredentialItems: options?.approveCredentials
+              ? credentialItemsIn(input.headers)
+              : [],
             enabled: input.enabled ?? true,
             scope: input.scope,
             hint: input.hint,
@@ -498,11 +563,30 @@ const make = (options: IntegrationsOptions = {}) =>
             deletedAt: null,
           };
           yield* persist(integration);
-          return { integration };
+          return { integration: redactIntegration(integration) };
         }).pipe(Effect.mapError(failure("create", "storage"))),
-      update: (input, options) =>
+      update: (masked, options) =>
         Effect.gen(function* () {
-          const current = yield* getById(input.id);
+          const current = yield* getById(masked.id);
+          // A masked value is one the caller left as it was.
+          const input: IntegrationUpdateInput =
+            masked.headers === undefined
+              ? masked
+              : {
+                  ...masked,
+                  headers: yield* Effect.forEach(Object.entries(masked.headers), ([name, value]) =>
+                    value !== HEADER_MASK
+                      ? Effect.succeed([name, value] as const)
+                      : current.headers[name] !== undefined
+                        ? Effect.succeed([name, current.headers[name]] as const)
+                        : Effect.fail(
+                            new IntegrationError({
+                              operation: "update",
+                              reason: "invalid_request",
+                            }),
+                          ),
+                  ).pipe(Effect.map(Object.fromEntries<string>)),
+                };
           if (
             options?.preserveCredentialDestination &&
             integrationDestinationChanged(current, input)
@@ -510,6 +594,15 @@ const make = (options: IntegrationsOptions = {}) =>
             return yield* new IntegrationError({ operation: "update", reason: "invalid_request" });
           }
           if (input.url !== undefined) yield* validateUrl(input.url);
+          const credentialOrigin = options?.preserveCredentialDestination
+            ? (current.credentialOrigin ?? new URL(current.url).origin)
+            : new URL(input.url ?? current.url).origin;
+          const headers = input.headers ?? current.headers;
+          const approvedCredentialItems = options?.approveCredentials
+            ? credentialItemsIn(headers)
+            : credentialOrigin === current.credentialOrigin
+              ? (current.approvedCredentialItems ?? [])
+              : [];
           const integration: Integration = {
             ...current,
             ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
@@ -520,13 +613,12 @@ const make = (options: IntegrationsOptions = {}) =>
             ...(input.scope === undefined ? {} : { scope: input.scope }),
             ...(input.hint === undefined ? {} : { hint: input.hint }),
             updatedAt: yield* now,
-            credentialOrigin: options?.preserveCredentialDestination
-              ? (current.credentialOrigin ?? new URL(current.url).origin)
-              : new URL(input.url ?? current.url).origin,
+            credentialOrigin,
+            approvedCredentialItems,
           };
           yield* persist(integration);
           yield* invalidate(integration.id);
-          return { integration };
+          return { integration: redactIntegration(integration) };
         }).pipe(sql.withTransaction, Effect.mapError(failure("update", "storage"))),
       remove: (id) =>
         Effect.gen(function* () {

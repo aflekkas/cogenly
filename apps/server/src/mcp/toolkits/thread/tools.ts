@@ -228,7 +228,7 @@ const PendingRequestReadTool = Tool.make("pending_request_read", {
 const PendingRequestRespondTool = Tool.make("pending_request_respond", {
   ...commandTool,
   description:
-    "Answer a pending user-input request using the existing runtime response command. This cannot approve a permission request.",
+    "Answer a pending user-input request in a task you delegated, using the existing runtime response command. Questions in your own thread are for the user. This cannot approve a permission request.",
   parameters: Schema.Struct({ ...requestTarget, answers: ProviderUserInputAnswers }),
 })
   .annotate(Tool.Destructive, true)

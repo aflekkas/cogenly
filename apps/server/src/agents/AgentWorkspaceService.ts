@@ -570,8 +570,9 @@ const make = Effect.gen(function* () {
               case "integration_add": {
                 if (integrations._tag === "None")
                   return yield* fail("Integrations are unavailable on this server.");
+                // The owner reviewed these headers, so their vault items are approved.
                 yield* integrations.value
-                  .create(action.payload)
+                  .create(action.payload, { approveCredentials: true })
                   .pipe(Effect.mapError((cause) => fail(cause.message)));
                 break;
               }
@@ -579,7 +580,7 @@ const make = Effect.gen(function* () {
                 if (integrations._tag === "None")
                   return yield* fail("Integrations are unavailable on this server.");
                 yield* integrations.value
-                  .update(action.payload)
+                  .update(action.payload, { approveCredentials: true })
                   .pipe(Effect.mapError((cause) => fail(cause.message)));
                 break;
               }

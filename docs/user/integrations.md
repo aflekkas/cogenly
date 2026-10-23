@@ -16,7 +16,8 @@ From Settings → Integrations, under Services:
 3. Add any headers the server needs. For a secret, choose the key button
    beside the value and pick a vault item and field; Cogenly inserts a
    reference such as `Bearer {{credential:gmail.password}}`. Store the secret
-   in your vault first.
+   in your vault first. Once saved, header values typed in directly show as
+   `••••`; leave one as it is to keep it, or type a new value.
 4. Optionally add a hint agents see next to the name, and limit the
    integration to chosen projects.
 5. Choose **Test connection** to see how many tools the server offers, or why
@@ -37,6 +38,11 @@ secrets never go into an integration: only references, resolved by the server
 at call time. If a persistent agent asks to connect an integration, you get an
 approval card first — approving it creates the integration. Your own chats
 connect directly.
+
+A vault item is only sent to a server listed in the item's allowed domains, or
+to one you approved it for. Saving an integration in Settings, or approving an
+agent's request, approves the vault items in its headers for that server.
+Changing its URL drops that approval until you save it again.
 
 ## What agents see
 

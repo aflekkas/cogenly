@@ -3,7 +3,9 @@ import {
   CommandId,
   EnvironmentId,
   ProviderInstanceId,
+  RuntimeRequestId,
   ThreadId,
+  type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -26,11 +28,20 @@ const callerId = ThreadId.make("thread:caller");
 const otherId = ThreadId.make("thread:other");
 const planId = ThreadId.make("thread:plan");
 const endedId = ThreadId.make("thread:ended");
+const childId = ThreadId.make("thread:child");
+const siblingId = ThreadId.make("thread:sibling");
+/** A subagent `callerId` delegated to. */
+const delegatedBy = (id: ThreadId): OrchestrationV2ThreadShell => ({
+  ...liveThreadShell(id),
+  lineage: { rootThreadId: callerId, parentThreadId: callerId, relationshipToParent: "subagent" },
+});
 const shells = new Map<ThreadId, OrchestrationV2ThreadShell>([
   [callerId, liveThreadShell(callerId)],
   [otherId, liveThreadShell(otherId)],
   [planId, liveThreadShell(planId, { interactionMode: "plan" })],
   [endedId, liveThreadShell(endedId, { activeRunId: null })],
+  [childId, delegatedBy(childId)],
+  [siblingId, delegatedBy(siblingId)],
 ]);
 
 const threadScope = (threadId: ThreadId): Invocation.McpInvocationScope => ({
@@ -73,7 +84,12 @@ type Recorded = { readonly method: string; readonly input: Record<string, unknow
 /** The thread toolkit over a recording `ThreadManagementService`, called as `scope`. */
 const callTool = Effect.fn("test.callThreadTool")(function* (
   scope: Invocation.McpInvocationScope,
-  tool: "thread_snooze" | "thread_unsnooze" | "thread_settle" | "thread_unsettle",
+  tool:
+    | "thread_snooze"
+    | "thread_unsnooze"
+    | "thread_settle"
+    | "thread_unsettle"
+    | "pending_request_respond",
   params: Record<string, unknown>,
   overrides: Partial<Threads.ThreadManagementServiceShape> = {},
 ) {
@@ -262,5 +278,50 @@ it.effect.each(
     const { result, calls } = yield* callTool(scope, tool, { threadId: target, until: "tomorrow" });
     expect(result).toMatchObject({ code });
     expect(calls).toEqual([]);
+  }),
+);
+
+const requestId = RuntimeRequestId.make("request:question");
+
+/** Every thread waiting on one user-input question, `requestId`. */
+const withQuestion = (shell: OrchestrationV2ThreadShell): OrchestrationV2ThreadProjection => {
+  const projection = idleThreadProjection(shell);
+  return {
+    ...projection,
+    runtimeRequests: [
+      { id: requestId, kind: "user_input", status: "pending" },
+    ] as unknown as OrchestrationV2ThreadProjection["runtimeRequests"],
+    turnItems: [
+      { type: "user_input_request", requestId, questions: [] },
+    ] as unknown as OrchestrationV2ThreadProjection["turnItems"],
+  };
+};
+
+const respond = (scope: Invocation.McpInvocationScope, threadId: ThreadId) =>
+  callTool(
+    scope,
+    "pending_request_respond",
+    { threadId, requestId, answers: { choice: "yes" } },
+    {
+      getProjectThreadRecords: (input) => Effect.succeed(withQuestion(shells.get(input.threadId)!)),
+      dispatch: () => Effect.succeed({ sequence: 9, storedEvents: [] }),
+    },
+  );
+
+it.effect("pending_request_respond lets the delegating parent answer its child", () =>
+  Effect.gen(function* () {
+    const { result } = yield* respond(threadScope(callerId), childId);
+    expect(result).toEqual({ sequence: 9 });
+  }),
+);
+
+it.effect.each([
+  { who: "the asking thread itself", scope: threadScope(childId), target: childId },
+  { who: "a sibling subagent", scope: threadScope(siblingId), target: childId },
+  { who: "an unrelated thread", scope: threadScope(otherId), target: childId },
+])("pending_request_respond refuses $who", ({ scope, target }) =>
+  Effect.gen(function* () {
+    const { result } = yield* respond(scope, target);
+    expect(result).toMatchObject({ code: "capability_denied" });
   }),
 );
