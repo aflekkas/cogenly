@@ -112,6 +112,7 @@ export type Agent = typeof Agent.Type;
 export const AgentUpsertInput = Schema.Struct({
   id: Schema.optional(AgentId),
   ...AgentFields,
+  fallbackChain: Schema.optional(Schema.Array(ModelSelection)),
   responsibility: Schema.optional(AgentPolicyFields.responsibility),
   permissions: Schema.optional(AgentPermissions),
   notifyPolicy: Schema.optional(AgentPolicyFields.notifyPolicy),
