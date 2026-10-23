@@ -12,7 +12,9 @@ import {
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
@@ -51,13 +53,16 @@ function harness(
     readonly labelArchived?: boolean;
     readonly checkoutFails?: boolean;
     readonly filedRepository?: boolean;
+    readonly runPreparing?: boolean;
+    readonly clonePhase?: "running" | "failed" | "cancelled" | null;
+    readonly checkoutGate?: Deferred.Deferred<void>;
   } = {},
 ) {
   const steps: Step[] = [];
   const createdWorktreePaths: Array<string | null> = [];
   const projection = {
     thread: { id: threadId, projectId, worktreePath: "/scratch/draft" },
-    runs: [{ id: runId, status: "running" }],
+    runs: [{ id: runId, status: options.runPreparing === true ? "preparing" : "running" }],
     messages: [],
   } as unknown as OrchestrationV2ThreadProjection;
   const layer = ThreadLaunch.layer.pipe(
@@ -66,11 +71,22 @@ function harness(
         Layer.mock(ProjectService.ProjectService)({
           getById: () => Effect.succeedSome({ id: projectId, workspaceRoot: "/scratch" } as never),
         }),
-        Layer.mock(WorktreeSetupTracker.WorktreeSetupTracker)({}),
-        Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({ get: () => Effect.succeed(null) }),
+        Layer.mock(WorktreeSetupTracker.WorktreeSetupTracker)({
+          stageStatus: () => Effect.void,
+          markUncancellable: () => Effect.void,
+          finish: () => Effect.void,
+        }),
+        Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({
+          get: () =>
+            Effect.succeed(
+              options.clonePhase == null ? null : ({ phase: options.clonePhase } as never),
+            ),
+        }),
         Layer.mock(TerminalManager.TerminalManager)({}),
         Layer.mock(GitWorkflow.GitWorkflowService)({}),
-        Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
+        Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({
+          runForThread: () => Effect.succeed({ status: "no-script" } as never),
+        }),
         Layer.mock(ProviderRegistry.ProviderRegistry)({}),
         Layer.mock(ServerSettings.ServerSettingsService)({}),
         Layer.mock(TextGeneration.TextGeneration)({}),
@@ -101,20 +117,31 @@ function harness(
               return { storedEvents: [{ event }] } as never;
             }),
           getThreadProjection: () => Effect.succeed(projection),
+          getThreadRecords: () =>
+            Effect.succeed({
+              runs:
+                options.runPreparing === true
+                  ? [{ id: runId, status: "preparing" }]
+                  : [{ id: runId, status: "running" }],
+            } as never),
         }),
         Layer.mock(RepositoryCheckout.RepositoryCheckout)({
           ensureCheckout: (repositoryId) =>
             Effect.suspend(() => {
               steps.push({ kind: "checkout", repositoryId });
-              return options.checkoutFails === true
-                ? Effect.fail(
-                    new RepositoryCheckout.RepositoryCheckoutError({
-                      repositoryId,
-                      repositoryName: "smile-express",
-                      reason: "no_remote",
-                    }),
-                  )
-                : Effect.void;
+              const checked =
+                options.checkoutFails === true
+                  ? Effect.fail(
+                      new RepositoryCheckout.RepositoryCheckoutError({
+                        repositoryId,
+                        repositoryName: "smile-express",
+                        reason: "no_remote",
+                      }),
+                    )
+                  : Effect.void;
+              return options.checkoutGate === undefined
+                ? checked
+                : Deferred.await(options.checkoutGate).pipe(Effect.andThen(checked));
             }),
         }),
         Layer.mock(ProjectLabelService.ProjectLabelService)({
@@ -237,26 +264,81 @@ describe("ThreadLaunchService project filing", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("ensures a checkout before creating a thread in a filed repository", () => {
-    const { steps, layer } = harness({ filedRepository: true });
+  it.effect("creates the thread immediately and checks out in background preparation", () => {
+    const { steps, layer } = harness({ filedRepository: true, runPreparing: true });
     return Effect.gen(function* () {
       const launches = yield* ThreadLaunch.ThreadLaunchService;
       yield* launches.launch(launchInput({ surface: "work" }));
-      expect(steps[0]).toEqual({ kind: "checkout", repositoryId: projectId });
+      // The launch itself never waits for a clone.
+      expect(steps).not.toContainEqual({ kind: "checkout", repositoryId: projectId });
       expect(steps).toContainEqual({ kind: "dispatch", type: "thread.create" });
+      // Background preparation ensures the checkout, then releases the run.
+      for (let i = 0; i < 50 && !steps.some((step) => step.kind === "checkout"); i++) {
+        yield* Effect.yieldNow;
+      }
+      expect(steps).toContainEqual({ kind: "checkout", repositoryId: projectId });
+      for (
+        let i = 0;
+        i < 50 &&
+        !steps.some((step) => step.kind === "dispatch" && step.type === "prepared-run.release");
+        i++
+      ) {
+        yield* Effect.yieldNow;
+      }
+      expect(steps).toContainEqual({ kind: "dispatch", type: "prepared-run.release" });
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("refuses a launch into a repository with no checkout and no remote", () => {
-    const { steps, layer } = harness({ filedRepository: true, checkoutFails: true });
+  it.effect("does not block the launch while a clone is still running", () => {
     return Effect.gen(function* () {
-      const launches = yield* ThreadLaunch.ThreadLaunchService;
-      const error = yield* Effect.flip(launches.launch(launchInput({ surface: "work" })));
-      expect(error._tag).toBe("ThreadLaunchError");
-      expect(error).toMatchObject({ operation: "provision-worktree" });
-      expect(steps).toEqual([{ kind: "checkout", repositoryId: projectId }]);
-    }).pipe(Effect.provide(layer));
+      const gate = yield* Deferred.make<void>();
+      const { steps, layer } = harness({
+        filedRepository: true,
+        runPreparing: true,
+        clonePhase: "running",
+        checkoutGate: gate,
+      });
+      const launches = yield* ThreadLaunch.ThreadLaunchService.pipe(Effect.provide(layer));
+      const fiber = yield* Effect.forkScoped(launches.launch(launchInput({ surface: "work" })));
+      for (let i = 0; i < 50 && fiber.pollUnsafe() === undefined; i++) {
+        yield* Effect.yieldNow;
+      }
+      // The launch completed even though the background checkout is gated.
+      expect(fiber.pollUnsafe()).toBeDefined();
+      expect(steps).toContainEqual({ kind: "dispatch", type: "thread.create" });
+      yield* Deferred.succeed(gate, undefined);
+      yield* Fiber.join(fiber);
+    });
   });
+
+  it.effect(
+    "a launch after a failed clone retries it in preparation, failing the run visibly",
+    () => {
+      const { steps, layer } = harness({
+        filedRepository: true,
+        checkoutFails: true,
+        runPreparing: true,
+        clonePhase: "failed",
+      });
+      return Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        // No "retry the clone first" rejection: the thread is created and its
+        // preparation retries the checkout.
+        yield* launches.launch(launchInput({ surface: "work" }));
+        expect(steps).toContainEqual({ kind: "dispatch", type: "thread.create" });
+        for (
+          let i = 0;
+          i < 50 &&
+          !steps.some((step) => step.kind === "dispatch" && step.type === "prepared-run.fail");
+          i++
+        ) {
+          yield* Effect.yieldNow;
+        }
+        expect(steps).toContainEqual({ kind: "checkout", repositoryId: projectId });
+        expect(steps).toContainEqual({ kind: "dispatch", type: "prepared-run.fail" });
+      }).pipe(Effect.provide(layer));
+    },
+  );
 
   it.effect("refuses an archived project before creating the thread, saying why", () => {
     const { steps, layer } = harness({ labelArchived: true });

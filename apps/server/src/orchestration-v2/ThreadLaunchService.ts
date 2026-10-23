@@ -1,5 +1,4 @@
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
-import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
@@ -224,7 +223,6 @@ function failureDetail(error: unknown): string {
 const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const setupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
-  const cloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
   const terminals = yield* TerminalManager.TerminalManager;
   const git = yield* GitWorkflow.GitWorkflowService;
   const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
@@ -910,10 +908,6 @@ const make = Effect.gen(function* () {
 
   const launch: ThreadLaunchService["Service"]["launch"] = Effect.fn("ThreadLaunchService.launch")(
     function* (input) {
-      yield* ProjectCloneTracker.rejectCommandsDuringClone(cloneTracker, {
-        type: "thread.create",
-        projectId: input.projectId,
-      }).pipe(Effect.mapError(mapError(input, "resolve-project")));
       const project = yield* projects.getById(input.projectId).pipe(
         Effect.mapError(mapError(input, "resolve-project")),
         Effect.flatMap(
@@ -923,7 +917,12 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
-      yield* ensureLaunchCheckout(input, input.threadId);
+      // No checkout here: a clone can take minutes, so the launch returns
+      // with the thread preparing and `prepareInBackground` ensures the
+      // checkout there (retrying a failed clone, waiting on a running one).
+      // A checkout failure fails the prepared run in the thread, and the
+      // clone tracker shows it on the project. Rejecting the launch while a
+      // clone runs or after one failed would strand the retry in the tracker.
       if (input.reuseExistingThread === true && input.threadId === undefined) {
         return yield* mapError(
           input,
