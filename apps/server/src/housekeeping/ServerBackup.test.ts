@@ -25,10 +25,10 @@ describe("planBackupRetention", () => {
   it("keeps the newest N backup directories and removes the rest", () => {
     const plan = planBackupRetention(
       [
-        "2026-10-11T02-00-00.000Z",
-        "2026-10-13T02-00-00.000Z",
-        "2026-10-12T02-00-00.000Z",
-        "unrelated-dir",
+        { name: "2026-10-11T02-00-00.000Z", hasSnapshot: true },
+        { name: "2026-10-13T02-00-00.000Z", hasSnapshot: true },
+        { name: "2026-10-12T02-00-00.000Z", hasSnapshot: true },
+        { name: "unrelated-dir", hasSnapshot: false },
       ],
       2,
     );
@@ -43,14 +43,35 @@ describe("planBackupRetention", () => {
   });
 
   it("removes nothing when at or under the retention count", () => {
-    expect(planBackupRetention(["2026-10-13T02-00-00.000Z"], 7).remove).toEqual([]);
+    expect(
+      planBackupRetention([{ name: "2026-10-13T02-00-00.000Z", hasSnapshot: true }], 7).remove,
+    ).toEqual([]);
     expect(planBackupRetention([], 7)).toEqual({ keep: [], remove: [] });
   });
 
   it("treats keep=1 as only the newest backup", () => {
-    const plan = planBackupRetention(["2026-10-11T02-00-00.000Z", "2026-10-12T02-00-00.000Z"], 1);
+    const plan = planBackupRetention(
+      [
+        { name: "2026-10-11T02-00-00.000Z", hasSnapshot: true },
+        { name: "2026-10-12T02-00-00.000Z", hasSnapshot: true },
+      ],
+      1,
+    );
     expect(plan.remove).toEqual(["2026-10-11T02-00-00.000Z"]);
     expect(plan.keep).toEqual(["2026-10-12T02-00-00.000Z"]);
+  });
+
+  it("does not count a dated folder without a snapshot as a backup", () => {
+    const plan = planBackupRetention(
+      [
+        { name: "2026-10-10T02-00-00.000Z", hasSnapshot: true },
+        { name: "2026-10-11T02-00-00.000Z", hasSnapshot: true },
+        { name: "2026-10-12T02-00-00.000Z", hasSnapshot: false },
+      ],
+      1,
+    );
+    expect(plan.keep).toEqual(["2026-10-11T02-00-00.000Z"]);
+    expect(plan.remove).toEqual(["2026-10-10T02-00-00.000Z", "2026-10-12T02-00-00.000Z"]);
   });
 });
 
@@ -106,6 +127,7 @@ describe("ServerBackup.backupNow", () => {
       const backupsDir = path.join(config.baseDir, "backups");
       for (const name of ["2026-10-10T02-00-00.000Z", "2026-10-11T02-00-00.000Z"]) {
         yield* fs.makeDirectory(path.join(backupsDir, name), { recursive: true });
+        yield* fs.writeFileString(path.join(backupsDir, name, "statev2.sqlite"), "");
       }
 
       const backup = yield* ServerBackup;
@@ -152,6 +174,22 @@ describe("ServerBackup.backupNow", () => {
       expect(
         NodeFS.statSync(path.join(result.directory, "secrets", "token.bin")).mode & 0o777,
       ).toBe(0o600);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("a failed backup leaves no dated backup folder behind", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const path = yield* Path.Path;
+      // No database seeded: the snapshot step fails.
+      const backup = yield* ServerBackup;
+      yield* TestClock.setTime(
+        DateTime.toEpochMillis(DateTime.makeUnsafe("2026-10-12T02:00:00.000Z")),
+      );
+      expect(yield* Effect.exit(backup.backupNow)).toMatchObject({ _tag: "Failure" });
+      const backupsDir = path.join(config.baseDir, "backups");
+      const entries = NodeFS.existsSync(backupsDir) ? NodeFS.readdirSync(backupsDir) : [];
+      expect(entries).toEqual([]);
     }).pipe(Effect.provide(testLayer)),
   );
 });
