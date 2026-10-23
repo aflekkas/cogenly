@@ -1433,7 +1433,7 @@ const make = (options: IntegrationsOptions = {}) =>
                 reason: "upstream_unreachable",
               });
             yield* local.value.start(integration);
-            const link = yield* local.value.signInLink(integration);
+            const link = yield* local.value.signInLink(integration, true);
             if (link === undefined)
               return yield* new IntegrationError({
                 operation: "sign in (already signed in)",

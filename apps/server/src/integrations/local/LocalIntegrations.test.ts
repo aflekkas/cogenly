@@ -4,6 +4,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId, IntegrationName } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -251,6 +252,57 @@ describe("managed Google integrations", () => {
       }).pipe(Effect.scoped, Effect.provide(testLayer(specs, false, format)));
     },
     15_000,
+  );
+
+  it.live.each(["reject-grant", "reject-grant-output"])(
+    "recovers a revoked Google grant reported by %s",
+    (tool) => {
+      const specs: Array<Runner.LocalMcpSpec> = [];
+      return Effect.gen(function* () {
+        yield* runMigrations();
+        const gateway = yield* Integrations.Integrations;
+        const local = yield* Local.LocalIntegrations;
+        const fs = yield* FileSystem.FileSystem;
+        const { integration } = yield* gateway.create({
+          preset: "google-workspace",
+          accountLabel: "work",
+          callbackOrigin: "https://cogenly.example.com",
+        });
+        const signIn = yield* gateway.beginSignIn(integration.id, { origin: undefined });
+        const auth = yield* local.authorize(
+          new URL(signIn.authorizationUrl).searchParams.get("ticket")!,
+        );
+        const state = new URL(auth.url!).searchParams.get("state")!;
+        expect(yield* local.callback(`state=${state}&code=first`)).toBe(true);
+        const credential = `${specs[0]!.env.WORKSPACE_MCP_CREDENTIALS_DIR}/fixture@example.com.json`;
+        expect(yield* local.signedIn(integration.id)).toBe(true);
+        const rejected = yield* local.changes.pipe(
+          Stream.filterEffect(() =>
+            local.signedIn(integration.id).pipe(Effect.map((signedIn) => !signedIn)),
+          ),
+          Stream.take(1),
+          Stream.runDrain,
+          Effect.forkScoped,
+        );
+        yield* gateway.callTool(integration.name, tool, {}, undefined).pipe(Effect.result);
+        if (tool === "reject-grant") expect(yield* local.signedIn(integration.id)).toBe(false);
+        yield* Fiber.join(rejected);
+        expect((yield* gateway.list()).integrations[0]?.status).toBe("needs_sign_in");
+        expect(yield* fs.exists(credential)).toBe(true);
+        const retry = yield* gateway.beginSignIn(integration.id, { origin: undefined });
+        expect(yield* fs.exists(credential)).toBe(false);
+        const next = yield* local.authorize(
+          new URL(retry.authorizationUrl).searchParams.get("ticket")!,
+        );
+        expect(next.connected).toBe(false);
+        expect(
+          yield* local.callback(
+            `state=${new URL(next.url!).searchParams.get("state")}&code=second`,
+          ),
+        ).toBe(true);
+        expect(yield* local.signedIn(integration.id)).toBe(true);
+      }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
+    },
   );
 
   it.live.each([

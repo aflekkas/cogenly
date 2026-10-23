@@ -27,6 +27,16 @@ const handle = (body, reply) => {
     url.searchParams.set("state", state);
     url.searchParams.set("redirect_uri", process.env.GOOGLE_OAUTH_REDIRECT_URI);
     reply({ content: [{ type: "text", text: `Open [Google sign-in](${url.href})` }] });
+  } else if (body.params?.name === "reject-grant") {
+    reply({
+      isError: true,
+      content: [{ type: "text", text: "invalid_grant: Token has been expired or revoked." }],
+    });
+  } else if (body.params?.name === "reject-grant-output") {
+    process.stderr.write(
+      "google.auth.exceptions.RefreshError: invalid_grant: Token has been expired or revoked.\n",
+    );
+    reply({ content: [] });
   } else if (body.params?.name === "crash") {
     process.stderr.write("crashing with " + process.env.FIXTURE_SECRET.slice(0, 5));
     process.stderr.write(process.env.FIXTURE_SECRET.slice(5) + "\n");

@@ -97,7 +97,9 @@ link is a ten-minute capability ticket on the account's fixed callback origin
 (Google needs that exact redirect URI registered), which asks the process for
 its consent URL; the callback is routed to the process by the OAuth `state` it
 issued. The process keeps the Google grant on disk, so Cogenly does not hold
-those tokens. Any committed edit retires the running definition (a stale
+those tokens. A rejected grant is tracked separately from its credential file;
+only an explicit sign-in moves that file aside and restarts the process for
+reauthorization. Any committed edit retires the running definition (a stale
 in-flight request cannot restart it); an empty update changes nothing, so
 asking for a fresh link does not kill a pending sign-in.
 

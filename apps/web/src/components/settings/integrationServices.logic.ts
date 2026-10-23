@@ -182,9 +182,8 @@ export function integrationTitle(integration: Integration): string {
 }
 
 /**
- * The sign-in action an integration offers, or null when it has none. A
- * managed account's process keeps its grant, so it only ever offers a first
- * sign-in.
+ * The sign-in action an integration offers, including explicit replacement
+ * of a managed account's existing grant.
  */
 export function signInAction(summary: IntegrationSummary): "Sign in" | "Reconnect" | null {
   if (summary.status === "needs_sign_in") {
@@ -192,7 +191,9 @@ export function signInAction(summary: IntegrationSummary): "Sign in" | "Reconnec
       ? "Sign in"
       : null;
   }
-  return summary.integration.auth?.type === "oauth" ? "Reconnect" : null;
+  return summary.integration.auth?.type === "oauth" || summary.integration.transport === "local"
+    ? "Reconnect"
+    : null;
 }
 
 /** A test from this page, tied to the integration version it ran against. */

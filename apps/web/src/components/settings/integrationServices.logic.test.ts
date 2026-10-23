@@ -240,7 +240,7 @@ describe("display helpers", () => {
     });
     expect(integrationStatus(google, runningTest)).toMatchObject({ label: "Needs sign-in" });
     expect(signInAction(google)).toBe("Sign in");
-    expect(signInAction({ ...google, status: "connected" })).toBeNull();
+    expect(signInAction({ ...google, status: "connected" })).toBe("Reconnect");
   });
   it("shows a host and a scope", () => {
     expect(urlHost("https://mcp.example.com:8443/x")).toBe("mcp.example.com:8443");

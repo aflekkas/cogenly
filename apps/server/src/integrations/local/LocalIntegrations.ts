@@ -20,6 +20,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as ServerConfig from "../../config.ts";
 import * as Credentials from "../IntegrationCredentials.ts";
+import { isGrantRejection } from "./GrantRejection.ts";
 import * as Runner from "./LocalMcpRunner.ts";
 import {
   GOOGLE_CALLBACK_PATH,
@@ -51,9 +52,10 @@ export class LocalIntegrations extends Context.Service<
     readonly status: (id: string) => Effect.Effect<Runner.LocalMcpStatus | undefined>;
     /** Whether the account's process holds a Google grant. */
     readonly signedIn: (id: string) => Effect.Effect<boolean, IntegrationError>;
-    /** A capability link to the sign-in page; undefined once signed in, or when retired. */
+    /** A capability link; explicit reauthentication replaces any stored grant. */
     readonly signInLink: (
       integration: Integration,
+      reauthenticate?: boolean,
     ) => Effect.Effect<IntegrationSignIn | undefined, IntegrationError>;
     /** Fires when a process changes state, a start fails differently, or a sign-in lands. */
     readonly changes: Stream.Stream<void>;
@@ -76,7 +78,12 @@ const definitionKey = Schema.encodeSync(Schema.fromJsonString(Integration));
 const mapLocalError = (cause: Runner.LocalMcpError) =>
   new IntegrationError({
     operation: "run local server",
-    reason: cause.reason === "missing_runtime" ? "local_runtime_missing" : "upstream_unreachable",
+    reason:
+      cause.reason === "missing_runtime"
+        ? "local_runtime_missing"
+        : cause.reason === "sign_in_required"
+          ? "sign_in_required"
+          : "upstream_unreachable",
     cause,
   });
 
@@ -183,6 +190,27 @@ const make = Effect.gen(function* () {
           reason: "google_client_missing",
         });
       return { clientId: id.value, clientSecret: secret.value };
+    });
+  const rejectedGrants = new Set<string>();
+  const rejectGrant = (id: string) =>
+    Effect.gen(function* () {
+      if (rejectedGrants.has(id)) return;
+      rejectedGrants.add(id);
+      yield* fs
+        .writeFileString(path.join(directoryFor(id), "grant-rejected"), "", { mode: 0o600 })
+        .pipe(Effect.mapError(storageError));
+      yield* changed;
+    });
+  const signedIn = (id: string) =>
+    Effect.gen(function* () {
+      if ((yield* runner.status(id))?.grantRejected) yield* rejectGrant(id);
+      return (
+        !rejectedGrants.has(id) &&
+        !(yield* fs
+          .exists(path.join(directoryFor(id), "grant-rejected"))
+          .pipe(Effect.mapError(storageError))) &&
+        (yield* hasCredentials(id))
+      );
     });
   const hasCredentials = (id: string) =>
     Effect.gen(function* () {
@@ -298,9 +326,23 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       yield* start(integration, labelId);
-      const result = yield* runner
-        .rpc(integration.id, method, params)
-        .pipe(Effect.mapError(mapLocalError));
+      const result = yield* runner.rpc(integration.id, method, params).pipe(
+        Effect.mapError(mapLocalError),
+        Effect.tapError((error) =>
+          error.reason === "sign_in_required" ? rejectGrant(integration.id) : Effect.void,
+        ),
+      );
+      const decoded = decodeAuthResult(result);
+      if (
+        decoded._tag === "Some" &&
+        decoded.value.content.some((block) => isGrantRejection(block.text ?? ""))
+      ) {
+        yield* rejectGrant(integration.id);
+        return yield* new IntegrationError({
+          operation: "Google authorization",
+          reason: "sign_in_required",
+        });
+      }
       yield* rememberAuth(integration, result);
       return result;
     });
@@ -328,12 +370,16 @@ const make = Effect.gen(function* () {
         ),
       ),
     status: (id) => runner.status(id).pipe(Effect.map((status) => status ?? failures.get(id))),
-    signedIn: hasCredentials,
+    signedIn,
     changes: Stream.merge(
-      runner.changes.pipe(Stream.map(() => undefined)),
+      runner.changes.pipe(
+        Stream.mapEffect((event) =>
+          event.status.grantRejected ? rejectGrant(event.id).pipe(Effect.ignore) : Effect.void,
+        ),
+      ),
       Stream.fromPubSub(ownChanges),
     ),
-    signInLink: (integration) =>
+    signInLink: (integration, reauthenticate = false) =>
       authLock.withPermits(1)(
         Effect.gen(function* () {
           if (
@@ -341,9 +387,27 @@ const make = Effect.gen(function* () {
             !integration.enabled ||
             integration.deletedAt !== null ||
             !integration.local ||
-            (yield* hasCredentials(integration.id))
+            (!reauthenticate && (yield* signedIn(integration.id)))
           )
             return undefined;
+          // Only an explicit owner/agent sign-in retires the on-disk grant.
+          // Listings and status checks never erase credentials.
+          if (reauthenticate && (yield* hasCredentials(integration.id))) {
+            yield* runner.stop(integration.id);
+            active.delete(integration.id);
+            const backup = `${credentialsFor(integration.id)}.previous`;
+            yield* fs
+              .remove(backup, { recursive: true, force: true })
+              .pipe(Effect.mapError(storageError));
+            yield* fs
+              .rename(credentialsFor(integration.id), backup)
+              .pipe(Effect.mapError(storageError));
+            for (const [key, ticket] of tickets)
+              if (ticket.integration.id === integration.id) tickets.delete(key);
+            for (const [key, state] of states)
+              if (state.integration.id === integration.id) states.delete(key);
+            yield* start(integration);
+          }
           const origin = integration.local.callbackOrigin;
           const link = (ticket: string): IntegrationSignIn => ({
             authorizationUrl: `${origin}${GOOGLE_SIGN_IN_PATH}?ticket=${ticket}`,
@@ -370,7 +434,7 @@ const make = Effect.gen(function* () {
               operation: "start Google sign-in (link expired; start sign-in again)",
               reason: "not_found",
             });
-          if (yield* hasCredentials(entry.integration.id)) return { connected: true };
+          if (yield* signedIn(entry.integration.id)) return { connected: true };
           const pending = [...states.values()].find(
             (state) => state.integration.id === entry.integration.id,
           );
@@ -408,9 +472,17 @@ const make = Effect.gen(function* () {
           .callback(entry.integration.id, params.toString())
           .pipe(Effect.mapError(mapLocalError));
         const connected = success && (yield* hasCredentials(entry.integration.id));
-        if (connected) yield* changed;
+        if (connected) {
+          rejectedGrants.delete(entry.integration.id);
+          yield* fs
+            .remove(path.join(directoryFor(entry.integration.id), "grant-rejected"), {
+              force: true,
+            })
+            .pipe(Effect.mapError(storageError));
+          yield* changed;
+        }
         return connected;
-      }),
+      }).pipe(authLock.withPermits(1)),
   });
 });
 

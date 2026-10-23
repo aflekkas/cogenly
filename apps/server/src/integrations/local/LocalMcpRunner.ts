@@ -16,6 +16,7 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 // Node's ephemeral listener selects a loopback port without a platform-specific shell command.
 import * as NodeNet from "node:net";
+import { isGrantRejection } from "./GrantRejection.ts";
 import { createOutputRedactor } from "./OutputRedactor.ts";
 
 export class LocalMcpError extends Schema.TaggedError<LocalMcpError>()("LocalMcpError", {
@@ -24,6 +25,7 @@ export class LocalMcpError extends Schema.TaggedError<LocalMcpError>()("LocalMcp
     "start_failed",
     "not_running",
     "protocol",
+    "sign_in_required",
     "timeout",
   ]),
   runtime: Schema.String,
@@ -57,6 +59,7 @@ export interface LocalMcpStatus {
   readonly version: string;
   readonly stderrTail: string;
   readonly message?: string;
+  readonly grantRejected?: boolean;
 }
 
 interface Connection {
@@ -194,7 +197,11 @@ const make = (
         for (const candidate of candidates) {
           const parsed = decodeResponse(candidate);
           if (parsed._tag === "Some" && parsed.value.id === id) {
-            if (parsed.value.error !== undefined) return yield* error(spec, "protocol");
+            if (parsed.value.error !== undefined)
+              return yield* error(
+                spec,
+                isGrantRejection(encodeJson(parsed.value.error)) ? "sign_in_required" : "protocol",
+              );
             return {
               result: parsed.value.result,
               sessionId: response.headers["mcp-session-id"] ?? sessionId,
@@ -233,11 +240,16 @@ const make = (
               const output = (stream: typeof child.stderr) => {
                 const redactor = createOutputRedactor(spec.secrets);
                 const retain = (text: string) =>
-                  Effect.sync(() => {
+                  Effect.gen(function* () {
+                    const stderrTail = (account.status.stderrTail + text).slice(-4000);
+                    const rejected = !account.status.grantRejected && isGrantRejection(stderrTail);
                     account.status = {
                       ...account.status,
-                      stderrTail: (account.status.stderrTail + text).slice(-4000),
+                      stderrTail,
+                      ...(rejected ? { grantRejected: true } : {}),
                     };
+                    if (rejected)
+                      yield* PubSub.publish(updates, { id: spec.id, status: account.status });
                   });
                 return stream.pipe(
                   Stream.decodeText(),
@@ -273,7 +285,15 @@ const make = (
                         if (!deferred) return;
                         yield* parsed.value.error === undefined
                           ? Deferred.succeed(deferred, parsed.value.result)
-                          : Deferred.fail(deferred, error(spec, "protocol"));
+                          : Deferred.fail(
+                              deferred,
+                              error(
+                                spec,
+                                isGrantRejection(encodeJson(parsed.value.error))
+                                  ? "sign_in_required"
+                                  : "protocol",
+                              ),
+                            );
                       }),
                     ),
                     Effect.ignore,
