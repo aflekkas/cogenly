@@ -64,9 +64,12 @@ export function launcherNotifyMessages(
 ): ReadonlyArray<string> {
   switch (phase) {
     case "starting":
-      // No READY yet: only a start-timeout extension helps; the child sends
-      // READY itself, and a trial child reports ready through the launcher.
-      return readySent ? ["WATCHDOG=1"] : [`EXTEND_TIMEOUT_USEC=${EXTEND_TIMEOUT_USEC}`];
+      // Extend the start timeout and feed the watchdog. A normal child
+      // sends READY itself, so the launcher may never learn readiness
+      // happened (`readySent` stays false), yet systemd still expects
+      // WATCHDOG pings after READY: a first-update migration longer
+      // than WatchdogSec would otherwise be killed mid-flight.
+      return [`EXTEND_TIMEOUT_USEC=${EXTEND_TIMEOUT_USEC}`, "WATCHDOG=1"];
     case "running":
       return ["WATCHDOG=1"];
     case "idle":

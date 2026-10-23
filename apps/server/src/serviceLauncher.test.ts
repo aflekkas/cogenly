@@ -9,14 +9,29 @@ import {
 } from "./serviceLauncher.ts";
 
 describe("launcher sd_notify decisions", () => {
-  it("extends the start timeout while a child starts, before READY", () => {
+  it("extends the start timeout and pings the watchdog while a child starts, before READY", () => {
     expect(launcherNotifyMessages("starting", false)).toEqual([
       `EXTEND_TIMEOUT_USEC=${EXTEND_TIMEOUT_USEC}`,
+      "WATCHDOG=1",
     ]);
   });
 
-  it("pings the watchdog while a child starts after READY was already sent", () => {
-    expect(launcherNotifyMessages("starting", true)).toEqual(["WATCHDOG=1"]);
+  it("extends and pings while a child starts after READY was already sent", () => {
+    // A normal child sends READY itself, so the launcher may never learn
+    // readiness happened; the watchdog must be fed either way or a long
+    // first-update migration outlives WatchdogSec and gets killed.
+    expect(launcherNotifyMessages("starting", true)).toEqual([
+      `EXTEND_TIMEOUT_USEC=${EXTEND_TIMEOUT_USEC}`,
+      "WATCHDOG=1",
+    ]);
+  });
+
+  it("pings the watchdog in every phase, ready or not", () => {
+    for (const phase of ["starting", "running", "idle", "long-operation"] as const) {
+      for (const readySent of [false, true]) {
+        expect(launcherNotifyMessages(phase, readySent)).toContain("WATCHDOG=1");
+      }
+    }
   });
 
   it("pings the watchdog while running", () => {
@@ -66,7 +81,7 @@ describe("LauncherNotifier", () => {
     notifier.markChildReady();
     notifier.tick();
     expect(sent).toEqual([
-      [`EXTEND_TIMEOUT_USEC=${EXTEND_TIMEOUT_USEC}`],
+      [`EXTEND_TIMEOUT_USEC=${EXTEND_TIMEOUT_USEC}`, "WATCHDOG=1"],
       ["READY=1", "WATCHDOG=1"],
       ["WATCHDOG=1"],
     ]);

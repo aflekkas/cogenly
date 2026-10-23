@@ -100,7 +100,32 @@ describe("project label folders", () => {
     }).pipe(Effect.provide(labelsLayer("label-folders-worktrees-inside"))),
   );
 
-  it.effect("renames when the only worktrees inside belong to archived threads", () =>
+  it.effect(
+    "refuses a rename while an archived thread has a worktree inside the project folder",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sql = yield* SqlClient.SqlClient;
+        const labels = yield* Labels.ProjectLabelService;
+        const folders = yield* Folders.ProjectLabelFolders;
+        const created = yield* labels.create({ name: "Spawn Partners" });
+        const first = (yield* folders.dirForLabel(created.label)).dir;
+        const worktreePath = path.join(first, "worktrees", "fix-login");
+        const at = "2026-01-01T00:00:00.000Z";
+        yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,archived_at,payload_json) VALUES ('thread:archived', 'project:repo-a', 'Work', 'codex', 'full-access', 'default', ${at}, ${at}, ${at}, ${JSON.stringify({ worktreePath })})`;
+        // Archived threads can be reopened, so their stored worktree paths
+        // would go stale exactly like a live thread's.
+        const error = yield* Effect.flip(labels.update({ id: created.label.id, name: "Spawned" }));
+        expect(error._tag).toBe("ProjectLabelError");
+        expect(error).toMatchObject({ reason: "worktrees_inside" });
+        expect(error.message).toContain("unarchive and finish");
+        expect((yield* labels.list()).labels[0]?.name).toBe("Spawn Partners");
+        expect(yield* fs.exists(first)).toBe(true);
+      }).pipe(Effect.provide(labelsLayer("label-folders-worktrees-archived"))),
+  );
+
+  it.effect("renames when the only worktrees inside belong to deleted threads", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
       const sql = yield* SqlClient.SqlClient;
@@ -110,10 +135,10 @@ describe("project label folders", () => {
       const first = (yield* folders.dirForLabel(created.label)).dir;
       const worktreePath = path.join(first, "worktrees", "fix-login");
       const at = "2026-01-01T00:00:00.000Z";
-      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,archived_at,payload_json) VALUES ('thread:archived', 'project:repo-a', 'Work', 'codex', 'full-access', 'default', ${at}, ${at}, ${at}, ${JSON.stringify({ worktreePath })})`;
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,deleted_at,payload_json) VALUES ('thread:deleted', 'project:repo-a', 'Work', 'codex', 'full-access', 'default', ${at}, ${at}, ${at}, ${JSON.stringify({ worktreePath })})`;
       const renamed = yield* labels.update({ id: created.label.id, name: "Spawned" });
       expect(renamed.label.name).toBe("Spawned");
-    }).pipe(Effect.provide(labelsLayer("label-folders-worktrees-archived"))),
+    }).pipe(Effect.provide(labelsLayer("label-folders-worktrees-deleted"))),
   );
 
   it.effect("reconcile adopts a Finder-renamed folder by its id file", () =>

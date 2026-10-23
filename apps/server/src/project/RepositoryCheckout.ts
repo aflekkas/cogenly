@@ -149,6 +149,31 @@ const make = Effect.gen(function* () {
     const workspaceRoot = project.workspaceRoot;
     const repositoryName = repositoryDirectoryName(workspaceRoot) ?? project.title ?? repositoryId;
 
+    // A clone git is still running has already created `.git` but has not
+    // checked out any files, so the filesystem shortcuts below would pass
+    // against a half-made checkout. Wait for this repository's own clone
+    // in the tracker before trusting anything on disk.
+    const activeClone = yield* clones.get(repositoryId);
+    if (activeClone?.phase === "running") {
+      const settled = Option.getOrUndefined(yield* waitForClone(repositoryId));
+      if (settled !== undefined && settled.phase !== "done") {
+        return yield* new RepositoryCheckoutError({
+          repositoryId,
+          repositoryName,
+          reason: "clone_failed",
+          detail:
+            settled.phase === "cancelled"
+              ? "The clone was cancelled."
+              : (settled.error ?? "The repository could not be cloned."),
+        });
+      }
+      if (yield* hasOwnCheckout(workspaceRoot)) {
+        return;
+      }
+      // The clone left the tracker (or finished without a checkout):
+      // fall through and let the normal flow judge what is on disk.
+    }
+
     if (yield* hasOwnCheckout(workspaceRoot)) {
       return;
     }

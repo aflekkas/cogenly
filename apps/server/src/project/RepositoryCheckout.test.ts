@@ -10,6 +10,8 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -147,6 +149,96 @@ const run = (box: Box) =>
     return yield* checkout.ensureCheckout(projectId);
   }).pipe(Effect.provide(harness(box)), Effect.scoped);
 
+/**
+ * A launch that arrives while this repository's clone is still running:
+ * git has already created `.git`, but no files are checked out yet. The
+ * tracker is mocked so the clone stays running until the test releases it.
+ */
+const runDuringClone = Effect.gen(function* () {
+  const workspaceRoot = NodePath.join(tempRoot(), "smile-express");
+  NodeFS.mkdirSync(workspaceRoot);
+  // Mid-clone state: `.git` exists, the working tree is still empty.
+  git(workspaceRoot, ["init", "--initial-branch=main"]);
+  const waitStarted = yield* Deferred.make<void>();
+  const releaseClone = yield* Deferred.make<void>();
+  const returned = yield* Deferred.make<void>();
+  const snapshot = (phase: "running" | "done") =>
+    ({
+      projectId,
+      remoteUrl: "https://example.invalid/repo.git",
+      destinationPath: workspaceRoot,
+      repository: null,
+      phase,
+      stage: "receiving",
+      percent: 10,
+      detail: null,
+      error: null,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      endedAt: null,
+      sequence: 1,
+    }) as never;
+  const clones = Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({
+    get: () => Effect.succeed(snapshot("running")),
+    stream: Stream.callback<ReadonlyArray<never>>((mailbox) =>
+      Effect.gen(function* () {
+        yield* Deferred.succeed(waitStarted, undefined);
+        yield* Deferred.await(releaseClone);
+        NodeFS.writeFileSync(NodePath.join(workspaceRoot, "README.md"), "hello\n");
+        yield* Effect.sync(() => Queue.offerUnsafe(mailbox, [snapshot("done")]));
+      }),
+    ),
+  });
+  const layer = RepositoryCheckout.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ProjectService.ProjectService)({
+          getById: () =>
+            Effect.succeedSome({
+              id: projectId,
+              title: "smile-express",
+              workspaceRoot,
+            } as never),
+          update: () => Effect.succeed({} as never),
+        }),
+        Layer.mock(GitWorkflow.GitWorkflowService)({ isRepository }),
+        clones,
+        Layer.mock(ProjectLabelService.ProjectLabelService)({
+          list: () =>
+            Effect.succeed({
+              labels: [
+                {
+                  repositories: [
+                    { repositoryId: projectId, remote: null, directoryName: "smile-express" },
+                  ],
+                },
+              ],
+            } as never),
+        }),
+        NodeServices.layer,
+      ),
+    ),
+  );
+  const ensure = Effect.gen(function* () {
+    const checkout = yield* RepositoryCheckout.RepositoryCheckout;
+    return yield* checkout.ensureCheckout(projectId);
+  }).pipe(
+    Effect.ensuring(Deferred.succeed(returned, undefined).pipe(Effect.asVoid)),
+    Effect.provide(layer),
+    Effect.scoped,
+  );
+  const fiber = yield* Effect.forkScoped(ensure);
+  // Whichever happens first decides: the ensure subscribing to wait for
+  // the clone (fixed) or the ensure returning against the half-clone.
+  const first = yield* Effect.raceFirst(
+    Deferred.await(waitStarted).pipe(Effect.as("waiting" as const)),
+    Deferred.await(returned).pipe(Effect.as("returned" as const)),
+  );
+  const outcome = { first, poll: fiber.pollUnsafe(), workspaceRoot };
+  yield* Deferred.succeed(releaseClone, undefined);
+  yield* Fiber.join(fiber);
+  return outcome;
+});
+
 describe("RepositoryCheckout.ensureCheckout", () => {
   it.effect("succeeds without cloning when the checkout already exists", () => {
     const bare = makeBareRemote();
@@ -247,6 +339,17 @@ describe("RepositoryCheckout.ensureCheckout", () => {
       );
     }).pipe(Effect.provide(harness(box)));
   });
+
+  it.effect("waits for this repository's running clone instead of launching into it", () =>
+    Effect.gen(function* () {
+      const outcome = yield* runDuringClone;
+      expect(outcome.first).toBe("waiting");
+      expect(outcome.poll).toBeUndefined();
+      expect(NodeFS.readFileSync(NodePath.join(outcome.workspaceRoot, "README.md"), "utf8")).toBe(
+        "hello\n",
+      );
+    }),
+  );
 
   it.effect("fails with what to do when there is no checkout and no remote", () => {
     const workspaceRoot = NodePath.join(tempRoot(), "smile-express");
