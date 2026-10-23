@@ -8,6 +8,7 @@ import * as Integrations from "./integration.ts";
 import * as Machines from "./machine.ts";
 import * as Work from "./work.ts";
 import * as Vault from "./vault.ts";
+import * as Accounts from "./accounts.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
 import * as AgentBuilder from "./agentBuilder.ts";
 import * as Agents from "./agent.ts";
@@ -576,6 +577,11 @@ export const WS_METHODS = {
   scheduledTasksRunNow: "scheduledTasks.runNow",
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
+  accountsList: "accounts.list",
+  accountsGet: "accounts.get",
+  accountsCreate: "accounts.create",
+  accountsUpdate: "accounts.update",
+  accountsDisconnect: "accounts.disconnect",
   vaultList: "vault.list",
   vaultCreate: "vault.create",
   vaultUpdate: "vault.update",
@@ -2320,6 +2326,31 @@ const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
 });
 
+const WsAccountsListRpc = Rpc.make(WS_METHODS.accountsList, {
+  payload: Accounts.AccountsListInput,
+  success: Accounts.AccountsListResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsGetRpc = Rpc.make(WS_METHODS.accountsGet, {
+  payload: Accounts.AccountKeyInput,
+  success: Accounts.AccountResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsCreateRpc = Rpc.make(WS_METHODS.accountsCreate, {
+  payload: Accounts.AccountCreateInput,
+  success: Accounts.AccountResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsUpdateRpc = Rpc.make(WS_METHODS.accountsUpdate, {
+  payload: Accounts.AccountUpdateInput,
+  success: Accounts.AccountResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsDisconnectRpc = Rpc.make(WS_METHODS.accountsDisconnect, {
+  payload: Accounts.AccountKeyInput,
+  success: Accounts.AccountDisconnectResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
 const WsVaultListRpc = Rpc.make(WS_METHODS.vaultList, {
   payload: Vault.VaultListInput,
   success: Vault.VaultListResult,
@@ -2520,6 +2551,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksRotateWebhookTokenRpc,
   WsSecretsAnswerRequestRpc,
+  WsAccountsListRpc,
+  WsAccountsGetRpc,
+  WsAccountsCreateRpc,
+  WsAccountsUpdateRpc,
+  WsAccountsDisconnectRpc,
   WsVaultListRpc,
   WsVaultCreateRpc,
   WsVaultUpdateRpc,

@@ -81,6 +81,9 @@ const vaultItemFields = {
 export const VaultItemMetadata = Schema.Struct({
   id: VaultItemId,
   ...vaultItemFields,
+  /** Optional association; encrypted identities are never copied into it. */
+  accountId: Schema.optional(TrimmedNonEmptyString),
+  credentialId: Schema.optional(TrimmedNonEmptyString),
   /** Names of secret fields present, e.g. ["username", "password", "totp"]. */
   fields: Schema.Array(VaultField),
   /**

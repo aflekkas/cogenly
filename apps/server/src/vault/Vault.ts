@@ -85,6 +85,8 @@ const wrap = (cause: unknown): VaultError =>
   isVaultError(cause) ? cause : new VaultError({ reason: "storage", cause });
 
 interface VaultRow {
+  readonly account_id?: string;
+  readonly credential_id?: string;
   readonly id: string;
   readonly name: string;
   readonly type: string;
@@ -326,6 +328,8 @@ const make = Effect.gen(function* () {
     const cardLast4 = stored ? cardLast4Of(stored) : metadata.cardLast4;
     return {
       id: VaultItemId.make(row.id),
+      ...(row.account_id ? { accountId: row.account_id } : {}),
+      ...(row.credential_id ? { credentialId: row.credential_id } : {}),
       name: row.name,
       type: row.type as VaultItemMetadata["type"],
       scopeProjectId: row.scope_project_id
@@ -344,7 +348,7 @@ const make = Effect.gen(function* () {
   const loadRow = (itemId: string) =>
     Effect.gen(function* () {
       const rows =
-        yield* sql<VaultRow>`SELECT * FROM vault_items WHERE id = ${itemId} AND deleted_at IS NULL`;
+        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE id = ${itemId} AND deleted_at IS NULL`;
       if (!rows[0]) return yield* new VaultError({ reason: "not_found" });
       return rows[0];
     });
@@ -358,7 +362,7 @@ const make = Effect.gen(function* () {
       if (input.itemId) return yield* loadRow(input.itemId);
       if (!input.name) return yield* new VaultError({ reason: "invalid_input" });
       const rows =
-        yield* sql<VaultRow>`SELECT * FROM vault_items WHERE name = ${input.name} AND deleted_at IS NULL ORDER BY updated_at DESC`;
+        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE name = ${input.name} AND deleted_at IS NULL ORDER BY updated_at DESC`;
       if (rows.length === 0) return yield* new VaultError({ reason: "not_found" });
       if (rows.length === 1) return rows[0]!;
       const scoped = rows.filter(
@@ -440,9 +444,10 @@ const make = Effect.gen(function* () {
   const ensureScrubSecrets = Effect.gen(function* () {
     const cache = yield* Ref.get(scrubCache);
     if (cache.loaded) return cache;
-    const rows = yield* sql<VaultRow>`SELECT * FROM vault_items WHERE deleted_at IS NULL`.pipe(
-      Effect.mapError(wrap),
-    );
+    const rows =
+      yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL`.pipe(
+        Effect.mapError(wrap),
+      );
     const secrets = new Set<string>();
     const shortSecrets = new Set<string>();
     for (const row of rows) {
@@ -508,7 +513,7 @@ const make = Effect.gen(function* () {
   const list: Vault["Service"]["list"] = (input) =>
     Effect.gen(function* () {
       const rows =
-        yield* sql<VaultRow>`SELECT * FROM vault_items WHERE deleted_at IS NULL AND (${input.scopeProjectId ?? null} IS NULL OR scope_project_id IS NULL OR scope_project_id = ${input.scopeProjectId ?? null}) ORDER BY name`.pipe(
+        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL AND (${input.scopeProjectId ?? null} IS NULL OR scope_project_id IS NULL OR scope_project_id = ${input.scopeProjectId ?? null}) ORDER BY name`.pipe(
           Effect.mapError(wrap),
         );
       return { items: rows.map((row) => metadataOf(row)) };

@@ -73,6 +73,7 @@ import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Vault from "../vault/Vault.ts";
+import * as Accounts from "../accounts/Accounts.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 
 /** The shared application event log and its command receipts. */
@@ -496,6 +497,7 @@ const layerProductionBase = Layer.mergeAll(
   layerScheduledTaskProvided,
   layerSecretRequestsProvided,
   layerVaultProvided,
+  Accounts.layer,
   UsageLimitRecoveryWorker.layer.pipe(
     Layer.provide(Layer.mergeAll(ProjectionStore.layer, layerThreadManagementProvided)),
   ),
