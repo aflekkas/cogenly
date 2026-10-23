@@ -12,6 +12,7 @@ import { ChildProcessSpawner } from "effect/process";
 
 import {
   baseSshArgs,
+  buildLocalForwardArgs,
   getLastNonEmptyOutputLine,
   parseSshResolveOutput,
   remoteStateKey,
@@ -96,6 +97,17 @@ describe("ssh command", () => {
         ),
         ["-o", "BatchMode=no", "-o", "ConnectTimeout=10", "-p", "2222"],
       );
+    }),
+  );
+
+  it.effect("binds local forwards to loopback and disables GatewayPorts", () =>
+    Effect.sync(() => {
+      assert.deepEqual(buildLocalForwardArgs({ localPort: 47730, remotePort: 4773 }), [
+        "-o",
+        "GatewayPorts=no",
+        "-L",
+        "127.0.0.1:47730:127.0.0.1:4773",
+      ]);
     }),
   );
 
