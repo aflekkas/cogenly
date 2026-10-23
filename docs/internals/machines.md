@@ -5,9 +5,11 @@ spokes dial out so a laptop needs no inbound address or exposed port. The same
 socket carries requests in either direction. A machine may join one hub or have
 spokes, never both. Client connection catalogs remain independent of this link.
 
-The link currently carries machine presence, self reports, and registered typed
-channels. It does not replicate projects, settings, threads, files, credentials,
-or launch work remotely. Provider reports contain status, never login tokens.
+The link carries machine presence, self reports, and registered typed channels.
+[Shared state](./sync.md) uses those channels for project, agent and schedule
+configuration. Settings, threads, files and credentials do not replicate yet,
+and the link does not launch work remotely. Provider reports contain status,
+never login tokens.
 
 ## Pairing establishes a separate audience
 
