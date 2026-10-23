@@ -45,9 +45,4 @@ export const integrationsRpc = {
     tag: "integrations.testConnection",
     onSuccess: refreshList,
   }),
-  /** Item names and present fields only; never secret values. */
-  vaultItems: createEnvironmentGuardedRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "integrations:vaultItems",
-    tag: "vault.list",
-  }),
 };

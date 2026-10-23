@@ -31,6 +31,7 @@ import { requestConfirmDialog } from "../../confirmDialog";
 import { ProjectLabelChips, ProjectLabelPicker } from "../../projectLabels/ProjectLabelPicker";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { integrationsRpc } from "../../rpc/integrations";
+import { vaultRpc } from "../../rpc/vault";
 import { useEnvironmentQuery } from "../../state/query";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { Badge } from "../ui/badge";
@@ -360,7 +361,7 @@ function IntegrationEditorDialog(props: {
   const create = useOrchestrationCommand(integrationsRpc.create, { reportFailure: false });
   const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
   const test = useOrchestrationCommand(integrationsRpc.testConnection, { reportFailure: false });
-  const vault = useEnvironmentQuery(integrationsRpc.vaultItems({ environmentId, input: {} }));
+  const vault = useEnvironmentQuery(vaultRpc.list({ environmentId, input: {} }));
   const vaultItems = vault.data?.items ?? EMPTY_VAULT_ITEMS;
   // Becomes the created integration after a first save, so a test then edits it.
   const [stored, setStored] = useState(props.integration);

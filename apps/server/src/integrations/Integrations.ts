@@ -518,6 +518,16 @@ const make = (options: IntegrationsOptions = {}) =>
             });
           }
           const result = yield* fetchTools(integration).pipe(
+            // A passing test is a fresh tool list, so the list view shows it.
+            Effect.tap((tools) =>
+              Effect.gen(function* () {
+                const key = `${integration.id}:${integration.updatedAt}`;
+                const at = yield* Clock.currentTimeMillis;
+                yield* Ref.update(cache, (entries) =>
+                  new Map(entries).set(key, { key, atMs: at, result: tools }),
+                );
+              }),
+            ),
             Effect.map((tools): IntegrationTestResult => ({
               status: "connected",
               toolCount: tools.tools.length,

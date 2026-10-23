@@ -38,8 +38,9 @@ context line is built in `RuntimePolicy` through `buildProjectManifest`, so
 all three adapters carry it with no per-provider code.
 
 `integrations.list` reports `connected` only while the tool cache holds the
-current version, and `testConnection` bypasses that cache, so Settings keeps
-its own last test result per integration version to show test outcomes.
+current version. A passing `testConnection` refills that cache; a failing one
+leaves it alone, so Settings also keeps its last test result per integration
+version to show the failure reason.
 
 Deferred: upstream OAuth (tokens will be vault items) and `stdio` transport
 (the transport union is designed to admit it). Clients have no RPC for an
