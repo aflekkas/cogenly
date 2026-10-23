@@ -83,7 +83,7 @@ describe("shared documents over the authenticated machine link", () => {
         const spoke = yield* start("sync-spoke", "computer");
         yield* hub.state.write("project", "label:one", project);
         yield* pair(hub, spoke);
-        expect(yield* spoke.state.defaultOwner).toBe(hub.environmentId);
+        expect(yield* spoke.state.defaultOwner).toBe(spoke.environmentId);
         yield* spoke.sync.sync(hub.environmentId);
         yield* hub.sync.sync(spoke.environmentId);
         // Simultaneous independent edits persist before either side exchanges the next batch.

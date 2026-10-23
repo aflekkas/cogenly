@@ -370,7 +370,7 @@ const make = Effect.gen(function* () {
     .pipe(Effect.mapError(storage));
   return SharedState.of({
     environmentId,
-    defaultOwner: Ref.get(hub).pipe(Effect.map((value) => value ?? environmentId)),
+    defaultOwner: Effect.succeed(environmentId),
     setHub: (value) => Ref.set(hub, value),
     changes: Stream.fromPubSub(signals),
     get,

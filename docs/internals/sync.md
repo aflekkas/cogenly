@@ -31,7 +31,8 @@ rejects unknown fields, malformed values, oversized multi-document batches, curs
 gaps, implausibly future clocks, forged authorship and ownership changes.
 V1 ownership is fixed after creation: transferring execution needs a separate
 handoff protocol. Existing jobs are backfilled to the local machine before
-scheduling starts; new jobs default to the paired hub. An agent's triggers must
+scheduling starts; new jobs default to their creating machine even when paired.
+An agent's triggers must
 have the same owner. Reservations, due-work dispatch, event dispatch, webhooks
 and reconciliation enforce ownership. Being offline does not grant another
 machine permission to take over.

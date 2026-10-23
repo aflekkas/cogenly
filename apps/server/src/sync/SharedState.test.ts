@@ -47,6 +47,13 @@ const batch = (changes: SharedDocumentChange[], after = 0) => ({
   changes,
 });
 describe("SharedState", () => {
+  it.effect("pairing never changes the default execution owner from the creating machine", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      yield* state.setHub(peer);
+      expect(yield* state.defaultOwner).toBe(local);
+    }).pipe(Effect.provide(layer)),
+  );
   it.effect("skips undecodable persisted rows and advances past them", () =>
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;
