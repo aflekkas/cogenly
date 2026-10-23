@@ -508,6 +508,21 @@ export function summarizeT3ToolCalls(
     case "project-recall":
       label = phrase("Searched", "search", `project files ${times}`);
       break;
+    case "terminal-run":
+      label = phrase("Ran", "run", quantity(selected.length, "command"));
+      break;
+    case "terminal-read":
+      label = phrase("Read", "read", `terminal output ${times}`);
+      break;
+    case "terminal-write":
+      label = phrase("Wrote", "write", `to the terminal ${times}`);
+      break;
+    case "terminal-kill":
+      label = phrase("Stopped", "stop", quantity(selected.length, "terminal"));
+      break;
+    case "terminal-list":
+      label = phrase("Listed", "list", `terminals ${times}`);
+      break;
   }
   return { label, failedCount };
 }

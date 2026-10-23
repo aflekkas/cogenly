@@ -38,7 +38,7 @@ const toolInstructions = (availability: boolean | T3CodeToolAvailability): strin
     tools.browser ? COGENLY_BROWSER_TOOL_INSTRUCTIONS : "",
     tools.device ? COGENLY_DEVICE_TOOL_INSTRUCTIONS : "",
     tools.terminal
-      ? "Use the cogenly MCP terminal_run tool for every shell command so the owner sees it live. Native shell tools are disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. Thread settlement kills these terminals and their children."
+      ? "Use the cogenly MCP terminal_run tool for every shell command so the owner sees it live. Native shell tools are disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Thread settlement kills these terminals and their children."
       : "",
   ]
     .filter(Boolean)
