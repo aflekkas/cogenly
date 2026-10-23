@@ -100,7 +100,7 @@ const testLayer = (
       Layer.provide(NodeServices.layer),
     ),
   );
-  const local = Local.layer.pipe(Layer.provide(runner), Layer.provideMerge(infrastructure));
+  const local = Local.layer.pipe(Layer.provideMerge(runner), Layer.provideMerge(infrastructure));
   return Integrations.layer.pipe(
     Layer.provide(
       allowLoopback
@@ -253,6 +253,51 @@ describe("managed Google integrations", () => {
     },
     15_000,
   );
+
+  it.live("remembers Google's successful browser origin privately across restarts", () => {
+    const specs: Array<Runner.LocalMcpSpec> = [];
+    return Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const local = yield* Local.LocalIntegrations;
+      const fs = yield* FileSystem.FileSystem;
+      const { integration } = yield* gateway.create({
+        preset: "google-workspace",
+        accountLabel: "work",
+      });
+      const missing = yield* gateway
+        .beginSignIn(integration.id, { origin: "http://localhost:3000", fromAgent: true })
+        .pipe(Effect.result);
+      expect(missing._tag).toBe("Failure");
+      const link = yield* gateway.beginSignIn(integration.id, {
+        origin: "http://localhost:3000",
+        fromAgent: true,
+        callbackOrigin: "https://vps.example",
+      });
+      const auth = yield* local.authorize(
+        new URL(link.authorizationUrl).searchParams.get("ticket")!,
+      );
+      expect(
+        yield* local.callback(`state=${new URL(auth.url!).searchParams.get("state")}&code=test`),
+      ).toBe(true);
+      expect(yield* fs.readFileString(`${specs[0]!.directory}/browser-origin.json`)).toBe(
+        JSON.stringify("https://vps.example"),
+      );
+      yield* local.stop(integration.id, integration);
+      const restarted = Context.get(
+        yield* Layer.build(Layer.fresh(Local.layer)),
+        Local.LocalIntegrations,
+      );
+      yield* restarted.start(integration);
+      const retry = yield* restarted.signInLink(integration, true, {
+        origin: "http://localhost:3000",
+        fromAgent: true,
+      });
+      expect(retry?.redirectUri).toBe(`https://vps.example${GOOGLE_CALLBACK_PATH}`);
+      expect(specs.at(-1)?.env.GOOGLE_OAUTH_REDIRECT_URI).toBe(retry?.redirectUri);
+      expect(JSON.stringify(yield* gateway.list())).not.toContain("browserOrigin");
+    }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
+  });
 
   it.live.each(["reject-grant", "reject-grant-output"])(
     "recovers a revoked Google grant reported by %s",

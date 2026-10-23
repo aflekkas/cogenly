@@ -20,6 +20,8 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as ServerConfig from "../../config.ts";
 import * as Credentials from "../IntegrationCredentials.ts";
+import { selectCallbackOrigin, type SignInOrigin } from "../SignInOrigin.ts";
+import { isLoopbackHost } from "@t3tools/shared/preview";
 import { isGrantRejection } from "./GrantRejection.ts";
 import * as Runner from "./LocalMcpRunner.ts";
 import {
@@ -56,6 +58,7 @@ export class LocalIntegrations extends Context.Service<
     readonly signInLink: (
       integration: Integration,
       reauthenticate?: boolean,
+      from?: SignInOrigin,
     ) => Effect.Effect<IntegrationSignIn | undefined, IntegrationError>;
     /** Fires when a process changes state, a start fails differently, or a sign-in lands. */
     readonly changes: Stream.Stream<void>;
@@ -191,6 +194,23 @@ const make = Effect.gen(function* () {
         });
       return { clientId: id.value, clientSecret: secret.value };
     });
+  const browserOriginFile = (id: string) => path.join(directoryFor(id), "browser-origin.json");
+  const activeOrigins = new Map<string, string>();
+  const readBrowserOrigin = (id: string) =>
+    Effect.gen(function* () {
+      if (!(yield* fs.exists(browserOriginFile(id)))) return undefined;
+      return yield* fs
+        .readFileString(browserOriginFile(id))
+        .pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.String))));
+    }).pipe(Effect.mapError(storageError));
+  const originFor = (integration: Integration) =>
+    Effect.gen(function* () {
+      return (
+        activeOrigins.get(integration.id) ??
+        (yield* readBrowserOrigin(integration.id)) ??
+        integration.local!.callbackOrigin
+      );
+    });
   const rejectedGrants = new Set<string>();
   const rejectGrant = (id: string) =>
     Effect.gen(function* () {
@@ -247,7 +267,7 @@ const make = Effect.gen(function* () {
           });
         if (active.has(integration.id)) return;
         const secrets = yield* client(labelId);
-        yield* validOrigin(integration.local.callbackOrigin);
+        const callbackOrigin = yield* originFor(integration).pipe(Effect.flatMap(validOrigin));
         const directory = directoryFor(integration.id);
         const credentialsDirectory = credentialsFor(integration.id);
         for (const dir of [directory, credentialsDirectory, path.join(directory, "logs")]) {
@@ -268,7 +288,7 @@ const make = Effect.gen(function* () {
           directory,
           credentialsDirectory,
           port: yield* Runner.freeLoopbackPort.pipe(Effect.mapError(mapLocalError)),
-          callbackOrigin: integration.local.callbackOrigin,
+          callbackOrigin,
           ...secrets,
           environment,
         });
@@ -310,7 +330,7 @@ const make = Effect.gen(function* () {
           if (
             !state ||
             url.searchParams.get("redirect_uri") !==
-              `${integration.local?.callbackOrigin}${GOOGLE_CALLBACK_PATH}`
+              `${yield* originFor(integration)}${GOOGLE_CALLBACK_PATH}`
           )
             continue;
           if (states.size >= 1000) return;
@@ -379,7 +399,7 @@ const make = Effect.gen(function* () {
       ),
       Stream.fromPubSub(ownChanges),
     ),
-    signInLink: (integration, reauthenticate = false) =>
+    signInLink: (integration, reauthenticate = false, from) =>
       authLock.withPermits(1)(
         Effect.gen(function* () {
           if (
@@ -390,25 +410,41 @@ const make = Effect.gen(function* () {
             (!reauthenticate && (yield* signedIn(integration.id)))
           )
             return undefined;
-          // Only an explicit owner/agent sign-in retires the on-disk grant.
-          // Listings and status checks never erase credentials.
-          if (reauthenticate && (yield* hasCredentials(integration.id))) {
+          const previousOrigin = yield* originFor(integration);
+          const known = yield* readBrowserOrigin(integration.id);
+          const configured = integration.local.callbackOrigin;
+          const publicConfigured = !isLoopbackHost(new URL(configured).hostname);
+          const origin = yield* selectCallbackOrigin(
+            {
+              ...from,
+              origin: from?.fromAgent
+                ? from.origin
+                : (known ?? (publicConfigured ? configured : (from?.origin ?? configured))),
+            },
+            known ?? (publicConfigured ? configured : undefined),
+          ).pipe(Effect.flatMap(validOrigin));
+          const replaceCredentials = reauthenticate && (yield* hasCredentials(integration.id));
+          activeOrigins.set(integration.id, origin);
+          // Only an explicit sign-in retires the on-disk grant. A changed
+          // callback also needs a fresh process with the matching redirect URI.
+          if (replaceCredentials || origin !== previousOrigin) {
             yield* runner.stop(integration.id);
             active.delete(integration.id);
-            const backup = `${credentialsFor(integration.id)}.previous`;
-            yield* fs
-              .remove(backup, { recursive: true, force: true })
-              .pipe(Effect.mapError(storageError));
-            yield* fs
-              .rename(credentialsFor(integration.id), backup)
-              .pipe(Effect.mapError(storageError));
+            if (replaceCredentials) {
+              const backup = `${credentialsFor(integration.id)}.previous`;
+              yield* fs
+                .remove(backup, { recursive: true, force: true })
+                .pipe(Effect.mapError(storageError));
+              yield* fs
+                .rename(credentialsFor(integration.id), backup)
+                .pipe(Effect.mapError(storageError));
+            }
             for (const [key, ticket] of tickets)
               if (ticket.integration.id === integration.id) tickets.delete(key);
             for (const [key, state] of states)
               if (state.integration.id === integration.id) states.delete(key);
             yield* start(integration);
           }
-          const origin = integration.local.callbackOrigin;
           const link = (ticket: string): IntegrationSignIn => ({
             authorizationUrl: `${origin}${GOOGLE_SIGN_IN_PATH}?ticket=${ticket}`,
             redirectUri: `${origin}${GOOGLE_CALLBACK_PATH}`,
@@ -473,6 +509,16 @@ const make = Effect.gen(function* () {
           .pipe(Effect.mapError(mapLocalError));
         const connected = success && (yield* hasCredentials(entry.integration.id));
         if (connected) {
+          const redirect = new URL(entry.url).searchParams.get("redirect_uri")!;
+          yield* fs
+            .writeFileString(
+              browserOriginFile(entry.integration.id),
+              yield* Schema.encodeEffect(Schema.fromJsonString(Schema.String))(
+                new URL(redirect).origin,
+              ).pipe(Effect.mapError(storageError)),
+              { mode: 0o600 },
+            )
+            .pipe(Effect.mapError(storageError));
           rejectedGrants.delete(entry.integration.id);
           yield* fs
             .remove(path.join(directoryFor(entry.integration.id), "grant-rejected"), {

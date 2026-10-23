@@ -63,9 +63,12 @@ Constraints that are not obvious from the code:
 - The redirect URI is `<origin>/oauth/integrations/callback` on the origin the
   request that started sign-in reached (the WebSocket upgrade for Settings, the
   MCP request for agents), like `/oauth/mcp`. A browser elsewhere cannot open a
-  loopback origin, so an agent's loopback request uses the origin of the last
-  finished sign-in instead. Dynamic registrations record their redirect URIs and
-  are reused only for the same one.
+  loopback origin, so an agent's loopback request uses that account's last
+  successful browser origin, persisted as server-only state (in the account
+  directory for Google). A first-time loopback request needs an explicit
+  `callbackOrigin`, or a sign-in through Settings on the reachable address.
+  Dynamic registrations record their redirect URIs and are reused only for the
+  same one.
 - The callback is unauthenticated: the browser that consents need not hold a
   Cogenly session. The single-use `state`, bound in memory to the PKCE verifier
   and to the integration's URL at the time, is the authority; pending sign-ins

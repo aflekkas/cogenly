@@ -15,7 +15,6 @@ import {
   type IntegrationUpdateInput,
   type ProjectLabelId,
 } from "@t3tools/contracts";
-import { isLoopbackHost } from "@t3tools/shared/preview";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -32,6 +31,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { selectCallbackOrigin, type SignInOrigin } from "./SignInOrigin.ts";
 import { redactValue } from "../vault/VaultRedactor.ts";
 import { resolveCatalogConnect } from "./IntegrationCatalog.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
@@ -59,6 +59,7 @@ type OAuthState = typeof OAuthState.Type;
 const StoredIntegration = Schema.Struct({
   ...Integration.fields,
   oauthState: Schema.optional(OAuthState),
+  browserOrigin: Schema.optional(Schema.String),
 });
 type StoredIntegration = typeof StoredIntegration.Type;
 
@@ -127,7 +128,7 @@ export const redactHeaders = (headers: Readonly<Record<string, string>>): Record
 
 /** What leaves the service: masked headers and no OAuth state. */
 const redactIntegration = (integration: Integration | StoredIntegration): Integration => {
-  const { oauthState: _, ...rest } = integration as StoredIntegration;
+  const { oauthState: _, browserOrigin: _origin, ...rest } = integration as StoredIntegration;
   return { ...rest, headers: redactHeaders(integration.headers) };
 };
 
@@ -268,18 +269,6 @@ export interface IntegrationWriteOptions {
 export interface IntegrationsOptions {
   readonly toolCacheTtlMs?: number;
   readonly upstreamTimeoutMs?: number;
-}
-
-/** Where sign-in returns to, and who asked. */
-export interface SignInOrigin {
-  /** The origin the request that starts sign-in reached, e.g. the WebSocket upgrade's. */
-  readonly origin: string | undefined;
-  /**
-   * An agent's MCP request usually reaches loopback, which a browser on
-   * another machine cannot open; then the origin of the last finished
-   * sign-in, which a browser demonstrably reached, is used instead.
-   */
-  readonly fromAgent?: boolean;
 }
 
 /** What the browser brings back to the callback. */
@@ -494,7 +483,6 @@ const make = (options: IntegrationsOptions = {}) =>
       }
       return lock;
     };
-    const lastBrowserOrigin = yield* Ref.make<string | undefined>(undefined);
 
     const invalidate = (id: IntegrationId) =>
       Ref.update(cache, (entries) => {
@@ -643,11 +631,16 @@ const make = (options: IntegrationsOptions = {}) =>
     const persistState = (
       id: IntegrationId,
       update: (state: OAuthState | undefined) => OAuthState,
+      browserOrigin?: string,
     ) =>
       Effect.gen(function* () {
         const current = yield* getById(id);
         // Sign-in state is not an edit: updatedAt, and so the tool cache, stay put.
-        yield* persist({ ...current, oauthState: update(current.oauthState) });
+        yield* persist({
+          ...current,
+          oauthState: update(current.oauthState),
+          ...(browserOrigin === undefined ? {} : { browserOrigin }),
+        });
       }).pipe(sql.withTransaction, Effect.mapError(failure("sign in", "storage")));
 
     /** The grant is gone; only a new browser sign-in helps, so nothing retries it. */
@@ -1433,7 +1426,7 @@ const make = (options: IntegrationsOptions = {}) =>
                 reason: "upstream_unreachable",
               });
             yield* local.value.start(integration);
-            const link = yield* local.value.signInLink(integration, true);
+            const link = yield* local.value.signInLink(integration, true, from);
             if (link === undefined)
               return yield* new IntegrationError({
                 operation: "sign in (already signed in)",
@@ -1443,19 +1436,7 @@ const make = (options: IntegrationsOptions = {}) =>
           }
           if (!usesOAuth(integration))
             return yield* new IntegrationError({ operation: "sign in", reason: "invalid_request" });
-          const requested = from.origin === undefined ? null : URL.parse(from.origin);
-          const known = yield* Ref.get(lastBrowserOrigin);
-          const origin =
-            from.fromAgent &&
-            known !== undefined &&
-            (requested === null || isLoopbackHost(requested.hostname))
-              ? known
-              : requested !== null &&
-                  (requested.protocol === "http:" || requested.protocol === "https:")
-                ? requested.origin
-                : undefined;
-          if (origin === undefined)
-            return yield* new IntegrationError({ operation: "sign in", reason: "invalid_request" });
+          const origin = yield* selectCallbackOrigin(from, integration.browserOrigin);
           const redirectUri = `${origin}${OAuth.CALLBACK_PATH}`;
           const server = yield* protocol.discover(integration.url);
           const auth = integration.auth!;
@@ -1615,15 +1596,19 @@ const make = (options: IntegrationsOptions = {}) =>
                 itemId,
                 expiresAt: tokens.expiresAt,
               });
-              yield* persistState(integration.id, () => ({
-                signedIn: true,
-                server: pending.server,
-                ...(pending.registration === undefined
-                  ? {}
-                  : { registration: pending.registration }),
-                tokenItemId: itemId,
-                expiresAt: tokens.expiresAt,
-              })).pipe(
+              yield* persistState(
+                integration.id,
+                () => ({
+                  signedIn: true,
+                  server: pending.server,
+                  ...(pending.registration === undefined
+                    ? {}
+                    : { registration: pending.registration }),
+                  tokenItemId: itemId,
+                  expiresAt: tokens.expiresAt,
+                }),
+                new URL(pending.redirectUri).origin,
+              ).pipe(
                 Effect.tapError(() =>
                   dropTokens({
                     ...integration,
@@ -1633,7 +1618,7 @@ const make = (options: IntegrationsOptions = {}) =>
               );
             }).pipe(Effect.uninterruptible),
           );
-          yield* Ref.set(lastBrowserOrigin, new URL(pending.redirectUri).origin);
+
           yield* Ref.update(checks, (current) => {
             const next = new Map(current);
             next.delete(integration.id);
@@ -1678,7 +1663,10 @@ const make = (options: IntegrationsOptions = {}) =>
           const { integration } = yield* service.create(resolution.input, options);
           if (!resolution.signsIn) return { integration };
           const signIn = yield* service
-            .beginSignIn(integration.id, options.origin)
+            .beginSignIn(integration.id, {
+              ...options.origin,
+              callbackOrigin: request.inputs?.callbackOrigin,
+            })
             .pipe(Effect.option);
           return Option.isSome(signIn) ? { integration, signIn: signIn.value } : { integration };
         }),

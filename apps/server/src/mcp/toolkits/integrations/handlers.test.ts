@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import * as AgentStore from "../../../agents/AgentStore.ts";
+import type { SignInOrigin } from "../../../integrations/SignInOrigin.ts";
 import * as Integrations from "../../../integrations/Integrations.ts";
 import * as Threads from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
@@ -89,7 +90,7 @@ it.effect("integration_tools lists an integration's tools for a live thread", ()
 const addIntegration = Effect.fn("test.addIntegration")(function* (
   input: Pick<IntegrationCreateInput, "auth">,
 ) {
-  const signIns: Array<{ id: string; origin: Integrations.SignInOrigin }> = [];
+  const signIns: Array<{ id: string; origin: SignInOrigin }> = [];
   const integration: Integration = {
     id: IntegrationId.make("integration:linear"),
     name: IntegrationName.make("linear"),

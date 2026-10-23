@@ -133,7 +133,7 @@ export const IntegrationCatalogInputs = Schema.Struct({
   clientId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
   /** Vault reference to that app's client secret. */
   clientSecret: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
-  /** Google only: the origin Google's redirect URI was registered on. */
+  /** The reachable origin for OAuth callbacks (registered with Google for its preset). */
   callbackOrigin: GoogleWorkspaceAddInput.fields.callbackOrigin,
 });
 export type IntegrationCatalogInputs = typeof IntegrationCatalogInputs.Type;
@@ -324,6 +324,7 @@ export type IntegrationCallResult = typeof IntegrationCallResult.Type;
 
 export const IntegrationUpdateByNameInput = Schema.Struct({
   name: IntegrationName,
+  callbackOrigin: GoogleWorkspaceAddInput.fields.callbackOrigin,
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   transport: Schema.optional(IntegrationTransport),
   url: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2000))),

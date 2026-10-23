@@ -252,8 +252,8 @@ const gatewayLayer = () => {
   return Integrations.layer.pipe(
     // The mock servers listen on loopback, which production refuses.
     Layer.provide(Layer.succeed(IntegrationEndpointPolicy, () => Effect.succeed(undefined))),
-    Layer.provide(Credentials.layer),
-    Layer.provide(Tokens.layer),
+    Layer.provideMerge(Credentials.layer),
+    Layer.provideMerge(Tokens.layer),
     Layer.provideMerge(Vault.layer),
     Layer.provide(
       Layer.mock(ServerSecretStore.ServerSecretStore)({
@@ -268,7 +268,7 @@ const gatewayLayer = () => {
     ),
     Layer.provideMerge(database),
     Layer.provideMerge(FetchHttpClient.layer),
-    Layer.provide(EffectNodeCrypto.layer),
+    Layer.provideMerge(EffectNodeCrypto.layer),
     Layer.provide(NodeServices.layer),
   );
 };
@@ -335,6 +335,45 @@ const whoami = (name: string) =>
   });
 
 describe("Integration OAuth sign-in", () => {
+  it.effect("retains each account's browser origin across service restarts", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        const integration = yield* addLinear(mock, "linear");
+        yield* signIn(integration.id, "spawn");
+        const restarted = Context.get(
+          yield* Layer.build(
+            Integrations.layerWith({}).pipe(
+              Layer.provide(
+                Layer.succeed(IntegrationEndpointPolicy, () => Effect.succeed(undefined)),
+              ),
+            ),
+          ),
+          Integrations.Integrations,
+        );
+        const link = yield* restarted.beginSignIn(integration.id, {
+          origin: "http://localhost:3000",
+          fromAgent: true,
+        });
+        expect(link.redirectUri).toBe(`${COGENLY_ORIGIN}${CALLBACK_PATH}`);
+        expect(JSON.stringify(yield* restarted.list())).not.toContain("browserOrigin");
+        const other = yield* addLinear(mock, "other");
+        const missing = yield* restarted
+          .beginSignIn(other.id, { origin: "http://localhost:3000", fromAgent: true })
+          .pipe(Effect.result);
+        expect(missing._tag).toBe("Failure");
+        if (missing._tag === "Failure") expect(missing.failure.cause).toContain("Settings");
+        const explicit = yield* restarted.beginSignIn(other.id, {
+          origin: "http://localhost:3000",
+          fromAgent: true,
+          callbackOrigin: "https://vps.example",
+        });
+        expect(explicit.redirectUri).toBe(`https://vps.example${CALLBACK_PATH}`);
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
   it.effect.each(["edit", "client", "version", "remove"] as const)(
     "discards a code exchange completed after %s",
     (mutation) =>

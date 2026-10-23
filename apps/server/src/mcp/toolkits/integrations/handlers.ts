@@ -5,6 +5,7 @@ import {
   type Integration,
   type ProjectLabelId,
 } from "@t3tools/contracts";
+import { isLoopbackHost } from "@t3tools/shared/preview";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -109,7 +110,7 @@ const byName = (name: string) =>
  * managed local account) and has no usable grant yet. A remote link returns
  * to the origin this MCP request reached; a local one to its callback origin.
  */
-const withSignIn = (integration: Integration) =>
+const withSignIn = (integration: Integration, callbackOrigin?: string) =>
   Effect.gen(function* () {
     if (integration.auth?.type !== "oauth" && integration.transport !== "local")
       return { integration };
@@ -121,10 +122,10 @@ const withSignIn = (integration: Integration) =>
     if (status !== "needs_sign_in") return { integration };
     const scope = yield* Invocation.McpInvocationContext;
     const signIn = yield* service
-      .beginSignIn(integration.id, { origin: scope.httpOrigin, fromAgent: true })
+      .beginSignIn(integration.id, { origin: scope.httpOrigin, fromAgent: true, callbackOrigin })
       .pipe(
         Effect.mapError((cause) => {
-          const reason = failure(cause).message;
+          const reason = catalogFailure(cause).message;
           return new OrchestratorMcpFailure({
             code: "invalid_request",
             message: `${integration.name} is saved, but sign-in could not start. ${reason}`,
@@ -174,7 +175,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
           .pipe(Effect.mapError(catalogFailure));
         // No link: its sign-in could not start, so ask again for the reason.
         return connected.signIn === undefined
-          ? yield* withSignIn(connected.integration)
+          ? yield* withSignIn(connected.integration, input.callbackOrigin)
           : connected;
       }
       const decoded = yield* decodeAdd(input).pipe(
@@ -188,11 +189,14 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
         ),
       );
       const request =
-        "preset" in decoded && decoded.callbackOrigin === undefined && scope.httpOrigin
+        "preset" in decoded &&
+        decoded.callbackOrigin === undefined &&
+        scope.httpOrigin &&
+        !isLoopbackHost(new URL(scope.httpOrigin).hostname)
           ? { ...decoded, callbackOrigin: scope.httpOrigin }
           : decoded;
       const { integration } = yield* service.create(request).pipe(Effect.mapError(failure));
-      return yield* withSignIn(integration);
+      return yield* withSignIn(integration, input.callbackOrigin);
     }),
   ),
   integration_update: McpToolAccess.writesEnvironment((input) =>
@@ -231,7 +235,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
         )
         .pipe(
           Effect.mapError(failure),
-          Effect.flatMap(({ integration }) => withSignIn(integration)),
+          Effect.flatMap(({ integration }) => withSignIn(integration, input.callbackOrigin)),
         );
     }),
   ),
