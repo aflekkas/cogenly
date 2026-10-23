@@ -54,6 +54,7 @@ export class ProjectCloneTracker extends Context.Service<
     readonly start: (
       input: ProjectCloneStartInput,
       hooks: ProjectCloneHooks,
+      options?: { readonly cloneCaller?: SourceControlRepositoryService.CloneCaller },
     ) => Effect.Effect<
       ProjectCloneStartResult,
       SourceControlRepositoryError | OrchestrationDispatchCommandError
@@ -121,6 +122,7 @@ interface TrackedClone {
     readonly cloneUrl: string;
     readonly destinationPath: string;
     readonly repository: SourceControlRepositoryInfo | null;
+    readonly cloneCaller: SourceControlRepositoryService.CloneCaller;
   };
 }
 
@@ -262,7 +264,11 @@ export const make = Effect.gen(function* () {
     repositories
       .cloneRepository(
         { remoteUrl: tracked.input.cloneUrl, destinationPath: tracked.input.destinationPath },
-        { onProgress: (update) => progress(projectId, update), timeoutMs: null },
+        {
+          onProgress: (update) => progress(projectId, update),
+          timeoutMs: null,
+          caller: tracked.input.cloneCaller,
+        },
       )
       .pipe(
         Effect.onExit((exit) =>
@@ -300,8 +306,10 @@ export const make = Effect.gen(function* () {
     });
 
   const start: ProjectCloneTracker["Service"]["start"] = Effect.fn("ProjectCloneTracker.start")(
-    function* (input, hooks) {
-      const prepared = yield* repositories.prepareClone(input);
+    function* (input, hooks, options) {
+      const prepared = yield* repositories.prepareClone(input, {
+        caller: options?.cloneCaller ?? "owner",
+      });
       const startedAt = yield* nowIso;
       const snapshot: ProjectCloneSnapshot = {
         projectId: input.projectId,
@@ -337,6 +345,7 @@ export const make = Effect.gen(function* () {
             cloneUrl: prepared.cloneUrl,
             destinationPath: prepared.destinationPath,
             repository: prepared.repository,
+            cloneCaller: options?.cloneCaller ?? "owner",
           },
         });
         return [true, next] as const;
@@ -469,7 +478,7 @@ export const make = Effect.gen(function* () {
   );
 
   return ProjectCloneTracker.of({
-    start: (input, hooks) => locked(start(input, hooks)),
+    start: (input, hooks, options) => locked(start(input, hooks, options)),
     cancel: (projectId) => locked(cancel(projectId)),
     retry: (projectId) => locked(retry(projectId)),
     discard: (projectId) => locked(discard(projectId)),

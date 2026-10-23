@@ -1,6 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { cloneFailureDetail, selectRemoteUrl } from "./SourceControlRepositoryService.ts";
+import {
+  cloneFailureDetail,
+  cloneRemoteRejection,
+  selectRemoteUrl,
+} from "./SourceControlRepositoryService.ts";
 
 const urls = {
   nameWithOwner: "acme/widgets",
@@ -22,6 +26,38 @@ describe("selectRemoteUrl", () => {
   it("honors an explicit protocol over the provider's preference", () => {
     expect(selectRemoteUrl(urls, "ssh", "https")).toBe(urls.sshUrl);
     expect(selectRemoteUrl(urls, "https", "ssh")).toBe(urls.url);
+  });
+});
+
+describe("cloneRemoteRejection", () => {
+  it("allows network remotes for every caller", () => {
+    for (const caller of ["owner", "agent"] as const) {
+      expect(cloneRemoteRejection("https://github.com/acme/widgets.git", caller)).toBeNull();
+      expect(cloneRemoteRejection("http://example.com/acme/widgets.git", caller)).toBeNull();
+      expect(cloneRemoteRejection("ssh://git@example.com/acme/widgets.git", caller)).toBeNull();
+      expect(cloneRemoteRejection("git://example.com/acme/widgets.git", caller)).toBeNull();
+      expect(cloneRemoteRejection("git@github.com:acme/widgets.git", caller)).toBeNull();
+    }
+  });
+
+  it("refuses option-like and helper-transport remotes for every caller", () => {
+    for (const caller of ["owner", "agent"] as const) {
+      expect(cloneRemoteRejection("--upload-pack=touch /tmp/pwn", caller)).not.toBeNull();
+      expect(cloneRemoteRejection("-oProxyCommand=id", caller)).not.toBeNull();
+      expect(cloneRemoteRejection("ext::sh -c id", caller)).not.toBeNull();
+      expect(cloneRemoteRejection("fd::17", caller)).not.toBeNull();
+    }
+  });
+
+  it("allows local remotes only for owner-initiated clones", () => {
+    expect(cloneRemoteRejection("/srv/repos/widgets.git", "owner")).toBeNull();
+    expect(cloneRemoteRejection("./widgets.git", "owner")).toBeNull();
+    expect(cloneRemoteRejection("file:///srv/repos/widgets.git", "owner")).toBeNull();
+    expect(cloneRemoteRejection("/srv/repos/widgets.git", "agent")).not.toBeNull();
+    expect(cloneRemoteRejection("./widgets.git", "agent")).not.toBeNull();
+    expect(cloneRemoteRejection("../widgets.git", "agent")).not.toBeNull();
+    expect(cloneRemoteRejection("file:///srv/repos/widgets.git", "agent")).not.toBeNull();
+    expect(cloneRemoteRejection("~/widgets.git", "agent")).not.toBeNull();
   });
 });
 

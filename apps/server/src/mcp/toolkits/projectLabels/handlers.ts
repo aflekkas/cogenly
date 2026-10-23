@@ -151,21 +151,25 @@ export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
   project_label_clone_repository: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const broadcaster = yield* Broadcaster.VcsStatusBroadcaster;
-      return yield* Clone.cloneRepositoryIntoLabel(input, {
-        labels: yield* Labels.ProjectLabelService,
-        clones: yield* Clones.ProjectCloneTracker,
-        projects: yield* Projects.ProjectService,
-        identities: yield* Identities.RepositoryIdentityResolver,
-        settings: yield* Settings.ServerSettingsService,
-        crypto: yield* Crypto.Crypto,
-        path: yield* Path.Path,
-        home: yield* HostProcess.HomeDirectory,
-        cogenlyHome: (yield* ServerConfig.ServerConfig).baseDir,
-        refreshGitStatus: (cwd) =>
-          broadcaster
-            .refreshStatus(cwd)
-            .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid),
-      }).pipe(Effect.mapError(cloneFailure));
+      return yield* Clone.cloneRepositoryIntoLabel(
+        input,
+        {
+          labels: yield* Labels.ProjectLabelService,
+          clones: yield* Clones.ProjectCloneTracker,
+          projects: yield* Projects.ProjectService,
+          identities: yield* Identities.RepositoryIdentityResolver,
+          settings: yield* Settings.ServerSettingsService,
+          crypto: yield* Crypto.Crypto,
+          path: yield* Path.Path,
+          home: yield* HostProcess.HomeDirectory,
+          cogenlyHome: (yield* ServerConfig.ServerConfig).baseDir,
+          refreshGitStatus: (cwd) =>
+            broadcaster
+              .refreshStatus(cwd)
+              .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid),
+        },
+        { caller: "agent" },
+      ).pipe(Effect.mapError(cloneFailure));
     }),
   ),
 });

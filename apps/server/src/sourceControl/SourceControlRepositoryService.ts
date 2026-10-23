@@ -45,6 +45,7 @@ export class SourceControlRepositoryService extends Context.Service<
      */
     readonly prepareClone: (
       input: SourceControlCloneRepositoryInput,
+      options?: SourceControlPrepareCloneOptions,
     ) => Effect.Effect<SourceControlPreparedClone, SourceControlRepositoryError>;
     readonly cloneRepository: (
       input: SourceControlCloneRepositoryInput,
@@ -69,10 +70,21 @@ export interface SourceControlPreparedClone {
   readonly repository: SourceControlRepositoryInfo | null;
 }
 
+/**
+ * Who asked for a clone. `owner` is the user (or the server itself, re-cloning
+ * a stored remote); `agent` is an MCP agent. Local remotes are owner-only.
+ */
+export type CloneCaller = "owner" | "agent";
+
+export interface SourceControlPrepareCloneOptions {
+  readonly caller?: CloneCaller;
+}
+
 export interface SourceControlCloneOptions {
   readonly onProgress?: (line: GitCloneProgressLine) => Effect.Effect<void>;
   /** Overrides the default clone budget; `null` disables the deadline. */
   readonly timeoutMs?: number | null;
+  readonly caller?: CloneCaller;
 }
 
 // The synchronous RPC (older clients, mobile) keeps a deadline: nothing else
@@ -87,6 +99,45 @@ const CLONE_ENV = {
   GIT_TERMINAL_PROMPT: "0",
   LC_ALL: "C",
 } satisfies NodeJS.ProcessEnv;
+
+const NETWORK_PROTOCOLS: ReadonlySet<string> = new Set(["https", "http", "ssh", "git"]);
+
+/**
+ * Why a clone remote is refused, or null when it may be cloned. Option-like
+ * remotes and helper transports (`ext::`, `fd::`) are refused for everyone;
+ * `file://` and bare local paths are refused for agent-requested clones, so
+ * an agent cannot clone arbitrary repositories off this machine.
+ */
+export function cloneRemoteRejection(remoteUrl: string, caller: CloneCaller): string | null {
+  const remote = remoteUrl.trim();
+  if (remote.startsWith("-")) return 'The clone remote must not start with "-".';
+  const lower = remote.toLowerCase();
+  if (lower.startsWith("ext::") || lower.startsWith("fd::")) {
+    return "This clone transport is not allowed.";
+  }
+  const scheme = /^([a-z][a-z0-9+.-]*):/.exec(lower)?.[1];
+  if (scheme !== undefined && NETWORK_PROTOCOLS.has(scheme)) return null;
+  if (scheme === "file") {
+    return caller === "agent"
+      ? "Agents cannot clone local repositories; use an https, ssh or git remote."
+      : null;
+  }
+  if (scheme !== undefined && remote.includes("://")) {
+    return "This clone protocol is not allowed; use https, http, ssh or git.";
+  }
+  // An scp-style remote (`git@host:path`) rides ssh; anything else is a local path.
+  if (/^[^\s/@:]+@[^\s/:]+:[^\s]+$/.test(remote)) return null;
+  return caller === "agent"
+    ? "Agents cannot clone local repositories; use an https, ssh or git remote."
+    : null;
+}
+
+const cloneEnvFor = (caller: CloneCaller): NodeJS.ProcessEnv => ({
+  ...CLONE_ENV,
+  // Defense in depth behind cloneRemoteRejection: git itself refuses any
+  // transport outside this list (notably `ext::`/`fd::` helper commands).
+  GIT_ALLOW_PROTOCOL: caller === "agent" ? "https:http:ssh:git" : "https:http:ssh:git:file",
+});
 
 function mapRepositoryError(operation: string, provider: SourceControlProviderKind) {
   return Effect.mapError((cause: unknown) =>
@@ -327,6 +378,7 @@ export const make = Effect.gen(function* () {
 
   const prepareClone = Effect.fn("SourceControlRepositoryService.prepareClone")(function* (
     input: SourceControlCloneRepositoryInput,
+    options?: SourceControlPrepareCloneOptions,
   ) {
     const trimmedDestination = input.destinationPath?.trim() ?? "";
     const destinationPath =
@@ -360,6 +412,15 @@ export const make = Effect.gen(function* () {
       });
     }
 
+    const rejection = cloneRemoteRejection(remoteUrl, options?.caller ?? "owner");
+    if (rejection !== null) {
+      return yield* new SourceControlRepositoryError({
+        operation: "cloneRepository",
+        provider,
+        detail: rejection,
+      });
+    }
+
     return {
       destinationPath: preparedDestination.destinationPath,
       remoteUrl: redactRemoteUrl(remoteUrl),
@@ -372,7 +433,7 @@ export const make = Effect.gen(function* () {
     input: SourceControlCloneRepositoryInput,
     options?: SourceControlCloneOptions,
   ) {
-    const prepared = yield* prepareClone(input);
+    const prepared = yield* prepareClone(input, { caller: options?.caller ?? "owner" });
     const onProgress = options?.onProgress;
     // Git interleaves progress redraws with its real messages on stderr. The
     // last non-progress lines are what explain a failure ("Repository not
@@ -407,7 +468,7 @@ export const make = Effect.gen(function* () {
         maxOutputBytes: 256 * 1024,
         appendTruncationMarker: true,
         keepLineCallbacksAfterTruncation: true,
-        env: CLONE_ENV,
+        env: cloneEnvFor(options?.caller ?? "owner"),
         progress: { onStderrLine },
       })
       .pipe(
@@ -538,8 +599,8 @@ export const make = Effect.gen(function* () {
   return SourceControlRepositoryService.of({
     lookupRepository: (input) =>
       lookupRepository(input).pipe(mapRepositoryError("lookupRepository", input.provider)),
-    prepareClone: (input) =>
-      prepareClone(input).pipe(
+    prepareClone: (input, options) =>
+      prepareClone(input, options).pipe(
         mapRepositoryError(
           "cloneRepository",
           input.provider ?? SourceControlProviderKind.make("unknown"),
