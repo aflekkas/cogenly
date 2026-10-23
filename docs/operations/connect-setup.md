@@ -65,12 +65,12 @@ URL selects the deployment.
 Enable Clerk's Native API and add the desktop redirects to its SSO redirect allowlist:
 
 ```text
-t3code-dev://app/
-t3code://app/
+cogenly-dev://app/
+cogenly://app/
 ```
 
 Add the corresponding origin to the Clerk instance's Backend API `allowed_origins` array.
-Development uses `t3code-dev://app`; production uses `t3code://app`. Update the array with
+Development uses `cogenly-dev://app`; production uses `cogenly://app`. Update the array with
 `PATCH https://api.clerk.com/v1/instance` using the Clerk secret key, preserving existing entries.
 The Clerk Electron integration handles token
 persistence and system-browser callback delivery.
