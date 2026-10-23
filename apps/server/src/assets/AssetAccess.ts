@@ -6,6 +6,7 @@ import {
   AssetProjectFaviconInspectionError,
   AssetProjectFaviconNotFoundError,
   AssetProjectFaviconResolutionError,
+  AssetRemoteImageUrlValidationError,
   AssetSigningKeyLoadError,
   AssetWorkspaceAssetInspectionError,
   AssetWorkspaceAssetNotFoundError,
@@ -63,6 +64,7 @@ import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 import { extractIcnsPng } from "./icns.ts";
+import { parseImageProxyTarget } from "./ImageProxyFetch.ts";
 import { openMediaFile, readMediaFileHeader, type OpenMediaFile } from "./MediaFile.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
@@ -169,6 +171,13 @@ const AssetClaimsSchema = Schema.Union([
     cwd: Schema.String,
     expiresAt: Schema.Number,
   }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    kind: Schema.Literal("remote-image"),
+    /** Already validated as a public https target at mint time; the fetch re-validates every hop. */
+    url: Schema.String,
+    expiresAt: Schema.Number,
+  }),
 ]);
 type AssetClaims = typeof AssetClaimsSchema.Type;
 
@@ -198,6 +207,10 @@ export type ResolvedAsset =
       /** When the signed URL that granted this stops working, which bounds how long a client
           may keep the bytes it fetched with it. */
       readonly expiresAt: number;
+    }
+  | {
+      readonly kind: "remote-image";
+      readonly url: string;
     };
 
 function decodeClaims(encodedPayload: string): AssetClaims | null {
@@ -215,6 +228,12 @@ function decodeRelativePath(value: string): string | null {
     return null;
   }
 }
+
+/** The last path segment names the download; a bare host or trailing slash falls back to "image". */
+const remoteImageFileName = (url: string): string => {
+  const segment = new URL(url).pathname.split("/").findLast((part) => part.length > 0);
+  return segment === undefined ? "image" : (decodeRelativePath(segment) ?? segment);
+};
 
 const optionOnNotFound = <A, R>(
   effect: Effect.Effect<A, PlatformError.PlatformError, R>,
@@ -807,6 +826,15 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       fileName = githubMediaFileName(fetchUrl);
       break;
     }
+    case "remote-image": {
+      const target = parseImageProxyTarget(input.resource.url);
+      if (!("url" in target)) {
+        return yield* new AssetRemoteImageUrlValidationError({});
+      }
+      claims = { version: 1, kind: "remote-image", url: target.url, expiresAt };
+      fileName = remoteImageFileName(target.url);
+      break;
+    }
   }
 
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
@@ -921,6 +949,10 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
       cwd: claims.cwd,
       expiresAt: claims.expiresAt,
     } satisfies ResolvedAsset;
+  }
+
+  if (claims.kind === "remote-image") {
+    return { kind: "remote-image", url: claims.url } satisfies ResolvedAsset;
   }
 
   if (claims.kind === "tool-output-image") {

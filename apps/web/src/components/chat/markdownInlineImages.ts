@@ -4,6 +4,9 @@
  * image is held back until its markdown is complete.
  */
 
+import type { AssetUrlState } from "@t3tools/client-runtime/state/assets";
+import type { AssetResource } from "@t3tools/contracts";
+
 /** The slice of a hast node these helpers read and build. */
 export interface InlineImageHastNode {
   type: string;
@@ -14,8 +17,16 @@ export interface InlineImageHastNode {
 }
 
 export type InlineImageSource =
-  /** `url` is the authored image (for "open source"); `src` is what the `<img>` loads. */
-  | { readonly kind: "remote"; readonly url: string; readonly src: string }
+  /**
+   * `url` is the authored image (for "open source"); `src` is what the `<img>` loads when the
+   * server cannot sign it. `proxied` marks a third-party image the server should sign and fetch.
+   */
+  | {
+      readonly kind: "remote";
+      readonly url: string;
+      readonly src: string;
+      readonly proxied: boolean;
+    }
   /** Plain `http:`: never loaded, so the message keeps only its caption and source. */
   | { readonly kind: "blocked"; readonly url: string };
 
@@ -69,7 +80,31 @@ export function resolveInlineImageSource(
   const firstParty = options.firstPartyOrigins?.includes(url.origin) ?? false;
   const proxied =
     !firstParty && options.proxyEndpoint ? imageProxyUrl(options.proxyEndpoint, href) : null;
-  return { kind: "remote", url: href, src: proxied ?? href };
+  return { kind: "remote", url: href, src: proxied ?? href, proxied: proxied !== null };
+}
+
+/** The asset the server signs for a proxied image, or null when the image loads as authored. */
+export function remoteImageAssetResource(
+  source: InlineImageSource | null,
+): Extract<AssetResource, { readonly _tag: "remote-image" }> | null {
+  return source?.kind === "remote" && source.proxied
+    ? { _tag: "remote-image", url: source.url }
+    : null;
+}
+
+/**
+ * What a remote image's `<img>` loads from. A proxied image waits for its signed URL, because
+ * an `<img>` cannot send the bearer token the proxy route would need; if the server cannot sign
+ * it (an older server), the cookie-authenticated proxy URL is the best that remains. Null means
+ * "not yet".
+ */
+export function resolveRemoteImageSrc(
+  source: Extract<InlineImageSource, { readonly kind: "remote" }>,
+  signed: AssetUrlState | null,
+): string | null {
+  if (!source.proxied || signed === null) return source.src;
+  if (signed._tag === "Success") return signed.url;
+  return signed._tag === "Loading" ? null : source.src;
 }
 
 /** The pixel box an author gave an image, as an aspect ratio for its placeholder. */
