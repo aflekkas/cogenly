@@ -288,7 +288,10 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       ...previous,
       ...profile,
       id,
-      projectId: locals[0]?.project_id ?? previous.projectId ?? null,
+      projectId:
+        preserveLocalBindings && previous.projectId !== undefined
+          ? previous.projectId
+          : (locals[0]?.project_id ?? previous.projectId ?? null),
       conversationThreadId: previous.conversationThreadId ?? `agent-conversation:${id}`,
       projectFolderId: null,
       updatedAt: at,
@@ -333,7 +336,10 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
             ? yield* json(previous[0].workspace_strategy_json)
             : { type: "root" }
         : f.workspaceStrategy;
-  const projectId = locals[0]?.project_id ?? previous[0]?.project_id ?? `remote:${remote ?? id}`;
+  const projectId =
+    preserveLocalBindings && previous[0]
+      ? previous[0].project_id
+      : (locals[0]?.project_id ?? previous[0]?.project_id ?? `remote:${remote ?? id}`);
   const schedule = encodeJson(f.schedule);
   const occurrence = f.enabled
     ? nextScheduledRunAt(f.schedule, yield* DateTime.now, {

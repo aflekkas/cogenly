@@ -37,6 +37,17 @@ const seed = Effect.gen(function* () {
 });
 
 describe("local shared document captures", () => {
+  it.effect("keeps two local clones of the same remote linked", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const labels = yield* Labels.ProjectLabelService;
+      const id = (yield* labels.create({ name: "Clones" })).label.id;
+      for (const clone of ["clone-one", "clone-two"])
+        yield* labels.linkRepository({ labelId: id, repositoryId: ProjectId.make(clone) });
+      yield* labels.update({ id, name: "Renamed" });
+      expect((yield* labels.read(id)).label.repositoryIds).toEqual(["clone-one", "clone-two"]);
+    }).pipe(Effect.provide(layer)),
+  );
   it.effect("moving a repository captures both projects without unlinking the destination", () =>
     Effect.gen(function* () {
       yield* seed;
