@@ -1342,9 +1342,12 @@ export function claudeMcpQueryOverrides(input: {
         ? CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS
         : [CLAUDE_T3_MCP_TOOL_WILDCARD];
   return {
-    ...(session.terminalToolsAvailable === false
-      ? {}
-      : { disallowedTools: ["Bash", "BashOutput", "KillShell", "TaskOutput", "TaskStop"] }),
+    // The native shell is disallowed only when the credential explicitly
+    // grants the Cogenly terminal tools; an absent flag keeps Bash so the
+    // agent always has some way to run commands.
+    ...(McpProviderSession.terminalToolsAvailable(session)
+      ? { disallowedTools: ["Bash", "BashOutput", "KillShell", "TaskOutput", "TaskStop"] }
+      : {}),
     allowedTools: Array.from(new Set([...(input.allowedTools ?? []), ...mcpAllowedTools])),
     mcpServers: {
       cogenly: {

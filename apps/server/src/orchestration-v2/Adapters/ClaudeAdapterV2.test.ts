@@ -321,7 +321,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
 
   it("pre-approves all t3-code tools when attaching an MCP session without an allowlist", () => {
     const threadId = ThreadId.make("thread-claude-mcp-no-allowlist");
-    const mcpSession = mcpSessionFor(threadId);
+    const mcpSession = { ...mcpSessionFor(threadId), terminalToolsAvailable: true };
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
       mcpSession,
       readOnlySandbox: false,
@@ -336,7 +336,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
 
   it("extends an explicit allowlist with the t3-code wildcard", () => {
     const threadId = ThreadId.make("thread-claude-mcp-with-allowlist");
-    const mcpSession = mcpSessionFor(threadId);
+    const mcpSession = { ...mcpSessionFor(threadId), terminalToolsAvailable: true };
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
       mcpSession,
       readOnlySandbox: false,
@@ -352,7 +352,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
 
   it("pre-approves only read-only t3-code tools in a read-only sandbox", () => {
     const threadId = ThreadId.make("thread-claude-mcp-read-only");
-    const mcpSession = mcpSessionFor(threadId);
+    const mcpSession = { ...mcpSessionFor(threadId), terminalToolsAvailable: true };
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
       mcpSession,
       readOnlySandbox: true,
@@ -492,6 +492,24 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       }),
     );
     assert.notEqual(rotatedKey, initialKey);
+  });
+
+  it("disallows the native shell only when terminal tools are explicitly granted", () => {
+    const base = mcpSessionFor(ThreadId.make("terminal-grant"));
+    const disallowedToolsFor = (mcpSession: McpProviderSession.McpProviderSessionConfig) =>
+      ClaudeAdapterV2.claudeMcpQueryOverrides({ mcpSession, readOnlySandbox: false })
+        .disallowedTools;
+    assert.deepEqual(disallowedToolsFor({ ...base, terminalToolsAvailable: true }), [
+      "Bash",
+      "BashOutput",
+      "KillShell",
+      "TaskOutput",
+      "TaskStop",
+    ]);
+    assert.isUndefined(disallowedToolsFor({ ...base, terminalToolsAvailable: false }));
+    // A credential that never stated terminal availability must keep Bash:
+    // nothing guarantees the Cogenly terminal tools serve this session.
+    assert.isUndefined(disallowedToolsFor(base));
   });
 
   it("restores native shell tools when agent terminals are disabled", () => {

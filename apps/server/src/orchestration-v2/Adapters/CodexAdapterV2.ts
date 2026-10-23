@@ -1345,9 +1345,12 @@ export function codexThreadRuntimeParams(input: {
         : {
             // Codex gates both exec_command and write_stdin on ShellTool before UnifiedExec.
             // https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/spec_plan.rs#L1234-L1260
-            ...(mcpSession.terminalToolsAvailable === false
-              ? {}
-              : { "features.shell_tool": false }),
+            // The native shell is disabled only when the credential
+            // explicitly grants the Cogenly terminal tools; an absent flag
+            // keeps the shell so the agent can still run commands.
+            ...(McpProviderSession.terminalToolsAvailable(mcpSession)
+              ? { "features.shell_tool": false }
+              : {}),
             mcp_servers: {
               cogenly: {
                 url: mcpSession.endpoint,
@@ -5758,8 +5761,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               hasT3Mcp: mcpSession !== undefined,
               browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
               deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
-              terminalToolsAvailable:
-                mcpSession !== undefined && mcpSession.terminalToolsAvailable !== false,
+              terminalToolsAvailable: McpProviderSession.terminalToolsAvailable(mcpSession),
               omitServiceTier: adapterOptions.resolveRuntime !== undefined,
               ...(turnInput.appContext === undefined ? {} : { appContext: turnInput.appContext }),
             });
