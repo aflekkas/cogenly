@@ -16,7 +16,8 @@ From Settings → Integrations, under Services:
 3. Add any headers the server needs. For a secret, choose the key button
    beside the value and pick a vault item and field; Cogenly inserts a
    reference such as `Bearer {{credential:gmail.password}}`. Store the secret
-   in your vault first.
+   in your vault first. Once saved, header values typed in directly show as
+   `••••`; leave one as it is to keep it, or type a new value.
 4. Optionally add a hint agents see next to the name, and limit the
    integration to chosen projects.
 5. Choose **Test connection** to see how many tools the server offers, or why

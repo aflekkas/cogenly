@@ -98,7 +98,7 @@ export const IntegrationConnectionStatus = Schema.Literals([
 ]);
 export type IntegrationConnectionStatus = typeof IntegrationConnectionStatus.Type;
 
-/** What clients and `integrations_list` see: never resolved credentials. */
+/** What clients and `integrations_list` see: never resolved credentials, and literal header values masked. */
 export const IntegrationSummary = Schema.Struct({
   integration: Integration,
   status: IntegrationConnectionStatus,

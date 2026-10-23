@@ -382,6 +382,49 @@ describe("Integrations gateway", () => {
     ),
   );
 
+  it.effect("masks literal header values and keeps them when an edit sends the mask back", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const created = yield* service.create({
+        ...createInput("https://example.com/mcp"),
+        headers: {
+          authorization: "Bearer {{credential:gmail.apiKey}}",
+          "x-api-key": "literal-secret-123",
+        },
+      });
+      const masked = {
+        authorization: "Bearer {{credential:gmail.apiKey}}",
+        "x-api-key": Integrations.HEADER_MASK,
+      };
+      expect(created.integration.headers).toEqual(masked);
+      const listed = yield* service.list();
+      expect(listed.integrations[0]?.integration.headers).toEqual(masked);
+      expect(JSON.stringify(listed)).not.toContain("literal-secret-123");
+
+      const updated = yield* service.update({
+        id: created.integration.id,
+        headers: { ...masked, "x-extra": "visible-change" },
+      });
+      expect(JSON.stringify(updated)).not.toContain("literal-secret-123");
+      const sql = yield* SqlClient.SqlClient;
+      const [row] = yield* sql<{
+        payload_json: string;
+      }>`SELECT payload_json FROM integrations WHERE id = ${created.integration.id}`;
+      expect(JSON.parse(row!.payload_json).headers).toEqual({
+        authorization: "Bearer {{credential:gmail.apiKey}}",
+        "x-api-key": "literal-secret-123",
+        "x-extra": "visible-change",
+      });
+
+      // A mask names no stored value under a new header name.
+      const renamed = yield* service
+        .update({ id: created.integration.id, headers: { "x-renamed": Integrations.HEADER_MASK } })
+        .pipe(Effect.result);
+      expect(renamed._tag).toBe("Failure");
+    }).pipe(Effect.provide(layerWith())),
+  );
+
   it.effect("filters by project scope and tombstones on remove", () =>
     Effect.gen(function* () {
       yield* runMigrations();

@@ -57,6 +57,27 @@ const credentialItemsIn = (headers: Readonly<Record<string, string>>): Array<str
   ),
 ];
 
+/**
+ * What clients and agents see in place of a literal header value, which may be
+ * a pasted secret. Credential templates are shown as they are. Sending the
+ * mask back in an update keeps the stored value.
+ */
+export const HEADER_MASK = "••••";
+
+/** Headers as clients and agents may see them. */
+export const redactHeaders = (headers: Readonly<Record<string, string>>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [
+      name,
+      value === "" || credentialRefsIn(value).length > 0 ? value : HEADER_MASK,
+    ]),
+  );
+
+const redactIntegration = (integration: Integration): Integration => ({
+  ...integration,
+  headers: redactHeaders(integration.headers),
+});
+
 /** Treat every header as sensitive: even a static Host header can change routing. */
 export const integrationDestinationChanged = (
   current: Integration,
@@ -66,7 +87,9 @@ export const integrationDestinationChanged = (
   (input.transport !== undefined && input.transport !== current.transport) ||
   (input.headers !== undefined &&
     (Object.keys(input.headers).length !== Object.keys(current.headers).length ||
-      Object.entries(input.headers).some(([name, value]) => current.headers[name] !== value)));
+      Object.entries(input.headers).some(
+        ([name, value]) => value !== HEADER_MASK && current.headers[name] !== value,
+      )));
 
 /**
  * Resolves `{{credential:item.field}}` references in every header value.
@@ -293,7 +316,7 @@ const make = (options: IntegrationsOptions = {}) =>
           integrations: integrations.map((integration) => {
             const cached = entries.get(`${integration.id}:${integration.updatedAt}`);
             return {
-              integration,
+              integration: redactIntegration(integration),
               status: cached === undefined ? "unknown" : "connected",
               toolCount: cached === undefined ? null : cached.result.tools.length,
             } satisfies IntegrationSummary;
@@ -540,11 +563,30 @@ const make = (options: IntegrationsOptions = {}) =>
             deletedAt: null,
           };
           yield* persist(integration);
-          return { integration };
+          return { integration: redactIntegration(integration) };
         }).pipe(Effect.mapError(failure("create", "storage"))),
-      update: (input, options) =>
+      update: (masked, options) =>
         Effect.gen(function* () {
-          const current = yield* getById(input.id);
+          const current = yield* getById(masked.id);
+          // A masked value is one the caller left as it was.
+          const input: IntegrationUpdateInput =
+            masked.headers === undefined
+              ? masked
+              : {
+                  ...masked,
+                  headers: yield* Effect.forEach(Object.entries(masked.headers), ([name, value]) =>
+                    value !== HEADER_MASK
+                      ? Effect.succeed([name, value] as const)
+                      : current.headers[name] !== undefined
+                        ? Effect.succeed([name, current.headers[name]] as const)
+                        : Effect.fail(
+                            new IntegrationError({
+                              operation: "update",
+                              reason: "invalid_request",
+                            }),
+                          ),
+                  ).pipe(Effect.map(Object.fromEntries<string>)),
+                };
           if (
             options?.preserveCredentialDestination &&
             integrationDestinationChanged(current, input)
@@ -576,7 +618,7 @@ const make = (options: IntegrationsOptions = {}) =>
           };
           yield* persist(integration);
           yield* invalidate(integration.id);
-          return { integration };
+          return { integration: redactIntegration(integration) };
         }).pipe(sql.withTransaction, Effect.mapError(failure("update", "storage"))),
       remove: (id) =>
         Effect.gen(function* () {
