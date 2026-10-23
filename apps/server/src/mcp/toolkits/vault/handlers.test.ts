@@ -14,6 +14,7 @@ import * as AgentStore from "../../../agents/AgentStore.ts";
 import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as Sqlite from "../../../persistence/Sqlite.ts";
+import * as ProjectFiles from "../../../projectLabels/ProjectFiles.ts";
 import * as Vault from "../../../vault/Vault.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
 import * as Access from "../../McpToolAccess.ts";
@@ -66,6 +67,7 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
         }),
         liveThreadsLayer,
         Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
+        Layer.mock(ProjectFiles.ProjectFiles)({ folderForThread: () => Effect.succeed(null) }),
         PreviewAutomationBroker.layer.pipe(Layer.provide(NodeCrypto.layer)),
         Vault.layer.pipe(
           Layer.provideMerge(Sqlite.layerMemory),
@@ -152,6 +154,26 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
 
       const listed = yield* call("vault_list", {});
       expect(JSON.stringify(listed)).not.toContain("octo-password-123");
+
+      // An unfiled thread sees only environment-wide items, by list, id or name.
+      const vaultService = Context.get(context, Vault.Vault);
+      const { item: scoped } = yield* vaultService.create({
+        name: "Other project",
+        type: "login",
+        scopeProjectId: "label:other" as never,
+        allowedDomains: ["github.com"],
+        policy: { mode: "allow", allowedAgentIds: [], allowedDomains: [] },
+        secretFields: { password: "other-project-password" },
+      });
+      expect(JSON.stringify(yield* call("vault_list", {}))).not.toContain("Other project");
+      for (const target of [{ itemId: scoped.id }, { name: "Other project" }]) {
+        expect(
+          yield* call("vault_fill", { ...target, field: "password", locator: "input" }),
+        ).toMatchObject({ code: "invalid_request" });
+      }
+      expect(yield* call("vault_delete", { id: scoped.id })).toMatchObject({
+        code: "invalid_request",
+      });
 
       // A thread without a persistent agent is not the owner: the default
       // policy asks before anything is typed.
@@ -293,6 +315,7 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
         }),
         liveThreadsLayer,
         Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
+        Layer.mock(ProjectFiles.ProjectFiles)({ folderForThread: () => Effect.succeed(null) }),
         Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({
           invoke: (request) =>
             request.operation === "status"

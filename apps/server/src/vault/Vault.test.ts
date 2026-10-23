@@ -228,6 +228,51 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("a caller scope sees only its project's and environment-wide items", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const make = (name: string, scopeProjectId: string | null) =>
+        vault.create({
+          name,
+          type: "api_key",
+          scopeProjectId: scopeProjectId as never,
+          secretFields: { value: `${name}-secret-value` },
+        });
+      yield* make("Shared", null);
+      yield* make("Mine", "label:a");
+      const { item: theirs } = yield* make("Theirs", "label:b");
+      const scope = { projectId: "label:a" };
+      expect((yield* vault.list({}, scope)).items.map((item) => item.name)).toEqual([
+        "Mine",
+        "Shared",
+      ]);
+      expect((yield* vault.list({ scopeProjectId: "label:b" as never }, scope)).items).toHaveLength(
+        2,
+      );
+      expect((yield* vault.list({}, { projectId: null })).items.map((i) => i.name)).toEqual([
+        "Shared",
+      ]);
+      for (const target of [{ itemId: theirs.id }, { name: "Theirs" }]) {
+        const error = yield* vault
+          .use({ ...target, field: "value", caller: { kind: "server" }, callerScope: scope })
+          .pipe(Effect.flip);
+        expect(error.reason).toBe("not_found");
+      }
+      expect((yield* vault.delete({ id: theirs.id }, scope).pipe(Effect.flip)).reason).toBe(
+        "not_found",
+      );
+      expect((yield* vault.list({})).items).toHaveLength(3);
+      expect(
+        yield* vault.use({
+          name: "Mine",
+          field: "value",
+          caller: { kind: "server" },
+          callerScope: scope,
+        }),
+      ).toMatchObject({ status: "allowed", value: "Mine-secret-value" });
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("asks an agentless thread by default and fills once allowed or approved", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;

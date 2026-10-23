@@ -6,7 +6,6 @@ import {
   VaultField,
   VaultItemMetadata,
   VaultItemResult,
-  VaultListInput,
   VaultListResult,
   VaultSecretFields,
   VaultItemType,
@@ -17,6 +16,7 @@ import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 
 import * as AgentStore from "../../../agents/AgentStore.ts";
+import * as ProjectFiles from "../../../projectLabels/ProjectFiles.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Vault from "../../../vault/Vault.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -28,6 +28,7 @@ const dependencies = [
   Vault.Vault,
   PreviewAutomationBroker.PreviewAutomationBroker,
   AgentStore.AgentStore,
+  ProjectFiles.ProjectFiles,
 ];
 
 const VaultFillResult = Schema.Struct({
@@ -41,8 +42,8 @@ const VaultFillResult = Schema.Struct({
 
 const VaultListTool = Tool.make("vault_list", {
   description:
-    "List vault items (logins, API keys, cards, notes) as metadata only: name, type, allowed domains, policy and which secret fields exist. Never returns secret values or usernames.",
-  parameters: VaultListInput,
+    "List the vault items this thread may use (its project's and environment-wide logins, API keys, cards, notes) as metadata only: name, type, allowed domains, policy and which secret fields exist. Never returns secret values or usernames.",
+  parameters: Tool.EmptyParams,
   success: VaultListResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",

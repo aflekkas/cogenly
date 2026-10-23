@@ -51,11 +51,23 @@ import {
 } from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
+/**
+ * The project (label) an agent calls from. A scoped caller sees only items in
+ * that project and environment-wide ones; `projectId: null` (an unfiled thread
+ * or an outside agent) sees only environment-wide items. Owner surfaces pass
+ * no scope and see everything.
+ */
+export interface VaultCallerScope {
+  readonly projectId: string | null;
+}
+
 export interface VaultUseInput {
   readonly itemId?: VaultItemId | undefined;
   readonly name?: string | undefined;
   /** Project (label) scope to prefer when a name exists in several scopes. */
   readonly scopeProjectId?: string | null | undefined;
+  /** Enforced visibility for agent callers; see VaultCallerScope. */
+  readonly callerScope?: VaultCallerScope | undefined;
   readonly field: VaultField;
   readonly caller: VaultUseCaller;
   readonly threadId?: ThreadId | undefined;
@@ -235,8 +247,10 @@ const parseDomains = (text: string): Array<string> =>
 export class Vault extends Context.Service<
   Vault,
   {
+    /** With a caller scope, `input.scopeProjectId` is ignored and the scope is enforced. */
     readonly list: (
       input: VaultListInput,
+      callerScope?: VaultCallerScope,
     ) => Effect.Effect<{ items: ReadonlyArray<VaultItemMetadata> }, VaultError>;
     readonly getMetadata: (itemId: VaultItemId) => Effect.Effect<VaultItemMetadata, VaultError>;
     readonly create: (
@@ -245,8 +259,10 @@ export class Vault extends Context.Service<
     readonly update: (
       input: VaultUpdateInput,
     ) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
+    /** With a caller scope, an item outside it is `not_found`. */
     readonly delete: (
       input: VaultDeleteInput,
+      callerScope?: VaultCallerScope,
     ) => Effect.Effect<{ id: VaultItemId; deleted: boolean }, VaultError>;
     readonly listUsage: (
       input: VaultUsageListInput,
@@ -378,21 +394,35 @@ const make = Effect.gen(function* () {
       return rows[0];
     });
 
+  const visibleTo = (row: VaultRow, scope: VaultCallerScope | undefined) =>
+    scope === undefined ||
+    row.scope_project_id === null ||
+    row.scope_project_id === scope.projectId;
+
   const findRow = (input: {
     itemId?: VaultItemId | undefined;
     name?: string | undefined;
     scopeProjectId?: string | null | undefined;
+    callerScope?: VaultCallerScope | undefined;
   }) =>
     Effect.gen(function* () {
-      if (input.itemId) return yield* loadRow(input.itemId);
+      if (input.itemId) {
+        const row = yield* loadRow(input.itemId);
+        // Out of scope looks the same as missing, so ids do not probe other projects.
+        if (!visibleTo(row, input.callerScope))
+          return yield* new VaultError({ reason: "not_found" });
+        return row;
+      }
       if (!input.name) return yield* new VaultError({ reason: "invalid_input" });
       const rows =
-        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE name = ${input.name} AND deleted_at IS NULL ORDER BY updated_at DESC`;
+        (yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE name = ${input.name} AND deleted_at IS NULL ORDER BY updated_at DESC`).filter(
+          (row) => visibleTo(row, input.callerScope),
+        );
       if (rows.length === 0) return yield* new VaultError({ reason: "not_found" });
       if (rows.length === 1) return rows[0]!;
+      const preferred = input.callerScope?.projectId ?? input.scopeProjectId ?? null;
       const scoped = rows.filter(
-        (row) =>
-          row.scope_project_id === (input.scopeProjectId ?? null) || row.scope_project_id === null,
+        (row) => row.scope_project_id === preferred || row.scope_project_id === null,
       );
       if (scoped.length === 1) return scoped[0]!;
       return yield* new VaultError({ reason: "ambiguous_name" });
@@ -566,13 +596,15 @@ const make = Effect.gen(function* () {
       return { item: metadataOf(row, stored) };
     }).pipe(Effect.mapError(wrap));
 
-  const list: Vault["Service"]["list"] = (input) =>
+  const list: Vault["Service"]["list"] = (input, callerScope) =>
     Effect.gen(function* () {
       const rows =
-        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL AND (${input.scopeProjectId ?? null} IS NULL OR scope_project_id IS NULL OR scope_project_id = ${input.scopeProjectId ?? null}) ORDER BY name`.pipe(
+        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL AND (${callerScope ? null : (input.scopeProjectId ?? null)} IS NULL OR scope_project_id IS NULL OR scope_project_id = ${input.scopeProjectId ?? null}) ORDER BY name`.pipe(
           Effect.mapError(wrap),
         );
-      return { items: rows.map((row) => metadataOf(row)) };
+      return {
+        items: rows.filter((row) => visibleTo(row, callerScope)).map((row) => metadataOf(row)),
+      };
     });
 
   const update: Vault["Service"]["update"] = (input) =>
@@ -639,6 +671,7 @@ const make = Effect.gen(function* () {
         itemId: input.itemId,
         name: input.name,
         scopeProjectId: input.scopeProjectId,
+        callerScope: input.callerScope,
       });
       if (
         input.expectedRevision !== undefined &&
@@ -749,8 +782,10 @@ const make = Effect.gen(function* () {
       ),
     create,
     update,
-    delete: (input) =>
+    delete: (input, callerScope) =>
       Effect.gen(function* () {
+        if (callerScope)
+          yield* findRow({ itemId: input.id, callerScope }).pipe(Effect.mapError(wrap));
         const rows =
           yield* sql`UPDATE vault_items SET deleted_at = ${yield* now}, ciphertext = '', wrapped_keys_json = '[]', updated_at = ${yield* now} WHERE id = ${input.id} AND deleted_at IS NULL RETURNING id`.pipe(
             Effect.mapError(wrap),

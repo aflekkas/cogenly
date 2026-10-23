@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import * as AgentStore from "../../../agents/AgentStore.ts";
+import * as ProjectFiles from "../../../projectLabels/ProjectFiles.ts";
 import * as Vault from "../../../vault/Vault.ts";
 import { normalizeHost } from "../../../vault/VaultPolicy.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -26,11 +27,28 @@ const toFailure = (cause: unknown) =>
       )
     : failure("Vault operation failed.", "orchestration_error");
 
+/**
+ * Items an agent may see: its thread's project folder plus environment-wide
+ * ones. A caller outside a filed thread sees only environment-wide items.
+ */
+const callerScope = Effect.gen(function* () {
+  const invocation = yield* McpInvocationContext.McpInvocationContext;
+  if (!invocation.thread) return { projectId: null };
+  const folder = yield* (yield* ProjectFiles.ProjectFiles)
+    .folderForThread(invocation.thread.threadId)
+    .pipe(
+      Effect.mapError(() =>
+        failure("Could not resolve the calling project.", "orchestration_error"),
+      ),
+    );
+  return { projectId: folder?.labelId ?? null };
+});
+
 export const layer = McpToolAccess.toLayer(VaultToolkit, {
-  vault_list: McpToolAccess.readsAsCaller((input) =>
+  vault_list: McpToolAccess.readsAsCaller(() =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;
-      return yield* vault.list(input ?? {}).pipe(Effect.mapError(toFailure));
+      return yield* vault.list({}, yield* callerScope).pipe(Effect.mapError(toFailure));
     }),
   ),
   vault_save: McpToolAccess.actsAsCaller((input) =>
@@ -78,6 +96,7 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
           ...(rest.itemId ? { itemId: VaultItemId.make(rest.itemId) } : {}),
           ...(rest.name ? { name: rest.name } : {}),
           field: rest.field,
+          callerScope: yield* callerScope,
           // An MCP caller is never the owner: an agentless thread is subject
           // to the item policy and asks like an agent.
           caller: agent
@@ -134,7 +153,7 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
   vault_delete: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;
-      return yield* vault.delete(input).pipe(Effect.mapError(toFailure));
+      return yield* vault.delete(input, yield* callerScope).pipe(Effect.mapError(toFailure));
     }),
   ),
 });

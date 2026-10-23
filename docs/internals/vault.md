@@ -58,6 +58,11 @@ was involved, so a retry succeeds. An agentless thread's row has no agent; the
 approved row itself is that thread's grant for the item, field and domain, and
 any later edit to the item ends it. Rejecting leaves the policy untouched.
 
+MCP vault tools take their scope from the calling thread's project folder, not
+from input: list, fill and delete see only that project's items and
+environment-wide ones (an unfiled caller sees only environment-wide items),
+and an out-of-scope id or name is `not_found`.
+
 `resolveSecretByName` is the server-internal API for other server features
 (e.g. the integrations gateway): it returns a decrypted field by name and is
 never exposed through MCP or RPC. It takes the destination host and refuses
