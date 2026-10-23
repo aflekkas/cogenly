@@ -19,6 +19,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "../cloud/environmentKeys.ts";
@@ -60,6 +61,20 @@ const readPeerDpopKey = Effect.gen(function* () {
   return Option.some(toPeerDpopKey(decoded));
 });
 
+// Locks belong to the supplied store, so separate environments never block each other.
+// Creation and removal share the lock; no key or service is cached here.
+const keyLocks = new WeakMap<ServerSecretStore.ServerSecretStore["Service"], Semaphore.Semaphore>();
+const withKeyLock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const secrets = yield* ServerSecretStore.ServerSecretStore;
+    let lock = keyLocks.get(secrets);
+    if (lock === undefined) {
+      lock = Semaphore.makeUnsafe(1);
+      keyLocks.set(secrets, lock);
+    }
+    return yield* lock.withPermit(effect);
+  });
+
 /** This server's peer proof key, created on first use. */
 export const getOrCreatePeerDpopKey = Effect.gen(function* () {
   const existing = yield* readPeerDpopKey;
@@ -89,11 +104,12 @@ export const getOrCreatePeerDpopKey = Effect.gen(function* () {
   );
   yield* secrets.set(PEER_DPOP_KEY_SECRET, new TextEncoder().encode(encoded));
   return toPeerDpopKey(stored);
-});
+}).pipe(withKeyLock);
 
 /** Unpairing forgets the key so the next pairing starts from a fresh one. */
 export const removePeerDpopKey = ServerSecretStore.ServerSecretStore.pipe(
   Effect.flatMap((secrets) => secrets.remove(PEER_DPOP_KEY_SECRET)),
+  withKeyLock,
 );
 
 const encodeProofHeader = Schema.encodeSync(
