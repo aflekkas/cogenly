@@ -35,7 +35,7 @@ export const IntegrationsToolkit = Toolkit.make(
     parameters: Tool.EmptyParams,
     success: IntegrationListResult,
     description:
-      "List Cogenly-managed integrations connected for this project: name, display name, hint, connected status and tool count. Credentials are never shown.",
+      "List Cogenly-managed integrations connected for this project: name, display name, account label, hint, status (connected, needs_sign_in, error with message) and tool count. One service can be connected several times, e.g. two Slack workspaces; the account label tells them apart. Credentials are never shown.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -63,14 +63,14 @@ export const IntegrationsToolkit = Toolkit.make(
     parameters: IntegrationCreateInput,
     success: IntegrationMutationResult,
     description:
-      "Connect a new remote MCP integration (http transport). Header values may reference vault credentials as {{credential:<item>.<field>}}; never put raw secrets in headers. Persistent agents need owner approval first.",
+      'Connect a new remote MCP integration (http transport). Most hosted servers (Linear, Notion, Atlassian, GitHub, Slack, Intercom…) sign in with OAuth: set auth to {type: "oauth"} with no auth headers, and the result\'s signIn.authorizationUrl is a link the user must open in their browser to approve access; give it to them. After that it keeps working, including for scheduled runs. Servers without automatic client registration (e.g. Slack) also need auth.clientId and auth.clientSecret as a vault reference. To connect another account of the same service, use a new name and an accountLabel. Header values may reference vault credentials as {{credential:<item>.<field>}}; never put raw secrets in headers. Persistent agents need owner approval first.',
   }).annotate(Tool.Destructive, false),
   Tool.make("integration_update", {
     ...shared,
     parameters: IntegrationUpdateByNameInput,
     success: IntegrationMutationResult,
     description:
-      "Change a connected integration by name: display name, transport, url, headers, enabled, project scope, or hint. Omitted fields are preserved. Widening project scope needs owner approval. Persistent agents also need approval for URL, transport, or header changes.",
+      "Change a connected integration by name: display name, account label, transport, url, headers, auth, enabled, project scope, or hint. Omitted fields are preserved. When the integration needs a (new) OAuth sign-in, the result includes signIn.authorizationUrl for the user to open; call this with just the name to get a fresh link. Widening project scope needs owner approval. Persistent agents also need approval for URL, transport, header, or auth changes.",
   }).annotate(Tool.Destructive, false),
   Tool.make("integration_remove", {
     ...shared,

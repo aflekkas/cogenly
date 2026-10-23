@@ -44,12 +44,15 @@ export interface IntegrationContextEntry {
   readonly name: string;
   readonly displayName: string;
   readonly hint?: string | undefined;
+  /** Which account of the service, e.g. "Spawn Partners". */
+  readonly accountLabel?: string | undefined;
 }
 
 /**
  * The one line every provider turn gets about connected integrations, e.g.
- * "Connected integrations: gmail (Gmail, aflekkas@…), linear. Use
- * integration_tools / integration_call." Empty when none are connected.
+ * "Connected integrations: gmail (Gmail, aflekkas@…), linear-spawn (Linear ·
+ * Spawn Partners). Use integration_tools / integration_call." Empty when none
+ * are connected.
  */
 export function buildIntegrationsContextLine(
   integrations: ReadonlyArray<IntegrationContextEntry>,
@@ -57,12 +60,15 @@ export function buildIntegrationsContextLine(
   if (integrations.length === 0) return "";
   const names = integrations.map((integration) => {
     const hint = integration.hint?.trim() ?? "";
+    const account = integration.accountLabel?.trim() ?? "";
     const label =
-      hint.length > 0
-        ? hint
-        : integration.displayName !== integration.name
-          ? integration.displayName
-          : "";
+      account.length > 0
+        ? [`${integration.displayName} · ${account}`, hint].filter(Boolean).join(", ")
+        : hint.length > 0
+          ? hint
+          : integration.displayName !== integration.name
+            ? integration.displayName
+            : "";
     return label.length > 0
       ? `${toSingleLine(integration.name)} (${toSingleLine(label)})`
       : toSingleLine(integration.name);

@@ -135,6 +135,22 @@ describe("integrations context line", () => {
     );
   });
 
+  it("names the account of each connection so agents can pick one", () => {
+    expect(
+      buildIntegrationsContextLine([
+        { name: "linear-spawn", displayName: "Linear", accountLabel: "Spawn Partners" },
+        {
+          name: "linear-personal",
+          displayName: "Linear",
+          accountLabel: "personal",
+          hint: "side projects",
+        },
+      ]),
+    ).toBe(
+      "Connected integrations: linear-spawn (Linear · Spawn Partners), linear-personal (Linear · personal, side projects). Use integration_tools / integration_call.",
+    );
+  });
+
   it("adds exactly one line to the project manifest", () => {
     const base = { name: "P", directory: "/projects/P", resources: [], total: 0 };
     const withIntegrations = buildProjectManifest({
