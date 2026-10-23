@@ -22,7 +22,7 @@ export interface RecordedCommandOutput {
 export class CommandOutputRecorder extends Context.Service<
   CommandOutputRecorder,
   { readonly snapshot: Effect.Effect<ReadonlyMap<TurnItemId, RecordedCommandOutput>> }
->()("t3/orchestration-v2/testkit/CommandOutputRecorder") {}
+>()("cogenly-server/orchestration-v2/testkit/CommandOutputRecorder") {}
 
 /** The real hub, plus a record of every chunk it was given, keyed by turn item. */
 export const layer: Layer.Layer<

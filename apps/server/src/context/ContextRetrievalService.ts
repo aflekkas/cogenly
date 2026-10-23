@@ -76,7 +76,7 @@ export class ContextRetrievalService extends Context.Service<
       readonly enabled: boolean;
     }) => Effect.Effect<{ enabled: boolean }, FactError>;
   }
->()("t3/context/ContextRetrievalService") {}
+>()("cogenly-server/context/ContextRetrievalService") {}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

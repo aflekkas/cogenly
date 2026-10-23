@@ -95,7 +95,7 @@ export class AgentService extends Context.Service<
     /** Also called on startup; terminal runs with undelivered postbacks survive restarts. */
     readonly reconcile: () => Effect.Effect<void, AgentError>;
   }
->()("t3/agents/AgentService") {}
+>()("cogenly-server/agents/AgentService") {}
 
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;

@@ -129,7 +129,7 @@ export class AgentWorkspaceService extends Context.Service<
       targetId?: string,
     ) => Effect.Effect<void, AgentError>;
   }
->()("t3/agents/AgentWorkspaceService") {}
+>()("cogenly-server/agents/AgentWorkspaceService") {}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

@@ -87,7 +87,7 @@ export class AgentStore extends Context.Service<
     readonly markRunning: (id: string) => Effect.Effect<void, AgentError>;
     readonly markPosted: (id: string) => Effect.Effect<void, AgentError>;
   }
->()("t3/agents/AgentStore") {}
+>()("cogenly-server/agents/AgentStore") {}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

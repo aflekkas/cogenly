@@ -50,7 +50,7 @@ export class AgentMcpPolicy extends Context.Service<
       result?: unknown,
     ) => Effect.Effect<void, OrchestratorMcpFailure>;
   }
->()("t3/agents/AgentMcpPolicy") {}
+>()("cogenly-server/agents/AgentMcpPolicy") {}
 const make = Effect.gen(function* () {
   const store = yield* Store.AgentStore;
   const workspace = yield* Workspace.AgentWorkspaceService;

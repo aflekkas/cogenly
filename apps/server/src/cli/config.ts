@@ -89,7 +89,7 @@ const tailscaleServePortFlag = Flag.Int("tailscale-serve-port").pipe(
   Flag.optional,
 );
 
-// Trace file location, shared by the server and `t3 trace summary`.
+// Trace file location, shared by the server and `cogenly trace summary`.
 export const traceFileConfig = Config.String("COGENLY_TRACE_FILE").pipe(
   Config.option,
   Config.map(Option.getOrUndefined),

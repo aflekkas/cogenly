@@ -55,7 +55,7 @@ export class FactService extends Context.Service<
       principal: ContextPrincipal,
     ) => Effect.Effect<ReadonlyArray<ProjectLabelId>, FactError>;
   }
->()("t3/context/FactService") {}
+>()("cogenly-server/context/FactService") {}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

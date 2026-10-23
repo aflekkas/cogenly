@@ -7,7 +7,7 @@ import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
 
 // A desktop install puts no `t3` on PATH, so commands the server asks a person
-// to run (`sudo t3 browser setup`) had nothing to call. The app keeps a small
+// to run (`sudo cogenly browser setup`) had nothing to call. The app keeps a small
 // launcher for its bundled CLI in the T3 home, which is never on PATH and so
 // never shadows another `t3`, and the server names it by absolute path in those
 // commands through COGENLY_CLI_PATH. An AppImage mounts somewhere new each run,
@@ -128,7 +128,7 @@ export const renderCliShim = (input: {
   ].join("\n");
 };
 
-/** Where the packaged app keeps its launcher: `<T3 home>/bin/t3`, `t3.cmd` on Windows. */
+/** Where the packaged app keeps its launcher: `<Cogenly home>/bin/cogenly`, `cogenly.cmd` on Windows. */
 export const launcherPath = (environment: DesktopEnvironment.DesktopEnvironment["Service"]) =>
   environment.path.join(
     environment.baseDir,
@@ -137,7 +137,7 @@ export const launcherPath = (environment: DesktopEnvironment.DesktopEnvironment[
   );
 
 /**
- * Writes the packaged app's launcher to `<T3 home>/bin` and returns its path
+ * Writes the packaged app's launcher to `<Cogenly home>/bin` and returns its path
  * for the backend's COGENLY_CLI_PATH. Development builds run from a checkout
  * and get none.
  */

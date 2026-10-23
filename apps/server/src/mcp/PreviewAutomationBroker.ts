@@ -80,7 +80,7 @@ export class PreviewAutomationBroker extends Context.Service<
       request: PreviewAutomationInvokeInput,
     ) => Effect.Effect<A, PreviewAutomationError>;
   }
->()("t3/mcp/PreviewAutomationBroker") {}
+>()("cogenly-server/mcp/PreviewAutomationBroker") {}
 
 interface ClientConnection {
   readonly clientId: string;

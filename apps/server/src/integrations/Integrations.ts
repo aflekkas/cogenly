@@ -157,7 +157,7 @@ export class Integrations extends Context.Service<
       labelId: ProjectLabelId | null,
     ) => Effect.Effect<ReadonlyArray<Integration>, IntegrationError>;
   }
->()("t3/integrations/Integrations") {}
+>()("cogenly-server/integrations/Integrations") {}
 
 interface JsonRpcResponse {
   readonly result?: unknown;

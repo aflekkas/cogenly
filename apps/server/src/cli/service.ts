@@ -89,7 +89,7 @@ export function formatServiceStatus(
   ) {
     return [
       "Cogenly service",
-      `  Status: installed · t3@${installedVersion} (newer than this t3@${cliVersion} CLI)`,
+      `  Status: installed · cogenly@${installedVersion} (newer than this cogenly@${cliVersion} CLI)`,
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
       ...problems,
@@ -98,7 +98,7 @@ export function formatServiceStatus(
   }
   return [
     "Cogenly service",
-    `  Status: ${status.current ? `installed · t3@${installedVersion}` : "needs an update or repair"}`,
+    `  Status: ${status.current ? `installed · cogenly@${installedVersion}` : "needs an update or repair"}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...problems,
@@ -176,20 +176,20 @@ const serviceInstallCommand = Command.make("install", serviceInstallFlags).pipe(
         });
         if (!result.changed) {
           yield* Console.log(
-            `Cogenly service is already installed with t3@${packageJson.version}.`,
+            `Cogenly service is already installed with cogenly@${packageJson.version}.`,
           );
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} Cogenly service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} Cogenly service with cogenly@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
   ),
 );
 
-// Kept one release for muscle memory and old docs. It did what `t3 service
-// install` does; the way to move to a newer release is `t3 update`.
+// Kept one release for muscle memory and old docs. It did what `cogenly service
+// install` does; the way to move to a newer release is `cogenly update`.
 const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
   Command.withDescription("Deprecated. Run `cogenly update` to move to a newer release."),
   Command.unlisted,
@@ -202,11 +202,11 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
         );
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
-          yield* Console.log(`Cogenly service is already using t3@${packageJson.version}.`);
+          yield* Console.log(`Cogenly service is already using cogenly@${packageJson.version}.`);
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} Cogenly service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} Cogenly service with cogenly@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
@@ -226,7 +226,7 @@ const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe
         const restarted = yield* service.restart;
         yield* Console.log(
           restarted
-            ? `Restarted the Cogenly service${status.installedVersion === undefined ? "" : ` on t3@${status.installedVersion}`}.`
+            ? `Restarted the Cogenly service${status.installedVersion === undefined ? "" : ` on cogenly@${status.installedVersion}`}.`
             : "Cogenly service is not installed.",
         );
       }),
@@ -331,7 +331,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     compareExactServiceVersions(status.installedVersion, packageJson.version) > 0
   ) {
     yield* Console.log(
-      `A newer t3@${status.installedVersion} background service is installed. Leaving it unchanged.`,
+      `A newer cogenly@${status.installedVersion} background service is installed. Leaving it unchanged.`,
     );
     // This CLI cannot verify the newer service. Keep the manual fallback available.
     return false;

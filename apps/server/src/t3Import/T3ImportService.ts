@@ -115,7 +115,7 @@ export class T3ImportService extends Context.Service<
     ) => Effect.Effect<{ readonly started: boolean }, T3ImportError>;
     readonly cancel: Effect.Effect<{ readonly cancelled: boolean }>;
   }
->()("t3/t3Import/T3ImportService") {}
+>()("cogenly-server/t3Import/T3ImportService") {}
 
 const SOURCE_POLL_INTERVAL = "3 seconds";
 

@@ -84,7 +84,7 @@ export class PreviewManager extends Context.Service<
     readonly events: Stream.Stream<PreviewEvent>;
     readonly subscribeEvents: Effect.Effect<PubSub.Subscription<PreviewEvent>, never, Scope.Scope>;
   }
->()("t3/preview/Manager/PreviewManager") {}
+>()("cogenly-server/preview/Manager/PreviewManager") {}
 
 interface PreviewSessionState {
   readonly threadId: string;

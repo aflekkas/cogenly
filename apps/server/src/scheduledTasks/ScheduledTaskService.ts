@@ -101,7 +101,7 @@ export function relayHookBaseUrl(input: {
 }
 
 export class ScheduledTaskWebhookOrigin extends Context.Reference<Effect.Effect<WebhookOrigin>>(
-  "t3/scheduledTasks/ScheduledTaskWebhookOrigin",
+  "cogenly-server/scheduledTasks/ScheduledTaskWebhookOrigin",
   {
     defaultValue: () => Effect.succeed({ relayHookBaseUrl: null }),
   },
@@ -112,7 +112,7 @@ export class ScheduledTaskWebhookOrigin extends Context.Reference<Effect.Effect<
  * configured zone; the default keeps tests and bare layers on the host zone.
  */
 export class ScheduledTaskTimeZone extends Context.Reference<string>(
-  "t3/scheduledTasks/ScheduledTaskTimeZone",
+  "cogenly-server/scheduledTasks/ScheduledTaskTimeZone",
   {
     defaultValue: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
   },
@@ -276,7 +276,7 @@ export class ScheduledTaskService extends Context.Service<
       request: WebhookTriggerRequest,
     ) => Effect.Effect<WebhookTriggerResult, ScheduledTaskError>;
   }
->()("t3/scheduledTasks/ScheduledTaskService") {}
+>()("cogenly-server/scheduledTasks/ScheduledTaskService") {}
 
 function taskError(message: string, input?: { taskId?: ScheduledTaskId; cause?: unknown }) {
   return new ScheduledTaskError({

@@ -35,7 +35,7 @@ export class IntegrationCredentials extends Context.Service<
       ref: string,
     ) => Effect.Effect<Option.Option<string>, IntegrationCredentialError>;
   }
->()("t3/integrations/IntegrationCredentials") {}
+>()("cogenly-server/integrations/IntegrationCredentials") {}
 
 /** Splits `item.field` at the last dot; item names may contain dots. */
 export const parseCredentialRef = (

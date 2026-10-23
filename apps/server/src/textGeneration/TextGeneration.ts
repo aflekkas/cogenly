@@ -30,7 +30,7 @@ export type {
 export class TextGeneration extends Context.Service<
   TextGeneration,
   ProviderTextGeneration & WorkScopeSummaryGeneration
->()("t3/textGeneration/TextGeneration") {}
+>()("cogenly-server/textGeneration/TextGeneration") {}
 
 type TextGenerationOp =
   | "generateCommitMessage"

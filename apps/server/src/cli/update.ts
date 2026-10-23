@@ -104,11 +104,57 @@ export function launcherOwnsVersionsDir(
 }
 
 /**
- * The launcher the install scripts leave behind: a symlink at `<bin>/t3` on
- * POSIX, a `t3.cmd` shim on Windows. `t3 update` repoints it so the next `t3`
- * invocation is the new version. Only a launcher that already points into
- * this home's `runtime/versions` tree is touched; a plain copy of the
- * executable, or a launcher for some other install, is left alone.
+ * Whether a launcher (a symlink on POSIX, a `.cmd` shim on Windows) points
+ * into this home's `runtime/versions` tree, and so is ours to rewrite or remove.
+ */
+const launcherIsOwned = Effect.fn("cli.update.launcher_is_owned")(function* (
+  launcher: string,
+  versionsDir: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  if ((yield* HostProcess.Platform) === "win32") {
+    const contents = yield* fs.readFileString(launcher).pipe(Effect.option);
+    const target = Option.isSome(contents) ? /^"([^"]+)"/m.exec(contents.value)?.[1] : undefined;
+    return target !== undefined && launcherOwnsVersionsDir(path, versionsDir, target);
+  }
+  const linkTarget = yield* fs.readLink(launcher).pipe(Effect.option);
+  return (
+    Option.isSome(linkTarget) &&
+    launcherOwnsVersionsDir(
+      path,
+      versionsDir,
+      path.resolve(path.dirname(launcher), linkTarget.value),
+    )
+  );
+});
+
+/** Points a launcher at `targetEntryPath`, replacing whatever is at `launcher` atomically on POSIX. */
+const writeLauncher = Effect.fn("cli.update.write_launcher")(function* (
+  launcher: string,
+  targetEntryPath: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const write =
+    (yield* HostProcess.Platform) === "win32"
+      ? fs.writeFileString(launcher, `@echo off\r\n"${targetEntryPath}" %*`)
+      : fs
+          .symlink(targetEntryPath, `${launcher}.${process.pid}.tmp`)
+          .pipe(Effect.andThen(fs.rename(`${launcher}.${process.pid}.tmp`, launcher)));
+  yield* write.pipe(
+    Effect.mapError(
+      () =>
+        new CliUpdateError({ reason: `Could not repoint the cogenly launcher at ${launcher}.` }),
+    ),
+  );
+});
+
+/**
+ * The launcher the install scripts leave behind: a symlink at `<bin>/cogenly`
+ * on POSIX, a `cogenly.cmd` shim on Windows. `cogenly update` repoints it so
+ * the next `cogenly` invocation is the new version. Only a launcher that
+ * already points into this home's `runtime/versions` tree is touched; a plain
+ * copy of the executable, or a launcher for some other install, is left alone.
  */
 export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function* (input: {
   /** Path the current process was started through, if known. */
@@ -117,52 +163,92 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   readonly versionsDir: string;
   readonly targetEntryPath: string;
 }) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const platform = yield* HostProcess.Platform;
   if (input.launchedAs === undefined) return Option.none<string>();
-  const ownsTarget = (candidate: string) =>
-    launcherOwnsVersionsDir(path, input.versionsDir, candidate);
-
-  if (platform === "win32") {
-    // The shim runs the executable by absolute path, so the executable sees
-    // itself as argv0; the shim is the `t3.cmd` next to it only when launched
-    // from an install script's bin directory. Find it by searching the
-    // directories that would resolve `t3` on this shell's PATH.
-    const shimPath = yield* findWindowsShim(input.launchedAs);
-    if (shimPath === undefined) return Option.none<string>();
-    const current = yield* fs.readFileString(shimPath).pipe(Effect.option);
-    const quoted = Option.isSome(current) ? /^"([^"]+)"/m.exec(current.value)?.[1] : undefined;
-    if (quoted === undefined || !ownsTarget(quoted)) return Option.none<string>();
-    yield* fs
-      .writeFileString(shimPath, `@echo off\r\n"${input.targetEntryPath}" %*`)
-      .pipe(
-        Effect.mapError(
-          () => new CliUpdateError({ reason: `Could not rewrite the t3 launcher at ${shimPath}.` }),
-        ),
-      );
-    return Option.some(shimPath);
+  // On Windows the shim runs the executable by absolute path, so the
+  // executable sees itself as argv0. Find the shim by searching the
+  // directories that would resolve `cogenly` on this shell's PATH.
+  const launcher =
+    (yield* HostProcess.Platform) === "win32"
+      ? yield* findWindowsShim(input.launchedAs)
+      : input.launchedAs;
+  if (launcher === undefined || !(yield* launcherIsOwned(launcher, input.versionsDir))) {
+    return Option.none<string>();
   }
-
-  const linkTarget = yield* fs.readLink(input.launchedAs).pipe(Effect.option);
-  if (Option.isNone(linkTarget)) return Option.none<string>();
-  const resolvedTarget = path.resolve(path.dirname(input.launchedAs), linkTarget.value);
-  if (!ownsTarget(resolvedTarget)) return Option.none<string>();
-  const tempLink = `${input.launchedAs}.${process.pid}.tmp`;
-  yield* fs.symlink(input.targetEntryPath, tempLink).pipe(
-    Effect.andThen(fs.rename(tempLink, input.launchedAs)),
-    Effect.mapError(
-      () =>
-        new CliUpdateError({ reason: `Could not repoint the t3 launcher at ${input.launchedAs}.` }),
-    ),
-  );
-  return Option.some(input.launchedAs);
+  yield* writeLauncher(launcher, input.targetEntryPath);
+  return Option.some(launcher);
 });
 
 /**
+ * Release installs used to name the launcher `t3` (`t3.cmd` on Windows).
+ * Finds such launchers of ours next to the one this process ran through, in
+ * `COGENLY_INSTALL_BIN_DIR`, and on PATH. A `t3` that does not point into this
+ * home's `runtime/versions` belongs to something else and is not returned.
+ */
+export const findLegacyLaunchers = Effect.fn("cli.update.find_legacy_launchers")(function* (input: {
+  readonly launchedAs: string | undefined;
+  readonly versionsDir: string;
+}) {
+  const path = yield* Path.Path;
+  const environment = yield* HostProcess.Environment;
+  const windows = (yield* HostProcess.Platform) === "win32";
+  const directories = new Set(
+    [
+      ...(input.launchedAs === undefined || windows ? [] : [path.dirname(input.launchedAs)]),
+      environment["COGENLY_INSTALL_BIN_DIR"] ?? "",
+      ...(environment["PATH"] ?? environment["Path"] ?? "").split(windows ? ";" : ":"),
+    ]
+      .filter((entry) => entry.trim().length > 0)
+      .map((entry) => path.resolve(entry)),
+  );
+  const found: Array<string> = [];
+  for (const directory of directories) {
+    const legacy = path.join(directory, windows ? "t3.cmd" : "t3");
+    if (yield* launcherIsOwned(legacy, input.versionsDir)) found.push(legacy);
+  }
+  return found;
+});
+
+/**
+ * Replaces each legacy `t3` launcher of ours with a `cogenly` one in the same
+ * directory and removes the `t3` one. One whose directory already holds a
+ * `cogenly` that is not ours stays, so the install keeps a working command.
+ * Returns the `cogenly` launchers that took over.
+ */
+export const retireLegacyLauncher = Effect.fn("cli.update.retire_legacy_launcher")(
+  function* (input: {
+    readonly launchedAs: string | undefined;
+    readonly versionsDir: string;
+    readonly targetEntryPath: string;
+  }) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const windows = (yield* HostProcess.Platform) === "win32";
+    const replaced: Array<string> = [];
+    for (const legacy of yield* findLegacyLaunchers(input)) {
+      const launcher = path.join(path.dirname(legacy), windows ? "cogenly.cmd" : "cogenly");
+      const occupied =
+        (yield* fs.exists(launcher).pipe(Effect.orElseSucceed(() => false))) ||
+        Option.isSome(yield* fs.readLink(launcher).pipe(Effect.option));
+      if (occupied && !(yield* launcherIsOwned(launcher, input.versionsDir))) continue;
+      yield* writeLauncher(launcher, input.targetEntryPath);
+      yield* fs
+        .remove(legacy, { force: true })
+        .pipe(
+          Effect.mapError(
+            () =>
+              new CliUpdateError({ reason: `Could not remove the old t3 launcher at ${legacy}.` }),
+          ),
+        );
+      replaced.push(launcher);
+    }
+    return replaced;
+  },
+);
+
+/**
  * The path the executable was started through. Node keeps the shell's
- * spelling in argv0: a launcher symlink or `./t3` resolves against the
- * working directory, while a bare `t3` was found on PATH and has to be
+ * spelling in argv0: a launcher symlink or `./cogenly` resolves against the
+ * working directory, while a bare `cogenly` was found on PATH and has to be
  * looked up there again, or the launcher symlink is never seen.
  */
 export const resolveLauncherPath = Effect.gen(function* () {
@@ -188,7 +274,7 @@ export const resolveLauncherPath = Effect.gen(function* () {
 
 /**
  * On Windows a `.cmd` shim is what PATH resolves, but the executable it runs
- * only ever sees its own path. Walk PATH for a `t3.cmd` whose target is the
+ * only ever sees its own path. Walk PATH for a `cogenly.cmd` whose target is the
  * running executable; that is the launcher the install script wrote.
  */
 export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(function* (
@@ -273,7 +359,7 @@ export const updateCommand = Command.make("update", {
 );
 
 /**
- * A `t3 serve` or `t3` someone started by hand, as opposed to the one the
+ * A `cogenly serve` or `t3` someone started by hand, as opposed to the one the
  * background service supervises. The server records its pid on startup; a
  * stale file from a crashed server is ignored by checking the pid is alive.
  *
@@ -511,17 +597,19 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   );
 
   const launchedAs = (yield* HostProcess.IsExecutable) ? yield* resolveLauncherPath : undefined;
-  const repointed = yield* repointLauncher({
+  const launcherInput = {
     launchedAs,
     versionsDir: path.dirname(runtime.versionDir),
     targetEntryPath: runtime.entryPath,
-  });
+  };
+  const repointed = yield* repointLauncher(launcherInput);
+  const retired = yield* retireLegacyLauncher(launcherInput);
 
   // The service switch runs in this process against the target version: the
   // downloaded runtime has already proven it runs (the `--version` check
   // above), and doing it here rather than through the target's own CLI means
   // a downgrade to a version without today's commands still works. The unit
-  // is rewritten either way so a later `t3 service restart` lands on the new
+  // is rewritten either way so a later `cogenly service restart` lands on the new
   // version; only the restart itself waits for the user's answer.
   let serviceUpdated = false;
   if (serviceInstalled && !serviceCurrent) {
@@ -552,7 +640,10 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   }
 
   progress.success(`Installed Cogenly ${targetVersion}`);
-  if (Option.isSome(repointed)) {
+  for (const launcher of retired) {
+    yield* Console.log(`  The t3 command is now cogenly (${launcher}).`);
+  }
+  if (Option.isSome(repointed) || retired.length > 0) {
     yield* Console.log("  Run cogenly to get started.\n");
   } else {
     yield* Console.log(`  Run ${runtime.entryPath}\n`);

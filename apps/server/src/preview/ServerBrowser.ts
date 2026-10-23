@@ -272,7 +272,7 @@ export class ServerBrowser extends Context.Service<
     /** Records which tabs the desktop app's panel shows; see `PreviewReportShownInput`. */
     readonly reportShown: (input: PreviewReportShownInput) => Effect.Effect<void>;
   }
->()("t3/preview/ServerBrowser") {}
+>()("cogenly-server/preview/ServerBrowser") {}
 
 interface ViewerState {
   readonly id: string;

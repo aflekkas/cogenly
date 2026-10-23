@@ -111,7 +111,7 @@ export class ServerConfig extends Context.Service<
      */
     readonly serverTimeZone: string;
   }
->()("t3/config/ServerConfig") {
+>()("cogenly-server/config/ServerConfig") {
   /** @deprecated Import and use `layerTest` from this module. */
   static readonly layerTest = (
     cwd: string,

@@ -106,7 +106,7 @@ export class ProjectFiles extends Context.Service<
       ProjectLabelError
     >;
   }
->()("t3/projectLabels/ProjectFiles") {}
+>()("cogenly-server/projectLabels/ProjectFiles") {}
 
 const MAX_RESOURCE_ENTRIES = 10_000;
 const MAX_INDEXED_TEXT_BYTES = 262_144;

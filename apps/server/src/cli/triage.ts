@@ -1,5 +1,5 @@
 /**
- * `t3 triage` - hand a misbehaving install to the user's own coding agent.
+ * `cogenly triage` - hand a misbehaving install to the user's own coding agent.
  *
  * The command is deliberately thin: it writes a `context.md` with machine facts
  * (versions, paths, server liveness), then launches claude or codex
@@ -175,7 +175,7 @@ export const triageCommand = Command.make("triage", {
 
       // Triage is a user-facing feature: always the userdata state, never dev.
       // --base-dir wins; COGENLY_HOME is its documented env equivalent (same
-      // precedence as `t3 pair`).
+      // precedence as `cogenly pair`).
       const explicitBaseDir = Option.getOrUndefined(flags.baseDir);
       const envHome = yield* Config.String("COGENLY_HOME").pipe(Config.option);
       const baseDir = yield* resolveBaseDir(explicitBaseDir ?? Option.getOrUndefined(envHome));
