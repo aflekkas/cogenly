@@ -698,6 +698,72 @@ const vaultLayer = () => {
   );
 };
 
+describe("Default catalog", () => {
+  const owner = { approveCredentials: true, origin: { origin: undefined } };
+
+  it.effect("connects a remote entry once per account and approves its vault key", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const request = {
+        catalogId: "linear" as const,
+        inputs: { apiKey: "{{credential:linear-key.value}}" },
+      };
+      const first = yield* service.connectFromCatalog(request, owner);
+      expect(first.signIn).toBeUndefined();
+      expect(first.integration).toMatchObject({
+        name: "linear",
+        displayName: "Linear",
+        url: "https://mcp.linear.app/mcp",
+        headers: { Authorization: "Bearer {{credential:linear-key.value}}" },
+        approvedCredentialItems: ["linear-key"],
+      });
+      const second = yield* service.connectFromCatalog(
+        { ...request, accountLabel: "Personal" },
+        owner,
+      );
+      expect(second.integration).toMatchObject({
+        name: "linear-personal",
+        accountLabel: "Personal",
+      });
+      expect((yield* service.list()).integrations.map((item) => item.integration.name)).toEqual([
+        "linear",
+        "linear-personal",
+      ]);
+    }).pipe(Effect.provide(layerWith())),
+  );
+
+  it.effect("uses the chosen region's endpoint", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const { integration } = yield* service.connectFromCatalog(
+        {
+          catalogId: "intercom",
+          inputs: { region: "eu", apiKey: "{{credential:intercom.value}}" },
+        },
+        owner,
+      );
+      expect(integration.url).toBe("https://mcp.eu.intercom.com/mcp");
+    }).pipe(Effect.provide(layerWith())),
+  );
+
+  it.effect("creates nothing until a missing input is supplied, and says which", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const result = yield* service
+        .connectFromCatalog({ catalogId: "intercom" }, owner)
+        .pipe(Effect.result);
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { reason: "invalid_request", cause: expect.stringContaining("region") },
+      });
+      expect((yield* service.list()).integrations).toHaveLength(0);
+    }).pipe(Effect.provide(layerWith())),
+  );
+});
+
 describe("Integration credential destinations", () => {
   const tokenHeaders = { authorization: "Bearer {{credential:github.value}}" };
   const reasonOf = (exit: { readonly _tag: string; readonly failure?: unknown }) =>

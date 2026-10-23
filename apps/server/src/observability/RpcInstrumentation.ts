@@ -127,6 +127,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.integrationsDelete]: "integrations",
   [WS_METHODS.integrationsTestConnection]: "integrations",
   [WS_METHODS.integrationsBeginSignIn]: "integrations",
+  [WS_METHODS.integrationsConnectFromCatalog]: "integrations",
   [WS_METHODS.integrationsSubscribe]: "integrations",
   [WS_METHODS.machineSecurityStatus]: "machines",
   [WS_METHODS.machinesList]: "machines",

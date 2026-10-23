@@ -4,6 +4,7 @@ import {
   IntegrationId,
   type IntegrationCallResult,
   type IntegrationAddInput,
+  type IntegrationCatalogConnectInput,
   type IntegrationMutationResult,
   type IntegrationListResult,
   type IntegrationName,
@@ -32,6 +33,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { redactValue } from "../vault/VaultRedactor.ts";
+import { resolveCatalogConnect } from "./IntegrationCatalog.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import * as OAuth from "./IntegrationOAuth.ts";
 import * as Tokens from "./IntegrationTokens.ts";
@@ -353,6 +355,17 @@ export class Integrations extends Context.Service<
     readonly completeSignIn: (
       callback: SignInCallback,
     ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
+    /**
+     * Connects a default catalog entry (a remote service or the Google preset)
+     * under an unused name, and starts its sign-in when it has one. A sign-in
+     * that cannot start leaves the integration saved without a link; it then
+     * reads "Needs sign-in" with the reason. A request missing an input fails
+     * `invalid_request` with the next step as its cause.
+     */
+    readonly connectFromCatalog: (
+      input: IntegrationCatalogConnectInput,
+      options: IntegrationWriteOptions & { readonly origin: SignInOrigin },
+    ) => Effect.Effect<IntegrationMutationResult, IntegrationError>;
   }
 >()("cogenly-server/integrations/Integrations") {}
 
@@ -1108,7 +1121,7 @@ const make = (options: IntegrationsOptions = {}) =>
       );
     }
 
-    return Integrations.of({
+    const service: Integrations["Service"] = Integrations.of({
       list: () => rows().pipe(Effect.flatMap(summaries)),
       listForProject: (labelId) =>
         rows().pipe(
@@ -1619,7 +1632,27 @@ const make = (options: IntegrationsOptions = {}) =>
           ),
           Effect.mapError(failure("complete sign in", "storage")),
         ),
+      connectFromCatalog: (request, options) =>
+        Effect.gen(function* () {
+          const resolution = resolveCatalogConnect(request, {
+            existingNames: new Set((yield* rows()).map((integration) => integration.name)),
+            requestOrigin: options.origin.origin,
+          });
+          if (resolution._tag === "needs")
+            return yield* new IntegrationError({
+              operation: "connect from catalog",
+              reason: "invalid_request",
+              cause: resolution.message,
+            });
+          const { integration } = yield* service.create(resolution.input, options);
+          if (!resolution.signsIn) return { integration };
+          const signIn = yield* service
+            .beginSignIn(integration.id, options.origin)
+            .pipe(Effect.option);
+          return Option.isSome(signIn) ? { integration, signIn: signIn.value } : { integration };
+        }),
     });
+    return service;
   });
 
 type Requirements =

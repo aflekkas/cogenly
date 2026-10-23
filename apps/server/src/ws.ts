@@ -1694,6 +1694,11 @@ const makeWsRpcHandlers = (
       [WS_METHODS.integrationsTestConnection]: (input) => integrations.testConnection(input.id),
       [WS_METHODS.integrationsBeginSignIn]: (input) =>
         integrations.beginSignIn(input.id, { origin: requestOrigin }),
+      [WS_METHODS.integrationsConnectFromCatalog]: (input) =>
+        integrations.connectFromCatalog(input, {
+          approveCredentials: true,
+          origin: { origin: requestOrigin },
+        }),
       [WS_METHODS.integrationsSubscribe]: () => integrations.subscribe(),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
       [WS_METHODS.machinesList]: () => machines.list,

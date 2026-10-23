@@ -609,6 +609,7 @@ export const WS_METHODS = {
   integrationsDelete: "integrations.delete",
   integrationsTestConnection: "integrations.testConnection",
   integrationsBeginSignIn: "integrations.beginSignIn",
+  integrationsConnectFromCatalog: "integrations.connectFromCatalog",
   integrationsSubscribe: "integrations.subscribe",
 
   // Machines: this server, its hub, and its paired spokes
@@ -2146,6 +2147,12 @@ const WsIntegrationsBeginSignInRpc = Rpc.make(WS_METHODS.integrationsBeginSignIn
   success: Integrations.IntegrationSignIn,
   error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
 });
+/** Connects a default catalog entry; returns the sign-in link when it needs one. */
+const WsIntegrationsConnectFromCatalogRpc = Rpc.make(WS_METHODS.integrationsConnectFromCatalog, {
+  payload: Integrations.IntegrationCatalogConnectInput,
+  success: Integrations.IntegrationMutationResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
 /** The list, then again after every change (including a finished sign-in). */
 const WsIntegrationsSubscribeRpc = Rpc.make(WS_METHODS.integrationsSubscribe, {
   payload: Schema.Struct({}),
@@ -2587,6 +2594,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsDeleteRpc,
   WsIntegrationsTestConnectionRpc,
   WsIntegrationsBeginSignInRpc,
+  WsIntegrationsConnectFromCatalogRpc,
   WsIntegrationsSubscribeRpc,
   WsMachineSecurityStatusRpc,
   WsMachinesListRpc,

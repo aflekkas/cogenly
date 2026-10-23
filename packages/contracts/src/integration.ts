@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IntegrationCatalogAuthKind, IntegrationCatalogId } from "./integrationCatalog.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 
 /**
@@ -118,10 +119,46 @@ export const IntegrationAddInput = Schema.Union([IntegrationCreateInput, GoogleW
 export type IntegrationAddInput = typeof IntegrationAddInput.Type;
 
 /**
+ * What a user fills in to connect a catalog entry. Secrets are
+ * `{{credential:<item>.<field>}}` vault references, never values.
+ */
+export const IntegrationCatalogInputs = Schema.Struct({
+  /** A region id, for services hosted per region (Intercom: us or eu). */
+  region: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(40))),
+  /** The auth mode; inferred from the other inputs when omitted. */
+  auth: Schema.optional(IntegrationCatalogAuthKind),
+  /** Vault reference to an API key or token, sent as a bearer token. */
+  apiKey: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
+  /** For a service without automatic client registration (e.g. a Slack app). */
+  clientId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+  /** Vault reference to that app's client secret. */
+  clientSecret: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
+  /** Google only: the origin Google's redirect URI was registered on. */
+  callbackOrigin: GoogleWorkspaceAddInput.fields.callbackOrigin,
+});
+export type IntegrationCatalogInputs = typeof IntegrationCatalogInputs.Type;
+
+/** Connect one entry of the default catalog; the server fills in the rest. */
+export const IntegrationCatalogConnectInput = Schema.Struct({
+  catalogId: IntegrationCatalogId,
+  /** Which account this is, e.g. "work"; required for Google. */
+  accountLabel: Schema.optional(GoogleWorkspaceAddInput.fields.accountLabel),
+  inputs: Schema.optional(IntegrationCatalogInputs),
+  scope: Schema.optional(IntegrationScope),
+});
+export type IntegrationCatalogConnectInput = typeof IntegrationCatalogConnectInput.Type;
+
+/**
  * `integration_add` arguments as one object, since MCP tools need an object
- * root; the handler decodes them as `IntegrationAddInput`.
+ * root; the handler decodes them as `IntegrationCatalogConnectInput` when
+ * `catalogId` is set, otherwise as `IntegrationAddInput`.
  */
 export const IntegrationAddToolInput = Schema.Struct({
+  catalogId: Schema.optional(IntegrationCatalogId),
+  region: IntegrationCatalogInputs.fields.region,
+  apiKey: IntegrationCatalogInputs.fields.apiKey,
+  clientId: IntegrationCatalogInputs.fields.clientId,
+  clientSecret: IntegrationCatalogInputs.fields.clientSecret,
   preset: Schema.optional(GoogleWorkspaceAddInput.fields.preset),
   name: Schema.optional(IntegrationName),
   displayName: Schema.optional(integrationFields.displayName),

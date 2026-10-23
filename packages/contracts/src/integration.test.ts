@@ -13,6 +13,7 @@ describe("integration RPC permissions", () => {
       WS_METHODS.integrationsDelete,
       WS_METHODS.integrationsTestConnection,
       WS_METHODS.integrationsBeginSignIn,
+      WS_METHODS.integrationsConnectFromCatalog,
     ]) {
       expect(clientRpcRequiredScopes(method, {})).toEqual(["orchestration:operate"]);
     }

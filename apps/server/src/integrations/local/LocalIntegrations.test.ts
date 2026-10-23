@@ -301,6 +301,25 @@ describe("managed Google integrations", () => {
       }).pipe(Effect.scoped, Effect.provide(testLayer([], missing))),
   );
 
+  it.live("connects the Google catalog entry and hands back its sign-in link", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const connected = yield* gateway.connectFromCatalog(
+        { catalogId: "google-workspace", accountLabel: "personal" },
+        { approveCredentials: true, origin: { origin: "https://cogenly.example.com" } },
+      );
+      expect(connected.integration).toMatchObject({
+        name: "google-personal",
+        transport: "local",
+        local: { callbackOrigin: "https://cogenly.example.com" },
+      });
+      expect(connected.signIn?.authorizationUrl).toContain(
+        "https://cogenly.example.com/oauth/integrations/google/start?ticket=",
+      );
+    }).pipe(Effect.scoped, Effect.provide(testLayer([]))),
+  );
+
   it.live("does not create an account until the shared OAuth client is stored", () =>
     Effect.gen(function* () {
       yield* runMigrations();

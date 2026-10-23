@@ -89,6 +89,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.integrationsSubscribe]: AuthOrchestrationReadScope,
   // Signing in grants agents a new upstream account.
   [WS_METHODS.integrationsBeginSignIn]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsConnectFromCatalog]: AuthOrchestrationOperateScope,
   [WS_METHODS.machineSecurityStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesList]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesSubscribe]: AuthOrchestrationReadScope,
