@@ -4,6 +4,7 @@ import {
   PreviewAutomationControlInterruptedError,
   PreviewAutomationControlReason,
   PreviewAutomationExecutionError,
+  PreviewAutomationVaultSafetyError,
   SERVER_BROWSER_AUTOMATION_CLIENT_ID,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationMalformedResponseError,
@@ -48,6 +49,8 @@ export interface PreviewAutomationInvokeInput {
   readonly scope: McpInvocationContext.McpThreadInvocationScope;
   readonly operation: PreviewAutomationOperation;
   readonly input: unknown;
+  /** Server-only: seal evaluation before delivering a vault value to the browser. */
+  readonly containsVaultSecret?: boolean;
   readonly tabId?: PreviewTabId;
   readonly timeoutMs?: number;
   /** Background metadata reads must not change the agent's current tab. */
@@ -132,6 +135,8 @@ interface PreviewAutomationRequestErrorContext {
 }
 
 interface BrokerState {
+  /** Survives provider sessions, host reconnections, and navigation (including back/forward cache). */
+  readonly vaultProtectedTabs: ReadonlySet<string>;
   readonly clients: ReadonlyMap<string, ClientConnection>;
   readonly assignments: ReadonlyMap<string, HostAssignment>;
   readonly pending: ReadonlyMap<string, PendingRequest>;
@@ -351,6 +356,7 @@ const classifyResponseError = (
 export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
   const crypto = yield* Crypto.Crypto;
   const state = yield* SynchronizedRef.make<BrokerState>({
+    vaultProtectedTabs: new Set(),
     clients: new Map(),
     assignments: new Map(),
     pending: new Map(),
@@ -631,6 +637,41 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         ) {
           return Effect.succeed([false, current] as const);
         }
+        if (
+          input.containsVaultSecret &&
+          (input.operation !== "type" || input.tabId === undefined)
+        ) {
+          return Effect.fail(
+            new PreviewAutomationVaultSafetyError({
+              ...requestContext,
+              reason: "tab_required",
+            }),
+          );
+        }
+        const threadPrefix = `${input.scope.environmentId}\u0000${input.scope.thread.threadId}\u0000`;
+        const protectedKey = `${threadPrefix}${requestContext.tabId}`;
+        if (
+          input.operation === "evaluate" &&
+          (requestContext.tabId === undefined
+            ? [...current.vaultProtectedTabs].some((key) => key.startsWith(threadPrefix))
+            : current.vaultProtectedTabs.has(protectedKey))
+        ) {
+          return Effect.fail(
+            new PreviewAutomationVaultSafetyError({
+              ...requestContext,
+              reason: "evaluation_disabled",
+            }),
+          );
+        }
+        // Seal before dispatch, including fills that time out after typing.
+        // Never clear on navigation: history can restore filled inputs, and
+        // same-origin pages can keep values in script state or storage.
+        const next = input.containsVaultSecret
+          ? {
+              ...current,
+              vaultProtectedTabs: new Set(current.vaultProtectedTabs).add(protectedKey),
+            }
+          : current;
         return Queue.offer(connection.queue, {
           type: "request",
           connectionId: connection.connectionId,
@@ -644,7 +685,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
             input: input.input,
             timeoutMs,
           },
-        }).pipe(Effect.map((offered) => [offered, current] as const));
+        }).pipe(Effect.map((offered) => [offered, next] as const));
       });
       if (!offered) {
         const completion = yield* Deferred.poll(deferred);

@@ -1039,6 +1039,20 @@ export class PreviewAutomationControlInterruptedError extends Schema.TaggedError
   }
 }
 
+export class PreviewAutomationVaultSafetyError extends Schema.TaggedError<PreviewAutomationVaultSafetyError>()(
+  "PreviewAutomationVaultSafetyError",
+  {
+    ...PreviewAutomationRequestErrorFields,
+    reason: Schema.Literals(["tab_required", "evaluation_disabled"]),
+  },
+) {
+  override get message(): string {
+    return this.reason === "tab_required"
+      ? "A vault fill requires an explicit target tab."
+      : "Evaluation is disabled on this tab after a vault fill. Use snapshots and focused browser actions, or open a fresh tab.";
+  }
+}
+
 export class PreviewAutomationExecutionError extends Schema.TaggedError<PreviewAutomationExecutionError>()(
   "PreviewAutomationExecutionError",
   {
@@ -1206,6 +1220,7 @@ export const PreviewAutomationError = Schema.Union([
   PreviewAutomationTimeoutError,
   PreviewAutomationControlInterruptedError,
   PreviewAutomationExecutionError,
+  PreviewAutomationVaultSafetyError,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationTargetNotEditableError,
   PreviewAutomationResultTooLargeError,
