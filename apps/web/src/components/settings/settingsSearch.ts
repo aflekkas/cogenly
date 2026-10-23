@@ -524,6 +524,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
+    id: "integration-services",
+    title: "Services",
+    to: "/settings/integrations",
+    searchTerms: [
+      "integrations mcp servers connect remote gmail linear github tools vault credentials headers add",
+    ],
+  },
+  {
     id: "agent-browser-access",
     title: "Agent browser access",
     to: "/settings/integrations",
