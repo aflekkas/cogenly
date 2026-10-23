@@ -43,7 +43,7 @@ const specFor = (transport: "http" | "stdio") =>
       directory,
       transport,
       port,
-      portEnvironment: ["FIXTURE_PORT"],
+      portEnvironment: { FIXTURE_PORT: "{port}" },
       env: {
         PATH: process.env.PATH ?? "",
         FIXTURE_TRANSPORT: transport,

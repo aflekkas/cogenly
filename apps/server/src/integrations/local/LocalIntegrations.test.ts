@@ -12,6 +12,8 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
   FetchHttpClient,
+  HttpClient,
+  HttpClientRequest,
   HttpRouter,
   HttpServer,
   HttpServerRequest,
@@ -78,10 +80,10 @@ const testLayer = (
             ...spec,
             runtime: runtimeMissing ? "uvx" : process.execPath,
             args: [fixture],
-            portEnvironment: [...(spec.portEnvironment ?? []), "FIXTURE_PORT"],
+            portEnvironment: { ...spec.portEnvironment, FIXTURE_PORT: "{port}" },
             env: {
               ...spec.env,
-              FIXTURE_TRANSPORT: "http",
+              FIXTURE_TRANSPORT: spec.transport,
               FIXTURE_PORT: String(spec.port),
               FIXTURE_SECRET: "fake-client-secret",
               ...(runtimeMissing ? { PATH: spec.directory } : {}),
@@ -149,9 +151,13 @@ describe("managed Google integrations", () => {
           specs[1]?.env.WORKSPACE_MCP_CREDENTIALS_DIR,
         );
         expect(specs[0]?.args).toEqual([
+          "--from",
           `workspace-mcp@${GOOGLE_WORKSPACE_VERSION}`,
+          "python",
+          "-c",
+          expect.any(String),
           "--transport",
-          "streamable-http",
+          "stdio",
           "--single-user",
           "--tool-tier",
           "complete",
@@ -205,6 +211,11 @@ describe("managed Google integrations", () => {
           [local.authorize(ticket), local.authorize(ticket)],
           { concurrency: "unbounded" },
         );
+        const http = yield* HttpClient.HttpClient;
+        const networkMcp = yield* http.execute(
+          HttpClientRequest.post(`http://127.0.0.1:${specs[0]!.port}/mcp`),
+        );
+        expect(networkMcp.status).toBe(404);
         expect(concurrentAuth.url).toBe(auth.url);
         expect(auth.connected).toBe(false);
         expect(new URL(auth.url!).hostname).toBe("accounts.google.com");

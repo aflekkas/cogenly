@@ -6,6 +6,7 @@ import {
 import { type LocalMcpSpec } from "./LocalMcpRunner.ts";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
+import { googleStdioLauncher } from "./GoogleWorkspaceLauncher.ts";
 import { managedPackageCommand } from "./ManagedPackage.ts";
 
 // Verified against the PyPI 2.1.2 sdist: main.py, auth/oauth_config.py and auth/credential_store.py.
@@ -80,9 +81,13 @@ export const googleWorkspaceSpec = (input: {
   id: input.id,
   runtime: command.runtime,
   args: [
+    "--from",
     ...command.args,
+    "python",
+    "-c",
+    googleStdioLauncher,
     "--transport",
-    "streamable-http",
+    "stdio",
     "--single-user",
     "--tool-tier",
     "complete",
@@ -95,15 +100,20 @@ export const googleWorkspaceSpec = (input: {
   ],
   version: GOOGLE_WORKSPACE_VERSION,
   directory: input.directory,
-  transport: "http",
+  transport: "stdio",
   port: input.port,
-  portEnvironment: ["WORKSPACE_MCP_PORT"],
+  portEnvironment: {
+    WORKSPACE_MCP_PORT: "{port}",
+    WORKSPACE_MCP_ALLOWED_HOSTS: "127.0.0.1:{port}",
+  },
   env: {
     ...input.environment,
     GOOGLE_OAUTH_CLIENT_ID: input.clientId,
     GOOGLE_OAUTH_CLIENT_SECRET: input.clientSecret,
     GOOGLE_OAUTH_REDIRECT_URI: `${input.callbackOrigin}${GOOGLE_CALLBACK_PATH}`,
     WORKSPACE_MCP_HOST: "127.0.0.1",
+    WORKSPACE_MCP_BASE_URI: "http://127.0.0.1",
+    WORKSPACE_MCP_ALLOWED_HOSTS: `127.0.0.1:${input.port}`,
     WORKSPACE_MCP_PORT: String(input.port),
     WORKSPACE_MCP_PORT_FALLBACK_COUNT: "0",
     WORKSPACE_MCP_CREDENTIALS_DIR: input.credentialsDirectory,

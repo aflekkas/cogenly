@@ -86,9 +86,10 @@ Constraints that are not obvious from the code:
 
 A `local` integration is a fixed preset (today only Google Workspace,
 [local/](../../apps/server/src/integrations/local/)), never a command from
-Settings or MCP: Cogenly pins the package, runs one process per account on a
-loopback port only the runner allocates, and passes the OAuth client through
-the environment, never argv. Loopback is reachable only this way; remote URLs,
+Settings or MCP: Cogenly pins the package, runs one process per account over stdio, and passes the OAuth client through
+the environment, never argv. Only its state-bearing OAuth callback listener uses a runner-allocated loopback
+port. MCP has no HTTP listener, and the pinned launcher removes the package's
+attachment routes and missing-state callback fallback. Remote URLs,
 including OAuth discovery and token endpoints, go through
 [RemoteEndpoint.ts](../../apps/server/src/integrations/RemoteEndpoint.ts),
 which refuses non-public addresses and pins the connection to the checked DNS

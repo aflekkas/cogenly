@@ -71,24 +71,30 @@ const handle = (body, reply) => {
   }
 };
 
+const callback = (request, response) => {
+  if (request.url.startsWith("/oauth2callback?")) {
+    if (process.env.WORKSPACE_MCP_CREDENTIALS_DIR) {
+      const state = new URL(request.url, "http://localhost").searchParams.get("state");
+      if (!authStates.delete(state)) {
+        response.writeHead(400).end();
+        return true;
+      }
+      NodeFS.writeFileSync(
+        `${process.env.WORKSPACE_MCP_CREDENTIALS_DIR}/fixture@example.com.json`,
+        JSON.stringify({ refresh_token: "fixture-only" }),
+        { mode: 0o600 },
+      );
+    }
+    response.end("connected");
+    return true;
+  }
+
+  return false;
+};
+
 if (process.env.FIXTURE_TRANSPORT === "http") {
   const server = NodeHttp.createServer(async (request, response) => {
-    if (request.url.startsWith("/oauth2callback?")) {
-      if (process.env.WORKSPACE_MCP_CREDENTIALS_DIR) {
-        const state = new URL(request.url, "http://localhost").searchParams.get("state");
-        if (!authStates.delete(state)) {
-          response.writeHead(400).end();
-          return;
-        }
-        NodeFS.writeFileSync(
-          `${process.env.WORKSPACE_MCP_CREDENTIALS_DIR}/fixture@example.com.json`,
-          JSON.stringify({ refresh_token: "fixture-only" }),
-          { mode: 0o600 },
-        );
-      }
-      response.end("connected");
-      return;
-    }
+    if (callback(request, response)) return;
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString());
@@ -107,6 +113,11 @@ if (process.env.FIXTURE_TRANSPORT === "http") {
   });
   server.listen(Number(process.env.FIXTURE_PORT), "127.0.0.1");
 } else {
+  if (process.env.WORKSPACE_MCP_CREDENTIALS_DIR) {
+    NodeHttp.createServer((request, response) => {
+      if (!callback(request, response)) response.writeHead(404).end();
+    }).listen(Number(process.env.FIXTURE_PORT), "127.0.0.1");
+  }
   NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {
     const body = JSON.parse(line);
     handle(body, (result) =>

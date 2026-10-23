@@ -1,5 +1,5 @@
 import { expect, it } from "vite-plus/test";
-import { googleClientFromJson } from "./GoogleWorkspace.ts";
+import { googleClientFromJson, googleWorkspaceSpec } from "./GoogleWorkspace.ts";
 import { managedPackageCommand } from "./ManagedPackage.ts";
 
 it("reads a Google Web client export or a client pair without exposing values in arguments", () => {
@@ -29,4 +29,22 @@ it("resolves exact Python and Node releases through their package runners", () =
   expect(
     managedPackageCommand({ ecosystem: "node", name: "@example/mcp", version: "1.2.3" }),
   ).toEqual({ runtime: "npx", args: ["-y", "@example/mcp@1.2.3"] });
+});
+
+it("keeps Google MCP on stdio with a callback-only loopback host", () => {
+  const spec = googleWorkspaceSpec({
+    id: "account",
+    directory: "/account",
+    credentialsDirectory: "/account/credentials",
+    port: 12345,
+    callbackOrigin: "https://cogenly.example",
+    clientId: "id",
+    clientSecret: "secret",
+    environment: {},
+  });
+  expect(spec.transport).toBe("stdio");
+  expect(spec.args).toContain("stdio");
+  expect(spec.args).not.toContain("streamable-http");
+  expect(spec.env.WORKSPACE_MCP_ALLOWED_HOSTS).toBe("127.0.0.1:12345");
+  expect(spec.env.WORKSPACE_MCP_HTTP_PORT).toBeUndefined();
 });

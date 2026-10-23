@@ -54,7 +54,7 @@ export interface LocalMcpSpec {
   readonly transport: "http" | "stdio";
   readonly port: number;
   /** Environment fields rebuilt whenever a bind failure retires the port. */
-  readonly portEnvironment?: ReadonlyArray<string>;
+  readonly portEnvironment?: Readonly<Record<string, string>>;
   readonly path?: string;
 }
 
@@ -501,7 +501,10 @@ const make = (
               env: {
                 ...spec.env,
                 ...Object.fromEntries(
-                  (spec.portEnvironment ?? []).map((key) => [key, String(port)]),
+                  Object.entries(spec.portEnvironment ?? {}).map(([key, template]) => [
+                    key,
+                    template.replaceAll("{port}", String(port)),
+                  ]),
                 ),
               },
             };
