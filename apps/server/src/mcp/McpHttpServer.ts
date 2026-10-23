@@ -87,6 +87,8 @@ import * as ProjectHomeHandlers from "./toolkits/projectHome/handlers.ts";
 import { ProjectFilesToolkit } from "./toolkits/projectFiles/tools.ts";
 import * as ImageSearchService from "../images/ImageSearchService.ts";
 import { IntegrationsToolkit } from "./toolkits/integrations/tools.ts";
+import { MachinesToolkit } from "./toolkits/machines/tools.ts";
+import * as MachinesHandlers from "./toolkits/machines/handlers.ts";
 import * as IntegrationsHandlers from "./toolkits/integrations/handlers.ts";
 
 /** Where an MCP client discovers how to sign in (RFC 9728), at this request's own origin. */
@@ -1005,6 +1007,7 @@ export const layer = Layer.mergeAll(
   layerProjectLabelsRegistration,
   // Integrations bubbles to the server root like ProjectFiles.
   toolkitRegistration(IntegrationsToolkit, IntegrationsHandlers.layer),
+  toolkitRegistration(MachinesToolkit, MachinesHandlers.layer),
   // ProjectFiles bubbles to the server root like ThreadManagement.
   toolkitRegistration(ProjectFilesToolkit, ProjectFilesHandlers.layer),
   // ProjectHome bubbles to the server root like ProjectFiles.

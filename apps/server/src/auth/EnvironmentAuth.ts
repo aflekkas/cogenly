@@ -4,6 +4,7 @@ import {
   AuthAdministrativeScopes,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  AuthPeerScopes,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   AuthStandardClientScopes,
@@ -98,6 +99,22 @@ export const mcpClientScopes = (
           AuthSourceControlWriteScope,
         ]
       : [AuthOrchestrationReadScope, AuthOrchestrationOperateScope];
+
+/**
+ * Sessions another Cogenly server holds after pairing as a machine. Only the
+ * `/peer` endpoints accept them, and only DPoP-bound: every other HTTP,
+ * WebSocket and MCP path rejects the subject, so a stolen peer credential can
+ * reach nothing but the peer protocol. See docs/internals/machines.md.
+ */
+const PEER_SUBJECT = "peer";
+// Proof-bound, so the token alone is useless; unpairing revokes it.
+const PEER_SESSION_TTL = Duration.days(365);
+const PEER_GRANT_TTL = Duration.minutes(10);
+
+export interface PeerSession {
+  readonly sessionId: AuthSessionId;
+  readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
+}
 
 export interface McpClientSession {
   readonly sessionId: AuthSessionId;
@@ -584,6 +601,31 @@ export class EnvironmentAuth extends Context.Service<
     readonly authenticateBrowserSession: (
       request: HttpServerRequest.HttpServerRequest,
     ) => Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError>;
+    /**
+     * A one-time grant another server redeems to pair as a machine. Bound to
+     * that server's proof key when it is known up front.
+     */
+    readonly issuePeerGrant: (input: {
+      readonly label: string;
+      readonly proofKeyThumbprint?: string;
+    }) => Effect.Effect<IssuedPairingLink, ServerAuthInternalError>;
+    /** Spends a peer grant for a proof-bound `peer` session. Other grants fail. */
+    readonly redeemPeerGrant: (input: {
+      readonly credential: string;
+      readonly proofKeyThumbprint: string;
+      readonly client: AuthClientMetadata;
+    }) => Effect.Effect<
+      { readonly session: PeerSession; readonly token: string; readonly expiresAt: DateTime.Utc },
+      ServerAuthInvalidCredentialError | ServerAuthInternalError
+    >;
+    /** Only DPoP `peer` sessions on a `/peer` HTTP request; never cookies or bearer tokens. */
+    readonly authenticatePeerRequest: (
+      request: HttpServerRequest.HttpServerRequest,
+    ) => Effect.Effect<PeerSession, ServerAuthCredentialError | ServerAuthInternalError>;
+    /** Only a WebSocket ticket minted for a `peer` session. */
+    readonly authenticatePeerWebSocket: (
+      request: HttpServerRequest.HttpServerRequest,
+    ) => Effect.Effect<PeerSession, ServerAuthCredentialError | ServerAuthInternalError>;
   }
 >()("cogenly-server/auth/EnvironmentAuth") {}
 
@@ -622,14 +664,33 @@ export function toBootstrapExchangeError(
   });
 }
 
-const rejectMcpClientAudience = <S extends { readonly subject: string }>(session: S) =>
+// Sessions whose subject is confined to one endpoint never authenticate any
+// other path: MCP clients to /mcp, paired machines to /peer.
+const rejectConfinedAudience = <S extends { readonly subject: string }>(session: S) =>
   session.subject === MCP_CLIENT_SUBJECT
     ? Effect.fail(
         new ServerAuthInvalidCredentialError({
           diagnostic: "MCP client sessions are only accepted by the MCP endpoint.",
         }),
       ).pipe(Effect.tap(() => Effect.logWarning("Rejected an MCP client session outside /mcp.")))
-    : Effect.succeed(session);
+    : session.subject === PEER_SUBJECT
+      ? Effect.fail(
+          new ServerAuthInvalidCredentialError({
+            diagnostic: "Peer sessions are only accepted by the peer endpoint.",
+          }),
+        ).pipe(Effect.tap(() => Effect.logWarning("Rejected a peer session outside /peer.")))
+      : Effect.succeed(session);
+
+// Peer grants are redeemed only through `redeemPeerGrant`; every client
+// pairing path refuses them, already spent.
+const refusePeerGrant = <G extends { readonly subject: string }>(grant: G) =>
+  grant.subject === PEER_SUBJECT
+    ? Effect.fail(
+        new ServerAuthInvalidCredentialError({
+          diagnostic: "Machine pairing grants are redeemed only by another Cogenly server.",
+        }),
+      )
+    : Effect.succeed(grant);
 
 const mapSessionVerificationErrors = <A, R>(
   effect: Effect.Effect<A, SessionStore.SessionCredentialError, R>,
@@ -757,7 +818,7 @@ export const make = Effect.gen(function* () {
           : Effect.void,
       ),
       mapSessionVerificationErrors,
-      Effect.flatMap(rejectMcpClientAudience),
+      Effect.flatMap(rejectConfinedAudience),
       Effect.map((session) => ({
         sessionId: session.sessionId,
         subject: session.subject,
@@ -902,7 +963,7 @@ export const make = Effect.gen(function* () {
           );
     const grant = yield* bootstrapCredentials
       .consume(credential)
-      .pipe(Effect.mapError(toBootstrapExchangeError));
+      .pipe(Effect.mapError(toBootstrapExchangeError), Effect.flatMap(refusePeerGrant));
     const session = yield* sessions
       .issue({
         method: "browser-session-cookie",
@@ -945,15 +1006,14 @@ export const make = Effect.gen(function* () {
     ServerAuthInvalidCredentialError | ServerAuthInternalError | ServerAuthScopeNotGrantedError
   > => {
     if (!devAuth?.matches(credential)) {
-      return bootstrapCredentials
-        .consume(credential, input)
-        .pipe(
-          Effect.mapError((cause) =>
-            cause._tag === "BootstrapCredentialScopeNotGrantedError"
-              ? new ServerAuthScopeNotGrantedError({})
-              : toBootstrapExchangeError(cause),
-          ),
-        );
+      return bootstrapCredentials.consume(credential, input).pipe(
+        Effect.mapError((cause) =>
+          cause._tag === "BootstrapCredentialScopeNotGrantedError"
+            ? new ServerAuthScopeNotGrantedError({})
+            : toBootstrapExchangeError(cause),
+        ),
+        Effect.flatMap(refusePeerGrant),
+      );
     }
     return sessions.verify(credential).pipe(
       mapSessionVerificationErrors,
@@ -1256,7 +1316,7 @@ export const make = Effect.gen(function* () {
         if (websocketTicket && websocketTicket.trim().length > 0) {
           return yield* sessions.verifyWebSocketToken(websocketTicket).pipe(
             mapSessionVerificationErrors,
-            Effect.flatMap(rejectMcpClientAudience),
+            Effect.flatMap(rejectConfinedAudience),
             Effect.map((session) => ({
               sessionId: session.sessionId,
               subject: session.subject,
@@ -1349,6 +1409,103 @@ export const make = Effect.gen(function* () {
       Effect.withSpan("EnvironmentAuth.consumeMcpApprovalCode"),
     );
 
+  const issuePeerGrant: EnvironmentAuth["Service"]["issuePeerGrant"] = (input) =>
+    createPairingLink({
+      subject: PEER_SUBJECT,
+      scopes: AuthPeerScopes,
+      label: input.label,
+      ttl: PEER_GRANT_TTL,
+      ...(input.proofKeyThumbprint ? { proofKeyThumbprint: input.proofKeyThumbprint } : {}),
+    }).pipe(Effect.withSpan("EnvironmentAuth.issuePeerGrant"));
+
+  const redeemPeerGrant: EnvironmentAuth["Service"]["redeemPeerGrant"] = Effect.fn(
+    "EnvironmentAuth.redeemPeerGrant",
+  )(function* (input) {
+    const grant = yield* bootstrapCredentials
+      .consume(input.credential, { proofKeyThumbprint: input.proofKeyThumbprint })
+      .pipe(Effect.mapError(toBootstrapExchangeError));
+    if (grant.subject !== PEER_SUBJECT || grant.method !== "one-time-token") {
+      return yield* new ServerAuthInvalidCredentialError({
+        diagnostic: "Only a machine pairing grant pairs a machine.",
+      });
+    }
+    const issued = yield* sessions
+      .issue({
+        method: "dpop-access-token",
+        subject: PEER_SUBJECT,
+        scopes: grant.scopes,
+        proofKeyThumbprint: input.proofKeyThumbprint,
+        ttl: PEER_SESSION_TTL,
+        client: { ...input.client, deviceType: "bot" },
+      })
+      .pipe(
+        Effect.mapError((cause) => new ServerAuthAuthenticatedAccessTokenIssueError({ cause })),
+      );
+    return {
+      session: { sessionId: issued.sessionId, scopes: issued.scopes },
+      token: issued.token,
+      expiresAt: DateTime.toUtc(issued.expiresAt),
+    };
+  });
+
+  const notPeerSession = () =>
+    new ServerAuthInvalidCredentialError({
+      diagnostic: "Only paired machine sessions are accepted here.",
+    });
+
+  const authenticatePeerRequest: EnvironmentAuth["Service"]["authenticatePeerRequest"] = (
+    request,
+  ) => {
+    const token = parseDpopToken(request);
+    if (token === null) return Effect.fail(new ServerAuthMissingCredentialError({}));
+    return sessions.verify(token).pipe(
+      mapSessionVerificationErrors,
+      Effect.flatMap((session) =>
+        session.subject === PEER_SUBJECT &&
+        session.method === "dpop-access-token" &&
+        session.proofKeyThumbprint !== undefined
+          ? Effect.succeed({ ...session, proofKeyThumbprint: session.proofKeyThumbprint })
+          : Effect.fail(notPeerSession()),
+      ),
+      Effect.flatMap((session) =>
+        verifyRequestDpopProof({
+          request,
+          expectedThumbprint: session.proofKeyThumbprint,
+          expectedAccessToken: token,
+        }).pipe(
+          Effect.as({ sessionId: session.sessionId, scopes: session.scopes } satisfies PeerSession),
+          Effect.provideService(ServerSecretStore.ServerSecretStore, secretStore),
+          Effect.provideService(Crypto.Crypto, crypto),
+        ),
+      ),
+      Effect.withSpan("EnvironmentAuth.authenticatePeerRequest"),
+    );
+  };
+
+  const authenticatePeerWebSocket: EnvironmentAuth["Service"]["authenticatePeerWebSocket"] = (
+    request,
+  ) => {
+    const ticket = Option.flatMapNullishOr(HttpServerRequest.toURL(request), (url) =>
+      url.searchParams.get(WEBSOCKET_TICKET_QUERY_PARAM)?.trim(),
+    );
+    if (Option.isNone(ticket) || ticket.value.length === 0) {
+      return Effect.fail(new ServerAuthMissingCredentialError({}));
+    }
+    // The ticket was minted over a DPoP-verified `/peer/ticket` request.
+    return sessions.verifyWebSocketToken(ticket.value).pipe(
+      mapSessionVerificationErrors,
+      Effect.flatMap((session) =>
+        session.subject === PEER_SUBJECT && session.method === "dpop-access-token"
+          ? Effect.succeed({
+              sessionId: session.sessionId,
+              scopes: session.scopes,
+            } satisfies PeerSession)
+          : Effect.fail(notPeerSession()),
+      ),
+      Effect.withSpan("EnvironmentAuth.authenticatePeerWebSocket"),
+    );
+  };
+
   return EnvironmentAuth.of({
     getDescriptor: () =>
       Effect.succeed(descriptor).pipe(Effect.withSpan("EnvironmentAuth.getDescriptor")),
@@ -1375,6 +1532,10 @@ export const make = Effect.gen(function* () {
     issueMcpClientSession,
     consumeMcpApprovalCode,
     authenticateBrowserSession,
+    issuePeerGrant,
+    redeemPeerGrant,
+    authenticatePeerRequest,
+    authenticatePeerWebSocket,
   });
 });
 

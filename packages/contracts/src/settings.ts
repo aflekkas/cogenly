@@ -19,7 +19,12 @@ import {
   TrimmedString,
 } from "./baseSchemas.ts";
 import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
-import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
+import {
+  EnvironmentMachineKind,
+  MachineRole,
+  ThreadEnvMode,
+  WorktreeSubmodules,
+} from "./environment.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
 import {
   CustomModelSetting,
@@ -1023,6 +1028,14 @@ export const ServerSettings = Schema.Struct({
   environmentIcon: ForwardCompatibleNullable(EnvironmentMachineKind).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /** The name paired machines show for this one. Null uses the detected default. */
+  machineName: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /** Whether this is a personal computer or a cloud server. Null uses detection. */
+  machineRole: ForwardCompatibleNullable(MachineRole).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   /**
    * Null means inherit: the repository's cogenly.json, then "local". The old
    * default "local" was never persisted (defaults are stripped on write), so
@@ -1386,6 +1399,8 @@ export const ServerSettingsPatch = Schema.Struct({
   providerHealthRefreshInterval: Schema.optionalKey(Schema.DurationFromMillis),
   backgroundActivityProfile: Schema.optionalKey(BackgroundActivityProfile),
   environmentIcon: Schema.optionalKey(Schema.NullOr(EnvironmentMachineKind)),
+  machineName: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
+  machineRole: Schema.optionalKey(Schema.NullOr(MachineRole)),
   defaultThreadEnvMode: Schema.optionalKey(Schema.NullOr(ThreadEnvMode)),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeSubmodules: Schema.optionalKey(Schema.NullOr(WorktreeSubmodules)),

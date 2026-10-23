@@ -1,4 +1,7 @@
 import {
+  AuthAccessWriteScope,
+  AuthPeerScopes,
+  AuthStandardClientScopes,
   clientRpcRequiredScopes,
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
@@ -108,6 +111,27 @@ describe("RPC authorization scopes", () => {
     for (const method of [WS_METHODS.vaultCreate, WS_METHODS.vaultUpdate, WS_METHODS.vaultDelete]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
       expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+    }
+  });
+
+  it("keeps machine pairing behind access management, which standard clients lack", () => {
+    for (const method of [
+      WS_METHODS.machinesPrepareJoin,
+      WS_METHODS.machinesCreatePeerGrant,
+      WS_METHODS.machinesJoinHub,
+      WS_METHODS.machinesUnpair,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthAccessWriteScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthAccessWriteScope]);
+    }
+    expect(AuthStandardClientScopes).not.toContain(AuthAccessWriteScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.machinesUpdate)).toBe(AuthSettingsWriteScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.machinesList)).toBe(AuthOrchestrationReadScope);
+  });
+
+  it("never lets a peer scope authorize a client RPC", () => {
+    for (const scope of Object.values(RPC_REQUIRED_SCOPES)) {
+      expect(AuthPeerScopes).not.toContain(scope);
     }
   });
 

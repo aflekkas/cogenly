@@ -7,6 +7,7 @@ import type * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
 import * as Integrations from "./integrations/Integrations.ts";
+import * as Machines from "./machines/Machines.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
@@ -1077,6 +1078,7 @@ const makeWsRpcHandlers = (
     const agentStore = yield* AgentStore.AgentStore;
     const facts = yield* Facts.FactService;
     const integrations = yield* Integrations.Integrations;
+    const machines = yield* Machines.Machines;
     const visualStates = yield* VisualStates.VisualStateService;
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
@@ -1670,6 +1672,13 @@ const makeWsRpcHandlers = (
       [WS_METHODS.integrationsUpdate]: (input) => integrations.update(input),
       [WS_METHODS.integrationsDelete]: (input) => integrations.remove(input.id),
       [WS_METHODS.integrationsTestConnection]: (input) => integrations.testConnection(input.id),
+      [WS_METHODS.machinesList]: () => machines.list,
+      [WS_METHODS.machinesSubscribe]: () => machines.subscribe,
+      [WS_METHODS.machinesUpdate]: (input) => machines.update(input),
+      [WS_METHODS.machinesPrepareJoin]: () => machines.prepareJoin,
+      [WS_METHODS.machinesCreatePeerGrant]: (input) => machines.createPeerGrant(input),
+      [WS_METHODS.machinesJoinHub]: (input) => machines.joinHub(input),
+      [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
       [WS_METHODS.visualStateGet]: (input) =>
@@ -2732,6 +2741,7 @@ type WsRequestServices =
   | ExternalLauncher.ExternalLauncher
   | Facts.FactService
   | Integrations.Integrations
+  | Machines.Machines
   | FileSystem.FileSystem
   | GitHubRest.GitHubRest
   | GitWorkflowService.GitWorkflowService

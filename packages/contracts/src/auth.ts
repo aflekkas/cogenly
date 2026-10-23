@@ -97,6 +97,13 @@ export const AuthAccessReadScope = "access:read" as const;
 export const AuthAccessWriteScope = "access:write" as const;
 export const AuthRelayReadScope = "relay:read" as const;
 export const AuthRelayWriteScope = "relay:write" as const;
+/**
+ * Held only by `peer` sessions: another Cogenly server paired as a machine.
+ * They are never part of a client grant and only the `/peer` endpoint accepts
+ * them; see docs/internals/machines.md.
+ */
+export const AuthSyncReplicateScope = "sync:replicate" as const;
+export const AuthPeerDelegateScope = "peer:delegate" as const;
 export const AuthEnvironmentScope = Schema.Literals([
   AuthOrchestrationReadScope,
   AuthOrchestrationOperateScope,
@@ -115,13 +122,25 @@ export const AuthEnvironmentScope = Schema.Literals([
   AuthAccessWriteScope,
   AuthRelayReadScope,
   AuthRelayWriteScope,
+  AuthSyncReplicateScope,
+  AuthPeerDelegateScope,
 ]);
 export type AuthEnvironmentScope = typeof AuthEnvironmentScope.Type;
 export const AuthEnvironmentScopes = Schema.Array(AuthEnvironmentScope);
 export type AuthEnvironmentScopes = typeof AuthEnvironmentScopes.Type;
 
+/** Everything a paired machine's session holds. */
+export const AuthPeerScopes = [AuthSyncReplicateScope, AuthPeerDelegateScope] as const;
+export const AuthPeerScope = Schema.Literals(AuthPeerScopes);
+export type AuthPeerScope = typeof AuthPeerScope.Type;
+export const isAuthPeerScope = Schema.is(AuthPeerScope);
+
+// Peer scopes are minted only by machine pairing, never by a pairing link or
+// token exchange a client asks for.
 export const AuthGrantScope = Schema.Literals(
-  AuthEnvironmentScope.literals.filter((scope) => scope !== AuthReviewWriteScope),
+  AuthEnvironmentScope.literals.filter(
+    (scope) => scope !== AuthReviewWriteScope && !isAuthPeerScope(scope),
+  ),
 );
 export type AuthGrantScope = typeof AuthGrantScope.Type;
 export const AuthGrantScopes = Schema.Array(AuthGrantScope);
