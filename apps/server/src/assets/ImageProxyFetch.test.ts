@@ -44,6 +44,11 @@ describe("parseImageProxyTarget", () => {
     "https://[::ffff:10.0.0.1]/x.jpg",
     "https://[fe80::1]/x.jpg",
     "https://[fc00::1]/x.jpg",
+    "https://localhost./x.jpg",
+    "https://img.localhost/x.jpg",
+    "https://100.64.1.2/x.jpg",
+    "https://[::ffff:127.0.0.1]/x.jpg",
+    "https://224.0.0.1/x.jpg",
   ])("refuses to proxy the internal host %s", (rawUrl) => {
     expect(parseImageProxyTarget(rawUrl)).toEqual({
       error: { status: 403, message: "That host cannot be proxied." },

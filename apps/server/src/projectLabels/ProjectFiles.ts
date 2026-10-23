@@ -670,12 +670,37 @@ const make = Effect.gen(function* () {
     const suffix = dot <= 0 ? "" : name.slice(dot);
     for (let attempt = 1; attempt <= MAX_DEDUPE_ATTEMPTS; attempt++) {
       const candidate = attempt === 1 ? name : `${stem} (${attempt})${suffix}`;
-      const exists = yield* fileSystem
-        .exists(path.join(directory, candidate))
-        .pipe(Effect.mapError(storage("add")));
-      if (!exists) return candidate;
+      const target = path.join(directory, candidate);
+      const exists = yield* fileSystem.exists(target).pipe(Effect.mapError(storage("add")));
+      // A dangling symlink is taken too: writing to it would land wherever it points.
+      const link = yield* fileSystem.readLink(target).pipe(Effect.option);
+      if (!exists && Option.isNone(link)) return candidate;
     }
     return yield* new ProjectLabelError({ operation: "add", reason: "storage" });
+  });
+
+  // The real path of the project's Resources directory, created if missing.
+  // Every add writes beneath it, so it is refused when it, or a symlink on the
+  // way to it, leads outside the project.
+  const containedResourcesDir = Effect.fn("ProjectFiles.containedResourcesDir")(function* (
+    dir: string,
+  ) {
+    const resourcesDir = path.join(dir, PROJECT_LABEL_RESOURCES_SEGMENT);
+    // Not recursive: a dangling symlink in its place fails instead of creating its target.
+    if ((yield* realPathOrNull(resourcesDir)) === null) {
+      yield* fileSystem.makeDirectory(resourcesDir).pipe(Effect.mapError(storage("add")));
+    }
+    const realRoot = (yield* realPathOrNull(dir)) ?? path.resolve(dir);
+    const realResources = yield* realPathOrNull(resourcesDir);
+    if (
+      realResources === null ||
+      realResources === realRoot ||
+      !isWithinRoot(realRoot, realResources) ||
+      !(yield* isDirectory(realResources))
+    ) {
+      return yield* invalidPath("add");
+    }
+    return realResources;
   });
 
   const createResource: ProjectFiles["Service"]["createResource"] = Effect.fn(
@@ -683,10 +708,7 @@ const make = Effect.gen(function* () {
   )(function* (input) {
     const label = yield* requireLabel(input.id);
     const { dir } = yield* folders.ensureForLabel(label).pipe(Effect.mapError(storage("add")));
-    const resourcesDir = path.join(dir, PROJECT_LABEL_RESOURCES_SEGMENT);
-    yield* fileSystem
-      .makeDirectory(resourcesDir, { recursive: true })
-      .pipe(Effect.mapError(storage("add")));
+    const resourcesDir = yield* containedResourcesDir(dir);
     const kind = input.resource.kind;
     let fileName: string;
     if (kind === "upload") {
@@ -726,7 +748,9 @@ const make = Effect.gen(function* () {
         wanted.toLowerCase().endsWith(".url") ? wanted : `${wanted}.url`,
       );
       yield* fileSystem
-        .writeFileString(path.join(resourcesDir, fileName), `[InternetShortcut]\nURL=${url}\n`)
+        .writeFileString(path.join(resourcesDir, fileName), `[InternetShortcut]\nURL=${url}\n`, {
+          flag: "wx",
+        })
         .pipe(Effect.mapError(storage("add")));
     } else {
       const wanted = sanitizeFileName(input.resource.title, "note");
@@ -739,6 +763,7 @@ const make = Effect.gen(function* () {
         .writeFileString(
           path.join(resourcesDir, fileName),
           text.endsWith("\n") ? text : `${text}\n`,
+          { flag: "wx" },
         )
         .pipe(Effect.mapError(storage("add")));
     }

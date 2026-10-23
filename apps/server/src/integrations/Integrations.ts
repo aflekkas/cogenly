@@ -93,6 +93,20 @@ export const integrationDestinationChanged = (
         ([name, value]) => value !== HEADER_MASK && current.headers[name] !== value,
       )));
 
+/**
+ * Whether `headers` would still send a secret the caller never saw: a stored
+ * literal value kept as it was (sent back masked, or left out of the update),
+ * or any vault credential reference.
+ */
+export const headersKeepStoredSecrets = (
+  current: Integration,
+  headers: Readonly<Record<string, string>>,
+): boolean =>
+  Object.entries(headers).some(
+    ([name, value]) =>
+      value !== "" && (credentialRefsIn(value).length > 0 || current.headers[name] === value),
+  );
+
 /** Adding any project, or switching to all projects, needs owner approval. */
 export const integrationScopeWidened = (
   current: Integration,
@@ -212,10 +226,17 @@ export class Integrations extends Context.Service<
       input: IntegrationCreateInput,
       options?: IntegrationWriteOptions,
     ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
-    /** A changed origin drops every credential approval unless this write approves anew. */
+    /**
+     * A changed origin drops every credential approval unless this write approves anew.
+     * `holdStoredSecrets` (every agent write) refuses a destination change that would
+     * carry stored literal headers or vault credentials along; the owner makes it in Settings.
+     */
     readonly update: (
       input: IntegrationUpdateInput,
-      options?: IntegrationWriteOptions & { readonly preserveCredentialDestination?: boolean },
+      options?: IntegrationWriteOptions & {
+        readonly preserveCredentialDestination?: boolean;
+        readonly holdStoredSecrets?: boolean;
+      },
     ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
     /** Tombstones the integration; its name becomes reusable. */
     readonly remove: (
@@ -655,6 +676,16 @@ const make = (options: IntegrationsOptions = {}) =>
             integrationDestinationChanged(current, input)
           ) {
             return yield* new IntegrationError({ operation: "update", reason: "invalid_request" });
+          }
+          if (
+            options?.holdStoredSecrets &&
+            integrationDestinationChanged(current, input) &&
+            headersKeepStoredSecrets(current, input.headers ?? current.headers)
+          ) {
+            return yield* new IntegrationError({
+              operation: "update",
+              reason: "approval_required",
+            });
           }
           if (input.url !== undefined) yield* validateUrl(input.url);
           const credentialOrigin = options?.preserveCredentialDestination

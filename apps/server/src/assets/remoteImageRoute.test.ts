@@ -21,6 +21,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { issueAssetUrl } from "./AssetAccess.ts";
+import { ImageProxyHostLookup } from "./ImageProxyFetch.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 
 const IMAGE_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
@@ -50,6 +51,7 @@ const noSession = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
 
 const services = Layer.mergeAll(
   upstream,
+  Layer.succeed(ImageProxyHostLookup, async () => [{ address: "93.184.216.34", family: 4 }]),
   noSession,
   Layer.mock(ServerSecretStore.ServerSecretStore)({
     getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(9)),

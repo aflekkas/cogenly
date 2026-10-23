@@ -597,6 +597,55 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("withholds tool output when a local item cannot be decrypted", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const sql = yield* SqlClient.SqlClient;
+      yield* vault.create({
+        name: "Token",
+        type: "api_key",
+        secretFields: { value: "token-value-123" },
+      });
+      const { item } = yield* vault.create({
+        name: "Broken",
+        type: "api_key",
+        secretFields: { value: "broken-value-456" },
+      });
+      yield* sql`UPDATE vault_items SET ciphertext = ${JSON.stringify({ nonce: "AAAA", ciphertext: "AAAA" })} WHERE id = ${item.id}`;
+      expect(yield* vault.scrubText("leaked token-value-123 broken-value-456")).toBe(
+        VAULT_WITHHELD,
+      );
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("skips a peer's item not wrapped for this machine and still scrubs local ones", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const sql = yield* SqlClient.SqlClient;
+      yield* vault.create({
+        name: "Token",
+        type: "api_key",
+        secretFields: { value: "token-value-123" },
+      });
+      const { item } = yield* vault.create({
+        name: "Peer",
+        type: "api_key",
+        secretFields: { value: "peer-value-789" },
+      });
+      const [row] = yield* sql<{
+        wrapped_keys_json: string;
+      }>`SELECT wrapped_keys_json FROM vault_items WHERE id = ${item.id}`;
+      const peerWrapped = (JSON.parse(row!.wrapped_keys_json) as Array<object>).map((entry) => ({
+        ...entry,
+        environmentId: "environment:peer",
+      }));
+      yield* sql`UPDATE vault_items SET wrapped_keys_json = ${JSON.stringify(peerWrapped)} WHERE id = ${item.id}`;
+      expect(yield* vault.scrubText("leaked token-value-123")).toBe(
+        "leaked [redacted vault secret]",
+      );
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("reuses pending approvals but creates a fresh request after revocation", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault,
