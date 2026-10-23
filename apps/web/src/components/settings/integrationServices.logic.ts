@@ -125,10 +125,13 @@ const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
   conflict: "Another integration already uses this name.",
   disabled: "Turn the integration on to test it.",
   credential_unresolved: "A vault reference in the headers does not match a vault item.",
+  credential_not_allowed:
+    "A vault item in the headers doesn't allow this server. Save the integration to approve it, or add the server to the item's allowed domains.",
   upstream_unreachable: "The server could not be reached.",
   upstream_timeout: "The server took too long to answer.",
   upstream_error: "The server answered with an error.",
   invalid_request: "The server rejected the request.",
+  approval_required: "Widening project access needs owner approval.",
 };
 
 export function integrationReasonText(reason: IntegrationError["reason"]): string {

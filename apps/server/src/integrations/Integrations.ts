@@ -23,6 +23,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as Credentials from "./IntegrationCredentials.ts";
@@ -37,6 +38,7 @@ const failure =
 
 export const DEFAULT_TOOL_CACHE_TTL_MS = 60_000;
 export const DEFAULT_UPSTREAM_TIMEOUT_MS = 10_000;
+const MAX_UPSTREAM_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_UPSTREAM_MESSAGE_CHARS = 500;
 
 const CREDENTIAL_REF = /\{\{credential:([^}]*)\}\}/g;
@@ -44,6 +46,39 @@ const CREDENTIAL_REF = /\{\{credential:([^}]*)\}\}/g;
 /** Credential references referenced by a header template, in order. */
 export const credentialRefsIn = (template: string): ReadonlyArray<string> =>
   [...template.matchAll(CREDENTIAL_REF)].map((match) => (match[1] ?? "").trim());
+
+/** The vault item names a set of headers references, which an owner approves together. */
+const credentialItemsIn = (headers: Readonly<Record<string, string>>): Array<string> => [
+  ...new Set(
+    Object.values(headers).flatMap((template) =>
+      credentialRefsIn(template).flatMap((ref) => {
+        const parsed = Credentials.parseCredentialRef(ref);
+        return parsed === undefined ? [] : [parsed.item];
+      }),
+    ),
+  ),
+];
+
+/**
+ * What clients and agents see in place of a literal header value, which may be
+ * a pasted secret. Credential templates are shown as they are. Sending the
+ * mask back in an update keeps the stored value.
+ */
+export const HEADER_MASK = "••••";
+
+/** Headers as clients and agents may see them. */
+export const redactHeaders = (headers: Readonly<Record<string, string>>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [
+      name,
+      value === "" || credentialRefsIn(value).length > 0 ? value : HEADER_MASK,
+    ]),
+  );
+
+const redactIntegration = (integration: Integration): Integration => ({
+  ...integration,
+  headers: redactHeaders(integration.headers),
+});
 
 /** Treat every header as sensitive: even a static Host header can change routing. */
 export const integrationDestinationChanged = (
@@ -54,7 +89,21 @@ export const integrationDestinationChanged = (
   (input.transport !== undefined && input.transport !== current.transport) ||
   (input.headers !== undefined &&
     (Object.keys(input.headers).length !== Object.keys(current.headers).length ||
-      Object.entries(input.headers).some(([name, value]) => current.headers[name] !== value)));
+      Object.entries(input.headers).some(
+        ([name, value]) => value !== HEADER_MASK && current.headers[name] !== value,
+      )));
+
+/** Adding any project, or switching to all projects, needs owner approval. */
+export const integrationScopeWidened = (
+  current: Integration,
+  input: IntegrationUpdateInput,
+): boolean =>
+  input.scope !== undefined &&
+  current.scope.type !== "all" &&
+  (input.scope.type === "all" ||
+    input.scope.labelIds.some(
+      (id) => current.scope.type === "projects" && !current.scope.labelIds.includes(id),
+    ));
 
 /**
  * Resolves `{{credential:item.field}}` references in every header value.
@@ -65,7 +114,10 @@ export const resolveHeaderTemplates = (
   headers: Readonly<Record<string, string>>,
   resolve: (
     ref: string,
-  ) => Effect.Effect<Option.Option<string>, Credentials.IntegrationCredentialError>,
+  ) => Effect.Effect<
+    Option.Option<string>,
+    Credentials.IntegrationCredentialError | Credentials.IntegrationCredentialNotAllowedError
+  >,
 ): Effect.Effect<Record<string, string>, IntegrationError> =>
   Effect.gen(function* () {
     const resolved: Record<string, string> = {};
@@ -86,10 +138,13 @@ export const resolveHeaderTemplates = (
         }
         const secret = yield* resolve(ref).pipe(
           Effect.mapError(
-            () =>
+            (error) =>
               new IntegrationError({
                 operation: "resolve credentials",
-                reason: "credential_unresolved",
+                reason:
+                  error._tag === "IntegrationCredentialNotAllowedError"
+                    ? "credential_not_allowed"
+                    : "credential_unresolved",
               }),
           ),
         );
@@ -99,7 +154,7 @@ export const resolveHeaderTemplates = (
             reason: "credential_unresolved",
           });
         }
-        value = value.replaceAll(`{{credential:${ref}}}`, secret.value);
+        value = value.replaceAll(`{{credential:${ref}}}`, () => secret.value);
       }
       resolved[name] = value;
     }
@@ -128,6 +183,17 @@ interface CachedTools {
   readonly result: IntegrationToolsResult;
 }
 
+/**
+ * How a write was authorized. The owner's own writes (Settings, or approving
+ * an agent's proposal) approve the vault items in the headers for the
+ * integration's origin; any other write approves nothing.
+ */
+export interface IntegrationWriteOptions {
+  readonly approveCredentials?: boolean;
+  readonly callerLabelId?: ProjectLabelId | null | undefined;
+  readonly preserveScope?: boolean;
+}
+
 export interface IntegrationsOptions {
   readonly toolCacheTtlMs?: number;
   readonly upstreamTimeoutMs?: number;
@@ -144,13 +210,18 @@ export class Integrations extends Context.Service<
     ) => Effect.Effect<IntegrationListResult, IntegrationError>;
     readonly create: (
       input: IntegrationCreateInput,
+      options?: IntegrationWriteOptions,
     ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
+    /** A changed origin drops every credential approval unless this write approves anew. */
     readonly update: (
       input: IntegrationUpdateInput,
-      options?: { readonly preserveCredentialDestination: boolean },
+      options?: IntegrationWriteOptions & { readonly preserveCredentialDestination?: boolean },
     ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
     /** Tombstones the integration; its name becomes reusable. */
-    readonly remove: (id: IntegrationId) => Effect.Effect<{ deleted: boolean }, IntegrationError>;
+    readonly remove: (
+      id: IntegrationId,
+      options?: IntegrationWriteOptions,
+    ) => Effect.Effect<{ deleted: boolean }, IntegrationError>;
     readonly testConnection: (
       id: IntegrationId,
     ) => Effect.Effect<IntegrationTestResult, IntegrationError>;
@@ -171,26 +242,41 @@ export class Integrations extends Context.Service<
   }
 >()("cogenly-server/integrations/Integrations") {}
 
-interface JsonRpcResponse {
-  readonly result?: unknown;
-  readonly error?: { readonly message?: unknown };
-}
+const RpcEnvelope = {
+  jsonrpc: Schema.Literal("2.0"),
+  id: Schema.NullOr(Schema.Union([Schema.String, Schema.Number])),
+};
+const JsonRpcResponse = Schema.Union([
+  Schema.Struct({ ...RpcEnvelope, result: Schema.Unknown, error: Schema.optional(Schema.Never) }),
+  Schema.Struct({
+    ...RpcEnvelope,
+    result: Schema.optional(Schema.Never),
+    error: Schema.Struct({
+      code: Schema.Number,
+      message: Schema.String,
+      data: Schema.optional(Schema.Unknown),
+    }),
+  }),
+]);
+type JsonRpcResponse = typeof JsonRpcResponse.Type;
+const decodeRpcBody = Schema.decodeUnknownOption(Schema.fromJsonString(JsonRpcResponse));
 
 const parseRpcBody = (text: string): JsonRpcResponse | undefined => {
   const trimmed = text.trim();
-  const candidates = trimmed.startsWith("data:")
-    ? trimmed
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice("data:".length).trim())
-    : [trimmed];
-  for (const candidate of candidates.toReversed()) {
-    try {
-      const parsed: unknown = JSON.parse(candidate);
-      if (typeof parsed === "object" && parsed !== null) return parsed as JsonRpcResponse;
-    } catch {
-      // Try the next SSE event; a body with no JSON is handled by the caller.
+  const candidates = [trimmed];
+  let data: Array<string> = [];
+  for (const line of text.split(/\r\n|\r|\n/)) {
+    if (line === "") {
+      if (data.length > 0) candidates.push(data.join("\n"));
+      data = [];
+    } else if (line.startsWith("data:")) {
+      data.push(line.slice(5).replace(/^ /, ""));
     }
+  }
+  if (data.length > 0) candidates.push(data.join("\n"));
+  for (const candidate of candidates.toReversed()) {
+    const parsed = decodeRpcBody(candidate);
+    if (Option.isSome(parsed)) return parsed.value;
   }
   return undefined;
 };
@@ -262,9 +348,12 @@ const make = (options: IntegrationsOptions = {}) =>
         const entries = yield* Ref.get(cache);
         return {
           integrations: integrations.map((integration) => {
-            const cached = entries.get(`${integration.id}:${integration.updatedAt}`);
+            const prefix = `${integration.id}:${integration.updatedAt}`;
+            const cached =
+              entries.get(prefix) ??
+              [...entries.values()].find((entry) => entry.key.startsWith(`${prefix}:`));
             return {
-              integration,
+              integration: redactIntegration(integration),
               status: cached === undefined ? "unknown" : "connected",
               toolCount: cached === undefined ? null : cached.result.tools.length,
             } satisfies IntegrationSummary;
@@ -300,26 +389,28 @@ const make = (options: IntegrationsOptions = {}) =>
         const response = yield* client.execute(request).pipe(
           // Fetch otherwise forwards custom secret headers across redirects.
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-          Effect.timeout(Duration.millis(timeoutMs)),
-          Effect.mapError((cause) =>
-            isError(cause)
-              ? cause
-              : typeof cause === "object" &&
-                  cause !== null &&
-                  "_tag" in cause &&
-                  cause._tag === "TimeoutError"
-                ? new IntegrationError({ operation: method, reason: "upstream_timeout" })
-                : new IntegrationError({
-                    operation: method,
-                    reason: "upstream_unreachable",
-                    cause,
-                  }),
+          Effect.mapError(
+            (cause) =>
+              new IntegrationError({ operation: method, reason: "upstream_unreachable", cause }),
           ),
         );
-        const text = yield* response.text.pipe(
-          Effect.mapError(
-            (cause) => new IntegrationError({ operation: method, reason: "upstream_error", cause }),
+        const decoder = new TextDecoder();
+        let bytes = 0;
+        const text = yield* response.stream.pipe(
+          Stream.runFoldEffect(
+            () => "",
+            (text, chunk) => {
+              bytes += chunk.byteLength;
+              if (bytes > MAX_UPSTREAM_BODY_BYTES) {
+                return Effect.fail(
+                  new IntegrationError({ operation: method, reason: "upstream_error" }),
+                );
+              }
+              return Effect.succeed(text + decoder.decode(chunk, { stream: true }));
+            },
           ),
+          Effect.map((text) => text + decoder.decode()),
+          Effect.mapError(failure(method, "upstream_error")),
         );
         if (response.status < 200 || response.status >= 300) {
           return yield* new IntegrationError({
@@ -349,14 +440,31 @@ const make = (options: IntegrationsOptions = {}) =>
           result: body.result,
           sessionId: response.headers["mcp-session-id"] ?? sessionId,
         };
-      });
+      }).pipe(
+        Effect.timeout(Duration.millis(timeoutMs)),
+        Effect.catchTags({
+          TimeoutError: () =>
+            Effect.fail(
+              new IntegrationError({
+                operation: method,
+                reason: "upstream_timeout",
+              }),
+            ),
+        }),
+      );
 
     /** One upstream round trip: resolve credentials, handshake, then call. */
-    const rpc = (integration: Integration, method: string, params: unknown) =>
+    const rpc = (
+      integration: Integration,
+      method: string,
+      params: unknown,
+      labelId?: ProjectLabelId | null,
+    ) =>
       Effect.gen(function* () {
+        const endpoint = new URL(integration.url);
         if (
           integration.credentialOrigin !== undefined &&
-          integration.credentialOrigin !== new URL(integration.url).origin &&
+          integration.credentialOrigin !== endpoint.origin &&
           Object.values(integration.headers).some((value) => credentialRefsIn(value).length > 0)
         ) {
           return yield* new IntegrationError({
@@ -364,7 +472,17 @@ const make = (options: IntegrationsOptions = {}) =>
             reason: "credential_unresolved",
           });
         }
-        const headers = yield* resolveHeaderTemplates(integration.headers, credentials.resolve);
+        const destination: Credentials.CredentialDestination = {
+          host: endpoint.hostname,
+          scopeProjectId: labelId,
+          approvedItems:
+            integration.credentialOrigin === endpoint.origin
+              ? (integration.approvedCredentialItems ?? [])
+              : [],
+        };
+        const headers = yield* resolveHeaderTemplates(integration.headers, (ref) =>
+          credentials.resolve(ref, destination),
+        );
         const initialized = yield* post(
           integration,
           headers,
@@ -381,8 +499,8 @@ const make = (options: IntegrationsOptions = {}) =>
         );
       });
 
-    const fetchTools = (integration: Integration) =>
-      rpc(integration, "tools/list", {}).pipe(
+    const fetchTools = (integration: Integration, labelId?: ProjectLabelId | null) =>
+      rpc(integration, "tools/list", {}, labelId).pipe(
         Effect.flatMap((result) => {
           const tools =
             typeof result === "object" && result !== null && "tools" in result
@@ -417,14 +535,14 @@ const make = (options: IntegrationsOptions = {}) =>
     ) =>
       Effect.gen(function* () {
         const integration = yield* getByName(name, labelId);
-        const key = `${integration.id}:${integration.updatedAt}`;
+        const key = `${integration.id}:${integration.updatedAt}${labelId === undefined ? "" : labelId === null ? ":unfiled" : `:project:${labelId}`}`;
         if (!force) {
           const entries = yield* Ref.get(cache);
           const cached = entries.get(key);
           const at = yield* Clock.currentTimeMillis;
           if (cached !== undefined && at - cached.atMs < ttlMs) return cached.result;
         }
-        const result = yield* fetchTools(integration);
+        const result = yield* fetchTools(integration, labelId);
         const at = yield* Clock.currentTimeMillis;
         yield* Ref.update(cache, (entries) => new Map(entries).set(key, { key, atMs: at, result }));
         return result;
@@ -462,7 +580,7 @@ const make = (options: IntegrationsOptions = {}) =>
           ),
           Effect.flatMap(summaries),
         ),
-      create: (input) =>
+      create: (input, options) =>
         Effect.gen(function* () {
           yield* validateUrl(input.url);
           for (const template of Object.values(input.headers)) {
@@ -490,6 +608,9 @@ const make = (options: IntegrationsOptions = {}) =>
             url: input.url,
             headers: input.headers,
             credentialOrigin: new URL(input.url).origin,
+            approvedCredentialItems: options?.approveCredentials
+              ? credentialItemsIn(input.headers)
+              : [],
             enabled: input.enabled ?? true,
             scope: input.scope,
             hint: input.hint,
@@ -498,11 +619,37 @@ const make = (options: IntegrationsOptions = {}) =>
             deletedAt: null,
           };
           yield* persist(integration);
-          return { integration };
+          return { integration: redactIntegration(integration) };
         }).pipe(Effect.mapError(failure("create", "storage"))),
-      update: (input, options) =>
+      update: (masked, options) =>
         Effect.gen(function* () {
-          const current = yield* getById(input.id);
+          const current = yield* getById(masked.id);
+          if (!integrationVisibleTo({ ...current, enabled: true }, options?.callerLabelId))
+            return yield* new IntegrationError({ operation: "update", reason: "not_found" });
+          if (options?.preserveScope && integrationScopeWidened(current, masked))
+            return yield* new IntegrationError({
+              operation: "update",
+              reason: "approval_required",
+            });
+          // A masked value is one the caller left as it was.
+          const input: IntegrationUpdateInput =
+            masked.headers === undefined
+              ? masked
+              : {
+                  ...masked,
+                  headers: yield* Effect.forEach(Object.entries(masked.headers), ([name, value]) =>
+                    value !== HEADER_MASK
+                      ? Effect.succeed([name, value] as const)
+                      : current.headers[name] !== undefined
+                        ? Effect.succeed([name, current.headers[name]] as const)
+                        : Effect.fail(
+                            new IntegrationError({
+                              operation: "update",
+                              reason: "invalid_request",
+                            }),
+                          ),
+                  ).pipe(Effect.map(Object.fromEntries<string>)),
+                };
           if (
             options?.preserveCredentialDestination &&
             integrationDestinationChanged(current, input)
@@ -510,6 +657,15 @@ const make = (options: IntegrationsOptions = {}) =>
             return yield* new IntegrationError({ operation: "update", reason: "invalid_request" });
           }
           if (input.url !== undefined) yield* validateUrl(input.url);
+          const credentialOrigin = options?.preserveCredentialDestination
+            ? (current.credentialOrigin ?? new URL(current.url).origin)
+            : new URL(input.url ?? current.url).origin;
+          const headers = input.headers ?? current.headers;
+          const approvedCredentialItems = options?.approveCredentials
+            ? credentialItemsIn(headers)
+            : credentialOrigin === current.credentialOrigin
+              ? (current.approvedCredentialItems ?? [])
+              : [];
           const integration: Integration = {
             ...current,
             ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
@@ -520,15 +676,14 @@ const make = (options: IntegrationsOptions = {}) =>
             ...(input.scope === undefined ? {} : { scope: input.scope }),
             ...(input.hint === undefined ? {} : { hint: input.hint }),
             updatedAt: yield* now,
-            credentialOrigin: options?.preserveCredentialDestination
-              ? (current.credentialOrigin ?? new URL(current.url).origin)
-              : new URL(input.url ?? current.url).origin,
+            credentialOrigin,
+            approvedCredentialItems,
           };
           yield* persist(integration);
           yield* invalidate(integration.id);
-          return { integration };
+          return { integration: redactIntegration(integration) };
         }).pipe(sql.withTransaction, Effect.mapError(failure("update", "storage"))),
-      remove: (id) =>
+      remove: (id, options) =>
         Effect.gen(function* () {
           const current = yield* getById(id).pipe(
             Effect.catchTags({
@@ -537,6 +692,8 @@ const make = (options: IntegrationsOptions = {}) =>
             }),
           );
           if (current === undefined) return { deleted: false };
+          if (!integrationVisibleTo({ ...current, enabled: true }, options?.callerLabelId))
+            return yield* new IntegrationError({ operation: "delete", reason: "not_found" });
           const at = yield* now;
           yield* persist({ ...current, deletedAt: at, updatedAt: at });
           yield* invalidate(id);
@@ -581,10 +738,15 @@ const make = (options: IntegrationsOptions = {}) =>
       callTool: (name, tool, args, labelId) =>
         Effect.gen(function* () {
           const integration = yield* getByName(name, labelId);
-          const result = yield* rpc(integration, "tools/call", {
-            name: tool,
-            arguments: args ?? {},
-          });
+          const result = yield* rpc(
+            integration,
+            "tools/call",
+            {
+              name: tool,
+              arguments: args ?? {},
+            },
+            labelId,
+          );
           const record =
             typeof result === "object" && result !== null
               ? (result as Record<string, unknown>)

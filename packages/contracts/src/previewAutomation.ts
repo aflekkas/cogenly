@@ -562,6 +562,8 @@ export type PreviewAutomationUploadInput = typeof PreviewAutomationUploadInput.T
 
 export const PreviewAutomationTypeInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
+  /** Vault delivery checks and writes in the target document's same JavaScript task. */
+  expectedOrigin: Schema.optional(Schema.String),
   text: Schema.String.annotate({ description: "Literal text to insert." }),
   selector: Schema.optional(LegacySelector).annotate({
     description: "Legacy CSS selector for the input. Prefer locator.",

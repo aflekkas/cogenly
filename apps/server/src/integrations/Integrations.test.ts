@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { IntegrationName, ProjectLabelId } from "@t3tools/contracts";
+import { EnvironmentId, IntegrationName, ProjectLabelId } from "@t3tools/contracts";
+import { NodeCrypto } from "@effect/platform-node";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -12,7 +13,10 @@ import * as SqlClient from "effect/sql/SqlClient";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- The fake upstream is a plain node:http server; Effect has no test HTTP server for this.
 import * as NodeHttp from "node:http";
 
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
+import * as Vault from "../vault/Vault.ts";
 import { runMigrations } from "../persistence/Migrations.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import * as Integrations from "./Integrations.ts";
@@ -150,6 +154,17 @@ const createInput = (url: string, name = "gmail") => ({
 });
 
 describe("resolveHeaderTemplates", () => {
+  it.effect("preserves dollar replacement sequences in credential values", () =>
+    Effect.gen(function* () {
+      const secret = "key-$&-$$-$`-$'";
+      const headers = yield* Integrations.resolveHeaderTemplates(
+        { authorization: "Bearer {{credential:gmail.apiKey}}" },
+        () => Effect.succeed(Option.some(secret)),
+      );
+      expect(headers.authorization).toBe(`Bearer ${secret}`);
+    }),
+  );
+
   it.effect("resolves credential references and fails closed when missing", () =>
     Effect.gen(function* () {
       const resolved = yield* Integrations.resolveHeaderTemplates(
@@ -327,6 +342,106 @@ describe("Integrations gateway", () => {
     ),
   );
 
+  it.effect.each([
+    'event: message\nid: 1\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[]}}\n\n',
+    ': heartbeat\r\nid: 2\r\nevent: message\r\ndata: {"jsonrpc":"2.0",\r\ndata: "id":1,"result":{"tools":[]}}\r\n\r\n',
+  ])("accepts SSE fields before data, including multiline data (%#)", (body) =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      yield* service.create(createInput("https://upstream.example/mcp"));
+      expect(yield* service.listTools(IntegrationName.make("gmail"), null)).toEqual({
+        name: "gmail",
+        tools: [],
+      });
+    }).pipe(
+      Effect.provide(layerWith()),
+      Effect.provideService(FetchHttpClient.Fetch, async () => new Response(body)),
+    ),
+  );
+
+  it.effect.each([
+    { jsonrpc: "2.0", id: 1, error: null },
+    { jsonrpc: "2.0", id: 1, error: "broken" },
+    { jsonrpc: "2.0", id: 1 },
+    { jsonrpc: "1.0", id: 1, result: { tools: [] } },
+    { jsonrpc: "2.0", id: 1, result: { tools: [] }, error: { code: -1, message: "both" } },
+  ])("maps malformed JSON-RPC to upstream_error (%#)", (body) =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      yield* service.create(createInput("https://upstream.example/mcp"));
+      const result = yield* service
+        .listTools(IntegrationName.make("gmail"), null)
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") expect(result.failure.reason).toBe("upstream_error");
+    }).pipe(
+      Effect.provide(layerWith()),
+      Effect.provideService(FetchHttpClient.Fetch, async () => new Response(JSON.stringify(body))),
+    ),
+  );
+
+  it.effect("rejects an upstream body over 4 MiB", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      yield* service.create(createInput("https://upstream.example/mcp"));
+      const result = yield* service
+        .listTools(IntegrationName.make("gmail"), null)
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") expect(result.failure.reason).toBe("upstream_error");
+    }).pipe(
+      Effect.provide(layerWith()),
+      Effect.provideService(
+        FetchHttpClient.Fetch,
+        async () =>
+          new Response(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              result: { padding: "x".repeat(4 * 1024 * 1024), tools: [] },
+            }),
+          ),
+      ),
+    ),
+  );
+
+  it.effect("times out an upstream body that stalls after headers", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const service = yield* Integrations.Integrations;
+        yield* service.create(createInput("https://upstream.example/mcp"));
+        const fiber = yield* service
+          .listTools(IntegrationName.make("gmail"), null)
+          .pipe(Effect.result, Effect.forkChild);
+        yield* TestClock.adjust(Duration.millis(100));
+        const result = fiber.pollUnsafe();
+        expect(result).toBeDefined();
+        if (result !== undefined) {
+          const outcome = yield* Fiber.join(fiber);
+          expect(outcome._tag).toBe("Failure");
+          if (outcome._tag === "Failure") expect(outcome.failure.reason).toBe("upstream_timeout");
+        }
+      }),
+    ).pipe(
+      Effect.provide(layerWith({ upstreamTimeoutMs: 50 })),
+      Effect.provideService(
+        FetchHttpClient.Fetch,
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"result":'));
+              },
+            }),
+          ),
+      ),
+    ),
+  );
+
   it.effect("maps upstream errors and timeouts to clear reasons", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -378,6 +493,87 @@ describe("Integrations gateway", () => {
     ),
   );
 
+  it.effect("masks literal header values and keeps them when an edit sends the mask back", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const created = yield* service.create({
+        ...createInput("https://example.com/mcp"),
+        headers: {
+          authorization: "Bearer {{credential:gmail.apiKey}}",
+          "x-api-key": "literal-secret-123",
+        },
+      });
+      const masked = {
+        authorization: "Bearer {{credential:gmail.apiKey}}",
+        "x-api-key": Integrations.HEADER_MASK,
+      };
+      expect(created.integration.headers).toEqual(masked);
+      const listed = yield* service.list();
+      expect(listed.integrations[0]?.integration.headers).toEqual(masked);
+      expect(JSON.stringify(listed)).not.toContain("literal-secret-123");
+
+      const updated = yield* service.update({
+        id: created.integration.id,
+        headers: { ...masked, "x-extra": "visible-change" },
+      });
+      expect(JSON.stringify(updated)).not.toContain("literal-secret-123");
+      const sql = yield* SqlClient.SqlClient;
+      const [row] = yield* sql<{
+        payload_json: string;
+      }>`SELECT payload_json FROM integrations WHERE id = ${created.integration.id}`;
+      expect(JSON.parse(row!.payload_json).headers).toEqual({
+        authorization: "Bearer {{credential:gmail.apiKey}}",
+        "x-api-key": "literal-secret-123",
+        "x-extra": "visible-change",
+      });
+
+      // A mask names no stored value under a new header name.
+      const renamed = yield* service
+        .update({ id: created.integration.id, headers: { "x-renamed": Integrations.HEADER_MASK } })
+        .pipe(Effect.result);
+      expect(renamed._tag).toBe("Failure");
+    }).pipe(Effect.provide(layerWith())),
+  );
+
+  it.effect(
+    "scoped mutations cannot reach hidden integrations or widen access without approval",
+    () =>
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const service = yield* Integrations.Integrations;
+        const a = ProjectLabelId.make("a"),
+          b = ProjectLabelId.make("b");
+        const { integration } = yield* service.create({
+          ...createInput("https://example.com/mcp"),
+          scope: { type: "projects", labelIds: [a] },
+        });
+        for (const operation of [
+          service
+            .update({ id: integration.id, hint: "hidden write" }, { callerLabelId: b })
+            .pipe(Effect.asVoid),
+          service.remove(integration.id, { callerLabelId: b }).pipe(Effect.asVoid),
+        ]) {
+          expect((yield* operation.pipe(Effect.flip)).reason).toBe("not_found");
+        }
+        for (const scope of [
+          { type: "all" as const },
+          { type: "projects" as const, labelIds: [a, b] },
+        ]) {
+          expect(
+            (yield* service
+              .update({ id: integration.id, scope }, { callerLabelId: a, preserveScope: true })
+              .pipe(Effect.flip)).reason,
+          ).toBe("approval_required");
+        }
+        yield* service.update(
+          { id: integration.id, scope: { type: "all" } },
+          { approveCredentials: true },
+        );
+        expect((yield* service.listForProject(b)).integrations).toHaveLength(1);
+      }).pipe(Effect.provide(layerWith())),
+  );
+
   it.effect("filters by project scope and tombstones on remove", () =>
     Effect.gen(function* () {
       yield* runMigrations();
@@ -422,5 +618,155 @@ describe("Integrations gateway", () => {
       }>`SELECT COUNT(*) AS n FROM integrations WHERE deleted_at IS NOT NULL`;
       expect(tombstones[0]?.n).toBe(1);
     }).pipe(Effect.provide(layerWith())),
+  );
+});
+
+/** The gateway over the real vault, so credential destinations are checked as in production. */
+const vaultLayer = () => {
+  const stored = new Map<string, Uint8Array>();
+  return Integrations.layer.pipe(
+    Layer.provide(Credentials.layer),
+    Layer.provideMerge(Vault.layer),
+    Layer.provide(
+      Layer.mock(ServerSecretStore.ServerSecretStore)({
+        get: (name) => Effect.succeed(Option.fromUndefinedOr(stored.get(name))),
+        create: (name, value) => Effect.sync(() => void stored.set(name, value)),
+      }),
+    ),
+    Layer.provide(
+      Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("env:test")),
+      }),
+    ),
+    Layer.provideMerge(database),
+    Layer.provideMerge(FetchHttpClient.layer),
+    Layer.provide(NodeCrypto.layer),
+    Layer.provide(NodeServices.layer),
+  );
+};
+
+describe("Integration credential destinations", () => {
+  const tokenHeaders = { authorization: "Bearer {{credential:github.value}}" };
+  const reasonOf = (exit: { readonly _tag: string; readonly failure?: unknown }) =>
+    exit._tag === "Failure" ? (exit.failure as { readonly reason?: string }).reason : "success";
+
+  it.effect(
+    "keeps project-scoped vault credentials inside that project, including cached tools",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const upstream = yield* fakeUpstream;
+          const vault = yield* Vault.Vault,
+            service = yield* Integrations.Integrations;
+          const a = ProjectLabelId.make("project:a"),
+            b = ProjectLabelId.make("project:b");
+          yield* vault.create({
+            name: "github",
+            type: "api_key",
+            scopeProjectId: a,
+            allowedDomains: ["127.0.0.1"],
+            secretFields: { value: "scoped-credential" },
+          });
+          yield* service.create({ ...createInput(upstream.url), headers: tokenHeaders });
+          expect((yield* service.listTools(IntegrationName.make("gmail"), a)).tools).toHaveLength(
+            1,
+          );
+          const calls = upstream.seen.length;
+          for (const scope of [b, null]) {
+            for (const operation of [
+              service.listTools(IntegrationName.make("gmail"), scope).pipe(Effect.asVoid),
+              service
+                .callTool(IntegrationName.make("gmail"), "echo", {}, scope)
+                .pipe(Effect.asVoid),
+            ])
+              expect((yield* operation.pipe(Effect.flip)).reason).toBe("credential_unresolved");
+          }
+          expect(upstream.seen).toHaveLength(calls);
+        }),
+      ).pipe(Effect.provide(vaultLayer())),
+  );
+
+  it.effect("refuses a vault item whose domains do not include the integration's host", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstream;
+        const vault = yield* Vault.Vault;
+        const service = yield* Integrations.Integrations;
+        yield* vault.create({
+          name: "github",
+          type: "api_key",
+          allowedDomains: ["github.com"],
+          secretFields: { value: "github-token-123" },
+        });
+        const { integration } = yield* service.create({
+          ...createInput(upstream.url),
+          headers: tokenHeaders,
+        });
+        const call = yield* service
+          .callTool(integration.name, "echo", {}, null)
+          .pipe(Effect.result);
+        expect(reasonOf(call)).toBe("credential_not_allowed");
+        expect(upstream.seen).toHaveLength(0);
+      }).pipe(Effect.provide(vaultLayer())),
+    ),
+  );
+
+  it.effect("sends a vault item whose domains include the integration's host", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstream;
+        const vault = yield* Vault.Vault;
+        const service = yield* Integrations.Integrations;
+        yield* vault.create({
+          name: "github",
+          type: "api_key",
+          allowedDomains: ["127.0.0.1"],
+          secretFields: { value: "github-token-123" },
+        });
+        const { integration } = yield* service.create({
+          ...createInput(upstream.url),
+          headers: tokenHeaders,
+        });
+        yield* service.callTool(integration.name, "echo", {}, null);
+        expect(upstream.seen.at(-1)?.authorization).toBe("Bearer github-token-123");
+      }).pipe(Effect.provide(vaultLayer())),
+    ),
+  );
+
+  it.effect("sends an owner-approved item until the integration's URL changes", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstream;
+        const other = yield* fakeUpstream;
+        const vault = yield* Vault.Vault;
+        const service = yield* Integrations.Integrations;
+        yield* vault.create({
+          name: "github",
+          type: "api_key",
+          secretFields: { value: "github-token-123" },
+        });
+        const { integration } = yield* service.create(
+          { ...createInput(upstream.url), headers: tokenHeaders },
+          { approveCredentials: true },
+        );
+        yield* service.callTool(integration.name, "echo", {}, null);
+        expect(upstream.seen.at(-1)?.authorization).toBe("Bearer github-token-123");
+
+        yield* service.update({ id: integration.id, url: other.url });
+        const moved = yield* service
+          .callTool(integration.name, "echo", {}, null)
+          .pipe(Effect.result);
+        expect(reasonOf(moved)).toBe("credential_not_allowed");
+        expect(other.seen).toHaveLength(0);
+
+        yield* service.update({ id: integration.id, url: other.url }, { approveCredentials: true });
+        yield* service.callTool(integration.name, "echo", {}, null);
+        expect(other.seen.at(-1)?.authorization).toBe("Bearer github-token-123");
+      }).pipe(Effect.provide(vaultLayer())),
+    ),
   );
 });

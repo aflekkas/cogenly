@@ -1682,8 +1682,11 @@ const makeWsRpcHandlers = (
       [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
       [WS_METHODS.integrationsList]: () => integrations.list(),
-      [WS_METHODS.integrationsCreate]: (input) => integrations.create(input),
-      [WS_METHODS.integrationsUpdate]: (input) => integrations.update(input),
+      // The owner's own Settings writes approve the vault items their headers reference.
+      [WS_METHODS.integrationsCreate]: (input) =>
+        integrations.create(input, { approveCredentials: true }),
+      [WS_METHODS.integrationsUpdate]: (input) =>
+        integrations.update(input, { approveCredentials: true }),
       [WS_METHODS.integrationsDelete]: (input) => integrations.remove(input.id),
       [WS_METHODS.integrationsTestConnection]: (input) => integrations.testConnection(input.id),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,

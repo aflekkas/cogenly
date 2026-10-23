@@ -58,6 +58,11 @@ export const Integration = Schema.Struct({
   ...integrationFields,
   /** Credential destination authorized by the owner; absent on legacy definitions. */
   credentialOrigin: Schema.optional(Schema.String),
+  /**
+   * Vault item names the owner approved for `credentialOrigin`. Any other item
+   * resolves only when its allowed domains include the integration's host.
+   */
+  approvedCredentialItems: Schema.optional(Schema.Array(Schema.String)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   /** Tombstone; null while live. Deletes set this instead of removing the row. */
@@ -93,7 +98,7 @@ export const IntegrationConnectionStatus = Schema.Literals([
 ]);
 export type IntegrationConnectionStatus = typeof IntegrationConnectionStatus.Type;
 
-/** What clients and `integrations_list` see: never resolved credentials. */
+/** What clients and `integrations_list` see: never resolved credentials, and literal header values masked. */
 export const IntegrationSummary = Schema.Struct({
   integration: Integration,
   status: IntegrationConnectionStatus,
@@ -127,10 +132,12 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
     "conflict",
     "disabled",
     "credential_unresolved",
+    "credential_not_allowed",
     "upstream_unreachable",
     "upstream_timeout",
     "upstream_error",
     "invalid_request",
+    "approval_required",
   ]),
   cause: Schema.optional(Schema.Defect()),
 }) {

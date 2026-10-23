@@ -161,6 +161,15 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
       });
       expect(evaluated).toBe(1);
 
+      const asked = yield* call("vault_fill", { name: "GitHub", field: "password" });
+      expect(asked).toMatchObject({ status: "approval_required" });
+      expect(typed).toHaveLength(0);
+      const savedItem = (yield* Context.get(context, Vault.Vault).list({})).items[0]!;
+      yield* Context.get(context, Vault.Vault).update({
+        id: savedItem.id,
+        policy: { mode: "allow", allowedAgentIds: [], allowedDomains: ["github.com"] },
+      });
+
       const filled = yield* call("vault_fill", {
         name: "GitHub",
         field: "password",
@@ -169,7 +178,12 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
       expect(filled).toMatchObject({ status: "filled", field: "password", domain: "github.com" });
       expect(JSON.stringify(filled)).not.toContain("octo-password-123");
       expect(typed).toEqual([
-        { text: "octo-password-123", locator: "input[name=password]", clear: true },
+        {
+          expectedOrigin: "https://github.com",
+          text: "octo-password-123",
+          locator: "input[name=password]",
+          clear: true,
+        },
       ]);
 
       for (const expression of [
@@ -321,6 +335,7 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
       const saved = yield* call("vault_save", {
         name: "Visa",
         type: "card",
+        policy: { mode: "allow", allowedAgentIds: [], allowedDomains: ["shop.test"] },
         allowedDomains: ["shop.test"],
         secretFields: {
           cardNumber: "4242 4242 4242 4242",
@@ -349,10 +364,30 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
         expect(JSON.stringify(filled)).not.toContain(text);
       }
       expect(typed).toEqual([
-        { text: "4242 4242 4242 4242", locator: "input[name=cardNumber]", clear: true },
-        { text: "08/27", locator: "input[name=cardExpiry]", clear: true },
-        { text: "987", locator: "input[name=cardCvc]", clear: true },
-        { text: "Ada Cardholder", locator: "input[name=cardholderName]", clear: true },
+        {
+          expectedOrigin: "https://shop.test",
+          text: "4242 4242 4242 4242",
+          locator: "input[name=cardNumber]",
+          clear: true,
+        },
+        {
+          expectedOrigin: "https://shop.test",
+          text: "08/27",
+          locator: "input[name=cardExpiry]",
+          clear: true,
+        },
+        {
+          expectedOrigin: "https://shop.test",
+          text: "987",
+          locator: "input[name=cardCvc]",
+          clear: true,
+        },
+        {
+          expectedOrigin: "https://shop.test",
+          text: "Ada Cardholder",
+          locator: "input[name=cardholderName]",
+          clear: true,
+        },
       ]);
 
       pageUrl = "https://evil.test/checkout";

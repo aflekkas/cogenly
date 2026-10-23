@@ -1,6 +1,7 @@
 import {
   AgentId,
   EnvironmentId,
+  ProjectLabelId,
   ThreadId,
   VaultItemMetadata,
   VaultSecretFields,
@@ -8,16 +9,29 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import type * as Statement from "effect/sql/Statement";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Vault from "./Vault.ts";
+import { VAULT_WITHHELD } from "./VaultRedactor.ts";
+import { totp } from "./VaultTotp.ts";
+
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
+import * as Workspace from "../agents/AgentWorkspaceService.ts";
+import * as AgentStore from "../agents/AgentStore.ts";
+import * as Agents from "../agents/AgentService.ts";
+import * as Work from "../work/WorkHandoffService.ts";
+import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
 
 const memoryStore = () => {
   const values = new Map<string, Uint8Array>();
@@ -38,17 +52,16 @@ const memoryStore = () => {
   } as ServerSecretStore.ServerSecretStore["Service"]);
 };
 
-const layer = Vault.layer.pipe(
-  Layer.provideMerge(Sqlite.layerMemory),
-  Layer.provideMerge(NodeServices.layer),
-  Layer.provideMerge(NodeCrypto.layer),
-  Layer.provide(memoryStore()),
-  Layer.provide(
-    Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
-      getEnvironmentId: Effect.succeed(EnvironmentId.make("env:test")),
-    }),
-  ),
+const dependencies = Layer.mergeAll(
+  Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer)),
+  NodeServices.layer,
+  NodeCrypto.layer,
+  memoryStore(),
+  Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+    getEnvironmentId: Effect.succeed(EnvironmentId.make("env:test")),
+  }),
 );
+const layer = Vault.layer.pipe(Layer.provideMerge(dependencies));
 
 const threadId = ThreadId.make("thread:1");
 
@@ -138,7 +151,12 @@ describe("Vault service", () => {
       });
       expect(wrongDomain.status).toBe("denied");
 
-      const resolved = yield* vault.resolveSecretByName({ name: "GitHub", field: "username" });
+      const resolved = yield* vault.resolveSecretByName({
+        name: "GitHub",
+        field: "username",
+        destinationHost: "api.github.com",
+        approved: false,
+      });
       expect(resolved.value).toBe("octo-user");
 
       const usage = yield* vault.listUsage({ itemId: item.id });
@@ -157,6 +175,125 @@ describe("Vault service", () => {
         .pipe(Effect.flip);
       expect(afterDelete.reason).toBe("not_found");
     }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("thread project scope filters lists and both id and name use", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const project = ProjectLabelId.make("project:a");
+      const other = ProjectLabelId.make("project:b");
+      const policy = { mode: "allow" as const, allowedAgentIds: [], allowedDomains: [] };
+      const { item: hidden } = yield* vault.create({
+        name: "Hidden",
+        type: "api_key",
+        scopeProjectId: other,
+        policy,
+        secretFields: { value: "hidden-secret" },
+      });
+      yield* vault.create({
+        name: "Visible",
+        type: "api_key",
+        scopeProjectId: project,
+        policy,
+        secretFields: { value: "visible-secret" },
+      });
+      yield* vault.create({
+        name: "Shared",
+        type: "api_key",
+        policy,
+        secretFields: { value: "shared-secret" },
+      });
+      expect(
+        (yield* vault.list({ scopeProjectId: other }, threadId)).items.map((i) => i.name),
+      ).toEqual(["Shared", "Visible"]);
+      expect((yield* vault.list({}, ThreadId.make("unfiled"))).items.map((i) => i.name)).toEqual([
+        "Shared",
+      ]);
+      for (const lookup of [{ itemId: hidden.id }, { name: hidden.name }]) {
+        const error = yield* vault
+          .use({
+            ...lookup,
+            field: "value",
+            caller: { kind: "thread", threadId },
+            threadId,
+            scopeProjectId: other,
+          })
+          .pipe(Effect.flip);
+        expect(error.reason).toBe("not_found");
+      }
+      expect(
+        (yield* vault.use({
+          name: "Visible",
+          field: "value",
+          caller: { kind: "thread", threadId },
+          threadId,
+        })).status,
+      ).toBe("allowed");
+    }).pipe(
+      Effect.provide(
+        layer.pipe(
+          Layer.provide(
+            Layer.mock(ProjectFiles.ProjectFiles)({
+              folderForThread: (id) =>
+                Effect.succeed(
+                  id === threadId ? ({ labelId: ProjectLabelId.make("project:a") } as never) : null,
+                ),
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("thread fills ask the owner and approval grants only that thread", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const workspace = yield* Workspace.AgentWorkspaceService;
+      const { item } = yield* vault.create({
+        name: "Thread login",
+        type: "login",
+        allowedDomains: ["example.com"],
+        secretFields: { password: "thread-password" },
+      });
+      const request = {
+        itemId: item.id,
+        field: "password" as const,
+        caller: { kind: "thread" as const, threadId },
+        threadId,
+        domain: "example.com",
+        enforceAllowedDomains: true,
+      };
+      const asked = yield* vault.use(request);
+      expect(asked.status).toBe("approval_required");
+      if (asked.status !== "approval_required" || !asked.approvalId)
+        throw new Error("Missing approval");
+      yield* workspace.approve(asked.approvalId);
+      expect(yield* vault.use(request)).toMatchObject({
+        status: "allowed",
+        value: "thread-password",
+      });
+      expect(
+        (yield* vault.use({
+          ...request,
+          caller: { kind: "thread", threadId: ThreadId.make("other") },
+        })).status,
+      ).toBe("approval_required");
+      expect((yield* vault.use({ ...request, domain: "evil.test" })).status).toBe("denied");
+    }).pipe(
+      Effect.provide(
+        Workspace.layer.pipe(
+          Layer.provideMerge(layer),
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(AgentStore.AgentStore)({}),
+              Layer.mock(Agents.AgentService)({}),
+              Layer.mock(Work.WorkHandoffService)({}),
+              Layer.mock(Schedules.ScheduledTaskService)({}),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   it.effect("asks agents by default, then allows after the policy grants them", () =>
@@ -300,6 +437,169 @@ describe("Vault service", () => {
         .use({ itemId: item.id, field: "cardNumber", caller: { kind: "human" } })
         .pipe(Effect.flip);
       expect(missing.reason).toBe("field_missing");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("withholds tool output when the secrets to scrub cannot be loaded", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const sql = yield* SqlClient.SqlClient;
+      yield* vault.create({
+        name: "Token",
+        type: "api_key",
+        secretFields: { value: "token-value-123" },
+      });
+      yield* sql`ALTER TABLE vault_items RENAME TO vault_items_gone`;
+      expect(yield* vault.scrubText("leaked token-value-123")).toBe(VAULT_WITHHELD);
+      expect(yield* vault.scrubValue({ output: "leaked token-value-123", exitCode: 0 })).toEqual({
+        [VAULT_WITHHELD]: 0,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("reuses pending approvals but creates a fresh request after revocation", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault,
+        sql = yield* SqlClient.SqlClient;
+      const { item } = yield* vault.create({
+        name: "revoke",
+        type: "note",
+        secretFields: { value: "revoked-secret" },
+      });
+      const request = {
+        itemId: item.id,
+        field: "value" as const,
+        threadId,
+        caller: { kind: "thread" as const, threadId },
+      };
+      const first = yield* vault.use(request),
+        pending = yield* vault.use(request);
+      expect(first.status).toBe("approval_required");
+      if (first.status !== "approval_required" || pending.status !== "approval_required")
+        throw new Error("Expected approval");
+      expect(pending.approvalId).toBe(first.approvalId);
+      yield* sql`UPDATE agent_approvals SET status = 'approved' WHERE id = ${first.approvalId}`;
+      yield* vault.update({
+        id: item.id,
+        policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [] },
+      });
+      const retry = yield* vault.use(request);
+      if (retry.status !== "approval_required") throw new Error("Expected fresh approval");
+      expect(retry.approvalId).not.toBe(first.approvalId);
+      const rows = yield* sql`SELECT status FROM agent_approvals`;
+      expect(rows.map((r) => r.status).sort()).toEqual(["approved", "pending"]);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("retains delivered revisions after deletion and refuses registry overflow", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const { item } = yield* vault.create({
+        name: "rotate",
+        type: "note",
+        secretFields: { value: "old-delivered-secret" },
+      });
+      const use = () => vault.use({ itemId: item.id, field: "value", caller: { kind: "human" } });
+      yield* use();
+      yield* vault.update({ id: item.id, secretFields: { value: "new-delivered-secret" } });
+      yield* use();
+      yield* vault.delete({ id: item.id });
+      expect(yield* vault.scrubText("old-delivered-secret new-delivered-secret")).toBe(
+        "[redacted vault secret] [redacted vault secret]",
+      );
+      const overflow = yield* vault
+        .registerProcessSecrets(Array.from({ length: 20_000 }, (_, i) => `unique-delivered-${i}`))
+        .pipe(Effect.result);
+      expect(overflow._tag).toBe("Failure");
+      expect(yield* vault.scrubText("old-delivered-secret")).toBe("[redacted vault secret]");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("retries a scrub reload invalidated while its old snapshot was in flight", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const captured = yield* Deferred.make<void>(),
+          release = yield* Deferred.make<void>();
+        let pause = false;
+        const intercepted = new Proxy(sql, {
+          apply(target, receiver, args: Array<unknown>) {
+            const query = Reflect.apply(target, receiver, args) as Statement.Statement<unknown>;
+            if (!pause || !query.compile()[0].endsWith("FROM vault_items WHERE deleted_at IS NULL"))
+              return query;
+            pause = false;
+            return query.pipe(
+              Effect.tap(() =>
+                Deferred.succeed(captured, undefined).pipe(Effect.andThen(Deferred.await(release))),
+              ),
+            );
+          },
+        });
+        yield* Effect.gen(function* () {
+          const vault = yield* Vault.Vault;
+          yield* vault.create({ name: "old", type: "note", secretFields: { value: "old-secret" } });
+          pause = true;
+          const reload = yield* vault.scrubText("new-secret").pipe(Effect.forkChild);
+          yield* Deferred.await(captured);
+          yield* vault.create({ name: "new", type: "note", secretFields: { value: "new-secret" } });
+          yield* Deferred.succeed(release, undefined);
+          expect(yield* Fiber.join(reload)).toBe("[redacted vault secret]");
+          expect(yield* vault.scrubText("new-secret")).toBe("[redacted vault secret]");
+        }).pipe(
+          Effect.provide(
+            Vault.layer.pipe(Layer.provide(Layer.succeed(SqlClient.SqlClient, intercepted))),
+          ),
+        );
+      }),
+    ).pipe(Effect.provide(dependencies)),
+  );
+
+  it.effect("scrubs short passwords as whole tokens and retains delivered TOTP codes", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const { item } = yield* vault.create({
+        name: "short",
+        type: "login",
+        secretFields: {
+          password: "p4ss",
+          totpSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+        },
+      });
+      expect(yield* vault.scrubText("p4ss xp4ss p4ss_word")).toBe(
+        "[redacted vault secret] xp4ss p4ss_word",
+      );
+      const used = yield* vault.use({ itemId: item.id, field: "totp", caller: { kind: "human" } });
+      if (used.status !== "allowed") throw new Error("Expected code");
+      yield* TestClock.adjust(120_000);
+      expect(yield* vault.scrubText(`code ${used.value} x${used.value}`)).toBe(
+        `code [redacted vault secret] x${used.value}`,
+      );
+      const stream = yield* vault.makeOutputRedactor();
+      const parts = [
+        yield* stream("p4"),
+        yield* stream("ss "),
+        yield* stream(used.value.slice(0, 3)),
+        yield* stream(used.value.slice(3)),
+        yield* stream(" "),
+        yield* stream("xp4ss ", true),
+      ];
+      expect(parts.join("")).toBe("[redacted vault secret] [redacted vault secret] xp4ss ");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("scrubs the TOTP codes valid around now", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+      yield* vault.create({ name: "2FA", type: "login", secretFields: { totpSecret: secret } });
+      const atMs = 1_800_000_015_000;
+      yield* TestClock.setTime(atMs);
+      const [previous, current, next] = [-30_000, 0, 30_000].map((offset) =>
+        totp(secret, { atMs: atMs + offset }),
+      );
+      expect(yield* vault.scrubText(`codes ${previous} ${current} ${next}`)).toBe(
+        "codes [redacted vault secret] [redacted vault secret] [redacted vault secret]",
+      );
     }).pipe(Effect.provide(layer)),
   );
 
