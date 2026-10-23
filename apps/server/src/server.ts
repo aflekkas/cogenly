@@ -5,6 +5,8 @@ import * as Random from "effect/Random";
 import * as Semaphore from "effect/Semaphore";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
+import * as ServerBackup from "./housekeeping/ServerBackup.ts";
+import * as ServerHousekeeping from "./housekeeping/ServerHousekeeping.ts";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as PullRequestWatchReactor from "./orchestration-v2/PullRequestWatchReactor.ts";
 import * as DelegatedTaskQuestionReactor from "./orchestration-v2/DelegatedTaskQuestionReactor.ts";
@@ -546,6 +548,10 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
+  // Server-owned periodic jobs: nightly home backups and housekeeping.
+  // Neither starts provider turns; both are plain service methods.
+  ServerBackup.layer,
+  ServerHousekeeping.layer,
   DatabaseStorage.layer.pipe(
     Layer.provide(ProjectionMaintenance.layer),
     Layer.provide(
