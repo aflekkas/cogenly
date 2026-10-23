@@ -4,6 +4,7 @@ import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import * as Schema from "effect/Schema";
 import { EllipsisIcon } from "lucide-react";
 import {
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -15,6 +16,7 @@ import { AgentFace } from "~/components/agents/face";
 import { ProviderInstanceIcon } from "~/components/chat/ProviderInstanceIcon";
 import { PanOnHoverText } from "~/components/sidebar/PanOnHoverText";
 import { SidebarChatStatusSlot } from "~/components/sidebar/SidebarChatStatusSlot";
+import { playListSwitchMotion } from "~/components/sidebar/listSwitchMotion";
 import {
   SidebarList,
   SidebarRowSubtitle,
@@ -141,6 +143,14 @@ export function AgentContacts({
     [agents],
   );
   const { onTransitionEnd } = useAgentGroupFlip(listRef, flipFolders);
+  // Switching the count bar's filter remounts the list (keyed below); the new
+  // one blur-fades in, as Work's shelves do.
+  const shownFilterRef = useRef(filter);
+  useLayoutEffect(() => {
+    if (shownFilterRef.current === filter) return;
+    shownFilterRef.current = filter;
+    playListSwitchMotion(listRef.current);
+  }, [filter]);
   const shownCount = groups.reduce((count, group) => count + group.agents.length, 0);
   return (
     <>
