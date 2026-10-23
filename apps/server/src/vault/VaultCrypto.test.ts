@@ -168,6 +168,24 @@ describe("redactor", () => {
     });
   });
 
+  it("redacts property names too, keeping entries whose names collide", () => {
+    expect(
+      redactValue({ headers: { "hunter2-a": 1, "hunter2-extended-a": 2, status: 3 } }, [
+        "hunter2",
+        "hunter2-extended",
+      ]),
+    ).toEqual({
+      headers: {
+        "[redacted vault secret]-a": 1,
+        "[redacted vault secret]-a#2": 2,
+        status: 3,
+      },
+    });
+    expect(redactShortValue({ "987": "cvc" }, ["987"])).toEqual({
+      "[redacted vault secret]": "cvc",
+    });
+  });
+
   it("redacts short card secrets only as whole tokens", () => {
     const short = ["987", "08/27"];
     expect(redactShortSecrets("cvc 987, expiry 08/27.", short)).toBe(

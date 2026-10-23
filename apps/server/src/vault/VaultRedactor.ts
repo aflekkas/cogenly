@@ -18,27 +18,44 @@ export const redactText = (text: string, secrets: Iterable<string>): string => {
   return result;
 };
 
-/** Deep-copies a tool result, rewriting every string inside it. */
-const mapStrings = <A>(value: A, rewrite: (text: string) => string): A => {
+/**
+ * Deep-copies a tool result, rewriting every string inside it, and property
+ * names too when `rewriteKeys` is set: a record keyed by a secret (headers,
+ * a map of tokens) leaks it as surely as a value. Keys that collide after
+ * rewriting get a `#n` suffix so no entry is dropped.
+ */
+const mapStrings = <A>(value: A, rewrite: (text: string) => string, rewriteKeys = false): A => {
   const walk = (current: unknown): unknown => {
     if (typeof current === "string") return rewrite(current);
     if (Array.isArray(current)) return current.map(walk);
-    if (typeof current === "object" && current !== null)
-      return Object.fromEntries(Object.entries(current).map(([key, entry]) => [key, walk(entry)]));
+    if (typeof current === "object" && current !== null) {
+      const result: Record<string, unknown> = {};
+      for (const [key, entry] of Object.entries(current)) {
+        let name = rewriteKeys ? rewrite(key) : key;
+        if (name !== key)
+          for (let n = 2; Object.hasOwn(result, name); n += 1) name = `${rewrite(key)}#${n}`;
+        result[name] = walk(entry);
+      }
+      return result;
+    }
     return current;
   };
   return walk(value) as A;
 };
 
-/** Deep-copies a tool result, redacting every string inside it. */
+/** Deep-copies a tool result, redacting every string and property name inside it. */
 export const redactValue = <A>(value: A, secrets: Iterable<string>): A => {
   const ordered = orderedSecrets(secrets);
   if (ordered.length === 0) return value;
-  return mapStrings(value, (text) => {
-    let result = text;
-    for (const secret of ordered) result = result.split(secret).join(VAULT_REDACTION);
-    return result;
-  });
+  return mapStrings(
+    value,
+    (text) => {
+      let result = text;
+      for (const secret of ordered) result = result.split(secret).join(VAULT_REDACTION);
+      return result;
+    },
+    true,
+  );
 };
 
 /** What a tool result says in place of its text when the vault cannot be checked. */
@@ -77,7 +94,7 @@ export const redactShortSecrets = (text: string, secrets: Iterable<string>): str
 export const redactShortValue = <A>(value: A, secrets: Iterable<string>): A => {
   const list = [...secrets];
   if (list.length === 0) return value;
-  return mapStrings(value, (text) => redactShortSecrets(text, list));
+  return mapStrings(value, (text) => redactShortSecrets(text, list), true);
 };
 
 /** A PTY may split a token across data callbacks. Hold only a possible secret
