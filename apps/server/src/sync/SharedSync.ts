@@ -44,18 +44,8 @@ const make = Effect.gen(function* () {
   ) {
     const view = yield* topology;
     const trustedRelay = view.link._tag === "spoke" && view.link.hubEnvironmentId === source;
-    if (!trustedRelay) {
-      const known = new Set(view.machines.map((machine) => machine.environmentId as string));
-      for (const change of batch.changes)
-        if (
-          typeof change.fields.ownerMachine === "string" &&
-          !known.has(change.fields.ownerMachine)
-        ) {
-          const current = yield* state.get(change.kind, change.id);
-          if (current?.fields.ownerMachine !== change.fields.ownerMachine)
-            return yield* new SharedStateError({ reason: "owner-change" });
-        }
-    }
+    // Former hubs may still own documents after re-pairing. Execution paths
+    // require the local machine to be the owner even when it is no longer paired.
     return yield* state.receive(batch, source, trustedRelay);
   });
   yield* channels.register(SharedChangesApply, (batch, caller) =>

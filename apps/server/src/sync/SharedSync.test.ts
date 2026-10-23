@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
+  EnvironmentId,
   SharedChangesApply,
   SharedChangesRead,
   type SharedDocumentChange,
@@ -58,6 +59,40 @@ const start = Effect.fn("startSyncMachine")(function* (
 });
 
 describe("shared documents over the authenticated machine link", () => {
+  it.live(
+    "re-pairing uploads jobs owned by an unknown former hub",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* start("repair-hub", "cloud-server");
+        const spoke = yield* start("repair-spoke", "computer");
+        const formerHub = EnvironmentId.make("former-hub");
+        yield* spoke.state.write("schedule", "task:former-hub", {
+          agentId: null,
+          title: "Old job",
+          prompt: "Check",
+          enabled: true,
+          schedule: { type: "interval", everyMs: 60000 },
+          repositoryRemote: null,
+          workspaceStrategy: { type: "root" },
+          modelSelection: { instanceId: "codex", model: "gpt-5" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          ownerMachine: formerHub,
+          createdAt: project.createdAt,
+        });
+        yield* pair(hub, spoke);
+        yield* spoke.sync.sync(hub.environmentId);
+        expect((yield* hub.state.get("schedule", "task:former-hub"))?.fields.ownerMachine).toBe(
+          formerHub,
+        );
+        const sql = yield* hub.run(SqlClient.SqlClient);
+        expect(yield* sql`SELECT owner_machine FROM scheduled_tasks`).toEqual([
+          { owner_machine: formerHub },
+        ]);
+        expect((yield* spoke.state.cursors(hub.environmentId)).acknowledged).toBeGreaterThan(0);
+      }).pipe(Effect.scoped),
+    20000,
+  );
   it.live(
     "a peer with a broken sync channel cannot block the later healthy peer",
     () =>

@@ -36,6 +36,8 @@ An agent's triggers must
 have the same owner. Reservations, due-work dispatch, event dispatch, webhooks
 and reconciliation enforce ownership. Being offline does not grant another
 machine permission to take over.
+Documents owned by machines outside the current pairing remain stored and inert;
+re-pairing does not transfer their execution to the new hub.
 
 Sync uses the domain's text and collection limits. A document exceeding the normal
 batch byte budget travels alone, so a valid configuration cannot wedge a cursor.
