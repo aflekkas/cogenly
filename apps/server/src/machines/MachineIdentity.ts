@@ -30,7 +30,7 @@ export class MachineIdentity extends Context.Service<
   {
     readonly self: Effect.Effect<MachineSelfReport>;
     readonly update: (input: MachineUpdateInput) => Effect.Effect<void, MachineError>;
-    /** Emits when the name, role or icon setting changes. */
+    /** Emits when the machine's settings or provider status changes. */
     readonly changes: Stream.Stream<void>;
   }
 >()("cogenly-server/machines/MachineIdentity") {}
@@ -48,14 +48,12 @@ const make = Effect.gen(function* () {
 
   const providerStatus = providers.getProviders.pipe(
     Effect.map((snapshots) =>
-      snapshots.map(
-        (provider): MachineProvider => ({
-          instanceId: provider.instanceId,
-          displayName: provider.displayName ?? provider.instanceId,
-          enabled: provider.enabled,
-          auth: provider.auth.status,
-        }),
-      ),
+      snapshots.map((provider): MachineProvider => ({
+        instanceId: provider.instanceId,
+        displayName: provider.displayName ?? provider.instanceId,
+        enabled: provider.enabled,
+        auth: provider.auth.status,
+      })),
     ),
   );
 
@@ -101,11 +99,13 @@ const make = Effect.gen(function* () {
         Effect.withSpan("MachineIdentity.update"),
       );
 
-  const changes = settings.streamChanges.pipe(
-    Stream.map((next) => [next.machineName, next.machineRole, next.environmentIcon] as const),
-    Stream.changesWith((a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2]),
-    Stream.as(undefined),
-  );
+  const changes = Stream.merge(
+    settings.streamChanges.pipe(
+      Stream.map((next) => [next.machineName, next.machineRole, next.environmentIcon] as const),
+      Stream.changesWith((a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2]),
+    ),
+    providers.streamChanges,
+  ).pipe(Stream.as(undefined));
 
   return MachineIdentity.of({ self, update, changes });
 });
