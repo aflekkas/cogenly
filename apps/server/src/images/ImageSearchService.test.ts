@@ -6,7 +6,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { assert, describe, it } from "@effect/vitest";
 
-import { probeImageUrl } from "../assets/ImageProxyFetch.ts";
+import { ImageProxyHostLookup, probeImageUrl } from "../assets/ImageProxyFetch.ts";
 import {
   commonsResponseToResult,
   keepReachableImages,
@@ -128,17 +128,20 @@ const upstreamAnswers: Record<string, () => Response | Promise<Response>> = {
   "https://img.test/silent.jpg": () => new Promise<Response>(() => {}),
 };
 const methods: string[] = [];
-const mockUpstream = Layer.succeed(
-  HttpClient.HttpClient,
-  HttpClient.make((request) =>
-    Effect.promise(async () => {
-      methods.push(request.method);
-      const answer = upstreamAnswers[request.url];
-      return HttpClientResponse.fromWeb(
-        request,
-        answer ? await answer() : new Response(null, { status: 404 }),
-      );
-    }),
+const mockUpstream = Layer.mergeAll(
+  Layer.succeed(ImageProxyHostLookup, async () => [{ address: "93.184.216.34", family: 4 }]),
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make((request) =>
+      Effect.promise(async () => {
+        methods.push(request.method);
+        const answer = upstreamAnswers[request.url];
+        return HttpClientResponse.fromWeb(
+          request,
+          answer ? await answer() : new Response(null, { status: 404 }),
+        );
+      }),
+    ),
   ),
 );
 

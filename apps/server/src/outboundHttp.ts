@@ -2,6 +2,8 @@ import * as NodeModule from "node:module";
 
 import type * as Undici from "undici";
 
+import { pinnedLookup, type ResolvedAddress } from "./security/PublicAddress.ts";
+
 // undici stays external to the CLI bundle (scripts/lib/cli-external-packages.ts).
 // Inside a Node single-executable only `require` can load it from disk.
 const requireUndici = NodeModule.createRequire(import.meta.url);
@@ -40,6 +42,25 @@ export function installHttp1FetchDispatcher(): void {
         })
       : new undici.Agent({ allowH2: false }),
   );
+}
+
+/**
+ * A fetch whose connections only ever reach `addresses`, whatever the URL's
+ * name resolves to by then. The URL's host still sets TLS SNI and the Host
+ * header. Close it once its responses are consumed.
+ */
+export function makePinnedFetch(addresses: ReadonlyArray<ResolvedAddress>) {
+  const undici = requireUndici("undici") as typeof Undici;
+  const dispatcher = new undici.Agent({
+    allowH2: false,
+    connect: { lookup: pinnedLookup(addresses) },
+  });
+  const fetch = ((input: string | URL, init?: RequestInit) =>
+    undici.fetch(input, {
+      ...(init as unknown as Undici.RequestInit),
+      dispatcher,
+    })) as unknown as typeof globalThis.fetch;
+  return { fetch, close: () => dispatcher.destroy() };
 }
 
 /**
