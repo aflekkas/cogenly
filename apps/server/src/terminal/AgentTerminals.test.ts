@@ -245,6 +245,7 @@ it.live("foreground timeout kills a SIGTERM-ignoring command and its child", () 
           if (match) yield* Deferred.succeed(children, [Number(match[1])]);
         }),
       );
+      // @effect-diagnostics-next-line globalDateInEffect:off - Live test: wall-clock bound, not TestClock.
       const startedAt = Date.now();
       const result = yield* manager.runAgent({
         threadId: "A",
@@ -252,6 +253,7 @@ it.live("foreground timeout kills a SIGTERM-ignoring command and its child", () 
         cwd,
         timeoutMs: 300,
       });
+      // @effect-diagnostics-next-line globalDateInEffect:off - Live test: wall-clock bound, not TestClock.
       const elapsed = Date.now() - startedAt;
       expect(result.timedOut).toBe(true);
       expect(result.status).toBe("exited");
