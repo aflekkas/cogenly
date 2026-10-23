@@ -8,7 +8,9 @@ reply means that transaction committed; sending bytes does not acknowledge it.
 
 Each field has an HLC ordered by physical milliseconds, logical counter, then
 stable environment ID. Receiving advances the persisted local clock before the
-next local edit. Collections are fields, so concurrent replacements of a repo
+next local edit, bounding observed wall time and logical counters to contain peer
+clock skew. Stored and relayed field clocks retain their original identities and
+ordering. Collections are fields, so concurrent replacements of a repo
 list or fallback chain choose one whole value. Tombstones are permanent for an
 ID, including against edits with newer clocks. Recreating means a new ID.
 Local captures preserve the domain's checkout bindings; only peer merges reconcile
@@ -28,7 +30,7 @@ reset protocol yet.
 
 Only the three declared document kinds cross these channels. The receiver
 rejects unknown fields, malformed values, oversized multi-document batches, cursor
-gaps, implausibly future clocks, forged authorship and ownership changes.
+gaps, forged authorship and ownership changes.
 V1 ownership is fixed after creation: transferring execution needs a separate
 handoff protocol. Only the owner machine may change an existing agent's or
 schedule's sensitive fields (permissions, instructions, prompt, provider/model,

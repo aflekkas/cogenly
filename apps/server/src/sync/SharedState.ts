@@ -78,17 +78,15 @@ const NON_OWNER_EDITABLE_FIELDS: Readonly<Record<"agent" | "schedule", ReadonlyS
   schedule: new Set(["title", "enabled"]),
 };
 
-/** How far ahead of this machine a peer's hybrid clock may run before it is clamped. */
+/** Maximum future wall time observed by the local hybrid clock. */
 export const MAX_CLOCK_SKEW_MS = 5 * 60_000;
-export const MAX_LOGICAL_CLOCK = 1_000_000_000;
+const MAX_LOGICAL_CLOCK = 1_000_000_000;
 
 /**
- * Bounds one hybrid clock to what this machine can safely observe: a wall
- * more than the skew allowance ahead is pulled back to the allowance (the
- * sender's machine clock is wrong, not its change), and an absurd logical
- * counter is capped. Returns whether anything moved.
+ * Bounds local observation only. Stored and relayed clocks retain their original
+ * identity: clamping those could collapse distinct edits or change replay order.
  */
-export function clampClock(
+function clampClock(
   clock: HybridClock,
   now: number,
 ): { readonly clock: HybridClock; readonly clamped: boolean } {
@@ -97,24 +95,6 @@ export function clampClock(
   return wall === clock.wall && logical === clock.logical
     ? { clock, clamped: false }
     : { clock: { ...clock, wall, logical }, clamped: true };
-}
-
-/** Clamps every clock a change carries; applied before persist and observe. */
-export function clampChangeClocks(
-  change: SharedDocumentChange,
-  now: number,
-): { readonly change: SharedDocumentChange; readonly clamped: boolean } {
-  let clamped = false;
-  const clocks = Object.fromEntries(
-    Object.entries(change.clocks).map(([key, clock]) => {
-      const result = clampClock(clock, now);
-      clamped = clamped || result.clamped;
-      return [key, result.clock];
-    }),
-  );
-  const tombstone = change.tombstone ? clampClock(change.tombstone, now).clock : change.tombstone;
-  if (change.tombstone) clamped = clamped || tombstone !== change.tombstone;
-  return { change: { ...change, clocks, tombstone }, clamped };
 }
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
@@ -163,7 +143,13 @@ const make = Effect.gen(function* () {
       clock_json: string;
     }>`SELECT clock_json FROM shared_clock WHERE singleton=1`;
     const local = rows[0] ? yield* decodeClock(rows[0].clock_json) : undefined;
-    const next = tickClock(environmentId, yield* Clock.currentTimeMillis, local, received);
+    const now = yield* Clock.currentTimeMillis;
+    const observed = received ? clampClock(received, now) : undefined;
+    if (observed?.clamped)
+      yield* Effect.logWarning("Bounded local observation of a shared change clock", {
+        source: received!.node,
+      });
+    const next = tickClock(environmentId, now, local, observed?.clock);
     yield* sql`INSERT INTO shared_clock(singleton,clock_json) VALUES (1,${encodeJson(next)}) ON CONFLICT(singleton) DO UPDATE SET clock_json=excluded.clock_json`;
     return next;
   });
@@ -354,7 +340,7 @@ const make = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.gen(function* () {
-          let batch = yield* Schema.decodeUnknownEffect(SharedChangeBatch)(input, {
+          const batch = yield* Schema.decodeUnknownEffect(SharedChangeBatch)(input, {
             onExcessProperty: "error",
           });
           if (
@@ -366,26 +352,11 @@ const make = Effect.gen(function* () {
             (batch.cursor === batch.after && batch.changes.length > 0)
           )
             return yield* new SharedStateError({ reason: "invalid-cursor" });
-          const now = yield* Clock.currentTimeMillis;
-          // A peer whose clock runs ahead must not stall the stream: its
-          // changes are accepted with their clocks clamped to the skew
-          // allowance (which also keeps the local hybrid clock from being
-          // poisoned by observing them), and the skew is logged so the
-          // misconfigured machine is visible in the server log.
-          const accepted: SharedDocumentChange[] = [];
           for (const change of batch.changes) {
             yield* validateChange(change);
             if (!trustedRelay && change.updatedBy !== source)
               return yield* new SharedStateError({ reason: "invalid-document" });
-            const { change: clampedChange, clamped } = clampChangeClocks(change, now);
-            if (clamped)
-              yield* Effect.logWarning(
-                "Clamped shared change clocks from a machine ahead of this one",
-                { source, kind: change.kind, id: change.id },
-              );
-            accepted.push(clampedChange);
           }
-          batch = { ...batch, changes: accepted };
           const previous = (yield* cursors(source)).received;
           if (batch.cursor <= previous) return { acknowledged: previous, changed: false };
           if (batch.after > previous)

@@ -422,28 +422,34 @@ describe("SharedState", () => {
       expect((yield* Effect.result(state.acknowledge(peer, 99)))._tag).toBe("Failure");
     }).pipe(Effect.provide(layer)),
   );
-  it.effect("accepts a batch from a machine over 5 minutes ahead, clamping its clocks", () =>
+  it.effect("preserves queued future clocks and bounds only local observation", () =>
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;
       // TestClock starts at 0, so a wall an hour out is far beyond the skew bound.
       const future = change({ name: "future" }, 60 * 60_000);
-      const received = yield* state.receive(batch([future]), peer, false);
-      expect(received.acknowledged).toBe(1);
+      const after = change({ name: "after" }, 60 * 60_000 + 1);
+      const received = yield* state.receive(
+        { after: 0, cursor: 2, changes: [future, after] },
+        peer,
+        false,
+      );
+      expect(received.acknowledged).toBe(2);
       const stored = yield* state.get("project", "label:peer");
-      expect(stored?.fields.name).toBe("future");
-      // Clamped to now + 5 minutes, not the sender's hour-ahead wall.
-      expect(stored?.clocks.name?.wall).toBeLessThanOrEqual(5 * 60_000);
-      // The stream never stalls: the peer's next batch (still ahead, still
-      // clamped) applies once time has moved, instead of being rejected.
+      expect(stored?.fields.name).toBe("after");
+      expect(stored?.clocks.name).toEqual(after.clocks.name);
+      const relay = EnvironmentId.make("relay");
+      expect((yield* state.readBatch(0, relay, false)).changes).toEqual([future, after]);
+      // Re-delivery through another hub must retain identity even after time moves.
       yield* TestClock.adjust("1 second");
-      yield* state.receive(batch([change({ name: "after" }, 60 * 60_000 + 1_000)], 1), peer, false);
-      expect((yield* state.get("project", "label:peer"))?.fields.name).toBe("after");
-      // The local clock was not poisoned by the future wall.
+      yield* state.receive({ after: 0, cursor: 2, changes: [after, future] }, relay, true);
+      expect(yield* state.get("project", "label:peer")).toEqual(stored);
+      const sql = yield* SqlClient.SqlClient;
+      expect((yield* sql`SELECT * FROM shared_changes`).length).toBe(2);
       yield* state.write("project", "label:local", project);
       const replay = yield* state.readBatch(0, peer, false);
       for (const replayed of replay.changes)
         for (const clock of Object.values(replayed.clocks))
-          expect(clock.wall).toBeLessThan(60 * 60_000);
+          expect(clock.wall).toBeLessThanOrEqual(1_000 + SharedState.MAX_CLOCK_SKEW_MS);
     }).pipe(Effect.provide(layer)),
   );
 
