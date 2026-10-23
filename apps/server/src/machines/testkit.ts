@@ -34,6 +34,12 @@ import * as PeerChannels from "./PeerChannels.ts";
 import * as PeerHttp from "./peerHttp.ts";
 import * as PeerHub from "./PeerHub.ts";
 
+interface MachineOverrides {
+  readonly auth?: (
+    auth: EnvironmentAuth.EnvironmentAuth["Service"],
+  ) => EnvironmentAuth.EnvironmentAuth["Service"];
+}
+
 const layerIdentity = (name: string, role: MachineRole) =>
   Layer.effect(
     MachineIdentity.MachineIdentity,
@@ -66,6 +72,7 @@ const machineLayer = (
   name: string,
   role: MachineRole,
   socketConstructor?: Socket.WebSocketConstructor["Service"],
+  overrides: MachineOverrides = {},
 ) => {
   const infra = Layer.mergeAll(
     SqlitePersistence.layerMemory,
@@ -81,7 +88,15 @@ const machineLayer = (
     Layer.provideMerge(PeerHub.layer),
     Layer.provideMerge(PeerChannels.layer),
     Layer.provideMerge(layerIdentity(name, role)),
-    Layer.provideMerge(EnvironmentAuth.layer),
+    Layer.provideMerge(
+      Layer.effect(
+        EnvironmentAuth.EnvironmentAuth,
+        Effect.gen(function* () {
+          const auth = yield* EnvironmentAuth.EnvironmentAuth;
+          return overrides.auth?.(auth) ?? auth;
+        }),
+      ).pipe(Layer.provideMerge(EnvironmentAuth.layer)),
+    ),
     Layer.provideMerge(infra),
     Layer.provide(
       Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
@@ -115,8 +130,9 @@ export const startMachine = Effect.fn("startMachine")(function* (
   name: string,
   role: MachineRole,
   socketConstructor?: Socket.WebSocketConstructor["Service"],
+  overrides: MachineOverrides = {},
 ) {
-  const context = yield* Layer.build(machineLayer(name, role, socketConstructor));
+  const context = yield* Layer.build(machineLayer(name, role, socketConstructor, overrides));
   const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.provideContext(effect, context as Context.Context<MachineContext>);
   const server = yield* run(HttpServer.HttpServer);
