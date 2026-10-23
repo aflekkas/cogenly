@@ -10,9 +10,14 @@ not introduce another execution model. See
 
 An environment keeps its ID across server restarts and endpoint changes. Saved
 connections are local to a client profile; the server's identity and state are
-not. A repository identity can correlate clones across environments, but never
-routes work between them. A project and its threads belong to one environment.
-The canonical key follows the `upstream` remote when one exists, so pull request
+not. Separately, [machine peer links](./machines.md) let an admin pair servers
+under one hub. A spoke stores its own peer credential and dials the hub; that
+server-owned link does not use the client's saved connection catalog. It
+currently carries presence and typed channels, with no project or thread
+replication or remote execution. Projects and threads still execute and persist
+in their original environment.
+
+A repository identity correlates clones across environments. The canonical key follows the `upstream` remote when one exists, so pull request
 features target the repository a fork tracks. A fork also reports its own
 `origin`, and clients group and label by that, so a fork never collapses into a
 checkout of its upstream.
