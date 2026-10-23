@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { IntegrationName, ProjectLabelId } from "@t3tools/contracts";
+import { EnvironmentId, IntegrationName, ProjectLabelId } from "@t3tools/contracts";
+import { NodeCrypto } from "@effect/platform-node";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -12,7 +13,10 @@ import * as SqlClient from "effect/sql/SqlClient";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- The fake upstream is a plain node:http server; Effect has no test HTTP server for this.
 import * as NodeHttp from "node:http";
 
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
+import * as Vault from "../vault/Vault.ts";
 import { runMigrations } from "../persistence/Migrations.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import * as Integrations from "./Integrations.ts";
@@ -422,5 +426,118 @@ describe("Integrations gateway", () => {
       }>`SELECT COUNT(*) AS n FROM integrations WHERE deleted_at IS NOT NULL`;
       expect(tombstones[0]?.n).toBe(1);
     }).pipe(Effect.provide(layerWith())),
+  );
+});
+
+/** The gateway over the real vault, so credential destinations are checked as in production. */
+const vaultLayer = () => {
+  const stored = new Map<string, Uint8Array>();
+  return Integrations.layer.pipe(
+    Layer.provide(Credentials.layer),
+    Layer.provideMerge(Vault.layer),
+    Layer.provide(
+      Layer.mock(ServerSecretStore.ServerSecretStore)({
+        get: (name) => Effect.succeed(Option.fromUndefinedOr(stored.get(name))),
+        create: (name, value) => Effect.sync(() => void stored.set(name, value)),
+      }),
+    ),
+    Layer.provide(
+      Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("env:test")),
+      }),
+    ),
+    Layer.provideMerge(database),
+    Layer.provideMerge(FetchHttpClient.layer),
+    Layer.provide(NodeCrypto.layer),
+    Layer.provide(NodeServices.layer),
+  );
+};
+
+describe("Integration credential destinations", () => {
+  const tokenHeaders = { authorization: "Bearer {{credential:github.value}}" };
+  const reasonOf = (exit: { readonly _tag: string; readonly failure?: unknown }) =>
+    exit._tag === "Failure" ? (exit.failure as { readonly reason?: string }).reason : "success";
+
+  it.effect("refuses a vault item whose domains do not include the integration's host", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstream;
+        const vault = yield* Vault.Vault;
+        const service = yield* Integrations.Integrations;
+        yield* vault.create({
+          name: "github",
+          type: "api_key",
+          allowedDomains: ["github.com"],
+          secretFields: { value: "github-token-123" },
+        });
+        const { integration } = yield* service.create({
+          ...createInput(upstream.url),
+          headers: tokenHeaders,
+        });
+        const call = yield* service
+          .callTool(integration.name, "echo", {}, null)
+          .pipe(Effect.result);
+        expect(reasonOf(call)).toBe("credential_not_allowed");
+        expect(upstream.seen).toHaveLength(0);
+      }).pipe(Effect.provide(vaultLayer())),
+    ),
+  );
+
+  it.effect("sends a vault item whose domains include the integration's host", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstream;
+        const vault = yield* Vault.Vault;
+        const service = yield* Integrations.Integrations;
+        yield* vault.create({
+          name: "github",
+          type: "api_key",
+          allowedDomains: ["127.0.0.1"],
+          secretFields: { value: "github-token-123" },
+        });
+        const { integration } = yield* service.create({
+          ...createInput(upstream.url),
+          headers: tokenHeaders,
+        });
+        yield* service.callTool(integration.name, "echo", {}, null);
+        expect(upstream.seen.at(-1)?.authorization).toBe("Bearer github-token-123");
+      }).pipe(Effect.provide(vaultLayer())),
+    ),
+  );
+
+  it.effect("sends an owner-approved item until the integration's URL changes", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstream;
+        const other = yield* fakeUpstream;
+        const vault = yield* Vault.Vault;
+        const service = yield* Integrations.Integrations;
+        yield* vault.create({
+          name: "github",
+          type: "api_key",
+          secretFields: { value: "github-token-123" },
+        });
+        const { integration } = yield* service.create(
+          { ...createInput(upstream.url), headers: tokenHeaders },
+          { approveCredentials: true },
+        );
+        yield* service.callTool(integration.name, "echo", {}, null);
+        expect(upstream.seen.at(-1)?.authorization).toBe("Bearer github-token-123");
+
+        yield* service.update({ id: integration.id, url: other.url });
+        const moved = yield* service
+          .callTool(integration.name, "echo", {}, null)
+          .pipe(Effect.result);
+        expect(reasonOf(moved)).toBe("credential_not_allowed");
+        expect(other.seen).toHaveLength(0);
+
+        yield* service.update({ id: integration.id, url: other.url }, { approveCredentials: true });
+        yield* service.callTool(integration.name, "echo", {}, null);
+        expect(other.seen.at(-1)?.authorization).toBe("Bearer github-token-123");
+      }).pipe(Effect.provide(vaultLayer())),
+    ),
   );
 });

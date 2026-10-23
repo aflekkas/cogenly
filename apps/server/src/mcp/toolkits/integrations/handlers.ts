@@ -15,25 +15,28 @@ const failure = (cause: unknown): OrchestratorMcpFailure =>
   isIntegrationError(cause)
     ? new OrchestratorMcpFailure({
         code:
-          cause.reason === "not_found" || cause.reason === "disabled"
+          cause.reason === "not_found" ||
+          cause.reason === "disabled" ||
+          cause.reason === "credential_unresolved" ||
+          cause.reason === "credential_not_allowed"
             ? "invalid_request"
-            : cause.reason === "credential_unresolved"
-              ? "invalid_request"
-              : "orchestration_error",
+            : "orchestration_error",
         message:
           cause.reason === "credential_unresolved"
             ? "An integration credential could not be resolved. Ask the owner to check the vault item named in its headers."
-            : cause.reason === "upstream_timeout"
-              ? "The integration did not answer in time. Try again, or ask the owner to check it in Settings."
-              : cause.reason === "upstream_unreachable"
-                ? "The integration could not be reached. Ask the owner to check it in Settings."
-                : cause.reason === "not_found"
-                  ? "No connected integration with that name is available in this project."
-                  : cause.reason === "disabled"
-                    ? "That integration is disabled."
-                    : cause.reason === "conflict"
-                      ? "An integration with that name already exists."
-                      : "The integration request could not be completed.",
+            : cause.reason === "credential_not_allowed"
+              ? "A vault item in this integration's headers isn't allowed for its server. Ask the owner to add the server to the item's allowed domains, or to save the integration in Settings → Integrations to approve it."
+              : cause.reason === "upstream_timeout"
+                ? "The integration did not answer in time. Try again, or ask the owner to check it in Settings."
+                : cause.reason === "upstream_unreachable"
+                  ? "The integration could not be reached. Ask the owner to check it in Settings."
+                  : cause.reason === "not_found"
+                    ? "No connected integration with that name is available in this project."
+                    : cause.reason === "disabled"
+                      ? "That integration is disabled."
+                      : cause.reason === "conflict"
+                        ? "An integration with that name already exists."
+                        : "The integration request could not be completed.",
       })
     : new OrchestratorMcpFailure({
         code: "orchestration_error",

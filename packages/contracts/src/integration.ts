@@ -58,6 +58,11 @@ export const Integration = Schema.Struct({
   ...integrationFields,
   /** Credential destination authorized by the owner; absent on legacy definitions. */
   credentialOrigin: Schema.optional(Schema.String),
+  /**
+   * Vault item names the owner approved for `credentialOrigin`. Any other item
+   * resolves only when its allowed domains include the integration's host.
+   */
+  approvedCredentialItems: Schema.optional(Schema.Array(Schema.String)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   /** Tombstone; null while live. Deletes set this instead of removing the row. */
@@ -127,6 +132,7 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
     "conflict",
     "disabled",
     "credential_unresolved",
+    "credential_not_allowed",
     "upstream_unreachable",
     "upstream_timeout",
     "upstream_error",

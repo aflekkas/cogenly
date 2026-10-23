@@ -38,6 +38,11 @@ at call time. If a persistent agent asks to connect an integration, you get an
 approval card first — approving it creates the integration. Your own chats
 connect directly.
 
+A vault item is only sent to a server listed in the item's allowed domains, or
+to one you approved it for. Saving an integration in Settings, or approving an
+agent's request, approves the vault items in its headers for that server.
+Changing its URL drops that approval until you save it again.
+
 ## What agents see
 
 Every turn carries one short line when anything is connected:

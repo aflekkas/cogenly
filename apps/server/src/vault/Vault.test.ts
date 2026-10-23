@@ -141,7 +141,12 @@ describe("Vault service", () => {
       });
       expect(wrongDomain.status).toBe("denied");
 
-      const resolved = yield* vault.resolveSecretByName({ name: "GitHub", field: "username" });
+      const resolved = yield* vault.resolveSecretByName({
+        name: "GitHub",
+        field: "username",
+        destinationHost: "api.github.com",
+        approved: false,
+      });
       expect(resolved.value).toBe("octo-user");
 
       const usage = yield* vault.listUsage({ itemId: item.id });

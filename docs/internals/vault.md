@@ -56,7 +56,9 @@ was involved, so a retry succeeds. Rejecting leaves the policy untouched.
 
 `resolveSecretByName` is the server-internal API for other server features
 (e.g. the integrations gateway): it returns a decrypted field by name and is
-never exposed through MCP or RPC.
+never exposed through MCP or RPC. It takes the destination host and refuses
+items whose allowed domains miss it unless the caller says the owner approved
+the item there; integrations record those approvals per credential origin.
 
 Accounts reference vault items without copying their encrypted identities. The
 legacy backfill reads metadata only and preserves item ids and encrypted

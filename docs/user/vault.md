@@ -35,6 +35,8 @@ leave a secret field blank to keep it, or type a new value to replace it.
   It can keep your answer in the vault so it never has to ask again.
 - Secret values are scrubbed from tool results and terminal output, so a
   filled password does not leak back into the conversation.
+- Integrations send an item only to servers in its allowed domains, or to an
+  integration you approved it for.
 
 ## Approvals
 

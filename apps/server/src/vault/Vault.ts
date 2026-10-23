@@ -258,14 +258,19 @@ export class Vault extends Context.Service<
     readonly use: (input: VaultUseInput) => Effect.Effect<VaultUseResult, VaultError>;
     /**
      * Server-internal only (integrations gateway, 2B): resolves a secret by
-     * item name for server code. Never expose this through MCP or RPC; agents
-     * use `use` via vault_fill so values stay out of model context.
+     * item name for server code sending it to `destinationHost`. The item's
+     * allowed domains must include that host unless the owner `approved` this
+     * item for it; otherwise it fails with `domain_not_allowed`. Never expose
+     * this through MCP or RPC; agents use `use` via vault_fill so values stay
+     * out of model context.
      */
     readonly resolveSecretByName: (input: {
       readonly name: string;
       readonly field?: VaultField | undefined;
       readonly scopeProjectId?: string | null | undefined;
       readonly threadId?: ThreadId | undefined;
+      readonly destinationHost: string;
+      readonly approved: boolean;
     }) => Effect.Effect<{ item: VaultItemMetadata; field: VaultField; value: string }, VaultError>;
     /** Stores a privately-entered value (request_secret saveToVault) as an item. */
     readonly saveSecretValue: (input: {
@@ -765,8 +770,12 @@ const make = Effect.gen(function* () {
           field: input.field ?? "value",
           caller: { kind: "server" },
           threadId: input.threadId,
+          domain: input.destinationHost,
+          enforceAllowedDomains: !input.approved,
           action: "resolve",
         });
+        if (result.status === "denied" && result.reason === "domain_not_allowed")
+          return yield* new VaultError({ reason: "domain_not_allowed" });
         if (result.status !== "allowed")
           return yield* new VaultError({ reason: "approval_required" });
         return { item: result.item, field: result.field, value: result.value };
