@@ -457,6 +457,30 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("retains delivered revisions after deletion and refuses registry overflow", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const { item } = yield* vault.create({
+        name: "rotate",
+        type: "note",
+        secretFields: { value: "old-delivered-secret" },
+      });
+      const use = () => vault.use({ itemId: item.id, field: "value", caller: { kind: "human" } });
+      yield* use();
+      yield* vault.update({ id: item.id, secretFields: { value: "new-delivered-secret" } });
+      yield* use();
+      yield* vault.delete({ id: item.id });
+      expect(yield* vault.scrubText("old-delivered-secret new-delivered-secret")).toBe(
+        "[redacted vault secret] [redacted vault secret]",
+      );
+      const overflow = yield* vault
+        .registerProcessSecrets(Array.from({ length: 20_000 }, (_, i) => `unique-delivered-${i}`))
+        .pipe(Effect.result);
+      expect(overflow._tag).toBe("Failure");
+      expect(yield* vault.scrubText("old-delivered-secret")).toBe("[redacted vault secret]");
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("retries a scrub reload invalidated while its old snapshot was in flight", () =>
     Effect.scoped(
       Effect.gen(function* () {

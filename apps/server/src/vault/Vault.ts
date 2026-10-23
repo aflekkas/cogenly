@@ -285,7 +285,9 @@ export class Vault extends Context.Service<
       readonly scopeProjectId?: string | null | undefined;
     }) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
     /** Retained through server lifetime: descendants and retained output may outlive a PTY. */
-    readonly registerProcessSecrets: (values: ReadonlyArray<string>) => Effect.Effect<void>;
+    readonly registerProcessSecrets: (
+      values: ReadonlyArray<string>,
+    ) => Effect.Effect<void, VaultError>;
     readonly makeOutputRedactor: () => Effect.Effect<
       (chunk: string, final?: boolean) => Effect.Effect<string>
     >;
@@ -293,6 +295,9 @@ export class Vault extends Context.Service<
     readonly scrubValue: <A>(value: A) => Effect.Effect<A>;
   }
 >()("cogenly-server/vault/Vault") {}
+
+const MAX_DELIVERED_SECRET_COUNT = 16_384;
+const MAX_DELIVERED_SECRET_BYTES = 4 * 1024 * 1024;
 
 const KEY_PAIR_STORE_NAME = "vault-x25519-key-pair";
 
@@ -321,8 +326,32 @@ const make = Effect.gen(function* () {
   const deliveredSecrets = yield* Ref.make({
     secrets: new Set<string>(),
     shortSecrets: new Set<string>(),
+    bytes: 0,
   });
-  const processSecrets = yield* Ref.make(new Set<string>());
+  const registerDelivered = (values: ReadonlyArray<string>, wholeToken = false) =>
+    Ref.modify(deliveredSecrets, (current) => {
+      const secrets = new Set(current.secrets),
+        shortSecrets = new Set(current.shortSecrets);
+      let bytes = current.bytes;
+      for (const value of values) {
+        if (!value) continue;
+        const target = wholeToken || value.length < 6 ? shortSecrets : secrets;
+        if (target.has(value)) continue;
+        bytes += Buffer.byteLength(value);
+        target.add(value);
+        if (
+          secrets.size + shortSecrets.size > MAX_DELIVERED_SECRET_COUNT ||
+          bytes > MAX_DELIVERED_SECRET_BYTES
+        )
+          return [false, current] as const;
+      }
+      return [true, { secrets, shortSecrets, bytes }] as const;
+    }).pipe(
+      Effect.flatMap((registered) =>
+        registered ? Effect.void : Effect.fail(new VaultError({ reason: "storage" })),
+      ),
+    );
+
   const projectFiles = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
   const projectForThread = (threadId: ThreadId | undefined) =>
     threadId === undefined || Option.isNone(projectFiles)
@@ -749,12 +778,8 @@ const make = Effect.gen(function* () {
         yield* record("field_missing");
         return yield* new VaultError({ reason: "field_missing" });
       }
-      yield* Ref.update(deliveredSecrets, (current) => {
-        const secrets = new Set(current.secrets),
-          shortSecrets = new Set(current.shortSecrets);
-        (input.field === "totp" || value.length < 6 ? shortSecrets : secrets).add(value);
-        return { secrets, shortSecrets };
-      });
+      // Never deliver a value we cannot keep scrubbing for this process's lifetime.
+      yield* registerDelivered([value], input.field === "totp");
       yield* record("allowed");
       return { status: "allowed", item, field: input.field, value } as const;
     }).pipe(Effect.mapError(wrap));
@@ -848,16 +873,14 @@ const make = Effect.gen(function* () {
         secretFields: input.type === "login" ? { password: input.value } : { value: input.value },
       }),
     registerProcessSecrets: (values) =>
-      Ref.update(processSecrets, (current) => {
-        const next = new Set(current);
-        for (const value of values) {
-          next.add(value);
-          next.add(Buffer.from(value).toString("base64"));
-          next.add(encodeURIComponent(value));
-          next.add(JSON.stringify(value).slice(1, -1));
-        }
-        return next;
-      }),
+      registerDelivered(
+        values.flatMap((value) => [
+          value,
+          Buffer.from(value).toString("base64"),
+          encodeURIComponent(value),
+          JSON.stringify(value).slice(1, -1),
+        ]),
+      ),
     makeOutputRedactor: () =>
       Effect.sync(() => {
         let values: Array<string> = [];
@@ -869,8 +892,7 @@ const make = Effect.gen(function* () {
         return (chunk, final = false) =>
           Effect.gen(function* () {
             const { secrets, shortSecrets } = yield* scrubSets;
-            const delivered = yield* Ref.get(processSecrets);
-            values = [...secrets, ...delivered];
+            values = [...secrets];
             shortValues = [...shortSecrets];
             return redact(chunk, final);
           }).pipe(
@@ -890,9 +912,6 @@ const make = Effect.gen(function* () {
           redactShortSecrets(redactText(text, secrets), shortSecrets),
         ),
         withheldOnFailure(() => VAULT_WITHHELD),
-        Effect.flatMap((scrubbed) =>
-          Ref.get(processSecrets).pipe(Effect.map((secrets) => redactText(scrubbed, secrets))),
-        ),
       ),
     scrubValue: (value) =>
       scrubSets.pipe(
@@ -900,9 +919,6 @@ const make = Effect.gen(function* () {
           redactShortValue(redactValue(value, secrets), shortSecrets),
         ),
         withheldOnFailure(() => withholdValue(value)),
-        Effect.flatMap((scrubbed) =>
-          Ref.get(processSecrets).pipe(Effect.map((secrets) => redactValue(scrubbed, secrets))),
-        ),
       ),
   });
 });

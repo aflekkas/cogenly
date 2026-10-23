@@ -107,9 +107,10 @@ after their window expires.
 Scrubbing fails closed: when the secrets cannot be loaded, every string in the
 result is replaced by a withheld notice and the error is logged.
 
-Delivered process values and their base64, URL-encoded and JSON-escaped forms
-stay registered for the server lifetime, including old revisions after
-replacement/deletion. This deliberately outlives a PTY: descendants and retained
+Delivered values stay registered for the server lifetime, including old revisions
+after replacement/deletion; process values also register base64, URL-encoded and
+JSON-escaped forms. The registry is bounded and refuses new deliveries when full
+rather than forgetting values that may still appear in retained output. This deliberately outlives a PTY: descendants and retained
 output may outlive it. All terminals also redact against the vault across PTY chunk boundaries
 before output enters events or persisted history. Tokens are resolved after
 provider environment configuration and overlay only the selected terminal's
