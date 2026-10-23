@@ -5,6 +5,7 @@ import * as Exports from "./export.ts";
 import * as T3Import from "./t3Import.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Integrations from "./integration.ts";
+import * as Machines from "./machine.ts";
 import * as Work from "./work.ts";
 import * as Vault from "./vault.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
@@ -589,6 +590,15 @@ export const WS_METHODS = {
   integrationsUpdate: "integrations.update",
   integrationsDelete: "integrations.delete",
   integrationsTestConnection: "integrations.testConnection",
+
+  // Machines: this server, its hub, and its paired spokes
+  machinesList: "machines.list",
+  machinesSubscribe: "machines.subscribe",
+  machinesUpdate: "machines.update",
+  machinesPrepareJoin: "machines.prepareJoin",
+  machinesCreatePeerGrant: "machines.createPeerGrant",
+  machinesJoinHub: "machines.joinHub",
+  machinesUnpair: "machines.unpair",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -2082,6 +2092,44 @@ const WsIntegrationsTestConnectionRpc = Rpc.make(WS_METHODS.integrationsTestConn
   error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
 });
 
+const machineErrors = Schema.Union([Machines.MachineError, EnvironmentAuthorizationError]);
+const WsMachinesListRpc = Rpc.make(WS_METHODS.machinesList, {
+  payload: Schema.Struct({}),
+  success: Machines.MachineListResult,
+  error: machineErrors,
+});
+const WsMachinesSubscribeRpc = Rpc.make(WS_METHODS.machinesSubscribe, {
+  payload: Schema.Struct({}),
+  success: Machines.MachineListResult,
+  error: machineErrors,
+  stream: true,
+});
+const WsMachinesUpdateRpc = Rpc.make(WS_METHODS.machinesUpdate, {
+  payload: Machines.MachineUpdateInput,
+  success: Machines.MachineListResult,
+  error: machineErrors,
+});
+const WsMachinesPrepareJoinRpc = Rpc.make(WS_METHODS.machinesPrepareJoin, {
+  payload: Schema.Struct({}),
+  success: Machines.MachinePeerIdentity,
+  error: machineErrors,
+});
+const WsMachinesCreatePeerGrantRpc = Rpc.make(WS_METHODS.machinesCreatePeerGrant, {
+  payload: Machines.MachineCreatePeerGrantInput,
+  success: Machines.MachineJoinCode,
+  error: machineErrors,
+});
+const WsMachinesJoinHubRpc = Rpc.make(WS_METHODS.machinesJoinHub, {
+  payload: Machines.MachineJoinHubInput,
+  success: Machines.MachineListResult,
+  error: machineErrors,
+});
+const WsMachinesUnpairRpc = Rpc.make(WS_METHODS.machinesUnpair, {
+  payload: Machines.MachineUnpairInput,
+  success: Machines.MachineUnpairResult,
+  error: machineErrors,
+});
+
 const WsFactsListRpc = Rpc.make(WS_METHODS.factsList, {
   payload: Facts.FactListInput,
   success: Facts.FactListResult,
@@ -2430,6 +2478,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsUpdateRpc,
   WsIntegrationsDeleteRpc,
   WsIntegrationsTestConnectionRpc,
+  WsMachinesListRpc,
+  WsMachinesSubscribeRpc,
+  WsMachinesUpdateRpc,
+  WsMachinesPrepareJoinRpc,
+  WsMachinesCreatePeerGrantRpc,
+  WsMachinesJoinHubRpc,
+  WsMachinesUnpairRpc,
   WsFactsListRpc,
   WsFactsCreateRpc,
   WsFactsUpdateRpc,

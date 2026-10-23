@@ -44,6 +44,13 @@ export const EnvironmentMachineKind = Schema.Literals(ENVIRONMENT_MACHINE_KINDS)
 export type EnvironmentMachineKind = typeof EnvironmentMachineKind.Type;
 export const isEnvironmentMachineKind = Schema.is(EnvironmentMachineKind);
 
+/**
+ * What a machine is, independent of who is looking: a personal computer or a
+ * cloud server. Detected by the server; the `machineRole` setting overrides it.
+ */
+export const MachineRole = Schema.Literals(["computer", "cloud-server"]);
+export type MachineRole = typeof MachineRole.Type;
+
 export const ExecutionEnvironmentPlatform = Schema.Struct({
   os: ExecutionEnvironmentPlatformOs,
   arch: ExecutionEnvironmentPlatformArch,

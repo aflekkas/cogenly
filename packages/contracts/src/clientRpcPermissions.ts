@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
+  AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
@@ -83,6 +84,15 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.integrationsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsTestConnection]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machinesList]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesUpdate]: AuthSettingsWriteScope,
+  // Pairing hands another server a standing credential to this one, or makes
+  // this server hold one for another: access management, like pairing links.
+  [WS_METHODS.machinesPrepareJoin]: AuthAccessWriteScope,
+  [WS_METHODS.machinesCreatePeerGrant]: AuthAccessWriteScope,
+  [WS_METHODS.machinesJoinHub]: AuthAccessWriteScope,
+  [WS_METHODS.machinesUnpair]: AuthAccessWriteScope,
   [WS_METHODS.factsCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsSupersede]: AuthOrchestrationOperateScope,
