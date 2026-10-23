@@ -41,6 +41,7 @@ import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Schema from "effect/Schema";
+import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { RpcClient, RpcClientError, RpcSerialization } from "effect/rpc";
@@ -478,7 +479,11 @@ const make = Effect.gen(function* () {
         const protocol = yield* Layer.build(
           Layer.effect(
             RpcClient.Protocol,
-            RpcClient.makeProtocolSocket({ retryTransientErrors: false }),
+            RpcClient.makeProtocolSocket({
+              retryTransientErrors: false,
+              // Reusing this codec on another socket would reuse its session.
+              retryPolicy: Schedule.recurs(0),
+            }),
           ).pipe(
             Layer.provide(
               Layer.mergeAll(

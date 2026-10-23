@@ -283,11 +283,13 @@ const makeActiveRelay = () => {
     wire,
     forward,
   ) => forward(direction, wire);
+  let dropCurrent = () => {};
   let sendCurrent: Forward = () => {
     throw new Error("relay not connected");
   };
   const constructor: Socket.WebSocketConstructor["Service"] = (url) => {
     const socket = new globalThis.WebSocket(url);
+    dropCurrent = () => socket.close();
     const listeners = new Set<(event: Socket.WebSocketEvent) => void>();
     const forward: Forward = (direction, wire) => {
       if (direction === "spoke-to-hub") socket.send(wire);
@@ -325,6 +327,7 @@ const makeActiveRelay = () => {
       intercept = handler;
     },
     inject: (direction: RelayDirection, wire: string) => sendCurrent(direction, wire),
+    drop: () => dropCurrent(),
   };
 };
 
@@ -471,6 +474,67 @@ describe("machines", () => {
       "Peer frame authentication failed",
     );
   });
+
+  it.live(
+    "rejects a captured call after reconnecting with the same pairing",
+    () =>
+      Effect.gen(function* () {
+        const relay = makeActiveRelay();
+        const hub = yield* startMachine("hub", "cloud-server");
+        const spoke = yield* startMachine("spoke", "computer", relay.constructor);
+        yield* pair(hub, spoke);
+        const channels = yield* hub.run(PeerChannels.PeerChannels);
+        const dispatched: string[] = [];
+        yield* channels.register(Echo, ({ text }) =>
+          Effect.sync(() => {
+            dispatched.push(text);
+            return { text, by: "hub" };
+          }),
+        );
+        let captured = "";
+        relay.intercept((direction, wire, forward) => {
+          const frame = authFrame(wire);
+          if (
+            direction === "spoke-to-hub" &&
+            Option.isSome(frame) &&
+            frame.value.method === "peer.call"
+          )
+            captured = wire;
+          forward(direction, wire);
+        });
+        yield* spoke.machines.call(hub.environmentId, Echo, { text: "first-session" });
+        const token = (yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow)))
+          .accessToken;
+        const dropped = yield* awaitLinkState(spoke, (state) => state.status !== "online").pipe(
+          Effect.forkScoped,
+        );
+        yield* Effect.sync(() => relay.drop());
+        yield* Fiber.join(dropped);
+        yield* awaitLinkState(spoke, (state) => state.status === "online");
+        assert.strictEqual(
+          (yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow))).accessToken,
+          token,
+        );
+        relay.intercept((direction, wire, forward) => {
+          const frame = authFrame(wire);
+          if (
+            direction === "spoke-to-hub" &&
+            Option.isSome(frame) &&
+            frame.value.method === "peer.call"
+          ) {
+            const previous = Option.getOrThrow(authFrame(captured));
+            assert.notStrictEqual(frame.value.connectionId, previous.connectionId);
+            forward(direction, captured);
+          } else forward(direction, wire);
+        });
+        const rejected = yield* spoke.machines
+          .call(hub.environmentId, Echo, { text: "second-session" })
+          .pipe(Effect.flip);
+        assert.strictEqual(rejected.reason, "disconnected");
+        assert.deepStrictEqual(dispatched, ["first-session"]);
+      }).pipe(Effect.scoped),
+    30_000,
+  );
 
   for (const kind of ["call-up", "call-down", "reply-up", "reply-down"] as const) {
     for (const attack of ["tamper", "replay", "reorder", "reflect"] as const) {
