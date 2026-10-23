@@ -112,6 +112,8 @@ class HubAttemptError extends Schema.TaggedError<HubAttemptError>()("HubAttemptE
   cause: Schema.optional(Schema.Defect()),
 }) {}
 
+const isHubAttemptError = Schema.is(HubAttemptError);
+
 type LinkState = Omit<HubLinkView, "link">;
 type HubClient = RpcClient.FromGroup<typeof PeerRpcGroup, RpcClientError.RpcClientError>;
 
@@ -197,11 +199,17 @@ const make = Effect.gen(function* () {
     return { environmentId: self.environmentId, name: self.name, keyThumbprint: key.thumbprint };
   }).pipe(Effect.withSpan("HubLink.peerIdentity"));
 
-  const post = (url: string, request: HttpClientRequest.HttpClientRequest) =>
-    http.execute(request).pipe(
+  const post = <A, E, R>(
+    url: string,
+    request: HttpClientRequest.HttpClientRequest,
+    consume: (response: HttpClientResponse.HttpClientResponse) => Effect.Effect<A, E, R>,
+  ) =>
+    Effect.scoped(HttpClient.withScope(http).execute(request).pipe(Effect.flatMap(consume))).pipe(
       Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
       Effect.timeout(REQUEST_TIMEOUT),
-      Effect.mapError((cause) => new HubAttemptError({ reason: "unreachable", cause })),
+      Effect.mapError((cause) =>
+        isHubAttemptError(cause) ? cause : new HubAttemptError({ reason: "unreachable", cause }),
+      ),
       Effect.withSpan("HubLink.post", { attributes: { "url.path": new URL(url).pathname } }),
     );
 
@@ -214,10 +222,10 @@ const make = Effect.gen(function* () {
         HttpClientRequest.post(url),
         { spokeEnvironmentId: self.environmentId, nonce },
       ).pipe(Effect.orDie);
-      const response = yield* post(url, request);
-      const result = yield* HttpClientResponse.filterStatusOk(response).pipe(
-        Effect.flatMap(HttpClientResponse.schemaBodyJson(PeerIdentityResult)),
-        Effect.mapError((cause) => new HubAttemptError({ reason: "unreachable", cause })),
+      const result = yield* post(url, request, (response) =>
+        HttpClientResponse.filterStatusOk(response).pipe(
+          Effect.flatMap(HttpClientResponse.schemaBodyJson(PeerIdentityResult)),
+        ),
       );
       if (
         result.hubEnvironmentId !== pin.hubEnvironmentId ||
@@ -286,17 +294,25 @@ const make = Effect.gen(function* () {
           ),
         },
       ).pipe(Effect.orDie);
-      const response = yield* post(url, request).pipe(Effect.option);
-      if (Option.isNone(response)) continue;
-      if (response.value.status === 401 || response.value.status === 409) {
-        // A spent, expired or wrong-key grant fails the same everywhere.
-        refused = true;
-        break;
+      const result = yield* post(url, request, (response) =>
+        Effect.gen(function* () {
+          if (response.status === 401 || response.status === 409) {
+            return yield* new HubAttemptError({ reason: "refused" });
+          }
+          return yield* HttpClientResponse.filterStatus(response, (status) => status === 200).pipe(
+            Effect.flatMap(decodeJoinResult),
+          );
+        }),
+      ).pipe(Effect.result);
+      if (result._tag === "Failure") {
+        if (result.failure.reason === "refused") {
+          // A spent, expired or wrong-key grant fails the same everywhere.
+          refused = true;
+          break;
+        }
+        continue;
       }
-      if (response.value.status !== 200) continue;
-      const result = yield* decodeJoinResult(response.value).pipe(Effect.option);
-      if (Option.isNone(result)) continue;
-      const joined = result.value;
+      const joined = result.success;
       const trusted =
         joined.hubEnvironmentId === code.hubEnvironmentId &&
         joined.hub.environmentId === code.hubEnvironmentId &&
@@ -456,7 +472,7 @@ const make = Effect.gen(function* () {
             accessToken: link.accessToken,
           }),
         ).pipe(Effect.orDie);
-        const response = yield* post(
+        const { ticket } = yield* post(
           ticketUrl,
           HttpClientRequest.post(ticketUrl).pipe(
             HttpClientRequest.setHeaders({
@@ -464,13 +480,15 @@ const make = Effect.gen(function* () {
               dpop: proof,
             }),
           ),
-        );
-        if (response.status === 401 || response.status === 403) {
-          return yield* new HubAttemptError({ reason: "refused" });
-        }
-        const { ticket } = yield* HttpClientResponse.filterStatusOk(response).pipe(
-          Effect.flatMap(decodeTicketResult),
-          Effect.mapError((cause) => new HubAttemptError({ reason: "unreachable", cause })),
+          (response) =>
+            Effect.gen(function* () {
+              if (response.status === 401 || response.status === 403) {
+                return yield* new HubAttemptError({ reason: "refused" });
+              }
+              return yield* HttpClientResponse.filterStatusOk(response).pipe(
+                Effect.flatMap(decodeTicketResult),
+              );
+            }),
         );
 
         const frames = new PeerFrameCodec("spoke");

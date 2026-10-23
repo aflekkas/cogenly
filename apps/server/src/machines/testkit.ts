@@ -36,6 +36,7 @@ import * as PeerHttp from "./peerHttp.ts";
 import * as PeerHub from "./PeerHub.ts";
 
 interface MachineOverrides {
+  readonly fetch?: typeof globalThis.fetch;
   readonly crypto?: (crypto: Crypto.Crypto["Service"]) => Crypto.Crypto["Service"];
   readonly auth?: (
     auth: EnvironmentAuth.EnvironmentAuth["Service"],
@@ -104,6 +105,7 @@ const machineLayer = (
       Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
     ),
     Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.succeed(FetchHttpClient.Fetch, overrides.fetch ?? globalThis.fetch)),
     Layer.provide(
       Layer.effect(
         Crypto.Crypto,
