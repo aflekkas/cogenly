@@ -98,6 +98,165 @@ describe("SharedState", () => {
       expect(yield* sql`SELECT * FROM project_labels`).toEqual([]);
     }).pipe(Effect.provide(layer)),
   );
+  it.effect("rejects non-owner edits to sensitive agent and schedule fields", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      yield* state.write("agent", "agent:owned", {
+        name: "Owned",
+        ownerMachine: local,
+        permissions: {
+          read: true,
+          draft: true,
+          execute: false,
+          send: false,
+          create_pr: false,
+          merge: false,
+          deploy: false,
+          delete: false,
+        },
+      });
+      const agentClock = (yield* state.get("agent", "agent:owned"))!.clocks.name!;
+      const permissionsEdit: SharedDocumentChange = {
+        kind: "agent",
+        id: "agent:owned",
+        fields: {
+          permissions: {
+            read: true,
+            draft: true,
+            execute: true,
+            send: false,
+            create_pr: false,
+            merge: false,
+            deploy: false,
+            delete: false,
+          },
+        },
+        clocks: {
+          permissions: { ...agentClock, logical: agentClock.logical + 1, node: peer },
+        },
+        tombstone: null,
+        updatedBy: peer,
+      };
+      const rejected = yield* Effect.result(state.receive(batch([permissionsEdit]), peer, false));
+      expect(rejected._tag).toBe("Failure");
+      expect((yield* state.get("agent", "agent:owned"))?.fields.permissions).toEqual({
+        read: true,
+        draft: true,
+        execute: false,
+        send: false,
+        create_pr: false,
+        merge: false,
+        deploy: false,
+        delete: false,
+      });
+      // Display-only edits from another machine still merge.
+      const nameEdit: SharedDocumentChange = {
+        kind: "agent",
+        id: "agent:owned",
+        fields: { name: "Renamed elsewhere" },
+        clocks: { name: { ...agentClock, logical: agentClock.logical + 1, node: peer } },
+        tombstone: null,
+        updatedBy: peer,
+      };
+      yield* state.receive(batch([nameEdit]), peer, false);
+      expect((yield* state.get("agent", "agent:owned"))?.fields.name).toBe("Renamed elsewhere");
+
+      yield* state.write("schedule", "task:owned", {
+        title: "Owned task",
+        prompt: "Do work",
+        enabled: true,
+        ownerMachine: local,
+      });
+      const scheduleClock = (yield* state.get("schedule", "task:owned"))!.clocks.title!;
+      const promptEdit: SharedDocumentChange = {
+        kind: "schedule",
+        id: "task:owned",
+        fields: { prompt: "Do something else" },
+        clocks: { prompt: { ...scheduleClock, logical: scheduleClock.logical + 1, node: peer } },
+        tombstone: null,
+        updatedBy: peer,
+      };
+      const promptRejected = yield* Effect.result(
+        state.receive(batch([promptEdit], 1), peer, false),
+      );
+      expect(promptRejected._tag).toBe("Failure");
+      expect((yield* state.get("schedule", "task:owned"))?.fields.prompt).toBe("Do work");
+      const enabledEdit: SharedDocumentChange = {
+        kind: "schedule",
+        id: "task:owned",
+        fields: { enabled: false },
+        clocks: { enabled: { ...scheduleClock, logical: scheduleClock.logical + 1, node: peer } },
+        tombstone: null,
+        updatedBy: peer,
+      };
+      yield* state.receive(batch([enabledEdit], 1), peer, false);
+      expect((yield* state.get("schedule", "task:owned"))?.fields.enabled).toBe(false);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("accepts sensitive edits from the owner machine, including via the hub relay", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const created: SharedDocumentChange = {
+        kind: "agent",
+        id: "agent:peer-owned",
+        fields: {
+          name: "Peer owned",
+          ownerMachine: peer,
+          permissions: {
+            read: true,
+            draft: true,
+            execute: false,
+            send: false,
+            create_pr: false,
+            merge: false,
+            deploy: false,
+            delete: false,
+          },
+        },
+        clocks: {
+          name: { wall: 10, logical: 0, node: peer },
+          ownerMachine: { wall: 10, logical: 0, node: peer },
+          permissions: { wall: 10, logical: 0, node: peer },
+        },
+        tombstone: null,
+        updatedBy: peer,
+      };
+      yield* state.receive(batch([created]), peer, false);
+      const edit: SharedDocumentChange = {
+        kind: "agent",
+        id: "agent:peer-owned",
+        fields: {
+          permissions: {
+            read: true,
+            draft: true,
+            execute: true,
+            send: false,
+            create_pr: false,
+            merge: false,
+            deploy: false,
+            delete: false,
+          },
+        },
+        clocks: { permissions: { wall: 20, logical: 0, node: peer } },
+        tombstone: null,
+        updatedBy: peer,
+      };
+      // Relayed by the local hub: authorship stays with the peer owner.
+      yield* state.receive(batch([edit]), local, true);
+      expect((yield* state.get("agent", "agent:peer-owned"))?.fields.permissions).toEqual({
+        read: true,
+        draft: true,
+        execute: true,
+        send: false,
+        create_pr: false,
+        merge: false,
+        deploy: false,
+        delete: false,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("validates authorship, clock bounds, fields, nested paths and cursor gaps", () =>
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;
@@ -247,7 +406,19 @@ describe("SharedState", () => {
       chain.clocks = {
         fallbackChain: { ...localClock, logical: localClock.logical + 2, node: peer },
       };
-      yield* state.receive(batch([chain], 1), peer, false);
+      // The fallback chain is owner-only: a peer edit is refused, so the
+      // local fallback position survives until the owner changes the chain.
+      const refused = yield* Effect.result(state.receive(batch([chain], 1), peer, false));
+      expect(refused._tag).toBe("Failure");
+      expect(
+        (yield* sql<{
+          fallback: number;
+        }>`SELECT json_extract(payload_json,'$.fallbackIndex') AS fallback FROM agents`)[0]
+          ?.fallback,
+      ).toBe(1);
+      yield* state.write("agent", f.id, {
+        fallbackChain: [{ ...f.modelSelection, model: "other" }],
+      });
       expect(
         (yield* sql<{
           fallback: number;
@@ -292,7 +463,11 @@ describe("SharedState", () => {
           id: "task:one",
           clocks: { prompt: { ...clock, logical: clock.logical + 1, node: peer } },
         };
-        yield* state.receive(batch([edit]), peer, false);
+        // The prompt is owner-only: a peer edit is refused, an owner edit merges.
+        expect((yield* Effect.result(state.receive(batch([edit]), peer, false)))._tag).toBe(
+          "Failure",
+        );
+        yield* state.write("schedule", "task:one", { prompt: "Edited" });
         expect(
           yield* sql`SELECT prompt,run_count,last_run_status,next_run_at FROM scheduled_tasks`,
         ).toEqual([
