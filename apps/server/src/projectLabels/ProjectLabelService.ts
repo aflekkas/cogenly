@@ -27,6 +27,7 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as SharedState from "../sync/SharedState.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import { normalizeRepositoryRemote, repositoryDirectoryName } from "../project/RepositoryRemote.ts";
@@ -131,6 +132,7 @@ const encodeAudit = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const shared = yield* SharedState.SharedState;
   const crypto = yield* Crypto.Crypto;
   const events = yield* Events.OrchestrationEventStore;
   const changes = yield* PubSub.sliding<void>(1);
@@ -256,6 +258,27 @@ const make = Effect.gen(function* () {
         .withTransaction(
           Effect.gen(function* () {
             const result = yield* effect;
+            if (
+              typeof result === "object" &&
+              result !== null &&
+              "label" in result &&
+              typeof result.label === "object" &&
+              result.label !== null &&
+              "id" in result.label &&
+              typeof result.label.id === "string" &&
+              [
+                "create",
+                "update",
+                "archive",
+                "unarchive",
+                "linkRepository",
+                "unlinkRepository",
+                "linkSource",
+                "unlinkSource",
+              ].includes(operation)
+            ) {
+              yield* shared.capture("project", result.label.id);
+            }
             const payload = yield* encodeAudit({ input, result });
             yield* sql`INSERT INTO project_label_audit(operation, occurred_at, payload_json) VALUES (${operation}, ${yield* now}, ${payload})`;
             return result;
@@ -288,9 +311,10 @@ const make = Effect.gen(function* () {
           );
         return Stream.concat(
           Stream.fromEffect(read()),
-          Stream.merge(Stream.fromSubscription(subscription), deletions).pipe(
-            Stream.mapEffect(read),
-          ),
+          Stream.merge(
+            Stream.merge(Stream.fromSubscription(subscription), shared.changes),
+            deletions,
+          ).pipe(Stream.mapEffect(read)),
         );
       }),
     );
@@ -480,7 +504,11 @@ const make = Effect.gen(function* () {
       ].includes(stored.event.type));
   return ProjectLabelService.of({
     moveThread,
-    subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
+    subscribeChanges: PubSub.subscribe(changes).pipe(
+      Effect.map((subscription) =>
+        Stream.merge(Stream.fromSubscription(subscription), shared.changes),
+      ),
+    ),
     list,
     read: get,
     readActive,
@@ -534,6 +562,7 @@ const make = Effect.gen(function* () {
             (SELECT json_group_array(l.value) FROM json_each(facts.payload_json, '$.labelIds') l WHERE l.value <> ${id})
           )) WHERE id IN (SELECT fact_id FROM fact_labels WHERE label_id = ${id})`;
           yield* sql`INSERT INTO fact_history(fact_id,payload_json) SELECT f.id,json_object('id',${yield* crypto.randomUUIDv4()} || ':' || f.id,'factId',f.id,'who','user','at',${at},'fact',json(f.payload_json)) FROM facts f WHERE f.id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
+          yield* shared.capture("project", id, true);
           const rows =
             yield* sql`DELETE FROM project_labels WHERE label_id = ${id} RETURNING label_id`;
           return { deleted: rows.length > 0 };
@@ -599,4 +628,4 @@ const make = Effect.gen(function* () {
     },
   });
 });
-export const layer = Layer.effect(ProjectLabelService, make);
+export const layer = Layer.effect(ProjectLabelService, make).pipe(Layer.provide(SharedState.layer));

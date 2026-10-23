@@ -511,4 +511,6 @@ const layerProductionBase = Layer.mergeAll(
 // requirement, which leaks into every CLI command through runServer.
 const layerVisualStatesProvided = VisualStates.layer.pipe(Layer.provide(layerProductionBase));
 
-export const layerProduction = Layer.mergeAll(layerProductionBase, layerVisualStatesProvided);
+export const layerProduction = Layer.mergeAll(layerProductionBase, layerVisualStatesProvided).pipe(
+  Layer.provide(ServerEnvironment.layerIdentity),
+);

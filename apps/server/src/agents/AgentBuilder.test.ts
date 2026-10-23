@@ -1,3 +1,4 @@
+import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Option from "effect/Option";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -183,13 +184,13 @@ const makeHarness = Effect.sync(() => {
     ServerConfig.layerTest(process.cwd(), { prefix: "t3-agent-builder-" }),
   );
   const database = Sqlite.layerMemory;
-  const store = Store.layer.pipe(Layer.provide(database));
-  const labels = Labels.layer.pipe(
-    Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))),
-  );
-  const agents = Agents.layer.pipe(
-    Layer.provide(Layer.mergeAll(boundaries, store, labels, database)),
-  );
+  const store = Store.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(Layer.provide(database));
+  const labels = Labels.layer
+    .pipe(Layer.provide(layerSharedIdentity))
+    .pipe(Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))));
+  const agents = Agents.layer
+    .pipe(Layer.provide(layerSharedIdentity))
+    .pipe(Layer.provide(Layer.mergeAll(boundaries, store, labels, database)));
   const layer = Layer.mergeAll(store, agents, labels, database, boundaries).pipe(
     Layer.provide(NodeServices.layer),
   );
@@ -396,7 +397,9 @@ describe("propose_agent policy", () => {
   const makePolicyHarness = Effect.sync(() => {
     const shells = new Map<ThreadId, "builder" | "chat">();
     const database = Sqlite.layerMemory;
-    const store = Store.layer.pipe(Layer.provide(database));
+    const store = Store.layer
+      .pipe(Layer.provide(layerSharedIdentity))
+      .pipe(Layer.provide(database));
     const layer = Layer.mergeAll(
       Policy.layer.pipe(
         Layer.provide(

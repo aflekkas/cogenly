@@ -29,6 +29,7 @@ import {
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
+import * as SharedState from "../sync/SharedState.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -106,6 +107,7 @@ export class AgentService extends Context.Service<
 
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
+  const shared = yield* SharedState.SharedState;
   const store = yield* Store.AgentStore;
   const launch = yield* ThreadLaunch.ThreadLaunchService;
   const threads = yield* Threads.ThreadManagementService;
@@ -233,6 +235,8 @@ const make = Effect.gen(function* () {
       for (const record of runs) {
         yield* Effect.gen(function* () {
           const agent = yield* store.get(record.agentId);
+          if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId)
+            return;
           if (record.status === "completed" || record.status === "failed") {
             yield* post(agent, record);
             return;
@@ -386,9 +390,12 @@ const make = Effect.gen(function* () {
             );
           return Stream.concat(
             Stream.fromEffect(list()),
-            Stream.mergeAll([Stream.fromSubscription(subscription), folderChanges, messages], {
-              concurrency: "unbounded",
-            }).pipe(Stream.mapEffect(list)),
+            Stream.mergeAll(
+              [Stream.fromSubscription(subscription), shared.changes, folderChanges, messages],
+              {
+                concurrency: "unbounded",
+              },
+            ).pipe(Stream.mapEffect(list)),
           );
         }),
       ),
@@ -447,6 +454,8 @@ const make = Effect.gen(function* () {
             ));
         const agent = yield* store.save({
           ...profile,
+          ownerMachine:
+            input.ownerMachine ?? existing?.ownerMachine ?? (yield* shared.defaultOwner),
           fallbackChain: input.fallbackChain ?? existing?.fallbackChain ?? [],
           projectFolderId: null,
           responsibility: input.responsibility ?? existing?.responsibility ?? "",
@@ -462,7 +471,7 @@ const make = Effect.gen(function* () {
           fallbackReason: chainChanged ? null : (existing?.fallbackReason ?? null),
           fallbackUntil: chainChanged ? null : (existing?.fallbackUntil ?? null),
         });
-        if (existing !== null) {
+        if (existing !== null && agent.ownerMachine === shared.environmentId) {
           yield* threads.dispatch({
             type: "thread.runtime-mode.set",
             commandId: CommandId.make(`agent-mode:${id}:${at}`),
@@ -662,6 +671,11 @@ const make = Effect.gen(function* () {
             message: "Event triggers require a source event and cannot be run manually.",
           });
         let agent = yield* store.get(task.agentId);
+        if (
+          (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId) ||
+          (task.ownerMachine !== undefined && task.ownerMachine !== shared.environmentId)
+        )
+          return false;
         const id = `agent-work:${fireKey}`;
         const workThreadId = ThreadId.make(id);
         let usedSelection = agent.modelSelection;
@@ -759,4 +773,6 @@ const make = Effect.gen(function* () {
     reconcile,
   });
 });
-export const layer = Layer.effect(AgentService, make).pipe(Layer.provide(Access.layer));
+export const layer = Layer.effect(AgentService, make)
+  .pipe(Layer.provide(SharedState.layer))
+  .pipe(Layer.provide(Access.layer));

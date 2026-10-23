@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
+  EnvironmentId,
   IsoDateTime,
   MessageId,
   ProjectId,
@@ -84,6 +85,7 @@ const AgentFields = {
 };
 export const Agent = Schema.Struct({
   id: AgentId,
+  ownerMachine: Schema.optionalKey(EnvironmentId),
   ...AgentFields,
   ...AgentPolicyFields,
   conversationThreadId: ThreadId,
@@ -111,6 +113,7 @@ export type Agent = typeof Agent.Type;
 /** Omit id to create. A project is required for creation; null on edits keeps the conversation's workspace. */
 export const AgentUpsertInput = Schema.Struct({
   id: Schema.optional(AgentId),
+  ownerMachine: Schema.optionalKey(EnvironmentId),
   ...AgentFields,
   fallbackChain: Schema.optional(Schema.Array(ModelSelection)),
   responsibility: Schema.optional(AgentPolicyFields.responsibility),

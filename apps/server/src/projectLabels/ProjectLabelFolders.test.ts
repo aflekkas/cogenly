@@ -1,3 +1,4 @@
+import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProjectLabelId } from "@t3tools/contracts";
@@ -26,11 +27,13 @@ const foldersLayer = (prefix: string) =>
   );
 
 const labelsLayer = (prefix: string) =>
-  Labels.layer.pipe(
-    Layer.provideMerge(persistence),
-    Layer.provideMerge(foldersLayer(prefix)),
-    Layer.provideMerge(NodeServices.layer),
-  );
+  Labels.layer
+    .pipe(Layer.provide(layerSharedIdentity))
+    .pipe(
+      Layer.provideMerge(persistence),
+      Layer.provideMerge(foldersLayer(prefix)),
+      Layer.provideMerge(NodeServices.layer),
+    );
 
 const seedLabel = (id: string, name: string) =>
   Effect.gen(function* () {

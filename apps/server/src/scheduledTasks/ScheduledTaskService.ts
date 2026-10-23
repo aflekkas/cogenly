@@ -1,3 +1,5 @@
+import * as SharedState from "../sync/SharedState.ts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import * as Access from "../agents/AgentAccessScope.ts";
 import { matchesAgentEvent } from "../agents/agentEventPolicy.ts";
 import * as Agents from "../agents/AgentService.ts";
@@ -194,6 +196,7 @@ const encodeMissingFieldsJson = Schema.encodeSync(MissingFieldsJson);
 interface ScheduledTaskRow {
   readonly agent_id: string | null;
   readonly task_id: string;
+  readonly owner_machine?: string | null;
   readonly title: string;
   readonly prompt: string;
   readonly enabled: number;
@@ -220,6 +223,7 @@ interface ScheduledTaskRow {
 interface WebhookDeliveryRow {
   readonly delivery_id: string;
   readonly task_id: string;
+  readonly owner_machine?: string | null;
   readonly received_at: string;
   readonly method: string;
   readonly query: string;
@@ -341,6 +345,7 @@ const decodeRow = (row: ScheduledTaskRow, origin: WebhookOrigin | null = null) =
       // The stored id decodes through the task schema so a corrupt value fails
       // as a typed parse error, not a `ScheduledTaskId.make` defect.
       id: row.task_id,
+      ...(row.owner_machine == null ? {} : { ownerMachine: row.owner_machine }),
       agentId: row.agent_id,
       title: row.title,
       prompt: row.prompt,
@@ -378,12 +383,14 @@ const decodeRow = (row: ScheduledTaskRow, origin: WebhookOrigin | null = null) =
 /** Select poll candidates before decoding their schedules or other JSON payloads. */
 export const listDueTasks = Effect.fn("ScheduledTaskService.listDueTasks")(function* (
   now: DateTime.DateTime,
+  owner?: EnvironmentId,
 ) {
   const sql = yield* SqlClient.SqlClient;
   const rows = yield* sql<ScheduledTaskRow>`
     SELECT * FROM scheduled_tasks
     WHERE enabled = 1 AND next_run_at IS NOT NULL
       AND next_run_at <= ${iso(now)} AND last_run_status <> 'running'
+      ${owner === undefined ? sql`` : sql`AND (owner_machine IS NULL OR owner_machine=${owner})`}
     ORDER BY next_run_at ASC, task_id ASC
   `;
   const tasks: ScheduledTask[] = [];
@@ -415,6 +422,7 @@ export const layer = Layer.effect(
   ScheduledTaskService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const shared = yield* SharedState.SharedState;
     const access = yield* Access.AgentAccessScope;
     const crypto = yield* Crypto.Crypto;
     const agents = yield* Agents.AgentService;
@@ -443,6 +451,7 @@ export const layer = Layer.effect(
 
     const selectAllRows = () => sql<ScheduledTaskRow>`
       SELECT
+        owner_machine,
         agent_id,
         task_id,
         title,
@@ -479,6 +488,7 @@ export const layer = Layer.effect(
 
     const getRows = (id: ScheduledTaskId) => sql<ScheduledTaskRow>`
       SELECT
+        owner_machine,
         agent_id,
         task_id,
         title,
@@ -560,6 +570,7 @@ export const layer = Layer.effect(
     ) =>
       sql<{ task_id: string }>`
         INSERT INTO scheduled_tasks (
+          owner_machine,
           agent_id,
           task_id,
           title,
@@ -585,6 +596,7 @@ export const layer = Layer.effect(
           webhook_secret
         )
         SELECT
+          ${task.ownerMachine ?? shared.environmentId},
           ${task.agentId ?? null},
           ${task.id},
           ${task.title},
@@ -612,6 +624,7 @@ export const layer = Layer.effect(
            OR EXISTS (SELECT 1 FROM scheduled_tasks WHERE task_id = ${task.id})
         ON CONFLICT (task_id)
         DO UPDATE SET
+          owner_machine = excluded.owner_machine,
           agent_id = excluded.agent_id,
           title = excluded.title,
           prompt = excluded.prompt,
@@ -651,9 +664,14 @@ export const layer = Layer.effect(
     const deleteRow = (id: ScheduledTaskId) =>
       sql
         .withTransaction(
-          sql`DELETE FROM scheduled_task_webhook_deliveries WHERE task_id = ${id}`.pipe(
-            Effect.andThen(sql`DELETE FROM scheduled_tasks WHERE task_id = ${id}`),
-          ),
+          shared
+            .capture("schedule", id, true)
+            .pipe(
+              Effect.andThen(
+                sql`DELETE FROM scheduled_task_webhook_deliveries WHERE task_id = ${id}`,
+              ),
+              Effect.andThen(sql`DELETE FROM scheduled_tasks WHERE task_id = ${id}`),
+            ),
         )
         .pipe(
           Effect.mapError((cause) =>
@@ -778,6 +796,15 @@ export const layer = Layer.effect(
             return yield* taskError("Schedule task not found.", { taskId: task.id });
           }
           return task;
+        }
+        if (active.ownerMachine !== undefined && active.ownerMachine !== shared.environmentId) {
+          if (webhook !== undefined)
+            return yield* new WebhookDeliverySkipped({
+              reason: "This task runs on another machine.",
+            });
+          if (trigger === "manual")
+            return yield* taskError("This task runs on another machine.", { taskId: active.id });
+          return active;
         }
         // A next_run_at corrupted between the poll read and this re-read must
         // not defect the poll; an unparseable value is treated as not due.
@@ -942,7 +969,7 @@ export const layer = Layer.effect(
 
     const runDueTasks = Effect.fn("ScheduledTaskService.runDueTasks")(function* () {
       const now = yield* localNow;
-      const tasks = yield* listDueTasks(now).pipe(
+      const tasks = yield* listDueTasks(now, shared.environmentId).pipe(
         Effect.mapError((cause) => taskError("Could not list schedule tasks.", { cause })),
       );
       const due = tasks.flatMap((task) =>
@@ -973,7 +1000,11 @@ export const layer = Layer.effect(
     // rather than a single UPDATE.
     yield* Effect.gen(function* () {
       const rows = yield* selectAllRows();
-      const stuck = rows.filter((row) => row.last_run_status === "running");
+      const stuck = rows.filter(
+        (row) =>
+          row.last_run_status === "running" &&
+          (row.owner_machine == null || row.owner_machine === shared.environmentId),
+      );
       if (stuck.length === 0) return;
       const now = yield* localNow;
       yield* Effect.forEach(
@@ -1034,7 +1065,9 @@ export const layer = Layer.effect(
           const subscription = yield* PubSub.subscribe(changesPubSub);
           return Stream.concat(
             Stream.fromEffect(list()),
-            Stream.fromSubscription(subscription).pipe(Stream.mapEffect(() => list())),
+            Stream.merge(Stream.fromSubscription(subscription), shared.changes).pipe(
+              Stream.mapEffect(() => list()),
+            ),
           );
         }),
       );
@@ -1127,8 +1160,13 @@ export const layer = Layer.effect(
           existingTask !== null &&
           existingTask.enabled === input.enabled &&
           isSameSchedule(existingTask.schedule, schedule);
-        const task: ScheduledTask = {
+        let task: ScheduledTask = {
           id,
+          ownerMachine:
+            input.ownerMachine ??
+            existingTask?.ownerMachine ??
+            boundAgent?.ownerMachine ??
+            (yield* shared.defaultOwner),
           agentId:
             input.agentId === undefined
               ? (existingTask?.agentId ?? boundAgent?.id ?? null)
@@ -1159,9 +1197,14 @@ export const layer = Layer.effect(
           return yield* taskError("Event triggers require an agent.", { taskId: id });
         }
         if (task.agentId != null) {
-          yield* agentStore
+          const bound = yield* agentStore
             .get(task.agentId)
             .pipe(Effect.mapError((cause) => taskError("Agent not found.", { cause })));
+          if (input.ownerMachine !== undefined && input.ownerMachine !== bound.ownerMachine)
+            return yield* taskError("Agent triggers must run on the agent's owner.", {
+              taskId: id,
+            });
+          task = { ...task, ownerMachine: bound.ownerMachine ?? shared.environmentId };
         }
         if (task.schedule.type === "event" && task.agentId != null) {
           const scope = yield* access
@@ -1182,24 +1225,43 @@ export const layer = Layer.effect(
               message: "Event filters must stay within the agent's readable scope.",
             });
         }
-        yield* saveTask(task, input.requireExisting === true, webhook);
+        yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              yield* saveTask(task, input.requireExisting === true, webhook);
+              yield* shared
+                .capture("schedule", task.id)
+                .pipe(
+                  Effect.mapError((cause) =>
+                    taskError("Could not sync schedule task.", { taskId: task.id, cause }),
+                  ),
+                );
+            }),
+          )
+          .pipe(
+            Effect.mapError((cause) =>
+              taskError("Could not save schedule task.", { taskId: task.id, cause }),
+            ),
+          );
         yield* notifyChanged;
         return { task: (yield* findTask(id)) ?? task };
       });
 
     const setEnabled: ScheduledTaskService["Service"]["setEnabled"] = (input) =>
-      Effect.gen(function* () {
-        const existing = yield* loadTask(input.id);
-        if (existing.enabled === input.enabled) return { task: existing };
-        const now = yield* localNow;
-        const next = nextRunAt(
-          { enabled: input.enabled, schedule: existing.schedule },
-          now,
-          timeZone,
-        );
-        // RETURNING so a task deleted between the load and this UPDATE is a
-        // visible not-found error, not a false success.
-        const updated = yield* sql<{ task_id: string }>`
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const existing = yield* loadTask(input.id);
+            if (existing.enabled === input.enabled) return { task: existing };
+            const now = yield* localNow;
+            const next = nextRunAt(
+              { enabled: input.enabled, schedule: existing.schedule },
+              now,
+              timeZone,
+            );
+            // RETURNING so a task deleted between the load and this UPDATE is a
+            // visible not-found error, not a false success.
+            const updated = yield* sql<{ task_id: string }>`
           UPDATE scheduled_tasks
           SET enabled = ${input.enabled ? 1 : 0},
               next_run_at = ${next},
@@ -1207,18 +1269,31 @@ export const layer = Layer.effect(
           WHERE task_id = ${input.id}
           RETURNING task_id
         `.pipe(
+              Effect.mapError((cause) =>
+                taskError("Could not update schedule task.", { taskId: input.id, cause }),
+              ),
+            );
+            if (updated.length === 0) {
+              return yield* taskError("Schedule task not found.", { taskId: input.id });
+            }
+            yield* shared
+              .capture("schedule", input.id)
+              .pipe(
+                Effect.mapError((cause) =>
+                  taskError("Could not sync schedule task.", { taskId: input.id, cause }),
+                ),
+              );
+            yield* notifyChanged;
+            return {
+              task: { ...existing, enabled: input.enabled, nextRunAt: next, updatedAt: iso(now) },
+            };
+          }),
+        )
+        .pipe(
           Effect.mapError((cause) =>
             taskError("Could not update schedule task.", { taskId: input.id, cause }),
           ),
         );
-        if (updated.length === 0) {
-          return yield* taskError("Schedule task not found.", { taskId: input.id });
-        }
-        yield* notifyChanged;
-        return {
-          task: { ...existing, enabled: input.enabled, nextRunAt: next, updatedAt: iso(now) },
-        };
-      });
 
     const deleteTask: ScheduledTaskService["Service"]["delete"] = (input) =>
       deleteRow(input.id).pipe(
@@ -1266,7 +1341,12 @@ export const layer = Layer.effect(
     const triggerEvent: ScheduledTaskService["Service"]["triggerEvent"] = (id, event) =>
       Effect.gen(function* () {
         const task = yield* findTask(id);
-        if (task === null || !matchesAgentEvent(task, event)) return false;
+        if (
+          task === null ||
+          (task.ownerMachine !== undefined && task.ownerMachine !== shared.environmentId) ||
+          !matchesAgentEvent(task, event)
+        )
+          return false;
         const accepted = yield* agents.trigger(
           task,
           `event:${task.agentId}:${event.dedupKey}`,
@@ -1550,6 +1630,8 @@ export const layer = Layer.effect(
           return yield* notFound;
         }
         const task = yield* decodeRow(row);
+        if (task.ownerMachine !== undefined && task.ownerMachine !== shared.environmentId)
+          return yield* notFound;
         yield* Effect.annotateCurrentSpan({ "scheduled_task.id": task.id });
         const schedule = task.schedule;
         if (schedule.type !== "webhook") return yield* notFound;
@@ -1789,4 +1871,4 @@ export const layer = Layer.effect(
       triggerWebhook,
     });
   }),
-).pipe(Layer.provide(Access.layer));
+).pipe(Layer.provide(Access.layer), Layer.provide(SharedState.layer));

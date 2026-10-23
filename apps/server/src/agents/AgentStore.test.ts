@@ -1,3 +1,4 @@
+import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { MessageId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
@@ -17,7 +18,9 @@ import { EnvironmentId } from "@t3tools/contracts";
 
 import { agentFixture } from "./agent.testkit.ts";
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
-const layer = Store.layer.pipe(Layer.provideMerge(database), Layer.provide(NodeServices.layer));
+const layer = Store.layer
+  .pipe(Layer.provide(layerSharedIdentity))
+  .pipe(Layer.provideMerge(database), Layer.provide(NodeServices.layer));
 
 describe("persistent agents", () => {
   it.effect("creates, edits, lists and deletes identities and their memory", () =>
@@ -91,7 +94,13 @@ describe("persistent agents", () => {
         // Reconstructing the store (as after a server restart) uses the same persisted cursor.
         const persisted = yield* store
           .get(agent.id)
-          .pipe(Effect.provide(Store.layer.pipe(Layer.provide(NodeServices.layer))));
+          .pipe(
+            Effect.provide(
+              Store.layer
+                .pipe(Layer.provide(layerSharedIdentity))
+                .pipe(Layer.provide(NodeServices.layer)),
+            ),
+          );
         expect(persisted.unreadCount).toBe(1);
         for (const id of ["foreign", "owner", "empty", "missing"]) {
           expect(

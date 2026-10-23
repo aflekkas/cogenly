@@ -1,3 +1,4 @@
+import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -44,7 +45,9 @@ const insertThread = (threadId: ThreadId) =>
 
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 const persistence = Events.layer.pipe(Layer.provideMerge(database));
-const labels = Labels.layer.pipe(Layer.provideMerge(persistence));
+const labels = Labels.layer
+  .pipe(Layer.provide(layerSharedIdentity))
+  .pipe(Layer.provideMerge(persistence));
 
 // The launch stub writes the thread row and files it, as the real launch does.
 const launch = Layer.effect(
