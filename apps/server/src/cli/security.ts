@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import * as Console from "effect/Console";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -34,7 +35,7 @@ class SecurityCliError extends Schema.TaggedError<SecurityCliError>()("SecurityC
 
 const describeStatus = (status: MachineSecurityStatus): string =>
   [
-    `State: ${status.state} (observed ${String(status.observedAt)})`,
+    `State: ${status.state} (observed ${DateTime.formatIso(status.observedAt)})`,
     status.summary,
     `Cogenly bind: ${status.cogenlyBind.host}:${status.cogenlyBind.port}${status.cogenlyBind.loopback ? " (loopback)" : " (NOT loopback)"}`,
     ...status.findings.map(

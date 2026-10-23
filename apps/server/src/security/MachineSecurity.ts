@@ -212,7 +212,7 @@ export const buildMachineSecurityStatus = (
             checkId: "listening-sockets",
             status: "warn",
             title: "Non-loopback listeners present",
-            detail: `Listening publicly (bind): ${wide.map((s) => `${s.address}:${s.port}${s.process ? ` (${s.process})` : ""}`).join(", ")}. Listening is not proof of public reachability; see the firewall finding.`,
+            detail: `Listening publicly (bind): ${[...new Set(wide.map((s) => `${s.address}:${s.port}${s.process ? ` (${s.process})` : ""}`))].join(", ")}. Listening is not proof of public reachability; see the firewall finding.`,
             evidence: input.socketsEvidence,
           },
     );
