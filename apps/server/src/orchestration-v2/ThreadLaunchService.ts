@@ -40,6 +40,7 @@ import {
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
@@ -237,6 +238,9 @@ const make = Effect.gen(function* () {
   // Optional so launch-only test layers still resolve; production provides
   // it, and a launch that names a project fails without it.
   const projectLabels = yield* Effect.serviceOption(ProjectLabelService.ProjectLabelService);
+  // Optional for the same reason: without it launches keep their old
+  // behavior; production always provides it.
+  const repositoryCheckout = yield* Effect.serviceOption(RepositoryCheckout.RepositoryCheckout);
   const preparationScope = yield* Scope.make("sequential");
   const scheduledLaunches = yield* Ref.make<ReadonlySet<CommandId>>(new Set());
   yield* Effect.addFinalizer(() => Scope.close(preparationScope, Exit.void));
@@ -256,6 +260,42 @@ const make = Effect.gen(function* () {
     receipts
       .getByCommandId(commandId)
       .pipe(Effect.mapError(mapError(input, "read-receipt", input.threadId)));
+
+  /**
+   * A launch into a repository must land in a real checkout: clone a
+   * missing or empty one in place first, or fail before an agent starts.
+   * Applies to worktree launches (which need git) and to launches into a
+   * repository filed in a project; repository-less launches (Scratch and
+   * project folders) are untouched. Every launch path funnels through
+   * here: Work handoffs and `work_start`, `thread_launch`, delegated
+   * worktree tasks (via `prepareRun`), and scheduled tasks.
+   */
+  const ensureLaunchCheckout = (
+    input: PreparationInput,
+    threadId?: ThreadId,
+  ): Effect.Effect<void, ThreadLaunchError> =>
+    Effect.gen(function* () {
+      if (Option.isNone(repositoryCheckout)) return;
+      const filed =
+        input.workspaceStrategy.type === "worktree"
+          ? true
+          : yield* Option.match(projectLabels, {
+              onNone: () => Effect.succeed(false),
+              onSome: (labels) =>
+                labels.list().pipe(
+                  Effect.map(({ labels: all }) =>
+                    all.some((label) =>
+                      (label.repositories ?? []).some(
+                        (link) => link.repositoryId === input.projectId,
+                      ),
+                    ),
+                  ),
+                  Effect.orElseSucceed(() => false),
+                ),
+            });
+      if (!filed) return;
+      yield* repositoryCheckout.value.ensureCheckout(input.projectId);
+    }).pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
 
   const validateReusableThread = Effect.fn("ThreadLaunchService.validateReusableThread")(function* (
     input: ThreadLaunchInput,
@@ -333,6 +373,8 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
+
+    yield* ensureLaunchCheckout(input, threadId);
 
     const reused = input.reusedWorktree;
     const tracked = input.workspaceStrategy.type === "worktree" || reused !== undefined;
@@ -881,6 +923,7 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
+      yield* ensureLaunchCheckout(input, input.threadId);
       if (input.reuseExistingThread === true && input.threadId === undefined) {
         return yield* mapError(
           input,

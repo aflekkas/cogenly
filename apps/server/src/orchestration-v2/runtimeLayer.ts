@@ -36,6 +36,7 @@ import * as AgentSessionImporter from "../project/AgentSessionImporter.ts";
 import * as AgentSessionScanner from "../project/AgentSessionScanner.ts";
 import * as T3Import from "../t3Import/T3ImportService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as CheckpointCaptureService from "./CheckpointCaptureService.ts";
@@ -315,6 +316,9 @@ const layerT3ImportProvided = T3Import.layer.pipe(
     Layer.mergeAll(layerProjectService, layerEventSinkProvided, layerManagedProjectFoldersProvided),
   ),
 );
+const layerRepositoryCheckoutProvided = RepositoryCheckout.layer.pipe(
+  Layer.provide(Layer.mergeAll(layerProjectService, layerProjectLabelsProvided)),
+);
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -322,6 +326,7 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
       layerProjectSetupScriptRunner,
       layerManagedProjectFoldersProvided,
       layerProjectLabelsProvided,
+      layerRepositoryCheckoutProvided,
       layerThreadManagementProvided,
       layerCommandReceiptStoreProvided,
       IdAllocator.layer,

@@ -18,6 +18,7 @@ import * as Schema from "effect/Schema";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
@@ -41,10 +42,16 @@ const providerInstanceId = ProviderInstanceId.make("codex");
 type Step =
   | { readonly kind: "dispatch"; readonly type: string }
   | { readonly kind: "read-label"; readonly id: ProjectLabelId }
-  | { readonly kind: "file"; readonly threadId: ThreadId; readonly folderId: string | null };
+  | { readonly kind: "file"; readonly threadId: ThreadId; readonly folderId: string | null }
+  | { readonly kind: "checkout"; readonly repositoryId: ProjectId };
 
 function harness(
-  options: { readonly labelMissing?: boolean; readonly labelArchived?: boolean } = {},
+  options: {
+    readonly labelMissing?: boolean;
+    readonly labelArchived?: boolean;
+    readonly checkoutFails?: boolean;
+    readonly filedRepository?: boolean;
+  } = {},
 ) {
   const steps: Step[] = [];
   const createdWorktreePaths: Array<string | null> = [];
@@ -95,7 +102,39 @@ function harness(
             }),
           getThreadProjection: () => Effect.succeed(projection),
         }),
+        Layer.mock(RepositoryCheckout.RepositoryCheckout)({
+          ensureCheckout: (repositoryId) =>
+            Effect.suspend(() => {
+              steps.push({ kind: "checkout", repositoryId });
+              return options.checkoutFails === true
+                ? Effect.fail(
+                    new RepositoryCheckout.RepositoryCheckoutError({
+                      repositoryId,
+                      repositoryName: "smile-express",
+                      reason: "no_remote",
+                    }),
+                  )
+                : Effect.void;
+            }),
+        }),
         Layer.mock(ProjectLabelService.ProjectLabelService)({
+          list: () =>
+            Effect.succeed({
+              labels:
+                options.filedRepository === true
+                  ? [
+                      {
+                        repositories: [
+                          {
+                            repositoryId: projectId,
+                            remote: "github.com/spawn/smile-express",
+                            directoryName: "smile-express",
+                          },
+                        ],
+                      },
+                    ]
+                  : [],
+            } as never),
           readActive: (id) =>
             Effect.suspend(() => {
               steps.push({ kind: "read-label", id });
@@ -195,6 +234,27 @@ describe("ThreadLaunchService project filing", () => {
       const error = yield* Effect.flip(launches.launch(launchInput({ projectFolderId: folderId })));
       expect(error._tag).toBe("ThreadLaunchError");
       expect(steps).toEqual([{ kind: "read-label", id: folderId }]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("ensures a checkout before creating a thread in a filed repository", () => {
+    const { steps, layer } = harness({ filedRepository: true });
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      yield* launches.launch(launchInput({ surface: "work" }));
+      expect(steps[0]).toEqual({ kind: "checkout", repositoryId: projectId });
+      expect(steps).toContainEqual({ kind: "dispatch", type: "thread.create" });
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("refuses a launch into a repository with no checkout and no remote", () => {
+    const { steps, layer } = harness({ filedRepository: true, checkoutFails: true });
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const error = yield* Effect.flip(launches.launch(launchInput({ surface: "work" })));
+      expect(error._tag).toBe("ThreadLaunchError");
+      expect(error).toMatchObject({ operation: "provision-worktree" });
+      expect(steps).toEqual([{ kind: "checkout", repositoryId: projectId }]);
     }).pipe(Effect.provide(layer));
   });
 
