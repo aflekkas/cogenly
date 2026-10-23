@@ -1,3 +1,4 @@
+import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProjectId, ProjectLabelId } from "@t3tools/contracts";
@@ -12,7 +13,9 @@ import * as Labels from "./ProjectLabelService.ts";
 
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 const persistence = Events.layer.pipe(Layer.provideMerge(database));
-const layer = Labels.layer.pipe(Layer.provideMerge(persistence), Layer.provide(NodeServices.layer));
+const layer = Labels.layer
+  .pipe(Layer.provide(layerSharedIdentity))
+  .pipe(Layer.provideMerge(persistence), Layer.provide(NodeServices.layer));
 const identities = Layer.succeed(
   RepositoryIdentityResolver.RepositoryIdentityResolver,
   RepositoryIdentityResolver.RepositoryIdentityResolver.of({

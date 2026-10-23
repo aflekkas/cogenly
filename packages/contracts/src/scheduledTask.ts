@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 
 import {
   CommandId,
+  EnvironmentId,
   ForwardCompatibleArray,
   IsoDateTime,
   ProjectId,
@@ -35,6 +36,7 @@ export type ScheduledTaskWebhookEndpoint = typeof ScheduledTaskWebhookEndpoint.T
 
 export const ScheduledTask = Schema.Struct({
   id: ScheduledTaskId,
+  ownerMachine: Schema.optionalKey(EnvironmentId),
   agentId: Schema.optional(Schema.NullOr(AgentId)),
   title: TrimmedNonEmptyString,
   prompt: TrimmedNonEmptyString,
@@ -71,6 +73,7 @@ export type ScheduledTaskListResult = typeof ScheduledTaskListResult.Type;
 
 export const ScheduledTaskUpsertInput = Schema.Struct({
   id: Schema.optional(ScheduledTaskId),
+  ownerMachine: Schema.optionalKey(EnvironmentId),
   agentId: Schema.optional(Schema.NullOr(AgentId)),
   requireExisting: Schema.optional(Schema.Boolean).annotate({
     description: "Reject the save if the task no longer exists, for edits from a client form.",

@@ -1,3 +1,4 @@
+import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
@@ -17,9 +18,10 @@ import * as Search from "./GlobalSearch.ts";
 const json = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const at = "2026-01-01T00:00:00.000Z";
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
-const stores = Layer.mergeAll(Store.layer, Labels.layer.pipe(Layer.provide(Events.layer))).pipe(
-  Layer.provideMerge(database),
-);
+const stores = Layer.mergeAll(
+  Store.layer.pipe(Layer.provide(layerSharedIdentity)),
+  Labels.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(Layer.provide(Events.layer)),
+).pipe(Layer.provideMerge(database));
 const layer = Search.layer.pipe(
   Layer.provideMerge(stores),
   Layer.provideMerge(Config.layerTest(process.cwd(), { prefix: "cogenly-search-" })),

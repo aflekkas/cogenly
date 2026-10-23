@@ -1,3 +1,4 @@
+import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeSqlite from "@t3tools/shared/nodeSqliteClient";
@@ -81,7 +82,9 @@ it.effect("uses indexed prefix LIKE if the migration selected the non-FTS engine
     yield* sql`CREATE INDEX search_documents_body ON search_documents(body COLLATE NOCASE)`;
     yield* sql`INSERT INTO project_labels(label_id, name, description, created_at, updated_at) VALUES ('label', 'Quartz fallback', 'Nebula details', ${at}, ${at})`;
     const search = yield* Search.GlobalSearch.pipe(
-      Effect.provide(Search.layer.pipe(Layer.provide(Store.layer))),
+      Effect.provide(
+        Search.layer.pipe(Layer.provide(Store.layer.pipe(Layer.provide(layerSharedIdentity)))),
+      ),
     );
     expect((yield* search.query({ query: "quartz" })).results[0]?.id).toBe("label");
     expect((yield* search.query({ query: "nebula" })).results[0]?.id).toBe("label");

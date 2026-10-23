@@ -1,3 +1,4 @@
+import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as Facts from "../context/FactService.ts";
 import { describe, expect, it } from "@effect/vitest";
@@ -14,7 +15,9 @@ import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 const persistence = Events.layer.pipe(Layer.provideMerge(database));
-const layer = Labels.layer.pipe(Layer.provideMerge(persistence), Layer.provide(NodeServices.layer));
+const layer = Labels.layer
+  .pipe(Layer.provide(layerSharedIdentity))
+  .pipe(Layer.provideMerge(persistence), Layer.provide(NodeServices.layer));
 const threadId = ThreadId.make("chat");
 const repoA = ProjectId.make("repo-a"),
   repoB = ProjectId.make("repo-b");
@@ -147,7 +150,7 @@ describe("project labels", () => {
       ).toEqual({ repositoryId: repoA, remote: null, directoryName: "repo-a" });
     }).pipe(
       Effect.provide(
-        Labels.layer.pipe(
+        Labels.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(
           Layer.provideMerge(
             Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
               resolve: (cwd) =>

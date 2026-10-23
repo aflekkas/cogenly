@@ -14,6 +14,7 @@ const decode = Schema.decodeUnknownEffect(Agent);
  */
 export const decodeAgentRow = (row: {
   readonly payload_json: string;
+  readonly owner_machine?: string | null;
   readonly consecutive_failures: number;
   readonly backoff_until: string | null;
   readonly daily_run_cap: number;
@@ -36,6 +37,7 @@ export const decodeAgentRow = (row: {
       },
       notifyPolicy: "all",
       ...data,
+      ...(row.owner_machine == null ? {} : { ownerMachine: row.owner_machine }),
       consecutiveFailures: row.consecutive_failures,
       backoffUntil: row.backoff_until,
       dailyRunCap: row.daily_run_cap,

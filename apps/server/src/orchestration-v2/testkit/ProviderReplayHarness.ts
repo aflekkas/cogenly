@@ -1,3 +1,4 @@
+import { layerIdentity as layerSharedIdentity } from "../../sync/testkit.ts";
 import * as AgentStore from "../../agents/AgentStore.ts";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
@@ -405,7 +406,11 @@ export function layerWithRegistry<Error>(
   const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        AgentStore.layer.pipe(Layer.provide(layerDatabase)),
+        AgentStore.layer.pipe(
+          Layer.provide(layerSharedIdentity),
+          Layer.provide(layerDatabase),
+          Layer.orDie,
+        ),
         layerContextHandoffServiceProvided,
         layerEventSinkProvided,
         IdAllocator.layer,

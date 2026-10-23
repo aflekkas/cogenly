@@ -1,3 +1,4 @@
+import * as SharedState from "../sync/SharedState.ts";
 import { decodeAgentRow } from "./agentRecord.ts";
 import {
   Agent,
@@ -31,6 +32,7 @@ import { conversationCarryOver } from "./context.ts";
 
 interface Row {
   payload_json: string;
+  owner_machine?: string | null;
   consecutive_failures: number;
   backoff_until: string | null;
   daily_run_cap: number;
@@ -113,6 +115,7 @@ export class AgentStore extends Context.Service<
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const shared = yield* SharedState.SharedState;
   const facts = yield* Facts.FactService;
   const retrieval = yield* Retrieval.ContextRetrievalService;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -246,10 +249,16 @@ const make = Effect.gen(function* () {
         return yield* get(agent.id);
       }).pipe(Effect.mapError(storeError)),
     save: (agent) =>
-      sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, json_remove(${encodeAgent(agent)}, '$.projectFolderId'), 1, ${agent.dailyRunCap}) ON CONFLICT(agent_id) DO UPDATE SET payload_json = excluded.payload_json, daily_run_cap = excluded.daily_run_cap`.pipe(
-        Effect.andThen(get(agent.id)),
-        Effect.mapError(storeError),
-      ),
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const owner = agent.ownerMachine ?? (yield* shared.defaultOwner);
+            yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap, owner_machine) VALUES (${agent.id}, ${agent.conversationThreadId}, json_remove(${encodeAgent({ ...agent, ownerMachine: owner })}, '$.projectFolderId'), 1, ${agent.dailyRunCap}, ${owner}) ON CONFLICT(agent_id) DO UPDATE SET payload_json = excluded.payload_json, daily_run_cap = excluded.daily_run_cap, owner_machine = excluded.owner_machine`;
+            yield* shared.capture("agent", agent.id);
+            return yield* get(agent.id);
+          }),
+        )
+        .pipe(Effect.mapError(storeError)),
 
     retire: (id) =>
       sql`UPDATE agents SET enabled = 0 WHERE agent_id = ${id}`.pipe(
@@ -261,6 +270,11 @@ const make = Effect.gen(function* () {
         .withTransaction(
           Effect.gen(function* () {
             yield* sql`DELETE FROM scheduled_task_webhook_deliveries WHERE task_id IN (SELECT task_id FROM scheduled_tasks WHERE agent_id = ${id})`;
+            const schedules = yield* sql<{
+              task_id: string;
+            }>`SELECT task_id FROM scheduled_tasks WHERE agent_id = ${id}`;
+            for (const task of schedules) yield* shared.capture("schedule", task.task_id, true);
+            yield* shared.capture("agent", id, true);
             yield* sql`DELETE FROM scheduled_tasks WHERE agent_id = ${id}`;
             yield* sql`DELETE FROM agent_conversation_context WHERE agent_id = ${id}`;
             yield* sql`DELETE FROM agent_memory WHERE agent_id = ${id}`;
@@ -317,7 +331,7 @@ const make = Effect.gen(function* () {
         const at = yield* now;
         const day = at.slice(0, 10);
         const rows =
-          yield* sql`UPDATE agents SET run_day = ${day}, daily_runs = CASE WHEN run_day = ${day} THEN daily_runs + 1 ELSE 1 END WHERE agent_id = ${id} AND enabled = 1 AND (backoff_until IS NULL OR backoff_until <= ${at}) AND (run_day IS NULL OR run_day <> ${day} OR daily_runs < daily_run_cap) AND NOT EXISTS (SELECT 1 FROM agent_work_runs WHERE agent_id = ${id} AND status IN ('starting', 'running')) RETURNING agent_id`;
+          yield* sql`UPDATE agents SET run_day = ${day}, daily_runs = CASE WHEN run_day = ${day} THEN daily_runs + 1 ELSE 1 END WHERE agent_id = ${id} AND enabled = 1 AND (owner_machine IS NULL OR owner_machine = ${shared.environmentId}) AND (backoff_until IS NULL OR backoff_until <= ${at}) AND (run_day IS NULL OR run_day <> ${day} OR daily_runs < daily_run_cap) AND NOT EXISTS (SELECT 1 FROM agent_work_runs WHERE agent_id = ${id} AND status IN ('starting', 'running')) RETURNING agent_id`;
         return rows.length > 0;
       }).pipe(Effect.mapError(storeError)),
     outcome: (id, succeeded) =>
@@ -366,5 +380,5 @@ const make = Effect.gen(function* () {
   });
 });
 export const layer = Layer.effect(AgentStore, make).pipe(
-  Layer.provide(Layer.merge(Facts.layer, Retrieval.layer)),
+  Layer.provide(Layer.mergeAll(Facts.layer, Retrieval.layer, SharedState.layer)),
 );

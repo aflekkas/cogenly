@@ -85,3 +85,5 @@ export * from "./integration.ts";
 export * from "./machine.ts";
 export * from "./machineSecurity.ts";
 export * from "./accounts.ts";
+
+export * from "./sharedDocument.ts";
