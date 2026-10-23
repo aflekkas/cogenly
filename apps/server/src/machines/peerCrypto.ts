@@ -23,6 +23,8 @@ import * as Schema from "effect/Schema";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "../cloud/environmentKeys.ts";
 
+const decodeDpopPublicJwk = Schema.decodeUnknownEffect(DpopPublicJwk);
+
 const PEER_DPOP_KEY_SECRET = "machine-peer-dpop-key";
 
 const StoredDpopKey = Schema.Struct({
@@ -65,9 +67,7 @@ export const getOrCreatePeerDpopKey = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const generated = NodeCrypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
   const privateJwk = generated.privateKey.export({ format: "jwk" });
-  const publicJwk = yield* Schema.decodeUnknownEffect(DpopPublicJwk)(
-    generated.publicKey.export({ format: "jwk" }),
-  ).pipe(
+  const publicJwk = yield* decodeDpopPublicJwk(generated.publicKey.export({ format: "jwk" })).pipe(
     Effect.mapError(
       (cause) =>
         new ServerSecretStore.SecretStoreDecodeError({ resource: "machine peer key", cause }),
