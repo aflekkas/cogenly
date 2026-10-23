@@ -41,6 +41,24 @@ export const IntegrationHeaders = Schema.Record(
 );
 export type IntegrationHeaders = typeof IntegrationHeaders.Type;
 
+/**
+ * OAuth sign-in to the upstream server (MCP authorization spec). Tokens live
+ * in the vault, never here. `clientId` and `clientSecret` are for servers
+ * without dynamic client registration (e.g. a Slack app the owner created);
+ * the secret is a `{{credential:<item>.<field>}}` reference, never a value.
+ */
+export const IntegrationAuth = Schema.Struct({
+  type: Schema.Literal("oauth"),
+  clientId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+  clientSecret: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
+  /** Space-separated scopes to ask for; defaults to what the server advertises. */
+  scope: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
+});
+export type IntegrationAuth = typeof IntegrationAuth.Type;
+
+/** Which connection of a provider this is, e.g. "Spawn Partners" or "personal". */
+const IntegrationAccountLabel = Schema.String.check(Schema.isMaxLength(200));
+
 const integrationFields = {
   name: IntegrationName,
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
@@ -51,6 +69,8 @@ const integrationFields = {
   scope: IntegrationScope,
   /** Short hint agents see next to the name, e.g. "Gmail for aflekkas@…". */
   hint: Schema.String.check(Schema.isMaxLength(500)),
+  accountLabel: Schema.optional(IntegrationAccountLabel),
+  auth: Schema.optional(IntegrationAuth),
 };
 
 export const Integration = Schema.Struct({
@@ -85,16 +105,26 @@ export const IntegrationUpdateInput = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
   scope: Schema.optional(IntegrationScope),
   hint: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
+  /** An empty label removes it. */
+  accountLabel: Schema.optional(IntegrationAccountLabel),
+  /** Null turns OAuth sign-in off and forgets the stored tokens. */
+  auth: Schema.optional(Schema.NullOr(IntegrationAuth)),
 });
 export type IntegrationUpdateInput = typeof IntegrationUpdateInput.Type;
 
 export const IntegrationKey = Schema.Struct({ id: IntegrationId });
 export type IntegrationKey = typeof IntegrationKey.Type;
 
+/**
+ * `needs_sign_in`: OAuth has no usable grant (never signed in, or revoked).
+ * `error`: the last check failed; `message` says why.
+ */
 export const IntegrationConnectionStatus = Schema.Literals([
   "connected",
   "disconnected",
   "unknown",
+  "needs_sign_in",
+  "error",
 ]);
 export type IntegrationConnectionStatus = typeof IntegrationConnectionStatus.Type;
 
@@ -103,6 +133,8 @@ export const IntegrationSummary = Schema.Struct({
   integration: Integration,
   status: IntegrationConnectionStatus,
   toolCount: Schema.NullOr(Schema.Number),
+  message: Schema.optional(Schema.String),
+  checkedAt: Schema.optional(IsoDateTime),
 });
 export type IntegrationSummary = typeof IntegrationSummary.Type;
 
@@ -111,7 +143,18 @@ export const IntegrationListResult = Schema.Struct({
 });
 export type IntegrationListResult = typeof IntegrationListResult.Type;
 
-export const IntegrationMutationResult = Schema.Struct({ integration: Integration });
+/** A browser link that starts OAuth sign-in; it returns to `redirectUri` on this server. */
+export const IntegrationSignIn = Schema.Struct({
+  authorizationUrl: Schema.String,
+  redirectUri: Schema.String,
+});
+export type IntegrationSignIn = typeof IntegrationSignIn.Type;
+
+export const IntegrationMutationResult = Schema.Struct({
+  integration: Integration,
+  /** Present when the integration needs a browser sign-in before agents can use it. */
+  signIn: Schema.optional(IntegrationSignIn),
+});
 export type IntegrationMutationResult = typeof IntegrationMutationResult.Type;
 
 export const IntegrationDeleteResult = Schema.Struct({ deleted: Schema.Boolean });
@@ -138,6 +181,9 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
     "upstream_error",
     "invalid_request",
     "approval_required",
+    "sign_in_required",
+    /** The server has no dynamic client registration; the owner must supply a client id. */
+    "client_id_required",
   ]),
   cause: Schema.optional(Schema.Defect()),
 }) {
@@ -187,6 +233,8 @@ export const IntegrationUpdateByNameInput = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
   scope: Schema.optional(IntegrationScope),
   hint: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
+  accountLabel: Schema.optional(IntegrationAccountLabel),
+  auth: Schema.optional(Schema.NullOr(IntegrationAuth)),
 });
 export type IntegrationUpdateByNameInput = typeof IntegrationUpdateByNameInput.Type;
 

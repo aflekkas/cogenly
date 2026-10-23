@@ -608,6 +608,8 @@ export const WS_METHODS = {
   integrationsUpdate: "integrations.update",
   integrationsDelete: "integrations.delete",
   integrationsTestConnection: "integrations.testConnection",
+  integrationsBeginSignIn: "integrations.beginSignIn",
+  integrationsSubscribe: "integrations.subscribe",
 
   // Machines: this server, its hub, and its paired spokes
   machinesList: "machines.list",
@@ -2139,6 +2141,18 @@ const WsIntegrationsTestConnectionRpc = Rpc.make(WS_METHODS.integrationsTestConn
   success: Integrations.IntegrationTestResult,
   error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
 });
+const WsIntegrationsBeginSignInRpc = Rpc.make(WS_METHODS.integrationsBeginSignIn, {
+  payload: Integrations.IntegrationKey,
+  success: Integrations.IntegrationSignIn,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+/** The list, then again after every change (including a finished sign-in). */
+const WsIntegrationsSubscribeRpc = Rpc.make(WS_METHODS.integrationsSubscribe, {
+  payload: Schema.Struct({}),
+  success: Integrations.IntegrationListResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+  stream: true,
+});
 
 const machineErrors = Schema.Union([Machines.MachineError, EnvironmentAuthorizationError]);
 const WsMachineSecurityStatusRpc = Rpc.make(WS_METHODS.machineSecurityStatus, {
@@ -2572,6 +2586,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsUpdateRpc,
   WsIntegrationsDeleteRpc,
   WsIntegrationsTestConnectionRpc,
+  WsIntegrationsBeginSignInRpc,
+  WsIntegrationsSubscribeRpc,
   WsMachineSecurityStatusRpc,
   WsMachinesListRpc,
   WsMachinesSubscribeRpc,

@@ -6,12 +6,14 @@ import {
   type IntegrationCreateInput,
   type IntegrationListResult,
   type IntegrationName,
+  type IntegrationSignIn,
   type IntegrationSummary,
   type IntegrationTestResult,
   type IntegrationToolsResult,
   type IntegrationUpdateInput,
   type ProjectLabelId,
 } from "@t3tools/contracts";
+import { isLoopbackHost } from "@t3tools/shared/preview";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -21,15 +23,41 @@ import * as Effect from "effect/Effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { redactValue } from "../vault/VaultRedactor.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
+import * as OAuth from "./IntegrationOAuth.ts";
+import * as Tokens from "./IntegrationTokens.ts";
 
-const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(Integration));
-const encode = Schema.encodeEffect(Schema.fromJsonString(Integration));
+/**
+ * Server-only OAuth state, persisted with the integration and stripped before
+ * it reaches any client or agent. Secrets are in the vault item it names.
+ */
+const OAuthState = Schema.Struct({
+  signedIn: Schema.Boolean,
+  server: Schema.optional(OAuth.OAuthServer),
+  /** The dynamically registered client; absent when the owner supplied a client id. */
+  registration: Schema.optional(OAuth.OAuthClientRegistration),
+  tokenItemId: Schema.optional(Schema.String),
+  /** Access token expiry in epoch milliseconds; null when the server gave none. */
+  expiresAt: Schema.optional(Schema.NullOr(Schema.Number)),
+});
+type OAuthState = typeof OAuthState.Type;
+
+const StoredIntegration = Schema.Struct({
+  ...Integration.fields,
+  oauthState: Schema.optional(OAuthState),
+});
+type StoredIntegration = typeof StoredIntegration.Type;
+
+const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(StoredIntegration));
+const encode = Schema.encodeEffect(Schema.fromJsonString(StoredIntegration));
 const isError = Schema.is(IntegrationError);
 const failure =
   (operation: string, reason: IntegrationError["reason"]) =>
@@ -47,10 +75,16 @@ const CREDENTIAL_REF = /\{\{credential:([^}]*)\}\}/g;
 export const credentialRefsIn = (template: string): ReadonlyArray<string> =>
   [...template.matchAll(CREDENTIAL_REF)].map((match) => (match[1] ?? "").trim());
 
-/** The vault item names a set of headers references, which an owner approves together. */
-const credentialItemsIn = (headers: Readonly<Record<string, string>>): Array<string> => [
+/**
+ * The vault item names a set of headers and an OAuth client secret reference,
+ * which an owner approves together.
+ */
+const credentialItemsIn = (
+  headers: Readonly<Record<string, string>>,
+  auth?: Integration["auth"],
+): Array<string> => [
   ...new Set(
-    Object.values(headers).flatMap((template) =>
+    [...Object.values(headers), auth?.clientSecret ?? ""].flatMap((template) =>
       credentialRefsIn(template).flatMap((ref) => {
         const parsed = Credentials.parseCredentialRef(ref);
         return parsed === undefined ? [] : [parsed.item];
@@ -58,6 +92,14 @@ const credentialItemsIn = (headers: Readonly<Record<string, string>>): Array<str
     ),
   ),
 ];
+
+const usesOAuth = (integration: Integration) => integration.auth?.type === "oauth";
+
+/** "Linear · Spawn Partners": how people and agents tell two accounts of one service apart. */
+export const integrationTitle = (integration: Integration): string =>
+  integration.accountLabel?.trim()
+    ? `${integration.displayName} · ${integration.accountLabel.trim()}`
+    : integration.displayName;
 
 /**
  * What clients and agents see in place of a literal header value, which may be
@@ -75,18 +117,25 @@ export const redactHeaders = (headers: Readonly<Record<string, string>>): Record
     ]),
   );
 
-const redactIntegration = (integration: Integration): Integration => ({
-  ...integration,
-  headers: redactHeaders(integration.headers),
-});
+/** What leaves the service: masked headers and no OAuth state. */
+const redactIntegration = (integration: Integration | StoredIntegration): Integration => {
+  const { oauthState: _, ...rest } = integration as StoredIntegration;
+  return { ...rest, headers: redactHeaders(integration.headers) };
+};
 
-/** Treat every header as sensitive: even a static Host header can change routing. */
+/**
+ * Treat every header as sensitive: even a static Host header can change
+ * routing. OAuth settings are part of the destination too: a client secret
+ * reference travels to whatever token endpoint the server names.
+ */
 export const integrationDestinationChanged = (
   current: Integration,
   input: IntegrationUpdateInput,
 ): boolean =>
   (input.url !== undefined && input.url !== current.url) ||
   (input.transport !== undefined && input.transport !== current.transport) ||
+  (input.auth !== undefined &&
+    JSON.stringify(input.auth) !== JSON.stringify(current.auth ?? null)) ||
   (input.headers !== undefined &&
     (Object.keys(input.headers).length !== Object.keys(current.headers).length ||
       Object.entries(input.headers).some(
@@ -213,6 +262,32 @@ export interface IntegrationsOptions {
   readonly upstreamTimeoutMs?: number;
 }
 
+/** Where sign-in returns to, and who asked. */
+export interface SignInOrigin {
+  /** The origin the request that starts sign-in reached, e.g. the WebSocket upgrade's. */
+  readonly origin: string | undefined;
+  /**
+   * An agent's MCP request usually reaches loopback, which a browser on
+   * another machine cannot open; then the origin of the last finished
+   * sign-in, which a browser demonstrably reached, is used instead.
+   */
+  readonly fromAgent?: boolean;
+}
+
+/** What the browser brings back to the callback. */
+export interface SignInCallback {
+  readonly state: string | undefined;
+  readonly code: string | undefined;
+  readonly error: string | undefined;
+  readonly iss: string | undefined;
+}
+
+/** A pending sign-in lives this long, and only this many at once. */
+const SIGN_IN_TTL_MS = 10 * 60_000;
+const MAX_PENDING_SIGN_INS = 64;
+/** Refresh this long before the access token expires. */
+const REFRESH_SKEW_MS = 60_000;
+
 export class Integrations extends Context.Service<
   Integrations,
   {
@@ -260,6 +335,20 @@ export class Integrations extends Context.Service<
     readonly contextIntegrations: (
       labelId: ProjectLabelId | null,
     ) => Effect.Effect<ReadonlyArray<Integration>, IntegrationError>;
+    /** The owner's list, then again after every change. */
+    readonly subscribe: () => Stream.Stream<IntegrationListResult, IntegrationError>;
+    /**
+     * Starts OAuth sign-in for an integration: discovers its authorization
+     * server, registers a client when it can, and returns the link to open.
+     */
+    readonly beginSignIn: (
+      id: IntegrationId,
+      origin: SignInOrigin,
+    ) => Effect.Effect<IntegrationSignIn, IntegrationError>;
+    /** Finishes a sign-in from the browser callback; a state it did not issue fails. */
+    readonly completeSignIn: (
+      callback: SignInCallback,
+    ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
   }
 >()("cogenly-server/integrations/Integrations") {}
 
@@ -302,17 +391,88 @@ const parseRpcBody = (text: string): JsonRpcResponse | undefined => {
   return undefined;
 };
 
+const CHECK_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
+  credential_unresolved: "A vault reference could not be resolved.",
+  credential_not_allowed: "A vault item isn't allowed for this server.",
+  upstream_unreachable: "The server could not be reached.",
+  upstream_timeout: "The server took too long to answer.",
+  upstream_error: "The server answered with an error.",
+  sign_in_required: "Sign in again.",
+  client_id_required: "This server needs a client ID from an app you create with the provider.",
+};
+
+/** Status text owners and agents see; upstream messages are already bounded. */
+const checkMessage = (reason: IntegrationError["reason"], cause: unknown): string => {
+  const base = CHECK_MESSAGES[reason] ?? "The request could not be completed.";
+  return reason === "upstream_error" && typeof cause === "string" && cause.trim() !== ""
+    ? `${base} ${cause.trim().slice(0, MAX_UPSTREAM_MESSAGE_CHARS)}`
+    : base;
+};
+
+/** One vault item per integration account, named by its id so renames never collide. */
+const tokenItemName = (integration: Integration) =>
+  `integration-oauth:${integration.id.replace(/^integration:/, "")}`;
+
 const make = (options: IntegrationsOptions = {}) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const crypto = yield* Crypto.Crypto;
     const client = yield* HttpClient.HttpClient;
     const credentials = yield* Credentials.IntegrationCredentials;
+    const tokenStore = yield* Tokens.IntegrationTokens;
+    const protocol = yield* OAuth.make;
     const ttlMs = options.toolCacheTtlMs ?? DEFAULT_TOOL_CACHE_TTL_MS;
     const timeoutMs = options.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS;
     const cache = yield* Ref.make(new Map<string, CachedTools>());
     const requestIds = yield* Ref.make(0);
     const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
+    const changes = yield* PubSub.unbounded<void>();
+    const notify = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
+    /** The last upstream outcome per integration version, for the status column. */
+    const checks = yield* Ref.make(
+      new Map<
+        IntegrationId,
+        {
+          readonly updatedAt: string;
+          readonly ok: boolean;
+          readonly message?: string;
+          readonly checkedAt: string;
+        }
+      >(),
+    );
+    /** Sign-ins waiting for their browser callback, by `state`. Lost on restart; the user retries. */
+    const pendingSignIns = yield* Ref.make(
+      new Map<
+        string,
+        {
+          readonly integrationId: IntegrationId;
+          readonly url: string;
+          readonly server: OAuth.OAuthServer;
+          readonly redirectUri: string;
+          readonly verifier: string;
+          readonly registration: OAuth.OAuthClientRegistration | undefined;
+          /** A secret issued by a registration made for this sign-in, until it is stored. */
+          readonly newClientSecret: string | undefined;
+          readonly expiresAtMs: number;
+        }
+      >(),
+    );
+    /** Decrypted tokens per signed-in integration, so calls do not reopen the vault. */
+    const liveTokens = new Map<
+      IntegrationId,
+      Tokens.StoredTokens & { readonly itemId: string; readonly expiresAt: number | null }
+    >();
+    /** One refresh at a time per account; waiters reuse the token it produced. */
+    const refreshLocks = new Map<IntegrationId, Semaphore.Semaphore>();
+    const refreshLock = (id: IntegrationId) => {
+      let lock = refreshLocks.get(id);
+      if (lock === undefined) {
+        lock = Semaphore.makeUnsafe(1);
+        refreshLocks.set(id, lock);
+      }
+      return lock;
+    };
+    const lastBrowserOrigin = yield* Ref.make<string | undefined>(undefined);
 
     const invalidate = (id: IntegrationId) =>
       Ref.update(cache, (entries) => {
@@ -364,23 +524,225 @@ const make = (options: IntegrationsOptions = {}) =>
         return found;
       });
 
-    const summaries = (integrations: ReadonlyArray<Integration>) =>
+    const summaries = (integrations: ReadonlyArray<StoredIntegration>) =>
       Effect.gen(function* () {
         const entries = yield* Ref.get(cache);
+        const checked = yield* Ref.get(checks);
         return {
           integrations: integrations.map((integration) => {
             const prefix = `${integration.id}:${integration.updatedAt}`;
             const cached =
               entries.get(prefix) ??
               [...entries.values()].find((entry) => entry.key.startsWith(`${prefix}:`));
+            const check = checked.get(integration.id);
+            const current = check?.updatedAt === integration.updatedAt ? check : undefined;
+            const status: IntegrationSummary["status"] =
+              usesOAuth(integration) && !integration.oauthState?.signedIn
+                ? "needs_sign_in"
+                : current !== undefined && !current.ok
+                  ? "error"
+                  : cached === undefined
+                    ? "unknown"
+                    : "connected";
             return {
               integration: redactIntegration(integration),
-              status: cached === undefined ? "unknown" : "connected",
-              toolCount: cached === undefined ? null : cached.result.tools.length,
+              status,
+              toolCount: status === "connected" && cached ? cached.result.tools.length : null,
+              ...(current?.message === undefined ? {} : { message: current.message }),
+              ...(current === undefined ? {} : { checkedAt: current.checkedAt as never }),
             } satisfies IntegrationSummary;
           }),
         };
       });
+
+    /** Records an upstream outcome; clients hear only when the status changes. */
+    const recordCheck = (integration: Integration, outcome: { ok: true } | IntegrationError) =>
+      Effect.gen(function* () {
+        const message = "ok" in outcome ? undefined : checkMessage(outcome.reason, outcome.cause);
+        const checkedAt = yield* now;
+        const previous = yield* Ref.getAndUpdate(checks, (current) =>
+          new Map(current).set(integration.id, {
+            updatedAt: integration.updatedAt,
+            ok: "ok" in outcome,
+            ...(message === undefined ? {} : { message }),
+            checkedAt,
+          }),
+        );
+        const before = previous.get(integration.id);
+        if (
+          before?.updatedAt !== integration.updatedAt ||
+          before.ok !== "ok" in outcome ||
+          before.message !== message
+        )
+          yield* notify;
+      });
+
+    const persistState = (
+      id: IntegrationId,
+      update: (state: OAuthState | undefined) => OAuthState,
+    ) =>
+      Effect.gen(function* () {
+        const current = yield* getById(id);
+        // Sign-in state is not an edit: updatedAt, and so the tool cache, stay put.
+        yield* persist({ ...current, oauthState: update(current.oauthState) });
+      }).pipe(sql.withTransaction, Effect.mapError(failure("sign in", "storage")));
+
+    /** The grant is gone; only a new browser sign-in helps, so nothing retries it. */
+    const markNeedsSignIn = (integration: StoredIntegration, message: string) =>
+      Effect.gen(function* () {
+        liveTokens.delete(integration.id);
+        yield* persistState(integration.id, (state) => ({ ...state, signedIn: false }));
+        const checkedAt = yield* now;
+        yield* Ref.update(checks, (current) =>
+          new Map(current).set(integration.id, {
+            updatedAt: integration.updatedAt,
+            ok: false,
+            message,
+            checkedAt,
+          }),
+        );
+        yield* notify;
+      }).pipe(Effect.ignore);
+
+    const signInRequired = (operation: string) =>
+      new IntegrationError({ operation, reason: "sign_in_required" });
+
+    /** Forgets an account's tokens, e.g. after its server or client changed. */
+    const dropTokens = (integration: StoredIntegration) =>
+      Effect.gen(function* () {
+        liveTokens.delete(integration.id);
+        if (integration.oauthState?.tokenItemId !== undefined)
+          yield* tokenStore.remove(integration.oauthState.tokenItemId);
+      });
+
+    const loadTokens = (integration: StoredIntegration) =>
+      Effect.gen(function* () {
+        const state = integration.oauthState;
+        if (!state?.signedIn || state.tokenItemId === undefined) return undefined;
+        const live = liveTokens.get(integration.id);
+        if (live !== undefined && live.itemId === state.tokenItemId) return live;
+        const stored = yield* tokenStore.read(state.tokenItemId);
+        if (Option.isNone(stored)) return undefined;
+        const loaded = {
+          ...stored.value,
+          itemId: state.tokenItemId,
+          expiresAt: state.expiresAt ?? null,
+        };
+        liveTokens.set(integration.id, loaded);
+        return loaded;
+      });
+
+    /** The client a token request authenticates as. */
+    const oauthClient = (
+      integration: StoredIntegration,
+      server: OAuth.OAuthServer,
+      registration: OAuth.OAuthClientRegistration | undefined,
+      registeredSecret: string | undefined,
+    ) =>
+      Effect.gen(function* () {
+        const auth = integration.auth;
+        if (auth?.clientId !== undefined) {
+          const template = auth.clientSecret?.trim() ?? "";
+          if (template === "") return { clientId: auth.clientId, authMethod: "none" as const };
+          const endpoint = new URL(integration.url);
+          const resolved = yield* resolveHeaderTemplates({ secret: template }, (ref) =>
+            credentials.resolve(ref, {
+              host: new URL(server.tokenEndpoint).hostname,
+              approvedItems:
+                integration.credentialOrigin === endpoint.origin
+                  ? (integration.approvedCredentialItems ?? [])
+                  : [],
+            }),
+          );
+          return {
+            clientId: auth.clientId,
+            clientSecret: resolved.secret,
+            authMethod: OAuth.secretAuthMethod(server),
+          };
+        }
+        if (registration === undefined) return yield* signInRequired("sign in");
+        return {
+          clientId: registration.clientId,
+          clientSecret: registeredSecret,
+          authMethod: registration.authMethod,
+        };
+      });
+
+    /**
+     * A usable access token. Refreshes when it is about to expire, or when the
+     * server just refused `rejected`. One refresh per account at a time: a
+     * caller that waited finds the token the refresh produced and uses it.
+     */
+    const accessToken = (id: IntegrationId, rejected?: string) =>
+      refreshLock(id).withPermits(1)(
+        Effect.gen(function* () {
+          const integration = yield* getById(id);
+          const state = integration.oauthState;
+          const live = yield* loadTokens(integration);
+          if (state?.server === undefined || live === undefined) {
+            if (state?.signedIn) yield* markNeedsSignIn(integration, "Sign in again.");
+            return yield* signInRequired("authorize");
+          }
+          const nowMs = yield* Clock.currentTimeMillis;
+          const expired = live.expiresAt !== null && live.expiresAt <= nowMs;
+          const expiring = live.expiresAt !== null && live.expiresAt - REFRESH_SKEW_MS <= nowMs;
+          if (live.accessToken !== rejected && !expiring) return live.accessToken;
+          if (live.refreshToken === undefined) {
+            if (live.accessToken !== rejected && !expired) return live.accessToken;
+            yield* markNeedsSignIn(integration, "The sign-in expired. Sign in again.");
+            return yield* signInRequired("authorize");
+          }
+          const oauth = yield* oauthClient(
+            integration,
+            state.server,
+            state.registration,
+            live.clientSecret,
+          );
+          const refreshed = yield* protocol
+            .refresh({
+              server: state.server,
+              client: oauth,
+              refreshToken: live.refreshToken,
+              nowMs,
+            })
+            .pipe(Effect.result);
+          if (refreshed._tag === "Failure") {
+            if (refreshed.failure.revoked) {
+              yield* markNeedsSignIn(
+                integration,
+                "The sign-in was revoked or expired. Sign in again.",
+              );
+              return yield* signInRequired("refresh");
+            }
+            return yield* new IntegrationError({
+              operation: "refresh",
+              reason: "upstream_error",
+              cause: refreshed.failure.message,
+            });
+          }
+          const tokens = refreshed.success;
+          const itemId = yield* tokenStore.write({
+            itemId: live.itemId,
+            name: tokenItemName(integration),
+            label: `${integrationTitle(integration)} sign-in`,
+            host: new URL(integration.url).hostname,
+            tokens: { ...tokens, clientSecret: live.clientSecret },
+          });
+          liveTokens.set(id, {
+            ...tokens,
+            clientSecret: live.clientSecret,
+            itemId,
+            expiresAt: tokens.expiresAt,
+          });
+          yield* persistState(id, (current) => ({
+            ...current,
+            signedIn: true,
+            tokenItemId: itemId,
+            expiresAt: tokens.expiresAt,
+          }));
+          return tokens.accessToken;
+        }),
+      );
 
     const post = (
       integration: Integration,
@@ -436,7 +798,11 @@ const make = (options: IntegrationsOptions = {}) =>
         if (response.status < 200 || response.status >= 300) {
           return yield* new IntegrationError({
             operation: method,
-            reason: "upstream_error",
+            // Under OAuth a 401 means the token was refused, which a refresh may fix.
+            reason:
+              usesOAuth(integration) && response.status === 401
+                ? "sign_in_required"
+                : "upstream_error",
           });
         }
         const body = parseRpcBody(text);
@@ -474,12 +840,60 @@ const make = (options: IntegrationsOptions = {}) =>
         }),
       );
 
-    /** One upstream round trip: resolve credentials, handshake, then call. */
+    /**
+     * One upstream round trip, with the account's OAuth token when it signs
+     * in: a 401 refreshes once and retries once; a second 401 means the grant
+     * is no good, and the integration needs a new sign-in. Every outcome feeds
+     * the status column.
+     */
     const rpc = (
+      integration: StoredIntegration,
+      method: string,
+      params: unknown,
+      labelId?: ProjectLabelId | null,
+    ) =>
+      Effect.gen(function* () {
+        if (!usesOAuth(integration)) return yield* exchange(integration, method, params, labelId);
+        const token = yield* accessToken(integration.id);
+        return yield* exchange(integration, method, params, labelId, token).pipe(
+          Effect.catchIf(
+            (error) => error.reason === "sign_in_required",
+            () =>
+              accessToken(integration.id, token).pipe(
+                Effect.flatMap((fresh) =>
+                  exchange(integration, method, params, labelId, fresh).pipe(
+                    Effect.tapError((error) =>
+                      error.reason === "sign_in_required"
+                        ? markNeedsSignIn(
+                            integration,
+                            "The server refused the sign-in. Sign in again.",
+                          )
+                        : Effect.void,
+                    ),
+                  ),
+                ),
+              ),
+          ),
+        );
+      }).pipe(
+        Effect.tap(() => recordCheck(integration, { ok: true })),
+        Effect.tapError((error) =>
+          // A refused sign-in recorded its own, more specific status.
+          error.reason === "not_found" ||
+          error.reason === "disabled" ||
+          error.reason === "sign_in_required"
+            ? Effect.void
+            : recordCheck(integration, error),
+        ),
+      );
+
+    /** Resolve credentials, handshake, then call. */
+    const exchange = (
       integration: Integration,
       method: string,
       params: unknown,
       labelId?: ProjectLabelId | null,
+      bearer?: string,
     ) =>
       Effect.gen(function* () {
         const endpoint = new URL(integration.url);
@@ -501,9 +915,21 @@ const make = (options: IntegrationsOptions = {}) =>
               ? (integration.approvedCredentialItems ?? [])
               : [],
         };
-        const headers = yield* resolveHeaderTemplates(integration.headers, (ref) =>
+        const resolved = yield* resolveHeaderTemplates(integration.headers, (ref) =>
           credentials.resolve(ref, destination),
         );
+        // The signed-in account's token replaces any Authorization header.
+        const headers =
+          bearer === undefined
+            ? resolved
+            : {
+                ...Object.fromEntries(
+                  Object.entries(resolved).filter(
+                    ([name]) => name.toLowerCase() !== "authorization",
+                  ),
+                ),
+                authorization: `Bearer ${bearer}`,
+              };
         const initialized = yield* post(
           integration,
           headers,
@@ -520,7 +946,7 @@ const make = (options: IntegrationsOptions = {}) =>
         );
       });
 
-    const fetchTools = (integration: Integration, labelId?: ProjectLabelId | null) =>
+    const fetchTools = (integration: StoredIntegration, labelId?: ProjectLabelId | null) =>
       rpc(integration, "tools/list", {}, labelId).pipe(
         Effect.flatMap((result) => {
           const tools =
@@ -583,7 +1009,20 @@ const make = (options: IntegrationsOptions = {}) =>
         ),
       );
 
-    const persist = (integration: Integration) =>
+    /** A client secret is a vault reference or nothing; never a pasted value. */
+    const validateAuth = (auth: Integration["auth"] | null | undefined, operation: string) => {
+      const secret = auth?.clientSecret?.trim() ?? "";
+      if (secret === "") return Effect.void;
+      const refs = credentialRefsIn(secret);
+      return refs.length === 1 &&
+        secret === `{{credential:${refs[0]}}}` &&
+        Credentials.parseCredentialRef(refs[0]!) !== undefined &&
+        auth?.clientId !== undefined
+        ? Effect.void
+        : Effect.fail(new IntegrationError({ operation, reason: "credential_unresolved" }));
+    };
+
+    const persist = (integration: StoredIntegration) =>
       encode(integration).pipe(
         Effect.flatMap(
           (payload) =>
@@ -604,6 +1043,7 @@ const make = (options: IntegrationsOptions = {}) =>
       create: (input, options) =>
         Effect.gen(function* () {
           yield* validateUrl(input.url);
+          yield* validateAuth(input.auth, "create");
           for (const template of Object.values(input.headers)) {
             for (const ref of credentialRefsIn(template)) {
               if (Credentials.parseCredentialRef(ref) === undefined) {
@@ -630,16 +1070,19 @@ const make = (options: IntegrationsOptions = {}) =>
             headers: input.headers,
             credentialOrigin: new URL(input.url).origin,
             approvedCredentialItems: options?.approveCredentials
-              ? credentialItemsIn(input.headers)
+              ? credentialItemsIn(input.headers, input.auth)
               : [],
             enabled: input.enabled ?? true,
             scope: input.scope,
             hint: input.hint,
+            ...(input.accountLabel?.trim() ? { accountLabel: input.accountLabel.trim() } : {}),
+            ...(input.auth === undefined ? {} : { auth: input.auth }),
             createdAt: at,
             updatedAt: at,
             deletedAt: null,
           };
           yield* persist(integration);
+          yield* notify;
           return { integration: redactIntegration(integration) };
         }).pipe(Effect.mapError(failure("create", "storage"))),
       update: (masked, options) =>
@@ -677,10 +1120,12 @@ const make = (options: IntegrationsOptions = {}) =>
           ) {
             return yield* new IntegrationError({ operation: "update", reason: "invalid_request" });
           }
+          const auth = input.auth === undefined ? current.auth : (input.auth ?? undefined);
           if (
             options?.holdStoredSecrets &&
             integrationDestinationChanged(current, input) &&
-            headersKeepStoredSecrets(current, input.headers ?? current.headers)
+            (headersKeepStoredSecrets(current, input.headers ?? current.headers) ||
+              credentialRefsIn(auth?.clientSecret ?? "").length > 0)
           ) {
             return yield* new IntegrationError({
               operation: "update",
@@ -688,17 +1133,26 @@ const make = (options: IntegrationsOptions = {}) =>
             });
           }
           if (input.url !== undefined) yield* validateUrl(input.url);
+          yield* validateAuth(auth, "update");
           const credentialOrigin = options?.preserveCredentialDestination
             ? (current.credentialOrigin ?? new URL(current.url).origin)
             : new URL(input.url ?? current.url).origin;
           const headers = input.headers ?? current.headers;
           const approvedCredentialItems = options?.approveCredentials
-            ? credentialItemsIn(headers)
+            ? credentialItemsIn(headers, auth)
             : credentialOrigin === current.credentialOrigin
               ? (current.approvedCredentialItems ?? [])
               : [];
-          const integration: Integration = {
-            ...current,
+          // Tokens belong to one server and client: a new URL or client id needs a new sign-in.
+          const keepSignIn =
+            auth?.type === "oauth" &&
+            (input.url === undefined || input.url === current.url) &&
+            auth.clientId === current.auth?.clientId;
+          const { auth: _auth, accountLabel: _label, oauthState, ...rest } = current;
+          const accountLabel =
+            input.accountLabel === undefined ? current.accountLabel : input.accountLabel.trim();
+          const integration: StoredIntegration = {
+            ...rest,
             ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
             ...(input.transport === undefined ? {} : { transport: input.transport }),
             ...(input.url === undefined ? {} : { url: input.url }),
@@ -706,14 +1160,22 @@ const make = (options: IntegrationsOptions = {}) =>
             ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
             ...(input.scope === undefined ? {} : { scope: input.scope }),
             ...(input.hint === undefined ? {} : { hint: input.hint }),
+            ...(accountLabel ? { accountLabel } : {}),
+            ...(auth === undefined ? {} : { auth }),
+            ...(keepSignIn && oauthState !== undefined ? { oauthState } : {}),
             updatedAt: yield* now,
             credentialOrigin,
             approvedCredentialItems,
           };
           yield* persist(integration);
+          if (!keepSignIn) yield* dropTokens(current);
           yield* invalidate(integration.id);
           return { integration: redactIntegration(integration) };
-        }).pipe(sql.withTransaction, Effect.mapError(failure("update", "storage"))),
+        }).pipe(
+          sql.withTransaction,
+          Effect.tap(() => notify),
+          Effect.mapError(failure("update", "storage")),
+        ),
       remove: (id, options) =>
         Effect.gen(function* () {
           const current = yield* getById(id).pipe(
@@ -726,8 +1188,11 @@ const make = (options: IntegrationsOptions = {}) =>
           if (!integrationVisibleTo({ ...current, enabled: true }, options?.callerLabelId))
             return yield* new IntegrationError({ operation: "delete", reason: "not_found" });
           const at = yield* now;
-          yield* persist({ ...current, deletedAt: at, updatedAt: at });
+          const { oauthState: _, ...rest } = current;
+          yield* persist({ ...rest, deletedAt: at, updatedAt: at });
+          yield* dropTokens(current);
           yield* invalidate(id);
+          yield* notify;
           return { deleted: true };
         }).pipe(Effect.mapError(failure("delete", "storage"))),
       testConnection: (id) =>
@@ -757,7 +1222,7 @@ const make = (options: IntegrationsOptions = {}) =>
             })),
             Effect.catch((error: IntegrationError) =>
               Effect.succeed<IntegrationTestResult>({
-                status: "disconnected",
+                status: error.reason === "sign_in_required" ? "needs_sign_in" : "disconnected",
                 toolCount: 0,
                 message: `Could not connect (${error.reason}).`,
               }),
@@ -782,8 +1247,16 @@ const make = (options: IntegrationsOptions = {}) =>
             typeof result === "object" && result !== null
               ? (result as Record<string, unknown>)
               : undefined;
+          // A server that echoes its bearer token must not hand it to the agent.
+          const live = liveTokens.get(integration.id);
+          const content = redactValue(
+            result ?? null,
+            [live?.accessToken, live?.refreshToken, live?.clientSecret].filter(
+              (secret): secret is string => secret !== undefined && secret.length >= 8,
+            ),
+          );
           return {
-            content: result ?? null,
+            content,
             ...(typeof record?.isError === "boolean" ? { isError: record.isError } : {}),
           } satisfies IntegrationCallResult;
         }),
@@ -793,19 +1266,226 @@ const make = (options: IntegrationsOptions = {}) =>
             all.filter((integration) => integrationVisibleTo(integration, labelId)),
           ),
         ),
+      subscribe: () =>
+        // Subscribed alongside the first list, so a change in between is not missed.
+        Stream.mergeAll([Stream.make(undefined), Stream.fromPubSub(changes)], {
+          concurrency: "unbounded",
+        }).pipe(Stream.mapEffect(() => rows().pipe(Effect.flatMap(summaries)))),
+      beginSignIn: (id, from) =>
+        Effect.gen(function* () {
+          const integration = yield* getById(id);
+          if (!usesOAuth(integration))
+            return yield* new IntegrationError({ operation: "sign in", reason: "invalid_request" });
+          if (!integration.enabled)
+            return yield* new IntegrationError({ operation: "sign in", reason: "disabled" });
+          const requested = from.origin === undefined ? null : URL.parse(from.origin);
+          const known = yield* Ref.get(lastBrowserOrigin);
+          const origin =
+            from.fromAgent &&
+            known !== undefined &&
+            (requested === null || isLoopbackHost(requested.hostname))
+              ? known
+              : requested !== null &&
+                  (requested.protocol === "http:" || requested.protocol === "https:")
+                ? requested.origin
+                : undefined;
+          if (origin === undefined)
+            return yield* new IntegrationError({ operation: "sign in", reason: "invalid_request" });
+          const redirectUri = `${origin}${OAuth.CALLBACK_PATH}`;
+          const server = yield* protocol.discover(integration.url);
+          const auth = integration.auth!;
+          const previous = integration.oauthState;
+          // A registration made earlier for this server and redirect is reused.
+          const reusable =
+            auth.clientId === undefined &&
+            previous?.registration !== undefined &&
+            previous.server?.issuer === server.issuer &&
+            previous.registration.redirectUris.includes(redirectUri)
+              ? previous.registration
+              : undefined;
+          const registered =
+            auth.clientId !== undefined || reusable !== undefined
+              ? undefined
+              : yield* protocol.register(server, redirectUri);
+          const registration = reusable ?? registered?.registration;
+          const clientId = auth.clientId ?? registration!.clientId;
+          const { verifier, challenge } = yield* OAuth.pkcePair.pipe(
+            Effect.provideService(Crypto.Crypto, crypto),
+          );
+          const state = yield* OAuth.randomState.pipe(Effect.provideService(Crypto.Crypto, crypto));
+          const nowMs = yield* Clock.currentTimeMillis;
+          yield* Ref.update(pendingSignIns, (current) => {
+            const next = new Map([...current].filter(([, pending]) => pending.expiresAtMs > nowMs));
+            // The oldest pending sign-ins give way; their links stop working.
+            while (next.size >= MAX_PENDING_SIGN_INS) next.delete(next.keys().next().value!);
+            return next.set(state, {
+              integrationId: integration.id,
+              url: integration.url,
+              server,
+              redirectUri,
+              verifier,
+              registration,
+              newClientSecret: registered?.clientSecret,
+              expiresAtMs: nowMs + SIGN_IN_TTL_MS,
+            });
+          });
+          const scope = auth.scope?.trim() || server.scopesSupported?.join(" ") || undefined;
+          return {
+            authorizationUrl: OAuth.authorizationUrl({
+              server,
+              clientId,
+              redirectUri,
+              state,
+              challenge,
+              scope,
+            }),
+            redirectUri,
+          };
+        }).pipe(
+          Effect.tapError((error) =>
+            Effect.gen(function* () {
+              const integration = yield* getById(id).pipe(Effect.option);
+              if (Option.isSome(integration)) yield* recordCheck(integration.value, error);
+            }),
+          ),
+          Effect.mapError(failure("sign in", "upstream_error")),
+        ),
+      completeSignIn: (callback) =>
+        Effect.gen(function* () {
+          const rejected = new IntegrationError({
+            operation: "complete sign in",
+            reason: "invalid_request",
+          });
+          if (callback.state === undefined) return yield* rejected;
+          const state = callback.state;
+          // Single use: the state is gone whether or not what follows succeeds.
+          const pending = yield* Ref.modify(pendingSignIns, (current) => {
+            const found = current.get(state);
+            if (found === undefined) return [undefined, current] as const;
+            const next = new Map(current);
+            next.delete(state);
+            return [found, next] as const;
+          });
+          const nowMs = yield* Clock.currentTimeMillis;
+          if (pending === undefined || pending.expiresAtMs <= nowMs) return yield* rejected;
+          // RFC 9207: a response naming another issuer is a mix-up attempt.
+          if (
+            callback.iss !== undefined &&
+            callback.iss.replace(/\/+$/, "") !== pending.server.issuer.replace(/\/+$/, "")
+          )
+            return yield* rejected;
+          const integration = yield* getById(pending.integrationId);
+          if (!usesOAuth(integration) || integration.url !== pending.url) return yield* rejected;
+          if (callback.error !== undefined || callback.code === undefined) {
+            yield* recordCheck(
+              integration,
+              new IntegrationError({
+                operation: "sign in",
+                reason: "upstream_error",
+                cause: `Sign-in did not finish (${(callback.error ?? "no code").slice(0, 64)}).`,
+              }),
+            );
+            return yield* rejected;
+          }
+          const previous = integration.oauthState;
+          const stored =
+            previous?.tokenItemId === undefined
+              ? Option.none<Tokens.StoredTokens>()
+              : yield* tokenStore.read(previous.tokenItemId);
+          // A reused registration's secret is the one stored with the earlier sign-in.
+          const clientSecret =
+            pending.newClientSecret ??
+            (pending.registration !== undefined &&
+            pending.registration.clientId === previous?.registration?.clientId
+              ? Option.getOrUndefined(stored)?.clientSecret
+              : undefined);
+          const oauth = yield* oauthClient(
+            integration,
+            pending.server,
+            pending.registration,
+            clientSecret,
+          );
+          const tokens = yield* protocol
+            .exchangeCode({
+              server: pending.server,
+              client: oauth,
+              code: callback.code,
+              verifier: pending.verifier,
+              redirectUri: pending.redirectUri,
+              nowMs,
+            })
+            .pipe(
+              Effect.mapError(
+                (error) =>
+                  new IntegrationError({
+                    operation: "complete sign in",
+                    reason: "upstream_error",
+                    cause: error.message,
+                  }),
+              ),
+            );
+          const itemId = yield* tokenStore.write({
+            itemId: previous?.tokenItemId,
+            name: tokenItemName(integration),
+            label: `${integrationTitle(integration)} sign-in`,
+            host: new URL(integration.url).hostname,
+            tokens: { ...tokens, clientSecret },
+          });
+          liveTokens.set(integration.id, {
+            ...tokens,
+            clientSecret,
+            itemId,
+            expiresAt: tokens.expiresAt,
+          });
+          yield* persistState(integration.id, () => ({
+            signedIn: true,
+            server: pending.server,
+            ...(pending.registration === undefined ? {} : { registration: pending.registration }),
+            tokenItemId: itemId,
+            expiresAt: tokens.expiresAt,
+          }));
+          yield* Ref.set(lastBrowserOrigin, new URL(pending.redirectUri).origin);
+          yield* Ref.update(checks, (current) => {
+            const next = new Map(current);
+            next.delete(integration.id);
+            return next;
+          });
+          // A first tool listing makes the row read "Connected" with its tool count.
+          const signedIn = yield* getById(integration.id);
+          yield* fetchTools(signedIn).pipe(
+            Effect.tap((tools) =>
+              Effect.gen(function* () {
+                const key = `${signedIn.id}:${signedIn.updatedAt}`;
+                const at = yield* Clock.currentTimeMillis;
+                yield* Ref.update(cache, (entries) =>
+                  new Map(entries).set(key, { key, atMs: at, result: tools }),
+                );
+              }),
+            ),
+            Effect.ignore,
+          );
+          yield* notify;
+          return { integration: redactIntegration(signedIn) };
+        }).pipe(
+          Effect.tapError((error) =>
+            error.reason === "invalid_request"
+              ? Effect.void
+              : Effect.logWarning("Integration sign-in did not finish", { reason: error.reason }),
+          ),
+          Effect.mapError(failure("complete sign in", "storage")),
+        ),
     });
   });
 
+type Requirements =
+  | SqlClient.SqlClient
+  | Crypto.Crypto
+  | HttpClient.HttpClient
+  | Credentials.IntegrationCredentials
+  | Tokens.IntegrationTokens;
+
 export const layerWith = (
   options: IntegrationsOptions,
-): Layer.Layer<
-  Integrations,
-  never,
-  SqlClient.SqlClient | Crypto.Crypto | HttpClient.HttpClient | Credentials.IntegrationCredentials
-> => Layer.effect(Integrations, make(options));
+): Layer.Layer<Integrations, never, Requirements> => Layer.effect(Integrations, make(options));
 
-export const layer: Layer.Layer<
-  Integrations,
-  never,
-  SqlClient.SqlClient | Crypto.Crypto | HttpClient.HttpClient | Credentials.IntegrationCredentials
-> = layerWith({});
+export const layer: Layer.Layer<Integrations, never, Requirements> = layerWith({});

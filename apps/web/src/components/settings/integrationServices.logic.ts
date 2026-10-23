@@ -132,6 +132,9 @@ const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
   upstream_error: "The server answered with an error.",
   invalid_request: "The server rejected the request.",
   approval_required: "Widening project access needs owner approval.",
+  sign_in_required: "Sign in to this service to use it.",
+  client_id_required:
+    "This service does not register apps automatically. Create an OAuth app with it and enter its client ID and secret.",
 };
 
 export function integrationReasonText(reason: IntegrationError["reason"]): string {

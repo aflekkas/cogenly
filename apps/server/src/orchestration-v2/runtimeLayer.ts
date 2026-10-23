@@ -7,6 +7,7 @@ import * as GlobalSearch from "../search/GlobalSearch.ts";
 import * as Facts from "../context/FactService.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as IntegrationCredentials from "../integrations/IntegrationCredentials.ts";
+import * as IntegrationTokens from "../integrations/IntegrationTokens.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
 import * as Exports from "../export/ExportService.ts";
 import * as AgentEvents from "../agents/AgentEventBus.ts";
@@ -360,6 +361,7 @@ export const layerVaultProvided = Vault.layer.pipe(
 );
 const layerIntegrationsProvided = Integrations.layer.pipe(
   Layer.provide(IntegrationCredentials.layer.pipe(Layer.provide(layerVaultProvided))),
+  Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
 );
 const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(
