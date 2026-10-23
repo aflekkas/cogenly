@@ -82,7 +82,8 @@ provider-native credential files are neither imported nor cloned.
 
 ## Scrubbing and the preview_evaluate trap
 
-Exact stored secret values (length ≥ 6) are scrubbed from tool results.
+Stored and delivered secret values are scrubbed from tool results; values shorter
+than six characters use whole-token matching.
 This is an output guard, not a boundary against an agent already authorized
 to read a process token. All vault field values are cached in memory only (loaded lazily,
 invalidated on writes) and `McpToolAccess` redacts every MCP tool result
@@ -101,7 +102,8 @@ are also scrubbed in the shapes a page echoes them: the number digits-only or
 grouped in fours, and the expiry as `MM/YYYY`; the CVC and `MM/YY` expiry are
 below the length floor, so they are scrubbed as whole tokens only (never
 inside a longer number). TOTP codes for the current 30-second window and its
-neighbours are computed at scrub time and take the same whole-token pass.
+neighbours take the same whole-token pass; delivered codes remain registered
+after their window expires.
 Scrubbing fails closed: when the secrets cannot be loaded, every string in the
 result is replaced by a withheld notice and the error is logged.
 

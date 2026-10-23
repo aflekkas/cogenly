@@ -456,6 +456,39 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("scrubs short passwords as whole tokens and retains delivered TOTP codes", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const { item } = yield* vault.create({
+        name: "short",
+        type: "login",
+        secretFields: {
+          password: "p4ss",
+          totpSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+        },
+      });
+      expect(yield* vault.scrubText("p4ss xp4ss p4ss_word")).toBe(
+        "[redacted vault secret] xp4ss p4ss_word",
+      );
+      const used = yield* vault.use({ itemId: item.id, field: "totp", caller: { kind: "human" } });
+      if (used.status !== "allowed") throw new Error("Expected code");
+      yield* TestClock.adjust(120_000);
+      expect(yield* vault.scrubText(`code ${used.value} x${used.value}`)).toBe(
+        `code [redacted vault secret] x${used.value}`,
+      );
+      const stream = yield* vault.makeOutputRedactor();
+      const parts = [
+        yield* stream("p4"),
+        yield* stream("ss "),
+        yield* stream(used.value.slice(0, 3)),
+        yield* stream(used.value.slice(3)),
+        yield* stream(" "),
+        yield* stream("xp4ss ", true),
+      ];
+      expect(parts.join("")).toBe("[redacted vault secret] [redacted vault secret] xp4ss ");
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("scrubs the TOTP codes valid around now", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;

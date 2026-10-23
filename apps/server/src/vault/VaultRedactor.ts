@@ -1,7 +1,7 @@
 /** Replaces vault secret values in text shown to agents. Pure helpers. */
 
 const VAULT_REDACTION = "[redacted vault secret]";
-/** Shorter values are too likely to be ordinary words or numbers to scrub safely. */
+/** Shorter values need whole-token matching to avoid masking ordinary substrings. */
 const MIN_SCRUB_LENGTH = 6;
 
 /** Longest first, so a value that contains another is removed whole. */
@@ -64,7 +64,7 @@ export const redactShortSecrets = (text: string, secrets: Iterable<string>): str
     (a, b) => b.length - a.length,
   )) {
     result = result.replace(
-      new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(secret)}(?![A-Za-z0-9])`, "g"),
+      new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(secret)}(?![\\p{L}\\p{N}_])`, "gu"),
       VAULT_REDACTION,
     );
   }
@@ -80,29 +80,54 @@ export const redactShortValue = <A>(value: A, secrets: Iterable<string>): A => {
 
 /** A PTY may split a token across data callbacks. Hold only a possible secret
  * prefix so raw values never enter terminal events, history or disk logs. */
-export const processOutputRedactor = (values: Iterable<string> | (() => Iterable<string>)) => {
+type SecretSource = Iterable<string> | (() => Iterable<string>);
+const readSecrets = (source: SecretSource) => (typeof source === "function" ? source() : source);
+const tokenCharacter = /[\p{L}\p{N}_]/u;
+
+export const processOutputRedactor = (values: SecretSource, shortValues: SecretSource = []) => {
   let pending = "";
+  let previous = "";
   return (chunk: string, final = false): string => {
-    const secrets = orderedSecrets(typeof values === "function" ? values() : values);
+    const all = [...readSecrets(values)];
+    const short = new Set([
+      ...all.filter((value) => value.length < MIN_SCRUB_LENGTH),
+      ...readSecrets(shortValues),
+    ]);
+    const secrets = [...new Set([...all, ...short])]
+      .filter((value) => value.length > 0)
+      .sort((a, b) => b.length - a.length);
     const input = pending + chunk;
     pending = "";
     let output = "";
     let index = 0;
     while (index < input.length) {
       const rest = input.slice(index);
+      const eligible = secrets.filter(
+        (secret) => !short.has(secret) || !tokenCharacter.test(previous),
+      );
       if (
         !final &&
-        secrets.some((secret) => rest.length < secret.length && secret.startsWith(rest))
+        eligible.some(
+          (secret) =>
+            (rest.length < secret.length && secret.startsWith(rest)) ||
+            (short.has(secret) && rest === secret),
+        )
       ) {
         pending = rest;
         break;
       }
-      const match = secrets.find((secret) => input.startsWith(secret, index));
+      const match = eligible.find(
+        (secret) =>
+          input.startsWith(secret, index) &&
+          (!short.has(secret) || !tokenCharacter.test(input[index + secret.length] ?? "")),
+      );
       if (match) {
         output += VAULT_REDACTION;
+        previous = match.at(-1)!;
         index += match.length;
       } else {
-        output += input[index];
+        previous = input[index]!;
+        output += previous;
         index += 1;
       }
     }

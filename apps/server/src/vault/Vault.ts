@@ -314,6 +314,10 @@ const make = Effect.gen(function* () {
     totpSecrets: [],
   });
 
+  const deliveredSecrets = yield* Ref.make({
+    secrets: new Set<string>(),
+    shortSecrets: new Set<string>(),
+  });
   const processSecrets = yield* Ref.make(new Set<string>());
   const projectFiles = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
   const projectForThread = (threadId: ThreadId | undefined) =>
@@ -500,7 +504,8 @@ const make = Effect.gen(function* () {
       const stored = yield* decryptStored(row).pipe(Effect.option);
       if (Option.isNone(stored)) continue;
       for (const value of Object.values(stored.value))
-        if (typeof value === "string" && value.length > 0) secrets.add(value);
+        if (typeof value === "string" && value.length > 0)
+          (value.length < 6 ? shortSecrets : secrets).add(value);
       // Card values echo back in shapes other than the stored one: a page may
       // return the number digits-only or grouped, and the expiry as MM/YYYY.
       // The CVC and MM/YY are too short for the general pass, so they go to
@@ -531,7 +536,11 @@ const make = Effect.gen(function* () {
    * enough to collide with ordinary numbers, so they take the whole-token pass.
    */
   const scrubSets = Effect.gen(function* () {
-    const { secrets, shortSecrets, totpSecrets } = yield* ensureScrubSecrets;
+    const cached = yield* ensureScrubSecrets;
+    const delivered = yield* Ref.get(deliveredSecrets);
+    const secrets = new Set([...cached.secrets, ...delivered.secrets]);
+    const shortSecrets = new Set([...cached.shortSecrets, ...delivered.shortSecrets]);
+    const { totpSecrets } = cached;
     if (totpSecrets.length === 0) return { secrets, shortSecrets };
     const nowMs = yield* Clock.currentTimeMillis;
     const withCodes = new Set(shortSecrets);
@@ -628,8 +637,12 @@ const make = Effect.gen(function* () {
       return { item: metadataOf(yield* loadRow(row.id), stored) };
     }).pipe(Effect.mapError(wrap));
 
-  const fieldValue = (stored: StoredFields, field: VaultField): string | undefined => {
-    if (field === "totp") return stored.totpSecret ? totp(stored.totpSecret) : undefined;
+  const fieldValue = (
+    stored: StoredFields,
+    field: VaultField,
+    atMs: number,
+  ): string | undefined => {
+    if (field === "totp") return stored.totpSecret ? totp(stored.totpSecret, { atMs }) : undefined;
     if (field === "cardExpiry") return cardExpiryOf(stored);
     const key = storedKeyForField(field);
     const value = key === null ? undefined : stored[key];
@@ -724,11 +737,17 @@ const make = Effect.gen(function* () {
         return { status: "denied", item, field: input.field, reason: "policy" } as const;
       }
       const stored = yield* decryptStored(row);
-      const value = fieldValue(stored, input.field);
+      const value = fieldValue(stored, input.field, yield* Clock.currentTimeMillis);
       if (value === undefined) {
         yield* record("field_missing");
         return yield* new VaultError({ reason: "field_missing" });
       }
+      yield* Ref.update(deliveredSecrets, (current) => {
+        const secrets = new Set(current.secrets),
+          shortSecrets = new Set(current.shortSecrets);
+        (input.field === "totp" || value.length < 6 ? shortSecrets : secrets).add(value);
+        return { secrets, shortSecrets };
+      });
       yield* record("allowed");
       return { status: "allowed", item, field: input.field, value } as const;
     }).pipe(Effect.mapError(wrap));
@@ -835,17 +854,25 @@ const make = Effect.gen(function* () {
     makeOutputRedactor: () =>
       Effect.sync(() => {
         let values: Array<string> = [];
-        let redact = processOutputRedactor(() => values);
+        let shortValues: Array<string> = [];
+        let redact = processOutputRedactor(
+          () => values,
+          () => shortValues,
+        );
         return (chunk, final = false) =>
           Effect.gen(function* () {
             const { secrets, shortSecrets } = yield* scrubSets;
             const delivered = yield* Ref.get(processSecrets);
-            values = [...secrets, ...shortSecrets, ...delivered];
+            values = [...secrets, ...delivered];
+            shortValues = [...shortSecrets];
             return redact(chunk, final);
           }).pipe(
             withheldOnFailure(() => {
               // Discard any held prefix too: it cannot be released unchecked.
-              redact = processOutputRedactor(() => values);
+              redact = processOutputRedactor(
+                () => values,
+                () => shortValues,
+              );
               return VAULT_WITHHELD;
             }),
           );
