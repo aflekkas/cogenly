@@ -15,6 +15,7 @@ export type SettingsPath =
   | "/settings/projects"
   | "/settings/general"
   | "/settings/memory"
+  | "/settings/vault"
   | "/settings/diagnostics"
   | "/settings/appearance"
   | "/settings/keybindings"
@@ -95,6 +96,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/projects": "Repository",
   "/settings/general": "General",
   "/settings/memory": "Memory",
+  "/settings/vault": "Vault",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
@@ -218,6 +220,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Memory",
     to: "/settings/memory",
     searchTerms: ["facts remember forget correct context proposed confirm agents knowledge"],
+  },
+  {
+    id: "vault",
+    title: "Vault",
+    to: "/settings/vault",
+    searchTerms: [
+      "secrets passwords logins credentials api keys cards notes one-time codes totp approvals usage log",
+    ],
   },
   {
     id: "data-export",
@@ -809,6 +819,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/projects": "project",
   "/settings/general": null,
   "/settings/memory": null,
+  "/settings/vault": null,
   "/settings/data": null,
   "/settings/import": null,
   "/settings/appearance": null,
