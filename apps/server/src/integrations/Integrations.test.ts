@@ -331,6 +331,66 @@ describe("Integrations gateway", () => {
     ),
   );
 
+  it.effect("rejects an upstream body over 4 MiB", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      yield* service.create(createInput("https://upstream.example/mcp"));
+      const result = yield* service
+        .listTools(IntegrationName.make("gmail"), null)
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") expect(result.failure.reason).toBe("upstream_error");
+    }).pipe(
+      Effect.provide(layerWith()),
+      Effect.provideService(
+        FetchHttpClient.Fetch,
+        async () =>
+          new Response(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              result: { padding: "x".repeat(4 * 1024 * 1024), tools: [] },
+            }),
+          ),
+      ),
+    ),
+  );
+
+  it.effect("times out an upstream body that stalls after headers", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const service = yield* Integrations.Integrations;
+        yield* service.create(createInput("https://upstream.example/mcp"));
+        const fiber = yield* service
+          .listTools(IntegrationName.make("gmail"), null)
+          .pipe(Effect.result, Effect.forkChild);
+        yield* TestClock.adjust(Duration.millis(100));
+        const result = fiber.pollUnsafe();
+        expect(result).toBeDefined();
+        if (result !== undefined) {
+          const outcome = yield* Fiber.join(fiber);
+          expect(outcome._tag).toBe("Failure");
+          if (outcome._tag === "Failure") expect(outcome.failure.reason).toBe("upstream_timeout");
+        }
+      }),
+    ).pipe(
+      Effect.provide(layerWith({ upstreamTimeoutMs: 50 })),
+      Effect.provideService(
+        FetchHttpClient.Fetch,
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"result":'));
+              },
+            }),
+          ),
+      ),
+    ),
+  );
+
   it.effect("maps upstream errors and timeouts to clear reasons", () =>
     Effect.scoped(
       Effect.gen(function* () {

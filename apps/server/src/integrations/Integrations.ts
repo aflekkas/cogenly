@@ -23,6 +23,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as Credentials from "./IntegrationCredentials.ts";
@@ -37,6 +38,7 @@ const failure =
 
 export const DEFAULT_TOOL_CACHE_TTL_MS = 60_000;
 export const DEFAULT_UPSTREAM_TIMEOUT_MS = 10_000;
+const MAX_UPSTREAM_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_UPSTREAM_MESSAGE_CHARS = 500;
 
 const CREDENTIAL_REF = /\{\{credential:([^}]*)\}\}/g;
@@ -352,7 +354,6 @@ const make = (options: IntegrationsOptions = {}) =>
         const response = yield* client.execute(request).pipe(
           // Fetch otherwise forwards custom secret headers across redirects.
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-          Effect.timeout(Duration.millis(timeoutMs)),
           Effect.mapError((cause) =>
             isError(cause)
               ? cause
@@ -368,10 +369,23 @@ const make = (options: IntegrationsOptions = {}) =>
                   }),
           ),
         );
-        const text = yield* response.text.pipe(
-          Effect.mapError(
-            (cause) => new IntegrationError({ operation: method, reason: "upstream_error", cause }),
+        const decoder = new TextDecoder();
+        let bytes = 0;
+        const text = yield* response.stream.pipe(
+          Stream.runFoldEffect(
+            () => "",
+            (text, chunk) => {
+              bytes += chunk.byteLength;
+              if (bytes > MAX_UPSTREAM_BODY_BYTES) {
+                return Effect.fail(
+                  new IntegrationError({ operation: method, reason: "upstream_error" }),
+                );
+              }
+              return Effect.succeed(text + decoder.decode(chunk, { stream: true }));
+            },
           ),
+          Effect.map((text) => text + decoder.decode()),
+          Effect.mapError(failure(method, "upstream_error")),
         );
         if (response.status < 200 || response.status >= 300) {
           return yield* new IntegrationError({
@@ -401,7 +415,18 @@ const make = (options: IntegrationsOptions = {}) =>
           result: body.result,
           sessionId: response.headers["mcp-session-id"] ?? sessionId,
         };
-      });
+      }).pipe(
+        Effect.timeout(Duration.millis(timeoutMs)),
+        Effect.catchTags({
+          TimeoutError: () =>
+            Effect.fail(
+              new IntegrationError({
+                operation: method,
+                reason: "upstream_timeout",
+              }),
+            ),
+        }),
+      );
 
     /** One upstream round trip: resolve credentials, handshake, then call. */
     const rpc = (integration: Integration, method: string, params: unknown) =>
