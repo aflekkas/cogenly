@@ -27,13 +27,39 @@ export class IntegrationCredentialError extends Schema.TaggedError<IntegrationCr
 }
 export const isIntegrationCredentialError = Schema.is(IntegrationCredentialError);
 
+/** The vault item exists, but neither its domains nor the owner allow this destination. */
+export class IntegrationCredentialNotAllowedError extends Schema.TaggedError<IntegrationCredentialNotAllowedError>()(
+  "IntegrationCredentialNotAllowedError",
+  { ref: Schema.String },
+) {
+  override get message(): string {
+    return `Credential ${this.ref} may not be sent to this integration.`;
+  }
+}
+
+/** Where a resolved credential will be sent, and what the owner approved for it. */
+export interface CredentialDestination {
+  /** The integration endpoint's host. */
+  readonly host: string;
+  /** Vault item names the owner approved for this endpoint. */
+  readonly approvedItems: ReadonlyArray<string>;
+}
+
 export class IntegrationCredentials extends Context.Service<
   IntegrationCredentials,
   {
-    /** The secret for `ref`, or none when the item/field does not exist. */
+    /**
+     * The secret for `ref` when it may go to `destination`: the item's allowed
+     * domains include its host, or the owner approved the item for it. None
+     * when the item/field does not exist.
+     */
     readonly resolve: (
       ref: string,
-    ) => Effect.Effect<Option.Option<string>, IntegrationCredentialError>;
+      destination: CredentialDestination,
+    ) => Effect.Effect<
+      Option.Option<string>,
+      IntegrationCredentialError | IntegrationCredentialNotAllowedError
+    >;
   }
 >()("cogenly-server/integrations/IntegrationCredentials") {}
 
@@ -73,21 +99,32 @@ const isVaultField = Schema.is(VaultField);
 const makeVault = Effect.gen(function* () {
   const vault = yield* Vault.Vault;
   return IntegrationCredentials.of({
-    resolve: (ref) => {
+    resolve: (ref, destination) => {
       const parsed = parseCredentialRef(ref);
       if (parsed === undefined || parsed.item.length === 0 || !isVaultField(parsed.field)) {
         return Effect.succeed(Option.none<string>());
       }
-      return vault.resolveSecretByName({ name: parsed.item, field: parsed.field }).pipe(
-        Effect.map(({ value }) => Option.some(value)),
-        // A missing item or field is "no credential", which fails the request
-        // closed upstream; anything else is a real vault fault.
-        Effect.catchIf(
-          (error) => error.reason === "not_found" || error.reason === "field_missing",
-          () => Effect.succeed(Option.none<string>()),
-        ),
-        Effect.mapError((cause) => new IntegrationCredentialError({ ref, cause })),
-      );
+      return vault
+        .resolveSecretByName({
+          name: parsed.item,
+          field: parsed.field,
+          destinationHost: destination.host,
+          approved: destination.approvedItems.includes(parsed.item),
+        })
+        .pipe(
+          Effect.map(({ value }) => Option.some(value)),
+          // A missing item or field is "no credential", which fails the request
+          // closed upstream; anything else is a real vault fault.
+          Effect.catchIf(
+            (error) => error.reason === "not_found" || error.reason === "field_missing",
+            () => Effect.succeed(Option.none<string>()),
+          ),
+          Effect.mapError((cause) =>
+            cause.reason === "domain_not_allowed"
+              ? new IntegrationCredentialNotAllowedError({ ref })
+              : new IntegrationCredentialError({ ref, cause }),
+          ),
+        );
     },
   });
 });

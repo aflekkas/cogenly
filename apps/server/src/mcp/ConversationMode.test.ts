@@ -12,6 +12,7 @@ import { McpSchema, McpServer } from "effect/ai";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Crypto from "effect/Crypto";
+import { ChildProcessSpawner } from "effect/process";
 import { NodeCrypto, NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 
@@ -49,6 +50,16 @@ import { layer as OrchestratorHandlers } from "./toolkits/orchestrator/handlers.
 import { toolkit as WorkToolkit, handlers as WorkHandlers } from "../work/WorkMcp.ts";
 import { ProjectToolkit } from "./toolkits/project/tools.ts";
 import { layer as ProjectHandlers } from "./toolkits/project/handlers.ts";
+import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
+import { layer as EnvironmentHandlers } from "./toolkits/environment/handlers.ts";
+import { IntegrationsToolkit } from "./toolkits/integrations/tools.ts";
+import { layer as IntegrationsHandlers } from "./toolkits/integrations/handlers.ts";
+import * as DesktopAppControl from "../environment/DesktopAppControl.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
+import * as MachineSecurity from "../security/MachineSecurity.ts";
+import * as Integrations from "../integrations/Integrations.ts";
+import * as AgentStore from "../agents/AgentStore.ts";
 import { liveThreadShell } from "./McpToolAccess.testkit.ts";
 
 const chatThreadId = ThreadId.make("thread:conversation");
@@ -81,6 +92,8 @@ const serverLayer = Layer.mergeAll(
   McpHttpServer.toolkitRegistration(ProjectToolkit, ProjectHandlers),
   McpHttpServer.toolkitRegistration(ImageToolkit, ImageHandlers),
   McpHttpServer.toolkitRegistration(ProjectFilesToolkit, ProjectFilesHandlers),
+  McpHttpServer.toolkitRegistration(EnvironmentToolkit, EnvironmentHandlers),
+  McpHttpServer.toolkitRegistration(IntegrationsToolkit, IntegrationsHandlers),
   McpHttpServer.toolkitRegistration(ProjectHomeToolkit, ProjectHomeHandlers).pipe(
     Layer.provide(
       Layer.mock(ProjectHome.ProjectHome)({
@@ -142,7 +155,22 @@ const serverLayer = Layer.mergeAll(
         }),
     }),
   ),
-  Layer.provideMerge(Layer.mock(Project.ProjectService)({})),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      Layer.mock(Project.ProjectService)({}),
+      Layer.mock(DesktopAppControl.DesktopAppControl)({
+        addEnvironment: () => neverCall("desktop app control"),
+      }),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(ThreadCommandExecutor.ThreadCommandExecutor)({}),
+      Layer.mock(MachineSecurity.MachineSecurity)({}),
+      Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
+      Layer.mock(Integrations.Integrations)({
+        list: () => Effect.succeed({ integrations: [] }),
+      }),
+      Layer.mock(AgentStore.AgentStore)({}),
+    ),
+  ),
   Layer.provideMerge(
     Layer.mock(ImageSearchService.ImageSearchService)({
       search: () =>
@@ -291,6 +319,12 @@ describe("conversation-mode MCP boundary", () => {
       },
     ],
     ["thread_launch", { title: "Probe launch" }],
+    ["project_create", { title: "Probe project" }],
+    ["project_update", { projectId: "project:probe", title: "Renamed" }],
+    ["project_delete", { projectId: "project:probe" }],
+    ["project_clone", { repository: "acme/probe" }],
+    ["environment_add", { ssh: "probe-host" }],
+    ["environment_preferences_update", { enableAgentTerminals: true }],
   ] as const)("%s refuses a chat-surface caller", ([tool, args]) =>
     callText(tool, chatThreadId, args).pipe(
       Effect.flatMap(refusalOf),
@@ -308,6 +342,14 @@ describe("conversation-mode MCP boundary", () => {
           (JSON.parse(text) as { terminalId: string }).terminalId,
           "terminal-conversation",
         );
+      }),
+    ),
+  );
+
+  it.effect("integration_remove still serves a chat-surface caller", () =>
+    callText("integration_remove", chatThreadId, { name: "probe" }).pipe(
+      Effect.map((text) => {
+        assert.deepEqual(JSON.parse(text), { deleted: false });
       }),
     ),
   );

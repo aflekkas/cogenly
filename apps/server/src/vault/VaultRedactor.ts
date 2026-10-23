@@ -16,16 +16,10 @@ export const redactText = (text: string, secrets: Iterable<string>): string => {
   return result;
 };
 
-/** Deep-copies a tool result, redacting every string inside it. */
-export const redactValue = <A>(value: A, secrets: Iterable<string>): A => {
-  const ordered = orderedSecrets(secrets);
-  if (ordered.length === 0) return value;
+/** Deep-copies a tool result, rewriting every string inside it. */
+const mapStrings = <A>(value: A, rewrite: (text: string) => string): A => {
   const walk = (current: unknown): unknown => {
-    if (typeof current === "string") {
-      let result = current;
-      for (const secret of ordered) result = result.split(secret).join(VAULT_REDACTION);
-      return result;
-    }
+    if (typeof current === "string") return rewrite(current);
     if (Array.isArray(current)) return current.map(walk);
     if (typeof current === "object" && current !== null)
       return Object.fromEntries(Object.entries(current).map(([key, entry]) => [key, walk(entry)]));
@@ -33,6 +27,27 @@ export const redactValue = <A>(value: A, secrets: Iterable<string>): A => {
   };
   return walk(value) as A;
 };
+
+/** Deep-copies a tool result, redacting every string inside it. */
+export const redactValue = <A>(value: A, secrets: Iterable<string>): A => {
+  const ordered = orderedSecrets(secrets);
+  if (ordered.length === 0) return value;
+  return mapStrings(value, (text) => {
+    let result = text;
+    for (const secret of ordered) result = result.split(secret).join(VAULT_REDACTION);
+    return result;
+  });
+};
+
+/** What a tool result says in place of its text when the vault cannot be checked. */
+export const VAULT_WITHHELD = "[withheld: the vault could not be checked for secrets]";
+
+/**
+ * A tool result with every string replaced by `VAULT_WITHHELD`, for when the
+ * secrets to scrub cannot be loaded. The shape stays, so the result still
+ * encodes; nothing it said reaches the agent.
+ */
+export const withholdValue = <A>(value: A): A => mapStrings(value, () => VAULT_WITHHELD);
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -60,14 +75,7 @@ export const redactShortSecrets = (text: string, secrets: Iterable<string>): str
 export const redactShortValue = <A>(value: A, secrets: Iterable<string>): A => {
   const list = [...secrets];
   if (list.length === 0) return value;
-  const walk = (current: unknown): unknown => {
-    if (typeof current === "string") return redactShortSecrets(current, list);
-    if (Array.isArray(current)) return current.map(walk);
-    if (typeof current === "object" && current !== null)
-      return Object.fromEntries(Object.entries(current).map(([key, entry]) => [key, walk(entry)]));
-    return current;
-  };
-  return walk(value) as A;
+  return mapStrings(value, (text) => redactShortSecrets(text, list));
 };
 
 /** A PTY may split a token across data callbacks. Hold only a possible secret
