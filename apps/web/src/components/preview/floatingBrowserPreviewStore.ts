@@ -9,6 +9,7 @@ import {
   type FloatingPreviewCorner,
   type FloatingPreviewPoint,
   floatingPreviewTabKey,
+  migratePersistedPosition,
 } from "./floatingBrowserPreview.logic";
 
 export interface FloatingPreviewTarget {
@@ -24,8 +25,12 @@ interface FloatingBrowserPreviewState {
   readonly shownCounts: Readonly<Record<string, number>>;
   /** The tab whose card the user closed; looking at the tab again clears it. */
   readonly dismissedKey: string | null;
-  /** The chat-pane corner the card docks in, unless it was dropped somewhere else. */
-  readonly corner: FloatingPreviewCorner;
+  /**
+   * The chat-pane corner the user docked the card in; null until they position
+   * it, when it rests at DEFAULT_FLOATING_PREVIEW_CORNER. Ignored while
+   * `freePosition` is set.
+   */
+  readonly corner: FloatingPreviewCorner | null;
   /** Where the user dropped the card, in window coordinates; null when docked to a corner. */
   readonly freePosition: FloatingPreviewPoint | null;
   readonly dismiss: (key: string) => void;
@@ -39,7 +44,7 @@ export const useFloatingBrowserPreviewStore = create<FloatingBrowserPreviewState
       target: null,
       shownCounts: {},
       dismissedKey: null,
-      corner: "bottom-right",
+      corner: null,
       freePosition: null,
       dismiss: (key) => set({ dismissedKey: key }),
       setCorner: (corner) => set({ corner, freePosition: null }),
@@ -47,6 +52,8 @@ export const useFloatingBrowserPreviewStore = create<FloatingBrowserPreviewState
     }),
     {
       name: "cogenly:floating-browser-preview:v1",
+      version: 2,
+      migrate: migratePersistedPosition,
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
