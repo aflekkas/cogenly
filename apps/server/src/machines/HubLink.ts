@@ -339,7 +339,7 @@ const make = Effect.gen(function* () {
             }),
             Effect.flatMap((result) => client[PEER_METHODS.reply]({ id: push.id, result })),
             Effect.ignore({ log: true }),
-            Effect.forkDetach,
+            Effect.forkScoped,
             Effect.asVoid,
           );
     }
@@ -441,9 +441,13 @@ const make = Effect.gen(function* () {
           Effect.ignore,
           Effect.forkScoped,
         );
-        // Heartbeat, plus a fresh self report whenever name or kind changes.
+        // A half-open socket may never emit a disconnect. A missed heartbeat
+        // must end this attempt so pending calls fail and the dial loop retries.
         const ping = (spoke?: MachineSelfReport) =>
-          client[PEER_METHODS.ping](spoke === undefined ? {} : { spoke }).pipe(Effect.ignore);
+          client[PEER_METHODS.ping](spoke === undefined ? {} : { spoke }).pipe(
+            Effect.timeout(REQUEST_TIMEOUT),
+            Effect.catch(() => Deferred.succeed(closed, undefined)),
+          );
         yield* ping().pipe(Effect.delay(HEARTBEAT_INTERVAL), Effect.forever, Effect.forkScoped);
         yield* identity.changes.pipe(
           Stream.runForEach(() => identity.self.pipe(Effect.flatMap(ping))),

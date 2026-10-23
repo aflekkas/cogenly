@@ -17,11 +17,13 @@ import {
 } from "@t3tools/contracts";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Duration from "effect/Duration";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import {
   FetchHttpClient,
   HttpClient,
@@ -183,6 +185,7 @@ const startProxy = (target: Machine) =>
     Effect.callback<{
       readonly url: string;
       readonly dropAll: Effect.Effect<void>;
+      readonly stallAll: Effect.Effect<void>;
       readonly server: NodeNet.Server;
     }>((resume) => {
       const sockets = new Set<NodeNet.Socket>();
@@ -205,6 +208,9 @@ const startProxy = (target: Machine) =>
             server,
             dropAll: Effect.sync(() => {
               for (const socket of sockets) socket.destroy();
+            }),
+            stallAll: Effect.sync(() => {
+              for (const socket of sockets) socket.pause();
             }),
           }),
         );
@@ -405,6 +411,30 @@ describe("machines", () => {
         yield* proxy.dropAll;
         const untrusted = yield* awaitLinkState(spoke, (state) => state.status === "untrusted");
         assert.isNotNull(untrusted.lastError);
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.effect(
+    "reconnects when a half-open socket stops answering heartbeats",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* startMachine("hub", "cloud-server");
+        const spoke = yield* startMachine("laptop", "computer");
+        const proxy = yield* startProxy(hub);
+        yield* pair(hub, spoke, proxy.url);
+
+        // Pause traffic without closing TCP: no disconnect event can rescue
+        // the spoke. The heartbeat deadline must close this attempt itself.
+        yield* proxy.stallAll;
+        const offline = yield* awaitLinkState(spoke, (state) => state.status !== "online").pipe(
+          Effect.forkScoped,
+        );
+        yield* TestClock.adjust("45 seconds");
+        yield* Fiber.join(offline);
+        yield* awaitLinkState(spoke, (state) => state.status === "online");
+        assert.strictEqual((yield* hub.machines.list).machines[1]?.online, true);
+        yield* proxy.dropAll;
       }).pipe(Effect.scoped),
     30_000,
   );

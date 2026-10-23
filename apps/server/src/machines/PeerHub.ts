@@ -455,10 +455,12 @@ const make = Effect.gen(function* () {
 
       const ping: PeerHubConnection["ping"] = (input) =>
         requireHello.pipe(
-          Effect.tap((connection) =>
-            touch(connection.environmentId, input.spoke).pipe(
-              Effect.andThen(input.spoke === undefined ? Effect.void : publishChange),
-            ),
+          Effect.flatMap((connection) =>
+            input.spoke !== undefined && input.spoke.environmentId !== connection.environmentId
+              ? Effect.fail(new PeerProtocolError({ reason: "machine-mismatch" }))
+              : touch(connection.environmentId, input.spoke).pipe(
+                  Effect.andThen(input.spoke === undefined ? Effect.void : publishChange),
+                ),
           ),
           Effect.as({}),
         );
