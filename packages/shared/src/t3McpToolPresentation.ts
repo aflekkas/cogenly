@@ -77,7 +77,12 @@ export type T3McpToolSummaryAction =
   | "image-search"
   | "project-files-list"
   | "project-file-read"
-  | "project-recall";
+  | "project-recall"
+  | "terminal-run"
+  | "terminal-read"
+  | "terminal-write"
+  | "terminal-kill"
+  | "terminal-list";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -423,6 +428,11 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   project_files_list: tool(["List", "Listing", "Listed", "project files"], "project-files-list"),
   project_file_read: tool(["Read", "Reading", "Read", "a project file"], "project-file-read"),
   project_recall: tool(["Search", "Searching", "Searched", "project files"], "project-recall"),
+  terminal_run: tool(["Run", "Running", "Ran", "command"], "terminal-run"),
+  terminal_read: tool(["Read", "Reading", "Read", "terminal output"], "terminal-read"),
+  terminal_write: tool(["Write", "Writing", "Wrote", "to the terminal"], "terminal-write"),
+  terminal_kill: tool(["Stop", "Stopping", "Stopped", "the terminal"], "terminal-kill"),
+  terminal_list: tool(["List", "Listing", "Listed", "terminals"], "terminal-list"),
 };
 
 /**

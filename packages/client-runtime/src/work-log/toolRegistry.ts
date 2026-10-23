@@ -838,6 +838,45 @@ const COGENLY_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
     raw: "collapsed",
     group: { style: "times", noun: ["facts", "facts"] },
   },
+  terminal_run: {
+    icon: "terminal",
+    verb: ["Running", "Ran", "run"],
+    object: (call) => {
+      const command = commandText(call);
+      return command ? quoted(command, 72) : "a command";
+    },
+    raw: "inline",
+    group: { style: "count", noun: ["command", "commands"] },
+    priority: 0,
+  },
+  terminal_read: {
+    icon: "terminal",
+    verb: ["Reading", "Read", "read"],
+    object: () => "terminal output",
+    raw: "collapsed",
+    group: { style: "times", noun: ["terminal output", "terminal output"] },
+  },
+  terminal_write: {
+    icon: "terminal",
+    verb: ["Writing", "Wrote", "write"],
+    object: () => "to the terminal",
+    raw: "collapsed",
+    group: { style: "times", noun: ["terminal input", "terminal input"] },
+  },
+  terminal_kill: {
+    icon: "terminal",
+    verb: ["Stopping", "Stopped", "stop"],
+    object: () => "the terminal",
+    raw: "collapsed",
+    group: { style: "times", noun: ["terminal", "terminals"] },
+  },
+  terminal_list: {
+    icon: "terminal",
+    verb: ["Listing", "Listed", "list"],
+    object: () => "terminals",
+    raw: "collapsed",
+    group: { style: "times", noun: ["terminals", "terminals"] },
+  },
 };
 
 // Snooze and settle tools return a receipt; the row reads as it. Snooze
@@ -961,6 +1000,7 @@ function t3ActionIcon(definition: T3McpToolDefinition): WorkLogToolIcon {
   if (action.startsWith("environment-")) return "settings";
   if (action === "thread-fork") return "git-fork";
   if (action === "workflow-stop" || action === "thread-interrupt") return "square-stop";
+  if (action.startsWith("terminal-")) return "terminal";
   if (action === "secret-request") return "key";
   if (action === "html-preview" || action === "html-render") return "code";
   if (action === "capabilities") return "info";
