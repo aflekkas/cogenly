@@ -83,7 +83,9 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
       );
     }),
   ),
-  integration_tools: McpToolAccess.reads((input) =>
+  // Listing tools changes nothing, but it can send the integration's credentials
+  // upstream, so it needs a caller that may call the integration.
+  integration_tools: McpToolAccess.writesWithCapability((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
       const label = yield* callerLabel;
