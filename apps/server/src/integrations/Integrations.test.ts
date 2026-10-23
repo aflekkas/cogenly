@@ -154,6 +154,17 @@ const createInput = (url: string, name = "gmail") => ({
 });
 
 describe("resolveHeaderTemplates", () => {
+  it.effect("preserves dollar replacement sequences in credential values", () =>
+    Effect.gen(function* () {
+      const secret = "key-$&-$$-$`-$'";
+      const headers = yield* Integrations.resolveHeaderTemplates(
+        { authorization: "Bearer {{credential:gmail.apiKey}}" },
+        () => Effect.succeed(Option.some(secret)),
+      );
+      expect(headers.authorization).toBe(`Bearer ${secret}`);
+    }),
+  );
+
   it.effect("resolves credential references and fails closed when missing", () =>
     Effect.gen(function* () {
       const resolved = yield* Integrations.resolveHeaderTemplates(

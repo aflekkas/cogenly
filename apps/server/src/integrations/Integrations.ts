@@ -154,7 +154,7 @@ export const resolveHeaderTemplates = (
             reason: "credential_unresolved",
           });
         }
-        value = value.replaceAll(`{{credential:${ref}}}`, secret.value);
+        value = value.replaceAll(`{{credential:${ref}}}`, () => secret.value);
       }
       resolved[name] = value;
     }
