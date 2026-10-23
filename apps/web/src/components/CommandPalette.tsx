@@ -163,6 +163,7 @@ import { useGlobalSearchGroups } from "../search/useGlobalSearchGroups";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useNewProject } from "../hooks/useNewProject";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { isPickableRepository } from "../projectLabels/projectMeta.logic";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
@@ -1356,8 +1357,11 @@ function OpenCommandPaletteDialog(props: {
       isScratchProject(project, scratchWorkspaceRootFor(project.environmentId));
     const projectItems = enumerateCommandPaletteItems(
       buildProjectActionItems({
-        // The no-project home shows once, as the "No project" item below.
-        projects: pickerProjects.filter((project) => !isScratch(project)),
+        // The no-project home shows once, as the "No project" item below, and
+        // Scratch thread folders or the home folder never as repositories.
+        projects: pickerProjects.filter((project) =>
+          isPickableRepository(project, scratchWorkspaceRootFor(project.environmentId)),
+        ),
         valuePrefix: "new-thread-in",
         searchTerms: (project) => {
           const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);

@@ -11,6 +11,7 @@ import {
   composerProjectFolderId,
   groupRepositoriesByProject,
   heroProjectSuffix,
+  isPickableRepository,
   projectDefaultRepository,
   repositoriesInProject,
   threadProjectMeta,
@@ -22,6 +23,53 @@ import {
 
 const env = "env" as EnvironmentId;
 const other = "other" as EnvironmentId;
+
+describe("isPickableRepository", () => {
+  const scratch = "/Users/me/.cogenly/scratch";
+  const pickable = (workspaceRoot: string, scratchRoot: string | null = scratch) =>
+    isPickableRepository({ workspaceRoot }, scratchRoot);
+
+  it("lists a normal repository", () => {
+    expect(pickable("/Users/me/Documents/Projects/cogenly")).toBe(true);
+    expect(pickable("/Users/me/Documents/Projects/cogenly", null)).toBe(true);
+    // A folder merely named scratch is still a repository.
+    expect(pickable("/Users/me/code/scratch")).toBe(true);
+  });
+
+  it("never lists the Scratch project", () => {
+    expect(pickable(scratch)).toBe(false);
+    expect(pickable(`${scratch}/`)).toBe(false);
+    expect(isPickableRepository({ workspaceRoot: "/elsewhere", isScratch: true }, null)).toBe(
+      false,
+    );
+  });
+
+  it("never lists Scratch thread folders, including a T3 Code import's", () => {
+    expect(pickable(`${scratch}/2026-10-03-yo-can-we-build-a-41764429`)).toBe(false);
+    // T3 Code's Scratch, imported under the machine's name ("MacBook").
+    expect(pickable("/Users/me/.t3/scratch")).toBe(false);
+    expect(pickable("/Users/me/.t3/scratch/2026-10-03-yo-can-we-build-a-41764429", null)).toBe(
+      false,
+    );
+    expect(pickable("/srv/data/scratch/thread-folder", "/srv/data/scratch")).toBe(false);
+  });
+
+  it("never lists the home folder the data dir sits in, whatever it is named", () => {
+    expect(pickable("/Users/me")).toBe(false);
+    expect(pickable("/Users")).toBe(false);
+    expect(pickable("/Users/other")).toBe(true);
+    // A data dir that is not hidden says nothing about the home folder.
+    expect(pickable("/srv", "/srv/cogenly-data/scratch")).toBe(true);
+  });
+
+  it("compares Windows paths regardless of case and separator", () => {
+    expect(pickable("c:/users/me/.cogenly/scratch/x", "C:\\Users\\me\\.cogenly\\scratch")).toBe(
+      false,
+    );
+    expect(pickable("C:\\Users\\me", "C:\\Users\\me\\.cogenly\\scratch")).toBe(false);
+    expect(pickable("C:\\Users\\me\\repo", "C:\\Users\\me\\.cogenly\\scratch")).toBe(true);
+  });
+});
 
 function folder(
   environmentId: EnvironmentId,
