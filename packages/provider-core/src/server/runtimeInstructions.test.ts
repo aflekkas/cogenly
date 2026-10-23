@@ -25,6 +25,17 @@ describe("buildRuntimeInstructions", () => {
     ).toContain("through the Codex harness, as custom model with high reasoning effort.");
   });
 
+  it("tells every harness about the vault", () => {
+    for (const harness of ["Claude Code", "Codex", "Muse Code"]) {
+      const instructions = buildRuntimeInstructions({ harness });
+      expect(instructions).toContain("<vault>");
+      expect(instructions).toContain("vault_save");
+      expect(instructions).toContain("vault_fill");
+      expect(instructions).toContain("Never ask for secrets in chat");
+      expect(instructions).toContain("saveToVault");
+    }
+  });
+
   it("names the model by display name and slug when they differ", () => {
     expect(
       buildRuntimeInstructions({ harness: "Codex", model: "gpt-5.4", modelName: "GPT-5.4" }),

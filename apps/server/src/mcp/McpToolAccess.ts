@@ -17,6 +17,7 @@ import {
   type DispatchModeRefusal,
 } from "../orchestration-v2/DispatchModeLimit.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
+import * as Vault from "../vault/Vault.ts";
 import { resolveInteractionMode, resolveRuntimeMode } from "./OrchestratorMcpService.ts";
 import {
   assertFullAccess,
@@ -98,6 +99,17 @@ export class Declaration<out Handler> {
     declare = (handle) => {
       const declaration = new Declaration(builtHere, (params: Parameters<typeof handle>[0]) =>
         handle(params).pipe(
+          // Central scrub: every MCP tool result is redacted against the
+          // vault before serialization, so a secret echoed by a page
+          // (preview_evaluate), a terminal, or any other tool never reaches
+          // the model. No Vault service in scope means nothing to scrub.
+          Effect.flatMap((result) =>
+            Effect.serviceOption(Vault.Vault).pipe(
+              Effect.flatMap((vault) =>
+                Option.isSome(vault) ? vault.value.scrubValue(result) : Effect.succeed(result),
+              ),
+            ),
+          ),
           Effect.tap((result) =>
             Effect.serviceOption(McpInvocationContext.McpInvocationContext).pipe(
               Effect.flatMap((scope) =>

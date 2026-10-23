@@ -26,6 +26,16 @@ export type AgentStartWorkInput = typeof AgentStartWorkInput.Type;
 export const AgentApprovalAction = Schema.Union([
   Schema.Struct({ actionKind: Schema.Literal("start_work"), payload: AgentStartWorkInput }),
   Schema.Struct({
+    actionKind: Schema.Literal("vault_use"),
+    payload: Schema.Struct({
+      vaultItemId: TrimmedNonEmptyString,
+      vaultItemName: TrimmedNonEmptyString,
+      field: Schema.Literals(["username", "password", "totp", "value"]),
+      domain: Schema.NullOr(Schema.String),
+      threadId: Schema.NullOr(ThreadId),
+    }),
+  }),
+  Schema.Struct({
     actionKind: Schema.Literal("schedule_trigger"),
     payload: ScheduledTaskUpsertInput,
   }),
@@ -40,7 +50,12 @@ export const AgentApproval = Schema.Struct({
   id: TrimmedNonEmptyString,
   agentId: AgentId,
   action: AgentApprovalAction,
-  actionKind: Schema.Literals(["start_work", "schedule_trigger", "change_permissions"]),
+  actionKind: Schema.Literals([
+    "start_work",
+    "schedule_trigger",
+    "change_permissions",
+    "vault_use",
+  ]),
   payload: Schema.Record(Schema.String, Schema.Unknown),
   status: AgentApprovalStatus,
   requestedAt: IsoDateTime,

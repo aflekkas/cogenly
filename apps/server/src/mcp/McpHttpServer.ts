@@ -44,6 +44,8 @@ import * as ProjectHandlers from "./toolkits/project/handlers.ts";
 import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
 import * as AttachmentHandlers from "./toolkits/attachment/handlers.ts";
 import { TerminalToolkit } from "./toolkits/terminal/tools.ts";
+import { VaultToolkit } from "./toolkits/vault/tools.ts";
+import * as VaultHandlers from "./toolkits/vault/handlers.ts";
 import * as TerminalHandlers from "./toolkits/terminal/handlers.ts";
 import * as TerminalMcpService from "./TerminalMcpService.ts";
 import { ThreadToolkit } from "./toolkits/thread/tools.ts";
@@ -995,6 +997,7 @@ export const layer = Layer.mergeAll(
     Layer.provide(ThreadCommandExecutor.layer),
   ),
   layerThreadToolkit,
+  toolkitRegistration(VaultToolkit, VaultHandlers.layer),
   layerAttachmentToolkit,
   layerProjectRegistration,
   layerProjectLabelsRegistration,

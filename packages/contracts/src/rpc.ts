@@ -5,6 +5,7 @@ import * as Exports from "./export.ts";
 import * as T3Import from "./t3Import.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Work from "./work.ts";
+import * as Vault from "./vault.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
 import * as AgentBuilder from "./agentBuilder.ts";
 import * as Agents from "./agent.ts";
@@ -573,6 +574,11 @@ export const WS_METHODS = {
   scheduledTasksRunNow: "scheduledTasks.runNow",
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
+  vaultList: "vault.list",
+  vaultCreate: "vault.create",
+  vaultUpdate: "vault.update",
+  vaultDelete: "vault.delete",
+  vaultUsage: "vault.usage",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
 
@@ -2232,6 +2238,32 @@ const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
 });
 
+const WsVaultListRpc = Rpc.make(WS_METHODS.vaultList, {
+  payload: Vault.VaultListInput,
+  success: Vault.VaultListResult,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+const WsVaultCreateRpc = Rpc.make(WS_METHODS.vaultCreate, {
+  payload: Vault.VaultCreateInput,
+  success: Vault.VaultItemResult,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+const WsVaultUpdateRpc = Rpc.make(WS_METHODS.vaultUpdate, {
+  payload: Vault.VaultUpdateInput,
+  success: Vault.VaultItemResult,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+const WsVaultDeleteRpc = Rpc.make(WS_METHODS.vaultDelete, {
+  payload: Vault.VaultDeleteInput,
+  success: Vault.VaultDeleteResult,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+const WsVaultUsageRpc = Rpc.make(WS_METHODS.vaultUsage, {
+  payload: Vault.VaultUsageListInput,
+  success: Vault.VaultUsageListResult,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksListWebhookDeliveriesRpc = Rpc.make(
   WS_METHODS.scheduledTasksListWebhookDeliveries,
   {
@@ -2394,6 +2426,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksRotateWebhookTokenRpc,
   WsSecretsAnswerRequestRpc,
+  WsVaultListRpc,
+  WsVaultCreateRpc,
+  WsVaultUpdateRpc,
+  WsVaultDeleteRpc,
+  WsVaultUsageRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,

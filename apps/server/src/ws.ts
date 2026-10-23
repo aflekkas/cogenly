@@ -133,6 +133,7 @@ import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
+import * as Vault from "./vault/Vault.ts";
 import {
   archivedShellStreamItemFromThreadShell,
   buildActiveShellSnapshot,
@@ -1078,6 +1079,7 @@ const makeWsRpcHandlers = (
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
     const secretRequests = yield* SecretRequests.SecretRequests;
+    const vault = yield* Vault.Vault;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -1717,6 +1719,11 @@ const makeWsRpcHandlers = (
         Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
           Effect.andThen(scheduledTasks.rotateWebhookToken(input)),
         ),
+      [WS_METHODS.vaultList]: (input) => vault.list(input),
+      [WS_METHODS.vaultCreate]: (input) => vault.create(input),
+      [WS_METHODS.vaultUpdate]: (input) => vault.update(input),
+      [WS_METHODS.vaultDelete]: (input) => vault.delete(input),
+      [WS_METHODS.vaultUsage]: (input) => vault.listUsage(input),
       [WS_METHODS.secretsAnswerRequest]: (input) =>
         Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
           Effect.andThen(secretRequests.answer(input)),
@@ -2756,6 +2763,7 @@ type WsRequestServices =
   | ReviewService.ReviewService
   | ScheduledTasks.ScheduledTaskService
   | SecretRequests.SecretRequests
+  | Vault.Vault
   | ServerConfig.ServerConfig
   | ServerEnvironment.ServerEnvironment
   | ServerLifecycleEvents.ServerLifecycleEvents

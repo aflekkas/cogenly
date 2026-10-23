@@ -70,6 +70,8 @@ import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as Vault from "../vault/Vault.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 
 /** The shared application event log and its command receipts. */
 export const layerEventInfrastructure = Layer.mergeAll(
@@ -333,6 +335,7 @@ const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
+const layerVaultProvided = Vault.layer.pipe(Layer.provide(ServerEnvironment.layerIdentity));
 const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -485,6 +488,7 @@ const layerProductionBase = Layer.mergeAll(
   AgentStore.layer,
   layerScheduledTaskProvided,
   layerSecretRequestsProvided,
+  layerVaultProvided,
   UsageLimitRecoveryWorker.layer.pipe(
     Layer.provide(Layer.mergeAll(ProjectionStore.layer, layerThreadManagementProvided)),
   ),

@@ -100,6 +100,17 @@ describe("RPC authorization scopes", () => {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
   });
 
+  it("separates vault metadata reads from vault writes, on the client too", () => {
+    for (const method of [WS_METHODS.vaultList, WS_METHODS.vaultUsage]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationReadScope]);
+    }
+    for (const method of [WS_METHODS.vaultCreate, WS_METHODS.vaultUpdate, WS_METHODS.vaultDelete]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+    }
+  });
+
   it("requires operate access to stop a workflow", () => {
     expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.stopWorkflow)).toBe(
       AuthOrchestrationOperateScope,
