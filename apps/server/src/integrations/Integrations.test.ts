@@ -162,7 +162,18 @@ describe("parseRpcBody", () => {
       `: keep-alive\r\nevent: message\r\ndata: ${JSON.stringify(result)}\r\n\r\n`,
       `event: message\ndata: {"jsonrpc":"2.0","id":1,\ndata: "result":{"tools":[]}}\n\n`,
     ]) {
-      expect(Integrations.parseRpcBody(body)).toEqual(result);
+      expect(Integrations.parseRpcBody(body)).toMatchObject({ result: result.result });
+    }
+  });
+
+  it("treats a malformed envelope as no reply instead of failing on it", () => {
+    for (const body of [
+      `{"jsonrpc":"2.0","id":1,"error":null}`,
+      `{"jsonrpc":"2.0","id":1,"error":"boom"}`,
+      `[1, 2]`,
+      `data: null\n\n`,
+    ]) {
+      expect(Integrations.parseRpcBody(body)).toBeUndefined();
     }
   });
 });

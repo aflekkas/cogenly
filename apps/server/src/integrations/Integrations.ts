@@ -250,10 +250,13 @@ export class Integrations extends Context.Service<
   }
 >()("cogenly-server/integrations/Integrations") {}
 
-interface JsonRpcResponse {
-  readonly result?: unknown;
-  readonly error?: { readonly message?: unknown };
-}
+/** A JSON-RPC reply envelope; anything else (`"error": null`, a bare value) is malformed. */
+const JsonRpcResponse = Schema.Struct({
+  result: Schema.optional(Schema.Unknown),
+  error: Schema.optional(Schema.Struct({ message: Schema.optional(Schema.Unknown) })),
+});
+type JsonRpcResponse = typeof JsonRpcResponse.Type;
+const decodeJsonRpcResponse = Schema.decodeUnknownOption(JsonRpcResponse);
 
 /**
  * The data of each server-sent event, whatever order its fields come in
@@ -285,8 +288,8 @@ export const parseRpcBody = (text: string): JsonRpcResponse | undefined => {
     trimmed.startsWith("{") || trimmed.startsWith("[") ? [trimmed] : sseEventData(trimmed);
   for (const candidate of candidates.toReversed()) {
     try {
-      const parsed: unknown = JSON.parse(candidate);
-      if (typeof parsed === "object" && parsed !== null) return parsed as JsonRpcResponse;
+      const parsed = decodeJsonRpcResponse(JSON.parse(candidate));
+      if (Option.isSome(parsed)) return parsed.value;
     } catch {
       // Try the next SSE event; a body with no JSON is handled by the caller.
     }
