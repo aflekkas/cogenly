@@ -6,6 +6,7 @@ import * as T3Import from "./t3Import.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Integrations from "./integration.ts";
 import * as Machines from "./machine.ts";
+import * as MachineSecurity from "./machineSecurity.ts";
 import * as Work from "./work.ts";
 import * as Vault from "./vault.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
@@ -599,6 +600,7 @@ export const WS_METHODS = {
   machinesCreatePeerGrant: "machines.createPeerGrant",
   machinesJoinHub: "machines.joinHub",
   machinesUnpair: "machines.unpair",
+  machineSecurityStatus: "machines.securityStatus",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -2093,6 +2095,11 @@ const WsIntegrationsTestConnectionRpc = Rpc.make(WS_METHODS.integrationsTestConn
 });
 
 const machineErrors = Schema.Union([Machines.MachineError, EnvironmentAuthorizationError]);
+const WsMachineSecurityStatusRpc = Rpc.make(WS_METHODS.machineSecurityStatus, {
+  payload: Schema.Struct({}),
+  success: MachineSecurity.MachineSecurityStatus,
+  error: machineErrors,
+});
 const WsMachinesListRpc = Rpc.make(WS_METHODS.machinesList, {
   payload: Schema.Struct({}),
   success: Machines.MachineListResult,
@@ -2478,6 +2485,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsUpdateRpc,
   WsIntegrationsDeleteRpc,
   WsIntegrationsTestConnectionRpc,
+  WsMachineSecurityStatusRpc,
   WsMachinesListRpc,
   WsMachinesSubscribeRpc,
   WsMachinesUpdateRpc,

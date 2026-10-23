@@ -8,8 +8,11 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import { MachineSecurityStatus } from "@t3tools/contracts";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
+import * as MachineSecurity from "../../../security/MachineSecurity.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Settings from "../../../serverSettings.ts";
@@ -91,8 +94,22 @@ const EnvironmentAddTool = Tool.make("environment_add", {
 })
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false);
+const MachineSecurityStatusTool = Tool.make("machine_security_status", {
+  ...shared,
+  dependencies: [
+    ...shared.dependencies,
+    MachineSecurity.MachineSecurity,
+    ChildProcessSpawner.ChildProcessSpawner,
+  ],
+  description:
+    "Read-only security posture of this machine: Cogenly's bind, non-loopback listeners, sshd password/root settings when readable, Tailscale Serve/Funnel, and host firewall when readable. Checks that cannot run without root report unknown, never pass.",
+  success: MachineSecurityStatus,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
 export const EnvironmentToolkit = Toolkit.make(
   EnvironmentReadTool,
   EnvironmentPreferencesTool,
   EnvironmentAddTool,
+  MachineSecurityStatusTool,
 );

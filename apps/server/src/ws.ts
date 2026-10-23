@@ -8,6 +8,7 @@ import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
 import * as Integrations from "./integrations/Integrations.ts";
 import * as Machines from "./machines/Machines.ts";
+import * as MachineSecurity from "./security/MachineSecurity.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
@@ -1079,6 +1080,7 @@ const makeWsRpcHandlers = (
     const facts = yield* Facts.FactService;
     const integrations = yield* Integrations.Integrations;
     const machines = yield* Machines.Machines;
+    const machineSecurity = yield* MachineSecurity.MachineSecurity;
     const visualStates = yield* VisualStates.VisualStateService;
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
@@ -1672,6 +1674,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.integrationsUpdate]: (input) => integrations.update(input),
       [WS_METHODS.integrationsDelete]: (input) => integrations.remove(input.id),
       [WS_METHODS.integrationsTestConnection]: (input) => integrations.testConnection(input.id),
+      [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
       [WS_METHODS.machinesList]: () => machines.list,
       [WS_METHODS.machinesSubscribe]: () => machines.subscribe,
       [WS_METHODS.machinesUpdate]: (input) => machines.update(input),
@@ -2742,6 +2745,7 @@ type WsRequestServices =
   | Facts.FactService
   | Integrations.Integrations
   | Machines.Machines
+  | MachineSecurity.MachineSecurity
   | FileSystem.FileSystem
   | GitHubRest.GitHubRest
   | GitWorkflowService.GitWorkflowService
