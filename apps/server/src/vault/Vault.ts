@@ -537,28 +537,38 @@ const make = Effect.gen(function* () {
     const shortSecrets = new Set<string>();
     const totpSecrets: Array<string> = [];
     for (const row of rows) {
-      const stored = yield* decryptStored(row).pipe(Effect.option);
-      if (Option.isNone(stored)) continue;
-      for (const value of Object.values(stored.value))
+      // A peer's item not wrapped for this machine holds nothing this machine
+      // could deliver, so it is skipped. Failing to read a local item fails the
+      // whole load, and scrubbing withholds output rather than miss its secret.
+      const wrapped = decodeWrappedKeysOption(row.wrapped_keys_json);
+      if (
+        Option.isSome(wrapped) &&
+        wrapped.value.length > 0 &&
+        !wrapped.value.some((entry) => entry.environmentId === environmentId)
+      ) {
+        continue;
+      }
+      const stored = yield* decryptStored(row);
+      for (const value of Object.values(stored))
         if (typeof value === "string" && value.length > 0)
           (value.length < 6 ? shortSecrets : secrets).add(value);
       // Card values echo back in shapes other than the stored one: a page may
       // return the number digits-only or grouped, and the expiry as MM/YYYY.
       // The CVC and MM/YY are too short for the general pass, so they go to
       // the whole-token short pass instead.
-      const digits = cardDigits(stored.value);
+      const digits = cardDigits(stored);
       if (digits.length > 0) {
         secrets.add(digits);
         secrets.add(digits.replace(/(\d{4})(?=\d)/g, "$1 "));
       }
-      const expiry = cardExpiryOf(stored.value);
+      const expiry = cardExpiryOf(stored);
       if (expiry !== undefined) {
         shortSecrets.add(expiry);
-        const year = (stored.value.cardExpiryYear ?? "").trim();
+        const year = (stored.cardExpiryYear ?? "").trim();
         if (year.length === 4) secrets.add(`${expiry.slice(0, 3)}${year}`);
       }
-      if (stored.value.cardCvc) shortSecrets.add(stored.value.cardCvc);
-      if (stored.value.totpSecret) totpSecrets.push(stored.value.totpSecret);
+      if (stored.cardCvc) shortSecrets.add(stored.cardCvc);
+      if (stored.totpSecret) totpSecrets.push(stored.totpSecret);
     }
     const loaded = { version: cache.version, loaded: true, secrets, shortSecrets, totpSecrets };
     const committed = yield* Ref.modify(scrubCache, (current) =>
