@@ -9,6 +9,9 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import type * as Statement from "effect/sql/Statement";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -49,17 +52,16 @@ const memoryStore = () => {
   } as ServerSecretStore.ServerSecretStore["Service"]);
 };
 
-const layer = Vault.layer.pipe(
-  Layer.provideMerge(Sqlite.layerMemory),
-  Layer.provideMerge(NodeServices.layer),
-  Layer.provideMerge(NodeCrypto.layer),
-  Layer.provide(memoryStore()),
-  Layer.provide(
-    Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
-      getEnvironmentId: Effect.succeed(EnvironmentId.make("env:test")),
-    }),
-  ),
+const dependencies = Layer.mergeAll(
+  Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer)),
+  NodeServices.layer,
+  NodeCrypto.layer,
+  memoryStore(),
+  Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+    getEnvironmentId: Effect.succeed(EnvironmentId.make("env:test")),
+  }),
 );
+const layer = Vault.layer.pipe(Layer.provideMerge(dependencies));
 
 const threadId = ThreadId.make("thread:1");
 
@@ -453,6 +455,45 @@ describe("Vault service", () => {
         [VAULT_WITHHELD]: 0,
       });
     }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("retries a scrub reload invalidated while its old snapshot was in flight", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const captured = yield* Deferred.make<void>(),
+          release = yield* Deferred.make<void>();
+        let pause = false;
+        const intercepted = new Proxy(sql, {
+          apply(target, receiver, args: Array<unknown>) {
+            const query = Reflect.apply(target, receiver, args) as Statement.Statement<unknown>;
+            if (!pause || !query.compile()[0].endsWith("FROM vault_items WHERE deleted_at IS NULL"))
+              return query;
+            pause = false;
+            return query.pipe(
+              Effect.tap(() =>
+                Deferred.succeed(captured, undefined).pipe(Effect.andThen(Deferred.await(release))),
+              ),
+            );
+          },
+        });
+        yield* Effect.gen(function* () {
+          const vault = yield* Vault.Vault;
+          yield* vault.create({ name: "old", type: "note", secretFields: { value: "old-secret" } });
+          pause = true;
+          const reload = yield* vault.scrubText("new-secret").pipe(Effect.forkChild);
+          yield* Deferred.await(captured);
+          yield* vault.create({ name: "new", type: "note", secretFields: { value: "new-secret" } });
+          yield* Deferred.succeed(release, undefined);
+          expect(yield* Fiber.join(reload)).toBe("[redacted vault secret]");
+          expect(yield* vault.scrubText("new-secret")).toBe("[redacted vault secret]");
+        }).pipe(
+          Effect.provide(
+            Vault.layer.pipe(Layer.provide(Layer.succeed(SqlClient.SqlClient, intercepted))),
+          ),
+        );
+      }),
+    ).pipe(Effect.provide(dependencies)),
   );
 
   it.effect("scrubs short passwords as whole tokens and retains delivered TOTP codes", () =>

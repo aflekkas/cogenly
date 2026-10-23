@@ -296,21 +296,25 @@ export class Vault extends Context.Service<
 
 const KEY_PAIR_STORE_NAME = "vault-x25519-key-pair";
 
+interface ScrubCache {
+  readonly version: number;
+  readonly loaded: boolean;
+  readonly secrets: Set<string>;
+  readonly shortSecrets: Set<string>;
+  readonly totpSecrets: ReadonlyArray<string>;
+}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const store = yield* ServerSecretStore.ServerSecretStore;
   const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const crypto = yield* Crypto.Crypto;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
-  const scrubCache = yield* Ref.make<{
-    loaded: boolean;
-    secrets: Set<string>;
-    shortSecrets: Set<string>;
-    totpSecrets: ReadonlyArray<string>;
-  }>({
+  const scrubCache = yield* Ref.make<ScrubCache>({
+    version: 0,
     loaded: false,
-    secrets: new Set<string>(),
-    shortSecrets: new Set<string>(),
+    secrets: new Set(),
+    shortSecrets: new Set(),
     totpSecrets: [],
   });
 
@@ -483,14 +487,15 @@ const make = Effect.gen(function* () {
       yield* sql`INSERT INTO vault_usage(id, item_id, thread_id, agent_id, action, domain, at, outcome) VALUES (${`usage:${id}`}, ${input.itemId}, ${input.threadId ?? null}, ${input.agentId ?? null}, ${input.action}, ${input.domain ?? null}, ${at}, ${input.outcome})`;
     }).pipe(Effect.mapError(wrap), Effect.ignore);
 
-  const invalidateScrubCache = Ref.set(scrubCache, {
+  const invalidateScrubCache = Ref.update(scrubCache, (cache) => ({
+    version: cache.version + 1,
     loaded: false,
     secrets: new Set<string>(),
     shortSecrets: new Set<string>(),
     totpSecrets: [],
-  });
+  }));
 
-  const ensureScrubSecrets = Effect.gen(function* () {
+  const ensureScrubSecrets: Effect.Effect<ScrubCache, VaultError> = Effect.gen(function* () {
     const cache = yield* Ref.get(scrubCache);
     if (cache.loaded) return cache;
     const rows =
@@ -524,9 +529,11 @@ const make = Effect.gen(function* () {
       if (stored.value.cardCvc) shortSecrets.add(stored.value.cardCvc);
       if (stored.value.totpSecret) totpSecrets.push(stored.value.totpSecret);
     }
-    const loaded = { loaded: true, secrets, shortSecrets, totpSecrets };
-    yield* Ref.set(scrubCache, loaded);
-    return loaded;
+    const loaded = { version: cache.version, loaded: true, secrets, shortSecrets, totpSecrets };
+    const committed = yield* Ref.modify(scrubCache, (current) =>
+      current.version === cache.version ? ([true, loaded] as const) : ([false, current] as const),
+    );
+    return committed ? loaded : yield* ensureScrubSecrets;
   });
 
   /**
