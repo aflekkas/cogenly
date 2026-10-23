@@ -858,6 +858,16 @@ export const StorageCleanupReport = Schema.Struct({
 });
 export type StorageCleanupReport = typeof StorageCleanupReport.Type;
 
+/** Built-in nightly backups of the Cogenly home, owned by the server. */
+export const AutomaticBackupsSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** How many nightly backup directories to keep under `<home>/backups/`. */
+  retentionCount: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30 })).pipe(
+    Schema.withDecodingDefault(Effect.succeed(7)),
+  ),
+});
+export type AutomaticBackupsSettings = typeof AutomaticBackupsSettings.Type;
+
 export const StorageCleanupSettings = Schema.Struct({
   worktreeKeepWhen: WorktreeKeepWhen.pipe(
     Schema.withDecodingDefault(Effect.succeed("uncommitted-changes")),
@@ -891,6 +901,9 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  automaticBackups: AutomaticBackupsSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(AutomaticBackupsSettings)({}))),
+  ),
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
   ),
@@ -1299,6 +1312,14 @@ export const ServerSettingsPatch = Schema.Struct({
         }),
       ]),
     ),
+  ),
+  automaticBackups: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      retentionCount: Schema.optionalKey(
+        Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30 })),
+      ),
+    }),
   ),
   storageCleanup: Schema.optionalKey(
     Schema.Struct({
