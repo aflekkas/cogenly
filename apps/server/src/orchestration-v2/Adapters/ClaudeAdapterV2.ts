@@ -2812,11 +2812,14 @@ function providerFailureFromResult(
     }
   }
   const failureClass =
-    message.terminal_reason === "blocking_limit" ||
-    (message.subtype === "success" && message.api_error_status === 429) ||
-    usageLimited
-      ? "usage_limit"
-      : "provider_error";
+    message.terminal_reason === "prompt_too_long" ||
+    message.terminal_reason === "rapid_refill_breaker"
+      ? "context_overflow"
+      : message.terminal_reason === "blocking_limit" ||
+          (message.subtype === "success" && message.api_error_status === 429) ||
+          usageLimited
+        ? "usage_limit"
+        : "provider_error";
   const listedError = resultUserFacingError(message);
   const structuredError = isOverloadedResult(message)
     ? "Claude API is overloaded (529). Try again shortly."
