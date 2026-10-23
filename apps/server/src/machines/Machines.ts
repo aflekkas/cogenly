@@ -27,6 +27,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
+import * as SharedState from "../sync/SharedState.ts";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as DirectEndpoints from "../environment/DirectEndpoints.ts";
@@ -71,12 +72,15 @@ export class Machines extends Context.Service<
 >()("cogenly-server/machines/Machines") {}
 
 const make = Effect.gen(function* () {
+  const shared = yield* SharedState.SharedState;
   const identity = yield* MachineIdentity.MachineIdentity;
   const hub = yield* PeerHub.PeerHub;
   const hubLink = yield* HubLink.HubLink;
   const auth = yield* EnvironmentAuth.EnvironmentAuth;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const endpoints = yield* DirectEndpoints.DirectEndpoints;
+  const initialLink = yield* hubLink.view;
+  yield* shared.setHub(Option.isSome(initialLink) ? initialLink.value.link.hubEnvironmentId : null);
 
   const list: Machines["Service"]["list"] = Effect.gen(function* () {
     const self = yield* identity.self;
@@ -207,6 +211,7 @@ const make = Effect.gen(function* () {
   const joinHub: Machines["Service"]["joinHub"] = (input) =>
     requireNotHub("join").pipe(
       Effect.andThen(hubLink.join(input)),
+      Effect.andThen(shared.setHub(input.code.hubEnvironmentId)),
       Effect.andThen(list),
       Effect.withSpan("Machines.joinHub"),
     );
@@ -214,7 +219,9 @@ const make = Effect.gen(function* () {
   const unpair: Machines["Service"]["unpair"] = Effect.fn("Machines.unpair")(function* (input) {
     const view = yield* hubLink.view;
     if (Option.isSome(view) && view.value.link.hubEnvironmentId === input.environmentId) {
-      return { unpaired: yield* hubLink.leave };
+      const unpaired = yield* hubLink.leave;
+      yield* shared.setHub(null);
+      return { unpaired };
     }
     return { unpaired: yield* hub.unpair(input.environmentId) };
   });
@@ -241,4 +248,4 @@ const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(Machines, make);
+export const layer = Layer.effect(Machines, make).pipe(Layer.provide(SharedState.layer));

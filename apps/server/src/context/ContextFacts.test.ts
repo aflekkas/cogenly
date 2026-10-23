@@ -72,17 +72,14 @@ describe("shared facts and scoped context", () => {
       ]);
       expect(yield* sql`SELECT * FROM fact_history`).toHaveLength(4);
       expect(yield* sql`SELECT * FROM agent_memory`).toEqual([]);
-      const aliases = yield* (yield* Store.AgentStore).memory(scoped.id);
+      const aliases = yield* Store.AgentStore.pipe(
+        Effect.flatMap((store) => store.memory(scoped.id)),
+        Effect.provide(Store.layer.pipe(Layer.provide(layerSharedIdentity))),
+      );
       expect(aliases.map((n) => n.id).sort()).toEqual(["owner", "thread:evidence"]);
     }).pipe(
-      Effect.provide(
-        Store.layer
-          .pipe(Layer.provide(layerSharedIdentity))
-          .pipe(
-            Layer.provideMerge(NodeSqlite.layer({ filename: ":memory:" })),
-            Layer.provide(NodeServices.layer),
-          ),
-      ),
+      Effect.provide(NodeSqlite.layer({ filename: ":memory:" })),
+      Effect.provide(NodeServices.layer),
     ),
   );
 

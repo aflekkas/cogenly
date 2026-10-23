@@ -3,9 +3,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId, SharedStateError, type SharedDocumentChange } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
+import { agentFixture } from "../agents/agent.testkit.ts";
 import * as SharedState from "./SharedState.ts";
 
 const local = EnvironmentId.make("local");
@@ -154,4 +156,249 @@ describe("SharedState", () => {
       expect((yield* state.get("agent", "agent:one"))?.fields.ownerMachine).toBe(local);
     }).pipe(Effect.provide(layer)),
   );
+  it.effect(
+    "backfills legacy owners and bootstraps configuration without runtime fallback state",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const fixture = {
+          ...agentFixture(),
+          fallbackIndex: 2,
+          fallbackUntil: "2026-02-01T00:00:00.000Z",
+        };
+        const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(fixture);
+        yield* sql`INSERT INTO agents(agent_id,conversation_thread_id,payload_json,enabled,daily_run_cap) VALUES (${fixture.id},${fixture.conversationThreadId},${encoded},1,${fixture.dailyRunCap})`;
+        const restarted = yield* Layer.build(
+          Layer.fresh(SharedState.layer).pipe(
+            Layer.provide(
+              Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+                getEnvironmentId: Effect.succeed(local),
+              }),
+            ),
+          ),
+        );
+        const state = yield* SharedState.SharedState.pipe(Effect.provideContext(restarted));
+        yield* state.bootstrap;
+        const doc = yield* state.get("agent", fixture.id);
+        expect(doc?.fields.ownerMachine).toBe(local);
+        expect(doc?.fields.fallbackChain).toEqual([]);
+        for (const key of [
+          "projectId",
+          "fallbackIndex",
+          "fallbackUntil",
+          "fallbackReason",
+          "consecutiveFailures",
+          "backoffUntil",
+        ])
+          expect(doc?.fields).not.toHaveProperty(key);
+        expect(
+          (yield* sql<{ owner_machine: string }>`SELECT owner_machine FROM agents`)[0]
+            ?.owner_machine,
+        ).toBe(local);
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+
+  it.effect("incoming agent edits preserve local fallback state until its chain changes", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      const f = agentFixture();
+      const fields = {
+        name: f.name,
+        avatar: { seed: "one" },
+        instructions: f.instructions,
+        responsibility: f.responsibility,
+        permissions: f.permissions,
+        notifyPolicy: f.notifyPolicy,
+        modelSelection: { instanceId: f.modelSelection.instanceId, model: f.modelSelection.model },
+        fallbackChain: [],
+        runtimeMode: f.runtimeMode,
+        dailyRunCap: f.dailyRunCap,
+        repositoryRemote: null,
+        ownerMachine: local,
+        createdAt: f.createdAt,
+      };
+      yield* state.write("agent", f.id, fields);
+      yield* sql`UPDATE agents SET payload_json=json_set(payload_json,'$.fallbackIndex',1,'$.fallbackUntil','2026-02-01T00:00:00.000Z') WHERE agent_id=${f.id}`;
+      const incoming = {
+        ...change({ name: "From another machine" }, 100),
+        kind: "agent" as const,
+        id: f.id,
+      };
+      // The local write's clock is the test epoch, so the peer edit must follow that clock.
+      const localClock = (yield* state.get("agent", f.id))!.clocks.name!;
+      const edit = {
+        ...incoming,
+        clocks: { name: { ...localClock, logical: localClock.logical + 1, node: peer } },
+      };
+      yield* state.receive(batch([edit]), peer, false);
+      expect(
+        (yield* sql<{
+          fallback: number;
+        }>`SELECT json_extract(payload_json,'$.fallbackIndex') AS fallback FROM agents`)[0]
+          ?.fallback,
+      ).toBe(1);
+      expect((yield* state.get("agent", f.id))?.fields.name).toBe("From another machine");
+      const chain = {
+        ...change({ fallbackChain: [{ ...f.modelSelection, model: "other" }] }, localClock.wall),
+        kind: "agent" as const,
+        id: f.id,
+      };
+      chain.clocks = {
+        fallbackChain: { ...localClock, logical: localClock.logical + 2, node: peer },
+      };
+      yield* state.receive(batch([chain], 1), peer, false);
+      expect(
+        (yield* sql<{
+          fallback: number;
+        }>`SELECT json_extract(payload_json,'$.fallbackIndex') AS fallback FROM agents`)[0]
+          ?.fallback,
+      ).toBe(0);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect(
+    "schedule configuration merges preserve local run history and reject absolute worktrees",
+    () =>
+      Effect.gen(function* () {
+        const state = yield* SharedState.SharedState;
+        const sql = yield* SqlClient.SqlClient;
+        const f = agentFixture();
+        const fields = {
+          agentId: null,
+          title: "Check",
+          prompt: "Check work",
+          enabled: true,
+          schedule: { type: "interval", everyMs: 60000 },
+          repositoryRemote: null,
+          workspaceStrategy: { type: "root" },
+          modelSelection: {
+            instanceId: f.modelSelection.instanceId,
+            model: f.modelSelection.model,
+          },
+          runtimeMode: f.runtimeMode,
+          interactionMode: "default",
+          ownerMachine: local,
+          createdAt: f.createdAt,
+        };
+        yield* state.write("schedule", "task:one", fields);
+        const before = yield* sql<{ next_run_at: string }>`SELECT next_run_at FROM scheduled_tasks`;
+        expect(before[0]?.next_run_at).not.toBeNull();
+        yield* sql`UPDATE scheduled_tasks SET run_count=9,last_run_status='succeeded' WHERE task_id='task:one'`;
+        const clock = (yield* state.get("schedule", "task:one"))!.clocks.prompt!;
+        const edit = {
+          ...change({ prompt: "Edited" }, clock.wall),
+          kind: "schedule" as const,
+          id: "task:one",
+          clocks: { prompt: { ...clock, logical: clock.logical + 1, node: peer } },
+        };
+        yield* state.receive(batch([edit]), peer, false);
+        expect(
+          yield* sql`SELECT prompt,run_count,last_run_status,next_run_at FROM scheduled_tasks`,
+        ).toEqual([
+          {
+            prompt: "Edited",
+            run_count: 9,
+            last_run_status: "succeeded",
+            next_run_at: before[0]!.next_run_at,
+          },
+        ]);
+        const invalid = {
+          ...change({
+            workspaceStrategy: { type: "existing_worktree", worktreePath: "/private/repo" },
+          }),
+          kind: "schedule" as const,
+          id: "task:one",
+        };
+        expect((yield* Effect.result(state.receive(batch([invalid], 1), peer, false)))._tag).toBe(
+          "Failure",
+        );
+      }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("accepts overlapping committed ranges but never skips a cursor gap", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      yield* state.receive(batch([change(project)]), peer, false);
+      const second = change({ name: "New" }, 20);
+      yield* state.receive(
+        { after: 0, cursor: 2, changes: [change(project), second] },
+        peer,
+        false,
+      );
+      expect((yield* state.cursors(peer)).received).toBe(2);
+      expect((yield* state.get("project", "label:peer"))?.fields.name).toBe("New");
+      expect(
+        (yield* Effect.result(state.receive({ after: 3, cursor: 4, changes: [] }, peer, false)))
+          ._tag,
+      ).toBe("Failure");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  for (const reversed of [false, true])
+    it.effect(
+      `converges concurrent repository moves in ${reversed ? "reverse" : "forward"} delivery order`,
+      () =>
+        Effect.gen(function* () {
+          const state = yield* SharedState.SharedState;
+          const sql = yield* SqlClient.SqlClient;
+          const a = {
+            ...change(
+              {
+                ...project,
+                name: "A",
+                repositories: [{ remote: "github.com/org/repo", directoryName: "repo" }],
+              },
+              20,
+            ),
+            id: "label:a",
+          };
+          const b = {
+            ...change(
+              {
+                ...project,
+                name: "B",
+                repositories: [{ remote: "github.com/org/repo", directoryName: "repo" }],
+              },
+              10,
+            ),
+            id: "label:b",
+          };
+          yield* state.receive(
+            { after: 0, cursor: 2, changes: reversed ? [b, a] : [a, b] },
+            peer,
+            false,
+          );
+          expect(yield* sql`SELECT label_id,remote FROM label_repositories`).toEqual([
+            { label_id: "label:a", remote: "github.com/org/repo" },
+          ]);
+          // Bind this machine's clone, then delete the winning project. The other
+          // project's still-live intent wins without losing the local clone location.
+          yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES ('local-repo','Repo','/private/local/checkout','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')`;
+          yield* sql`UPDATE label_repositories SET repository_id='local-repo',directory_name='checkout' WHERE label_id='label:a'`;
+          yield* state.capture("project", "label:a");
+          const deletion = {
+            ...change({}, 30),
+            id: "label:a",
+            tombstone: { wall: 30, logical: 0, node: peer },
+          };
+          yield* state.receive({ after: 2, cursor: 3, changes: [deletion] }, peer, false);
+          expect(
+            yield* sql`SELECT label_id,repository_id,directory_name FROM label_repositories`,
+          ).toEqual([
+            { label_id: "label:b", repository_id: "local-repo", directory_name: "checkout" },
+          ]);
+          expect((yield* state.get("project", "label:b"))?.fields).not.toHaveProperty(
+            "workspaceRoot",
+          );
+          yield* sql`UPDATE projection_projects SET deleted_at='2026-01-02T00:00:00.000Z' WHERE project_id='local-repo'`;
+          expect(yield* sql`SELECT label_id,repository_id,remote FROM label_repositories`).toEqual([
+            {
+              label_id: "label:b",
+              repository_id: "remote:github.com/org/repo",
+              remote: "github.com/org/repo",
+            },
+          ]);
+        }).pipe(Effect.provide(layer)),
+    );
 });

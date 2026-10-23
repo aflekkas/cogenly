@@ -370,8 +370,17 @@ const make = Effect.gen(function* () {
             const remote =
               identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl);
             const directoryName = repositoryDirectoryName(workspaceRoot) ?? link.directoryName;
-            if (remote !== link.remote || directoryName !== link.directoryName)
-              yield* sql`UPDATE label_repositories SET remote = ${remote}, directory_name = ${directoryName} WHERE repository_id = ${link.repositoryId}`;
+            if (remote !== link.remote || directoryName !== link.directoryName) {
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  yield* sql`UPDATE label_repositories SET remote=${remote},directory_name=${directoryName} WHERE repository_id=${link.repositoryId}`;
+                  const labels = yield* sql<{
+                    label_id: string;
+                  }>`SELECT label_id FROM label_repositories WHERE repository_id=${link.repositoryId}`;
+                  for (const row of labels) yield* shared.capture("project", row.label_id);
+                }),
+              );
+            }
             return { repositoryId: link.repositoryId, remote, directoryName };
           }),
         );
@@ -400,6 +409,9 @@ const make = Effect.gen(function* () {
       link ? "linkRepository" : "unlinkRepository",
       input,
       Effect.gen(function* () {
+        const previous = yield* sql<{
+          label_id: string;
+        }>`SELECT label_id FROM label_repositories WHERE repository_id=${input.repositoryId}`;
         const { label } = yield* get(input.labelId);
         if (link && !label.repositoryIds.includes(input.repositoryId))
           yield* readActive(input.labelId);
@@ -424,6 +436,8 @@ const make = Effect.gen(function* () {
           yield* autoAddRepositorySourceLink(input.labelId, input.repositoryId);
         } else
           yield* sql`DELETE FROM label_repositories WHERE label_id = ${input.labelId} AND repository_id = ${input.repositoryId}`;
+        if (previous[0] && previous[0].label_id !== input.labelId)
+          yield* shared.capture("project", previous[0].label_id);
         yield* sql`UPDATE project_labels SET updated_at = ${yield* now} WHERE label_id = ${input.labelId}`;
         return yield* get(input.labelId);
       }),

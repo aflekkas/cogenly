@@ -111,6 +111,7 @@ const make = Effect.gen(function* () {
   const persist = Effect.fn("SharedState.persist")(function* (
     change: SharedDocumentChange,
     project: boolean,
+    preserveLocalBindings = false,
   ) {
     const current = yield* get(change.kind, change.id);
     for (const [key, clock] of Object.entries(change.clocks)) {
@@ -125,7 +126,6 @@ const make = Effect.gen(function* () {
     const ownerClock = current?.clocks.ownerMachine;
     const incomingOwner = change.fields.ownerMachine;
     // A regular configuration edit is never authority to move autonomous execution.
-    // Transfers must originate on the current owner and name its exact ownership version.
     // v1 keeps ownership immutable after creation; handoff of running work is a later protocol.
     if (
       owner !== undefined &&
@@ -139,9 +139,9 @@ const make = Effect.gen(function* () {
       const agent = yield* get("agent", merged.fields.agentId);
       if (
         agent &&
-        (agent.tombstone ||
-          (agent.fields.ownerMachine !== undefined &&
-            merged.fields.ownerMachine !== agent.fields.ownerMachine))
+        agent.fields.ownerMachine !== undefined &&
+        merged.fields.ownerMachine !== undefined &&
+        merged.fields.ownerMachine !== agent.fields.ownerMachine
       )
         return yield* new SharedStateError({ reason: "owner-change" });
     }
@@ -150,7 +150,9 @@ const make = Effect.gen(function* () {
     // Log the original delta, not the merged document: authorship must survive hub relay.
     yield* sql`INSERT INTO shared_changes(change_json) VALUES (${encodeJson(change)})`;
     if (project)
-      yield* projectDocument(merged).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+      yield* projectDocument(merged, preserveLocalBindings, Object.keys(change.fields)).pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+      );
     if (project && change.kind === "agent" && !merged.tombstone) {
       const pending = yield* sql<{
         id: string;
@@ -169,6 +171,7 @@ const make = Effect.gen(function* () {
     fields: SharedDocumentChange["fields"],
     deleted: boolean,
     project: boolean,
+    preserveLocalBindings = false,
   ) {
     const current = yield* get(kind, id);
     if (current?.tombstone) {
@@ -194,7 +197,7 @@ const make = Effect.gen(function* () {
       updatedBy: environmentId,
     };
     yield* validateChange(change);
-    yield* persist(change, project);
+    yield* persist(change, project, preserveLocalBindings);
   });
   const write: SharedState["Service"]["write"] = (kind, id, fields, deleted = false) =>
     sql
@@ -213,7 +216,7 @@ const make = Effect.gen(function* () {
           const fields = yield* Schema.decodeUnknownEffect(
             Schema.Record(Schema.String, Schema.Json),
           )(configuration);
-          yield* writeInternal(kind, id, fields, deleted, false);
+          yield* writeInternal(kind, id, fields, deleted, true, true);
         }),
       )
       .pipe(Effect.mapError(storage), Effect.andThen(notify));
@@ -283,7 +286,7 @@ const make = Effect.gen(function* () {
           }
           const previous = (yield* cursors(source)).received;
           if (batch.cursor <= previous) return { acknowledged: previous };
-          if (batch.after !== previous)
+          if (batch.after > previous)
             return yield* new SharedStateError({ reason: "invalid-cursor" });
           for (const change of batch.changes) {
             yield* persist(change, true);

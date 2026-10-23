@@ -10,6 +10,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { startMachine, pair, startProxy, awaitLinkState } from "../machines/testkit.ts";
 import * as SharedState from "./SharedState.ts";
+import { compareClock } from "./merge.ts";
 import * as SharedSync from "./SharedSync.ts";
 
 const project = {
@@ -51,6 +52,7 @@ describe("shared documents over the authenticated machine link", () => {
         const spoke = yield* start("sync-spoke", "computer");
         yield* hub.state.write("project", "label:one", project);
         yield* pair(hub, spoke);
+        expect(yield* spoke.state.defaultOwner).toBe(hub.environmentId);
         yield* spoke.sync.sync(hub.environmentId);
         yield* hub.sync.sync(spoke.environmentId);
         // Simultaneous independent edits persist before either side exchanges the next batch.
@@ -71,6 +73,25 @@ describe("shared documents over the authenticated machine link", () => {
           name: "Hub name",
           instructions: "Spoke instructions",
         });
+        yield* Effect.all(
+          [
+            hub.state.write("project", "label:one", { name: "Hub conflict" }),
+            spoke.state.write("project", "label:one", { name: "Spoke conflict" }),
+          ],
+          { concurrency: "unbounded" },
+        );
+        const hubEdit = (yield* hub.state.get("project", "label:one"))!;
+        const spokeEdit = (yield* spoke.state.get("project", "label:one"))!;
+        const expectedName =
+          compareClock(hubEdit.clocks.name!, spokeEdit.clocks.name!) > 0
+            ? hubEdit.fields.name
+            : spokeEdit.fields.name;
+        yield* spoke.sync.sync(hub.environmentId);
+        yield* hub.sync.sync(spoke.environmentId);
+        expect((yield* hub.state.get("project", "label:one"))?.fields.name).toBe(expectedName);
+        expect(yield* spoke.state.get("project", "label:one")).toEqual(
+          yield* hub.state.get("project", "label:one"),
+        );
         const sql = yield* hub.run(SqlClient.SqlClient);
         const before = (yield* sql`SELECT * FROM shared_changes`).length;
         const outgoing = yield* spoke.state.readBatch(0, hub.environmentId, true);

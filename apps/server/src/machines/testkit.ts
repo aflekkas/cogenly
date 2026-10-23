@@ -1,55 +1,38 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The test serves real loopback HTTP and proxies TCP to drop sockets.
-import * as NodeCrypto from "node:crypto";
+
 import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
-import {
-  AuthPeerDelegateScope,
-  AuthPeerScopes,
-  AuthSyncReplicateScope,
-  type MachineRole,
-  type MachineSelfReport,
-  isAuthPeerScope,
-  makePeerChannel,
-} from "@t3tools/contracts";
+
+import { type MachineRole, type MachineSelfReport } from "@t3tools/contracts";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
+
 import * as Duration from "effect/Duration";
-import * as Deferred from "effect/Deferred";
+
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
+
 import * as Stream from "effect/Stream";
-import * as TestClock from "effect/testing/TestClock";
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientRequest,
-  HttpRouter,
-  HttpServer,
-  HttpServerRequest,
-} from "effect/http";
+
+import { FetchHttpClient, HttpRouter, HttpServer } from "effect/http";
 import * as Socket from "effect/socket/Socket";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
-import { RPC_REQUIRED_SCOPES } from "../auth/RpcAuthorization.ts";
+
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as DirectEndpoints from "../environment/DirectEndpoints.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as HubLink from "./HubLink.ts";
-import { readHubLink, writeHubLink } from "./hubLinkStore.ts";
+
 import * as MachineIdentity from "./MachineIdentity.ts";
 import * as Machines from "./Machines.ts";
 import * as PeerChannels from "./PeerChannels.ts";
 import * as PeerHttp from "./peerHttp.ts";
 import * as PeerHub from "./PeerHub.ts";
-import { createPeerDpopProof, getOrCreatePeerDpopKey } from "./peerCrypto.ts";
 
 const layerIdentity = (name: string, role: MachineRole) =>
   Layer.effect(

@@ -3,6 +3,7 @@ import {
   SharedChangesRead,
   SharedStateError,
   type EnvironmentId,
+  type SharedChangeBatch,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
@@ -37,20 +38,28 @@ const make = Effect.gen(function* () {
       return yield* state.readBatch(after, caller.environmentId, link._tag === "spoke");
     }),
   );
-  yield* channels.register(SharedChangesApply, (batch, caller) =>
-    Effect.gen(function* () {
-      const view = yield* topology;
-      const trustedRelay =
-        view.link._tag === "spoke" && view.link.hubEnvironmentId === caller.environmentId;
+  const receive = Effect.fn("SharedSync.receive")(function* (
+    batch: SharedChangeBatch,
+    source: EnvironmentId,
+  ) {
+    const view = yield* topology;
+    const trustedRelay = view.link._tag === "spoke" && view.link.hubEnvironmentId === source;
+    if (!trustedRelay) {
       const known = new Set(view.machines.map((machine) => machine.environmentId as string));
       for (const change of batch.changes)
         if (
           typeof change.fields.ownerMachine === "string" &&
           !known.has(change.fields.ownerMachine)
-        )
-          return yield* new SharedStateError({ reason: "owner-change" });
-      return yield* state.receive(batch, caller.environmentId, trustedRelay);
-    }),
+        ) {
+          const current = yield* state.get(change.kind, change.id);
+          if (current?.fields.ownerMachine !== change.fields.ownerMachine)
+            return yield* new SharedStateError({ reason: "owner-change" });
+        }
+    }
+    return yield* state.receive(batch, source, trustedRelay);
+  });
+  yield* channels.register(SharedChangesApply, (batch, caller) =>
+    receive(batch, caller.environmentId),
   );
   const sync: SharedSync["Service"]["sync"] = (peer) =>
     Effect.gen(function* () {
@@ -88,7 +97,7 @@ const make = Effect.gen(function* () {
           .pipe(Effect.timeout("15 seconds"));
         if (batch.after !== after) return yield* new SharedStateError({ reason: "invalid-cursor" });
         if (batch.cursor === after) break;
-        yield* state.receive(batch, peer, spoke);
+        yield* receive(batch, peer);
       }
     }).pipe(
       Effect.mapError((cause) =>

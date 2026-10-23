@@ -127,7 +127,9 @@ export const validateChange = (change: SharedDocumentChange) =>
       return yield* invalid();
     yield* Schema.decodeUnknownEffect(partials[change.kind])(change.fields, {
       onExcessProperty: "error",
-    }).pipe(Effect.mapError(invalid));
+    }).pipe(
+      Effect.mapError((cause) => new SharedStateError({ reason: "invalid-document", cause })),
+    );
   });
 export const decodeProject = Schema.decodeUnknownEffect(ProjectFields);
 export const decodeAgent = Schema.decodeUnknownEffect(AgentFields);

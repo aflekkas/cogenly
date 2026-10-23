@@ -1,3 +1,4 @@
+import * as SharedState from "../sync/SharedState.ts";
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
@@ -288,6 +289,54 @@ const makeHarness = Effect.sync(() => {
 });
 
 describe("agent execution", () => {
+  it.effect("an incoming agent tombstone stops owner work through the normal deletion path", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const schedules = yield* Schedules.ScheduledTaskService;
+        const sql = yield* SqlClient.SqlClient;
+        yield* store.save(h.fixture);
+        const { task } = yield* schedules.upsert(h.triggerInput);
+        expect(yield* agents.trigger(task, "delete-running", task.prompt)).toBe(true);
+        const context = yield* Layer.build(
+          SharedState.layer.pipe(Layer.provide(layerSharedIdentity)),
+        );
+        const shared = yield* SharedState.SharedState.pipe(Effect.provideContext(context));
+        const peer = EnvironmentId.make("editing-machine");
+        yield* shared.receive(
+          {
+            after: 0,
+            cursor: 1,
+            changes: [
+              {
+                kind: "agent",
+                id: h.fixture.id,
+                fields: {},
+                clocks: {},
+                tombstone: { wall: 1, logical: 0, node: peer },
+                updatedBy: peer,
+              },
+            ],
+          },
+          peer,
+          false,
+        );
+        expect(
+          (yield* sql<{
+            enabled: number;
+          }>`SELECT enabled FROM scheduled_tasks WHERE task_id=${task.id}`)[0]?.enabled,
+        ).toBe(0);
+        yield* agents.reconcile();
+        expect(yield* store.list()).toHaveLength(0);
+        expect((yield* schedules.list()).tasks).toHaveLength(0);
+        expect(h.commands.filter((command) => command.type === "thread.stop")).toHaveLength(2);
+        expect((yield* shared.get("schedule", task.id))?.tombstone).not.toBeNull();
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+
   it.effect("only the owner fires agents, due schedules and event triggers", () =>
     Effect.gen(function* () {
       const h = yield* makeHarness;
@@ -1580,7 +1629,13 @@ describe("event-driven agent triggers", () => {
             yield* reactor.tick;
             yield* reactor.observe(source);
             yield* (yield* AgentEvents.AgentEventBus).drain;
-          }).pipe(Effect.provide(EventReactor.layer.pipe(Layer.provideMerge(AgentEvents.layer))));
+          }).pipe(
+            Effect.provide(
+              EventReactor.layer.pipe(
+                Layer.provideMerge(AgentEvents.layer.pipe(Layer.provide(layerSharedIdentity))),
+              ),
+            ),
+          );
           expect(h.launches).toHaveLength(1);
         }).pipe(Effect.provide(h.layer));
       }),
