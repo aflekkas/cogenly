@@ -4893,12 +4893,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       // Route durable mailbox deliveries under the thread lock, using the live
       // session's capabilities. Never interrupt/restart a turn for a notification.
-      if (
-        delegatedCompletion !== undefined &&
-        delegatedCompletion.taskIds.every(
-          (id) => projection.subagents.find((task) => task.id === id)?.completionWake === "always",
-        )
-      ) {
+      if (delegatedCompletion !== undefined) {
         const active = projection.runs.find((run) => run.status === "running");
         const providerThread = projection.providerThreads.find(
           (row) => row.id === active?.providerThreadId,
@@ -4920,8 +4915,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             .pipe(Effect.orElseSucceed(() => Option.none()));
           if (
             Option.isSome(session) &&
-            session.value.providerSession.capabilities.turns.supportsActiveSteering &&
-            session.value.providerSession.capabilities.turns.activeSteeringInterruptsTools !== true
+            session.value.providerSession.capabilities.turns.supportsActiveSteering
           ) {
             dispatchMode = { type: "steer_active", targetRunId: active.id };
           }

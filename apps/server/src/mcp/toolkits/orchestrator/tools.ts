@@ -242,8 +242,12 @@ export const ThreadUpdateTool = Tool.make("thread_update", {
   .annotate(Tool.Idempotent, false);
 
 const ThreadSendTool = Tool.make("thread_send", {
-  description:
-    "Send a message to any Cogenly thread in this environment. The target cannot have broader permission modes than the caller. Use delegate_task with the full review context and a new clientRequestId for independent review rounds. For a follow-up that needs the same child's conversation, send to its childThreadId. After the original task completes, a requested follow-up creates a fresh task in that child thread and returns taskId; its completion notifies the parent, and the original result stays unchanged. mode='auto' starts an idle thread, steers a fully active turn, or queues behind a turn that is not yet steerable. Use queue for a separate follow-up turn, steer for an in-flight update, or restart to interrupt-and-restart the active turn. clientRequestId makes retries idempotent.",
+  description: [
+    "Send to a Cogenly thread; the target cannot have broader permission modes than the caller. clientRequestId makes retries idempotent.",
+    "auto (recommended): steer an active, steerable target, start an idle thread, or queue otherwise.",
+    "steer: the target sees the message mid-turn, right away. Use for corrections and course changes needed now; it interrupts reasoning and can derail work if overused.",
+    "queue: run after the current turn without disturbing work. Use for new tasks or results that can wait; a busy target may not see it for a long time. restart: interrupt and restart the active turn.",
+  ].join("\n"),
   parameters: OrchestratorMcpThreadSendInput,
   success: OrchestratorMcpThreadSendResult,
   failure: OrchestratorMcpFailure,
