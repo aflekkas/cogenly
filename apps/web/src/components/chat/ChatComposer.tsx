@@ -1527,6 +1527,11 @@ export interface ChatComposerProps {
   activeProjectDefaultModelSelection: ModelSelection | null | undefined;
   activeThreadModelSelection: ModelSelection | null | undefined;
   reportedModelSelection?: ModelSelection | null;
+  /**
+   * Reports the selection a send would dispatch (null while no provider can
+   * take it), so the timeline's pending-handoff preview matches the composer.
+   */
+  onSendModelSelectionChange: (selection: ModelSelection | null) => void;
   /** The active project, so the picker can fold in its provider instance overrides. */
   activeProjectId: ProjectId | null;
 
@@ -1671,6 +1676,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProjectDefaultModelSelection,
     activeThreadModelSelection,
     reportedModelSelection,
+    onSendModelSelectionChange,
     activeProjectId,
     activeContextWindow,
     compactThreadUnavailable,
@@ -2257,6 +2263,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
     [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
   );
+  const sendModelSelection = noProviderAvailable ? null : selectedModelSelection;
+  useLayoutEffect(() => {
+    onSendModelSelectionChange(sendModelSelection);
+  }, [onSendModelSelectionChange, sendModelSelection]);
+  useLayoutEffect(() => () => onSendModelSelectionChange(null), [onSendModelSelectionChange]);
   const selectedModelForPicker = selectedModel;
   // Instance-keyed option list so the picker can show each configured
   // instance (built-in + custom) as a first-class sidebar entry. The
