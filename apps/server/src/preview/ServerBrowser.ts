@@ -2213,7 +2213,12 @@ const make = Effect.gen(function* () {
         );
       case "type":
         return recordAction(tab, "type", () =>
-          ServerBrowserPage.type(tab.page, input as PreviewAutomationTypeInput, pointerFor(tab)),
+          ServerBrowserPage.type(
+            tab.page,
+            input as PreviewAutomationTypeInput,
+            pointerFor(tab),
+            request.expectedOrigin,
+          ),
         );
       case "press":
         return recordAction(tab, "press", () =>

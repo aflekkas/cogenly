@@ -281,15 +281,69 @@ export const click = async (
   return point;
 };
 
+const originOf = (url: string): string | null => {
+  try {
+    const origin = new URL(url).origin;
+    return origin === "null" ? null : origin;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Fills a vault value only into a document still on `expectedOrigin`. The
+ * element handle pins one document: if the page navigates after the check,
+ * the handle detaches and the fill throws instead of typing into the new page.
+ */
+export const fillOnOrigin = async (
+  page: Pick<Page, "url" | "locator">,
+  locator: Pick<Locator, "elementHandle"> | null,
+  text: string,
+  expectedOrigin: string,
+  timeout: number,
+) => {
+  const target = locator ?? page.locator("*:focus").last();
+  const handle = await target.elementHandle({ timeout });
+  if (handle === null)
+    throw new ServerBrowserOperationError(
+      "PreviewAutomationTargetNotEditableError",
+      "There is no field to fill, so nothing was typed.",
+    );
+  try {
+    const documentOrigin = await handle.evaluate(
+      (element) =>
+        (
+          element as unknown as {
+            readonly ownerDocument: { readonly location: { readonly origin: string } };
+          }
+        ).ownerDocument.location.origin,
+    );
+    if (originOf(page.url()) !== expectedOrigin || documentOrigin !== expectedOrigin)
+      throw new ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        "The page changed before the vault fill, so nothing was typed. Check the page and try again.",
+      );
+    await handle.fill(text, { timeout });
+  } finally {
+    await handle.dispose().catch(constVoid);
+  }
+};
+
 export const type = async (
   page: Page,
   input: PreviewAutomationTypeInput,
   pointer: PointerReporter = noPointer,
+  /** Set for vault fills: type only into a document on this origin. */
+  expectedOrigin?: string,
 ) => {
   const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const locator = targetLocator(page, input);
   // Typing into the focused field has no target to point at.
   if (locator !== null) await pointer(await targetPoint(page, locator, {}, timeout), "move");
+  if (expectedOrigin !== undefined) {
+    await fillOnOrigin(page, locator, input.text, expectedOrigin, timeout);
+    return;
+  }
   if (locator !== null && input.clear) {
     await locator.fill(input.text, { timeout });
     return;

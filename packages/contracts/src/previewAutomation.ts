@@ -845,6 +845,11 @@ export const PreviewAutomationRequest = Schema.Struct({
   operation: PreviewAutomationOperation,
   input: Schema.Unknown,
   timeoutMs: Schema.Int.check(Schema.isGreaterThan(0)),
+  /**
+   * Supplied by the broker for vault fills, never from tool input: the host
+   * types only into a document still on this origin.
+   */
+  expectedOrigin: Schema.optional(Schema.String),
 });
 export type PreviewAutomationRequest = typeof PreviewAutomationRequest.Type;
 
@@ -1043,13 +1048,18 @@ export class PreviewAutomationVaultSafetyError extends Schema.TaggedError<Previe
   "PreviewAutomationVaultSafetyError",
   {
     ...PreviewAutomationRequestErrorFields,
-    reason: Schema.Literals(["tab_required", "evaluation_disabled"]),
+    reason: Schema.Literals(["tab_required", "origin_required", "evaluation_disabled"]),
   },
 ) {
   override get message(): string {
-    return this.reason === "tab_required"
-      ? "A vault fill requires an explicit target tab."
-      : "Evaluation is disabled on this tab after a vault fill. Use snapshots and focused browser actions, or open a fresh tab.";
+    switch (this.reason) {
+      case "tab_required":
+        return "A vault fill requires an explicit target tab.";
+      case "origin_required":
+        return "A vault fill requires the page origin it was checked against.";
+      case "evaluation_disabled":
+        return "Evaluation is disabled on this tab after a vault fill. Use snapshots and focused browser actions, or open a fresh tab.";
+    }
   }
 }
 

@@ -51,6 +51,8 @@ export interface PreviewAutomationInvokeInput {
   readonly input: unknown;
   /** Server-only: seal evaluation before delivering a vault value to the browser. */
   readonly containsVaultSecret?: boolean;
+  /** Server-only, required with `containsVaultSecret`: the origin the fill was checked on. */
+  readonly expectedOrigin?: string;
   readonly tabId?: PreviewTabId;
   readonly timeoutMs?: number;
   /** Background metadata reads must not change the agent's current tab. */
@@ -648,6 +650,14 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
             }),
           );
         }
+        if (input.containsVaultSecret && input.expectedOrigin === undefined) {
+          return Effect.fail(
+            new PreviewAutomationVaultSafetyError({
+              ...requestContext,
+              reason: "origin_required",
+            }),
+          );
+        }
         const threadPrefix = `${input.scope.environmentId}\u0000${input.scope.thread.threadId}\u0000`;
         const protectedKey = `${threadPrefix}${requestContext.tabId}`;
         if (
@@ -684,6 +694,9 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
             operation: input.operation,
             input: input.input,
             timeoutMs,
+            ...(input.containsVaultSecret && input.expectedOrigin !== undefined
+              ? { expectedOrigin: input.expectedOrigin }
+              : {}),
           },
         }).pipe(Effect.map((offered) => [offered, next] as const));
       });

@@ -104,7 +104,11 @@ across provider sessions and browser-host reconnections. It also seals fills
 whose browser response fails: typing may already have happened. Navigation
 does not lift the restriction, since history can restore filled inputs and
 pages can retain values in script state or storage. Snapshots and focused
-browser actions remain available; evaluation needs a fresh tab. Values are
+browser actions remain available; evaluation needs a fresh tab. The fill is
+bound to the origin the domain check saw: the broker forwards it as
+`expectedOrigin` and the server browser fills through an element handle only
+after the page and the field's document both match, so a navigation in between
+refuses or detaches the fill rather than typing into the new page. Values are
 never logged; lengths and names are the most telemetry may carry. Card values
 are also scrubbed in the shapes a page echoes them: the number digits-only or
 grouped in fours, and the expiry as `MM/YYYY`; the CVC and `MM/YY` expiry are

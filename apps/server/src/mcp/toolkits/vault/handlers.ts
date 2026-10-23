@@ -44,6 +44,15 @@ const callerScope = Effect.gen(function* () {
   return { projectId: folder?.labelId ?? null };
 });
 
+const originOf = (url: string): string | null => {
+  try {
+    const origin = new URL(url).origin;
+    return origin === "null" ? null : origin;
+  } catch {
+    return null;
+  }
+};
+
 export const layer = McpToolAccess.toLayer(VaultToolkit, {
   vault_list: McpToolAccess.readsAsCaller(() =>
     Effect.gen(function* () {
@@ -82,7 +91,8 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
         })
         .pipe(Effect.mapError((cause) => failure(cause.message, "orchestration_error")));
       const domain = status.url ? normalizeHost(status.url) || null : null;
-      if (!domain || !status.tabId)
+      const origin = status.url ? originOf(status.url) : null;
+      if (!domain || !origin || !status.tabId)
         return yield* failure("vault_fill needs an active preview tab with a page URL.");
       const agent = yield* agents
         .forThread(scope.thread.threadId)
@@ -132,6 +142,8 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
           scope,
           operation: "type",
           containsVaultSecret: true,
+          // The host refuses to type if the tab left the origin checked above.
+          expectedOrigin: origin,
           input: {
             text: result.value,
             ...(rest.locator ? { locator: rest.locator } : {}),

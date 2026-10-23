@@ -49,6 +49,7 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const typed: Array<unknown> = [];
+      const typedOrigins: Array<string | undefined> = [];
       let evaluated = 0;
       let failTyping = false;
       let pageUrl = "https://github.com/login";
@@ -96,7 +97,10 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
           Stream.runForEach((event) => {
             if (event.type === "connected") return Deferred.succeed(connected, undefined);
             const request = event.request;
-            if (request.operation === "type") typed.push(request.input);
+            if (request.operation === "type") {
+              typed.push(request.input);
+              typedOrigins.push(request.expectedOrigin);
+            }
             if (request.operation === "evaluate") evaluated += 1;
             return broker.respond({
               clientId: "test-browser",
@@ -207,6 +211,19 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
       expect(typed).toEqual([
         { text: "octo-password-123", locator: "input[name=password]", clear: true },
       ]);
+      // The host gets the origin the fill was checked on, and refuses to type elsewhere.
+      expect(typedOrigins).toEqual(["https://github.com"]);
+      const unbound = yield* broker
+        .invoke({
+          scope: threadScope,
+          operation: "type",
+          containsVaultSecret: true,
+          input: { text: "secret" },
+          tabId,
+        })
+        .pipe(Effect.result);
+      expect(unbound).toMatchObject({ failure: { reason: "origin_required" } });
+      expect(typed).toHaveLength(1);
 
       for (const expression of [
         "document.querySelector('input').value.split('').map(c => c.charCodeAt(0))",
