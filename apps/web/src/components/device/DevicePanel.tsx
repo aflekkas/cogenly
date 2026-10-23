@@ -19,15 +19,14 @@ import { deviceEnvironment, useDeviceState } from "~/state/device";
 import { formatEnvironmentQueryError } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { DeviceLoadingView } from "./DeviceLoadingView";
+import { deviceKey } from "./deviceTabMenu";
+import { useDeviceOpenPending } from "./useDeviceTabActions";
 import { DeviceSetup, deviceHubReadiness } from "./DeviceSetup";
 import { DeviceWorkspace } from "./DeviceWorkspace";
 import { PreviewPanelShell, type PreviewPanelMode } from "../preview/PreviewPanelShell";
 
 const platformLabel = (platform: DevicePlatform) =>
   platform === "ios" ? "iOS Simulators" : "Android Emulators";
-
-const deviceKey = (device: Pick<DeviceSummary, "hostId" | "id">) =>
-  `${device.hostId}\u0000${device.id}`;
 
 /** Each surface owns one host/device; only the visible surface streams. */
 export function DevicePanel(props: {
@@ -70,6 +69,21 @@ export function DevicePanel(props: {
         (device) => device.hostId === activeSession.hostId && device.id === activeSession.deviceId,
       )
     : undefined;
+
+  // A tab opened from "+" exists before its session does; until the session
+  // arrives it shows the device starting instead of the picker.
+  const targetDevice = props.surface.target
+    ? state.devices.find(
+        (device) =>
+          device.hostId === props.surface.target?.hostId &&
+          device.id === props.surface.target.deviceId,
+      )
+    : undefined;
+  const targetOpening = useDeviceOpenPending(
+    environmentId,
+    targetDevice ? { hostId: targetDevice.hostId, id: targetDevice.id } : null,
+  );
+  const openingDevice = pendingDevice ?? (targetOpening && !activeSession ? targetDevice : null);
 
   const grouped = useMemo(() => groupDevices(state), [state]);
 
@@ -197,18 +211,18 @@ export function DevicePanel(props: {
               onClose={() => closeActive(false)}
               onPowerOff={() => closeActive(true)}
             />
-          ) : pendingDevice || hostBusy || !loaded ? (
+          ) : openingDevice || hostBusy || !loaded ? (
             <DeviceLoadingView
-              name={pendingDevice?.name ?? "Devices"}
+              name={openingDevice?.name ?? "Devices"}
               description={
-                pendingDevice
-                  ? `${state.hosts.find((host) => host.id === pendingDevice.hostId)?.label ?? "Device host"} · ${pendingDevice.version}`
+                openingDevice
+                  ? `${state.hosts.find((host) => host.id === openingDevice.hostId)?.label ?? "Device host"} · ${openingDevice.version}`
                   : ""
               }
               stage="opening"
               message={
-                pendingDevice
-                  ? pendingDevice.booted
+                openingDevice
+                  ? openingDevice.booted
                     ? "Opening device…"
                     : "Starting device…"
                   : state.hostStatus === "installing"

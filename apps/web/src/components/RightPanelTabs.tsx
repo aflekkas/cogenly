@@ -5,6 +5,7 @@ import type {
   ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import {
+  Check,
   CircleUser,
   Files,
   Globe2,
@@ -46,8 +47,11 @@ import { AndroidIcon, AppleIcon } from "~/components/Icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import {
   Menu,
+  MenuGroup,
+  MenuGroupLabel,
   MenuItem,
   MenuPopup,
+  MenuSeparator,
   MenuShortcut,
   MenuSub,
   MenuSubPopup,
@@ -66,6 +70,7 @@ import { FaviconImage } from "./preview/PreviewFaviconIcon";
 import { previewBridge } from "./preview/previewBridge";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { PanelTab } from "./PanelTab";
+import type { DeviceAddMenu } from "./device/useDeviceTabActions";
 import { BadgeDot } from "./ui/badge-dot";
 import { TabStrip } from "./TabStrip";
 import { tabStripPanelId, tabStripTabId } from "./TabStrip.logic";
@@ -82,6 +87,8 @@ export interface RightPanelAddOption {
   readonly onSelect: () => void;
   /** Browser only: open the tab in one of the configured profiles. */
   readonly onSelectInProfile?: (profileId: string) => void;
+  /** Device only: the devices "+" lists, each opening as its own tab. */
+  readonly deviceMenu?: DeviceAddMenu & { readonly onSetup: () => void };
 }
 
 const ADD_OPTION_PRESENTATION = {
@@ -329,6 +336,59 @@ function RightPanelEmptyState({ options }: { options: readonly RightPanelAddOpti
 }
 
 /**
+ * "+ → Device": the simulators and emulators the environment can open, by host,
+ * like Browser's profile submenu. A device that already has a tab is checked and
+ * selecting it focuses that tab. With nothing to list it points at setup.
+ */
+function DeviceAddSubmenu(props: {
+  label: string;
+  icon: ReactNode;
+  menu: NonNullable<RightPanelAddOption["deviceMenu"]>;
+}) {
+  const { menu } = props;
+  const showHostLabels = menu.groups.length > 1;
+  return (
+    <MenuSub>
+      <MenuSubTrigger data-right-panel-add="device">
+        {props.icon}
+        {props.label}
+      </MenuSubTrigger>
+      <MenuSubPopup className="max-w-64 min-w-48">
+        {menu.groups.length === 0 && menu.busy ? (
+          <MenuItem disabled>Looking for devices…</MenuItem>
+        ) : null}
+        {menu.groups.map((group) => (
+          <MenuGroup key={group.hostId}>
+            {showHostLabels ? <MenuGroupLabel>{group.hostLabel}</MenuGroupLabel> : null}
+            {group.entries.map((entry) => (
+              <MenuItem
+                key={entry.key}
+                onClick={() => menu.onSelectDevice(entry)}
+                data-right-panel-device={entry.device.id}
+              >
+                {entry.device.platform === "ios" ? <AppleIcon /> : <AndroidIcon />}
+                <span className="min-w-0 truncate">{entry.device.name}</span>
+                {entry.open ? (
+                  <Check className="ms-auto" aria-label="Open" />
+                ) : entry.device.booted ? (
+                  <MenuShortcut>Running</MenuShortcut>
+                ) : null}
+              </MenuItem>
+            ))}
+          </MenuGroup>
+        ))}
+        {menu.groups.length > 0 ? <MenuSeparator /> : null}
+        {menu.groups.length > 0 || !menu.busy ? (
+          <MenuItem onClick={menu.onSetup} data-right-panel-device-setup>
+            {menu.groups.length > 0 ? "Device setup…" : "Set up devices…"}
+          </MenuItem>
+        ) : null}
+      </MenuSubPopup>
+    </MenuSub>
+  );
+}
+
+/**
  * The window pins two controls over the inline strip's right end (maximize
  * and the panel toggle): 1.75rem each with 0.25rem between, inset by the
  * window's control offset. The strip keeps that much clear.
@@ -519,7 +579,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const hasProfileChoice = browserProfiles.length > 1;
   if (!canAdd && addMenuOpen) setAddMenuOpen(false);
   const newTabButton = (
-    <Menu open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+    <Menu
+      open={addMenuOpen}
+      onOpenChange={(open) => {
+        setAddMenuOpen(open);
+        // Discovery is lazy: opening "+" is what finds devices (and installs
+        // device support the first time), so the submenu has them when it opens.
+        if (open) props.addOptions.find((option) => option.kind === "device")?.deviceMenu?.onOpen();
+      }}
+    >
       <Tooltip>
         <TooltipTrigger
           render={
@@ -550,6 +618,16 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           const shortcut = option.shortcutLabel ? (
             <MenuShortcut>{option.shortcutLabel}</MenuShortcut>
           ) : null;
+          if (option.kind === "device" && option.available && option.deviceMenu) {
+            return (
+              <DeviceAddSubmenu
+                key={option.kind}
+                label={label}
+                icon={<Icon />}
+                menu={option.deviceMenu}
+              />
+            );
+          }
           if (option.kind === "browser" && option.available && hasProfileChoice) {
             return (
               <MenuSub key={option.kind}>
