@@ -19,6 +19,7 @@ import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Duration from "effect/Duration";
+import * as Deferred from "effect/Deferred";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -327,6 +328,16 @@ describe("machines", () => {
 
         // An unbound grant (the CLI fallback) pairs whoever redeems it first, once.
         const open = yield* hub.machines.createPeerGrant({});
+        for (const route of [
+          "not-a-url",
+          "file:///etc/passwd",
+          "https://name:secret@example.com",
+        ]) {
+          const invalid = yield* first.machines
+            .joinHub({ hubUrls: [route], code: open })
+            .pipe(Effect.flip);
+          assert.strictEqual(invalid.reason, "invalid-input");
+        }
         yield* first.machines.joinHub({ hubUrls: [hub.url], code: open });
         const replay = yield* second.machines
           .joinHub({ hubUrls: [hub.url], code: open })
@@ -415,6 +426,34 @@ describe("machines", () => {
     30_000,
   );
 
+  it.live(
+    "interrupts incoming channel work and fails the caller when its socket drops",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* startMachine("hub", "cloud-server");
+        const spoke = yield* startMachine("laptop", "computer");
+        const proxy = yield* startProxy(hub);
+        yield* pair(hub, spoke, proxy.url);
+        const started = yield* Deferred.make<void>();
+        const interrupted = yield* Deferred.make<void>();
+        const channels = yield* spoke.run(PeerChannels.PeerChannels);
+        yield* channels.register(Echo, () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+          ),
+        );
+        const pending = yield* hub.machines
+          .call(spoke.environmentId, Echo, { text: "pending" })
+          .pipe(Effect.flip, Effect.forkScoped);
+        yield* Deferred.await(started);
+        yield* proxy.dropAll;
+        yield* Deferred.await(interrupted);
+        assert.strictEqual((yield* Fiber.join(pending)).reason, "disconnected");
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
   it.effect(
     "reconnects when a half-open socket stops answering heartbeats",
     () =>
@@ -435,6 +474,77 @@ describe("machines", () => {
         yield* awaitLinkState(spoke, (state) => state.status === "online");
         assert.strictEqual((yield* hub.machines.list).machines[1]?.online, true);
         yield* proxy.dropAll;
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.effect(
+    "expires silent spokes and refuses self reports for a different machine",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* startMachine("hub", "cloud-server");
+        const spoke = yield* startMachine("laptop", "computer");
+        const peerHub = yield* hub.run(PeerHub.PeerHub);
+        const self = yield* spoke
+          .run(MachineIdentity.MachineIdentity)
+          .pipe(Effect.flatMap((identity) => identity.self));
+        const key = yield* spoke.run(getOrCreatePeerDpopKey);
+        const code = yield* hub.machines.createPeerGrant({ spokeKeyThumbprint: key.thumbprint });
+        const joined = yield* peerHub.redeem({
+          grant: code.grant,
+          nonce: "hello-nonce",
+          proofKeyThumbprint: key.thumbprint,
+          spoke: self,
+          client: { deviceType: "bot" },
+        });
+        const url = new URL("/peer/ticket", hub.url).toString();
+        const proof = yield* hub.run(
+          createPeerDpopProof({ key, method: "POST", url, accessToken: joined.accessToken }),
+        );
+        const auth = yield* hub.run(EnvironmentAuth.EnvironmentAuth);
+        const session = yield* auth.authenticatePeerRequest(
+          HttpServerRequest.fromWeb(
+            new Request(url, {
+              method: "POST",
+              headers: {
+                host: `127.0.0.1:${hub.port}`,
+                authorization: `DPoP ${joined.accessToken}`,
+                dpop: proof,
+              },
+            }),
+          ),
+        );
+        const connection = yield* peerHub.connect(session);
+        const other = { ...self, environmentId: hub.environmentId };
+        assert.strictEqual(
+          (yield* connection.hello({ nonce: "hello", spoke: other }).pipe(Effect.flip)).reason,
+          "machine-mismatch",
+        );
+        yield* connection.hello({ nonce: "hello", spoke: self });
+        assert.strictEqual(
+          (yield* connection.ping({ spoke: other }).pipe(Effect.flip)).reason,
+          "machine-mismatch",
+        );
+        assert.strictEqual(
+          (yield* hub.machines.list).machines[1]?.environmentId,
+          spoke.environmentId,
+        );
+        assert.strictEqual((yield* hub.machines.list).machines[1]?.online, true);
+
+        yield* TestClock.adjust("75 seconds");
+        const offline = yield* hub.machines.subscribe.pipe(
+          Stream.filter((result) => result.machines[1]?.online === false),
+          Stream.runHead,
+          Effect.map(Option.getOrThrow),
+        );
+        assert.strictEqual(offline.machines[1]?.pairing, "paired");
+        assert.strictEqual((yield* connection.ping({}).pipe(Effect.flip)).reason, "not-paired");
+        assert.strictEqual(
+          (yield* hub.machines
+            .call(spoke.environmentId, Echo, { text: "offline" })
+            .pipe(Effect.flip)).reason,
+          "offline",
+        );
       }).pipe(Effect.scoped),
     30_000,
   );

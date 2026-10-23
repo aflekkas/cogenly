@@ -136,7 +136,15 @@ const socketUrl = (route: string, ticket: string) => {
 };
 
 const uniqueRoutes = (routes: ReadonlyArray<string>) => [
-  ...new Set(routes.map((route) => new URL(route).origin + "/")),
+  ...new Set(
+    routes.map((route) => {
+      const url = new URL(route);
+      if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) {
+        throw new Error("Invalid peer route");
+      }
+      return url.origin + "/";
+    }),
+  ),
 ];
 
 const make = Effect.gen(function* () {
@@ -195,7 +203,10 @@ const make = Effect.gen(function* () {
       return yield* new MachineError({ operation: "join", reason: "already-paired" });
     }
     const { code } = input;
-    const routes = uniqueRoutes([...input.hubUrls, ...code.routes]);
+    const routes = yield* Effect.try({
+      try: () => uniqueRoutes([...input.hubUrls, ...code.routes]),
+      catch: () => new MachineError({ operation: "join", reason: "invalid-input" }),
+    });
     if (routes.length === 0) {
       return yield* new MachineError({ operation: "join", reason: "invalid-input" });
     }

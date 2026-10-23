@@ -390,10 +390,12 @@ const make = Effect.gen(function* () {
 
   const connect: PeerHub["Service"]["connect"] = (session) =>
     Effect.gen(function* () {
+      const scope = yield* Effect.scope;
       const scopes = session.scopes.filter(isAuthPeerScope);
       const closed = yield* Deferred.make<void>();
       const inboxDone = yield* Deferred.make<void>();
       let inboxOpen = false;
+      const heartbeat = yield* Queue.sliding<void>(1);
       let current: LiveConnection | undefined;
       // Every method but hello needs a hello on this socket, and only while
       // the socket is still the spoke's current one.
@@ -447,7 +449,19 @@ const make = Effect.gen(function* () {
             live.set(row.environmentId, connection);
             if (replaced !== undefined) yield* drop(replaced);
             current = connection;
+            // A sleeping or vanished spoke may leave TCP open indefinitely.
+            // Presence must expire even when no disconnect event arrives.
+            yield* Effect.gen(function* () {
+              while (
+                Option.isSome(yield* Queue.take(heartbeat).pipe(Effect.timeoutOption("75 seconds")))
+              ) {
+                // Each verified heartbeat starts a fresh deadline.
+              }
+              yield* drop(connection);
+              yield* publishChange;
+            }).pipe(Effect.forkIn(scope));
           }
+          yield* Queue.offer(heartbeat, undefined);
           yield* touch(row.environmentId, input.spoke);
           yield* publishChange;
           return { hubEnvironmentId: self.environmentId, signature, hub: self };
@@ -458,7 +472,8 @@ const make = Effect.gen(function* () {
           Effect.flatMap((connection) =>
             input.spoke !== undefined && input.spoke.environmentId !== connection.environmentId
               ? Effect.fail(new PeerProtocolError({ reason: "machine-mismatch" }))
-              : touch(connection.environmentId, input.spoke).pipe(
+              : Queue.offer(heartbeat, undefined).pipe(
+                  Effect.andThen(touch(connection.environmentId, input.spoke)),
                   Effect.andThen(input.spoke === undefined ? Effect.void : publishChange),
                 ),
           ),
