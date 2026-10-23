@@ -340,7 +340,7 @@ interface TerminalSessionState {
   pid: number | null;
   history: BoundedTerminalHistory;
   pendingHistoryControlSequence: string;
-  redactVaultOutput?: (chunk: string, final?: boolean) => Effect.Effect<string>;
+  redactVaultOutput?: ((chunk: string, final?: boolean) => Effect.Effect<string>) | undefined;
   pendingProcessEvents: Array<PendingProcessEvent>;
   pendingProcessEventIndex: number;
   processEventDrainRunning: boolean;

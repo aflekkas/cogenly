@@ -211,9 +211,13 @@ it.effect("scope widening requests owner approval for a visible integration", ()
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") expect(result.failure.code).toBe("agent_approval_required");
   }).pipe(
-    Effect.provide(layer),
-    Effect.provideService(ProjectFiles.ProjectFiles, {
-      folderForThread: () => Effect.succeed({ labelId: ProjectLabelId.make("a") } as never),
-    } as ProjectFiles.ProjectFiles["Service"]),
+    Effect.provide(
+      Layer.merge(
+        layer,
+        Layer.mock(ProjectFiles.ProjectFiles)({
+          folderForThread: () => Effect.succeed({ labelId: ProjectLabelId.make("a") } as never),
+        }),
+      ),
+    ),
   ),
 );

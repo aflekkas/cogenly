@@ -34,10 +34,9 @@ export type VaultUseCaller =
 export type VaultPolicyDecision = "allow" | "ask" | "deny";
 
 /**
- * Owner/human-initiated turns and server-internal callers are allowed. An
- * agent is allowed only when the item policy says `allow` for that agent
- * (an empty agent list means any agent) and, when the policy lists domains,
- * for this domain. Everything else asks the owner.
+ * Human and server-internal callers are allowed. MCP threads and persistent
+ * agents require `allow` for their identity and the destination domain. Empty
+ * identity lists mean any thread or agent; everything else asks the owner.
  */
 export const evaluateVaultPolicy = (input: {
   readonly policy: VaultPolicy;

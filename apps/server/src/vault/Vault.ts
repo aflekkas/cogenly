@@ -810,7 +810,7 @@ const make = Effect.gen(function* () {
           );
         yield* invalidateScrubCache;
         return { id: input.id, deleted: rows.length > 0 };
-      }),
+      }).pipe(Effect.mapError(wrap)),
     listUsage: (input) =>
       Effect.gen(function* () {
         const rows = yield* sql<{

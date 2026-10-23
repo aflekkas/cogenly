@@ -190,7 +190,7 @@ interface CachedTools {
  */
 export interface IntegrationWriteOptions {
   readonly approveCredentials?: boolean;
-  readonly callerLabelId?: ProjectLabelId | null;
+  readonly callerLabelId?: ProjectLabelId | null | undefined;
   readonly preserveScope?: boolean;
 }
 
@@ -386,19 +386,9 @@ const make = (options: IntegrationsOptions = {}) =>
         const response = yield* client.execute(request).pipe(
           // Fetch otherwise forwards custom secret headers across redirects.
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-          Effect.mapError((cause) =>
-            isError(cause)
-              ? cause
-              : typeof cause === "object" &&
-                  cause !== null &&
-                  "_tag" in cause &&
-                  cause._tag === "TimeoutError"
-                ? new IntegrationError({ operation: method, reason: "upstream_timeout" })
-                : new IntegrationError({
-                    operation: method,
-                    reason: "upstream_unreachable",
-                    cause,
-                  }),
+          Effect.mapError(
+            (cause) =>
+              new IntegrationError({ operation: method, reason: "upstream_unreachable", cause }),
           ),
         );
         const decoder = new TextDecoder();

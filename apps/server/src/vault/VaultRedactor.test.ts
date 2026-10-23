@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "@effect/vitest";
 import { redactValue, redactShortValue } from "./VaultRedactor.ts";
 
 it("redacts secrets in property names throughout nested output", () => {

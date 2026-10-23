@@ -549,8 +549,10 @@ describe("Integrations gateway", () => {
           scope: { type: "projects", labelIds: [a] },
         });
         for (const operation of [
-          service.update({ id: integration.id, hint: "hidden write" }, { callerLabelId: b }),
-          service.remove(integration.id, { callerLabelId: b }),
+          service
+            .update({ id: integration.id, hint: "hidden write" }, { callerLabelId: b })
+            .pipe(Effect.asVoid),
+          service.remove(integration.id, { callerLabelId: b }).pipe(Effect.asVoid),
         ]) {
           expect((yield* operation.pipe(Effect.flip)).reason).toBe("not_found");
         }

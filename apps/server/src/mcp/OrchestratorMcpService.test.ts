@@ -40,9 +40,9 @@ it.effect("a failed saveToVault leaves the private answer available for retry", 
         status: "running",
         rootNodeId: NodeId.make("node"),
         providerInstanceId: ProviderInstanceId.make("codex"),
-      },
+      } as never,
     ],
-  } as typeof projection;
+  };
   const ref = SecretRef.make("secret-ref:0123456789abcdef0123456789abcdef");
   const dependencies = Layer.mergeAll(
     NodeCrypto.layer,

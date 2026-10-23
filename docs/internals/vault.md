@@ -46,12 +46,11 @@ for one field, and every outcome is appended to `vault_usage`. Process delivery
 adds the credential revision, machine, project, provider instance, terminal id
 and delivery method. This records delivery, not every downstream API action.
 
-For browser fill, humans (owner-initiated turns) and server-internal callers
-are allowed.
-Agents default to `ask`: the first use inserts a pending row in the existing
+MCP browser fills identify a thread or its persistent agent, never a human.
+Both default to `ask`: the first use inserts a pending row in the existing
 `agent_approvals` table with action kind `vault_use` and the tool returns a
 clear "waiting on you" result — no hang. Approving (existing agents RPCs)
-grants that item's policy to that agent, and to the approved domain when one
+grants that item's policy to that thread or agent, and to the approved domain when one
 was involved, so a retry succeeds. Rejecting leaves the policy untouched.
 
 `resolveSecretByName` is the server-internal API for other server features
@@ -116,5 +115,3 @@ before output enters events or persisted history. Tokens are resolved after
 provider environment configuration and overlay only the selected terminal's
 environment; they never enter settings or launch arguments. Provider-native
 shell delivery is separate work because provider sessions can share threads.
-
-MCP vault fills always identify a thread or its persistent agent; neither is a human caller. The existing `vault_use` approval grants only that identity and the approved domain.

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "@effect/vitest";
 import type { Page } from "playwright-core";
 import * as BrowserPage from "./ServerBrowserPage.ts";
 
@@ -17,7 +17,10 @@ const fillPage = (origin: string, navigateWhileWaiting = false) => {
       declare value: string;
     },
     Event: class {
-      constructor(readonly type: string) {}
+      readonly type: string;
+      constructor(type: string) {
+        this.type = type;
+      }
     },
   };
   Object.defineProperty(view.HTMLInputElement.prototype, "value", {
