@@ -89,8 +89,10 @@ const mapLocalError = (cause: Runner.LocalMcpError) =>
         ? "local_runtime_missing"
         : cause.reason === "sign_in_required"
           ? "sign_in_required"
-          : "upstream_unreachable",
-    cause,
+          : cause.reason === "protocol"
+            ? "upstream_error"
+            : "upstream_unreachable",
+    cause: cause.reason === "protocol" && typeof cause.cause === "string" ? cause.cause : cause,
   });
 
 const make = Effect.gen(function* () {

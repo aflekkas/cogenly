@@ -31,6 +31,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { redactUpstream, toolErrorMessage, upstreamErrorMessage } from "./UpstreamResult.ts";
 import { selectCallbackOrigin, type SignInOrigin } from "./SignInOrigin.ts";
 import { redactValue } from "../vault/VaultRedactor.ts";
 import { resolveCatalogConnect } from "./IntegrationCatalog.ts";
@@ -863,6 +864,24 @@ const make = (options: IntegrationsOptions = {}) =>
           Effect.map((text) => text + decoder.decode()),
           Effect.mapError(failure(method, "upstream_error")),
         );
+        const live = liveTokens.get(integration.id);
+        const requestSecrets = [
+          ...Object.values(headers).flatMap((value) => [
+            value,
+            value.replace(/^(?:Bearer|Basic)\s+/i, ""),
+          ]),
+          live?.accessToken ?? "",
+          live?.refreshToken ?? "",
+          live?.clientSecret ?? "",
+        ];
+        const body = parseRpcBody(text);
+        const upstreamMessage = upstreamErrorMessage(text);
+        const message =
+          upstreamMessage === undefined
+            ? undefined
+            : redactUpstream(upstreamMessage, requestSecrets)
+                .replace(/\s+/g, " ")
+                .slice(0, MAX_UPSTREAM_MESSAGE_CHARS);
         if (response.status < 200 || response.status >= 300) {
           return yield* new IntegrationError({
             operation: method,
@@ -871,9 +890,9 @@ const make = (options: IntegrationsOptions = {}) =>
               usesOAuth(integration) && response.status === 401
                 ? "sign_in_required"
                 : "upstream_error",
+            ...(message === undefined ? {} : { cause: message }),
           });
         }
-        const body = parseRpcBody(text);
         if (body === undefined) {
           return yield* new IntegrationError({
             operation: method,
@@ -881,10 +900,6 @@ const make = (options: IntegrationsOptions = {}) =>
           });
         }
         if (body.error !== undefined) {
-          const message =
-            typeof body.error.message === "string"
-              ? body.error.message.slice(0, MAX_UPSTREAM_MESSAGE_CHARS)
-              : "Upstream MCP error";
           return yield* new IntegrationError({
             operation: method,
             reason: "upstream_error",
@@ -892,7 +907,7 @@ const make = (options: IntegrationsOptions = {}) =>
           });
         }
         return {
-          result: body.result,
+          result: redactUpstream(body.result, requestSecrets),
           sessionId: response.headers["mcp-session-id"] ?? sessionId,
         };
       }).pipe(
@@ -953,7 +968,19 @@ const make = (options: IntegrationsOptions = {}) =>
       }).pipe(
         (effect) =>
           usesOAuth(integration) ? integrationLock(integration.id).withPermits(1)(effect) : effect,
-        Effect.tap(() => recordCheck(integration, { ok: true })),
+        Effect.tap((result) => {
+          const message = toolErrorMessage(result);
+          return recordCheck(
+            integration,
+            message === undefined
+              ? { ok: true }
+              : new IntegrationError({
+                  operation: method,
+                  reason: "upstream_error",
+                  cause: message,
+                }),
+          );
+        }),
         Effect.tapError((error) =>
           // A refused sign-in recorded its own, more specific status.
           error.reason === "not_found" ||
@@ -1402,7 +1429,10 @@ const make = (options: IntegrationsOptions = {}) =>
               Effect.succeed<IntegrationTestResult>({
                 status: error.reason === "sign_in_required" ? "needs_sign_in" : "disconnected",
                 toolCount: 0,
-                message: `Could not connect (${error.reason}).`,
+                message:
+                  error.reason === "upstream_error" && typeof error.cause === "string"
+                    ? checkMessage(error.reason, error.cause)
+                    : `Could not connect (${error.reason}).`,
               }),
             ),
           );

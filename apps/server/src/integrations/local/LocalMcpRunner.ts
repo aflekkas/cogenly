@@ -17,6 +17,7 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 // Node's ephemeral listener selects a loopback port without a platform-specific shell command.
 import * as NodeNet from "node:net";
+import { redactUpstream, upstreamErrorMessage } from "../UpstreamResult.ts";
 import { isGrantRejection } from "./GrantRejection.ts";
 import { createOutputRedactor } from "./OutputRedactor.ts";
 
@@ -155,6 +156,17 @@ const make = (
     let nextId = 0;
     const error = (spec: LocalMcpSpec, reason: LocalMcpError["reason"], cause?: unknown) =>
       new LocalMcpError({ reason, runtime: spec.runtime, cause });
+    const rpcFailure = (spec: LocalMcpSpec, raw: unknown) => {
+      const encoded = encodeJson({ error: raw });
+      const message = upstreamErrorMessage(encoded);
+      return error(
+        spec,
+        isGrantRejection(encoded) ? "sign_in_required" : "protocol",
+        message === undefined
+          ? undefined
+          : redactUpstream(message, spec.secrets).replace(/\s+/g, " ").slice(0, 500),
+      );
+    };
     const changed = (account: Account, status: LocalMcpStatus["state"], message?: string) =>
       Effect.gen(function* () {
         account.status = {
@@ -247,7 +259,7 @@ const make = (
             HttpClientRequest.bodyJsonUnsafe({ jsonrpc: "2.0", id, method, params }),
           ),
         );
-        if (response.status !== 200) return yield* error(spec, "protocol");
+
         let bytes = 0;
         const chunks = yield* response.stream.pipe(
           Stream.runFoldEffect(
@@ -261,6 +273,10 @@ const make = (
           ),
         );
         const text = new TextDecoder().decode(Buffer.concat(chunks));
+        if (response.status !== 200)
+          return yield* rpcFailure(spec, {
+            message: upstreamErrorMessage(text) ?? "Managed server refused the request.",
+          });
         const candidates = [
           text,
           ...text.split(/\r?\n\r?\n/).map((event) =>
@@ -275,12 +291,9 @@ const make = (
           const parsed = decodeResponse(candidate);
           if (parsed._tag === "Some" && parsed.value.id === id) {
             if (parsed.value.error !== undefined)
-              return yield* error(
-                spec,
-                isGrantRejection(encodeJson(parsed.value.error)) ? "sign_in_required" : "protocol",
-              );
+              return yield* rpcFailure(spec, parsed.value.error);
             return {
-              result: parsed.value.result,
+              result: redactUpstream(parsed.value.result, spec.secrets),
               sessionId: response.headers["mcp-session-id"] ?? sessionId,
             };
           }
@@ -382,16 +395,11 @@ const make = (
                         const deferred = pending.get(parsed.value.id);
                         if (!deferred) return;
                         yield* parsed.value.error === undefined
-                          ? Deferred.succeed(deferred, parsed.value.result)
-                          : Deferred.fail(
+                          ? Deferred.succeed(
                               deferred,
-                              error(
-                                spec,
-                                isGrantRejection(encodeJson(parsed.value.error))
-                                  ? "sign_in_required"
-                                  : "protocol",
-                              ),
-                            );
+                              redactUpstream(parsed.value.result, spec.secrets),
+                            )
+                          : Deferred.fail(deferred, rpcFailure(spec, parsed.value.error));
                       }),
                     ),
                     Effect.ignore,

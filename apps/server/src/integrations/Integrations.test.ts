@@ -97,6 +97,22 @@ const fakeUpstreamWith = (redirectTo?: string) =>
             });
           } else if (body.method === "tools/call" && body.params?.name === "hang") {
             // Never answers: the gateway timeout must map this.
+          } else if (
+            body.method === "tools/call" &&
+            ["http-error", "tool-error"].includes(body.params?.name ?? "")
+          ) {
+            const message = `Workspace permission denied for ${request.headers.authorization}. ${"x".repeat(700)}`;
+            if (body.params?.name === "http-error") {
+              response.writeHead(403, { "content-type": "application/json" });
+              response.end(
+                JSON.stringify({ jsonrpc: "2.0", id: body.id, error: { code: -32000, message } }),
+              );
+            } else
+              reply({
+                jsonrpc: "2.0",
+                id: body.id,
+                result: { isError: true, content: [{ type: "text", text: message }] },
+              });
           } else if (body.method === "tools/call" && body.params?.name === "fail") {
             reply({
               jsonrpc: "2.0",
@@ -646,6 +662,25 @@ describe("Integrations gateway", () => {
         );
         expect((yield* service.listForProject(b)).integrations).toHaveLength(1);
       }).pipe(Effect.provide(layerWith())),
+  );
+
+  it.effect.each(["http-error", "tool-error"])(
+    "reports a brief, redacted %s in account status",
+    (tool) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const upstream = yield* fakeUpstreamWith();
+          const service = yield* Integrations.Integrations;
+          const { integration } = yield* service.create(createInput(upstream.url));
+          yield* service.callTool(integration.name, tool, {}, undefined).pipe(Effect.result);
+          const summary = (yield* service.list()).integrations[0]!;
+          expect(summary.status).toBe("error");
+          expect(summary.message).toContain("Workspace permission denied");
+          expect(summary.message).not.toContain("SECRET-VALUE-123");
+          expect(summary.message!.length).toBeLessThan(600);
+        }),
+      ).pipe(Effect.provide(layerWith())),
   );
 
   it.effect("context reports account health and reserves disabled catalog services", () =>

@@ -417,6 +417,30 @@ describe("managed Google integrations", () => {
       }).pipe(Effect.scoped, Effect.provide(testLayer([], missing, "json", false, runtimeMissing))),
   );
 
+  it.live("reports a redacted local tool error in Settings and agent status", () => {
+    const specs: Array<Runner.LocalMcpSpec> = [];
+    return Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const fs = yield* FileSystem.FileSystem;
+      const { integration } = yield* gateway.create({
+        preset: "google-workspace",
+        accountLabel: "work",
+        callbackOrigin: "https://cogenly.example.com",
+      });
+      yield* fs.writeFileString(
+        `${specs[0]!.env.WORKSPACE_MCP_CREDENTIALS_DIR}/work.json`,
+        JSON.stringify({ refresh_token: "grant" }),
+      );
+      const result = yield* gateway.callTool(integration.name, "tool-error", {}, undefined);
+      expect(result.isError).toBe(true);
+      const summary = (yield* gateway.list()).integrations[0]!;
+      expect(summary.status).toBe("error");
+      expect(summary.message).toContain("Workspace permission denied");
+      expect(JSON.stringify([result, summary])).not.toContain("fake-client-secret");
+    }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
+  });
+
   it.live("removing an account erases its grants while disabling preserves them", () => {
     const specs: Array<Runner.LocalMcpSpec> = [];
     return Effect.gen(function* () {

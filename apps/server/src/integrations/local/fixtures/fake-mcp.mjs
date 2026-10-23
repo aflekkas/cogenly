@@ -32,6 +32,13 @@ const handle = (body, reply) => {
     url.searchParams.set("state", state);
     url.searchParams.set("redirect_uri", process.env.GOOGLE_OAUTH_REDIRECT_URI);
     reply({ content: [{ type: "text", text: `Open [Google sign-in](${url.href})` }] });
+  } else if (body.params?.name === "tool-error") {
+    reply({
+      isError: true,
+      content: [
+        { type: "text", text: `Workspace permission denied for ${process.env.FIXTURE_SECRET}` },
+      ],
+    });
   } else if (body.params?.name === "reject-grant") {
     reply({
       isError: true,
