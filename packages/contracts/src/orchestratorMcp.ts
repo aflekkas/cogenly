@@ -220,7 +220,7 @@ export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
   resultContextTransferId: Schema.NullOr(ContextTransferId),
   hasPendingQuestion: Schema.Boolean.annotate({
     description:
-      "Blocking question ends mode=wait. Pass threadId=childThreadId to t3_pending_request_list, t3_pending_request_read (with requestId) and t3_pending_request_respond, or ask the user; the task's completion still wakes this thread.",
+      "Blocking question ends mode=wait. Pass threadId=childThreadId to pending_request_list, pending_request_read (with requestId) and pending_request_respond, or ask the user; the task's completion still wakes this thread.",
   }),
   waitTimedOut: Schema.Boolean.annotate({
     description:
@@ -321,7 +321,7 @@ export type OrchestratorMcpThreadListInput = typeof OrchestratorMcpThreadListInp
 /** A thread stopped on a usage limit: when the limit resets and whether it continues then. */
 export const OrchestratorMcpThreadUsageLimit = Schema.Struct({
   resetAt: IsoDateTime,
-  /** Continues on its own at resetAt; change with t3_thread_organize resume_at_reset / dont_resume. */
+  /** Continues on its own at resetAt; change with thread_organize resume_at_reset / dont_resume. */
   autoResume: Schema.Boolean,
 });
 export type OrchestratorMcpThreadUsageLimit = typeof OrchestratorMcpThreadUsageLimit.Type;

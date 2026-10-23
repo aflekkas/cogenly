@@ -248,7 +248,7 @@ describe("truncation and summary threshold", () => {
     expect(coverage).toContain("- link: https://example.com/spec");
     expect(coverage).toContain("- file: spec.md (file)");
     expect(coverage).toContain("- command `vp test` (exit 0): all green");
-    expect(coverage).toContain(`t3_thread_read({threadId:"${sourceId}"`);
+    expect(coverage).toContain(`thread_read({threadId:"${sourceId}"`);
   });
 });
 

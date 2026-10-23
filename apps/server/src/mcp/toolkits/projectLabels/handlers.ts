@@ -45,19 +45,19 @@ const cloneFailure = (
         message: error._tag === "SourceControlRepositoryError" ? error.detail : error.message,
       });
 export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
-  t3_project_label_list: McpToolAccess.reads(() =>
+  project_label_list: McpToolAccess.reads(() =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.list().pipe(Effect.mapError(failure));
     }),
   ),
-  t3_project_label_read: McpToolAccess.reads((input) =>
+  project_label_read: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.read(input.id).pipe(Effect.mapError(failure));
     }),
   ),
-  t3_project_label_file_thread: McpToolAccess.writesThreads(
+  project_label_file_thread: McpToolAccess.writesThreads(
     (input) => [input.threadId],
     (input) =>
       Effect.gen(function* () {
@@ -78,7 +78,7 @@ export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
         };
       }),
   ),
-  t3_thread_move_project_folder: McpToolAccess.writesThreads(
+  thread_move_project_folder: McpToolAccess.writesThreads(
     (input) => [input.threadId],
     (input) =>
       Effect.gen(function* () {
@@ -86,7 +86,7 @@ export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
         return yield* labels.moveThread(input).pipe(Effect.mapError(moveFailure));
       }),
   ),
-  t3_thread_set_project_labels: McpToolAccess.writesThreads(
+  thread_set_project_labels: McpToolAccess.writesThreads(
     (input) => [input.threadId],
     (input) =>
       Effect.gen(function* () {
@@ -94,61 +94,61 @@ export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
         return yield* labels.setThreadLabels(input, false).pipe(Effect.mapError(moveFailure));
       }),
   ),
-  t3_project_label_create: McpToolAccess.writes((input) =>
+  project_label_create: McpToolAccess.writes((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.create(input).pipe(Effect.mapError(failure));
     }),
   ),
-  t3_project_label_update: McpToolAccess.writes((input) =>
+  project_label_update: McpToolAccess.writes((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.update(input).pipe(Effect.mapError(failure));
     }),
   ),
-  t3_project_label_delete: McpToolAccess.writes((input) =>
+  project_label_delete: McpToolAccess.writes((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.delete(input.id).pipe(Effect.mapError(failure));
     }),
   ),
-  t3_project_label_archive: McpToolAccess.writes((input) =>
+  project_label_archive: McpToolAccess.writes((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.archive(input.id).pipe(Effect.mapError(failure));
     }),
   ),
-  t3_project_label_unarchive: McpToolAccess.writes((input) =>
+  project_label_unarchive: McpToolAccess.writes((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.unarchive(input.id).pipe(Effect.mapError(failure));
     }),
   ),
-  t3_project_label_link_source: McpToolAccess.writes((input) =>
+  project_label_link_source: McpToolAccess.writes((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.linkSource(input).pipe(Effect.mapError(failure));
     }),
   ),
-  t3_project_label_unlink_source: McpToolAccess.writes((input) =>
+  project_label_unlink_source: McpToolAccess.writes((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.unlinkSource(input).pipe(Effect.mapError(failure));
     }),
   ),
-  t3_project_label_link_repository: McpToolAccess.writes((input) =>
+  project_label_link_repository: McpToolAccess.writes((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.linkRepository(input).pipe(Effect.mapError(failure));
     }),
   ),
-  t3_project_label_unlink_repository: McpToolAccess.writes((input) =>
+  project_label_unlink_repository: McpToolAccess.writes((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.unlinkRepository(input).pipe(Effect.mapError(failure));
     }),
   ),
-  t3_project_label_clone_repository: McpToolAccess.writesEnvironment((input) =>
+  project_label_clone_repository: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const broadcaster = yield* Broadcaster.VcsStatusBroadcaster;
       return yield* Clone.cloneRepositoryIntoLabel(input, {

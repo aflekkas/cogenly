@@ -73,7 +73,7 @@ type Recorded = { readonly method: string; readonly input: Record<string, unknow
 /** The thread toolkit over a recording `ThreadManagementService`, called as `scope`. */
 const callTool = Effect.fn("test.callThreadTool")(function* (
   scope: Invocation.McpInvocationScope,
-  tool: "t3_thread_snooze" | "t3_thread_unsnooze" | "t3_thread_settle" | "t3_thread_unsettle",
+  tool: "thread_snooze" | "thread_unsnooze" | "thread_settle" | "thread_unsettle",
   params: Record<string, unknown>,
   overrides: Partial<Threads.ThreadManagementServiceShape> = {},
 ) {
@@ -123,7 +123,7 @@ const spaced = (value: unknown) => String(value).replace(/\s/g, " ");
 
 it.effect("resolves a preset in the environment's time zone and returns a receipt", () =>
   Effect.gen(function* () {
-    const { result, calls } = yield* callTool(threadScope(callerId), "t3_thread_snooze", {
+    const { result, calls } = yield* callTool(threadScope(callerId), "thread_snooze", {
       threadId: otherId,
       until: "tomorrow",
     });
@@ -147,7 +147,7 @@ it.effect("resolves a typed phrase for the calling thread and defers to its turn
   Effect.gen(function* () {
     const { result, calls } = yield* callTool(
       threadScope(callerId),
-      "t3_thread_snooze",
+      "thread_snooze",
       { until: "next mon 10am" },
       {
         snoozeThread: (input) =>
@@ -168,7 +168,7 @@ it.effect("resolves a typed phrase for the calling thread and defers to its turn
 
 it.effect("refuses a time it cannot read without touching the thread", () =>
   Effect.gen(function* () {
-    const { result, calls } = yield* callTool(threadScope(callerId), "t3_thread_snooze", {
+    const { result, calls } = yield* callTool(threadScope(callerId), "thread_snooze", {
       until: "whenever works",
     });
     expect(result).toMatchObject({ code: "invalid_request" });
@@ -180,7 +180,7 @@ it.effect("snoozes until a usage-limit reset, and says when there is none", () =
   Effect.gen(function* () {
     const { result } = yield* callTool(
       threadScope(callerId),
-      "t3_thread_snooze",
+      "thread_snooze",
       { threadId: otherId, until: "limit_reset" },
       {
         snoozeThread: (input) =>
@@ -197,9 +197,9 @@ it.effect("snoozes until a usage-limit reset, and says when there is none", () =
 );
 
 it.effect.each([
-  { tool: "t3_thread_settle", method: "settleThread", receipt: "Settled the thread" },
-  { tool: "t3_thread_unsettle", method: "unsettleThread", receipt: "Moved back to active" },
-  { tool: "t3_thread_unsnooze", method: "unsnoozeThread", receipt: "Woke the thread" },
+  { tool: "thread_settle", method: "settleThread", receipt: "Settled the thread" },
+  { tool: "thread_unsettle", method: "unsettleThread", receipt: "Moved back to active" },
+  { tool: "thread_unsnooze", method: "unsnoozeThread", receipt: "Woke the thread" },
 ] as const)("$tool reaches another thread in the environment", ({ tool, method, receipt }) =>
   Effect.gen(function* () {
     const { result, calls } = yield* callTool(threadScope(callerId), tool, { threadId: otherId });
@@ -221,7 +221,7 @@ it.effect("settles the calling thread when its turn ends", () =>
   Effect.gen(function* () {
     const { result, calls } = yield* callTool(
       threadScope(callerId),
-      "t3_thread_settle",
+      "thread_settle",
       {},
       { settleThread: () => Effect.succeed({ settlesWhenTurnEnds: true as const }) },
     );
@@ -231,32 +231,32 @@ it.effect("settles the calling thread when its turn ends", () =>
 );
 
 it.effect.each(
-  (
-    ["t3_thread_snooze", "t3_thread_unsnooze", "t3_thread_settle", "t3_thread_unsettle"] as const
-  ).flatMap((tool) => [
-    {
-      tool,
-      who: "a read-only client",
-      scope: readOnlyClient,
-      target: otherId,
-      code: "capability_denied",
-    },
-    // A plan-mode caller cannot reach a thread running in default mode.
-    {
-      tool,
-      who: "a plan-mode thread",
-      scope: threadScope(planId),
-      target: otherId,
-      code: "interaction_mode_escalation_denied",
-    },
-    {
-      tool,
-      who: "an ended turn",
-      scope: threadScope(endedId),
-      target: otherId,
-      code: "parent_not_active",
-    },
-  ]),
+  (["thread_snooze", "thread_unsnooze", "thread_settle", "thread_unsettle"] as const).flatMap(
+    (tool) => [
+      {
+        tool,
+        who: "a read-only client",
+        scope: readOnlyClient,
+        target: otherId,
+        code: "capability_denied",
+      },
+      // A plan-mode caller cannot reach a thread running in default mode.
+      {
+        tool,
+        who: "a plan-mode thread",
+        scope: threadScope(planId),
+        target: otherId,
+        code: "interaction_mode_escalation_denied",
+      },
+      {
+        tool,
+        who: "an ended turn",
+        scope: threadScope(endedId),
+        target: otherId,
+        code: "parent_not_active",
+      },
+    ],
+  ),
 )("$tool from $who: $code", ({ tool, scope, target, code }) =>
   Effect.gen(function* () {
     const { result, calls } = yield* callTool(scope, tool, { threadId: target, until: "tomorrow" });

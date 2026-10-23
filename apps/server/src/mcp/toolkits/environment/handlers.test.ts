@@ -90,7 +90,7 @@ const decodeOutcome = Schema.decodeUnknownEffect(
 
 const call = (scope: McpInvocationContext.McpInvocationScope, args: Record<string, unknown>) =>
   McpServer.McpServer.pipe(
-    Effect.flatMap((server) => server.callTool({ name: "t3_environment_add", arguments: args })),
+    Effect.flatMap((server) => server.callTool({ name: "environment_add", arguments: args })),
     Effect.flatMap(({ content }) =>
       decodeOutcome(content.map((part) => (part.type === "text" ? part.text : "")).join("")),
     ),
@@ -112,7 +112,7 @@ it.effect.each([
   ["a plan-mode thread", threadCaller(planThreadId), { code: "capability_denied" }],
   ["a thread whose turn ended", threadCaller(endedThreadId), { code: "parent_not_active" }],
   ["a read-only client", readOnlyClient, { code: "capability_denied" }],
-] as const)("t3_environment_add from %s", ([, scope, expected]) =>
+] as const)("environment_add from %s", ([, scope, expected]) =>
   Effect.gen(function* () {
     const calls: Array<unknown> = [];
     const outcome = yield* call(scope, { ssh: "t3vps", name: "Contabo VPS" }).pipe(
@@ -128,7 +128,7 @@ it.effect.each([
   }),
 );
 
-it.effect("t3_environment_add says when no desktop app runs beside this environment", () =>
+it.effect("environment_add says when no desktop app runs beside this environment", () =>
   call(threadCaller(fullAccessThreadId), { ssh: "t3vps" }).pipe(
     Effect.map((outcome) =>
       expect(outcome).toMatchObject({

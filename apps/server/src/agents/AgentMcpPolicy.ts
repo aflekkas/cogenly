@@ -89,7 +89,7 @@ const make = Effect.gen(function* () {
         if (
           params.projectId !== undefined &&
           !permittedProject(params.projectId) &&
-          !["request_agent_approval", "t3_thread_launch", "start_agent_work"].includes(name)
+          !["request_agent_approval", "thread_launch", "start_agent_work"].includes(name)
         )
           return yield* denied("This repository does not exist in this environment.");
         if (typeof params.threadId === "string" && params.threadId !== actor.threadId) {
@@ -100,7 +100,7 @@ const make = Effect.gen(function* () {
             return yield* denied("This thread is not in a live repository.");
         }
         if (readonly) return { handled: false };
-        if (["create_threads", "delegate_task", "t3_thread_fork"].includes(name))
+        if (["create_threads", "delegate_task", "thread_fork"].includes(name))
           return yield* denied(
             "Persistent agents must start governed Work with start_agent_work; untracked child threads require the owner.",
           );
@@ -127,9 +127,9 @@ const make = Effect.gen(function* () {
         yield* resolveRuntimeMode(caller.limits.runtimeMode, agent.runtimeMode);
         if (
           [
-            "t3_pending_request_respond",
-            "t3_thread_configure",
-            "t3_environment_preferences_update",
+            "pending_request_respond",
+            "thread_configure",
+            "environment_preferences_update",
           ].includes(name)
         )
           return yield* denied(
@@ -146,7 +146,7 @@ const make = Effect.gen(function* () {
           ].includes(name)
         )
           return { handled: false };
-        if (name === "t3_thread_launch" || name === "work_start") {
+        if (name === "thread_launch" || name === "work_start") {
           if (
             params.modelSelection !== undefined ||
             params.runtimeMode !== undefined ||
@@ -268,7 +268,7 @@ const make = Effect.gen(function* () {
               : /create.*(?:pr|pull_request)/.test(name)
                 ? "create_pr"
                 : /send|comment|review|reply|reaction/.test(name) &&
-                    !["t3_thread_send", "t3_thread_send_attachments"].includes(name)
+                    !["thread_send", "thread_send_attachments"].includes(name)
                   ? "send"
                   : /fact_(propose|supersede)|memory_(remember|write)|html_|attachment_/.test(name)
                     ? "draft"
@@ -278,7 +278,7 @@ const make = Effect.gen(function* () {
         // They cannot safely be reduced to an execute grant by parsing model text.
         // Adding a project (create or clone) is ordinary execute work for an agent.
         if (
-          /^(terminal_|preview_|device_|t3_project_(?:update|delete))/.test(name) &&
+          /^(terminal_|preview_(?!close$|list$)|device_|project_(?:update|delete)$)/.test(name) &&
           !["send", "create_pr", "merge", "deploy", "delete"].every(
             (key) => agent.permissions[key as keyof AgentPermissions],
           )
@@ -305,7 +305,7 @@ const make = Effect.gen(function* () {
             "propose_commitment",
             "update_commitment_status",
             "start_agent_work",
-            "t3_thread_launch",
+            "thread_launch",
             "work_start",
           ].includes(name)
         )

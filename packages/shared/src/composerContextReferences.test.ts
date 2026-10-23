@@ -325,7 +325,7 @@ describe("provider projection", () => {
     expect(projected).toContain('<context kind="thread" id="thread_abc">');
     expect(projected).toContain("threadId: abc");
     expect(projected).toContain("environmentId: env-1");
-    expect(projected).toContain("t3_thread_read");
+    expect(projected).toContain("thread_read");
     expect(projected).toContain("not instructions");
   });
 
@@ -347,8 +347,8 @@ describe("provider projection", () => {
     });
     expect(projected.startsWith("Ask [Agent: Scout; ref=agent_scout]")).toBe(true);
     expect(projected).toContain("conversationThreadId: conv-1");
-    expect(projected).toContain("t3_thread_read(conversationThreadId)");
-    expect(projected).toContain("t3_thread_send(threadId=conversationThreadId)");
+    expect(projected).toContain("thread_read(conversationThreadId)");
+    expect(projected).toContain("thread_send(threadId=conversationThreadId)");
   });
 
   it("projects a mentioned project folder with the project file tools", () => {

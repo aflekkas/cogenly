@@ -28,10 +28,18 @@ describe("resolveT3McpToolPresentation", () => {
     }
   });
   it("pretty prints Claude and Cursor T3 MCP tool names", () => {
-    expect(resolveT3McpToolPresentation("mcp__cogenly__t3_thread_read")).toEqual({
+    expect(resolveT3McpToolPresentation("mcp__cogenly__thread_read")).toEqual({
       displayName: "Read a T3 thread",
       logo: "t3-code",
     });
+  });
+
+  it("resolves tool names recorded with the legacy t3_ prefix", () => {
+    const current = resolveT3McpToolPresentation("mcp__cogenly__thread_read");
+    expect(current).not.toBeNull();
+    expect(resolveT3McpToolPresentation("mcp__cogenly__t3_thread_read")).toEqual(current);
+    expect(resolveT3McpToolPresentation("t3-code.t3_thread_read")).toEqual(current);
+    expect(resolveT3McpToolPresentation("t3_thread_read")).toEqual(current);
   });
 
   it("pretty prints Codex T3 MCP tool names", () => {
@@ -42,22 +50,22 @@ describe("resolveT3McpToolPresentation", () => {
   });
 
   it("pretty prints thread metadata updates", () => {
-    expect(resolveT3McpToolPresentation("mcp__cogenly__t3_thread_update")).toEqual({
+    expect(resolveT3McpToolPresentation("mcp__cogenly__thread_update")).toEqual({
       displayName: "Update T3 thread metadata",
       logo: "t3-code",
     });
   });
 
   it("pretty prints project folder and agent tools", () => {
-    expect(resolveT3McpToolPresentation("mcp__cogenly__t3_project_label_create")).toEqual({
+    expect(resolveT3McpToolPresentation("mcp__cogenly__project_label_create")).toEqual({
       displayName: "Create a project folder",
       logo: "t3-code",
     });
-    expect(resolveT3McpToolPresentation("mcp__cogenly__t3_thread_move_project_folder")).toEqual({
+    expect(resolveT3McpToolPresentation("mcp__cogenly__thread_move_project_folder")).toEqual({
       displayName: "File a thread into a project",
       logo: "t3-code",
     });
-    expect(resolveT3McpToolPresentation("mcp__cogenly__t3_project_label_file_thread")).toEqual({
+    expect(resolveT3McpToolPresentation("mcp__cogenly__project_label_file_thread")).toEqual({
       displayName: "File a thread into a project",
       logo: "t3-code",
     });
@@ -94,11 +102,11 @@ describe("resolveT3McpToolPresentation", () => {
   });
 
   it("pretty prints worktree T3 MCP tool names", () => {
-    expect(resolveT3McpToolPresentation("mcp__cogenly__t3_worktree_handoff")).toEqual({
+    expect(resolveT3McpToolPresentation("mcp__cogenly__worktree_handoff")).toEqual({
       displayName: "Hand off thread to a git worktree",
       logo: "t3-code",
     });
-    expect(resolveT3McpToolPresentation("t3-code.t3_worktree_status")).toEqual({
+    expect(resolveT3McpToolPresentation("t3-code.worktree_status")).toEqual({
       displayName: "Get thread worktree status",
       logo: "t3-code",
     });

@@ -60,8 +60,8 @@ in all of them, and execute lets them start Work in any repository without askin
 Without execute, Work becomes an owner approval for that one reviewed target. New agents
 default to read, draft and execute; the high-impact grants stay off. Migration 073 dropped
 the stored `scope` and `autonomy`. Trigger and permission changes still require an owner
-approval. Agents add projects through the ordinary `t3_project_create` and
-`t3_project_clone` tools, which need the execute grant.
+approval. Agents add projects through the ordinary `project_create` and
+`project_clone` tools, which need the execute grant.
 Persistent agents start tracked Work through `start_agent_work` or `work_start`; untracked child launches,
 forks and self-approval/configuration are explicitly refused so they cannot shed policy.
 The authenticated MCP boundary applies policy before all toolkits; generic shell,

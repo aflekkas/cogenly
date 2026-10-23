@@ -173,7 +173,7 @@ export type DesktopAppControlError =
 
 /**
  * The Cogenly desktop app on this machine, reached through its control socket. The CLI and
- * agents (`t3_environment_add`) use it to add environments with no clicks; the desktop runs
+ * agents (`environment_add`) use it to add environments with no clicks; the desktop runs
  * its own SSH flow and saves the result.
  */
 export class DesktopAppControl extends Context.Service<

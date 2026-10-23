@@ -73,7 +73,7 @@ it.effect.each([
         ),
       );
       const results = yield* toolkit
-        .handle("t3_thread_move_project_folder", { threadId, folderId: labelId })
+        .handle("thread_move_project_folder", { threadId, folderId: labelId })
         .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
       if (code) {
         expect(results.at(-1)?.result).toMatchObject({ code });
@@ -132,7 +132,7 @@ it.effect.each([
       Effect.provide(Access.HandlersLayer.layer(Handlers.layer).pipe(Layer.provide(dependencies))),
     );
     const results = yield* toolkit
-      .handle("t3_project_label_create", { name: "Spawn Partners" })
+      .handle("project_label_create", { name: "Spawn Partners" })
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
     if (code) {
       expect(results.at(-1)?.result).toMatchObject({ code });
@@ -173,7 +173,7 @@ it.effect("lets a chat-surface thread organize project folders", () =>
       Effect.provide(Access.HandlersLayer.layer(Handlers.layer).pipe(Layer.provide(dependencies))),
     );
     const results = yield* toolkit
-      .handle("t3_project_label_create", { name: "Spawn Partners" })
+      .handle("project_label_create", { name: "Spawn Partners" })
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
     expect(results.at(-1)?.result).toMatchObject({ label: { name: "Spawn Partners" } });
   }),
@@ -250,7 +250,7 @@ it.effect("files a turnless chat or Work thread into a project in place", () =>
       turned: false,
     });
     const results = yield* toolkit
-      .handle("t3_project_label_file_thread", { threadId, labelId })
+      .handle("project_label_file_thread", { threadId, labelId })
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
     expect(results.at(-1)?.result).toMatchObject({
       threadId,
@@ -269,7 +269,7 @@ it.effect("re-homes a chat with turns into the project, keeping the same thread"
       turned: true,
     });
     const results = yield* toolkit
-      .handle("t3_project_label_file_thread", { threadId, labelId })
+      .handle("project_label_file_thread", { threadId, labelId })
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
     const result = results.at(-1)?.result as { threadId: ThreadId; message: string };
     expect(result).toMatchObject({
@@ -291,7 +291,7 @@ it.effect("keeps read-only callers from filing threads into a project", () =>
       access: "read-only",
     });
     const results = yield* toolkit
-      .handle("t3_project_label_file_thread", { threadId, labelId })
+      .handle("project_label_file_thread", { threadId, labelId })
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
     expect(results.at(-1)?.result).toMatchObject({ code: "capability_denied" });
     expect(moved).toEqual([]);
@@ -300,8 +300,8 @@ it.effect("keeps read-only callers from filing threads into a project", () =>
 );
 
 it.effect.each([
-  { tool: "t3_thread_move_project_folder" as const },
-  { tool: "t3_thread_set_project_labels" as const },
+  { tool: "thread_move_project_folder" as const },
+  { tool: "thread_set_project_labels" as const },
 ])("$tool refuses to move a thread while a turn is running in it", ({ tool }) =>
   Effect.gen(function* () {
     const { toolkit, dependencies, threadId, labelId, moved, dispatched } = yield* fileSetup({
@@ -309,7 +309,7 @@ it.effect.each([
       active: true,
     });
     const last =
-      tool === "t3_thread_move_project_folder"
+      tool === "thread_move_project_folder"
         ? yield* toolkit.handle(tool, { threadId, folderId: labelId }).pipe(
             Stream.unwrap,
             Stream.runLast,

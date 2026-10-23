@@ -101,6 +101,11 @@ export const T3_MCP_SERVER_NAME = "cogenly";
 // Legacy upstream spellings stay recognized so transcripts recorded before the rename still render.
 const T3_MCP_SERVER_ALIASES = new Set([T3_MCP_SERVER_NAME, "t3-code", "t3_code", "t3code"]);
 
+/** Strips the `t3_` prefix tools carried before the rename, so old transcripts still resolve. */
+export function withoutLegacyToolPrefix(tool: string): string {
+  return tool.startsWith("t3_") ? tool.slice(3) : tool;
+}
+
 // Cards, activity rows, summaries, and provider identity recovery share this inventory.
 const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   link_pull_request: tool(
@@ -163,24 +168,21 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   ),
   request_secret: tool(["Ask for", "Asking for", "Asked for", "a secret"], "secret-request"),
   create_threads: tool(["Create", "Creating", "Created", "T3 threads"], "thread-create"),
-  t3_thread_start: tool(["Start", "Starting", "Started", "a T3 thread"], "thread-create"),
-  t3_thread_list: tool(["List", "Listing", "Listed", "T3 threads"], "thread-list"),
-  t3_thread_read: tool(["Read", "Reading", "Read", "a T3 thread"], "thread-read"),
-  t3_thread_send: tool(["Send", "Sending", "Sent", "to a T3 thread"], "thread-send"),
-  t3_thread_wait: tool(["Wait", "Waiting", "Waited", "for a T3 thread"], "thread-wait"),
-  t3_workflow_stop: tool(
-    ["Stop", "Stopping", "Requested a stop for", "a workflow"],
-    "workflow-stop",
-  ),
-  t3_thread_interrupt: tool(
+  thread_start: tool(["Start", "Starting", "Started", "a T3 thread"], "thread-create"),
+  thread_list: tool(["List", "Listing", "Listed", "T3 threads"], "thread-list"),
+  thread_read: tool(["Read", "Reading", "Read", "a T3 thread"], "thread-read"),
+  thread_send: tool(["Send", "Sending", "Sent", "to a T3 thread"], "thread-send"),
+  thread_wait: tool(["Wait", "Waiting", "Waited", "for a T3 thread"], "thread-wait"),
+  workflow_stop: tool(["Stop", "Stopping", "Requested a stop for", "a workflow"], "workflow-stop"),
+  thread_interrupt: tool(
     ["Interrupt", "Interrupting", "Requested an interrupt of", "a T3 thread"],
     "thread-interrupt",
   ),
-  t3_worktree_handoff: tool(
+  worktree_handoff: tool(
     ["Hand off", "Handing off", "Handed off", "thread to a git worktree"],
     "worktree-handoff",
   ),
-  t3_worktree_status: tool(["Get", "Getting", "Got", "thread worktree status"], "worktree-status"),
+  worktree_status: tool(["Get", "Getting", "Got", "thread worktree status"], "worktree-status"),
   preview_status: tool(["Get", "Getting", "Got", "preview browser status"], "browser", "browser"),
   preview_open: tool(
     ["Open", "Opening", "Opened", "a page in the preview browser"],
@@ -285,115 +287,112 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     ["Run", "Running", "Requested a run of", "a scheduled task"],
     "schedule-run",
   ),
-  t3_queue_list: tool(["List", "Listing", "Listed", "queued messages"], "queue-list"),
-  t3_queue_read: tool(["Read", "Reading", "Read", "a queued message"], "queue-read"),
-  t3_queue_edit: tool(["Edit", "Editing", "Edited", "a queued message"], "queue-edit"),
-  t3_queue_cancel: tool(
+  queue_list: tool(["List", "Listing", "Listed", "queued messages"], "queue-list"),
+  queue_read: tool(["Read", "Reading", "Read", "a queued message"], "queue-read"),
+  queue_edit: tool(["Edit", "Editing", "Edited", "a queued message"], "queue-edit"),
+  queue_cancel: tool(
     ["Cancel", "Canceling", "Requested cancellation of", "a queued run"],
     "queue-cancel",
   ),
-  t3_queue_reorder: tool(["Reorder", "Reordering", "Reordered", "a queued run"], "queue-reorder"),
-  t3_queue_promote_to_steer: tool(
+  queue_reorder: tool(["Reorder", "Reordering", "Reordered", "a queued run"], "queue-reorder"),
+  queue_promote_to_steer: tool(
     ["Steer with", "Steering with", "Requested steering with", "a queued message"],
     "queue-steer",
   ),
-  t3_pending_request_list: tool(
-    ["List", "Listing", "Listed", "pending questions"],
-    "question-list",
-  ),
-  t3_pending_request_read: tool(["Read", "Reading", "Read", "pending questions"], "question-read"),
-  t3_pending_request_respond: tool(
+  pending_request_list: tool(["List", "Listing", "Listed", "pending questions"], "question-list"),
+  pending_request_read: tool(["Read", "Reading", "Read", "pending questions"], "question-read"),
+  pending_request_respond: tool(
     ["Answer", "Answering", "Answered", "pending questions"],
     "question-respond",
   ),
-  t3_thread_configuration: tool(
+  thread_configuration: tool(
     ["Read", "Reading", "Read", "thread configuration"],
     "thread-configuration",
   ),
-  t3_thread_configure: tool(["Set", "Setting", "Set", "thread model"], "thread-configure"),
-  t3_thread_fork: tool(["Fork", "Forking", "Requested a fork of", "this thread"], "thread-fork"),
-  t3_thread_merge_back: tool(
+  thread_configure: tool(["Set", "Setting", "Set", "thread model"], "thread-configure"),
+  thread_fork: tool(["Fork", "Forking", "Requested a fork of", "this thread"], "thread-fork"),
+  thread_merge_back: tool(
     ["Merge", "Merging", "Requested a merge of", "thread context"],
     "thread-merge",
   ),
-  t3_thread_search: tool(["Search", "Searching", "Searched", "thread content"], "thread-search"),
-  t3_thread_transfers: tool(["Read", "Reading", "Read", "thread transfers"], "thread-transfers"),
-  t3_thread_organize: tool(["Organize", "Organizing", "Organized", "a thread"], "thread-organize"),
-  t3_thread_snooze: tool(["Snooze", "Snoozing", "Snoozed", "a thread"], "thread-organize"),
-  t3_thread_unsnooze: tool(["Wake", "Waking", "Woke", "a thread"], "thread-organize"),
-  t3_thread_settle: tool(["Settle", "Settling", "Settled", "a thread"], "thread-organize"),
-  t3_thread_unsettle: tool(["Unsettle", "Unsettling", "Unsettled", "a thread"], "thread-organize"),
-  t3_thread_update: tool(["Update", "Updating", "Updated", "T3 thread metadata"], "thread-update"),
-  t3_worktree_list: tool(["List", "Listing", "Listed", "workspace branches"], "worktree-list"),
-  t3_preview_list: tool(["List", "Listing", "Listed", "preview tabs"], "browser", "browser"),
-  t3_preview_close: tool(["Close", "Closing", "Closed", "a preview tab"], "browser", "browser"),
-  t3_environment_read: tool(
+  thread_search: tool(["Search", "Searching", "Searched", "thread content"], "thread-search"),
+  thread_transfers: tool(["Read", "Reading", "Read", "thread transfers"], "thread-transfers"),
+  thread_organize: tool(["Organize", "Organizing", "Organized", "a thread"], "thread-organize"),
+  thread_snooze: tool(["Snooze", "Snoozing", "Snoozed", "a thread"], "thread-organize"),
+  thread_unsnooze: tool(["Wake", "Waking", "Woke", "a thread"], "thread-organize"),
+  thread_settle: tool(["Settle", "Settling", "Settled", "a thread"], "thread-organize"),
+  thread_unsettle: tool(["Unsettle", "Unsettling", "Unsettled", "a thread"], "thread-organize"),
+  thread_update: tool(["Update", "Updating", "Updated", "T3 thread metadata"], "thread-update"),
+  worktree_list: tool(["List", "Listing", "Listed", "workspace branches"], "worktree-list"),
+  preview_list: tool(["List", "Listing", "Listed", "preview tabs"], "browser", "browser"),
+  preview_close: tool(["Close", "Closing", "Closed", "a preview tab"], "browser", "browser"),
+  environment_read: tool(
     ["Read", "Reading", "Read", "environment preferences"],
     "environment-read",
   ),
-  t3_environment_preferences_update: tool(
+  environment_preferences_update: tool(
     ["Update", "Updating", "Updated", "environment preferences"],
     "environment-update",
   ),
-  t3_environment_add: tool(["Add", "Adding", "Added", "a server"], "environment-update"),
-  t3_thread_launch: tool(["Launch", "Launching", "Launched", "a project thread"], "thread-create"),
-  t3_project_list: tool(["List", "Listing", "Listed", "projects"], "project-list"),
-  t3_project_read: tool(["Read", "Reading", "Read", "a project"], "project-read"),
-  t3_project_create: tool(["Register", "Registering", "Registered", "a project"], "project-create"),
-  t3_project_update: tool(["Update", "Updating", "Updated", "a project"], "project-update"),
-  t3_project_delete: tool(["Delete", "Deleting", "Deleted", "a project"], "project-delete"),
-  t3_project_clone: tool(["Clone", "Cloning", "Cloned", "a repository"], "project-clone"),
-  t3_project_label_list: tool(["List", "Listing", "Listed", "project folders"], "project-list"),
-  t3_project_label_read: tool(["Read", "Reading", "Read", "a project folder"], "project-read"),
-  t3_project_label_create: tool(
+  environment_add: tool(["Add", "Adding", "Added", "a server"], "environment-update"),
+  thread_launch: tool(["Launch", "Launching", "Launched", "a project thread"], "thread-create"),
+  project_list: tool(["List", "Listing", "Listed", "projects"], "project-list"),
+  project_read: tool(["Read", "Reading", "Read", "a project"], "project-read"),
+  project_create: tool(["Register", "Registering", "Registered", "a project"], "project-create"),
+  project_update: tool(["Update", "Updating", "Updated", "a project"], "project-update"),
+  project_delete: tool(["Delete", "Deleting", "Deleted", "a project"], "project-delete"),
+  project_clone: tool(["Clone", "Cloning", "Cloned", "a repository"], "project-clone"),
+  project_label_list: tool(["List", "Listing", "Listed", "project folders"], "project-list"),
+  project_label_read: tool(["Read", "Reading", "Read", "a project folder"], "project-read"),
+  project_label_create: tool(
     ["Create", "Creating", "Created", "a project folder"],
     "project-label-create",
   ),
-  t3_project_label_update: tool(
+  project_label_update: tool(
     ["Update", "Updating", "Updated", "a project folder"],
     "project-label-update",
   ),
-  t3_project_label_delete: tool(
+  project_label_delete: tool(
     ["Delete", "Deleting", "Deleted", "a project folder"],
     "project-label-delete",
   ),
-  t3_project_label_archive: tool(
+  project_label_archive: tool(
     ["Archive", "Archiving", "Archived", "a project folder"],
     "project-label-update",
   ),
-  t3_project_label_unarchive: tool(
+  project_label_unarchive: tool(
     ["Unarchive", "Unarchiving", "Unarchived", "a project folder"],
     "project-label-update",
   ),
-  t3_project_label_link_source: tool(
+  project_label_link_source: tool(
     ["Link", "Linking", "Linked", "a source to a project"],
     "project-label-link",
   ),
-  t3_project_label_unlink_source: tool(
+  project_label_unlink_source: tool(
     ["Unlink", "Unlinking", "Unlinked", "a source from a project"],
     "project-label-link",
   ),
-  t3_project_label_link_repository: tool(
+  project_label_link_repository: tool(
     ["Add", "Adding", "Added", "a repository to a project"],
     "project-label-link",
   ),
-  t3_project_label_unlink_repository: tool(
+  project_label_unlink_repository: tool(
     ["Remove", "Removing", "Removed", "a repository from a project"],
     "project-label-link",
   ),
-  t3_project_label_clone_repository: tool(
+  project_label_clone_repository: tool(
     ["Clone", "Cloning", "Started cloning", "a repository into a project"],
     "project-label-clone",
   ),
-  t3_project_label_file_thread: tool(
+  project_label_file_thread: tool(
     ["File", "Filing", "Filed", "a thread into a project"],
     "project-label-file-thread",
   ),
-  t3_thread_move_project_folder: tool(
+  thread_move_project_folder: tool(
     ["File", "Filing", "Filed", "a thread into a project"],
     "thread-organize",
   ),
-  t3_thread_set_project_labels: tool(
+  thread_set_project_labels: tool(
     ["File", "Filing", "Filed", "a thread into a project"],
     "thread-organize",
   ),
@@ -406,15 +405,15 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     ["Start", "Starting", "Started", "an agent builder"],
     "agent-builder-start",
   ),
-  t3_attachment_prepare_upload: tool(
+  attachment_prepare_upload: tool(
     ["Prepare", "Preparing", "Prepared", "an attachment upload"],
     "attachment-prepare",
   ),
-  t3_attachment_discard: tool(
+  attachment_discard: tool(
     ["Discard", "Discarding", "Discarded", "a pending attachment"],
     "attachment-discard",
   ),
-  t3_thread_send_attachments: tool(["Send", "Sending", "Sent", "attachments"], "attachment-send"),
+  thread_send_attachments: tool(["Send", "Sending", "Sent", "attachments"], "attachment-send"),
   html_preview: tool(["Preview", "Previewing", "Previewed", "an HTML page"], "html-preview"),
   html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
   image_search: tool(["Search", "Searching", "Searched", "the web for images"], "image-search"),
@@ -448,20 +447,21 @@ function resolveT3McpToolName(value: string): string | null {
     return server !== undefined &&
       tool !== undefined &&
       T3_MCP_SERVER_ALIASES.has(server.toLowerCase())
-      ? tool
+      ? withoutLegacyToolPrefix(tool)
       : null;
   }
 
   const namespaceMatch =
     /^(?<server>cogenly|t3-code|t3_code|t3code)(?:[.:/]|\s*·\s*)(?<tool>.+)$/i.exec(label);
   if (namespaceMatch?.groups) {
-    return namespaceMatch.groups.tool ?? null;
+    const tool = namespaceMatch.groups.tool;
+    return tool === undefined ? null : withoutLegacyToolPrefix(tool);
   }
 
   const prefixed = /^(?:mcp[-_]{1,2})?(?:cogenly|t3[-_ ]?code)(?:__|[-_.:/ ])(?<tool>.+)$/i.exec(
     label,
   );
-  const candidate = prefixed?.groups?.tool ?? label;
+  const candidate = withoutLegacyToolPrefix(prefixed?.groups?.tool ?? label);
   if (Object.hasOwn(T3_MCP_TOOLS, candidate)) return candidate;
   // OpenCode 2 registers one server per thread, `t3-code-<thread>`, and joins
   // it to the tool with `_`. Thread ids can hold `_` too, so take the longest

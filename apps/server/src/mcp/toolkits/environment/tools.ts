@@ -40,7 +40,7 @@ const shared = {
     ThreadCommandExecutor.ThreadCommandExecutor,
   ],
 };
-const EnvironmentReadTool = Tool.make("t3_environment_read", {
+const EnvironmentReadTool = Tool.make("environment_read", {
   ...shared,
   description:
     "Read this server's identity and selected environment preferences, including the projects root. Provider/model availability is exposed by orchestrator_capabilities. Writing instructions are limited to 4,000 characters.",
@@ -54,7 +54,7 @@ const EnvironmentReadTool = Tool.make("t3_environment_read", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
-const EnvironmentPreferencesTool = Tool.make("t3_environment_preferences_update", {
+const EnvironmentPreferencesTool = Tool.make("environment_preferences_update", {
   ...shared,
   description:
     "Update selected environment-wide preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. Omitted fields are preserved; empty customInstructions clears them.",
@@ -68,7 +68,7 @@ const EnvironmentPreferencesTool = Tool.make("t3_environment_preferences_update"
   }),
   success: Schema.Struct(PreferenceFields),
 }).annotate(Tool.Destructive, true);
-const EnvironmentAddTool = Tool.make("t3_environment_add", {
+const EnvironmentAddTool = Tool.make("environment_add", {
   ...shared,
   dependencies: [...shared.dependencies, DesktopAppControl.DesktopAppControl],
   description:

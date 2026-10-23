@@ -239,7 +239,7 @@ export type SkillContextRecord = typeof SkillContextRecord.Type;
 
 /**
  * Another thread on the same server, attached so the agent can read its history through
- * `t3_thread_read`. Only identity travels; the title is a display snapshot.
+ * `thread_read`. Only identity travels; the title is a display snapshot.
  */
 export const ThreadContextRecord = Schema.Struct({
   ...recordBase,
