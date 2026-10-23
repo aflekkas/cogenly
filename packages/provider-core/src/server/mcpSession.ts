@@ -14,6 +14,13 @@ export interface McpProviderSessionConfig {
    * call would reject.
    */
   readonly browserToolsAvailable: boolean;
+  /**
+   * Whether this credential explicitly grants the Cogenly terminal tools.
+   * Optional because a session can start with a credential that never stated
+   * terminal availability (the shape a delegated child can start with);
+   * consumers must treat an absent flag as "not granted" — see
+   * {@link terminalToolsAvailable}.
+   */
   readonly terminalToolsAvailable?: boolean;
   /** Capabilities the credential grants ("preview", "device"). */
   readonly capabilities?: ReadonlySet<string>;
@@ -24,6 +31,18 @@ export interface McpProviderSessionConfig {
    */
   readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
 }
+
+/**
+ * Whether the Cogenly terminal tools are definitely available to this
+ * session: an MCP session is present and its credential explicitly grants
+ * terminal tools. Adapters disable the provider's native shell only when
+ * this is true. A credential that never stated terminal availability
+ * (`terminalToolsAvailable` undefined) keeps the native shell, so the agent
+ * always has some way to run commands instead of none.
+ */
+export const terminalToolsAvailable = (
+  config: Pick<McpProviderSessionConfig, "terminalToolsAvailable"> | undefined,
+): boolean => config?.terminalToolsAvailable === true;
 
 /** Provider env with the device variables applied over `base`, or `base` untouched. */
 export function withAgentDeviceEnvironment(
