@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto as EffectNodeCrypto, NodeHttpServer } from "@effect/platform-node";
 import { EnvironmentId, IntegrationName, type IntegrationId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -49,6 +50,7 @@ interface MockAuthServer {
   refreshes: number;
   /** Refresh tokens answer invalid_grant, as after the user revokes access. */
   revoked: boolean;
+  tokenGate?: { entered: Deferred.Deferred<void>; resume: Deferred.Deferred<void> };
   readonly clients: Map<string, ReadonlyArray<string>>;
   readonly codes: Map<
     string,
@@ -156,6 +158,14 @@ const startMockAuthServer = Effect.gen(function* () {
     ),
     HttpRouter.add("POST", "/auth/token", (request) =>
       form(request).pipe(
+        Effect.tap(() =>
+          mock.tokenGate === undefined
+            ? Effect.void
+            : Effect.gen(function* () {
+                yield* Deferred.succeed(mock.tokenGate!.entered, undefined);
+                yield* Deferred.await(mock.tokenGate!.resume);
+              }),
+        ),
         Effect.map((params) => {
           if (params.get("resource") !== `${mock.base}/mcp`)
             return reply({ error: "invalid_target" }, 400);
@@ -325,6 +335,48 @@ const whoami = (name: string) =>
   });
 
 describe("Integration OAuth sign-in", () => {
+  it.effect.each(["edit", "client", "version", "remove"] as const)(
+    "discards a code exchange completed after %s",
+    (mutation) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const integration = yield* addLinear(mock, "linear");
+          const service = yield* Integrations.Integrations;
+          const link = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+          const callback = yield* consent(link.authorizationUrl, "spawn");
+          const gate = {
+            entered: yield* Deferred.make<void>(),
+            resume: yield* Deferred.make<void>(),
+          };
+          mock.tokenGate = gate;
+          const completion = yield* service
+            .completeSignIn(callback)
+            .pipe(Effect.result, Effect.forkScoped);
+          yield* Deferred.await(gate.entered);
+          if (mutation === "edit")
+            yield* service.update({ id: integration.id, url: `${mock.base}/changed` });
+          else if (mutation === "client")
+            yield* service.update({
+              id: integration.id,
+              auth: { type: "oauth", clientId: "changed" },
+            });
+          else if (mutation === "version") {
+            yield* TestClock.adjust("1 second");
+            yield* service.update({ id: integration.id, displayName: "Changed" });
+          } else yield* service.remove(integration.id);
+          yield* Deferred.succeed(gate.resume, undefined);
+          expect((yield* Fiber.join(completion))._tag).toBe("Failure");
+          const vault = yield* Vault.Vault;
+          expect((yield* vault.list({})).items).toHaveLength(0);
+          expect(mock.bearers.filter((bearer) => bearer !== undefined)).toHaveLength(0);
+          if (mutation === "edit")
+            expect((yield* statusOf(integration.id))?.status).toBe("needs_sign_in");
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
   it.effect("discovers, registers, exchanges a PKCE code and calls with the token", () =>
     Effect.scoped(
       Effect.gen(function* () {

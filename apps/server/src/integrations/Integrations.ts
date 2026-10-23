@@ -99,6 +99,8 @@ const credentialItemsIn = (
   ),
 ];
 
+const definitionKey = Schema.encodeSync(Schema.fromJsonString(Integration));
+
 const usesOAuth = (integration: Integration) => integration.auth?.type === "oauth";
 
 /** "Linear · Spawn Partners": how people and agents tell two accounts of one service apart. */
@@ -466,6 +468,7 @@ const make = (options: IntegrationsOptions = {}) =>
         {
           readonly integrationId: IntegrationId;
           readonly url: string;
+          readonly definition: string;
           readonly server: OAuth.OAuthServer;
           readonly redirectUri: string;
           readonly verifier: string;
@@ -482,12 +485,12 @@ const make = (options: IntegrationsOptions = {}) =>
       Tokens.StoredTokens & { readonly itemId: string; readonly expiresAt: number | null }
     >();
     /** One refresh at a time per account; waiters reuse the token it produced. */
-    const refreshLocks = new Map<IntegrationId, Semaphore.Semaphore>();
-    const refreshLock = (id: IntegrationId) => {
-      let lock = refreshLocks.get(id);
+    const integrationLocks = new Map<IntegrationId, Semaphore.Semaphore>();
+    const integrationLock = (id: IntegrationId) => {
+      let lock = integrationLocks.get(id);
       if (lock === undefined) {
         lock = Semaphore.makeUnsafe(1);
-        refreshLocks.set(id, lock);
+        integrationLocks.set(id, lock);
       }
       return lock;
     };
@@ -734,75 +737,73 @@ const make = (options: IntegrationsOptions = {}) =>
      * caller that waited finds the token the refresh produced and uses it.
      */
     const accessToken = (id: IntegrationId, rejected?: string) =>
-      refreshLock(id).withPermits(1)(
-        Effect.gen(function* () {
-          const integration = yield* getById(id);
-          const state = integration.oauthState;
-          const live = yield* loadTokens(integration);
-          if (state?.server === undefined || live === undefined) {
-            if (state?.signedIn) yield* markNeedsSignIn(integration, "Sign in again.");
-            return yield* signInRequired("authorize");
+      Effect.gen(function* () {
+        const integration = yield* getById(id);
+        const state = integration.oauthState;
+        const live = yield* loadTokens(integration);
+        if (state?.server === undefined || live === undefined) {
+          if (state?.signedIn) yield* markNeedsSignIn(integration, "Sign in again.");
+          return yield* signInRequired("authorize");
+        }
+        const nowMs = yield* Clock.currentTimeMillis;
+        const expired = live.expiresAt !== null && live.expiresAt <= nowMs;
+        const expiring = live.expiresAt !== null && live.expiresAt - REFRESH_SKEW_MS <= nowMs;
+        if (live.accessToken !== rejected && !expiring) return live.accessToken;
+        if (live.refreshToken === undefined) {
+          if (live.accessToken !== rejected && !expired) return live.accessToken;
+          yield* markNeedsSignIn(integration, "The sign-in expired. Sign in again.");
+          return yield* signInRequired("authorize");
+        }
+        const oauth = yield* oauthClient(
+          integration,
+          state.server,
+          state.registration,
+          live.clientSecret,
+        );
+        const refreshed = yield* protocol
+          .refresh({
+            server: state.server,
+            client: oauth,
+            refreshToken: live.refreshToken,
+            nowMs,
+          })
+          .pipe(Effect.result);
+        if (refreshed._tag === "Failure") {
+          if (refreshed.failure.revoked) {
+            yield* markNeedsSignIn(
+              integration,
+              "The sign-in was revoked or expired. Sign in again.",
+            );
+            return yield* signInRequired("refresh");
           }
-          const nowMs = yield* Clock.currentTimeMillis;
-          const expired = live.expiresAt !== null && live.expiresAt <= nowMs;
-          const expiring = live.expiresAt !== null && live.expiresAt - REFRESH_SKEW_MS <= nowMs;
-          if (live.accessToken !== rejected && !expiring) return live.accessToken;
-          if (live.refreshToken === undefined) {
-            if (live.accessToken !== rejected && !expired) return live.accessToken;
-            yield* markNeedsSignIn(integration, "The sign-in expired. Sign in again.");
-            return yield* signInRequired("authorize");
-          }
-          const oauth = yield* oauthClient(
-            integration,
-            state.server,
-            state.registration,
-            live.clientSecret,
-          );
-          const refreshed = yield* protocol
-            .refresh({
-              server: state.server,
-              client: oauth,
-              refreshToken: live.refreshToken,
-              nowMs,
-            })
-            .pipe(Effect.result);
-          if (refreshed._tag === "Failure") {
-            if (refreshed.failure.revoked) {
-              yield* markNeedsSignIn(
-                integration,
-                "The sign-in was revoked or expired. Sign in again.",
-              );
-              return yield* signInRequired("refresh");
-            }
-            return yield* new IntegrationError({
-              operation: "refresh",
-              reason: "upstream_error",
-              cause: refreshed.failure.message,
-            });
-          }
-          const tokens = refreshed.success;
-          const itemId = yield* tokenStore.write({
-            itemId: live.itemId,
-            name: tokenItemName(integration),
-            label: `${integrationTitle(integration)} sign-in`,
-            host: new URL(integration.url).hostname,
-            tokens: { ...tokens, clientSecret: live.clientSecret },
+          return yield* new IntegrationError({
+            operation: "refresh",
+            reason: "upstream_error",
+            cause: refreshed.failure.message,
           });
-          liveTokens.set(id, {
-            ...tokens,
-            clientSecret: live.clientSecret,
-            itemId,
-            expiresAt: tokens.expiresAt,
-          });
-          yield* persistState(id, (current) => ({
-            ...current,
-            signedIn: true,
-            tokenItemId: itemId,
-            expiresAt: tokens.expiresAt,
-          }));
-          return tokens.accessToken;
-        }),
-      );
+        }
+        const tokens = refreshed.success;
+        const itemId = yield* tokenStore.write({
+          itemId: live.itemId,
+          name: tokenItemName(integration),
+          label: `${integrationTitle(integration)} sign-in`,
+          host: new URL(integration.url).hostname,
+          tokens: { ...tokens, clientSecret: live.clientSecret },
+        });
+        liveTokens.set(id, {
+          ...tokens,
+          clientSecret: live.clientSecret,
+          itemId,
+          expiresAt: tokens.expiresAt,
+        });
+        yield* persistState(id, (current) => ({
+          ...current,
+          signedIn: true,
+          tokenItemId: itemId,
+          expiresAt: tokens.expiresAt,
+        }));
+        return tokens.accessToken;
+      });
 
     const post = (
       integration: Integration,
@@ -918,6 +919,9 @@ const make = (options: IntegrationsOptions = {}) =>
     ) =>
       Effect.gen(function* () {
         if (!usesOAuth(integration)) return yield* exchange(integration, method, params, labelId);
+        const current = yield* getById(integration.id);
+        if (!current.enabled || definitionKey(current) !== definitionKey(integration))
+          return yield* new IntegrationError({ operation: method, reason: "invalid_request" });
         const token = yield* accessToken(integration.id);
         return yield* exchange(integration, method, params, labelId, token).pipe(
           Effect.catchIf(
@@ -940,6 +944,8 @@ const make = (options: IntegrationsOptions = {}) =>
           ),
         );
       }).pipe(
+        (effect) =>
+          usesOAuth(integration) ? integrationLock(integration.id).withPermits(1)(effect) : effect,
         Effect.tap(() => recordCheck(integration, { ok: true })),
         Effect.tapError((error) =>
           // A refused sign-in recorded its own, more specific status.
@@ -1306,6 +1312,7 @@ const make = (options: IntegrationsOptions = {}) =>
           return { integration: redactIntegration(integration), changed: true };
         }).pipe(
           sql.withTransaction,
+          integrationLock(masked.id).withPermits(1),
           // Once committed, the old process gives way; the next list starts the new version.
           Effect.tap(({ integration, changed }) =>
             changed && integration.transport === "local" && Option.isSome(local)
@@ -1335,7 +1342,7 @@ const make = (options: IntegrationsOptions = {}) =>
           if (current.transport === "local" && Option.isSome(local)) yield* local.value.stop(id);
           yield* notify;
           return { deleted: true };
-        }).pipe(Effect.mapError(failure("delete", "storage"))),
+        }).pipe(integrationLock(id).withPermits(1), Effect.mapError(failure("delete", "storage"))),
       testConnection: (id) =>
         Effect.gen(function* () {
           const integration = yield* getById(id);
@@ -1479,6 +1486,7 @@ const make = (options: IntegrationsOptions = {}) =>
             return next.set(state, {
               integrationId: integration.id,
               url: integration.url,
+              definition: definitionKey(integration),
               server,
               redirectUri,
               verifier,
@@ -1533,7 +1541,12 @@ const make = (options: IntegrationsOptions = {}) =>
           )
             return yield* rejected;
           const integration = yield* getById(pending.integrationId);
-          if (!usesOAuth(integration) || integration.url !== pending.url) return yield* rejected;
+          if (
+            !integration.enabled ||
+            !usesOAuth(integration) ||
+            definitionKey(integration) !== pending.definition
+          )
+            return yield* rejected;
           if (callback.error !== undefined || callback.code === undefined) {
             yield* recordCheck(
               integration,
@@ -1582,26 +1595,44 @@ const make = (options: IntegrationsOptions = {}) =>
                   }),
               ),
             );
-          const itemId = yield* tokenStore.write({
-            itemId: previous?.tokenItemId,
-            name: tokenItemName(integration),
-            label: `${integrationTitle(integration)} sign-in`,
-            host: new URL(integration.url).hostname,
-            tokens: { ...tokens, clientSecret },
-          });
-          liveTokens.set(integration.id, {
-            ...tokens,
-            clientSecret,
-            itemId,
-            expiresAt: tokens.expiresAt,
-          });
-          yield* persistState(integration.id, () => ({
-            signedIn: true,
-            server: pending.server,
-            ...(pending.registration === undefined ? {} : { registration: pending.registration }),
-            tokenItemId: itemId,
-            expiresAt: tokens.expiresAt,
-          }));
+          // The exchange does not block edits. Only a current definition may commit
+          // its result; stale tokens never enter the vault or an upstream request.
+          yield* integrationLock(integration.id).withPermits(1)(
+            Effect.gen(function* () {
+              const current = yield* getById(integration.id);
+              if (!current.enabled || definitionKey(current) !== pending.definition)
+                return yield* rejected;
+              const itemId = yield* tokenStore.write({
+                itemId: previous?.tokenItemId,
+                name: tokenItemName(integration),
+                label: `${integrationTitle(integration)} sign-in`,
+                host: new URL(integration.url).hostname,
+                tokens: { ...tokens, clientSecret },
+              });
+              liveTokens.set(integration.id, {
+                ...tokens,
+                clientSecret,
+                itemId,
+                expiresAt: tokens.expiresAt,
+              });
+              yield* persistState(integration.id, () => ({
+                signedIn: true,
+                server: pending.server,
+                ...(pending.registration === undefined
+                  ? {}
+                  : { registration: pending.registration }),
+                tokenItemId: itemId,
+                expiresAt: tokens.expiresAt,
+              })).pipe(
+                Effect.tapError(() =>
+                  dropTokens({
+                    ...integration,
+                    oauthState: { signedIn: false, tokenItemId: itemId },
+                  }),
+                ),
+              );
+            }).pipe(Effect.uninterruptible),
+          );
           yield* Ref.set(lastBrowserOrigin, new URL(pending.redirectUri).origin);
           yield* Ref.update(checks, (current) => {
             const next = new Map(current);
