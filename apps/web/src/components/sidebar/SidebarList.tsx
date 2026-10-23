@@ -6,7 +6,7 @@ import type {
 } from "react";
 
 import { cn } from "~/lib/utils";
-import { DisclosureChevron } from "../ui/disclosure";
+import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
 
 /**
  * The sidebar's shared list pieces. Every tab (Chats, Work, Agents, Projects,
@@ -17,10 +17,12 @@ import { DisclosureChevron } from "../ui/disclosure";
  *   search dock when it `grow`s.
  * - `SidebarGroupHeader` — a group's heading: optional icon or badge, a label
  *   that truncates, a hairline, and a disclosure chevron when it collapses.
+ * - `SidebarFoldRow` — a row under a collapsible heading, which folds with it.
  * - `sidebarRowClassName` / `SidebarRowSubtitle` — a row: one line (32px) or a
- *   title with a muted second line (40px). Chats, Agents and Projects are rows.
- * - `SIDEBAR_CARD_CLASS_NAME` — Work's cards, which carry live status and
- *   actions, share the rows' focus ring, truncation and selected state.
+ *   title with a muted second line (40px). Chats and Projects are rows.
+ * - `SIDEBAR_CARD_CLASS_NAME` — Work's and Agents' cards, which carry live
+ *   status and actions, share the rows' focus ring, truncation and selected
+ *   state. Both sort by drag (`SidebarSortable`).
  * - `SidebarListEmptyState` (its own file) — one quiet line for a list with
  *   nothing in it.
  *
@@ -67,9 +69,8 @@ const headerContentClassName = "flex h-full min-w-0 flex-1 items-center gap-2 px
  * `collapse` a disclosure chevron, the whole heading being the button; without,
  * it is a static label. The count updates with the rows it counts and stays
  * visible while the group is shut. Right-click goes to `onContextMenu`, where a
- * group's actions live (no inline buttons). Collapsing hides the group's rows
- * from the flat list; the list's own motion fades them out while the rows
- * below glide up (opacity only under reduced motion).
+ * group's actions live (no inline buttons). The group's rows sit in
+ * `SidebarFoldRow`s, which fold shut and open with the chevron.
  */
 export function SidebarGroupHeader({
   label,
@@ -151,6 +152,41 @@ export function SidebarGroupHeader({
   );
 }
 
+/**
+ * One row under a collapsible `SidebarGroupHeader`. Folding the group closes
+ * the row with the shared disclosure motion (height and opacity, `ui/disclosure`)
+ * instead of removing it, so the rows below glide rather than jump, and a row
+ * that stays open (the open thread) moves with them without re-popping. The
+ * row is still a direct child of the list for its motion and drag, and it
+ * carries its own share of the list's gap: shut, it takes no room at all.
+ * Must follow another item (its heading), as its negative margin assumes one.
+ */
+export function SidebarFoldRow({
+  open,
+  density = "rows",
+  className,
+  children,
+  ...props
+}: Omit<ComponentProps<"li">, "children"> & {
+  open: boolean;
+  /** The list's density, whose gap this row carries. */
+  density?: "rows" | "cards";
+  children: ReactNode;
+}) {
+  return (
+    <li
+      {...props}
+      className={cn("min-w-0 list-none", density === "cards" ? "-mt-0.5" : "-mt-1", className)}
+    >
+      <DisclosurePanel open={open}>
+        <ul role="presentation" className={density === "cards" ? "pt-0.5" : "pt-1"}>
+          {children}
+        </ul>
+      </DisclosurePanel>
+    </li>
+  );
+}
+
 const ROW_FOCUS_CLASS_NAME =
   "outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
@@ -162,6 +198,8 @@ const ROW_FOCUS_CLASS_NAME =
 export function sidebarRowClassName(options: {
   readonly selected: boolean;
   readonly lines?: 1 | 2;
+  /** The row holds an unsent draft (`SIDEBAR_DRAFT_CLASS_NAME`). */
+  readonly draft?: boolean;
   readonly className?: string | false | null | undefined;
 }): string {
   return cn(
@@ -169,9 +207,19 @@ export function sidebarRowClassName(options: {
     ROW_FOCUS_CLASS_NAME,
     options.lines === 2 ? "h-10" : "h-8",
     options.selected ? "state-selected" : "state-hover",
+    options.draft && SIDEBAR_DRAFT_CLASS_NAME,
     options.className,
   );
 }
+
+/**
+ * Any row or card holding an unsent draft (a new-thread draft, or a thread
+ * with text left in its composer): an amber wash and edge that carries
+ * through hover and selection. Its title takes `SIDEBAR_DRAFT_TITLE_CLASS_NAME`
+ * in place of the resting/hover tones.
+ */
+export const SIDEBAR_DRAFT_CLASS_NAME = "sidebar-draft";
+export const SIDEBAR_DRAFT_TITLE_CLASS_NAME = "text-warning-foreground";
 
 /** The content-visibility placeholder height that matches a row, so offscreen rows never shift the list. */
 export function sidebarRowIntrinsicSizeClassName(lines: 1 | 2): string {

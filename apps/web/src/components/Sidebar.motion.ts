@@ -130,6 +130,21 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     );
   };
 
+  const measure = () =>
+    new Map(
+      Array.from(parent.children)
+        .filter((node): node is HTMLElement => node instanceof HTMLElement && !exiting.has(node))
+        .map((node) => [
+          node,
+          {
+            top: node.offsetTop,
+            left: node.offsetLeft,
+            width: node.offsetWidth,
+            height: node.offsetHeight,
+          },
+        ]),
+    );
+
   return {
     /** `inPlace` is for a page reveal: rows that arrive fade in where they
      * land and nothing travels, so the list reads as having grown rather
@@ -137,19 +152,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     update(animate: boolean, options?: { readonly inPlace?: boolean }) {
       const inPlace = options?.inPlace === true;
       if (disposed) return;
-      const next = new Map(
-        Array.from(parent.children)
-          .filter((node): node is HTMLElement => node instanceof HTMLElement && !exiting.has(node))
-          .map((node) => [
-            node,
-            {
-              top: node.offsetTop,
-              left: node.offsetLeft,
-              width: node.offsetWidth,
-              height: node.offsetHeight,
-            },
-          ]),
-      );
+      const next = measure();
       let fadeCount = 0;
       if (positions !== null) {
         for (const [node, position] of positions) {
@@ -254,6 +257,13 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         }
       }
       positions = next;
+    },
+    /** Rows that moved on their own (a fold's height motion settling)
+     * become the positions the next update moves from. Running animations
+     * carry on; nothing new animates. */
+    remeasure() {
+      if (disposed || positions === null) return;
+      positions = measure();
     },
     suspend,
     dispose() {

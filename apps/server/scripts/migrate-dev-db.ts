@@ -286,7 +286,15 @@ const copySourceSlice = Effect.fn("copyDevDbSourceSlice")(function* (sourcePath:
     SELECT m.name, c."notnull" FROM src.sqlite_master m, pragma_table_info(m.name, 'src') c
     WHERE m.type = 'table' AND c.name = 'thread_id'`;
   const threadIdNullable = new Map(threadColumns.map((row) => [row.name, row.notnull === 0]));
-  const tables = schema.filter((entry) => entry.type === "table");
+  // A virtual table (FTS5) creates its own shadow tables, which SQLite refuses
+  // to create or fill by hand; copying the virtual table's rows reindexes them.
+  const virtualTables = schema
+    .filter((entry) => entry.type === "table" && /^CREATE VIRTUAL TABLE/i.test(entry.sql))
+    .map((entry) => entry.name);
+  const tables = schema.filter(
+    (entry) =>
+      entry.type === "table" && !virtualTables.some((name) => entry.name.startsWith(`${name}_`)),
+  );
   const filtered = tables.some((table) => table.name === "orchestration_v2_projection_threads");
 
   yield* sql.withTransaction(

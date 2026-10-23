@@ -13,6 +13,12 @@ describe("projectPanelSummary", () => {
     expect(projectPanelSummary({ repositories: 0, chats: 4, work: 0, files: 1 })).toBe(
       "4 chats · 1 file",
     );
+    expect(projectPanelSummary({ repositories: 0, chats: 2, work: 1, files: 0, agents: 1 })).toBe(
+      "2 chats · 1 Work · 1 agent",
+    );
+    expect(projectPanelSummary({ repositories: 0, chats: 0, work: 0, files: 0, agents: 3 })).toBe(
+      "3 agents",
+    );
   });
 
   it("is null for an empty folder", () => {

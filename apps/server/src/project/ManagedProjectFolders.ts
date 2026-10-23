@@ -541,7 +541,8 @@ const make = Effect.gen(function* () {
     );
     let parent = path.join(projectsRoot, UNFILED_REPOSITORIES_SEGMENT);
     if (input.labelId !== undefined) {
-      const label = (yield* labels.read(input.labelId)).label;
+      // Filing below is best-effort, so an archived project refuses here.
+      const label = (yield* labels.readActive(input.labelId)).label;
       if (Option.isSome(labelFolders)) {
         // The reconciled folder, healing a label whose folder went missing.
         parent = (yield* labelFolders.value.ensureForLabel(label).pipe(

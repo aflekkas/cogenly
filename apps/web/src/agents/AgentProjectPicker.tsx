@@ -22,7 +22,10 @@ type ProjectOption =
 const optionText = (option: ProjectOption) =>
   option.kind === "folder" ? option.folder.label.name : "No project";
 
-/** An environment's project folders by name, and the one `id` names if it still exists. */
+/**
+ * An environment's active project folders by name, and the one `id` names if
+ * it still exists (archived or not).
+ */
 export function useAgentProjectFolders(
   environmentId: EnvironmentId | null,
   id: ProjectLabelId | null,
@@ -34,7 +37,7 @@ export function useAgentProjectFolders(
   const directory = useProjectLabelDirectory(environmentIds);
   const current =
     id === null ? null : (directory.labels.find((entry) => entry.label.id === id) ?? null);
-  return { folders: directory.labels, current };
+  return { folders: directory.active, current };
 }
 
 /**

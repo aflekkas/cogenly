@@ -8,6 +8,12 @@
 @custom-variant light (&:not(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));
+/* Focus rings follow the keyboard, not the browser's guess: after a pointer
+   press (data-input-modality, lib/inputModality.ts) a control focused by script,
+   such as a menu trigger getting focus back, shows no ring. Text fields keep
+   theirs, since a caret needs one. Raw `:focus-visible` CSS uses the same
+   `:not(:root[data-input-modality="pointer"] *)` guard. */
+@custom-variant focus-visible (&:focus-visible:not(:root[data-input-modality="pointer"] :not(input, textarea, [contenteditable]:not([contenteditable="false"]))));
 
 /* The sidebar's two layouts (useIsMobile, SHEET_LAYOUT_MEDIA_QUERY): a narrow
    touch window gets the sheet; any window with a mouse or trackpad, however
@@ -466,6 +472,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   display: none;
 }
 
+/* While a sidebar card is dragged to a new place, every surface shows the grab. */
+html[data-sidebar-sorting],
+html[data-sidebar-sorting] * {
+  cursor: grabbing !important;
+}
+
 /* The previous thread stays on screen while the next route's content is on its
    way (a mode switch landing on "/", a route chunk still loading), and gives
    way in the same frame that content commits. See ChatRouteLayout. */
@@ -513,7 +525,7 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   transition-property: color, text-decoration-color;
   transition-duration: 150ms;
   &:hover,
-  &:focus-visible {
+  &:focus-visible:not(:root[data-input-modality="pointer"] *) {
     text-decoration-line: underline;
   }
 }
@@ -1020,6 +1032,25 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   }
 }
 
+/* A sidebar row or card holding an unsent draft: a faint amber wash and edge
+   at rest, hover and selected (SIDEBAR_DRAFT_CLASS_NAME). It retints the
+   state-hover / state-selected fills, so those keep their cross-fade. The
+   rest rule outranks bg-(--sidebar-card) and steps aside on hover so the
+   amber hover fill shows. */
+@utility sidebar-draft {
+  --state-hover-fill: color-mix(in srgb, var(--warning) 10%, var(--sidebar-row-hover));
+  --state-selected-fill: color-mix(in srgb, var(--warning) 13%, var(--sidebar-row-active));
+  --tw-inset-ring-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 18%, transparent);
+  box-shadow:
+    var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000),
+    var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000),
+    var(--tw-shadow, 0 0 #0000);
+
+  &:not(.state-selected):not(:hover) {
+    background-color: color-mix(in srgb, var(--warning) 7%, var(--sidebar-card, transparent));
+  }
+}
+
 /* PanOnHoverText's clipping box. Text fades out at the right edge (and
    --pan-end-inset-target further in, under a row's hover actions), and at the
    left edge only as far as it has panned, so a title at rest never loses its
@@ -1295,6 +1326,15 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     var(--app-scrollbar-width) 100%;
 }
 
+/* A static fade along the bottom edge, for content that scrolls inside itself
+   where scroll-fade cannot follow it (the canvas terminal). Its rows fill from
+   the top, so the last stretch is mostly spare space; a row the edge does cut,
+   as mid-resize before a refit, fades out instead of being sliced. */
+@utility edge-fade-b {
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 0.5rem), transparent);
+  mask-image: linear-gradient(to bottom, black calc(100% - 0.5rem), transparent);
+}
+
 /* The in-progress shimmer: one soft band sweeping across live text. Every
    variant shares this band profile and timing so they read as one effect.
    The band is a few letters wide and peaks near foreground, so the letters
@@ -1500,6 +1540,11 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   ::before,
   ::after {
     outline-offset: -2px;
+  }
+  /* The UA focus outline, gated like the `focus-visible` variant above. */
+  :root[data-input-modality="pointer"]
+    :focus-visible:not(input, textarea, [contenteditable]:not([contenteditable="false"])) {
+    outline: none;
   }
   :where([data-slot="menu-popup"], [data-slot="select-popup"], [data-slot="popover-popup"]):focus,
   :where(

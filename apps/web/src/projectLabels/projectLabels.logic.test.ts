@@ -7,6 +7,8 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  isProjectLabelArchived,
+  partitionArchivedProjectLabels,
   projectChatThreadKeys,
   withoutProjectChats,
   priorFiling,
@@ -42,6 +44,11 @@ function folder(
   };
   return { key: projectLabelKey(environmentId, id), environmentId, label };
 }
+
+const archive = (entry: EnvironmentProjectLabel): EnvironmentProjectLabel => ({
+  ...entry,
+  label: { ...entry.label, archivedAt: "2026-02-01T00:00:00.000Z" },
+});
 
 const spawn = folder(env, "spawn", "Spawn Partners", ["server"]);
 const bartr = folder(env, "bartr", "Bartr");
@@ -88,6 +95,28 @@ describe("threadFolderState", () => {
     const state = threadFolderState(thread("gone", "explicit"), directory);
     expect(state.current).toBeNull();
     expect(state.source).toBeNull();
+  });
+
+  it("never offers an archived folder, but still names the one a thread is in", () => {
+    const archived = archive(spawn);
+    const withArchived = {
+      labels: [bartr, remote, archived],
+      byKey: new Map([bartr, remote, archived].map((entry) => [entry.key, entry] as const)),
+    };
+    const state = threadFolderState(thread("spawn", "explicit"), withArchived);
+    expect(state.current).toBe(archived);
+    expect(state.options.map((entry) => entry.label.name)).toEqual(["Bartr"]);
+  });
+});
+
+describe("partitionArchivedProjectLabels", () => {
+  it("splits active from archived folders, keeping each in order", () => {
+    const archived = archive(bartr);
+    const { active, archived: shelved } = partitionArchivedProjectLabels([archived, remote, spawn]);
+    expect(active).toEqual([remote, spawn]);
+    expect(shelved).toEqual([archived]);
+    expect(isProjectLabelArchived(archived.label)).toBe(true);
+    expect(isProjectLabelArchived(spawn.label)).toBe(false);
   });
 });
 

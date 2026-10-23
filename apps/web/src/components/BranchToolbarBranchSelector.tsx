@@ -674,7 +674,7 @@ export function BranchToolbarBranchSelector({
                 <ComposerControl size="xs" />
               )
             }
-            className="min-w-0 max-w-full active:scale-100"
+            className="min-w-0 max-w-full"
             disabled={isInitialBranchesLoadPending || isBranchActionPending}
           >
             <GitBranchIcon

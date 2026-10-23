@@ -168,6 +168,54 @@ export function resolveDraftHeroState(input: {
 }
 
 /**
+ * Whether a thread that exists on the server but was never written in opens
+ * like a new one: the hero headline with the composer centred under it. Only
+ * a thread with nothing to show qualifies, so no row, history page, setup
+ * card or footer line (settled, snoozed or woke, Work markers) loses its
+ * place. The shell already says the thread is empty, so this holds while its
+ * detail loads too, instead of moving the composer once it has. Agent
+ * conversations and embedded views keep their own empty state.
+ */
+export function resolveEmptyServerThreadHero(input: {
+  isServerThread: boolean;
+  /** An agent's conversation, or a ChatView embedded with its own empty state. */
+  hasOwnEmptyState: boolean;
+  hasTimelineEntries: boolean;
+  isWorking: boolean;
+  hasHistoryToLoad: boolean;
+  hasWorktreeSetupCard: boolean;
+  draftHeroDockRequested: boolean;
+  shell: {
+    readonly latestRun: unknown;
+    readonly itemCount: number;
+    readonly latestUserMessageAt: string | null;
+    readonly settledOverride?: string | null | undefined;
+    readonly snoozedUntil?: unknown;
+    readonly source: {
+      readonly workHandoffs?: ReadonlyArray<unknown> | undefined;
+      readonly workTasks?: ReadonlyArray<unknown> | undefined;
+    };
+  } | null;
+}): boolean {
+  const { shell } = input;
+  if (!input.isServerThread || shell === null || input.hasOwnEmptyState) return false;
+  return (
+    !input.hasTimelineEntries &&
+    !input.isWorking &&
+    !input.hasHistoryToLoad &&
+    !input.hasWorktreeSetupCard &&
+    !input.draftHeroDockRequested &&
+    shell.itemCount === 0 &&
+    shell.latestUserMessageAt === null &&
+    shell.latestRun == null &&
+    shell.settledOverride !== "settled" &&
+    shell.snoozedUntil == null &&
+    (shell.source.workHandoffs?.length ?? 0) === 0 &&
+    (shell.source.workTasks?.length ?? 0) === 0
+  );
+}
+
+/**
  * Keep painted timelines on screen across thread jumps. Remounting LegendList
  * (or handing it an empty first paint) punches a hole through the chat pane —
  * white in light mode — so cmd+1/2/3 spam flashes even when the destination

@@ -240,6 +240,14 @@ export interface PreviewStreamTarget {
   readonly maxHeight: number;
   /** Passive viewers reduce their own access, including automatic control grants. */
   readonly interactive?: boolean;
+  /**
+   * Paces this viewer to at most one frame per interval. The server's screencast
+   * waits for each ack, so holding acks back slows capture at the source instead
+   * of dropping frames here. Thumbnails use it; omitted, every frame is acked at once.
+   */
+  readonly minFrameIntervalMs?: number;
+  /** JPEG quality, 1 to 100; the server's default when omitted. */
+  readonly quality?: number;
 }
 
 export interface PreviewStreamEvents {
@@ -292,6 +300,7 @@ export function createPreviewStreamClient(
     maxHeight: String(Math.max(1, Math.round(target.maxHeight))),
   });
   if (target.interactive === false) query.set("interactive", "false");
+  if (target.quality !== undefined) query.set("quality", String(Math.round(target.quality)));
   const url = withDeviceHubQuery(`${target.access.wsBase}/ws?${query.toString()}`, target.access);
   let stopped = false;
   let socket: WebSocket | null = null;
@@ -299,9 +308,34 @@ export function createPreviewStreamClient(
   let failures = 0;
   let control: PreviewStreamControl | null = null;
   let fileChooser: string | null = null;
+  const frameIntervalMs = Math.max(0, target.minFrameIntervalMs ?? 0);
+  // Paced acks owed on the current socket, released one per interval.
+  let pendingAcks = 0;
+  let ackTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearPendingAcks = () => {
+    pendingAcks = 0;
+    if (ackTimer !== null) clearTimeout(ackTimer);
+    ackTimer = null;
+  };
+  const releaseAck = () => {
+    ackTimer = null;
+    if (pendingAcks === 0) return;
+    pendingAcks -= 1;
+    if (socket?.readyState === WebSocket.OPEN) socket.send(ACK_MESSAGE);
+    if (pendingAcks > 0) ackTimer = setTimeout(releaseAck, frameIntervalMs);
+  };
+  const acknowledgeFrame = (ws: WebSocket) => {
+    if (frameIntervalMs === 0) {
+      ws.send(ACK_MESSAGE);
+      return;
+    }
+    pendingAcks += 1;
+    ackTimer ??= setTimeout(releaseAck, frameIntervalMs);
+  };
 
   const connect = () => {
     if (stopped) return;
+    clearPendingAcks();
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     socket = ws;
@@ -315,7 +349,7 @@ export function createPreviewStreamClient(
       if (socket !== ws) return;
       if (event.data instanceof ArrayBuffer) {
         failures = 0;
-        ws.send(ACK_MESSAGE);
+        acknowledgeFrame(ws);
         events.onFrame(event.data);
         return;
       }
@@ -435,6 +469,7 @@ export function createPreviewStreamClient(
       if (socket !== ws) return;
       socket = null;
       control = null;
+      clearPendingAcks();
       if (opened) events.onConnectedChange(false);
       if (stopped) return;
       if (event.code === 4404) {
@@ -478,6 +513,7 @@ export function createPreviewStreamClient(
     stop: () => {
       stopped = true;
       if (retryTimer !== null) clearTimeout(retryTimer);
+      clearPendingAcks();
       const ws = socket;
       socket = null;
       control = null;

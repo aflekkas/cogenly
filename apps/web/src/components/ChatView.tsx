@@ -4,6 +4,7 @@ import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveDraftHeroState,
+  resolveEmptyServerThreadHero,
   shouldDockDraftHeroForSubmission,
   resolveServerThreadError,
   resolveVisibleWorktreeSetup,
@@ -261,6 +262,7 @@ import { previewRuntimeTabId } from "../browser/previewRuntimeTabId";
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
 import { usePreviewSession } from "./preview/usePreviewSession";
+import { FloatingBrowserPreview } from "./preview/FloatingBrowserPreview";
 import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
 import { RightPanelTabs, type RightPanelAddOption } from "./RightPanelTabs";
@@ -283,6 +285,7 @@ import {
   DownloadIcon,
   GitBranchIcon,
   ShieldQuestionIcon,
+  SquareIcon,
   TargetIcon,
   WifiOffIcon,
 } from "lucide-react";
@@ -401,6 +404,7 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { ThreadHeroHeadline } from "./chat/ThreadHeroHeadline";
 import { CollapsePresence, useExtendedAfterFrame } from "./chat/StateTransition";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
@@ -656,7 +660,16 @@ async function runCatching(
   }
 }
 
-function useDraftHeroLayoutTransition(isDraftHeroState: boolean, animationDurationMs: number) {
+/**
+ * Glides the composer between the centred hero and the docked layout.
+ * `animateEnter` false lands in the hero without a glide: an empty thread
+ * reaches it when its detail loads, which is not a change the user made.
+ */
+function useDraftHeroLayoutTransition(
+  isDraftHeroState: boolean,
+  animationDurationMs: number,
+  animateEnter = true,
+) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
   const previousStateRef = useRef(isDraftHeroState);
@@ -686,6 +699,7 @@ function useDraftHeroLayoutTransition(isDraftHeroState: boolean, animationDurati
     const previousComposerRect = previousComposerRectRef.current;
     if (
       stateChanged &&
+      (animateEnter || !isDraftHeroState) &&
       readPanelAnimationsActive() &&
       !mobileComposerTransitionActive &&
       transitionGroup &&
@@ -717,7 +731,7 @@ function useDraftHeroLayoutTransition(isDraftHeroState: boolean, animationDurati
     }
     previousStateRef.current = isDraftHeroState;
     previousComposerRectRef.current = nextComposerRect;
-  }, [animationDurationMs, isDraftHeroState]);
+  }, [animateEnter, animationDurationMs, isDraftHeroState]);
 
   return {
     attachTransitionGroup: attachTransitionGroupRef,
@@ -1915,7 +1929,8 @@ export default function ChatView(props: ChatViewProps) {
         actions: (
           <Button
             size="xs"
-            variant="ghost"
+            variant="outline"
+            aria-label={`Cancel cloning ${name}`}
             onClick={() =>
               void runProjectCloneActionStable("Failed to cancel clone", () =>
                 cancelProjectClone({ environmentId, input: { projectId } }),
@@ -3360,21 +3375,41 @@ export default function ChatView(props: ChatViewProps) {
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null);
   const draftHeroDockRequested =
     activeThreadKey !== null && dockedDraftHeroThreadKey === activeThreadKey;
-  const isDraftHeroState = resolveDraftHeroState({
-    isLocalDraftThread,
-    hasTimelineEntries: timelineEntries.length > 0,
-    isWorking,
-    draftHeroDockRequested,
-    backgroundSubmissionPending,
-    hasWorktreeSetupCard: worktreeSetup !== null,
-  });
+  // A thread nobody has written in yet opens like a new one, with its own
+  // read-only headline (ThreadHeroHeadline) over the centred composer.
+  const isEmptyServerThreadHero =
+    !backgroundSubmissionPending &&
+    resolveEmptyServerThreadHero({
+      isServerThread,
+      hasOwnEmptyState: activeThreadKind === "agentConversation" || embedded !== undefined,
+      hasTimelineEntries: timelineEntries.length > 0,
+      isWorking,
+      hasHistoryToLoad: threadHistoryControls !== undefined,
+      hasWorktreeSetupCard: worktreeSetup !== null,
+      draftHeroDockRequested,
+      shell: activeThreadShell,
+    });
+  const isDraftHeroState =
+    isEmptyServerThreadHero ||
+    resolveDraftHeroState({
+      isLocalDraftThread,
+      hasTimelineEntries: timelineEntries.length > 0,
+      isWorking,
+      draftHeroDockRequested,
+      backgroundSubmissionPending,
+      hasWorktreeSetupCard: worktreeSetup !== null,
+    });
   const embeddedEmptyStateVisible =
     timelineEntries.length === 0 && !isWorking && !threadDetailLoading && !isDraftHeroState;
   const {
     attachTransitionGroup: attachDraftHeroTransitionGroup,
     attachComposerAnchor: attachDraftHeroComposerAnchor,
     captureComposerRect: captureDraftHeroComposerRect,
-  } = useDraftHeroLayoutTransition(isDraftHeroState, LAYOUT_MOTION_DURATION);
+  } = useDraftHeroLayoutTransition(
+    isDraftHeroState,
+    LAYOUT_MOTION_DURATION,
+    !isEmptyServerThreadHero,
+  );
   const { turnDiffSummaries } = useTurnDiffSummaries(serverProjection);
 
   /**
@@ -4182,7 +4217,6 @@ export default function ChatView(props: ChatViewProps) {
     else useBottomPanelStore.getState().setOpen(activeThreadRef, true);
   };
   const showTerminalRunStable = useStableCallback(showTerminalRun);
-  const [bottomPanelActivity, setBottomPanelActivity] = useState(false);
   // What glides with the panel's top edge on open and close. A timeline
   // following its end moves up with the panel; otherwise only the composer
   // does. A centred draft composer moves half as far.
@@ -5552,10 +5586,12 @@ export default function ChatView(props: ChatViewProps) {
       actions: (
         <Button
           size="xs"
-          variant="ghost"
+          variant="outline"
+          aria-label={isStoppingBackgroundWork ? undefined : "Stop background work"}
           disabled={!canOperateThread || isStoppingBackgroundWork}
           onClick={() => void handleStopBackgroundWorkStable()}
         >
+          <SquareIcon className="fill-current" aria-hidden="true" />
           {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
         </Button>
       ),
@@ -8950,7 +8986,6 @@ export default function ChatView(props: ChatViewProps) {
       ? {
           bottomPanel: {
             open: bottomPanelOpen,
-            activity: bottomPanelActivity,
             shortcutLabel: shortcutLabelForCommand(keybindings, "terminal.toggle"),
             onToggle: toggleBottomPanelStable,
           },
@@ -9372,12 +9407,21 @@ export default function ChatView(props: ChatViewProps) {
                           forceExpandedMobileComposer ? "headline" : undefined
                         }
                       >
-                        <DraftHeroHeadline
-                          draftId={draftId}
-                          activeProjectRef={activeProjectRef}
-                          activeProjectTitle={activeProject?.title ?? null}
-                          surface={activeThreadSurface}
-                        />
+                        {isEmptyServerThreadHero && activeThreadShell ? (
+                          <ThreadHeroHeadline
+                            thread={activeThreadShell}
+                            project={activeProject}
+                            isChat={activeThreadKind === "chat"}
+                            isScratch={activeProjectIsScratch}
+                          />
+                        ) : (
+                          <DraftHeroHeadline
+                            draftId={draftId}
+                            activeProjectRef={activeProjectRef}
+                            activeProjectTitle={activeProject?.title ?? null}
+                            surface={activeThreadSurface}
+                          />
+                        )}
                       </div>
                     </div>
                   ) : null}
@@ -9669,6 +9713,12 @@ export default function ChatView(props: ChatViewProps) {
             {canOperatePreview && activeThreadRef && activeEnvironmentServerBrowser ? (
               <PreviewSessionSync threadRef={activeThreadRef} />
             ) : null}
+            {embedded ? null : (
+              <FloatingBrowserPreview
+                activeThreadRef={activeThreadRef}
+                composerElement={isDraftHeroState ? null : composerOverlayElement}
+              />
+            )}
 
             <AlertDialog open={branchRestoreConfirmOpen} onOpenChange={setBranchRestoreConfirmOpen}>
               <AlertDialogPopup>
@@ -9714,7 +9764,6 @@ export default function ChatView(props: ChatViewProps) {
             onAddTerminalContext={addTerminalContextToDraftStable}
             getMotionTargets={getBottomPanelMotionTargetsStable}
             runResolverRef={bottomPanelRunResolverRef}
-            onActivityChange={setBottomPanelActivity}
           />
         ) : null}
       </div>

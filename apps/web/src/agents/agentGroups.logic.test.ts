@@ -1,3 +1,4 @@
+import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
 import { type EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -5,7 +6,11 @@ import {
   projectLabelKey,
   type EnvironmentProjectLabel,
 } from "../projectLabels/projectLabels.logic";
-import { groupAgentsByProject, NO_PROJECT_GROUP_KEY } from "./agentGroups.logic";
+import {
+  groupAgentsByProject,
+  NO_PROJECT_GROUP_KEY,
+  orderAgentsForList,
+} from "./agentGroups.logic";
 
 const env = "env" as EnvironmentId;
 const other = "other" as EnvironmentId;
@@ -98,5 +103,51 @@ describe("groupAgentsByProject", () => {
 
   it("returns no groups for no agents", () => {
     expect(groupAgentsByProject({ agents: [], folders }).groups).toEqual([]);
+  });
+});
+
+describe("orderAgentsForList", () => {
+  const ordered = (agents: ReadonlyArray<{ id: string; orderKey: string | null }>) =>
+    orderAgentsForList(agents).map((entry) => entry.id);
+
+  it("leads with unarranged agents in their given order, then arranged ones by key", () => {
+    expect(
+      ordered([
+        { id: "arranged-late", orderKey: "t" },
+        { id: "new", orderKey: null },
+        { id: "arranged-early", orderKey: "f" },
+        { id: "newer", orderKey: null },
+      ]),
+    ).toEqual(["new", "newer", "arranged-early", "arranged-late"]);
+  });
+
+  it("draws a planned move where it was dropped, keying a keyless group once", () => {
+    const agents = [
+      { id: "a", orderKey: null as string | null },
+      { id: "b", orderKey: null as string | null },
+      { id: "c", orderKey: null as string | null },
+    ];
+    const keysById = () => new Map(agents.map((entry) => [entry.id, entry.orderKey]));
+    const apply = (writes: ReadonlyArray<{ id: string; orderKey: string }>) => {
+      for (const write of writes)
+        agents.find((entry) => entry.id === write.id)!.orderKey = write.orderKey;
+    };
+    // c dragged to the top: the keyless group is keyed in full.
+    const first = planPinnedReorder({
+      orderedIds: ["c", "a", "b"],
+      keysById: keysById(),
+      movedId: "c",
+    });
+    apply(first);
+    expect(ordered(agents)).toEqual(["c", "a", "b"]);
+    // Then a moved below b: one write between keyed neighbours.
+    const second = planPinnedReorder({
+      orderedIds: ["c", "b", "a"],
+      keysById: keysById(),
+      movedId: "a",
+    });
+    expect(second).toHaveLength(1);
+    apply(second);
+    expect(ordered(agents)).toEqual(["c", "b", "a"]);
   });
 });

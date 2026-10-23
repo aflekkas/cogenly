@@ -129,6 +129,33 @@ const make = Effect.gen(function* () {
       Effect.mapError(launchFailure),
     );
 
+  // The chat runs in the Scratch project, which puts a thread filed in a
+  // project in the project's own folder. Environments without Scratch (a data
+  // dir inside a checkout, as in dev worktrees) run it in the project's first
+  // linked repository instead; with neither there is nowhere to run it.
+  const chatProjectFor = (label: ProjectLabelWithRepositories) =>
+    managedFolders.ensureScratchProject.pipe(
+      Effect.map(({ projectId }) => projectId),
+      Effect.catchTags({
+        ScratchUnavailableError: (unavailable) =>
+          Effect.gen(function* () {
+            for (const repositoryId of label.repositoryIds) {
+              const row = yield* projects
+                .get(repositoryId)
+                .pipe(Effect.orElseSucceed(() => Option.none<ProjectStore.ProjectRow>()));
+              if (Option.isSome(row)) return row.value.projectId;
+            }
+            return yield* new OrchestrationDispatchCommandError({
+              message: `Add a repository to ${label.name} to talk to it on this environment.`,
+              cause: unavailable,
+            });
+          }),
+      }),
+      Effect.mapError((error) =>
+        error._tag === "OrchestrationDispatchCommandError" ? error : launchFailure(error),
+      ),
+    );
+
   const createChat = (label: ProjectLabelWithRepositories, input: ProjectChatEnsureInput) =>
     Effect.gen(function* () {
       const first = projectChatThreadIdFor(label.id);
@@ -140,9 +167,7 @@ const make = Effect.gen(function* () {
         existing === null
           ? first
           : ThreadId.make(`${first}:${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}`);
-      const { projectId } = yield* managedFolders.ensureScratchProject.pipe(
-        Effect.mapError(launchFailure),
-      );
+      const projectId = yield* chatProjectFor(label);
       yield* launch
         .launch({
           surface: "chat",

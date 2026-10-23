@@ -357,6 +357,14 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     ["Delete", "Deleting", "Deleted", "a project folder"],
     "project-label-delete",
   ),
+  t3_project_label_archive: tool(
+    ["Archive", "Archiving", "Archived", "a project folder"],
+    "project-label-update",
+  ),
+  t3_project_label_unarchive: tool(
+    ["Unarchive", "Unarchiving", "Unarchived", "a project folder"],
+    "project-label-update",
+  ),
   t3_project_label_link_source: tool(
     ["Link", "Linking", "Linked", "a source to a project"],
     "project-label-link",

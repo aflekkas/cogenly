@@ -47,15 +47,17 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentRunsView } from "./AgentRunsView";
 import {
+  BOTTOM_PANEL_COMPACT_HEIGHT,
   bottomPanelMaxHeight,
   bottomPanelTabs,
   bottomPanelTabStatus,
-  bottomPanelToggleShowsActivity,
   clampBottomPanelHeight,
   findRunForToolCall,
   resolveActiveBottomPanelTab,
+  runGroupOpen,
   type BottomPanelAgent,
   type BottomPanelTab,
+  type RunGroup,
 } from "./bottomPanel.logic";
 
 /** Something that glides with the panel's top edge, `shift` of its height (½ for centred content). */
@@ -209,8 +211,6 @@ export interface BottomTerminalPanelProps {
   readonly getMotionTargets: () => ReadonlyArray<BottomPanelMotionTarget>;
   /** Filled in for the timeline, so a "Terminal run" row can open its command. */
   readonly runResolverRef: MutableRefObject<BottomPanelRunResolver | null>;
-  /** Reports when the header toggle should show its dot: a command runs while the panel is closed. */
-  readonly onActivityChange: (activity: boolean) => void;
 }
 
 /**
@@ -241,9 +241,6 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
     runResolverRef.current = (call) => findRunForToolCall(allTabs, call);
   }, [allTabs, runResolverRef]);
   const open = panelState.open;
-  const activity = bottomPanelToggleShowsActivity(open, tabs);
-  const onActivityChange = useStableCallback(props.onActivityChange);
-  useEffect(() => onActivityChange(activity), [activity, onActivityChange]);
 
   const [maxHeight, setMaxHeight] = useState(() =>
     bottomPanelMaxHeight({
@@ -466,6 +463,8 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
             ) : null
           }
           selectedRunId={panelState.selectedRunByTabId?.[activeTab.id]}
+          runGroupsOpen={panelState.runGroupsOpen}
+          compact={height < BOTTOM_PANEL_COMPACT_HEIGHT}
           canOperate={canOperate}
           visible={open}
           focusRequestId={props.focusRequestId}
@@ -560,6 +559,8 @@ const AgentTabContent = memo(function AgentTabContent(props: {
   tab: BottomPanelTab;
   agentSwitcher: ReactNode;
   selectedRunId: string | undefined;
+  runGroupsOpen: Partial<Record<RunGroup, boolean>> | undefined;
+  compact: boolean;
   canOperate: boolean;
   visible: boolean;
   focusRequestId: number;
@@ -574,6 +575,17 @@ const AgentTabContent = memo(function AgentTabContent(props: {
   );
   const runs = tab.runs.length > 0 ? tab.runs : EMPTY_ENTRIES;
   const selected = resolveSelected(runs, props.selectedRunId);
+  const groupCounts = {
+    stored: props.runGroupsOpen,
+    liveCount: tab.liveRunCount,
+    finishedCount: runs.length - tab.liveRunCount,
+  };
+  const liveOpen = runGroupOpen("live", groupCounts);
+  const finishedOpen = runGroupOpen("finished", groupCounts);
+  const groupsOpen = useMemo(
+    () => ({ live: liveOpen, finished: finishedOpen }),
+    [finishedOpen, liveOpen],
+  );
 
   // Only a user request moves keyboard focus, and only into the run it was
   // made for: an agent starting a command never pulls it out of the composer.
@@ -610,6 +622,11 @@ const AgentTabContent = memo(function AgentTabContent(props: {
         onStop={props.onStop}
         onAddTerminalContext={props.onAddTerminalContext}
         listHeader={props.agentSwitcher}
+        compact={props.compact}
+        groupsOpen={groupsOpen}
+        onGroupOpenChange={(group, open) =>
+          useBottomPanelStore.getState().setRunGroupOpen(parentRef, group, open)
+        }
       />
     </div>
   );

@@ -11,11 +11,12 @@ import {
   composerProjectFolderId,
   groupRepositoriesByProject,
   heroProjectSuffix,
-  isRepositoryGroupOpen,
   projectDefaultRepository,
+  repositoriesInProject,
   threadProjectMeta,
   toggleCollapsedGroup,
   workDraftFolderId,
+  workHeroBreadcrumb,
   workHeroLine,
 } from "./projectMeta.logic";
 
@@ -204,6 +205,21 @@ describe("projectDefaultRepository", () => {
   it("is null for a project with no repositories", () => {
     expect(pick(mind, "loose")).toBeNull();
   });
+
+  it("picks among repositories in no project for No project", () => {
+    const none = (current: string | null) =>
+      projectDefaultRepository({
+        items: [...items, repo("scratchpad", 50)],
+        refsOf: (item) => item.refs,
+        project: null,
+        projects,
+        isCurrent: (item) => item.name === current,
+        lastActiveAt: (item) => item.activeAt,
+      })?.name ?? null;
+    // "shared" is current, but in a project: the latest loose one wins.
+    expect(none("shared")).toBe("loose");
+    expect(none("scratchpad")).toBe("scratchpad");
+  });
 });
 
 describe("workDraftFolderId", () => {
@@ -245,24 +261,36 @@ describe("workDraftFolderId", () => {
   });
 });
 
-describe("repository picker groups", () => {
-  const open = (collapsedKeys: string[], searching = false, hasMatches = true) =>
-    isRepositoryGroupOpen({ groupKey: "env:spawn", collapsedKeys, searching, hasMatches });
-
-  it("starts open and remembers a collapse", () => {
-    expect(open([])).toBe(true);
-    expect(open(["env:spawn"])).toBe(false);
-    expect(open(["env:bartr"])).toBe(true);
-  });
-
-  it("opens a collapsed group while a search matches inside it", () => {
-    expect(open(["env:spawn"], true, true)).toBe(true);
-    expect(open([], true, false)).toBe(false);
-  });
-
+describe("toggleCollapsedGroup", () => {
   it("toggles one group without touching the others", () => {
     expect(toggleCollapsedGroup(["env:bartr"], "env:spawn")).toEqual(["env:bartr", "env:spawn"]);
     expect(toggleCollapsedGroup(["env:bartr", "env:spawn"], "env:spawn")).toEqual(["env:bartr"]);
+  });
+});
+
+describe("repositoriesInProject", () => {
+  const repo = (name: string, environmentId: EnvironmentId = env) => ({
+    name,
+    refs: [{ environmentId, projectId: ProjectId.make(name) }],
+  });
+  const items = [repo("loose"), repo("platform"), repo("shared"), repo("platform", other)];
+  const scope = (project: EnvironmentProjectLabel | null) =>
+    repositoriesInProject({ items, refsOf: (item) => item.refs, project, projects }).map(
+      (item) => `${item.refs[0]?.environmentId}:${item.name}`,
+    );
+
+  it("lists only the picked project's repositories, on its machine", () => {
+    expect(scope(spawn)).toEqual(["env:platform", "env:shared"]);
+    expect(scope(bartr)).toEqual(["env:shared"]);
+    expect(scope(remote)).toEqual(["other:platform"]);
+  });
+
+  it("lists nothing for a project without repositories", () => {
+    expect(scope(mind)).toEqual([]);
+  });
+
+  it("lists only repositories in no project without one", () => {
+    expect(scope(null)).toEqual(["env:loose"]);
   });
 });
 
@@ -276,36 +304,75 @@ describe("workHeroLine", () => {
       ...input,
     });
 
-  it("offers the project folder beside a project's repository", () => {
+  it("offers the no-repository row beside a repository, in a project or not", () => {
     expect(line({ hasProject: true })).toEqual({
-      subline: "repository",
       projectFolderRow: "offered",
+      projectFolderRowLabel: "No repository (project folder)",
+    });
+    expect(line({})).toEqual({
+      projectFolderRow: "offered",
+      projectFolderRowLabel: "No repository",
     });
   });
 
-  it("does not offer the project folder where Work cannot run without a repository", () => {
+  it("does not offer it where Work cannot run without a repository", () => {
     expect(line({ hasProject: true, canStartWithoutRepository: false }).projectFolderRow).toBe(
       "hidden",
     );
   });
 
-  it("says Work in a project without a repository runs in its folder", () => {
-    expect(line({ hasProject: true, hasRepository: false })).toEqual({
-      subline: "project-folder",
-      projectFolderRow: "selected",
+  it("checks it for Work without a repository", () => {
+    expect(line({ hasProject: true, hasRepository: false }).projectFolderRow).toBe("selected");
+    expect(line({ hasRepository: false }).projectFolderRow).toBe("selected");
+  });
+
+  it("leaves chats without one", () => {
+    expect(line({ isChat: true, hasProject: true }).projectFolderRow).toBe("hidden");
+  });
+});
+
+describe("workHeroBreadcrumb", () => {
+  it("names a project and its repository", () => {
+    expect(
+      workHeroBreadcrumb({
+        projectName: "Spawn Partners",
+        repositoryName: "aflekkas/cogenly",
+        hasRepository: true,
+      }),
+    ).toEqual({
+      project: { text: "Spawn Partners", placeholder: false },
+      repository: { text: "aflekkas/cogenly", placeholder: false },
+      label: "What should we build in Spawn Partners / aflekkas/cogenly?",
     });
   });
 
-  it("lets Work without a project pick one, with or without a repository", () => {
-    expect(line({}).subline).toBe("pick-project");
-    expect(line({ hasRepository: false }).subline).toBe("pick-either");
-    expect(line({ hasRepository: false }).projectFolderRow).toBe("hidden");
+  it("reads No project for a repository in none", () => {
+    const crumb = workHeroBreadcrumb({
+      projectName: null,
+      repositoryName: "loose",
+      hasRepository: true,
+    });
+    expect(crumb.project).toEqual({ text: "No project", placeholder: true });
+    expect(crumb.label).toBe("What should we build in No project / loose?");
   });
 
-  it("leaves chats without a line", () => {
-    expect(line({ isChat: true, hasProject: true })).toEqual({
-      subline: "none",
-      projectFolderRow: "hidden",
-    });
+  it("names Work without a repository by where it runs", () => {
+    expect(
+      workHeroBreadcrumb({
+        projectName: "Mind",
+        repositoryName: "No project",
+        hasRepository: false,
+      }).label,
+    ).toBe("What should we build in Mind / project folder?");
+    expect(
+      workHeroBreadcrumb({ projectName: "  ", repositoryName: null, hasRepository: false }).label,
+    ).toBe("What should we build in No project / no repository?");
+  });
+
+  it("holds a placeholder while the repository is unknown", () => {
+    expect(
+      workHeroBreadcrumb({ projectName: null, repositoryName: null, hasRepository: true })
+        .repository,
+    ).toEqual({ text: "a repository", placeholder: true });
   });
 });

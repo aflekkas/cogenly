@@ -10,11 +10,7 @@ import {
   SquarePenIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import {
-  ThreadTerminalStatusButton,
-  ThreadStatusLabel,
-  ThreadWorktreeIndicator,
-} from "./ThreadStatusIndicators";
+import { ThreadStatusLabel, ThreadWorktreeIndicator } from "./ThreadStatusIndicators";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { useAtomValue } from "@effect/atom-react";
@@ -73,7 +69,6 @@ import {
   useThreadShellsForProjectRefs,
   waitForProjectRemoval,
 } from "../state/entities";
-import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useThreadDiscoveredPorts } from "../portDiscoveryState";
 import { openDiscoveredPort } from "./preview/openDiscoveredPort";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -397,10 +392,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const localLastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const lastVisitedAt = resolveThreadLastVisitedAt(thread.lastVisitedAt, localLastVisitedAt);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
-  const runningTerminalIds = useThreadRunningTerminalIds({
-    environmentId: thread.environmentId,
-    threadId: thread.id,
-  });
   const isMobile = useIsMobile();
   const discoveredPorts = useThreadDiscoveredPorts({
     environmentId: thread.environmentId,
@@ -737,11 +728,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             </Tooltip>
           )}
           <ThreadWorktreeIndicator thread={thread} />
-          <ThreadTerminalStatusButton
-            threadRef={threadRef}
-            terminalIds={runningTerminalIds}
-            onThreadActivate={navigateToThread}
-          />
           <div
             className={`flex min-w-12 justify-end ${
               isRemoteThread ? "max-sm:min-w-24" : "max-sm:min-w-20"

@@ -30,6 +30,7 @@ import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarNavRail } from "./sidebar/SidebarNavRail";
 import { NavigationHistoryButtons, NavigationHistoryShortcuts } from "./NavigationHistoryControls";
+import { usePageTitleSlotStore } from "./WorkspacePageTitle";
 import { resolveWorkspaceTitlebarLayout } from "../workspaceTitlebar";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { routeHidesListColumn, SIDEBAR_TOGGLE_DISABLED_LABEL } from "./sidebar/listColumnRoutes";
@@ -39,6 +40,7 @@ import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
 import { settingsReturnHref, SpaceRouteMemoryTracker } from "./sidebar/modes/spaceRouteMemory";
 import {
   mainColumnCrampedBesidePanel,
+  RIGHT_PANEL_MIN_WIDTH_PX,
   rightPanelFitsAgain,
   shouldReopenAutoClosedPanel,
   useListColumnLayoutStore,
@@ -54,12 +56,9 @@ import {
 } from "./sidebar/ListColumnPeek";
 import { listColumnPeekAvailable } from "./sidebar/listColumnPeek.logic";
 import { useProjects } from "../state/entities";
-import {
-  clampThreadSidebarWidth,
-  resolveInitialThreadSidebarWidth,
-  resolveThreadSidebarMaximumWidth,
-  resolveThreadSidebarMinimumWidth,
-} from "./threadSidebarWidth";
+import { resolveThreadSidebarMinimumWidth } from "./threadSidebarWidth";
+import { useThreadSidebarWidth } from "../hooks/useThreadSidebarWidth";
+import { EdgeResizeHandle } from "./EdgeResizeHandle";
 import { Sidebar, SidebarProvider, SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -361,24 +360,24 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     navRailVisible,
     macosWindowControlsVisible: isMacosDesktop && !isWindowFullscreen,
   });
-  const sidebarMinimumWidth = resolveThreadSidebarMinimumWidth(brandWidth);
-  // The sidebar width is the list column alone; the rail takes its own room.
-  const sidebarMaximumWidth = resolveThreadSidebarMaximumWidth(
-    viewportWidth - titlebarLayout.navRailWidthPx,
-    sidebarMinimumWidth,
-  );
   const windowControlsInsetStyle = titlebarLayout.windowControlsStyle as CSSProperties;
-  const listColumnWidth = clampThreadSidebarWidth(
-    resolveInitialThreadSidebarWidth(null, viewportWidth),
-    sidebarMinimumWidth,
-    sidebarMaximumWidth,
-  );
   // Each mode remembers its own open or closed list column, and a page without
   // the column leaves every mode's memory alone.
   const preferredOpen = useListColumnLayoutStore((store) => store.openByMode[sidebarMode]);
   const autoCollapsed = useListColumnLayoutStore((store) => store.autoCollapsed);
   const inlineRightPanelWidth = useListColumnLayoutStore((store) => store.inlineRightPanelWidth);
   const listColumnOpen = preferredOpen && !autoCollapsed;
+  // Only a docked desktop column resizes: not the sheet, a hidden or a collapsed one.
+  const listColumnResizable = !isMobile && listColumnOpen && !listSidebarHidden;
+  // The sidebar width is the list column alone; the rail takes its own room.
+  const listColumnResize = useThreadSidebarWidth({
+    viewportWidth,
+    availableWidth: viewportWidth - titlebarLayout.navRailWidthPx,
+    minimumWidth: resolveThreadSidebarMinimumWidth(brandWidth),
+    rightPanelMinimumWidth: inlineRightPanelWidth !== null ? RIGHT_PANEL_MIN_WIDTH_PX : null,
+    enabled: listColumnResizable,
+  });
+  const listColumnWidth = listColumnResize.width;
   const mainColumnCramped = mainColumnCrampedBesidePanel({
     viewportWidth,
     navRailWidth: titlebarLayout.navRailWidthPx,
@@ -409,6 +408,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (panelOutOfRoom) closeForRoom();
   }, [panelOutOfRoom, closeForRoom]);
+  // The page title moves into the list column's header while it is docked.
+  const pageTitleDocked = navRailVisible && listColumnOpen && !listSidebarHidden;
+  useEffect(() => {
+    usePageTitleSlotStore.getState().setDocked(pageTitleDocked);
+  }, [pageTitleDocked]);
   const onListColumnOpenChange = (open: boolean) =>
     useListColumnLayoutStore.getState().applyOpenChange(sidebarMode, open);
   const sidebarProviderStyle = {
@@ -515,6 +519,15 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
             <ThreadSidebar />
           )}
         </div>
+        {/* Positioned against the fixed sidebar container, on its right edge. */}
+        {listColumnResizable ? (
+          <EdgeResizeHandle
+            edge="right"
+            aria-label="Resize sidebar"
+            handlers={listColumnResize.handlers}
+            onDoubleClick={listColumnResize.reset}
+          />
+        ) : null}
       </ListColumnSidebar>
       {children}
       {/* Without the rail, or after the macOS traffic lights beside it. A page

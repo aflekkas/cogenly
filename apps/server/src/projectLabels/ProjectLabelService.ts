@@ -39,6 +39,16 @@ export class ProjectLabelService extends Context.Service<
     readonly read: (
       id: ProjectLabelId,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    /**
+     * Reads a project that may take new threads or repositories, failing
+     * `archived` otherwise. moveThread and linkRepository enforce it
+     * themselves; callers that create something before filing it (a launch,
+     * fork, clone or new repository) check first so a refusal leaves nothing
+     * behind.
+     */
+    readonly readActive: (
+      id: ProjectLabelId,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly subscribeChanges: Effect.Effect<Stream.Stream<void>, never, Scope.Scope>;
     readonly moveThread: (
       input: MoveThreadProjectFolderInput,
@@ -52,6 +62,18 @@ export class ProjectLabelService extends Context.Service<
       input: ProjectLabelUpdateInput,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly delete: (id: ProjectLabelId) => Effect.Effect<{ deleted: boolean }, ProjectLabelError>;
+    /**
+     * Archives the project: it leaves pickers but keeps its threads, chat,
+     * repositories and filing, and refuses new threads and repositories until
+     * unarchived. Archiving an archived project keeps its date.
+     */
+    readonly archive: (
+      id: ProjectLabelId,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    /** Brings an archived project back; a no-op for an active one. */
+    readonly unarchive: (
+      id: ProjectLabelId,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly linkRepository: (
       input: ProjectLabelRepository,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
@@ -107,7 +129,7 @@ const make = Effect.gen(function* () {
       : new ProjectLabelError({ operation, reason: "storage", cause });
   const missing = (operation: string) => new ProjectLabelError({ operation, reason: "not_found" });
   const readLabels = (id?: ProjectLabelId) =>
-    sql`SELECT label_id AS id, name, color, description, instructions, project_chat_thread_id AS projectChatThreadId, created_at AS createdAt, updated_at AS updatedAt,
+    sql`SELECT label_id AS id, name, color, description, instructions, project_chat_thread_id AS projectChatThreadId, archived_at AS archivedAt, created_at AS createdAt, updated_at AS updatedAt,
     (SELECT json_group_array(repository_id) FROM (SELECT repository_id FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositories
     , (SELECT json_group_array(json(source)) FROM (SELECT json_object('kind', kind, 'owner', owner, 'repo', repo) AS source FROM label_source_links s WHERE s.label_id = l.label_id ORDER BY kind, owner, repo)) AS sources
     , (SELECT count(*) FROM effective_thread_project_folders f
@@ -140,6 +162,7 @@ const make = Effect.gen(function* () {
               ...row,
               color: row.color ?? undefined,
               description: row.description ?? undefined,
+              archivedAt: row.archivedAt ?? undefined,
               instructions: row.instructions ?? "",
               repositoryIds,
               sourceLinks,
@@ -157,6 +180,21 @@ const make = Effect.gen(function* () {
         const label = labels.find((l) => l.id === id);
         return label ? Effect.succeed({ label }) : Effect.fail(missing("get"));
       }),
+    );
+  // The one archive guard: everything that files into a project passes it.
+  const readActive = (id: ProjectLabelId) =>
+    get(id).pipe(
+      Effect.flatMap((found) =>
+        found.label.archivedAt === undefined
+          ? Effect.succeed(found)
+          : Effect.fail(
+              new ProjectLabelError({
+                operation: "readActive",
+                reason: "archived",
+                projectName: found.label.name,
+              }),
+            ),
+      ),
     );
   const requireThread = (threadId: ThreadId) =>
     sql<{
@@ -286,7 +324,9 @@ const make = Effect.gen(function* () {
       link ? "linkRepository" : "unlinkRepository",
       input,
       Effect.gen(function* () {
-        yield* get(input.labelId);
+        const { label } = yield* get(input.labelId);
+        if (link && !label.repositoryIds.includes(input.repositoryId))
+          yield* readActive(input.labelId);
         if (link) {
           const rows =
             yield* sql`SELECT project_id FROM projection_projects WHERE project_id = ${input.repositoryId} AND deleted_at IS NULL`;
@@ -322,7 +362,10 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireThread(input.threadId);
         if (input.folderId !== null) {
-          yield* get(input.folderId);
+          // Only filing into an archived project is refused: unfiling, moving
+          // out, and re-filing where the thread already is stay allowed.
+          const current = (yield* tags(input.threadId)).labels[0]?.labelId;
+          yield* (current === input.folderId ? get : readActive)(input.folderId);
           // A chat with turns moves by forking, not by re-parenting: its
           // scratch working directory no longer matches the project dir, so
           // the history moves to a new chat through a context transfer
@@ -365,6 +408,7 @@ const make = Effect.gen(function* () {
     subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
     list,
     read: get,
+    readActive,
     subscribe: () => subscribe(list, membershipLifecycle),
     getThreadLabels,
     subscribeThreadLabels: (threadId) =>
@@ -418,6 +462,27 @@ const make = Effect.gen(function* () {
           const rows =
             yield* sql`DELETE FROM project_labels WHERE label_id = ${id} RETURNING label_id`;
           return { deleted: rows.length > 0 };
+        }),
+      ),
+    archive: (id) =>
+      mutate(
+        "archive",
+        { id },
+        Effect.gen(function* () {
+          yield* get(id);
+          const at = yield* now;
+          yield* sql`UPDATE project_labels SET archived_at = ${at}, updated_at = ${at} WHERE label_id = ${id} AND archived_at IS NULL`;
+          return yield* get(id);
+        }),
+      ),
+    unarchive: (id) =>
+      mutate(
+        "unarchive",
+        { id },
+        Effect.gen(function* () {
+          yield* get(id);
+          yield* sql`UPDATE project_labels SET archived_at = NULL, updated_at = ${yield* now} WHERE label_id = ${id} AND archived_at IS NOT NULL`;
+          return yield* get(id);
         }),
       ),
     linkRepository: (input) => repository(input, true),

@@ -39,7 +39,7 @@
   background-color: var(--state-hover-fill);
 }
 
-.project-card-row:focus-visible {
+.project-card-row:focus-visible:not(:root[data-input-modality="pointer"] *) {
   box-shadow: inset 0 0 0 2px var(--ring);
 }
 
@@ -142,7 +142,7 @@
   border-color: var(--input);
 }
 
-.project-chat-chip:focus-visible {
+.project-chat-chip:focus-visible:not(:root[data-input-modality="pointer"] *) {
   box-shadow: 0 0 0 2px var(--ring);
 }
 

@@ -6,6 +6,24 @@ import {
   type EnvironmentProjectLabel,
 } from "../projectLabels/projectLabels.logic";
 
+/**
+ * The Agents list's order, top to bottom: agents never arranged first, in the
+ * order they came in (most recent first), then arranged agents by their order
+ * key. A drag or alt+arrow writes keys with `planPinnedReorder` over a group's
+ * drawn order, so keys rise down the list and a new agent leads its group.
+ */
+export function orderAgentsForList<A extends { readonly orderKey?: string | null | undefined }>(
+  agents: ReadonlyArray<A>,
+): A[] {
+  const keyless = agents.filter((agent) => agent.orderKey == null);
+  const keyed = agents
+    .filter((agent) => agent.orderKey != null)
+    .toSorted((left, right) =>
+      left.orderKey! < right.orderKey! ? -1 : left.orderKey! > right.orderKey! ? 1 : 0,
+    );
+  return [...keyless, ...keyed];
+}
+
 /** The group for agents filed in no project, or in a folder that no longer exists. */
 export const NO_PROJECT_GROUP_KEY = "no-project";
 

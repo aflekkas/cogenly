@@ -83,6 +83,7 @@ import { ServerBrowserSurface, type ServerBrowserHandle } from "~/browser/Server
 import { pickMarkers } from "~/browser/serverBrowserPick";
 import { cn } from "~/lib/utils";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
+import { showBrowserTabInPanel } from "./floatingBrowserPreviewStore";
 import { usePreviewSession } from "./usePreviewSession";
 import { ZoomIndicator } from "./ZoomIndicator";
 import { AgentBrowserCursor } from "./AgentBrowserCursor";
@@ -306,6 +307,12 @@ export function PreviewView({
     setTitleForThreadUrl(threadRefRef.current, navUrl, navTitle, environmentHostname);
     // threadKey stands in for threadRef, whose identity churns on every thread update.
   }, [environmentHostname, latestHistoryUrl, navTitle, navUrl, threadKey]);
+
+  // The tab on screen here is the one the floating preview takes over once it is hidden.
+  useEffect(() => {
+    if (!visible || !tabId) return;
+    return showBrowserTabInPanel(threadRefRef.current, tabId);
+  }, [tabId, threadKey, visible]);
 
   const navigateToResolvedUrl = useCallback(
     async (resolvedUrl: string) => {

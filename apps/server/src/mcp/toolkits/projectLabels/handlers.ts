@@ -22,7 +22,10 @@ import * as McpToolAccess from "../../McpToolAccess.ts";
 import { ProjectLabelsToolkit } from "./tools.ts";
 const failure = (error: { reason: string; message: string }) =>
   new OrchestratorMcpFailure({
-    code: error.reason === "not_found" ? "invalid_request" : "orchestration_error",
+    code:
+      error.reason === "not_found" || error.reason === "archived"
+        ? "invalid_request"
+        : "orchestration_error",
     message: error.message,
   });
 // The server gate (ProjectLabelService.moveThread) refuses to re-parent a chat
@@ -133,6 +136,18 @@ export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;
       return yield* labels.delete(input.id).pipe(Effect.mapError(failure));
+    }),
+  ),
+  t3_project_label_archive: McpToolAccess.writes((input) =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      return yield* labels.archive(input.id).pipe(Effect.mapError(failure));
+    }),
+  ),
+  t3_project_label_unarchive: McpToolAccess.writes((input) =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      return yield* labels.unarchive(input.id).pipe(Effect.mapError(failure));
     }),
   ),
   t3_project_label_link_source: McpToolAccess.writes((input) =>

@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import {
+  partitionArchivedProjectLabels,
   projectLabelKey,
   scopedRepositoryKey,
   sortProjectLabels,
@@ -31,8 +32,15 @@ export function useEnvironmentProjectLabels(environmentId: EnvironmentId | null)
 }
 
 export interface ProjectLabelDirectory {
-  /** Every folder on the given environments, alphabetical. */
+  /**
+   * Every folder on the given environments, archived ones included,
+   * alphabetical. For naming what a thread is filed in; pickers use `active`.
+   */
   readonly labels: ReadonlyArray<EnvironmentProjectLabel>;
+  /** The folders that are not archived: what pickers and move menus offer. */
+  readonly active: ReadonlyArray<EnvironmentProjectLabel>;
+  /** Archived folders, for the Projects list's Archived filter. */
+  readonly archived: ReadonlyArray<EnvironmentProjectLabel>;
   readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
   /** `environmentId:repositoryId` → the one folder holding that repository. */
   readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
@@ -40,6 +48,8 @@ export interface ProjectLabelDirectory {
 
 const EMPTY_DIRECTORY: ProjectLabelDirectory = {
   labels: [],
+  active: [],
+  archived: [],
   byKey: new Map(),
   folderByRepository: new Map(),
 };
@@ -89,7 +99,8 @@ export function useProjectLabelDirectory(
                 );
               }
             }
-            return { labels: sorted, byKey, folderByRepository };
+            const { active, archived } = partitionArchivedProjectLabels(sorted);
+            return { labels: sorted, active, archived, byKey, folderByRepository };
           }).pipe(Atom.withLabel("project-label-directory")),
     [idsKey],
   );

@@ -24,8 +24,9 @@ export type ProjectChatThread =
   | { readonly status: "unavailable"; readonly reason: string };
 
 /**
- * The project chat, created on the first visit: the label names it once it
- * exists (`projectChatThreadId`); until then this asks the server for it once,
+ * The project's one persistent conversation, created on the first visit: the
+ * label names it once it exists (`projectChatThreadId`), so every visit and
+ * device opens the same thread; until then this asks the server for it once,
  * starting it on the model a new chat here would use.
  */
 export function useProjectChatThread(
@@ -40,33 +41,40 @@ export function useProjectChatThread(
   const configLoaded = useServerConfigs().has(environmentId);
   const modelSelection = useDefaultAgentModel(environmentId, null);
   const [ensured, setEnsured] = useState<ThreadId | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
-  const requested = useRef(false);
+  const [failure, setFailure] = useState<{ reason: string; attempt: string } | null>(null);
+  const requested = useRef<string | null>(null);
   const threadId = label?.projectChatThreadId ?? ensured;
   const labelId = label?.id ?? null;
+  // Where the chat could run changes with the linked repositories (an
+  // environment without Scratch runs it in one), so a new set asks again.
+  const attempt = label?.repositoryIds.join("\0") ?? "";
 
   useEffect(() => {
-    if (labelId === null || threadId !== null || requested.current) return;
+    if (labelId === null || threadId !== null || requested.current === attempt) return;
     if (!canEnsure || modelSelection === null) return;
-    requested.current = true;
+    requested.current = attempt;
     void ensure({ environmentId, input: { id: labelId, modelSelection } }).then((result) => {
       if (result._tag === "Success") {
         setEnsured(result.value.threadId);
       } else if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
-        setFailure(
-          error instanceof Error && error.message.trim().length > 0
-            ? error.message
-            : "Could not open the project chat.",
-        );
+        setFailure({
+          attempt,
+          reason:
+            error instanceof Error && error.message.trim().length > 0
+              ? error.message
+              : "Could not open the project chat.",
+        });
       }
     });
-  }, [canEnsure, ensure, environmentId, labelId, modelSelection, threadId]);
+  }, [attempt, canEnsure, ensure, environmentId, labelId, modelSelection, threadId]);
 
   if (threadId !== null) {
     return { status: "ready", threadRef: scopeThreadRef(environmentId, threadId) };
   }
-  if (failure !== null) return { status: "unavailable", reason: failure };
+  if (failure !== null && failure.attempt === attempt) {
+    return { status: "unavailable", reason: failure.reason };
+  }
   if (!canEnsure) {
     return {
       status: "unavailable",

@@ -66,8 +66,8 @@ function ProjectChatWelcome(props: {
           <FolderIcon aria-hidden className="size-3" />
           {props.note ?? (
             <span>
-              Project chat for <span className="font-medium text-foreground">{props.name}</span> ·
-              this thread stays with the project
+              <span className="font-medium text-foreground">{props.name}</span>’s conversation · it
+              picks up where you left off, on every device
             </span>
           )}
         </p>

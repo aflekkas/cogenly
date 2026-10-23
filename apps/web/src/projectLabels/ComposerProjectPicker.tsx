@@ -3,7 +3,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
 import { CheckIcon, FolderIcon, FolderMinusIcon, PlusIcon } from "lucide-react";
-import { Fragment, useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   ComposerControl,
@@ -42,6 +42,8 @@ import { HeroProjectSuffixText } from "./HeroProjectSuffix";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
 import { reportProjectFolderFailure, useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
+import { pickNoProjectForWork } from "./workNoProjectPicks";
+import { WorkHeroCrumbText } from "../components/chat/WorkHeroSentence";
 
 type ProjectOption =
   | {
@@ -87,16 +89,10 @@ export function ComposerProjectPicker(props: {
   /**
    * `hero` is the new-chat greeting's " · in <project>" tail: the same picker,
    * opened from the project's name, and nothing to click without a project.
-   * `headline` is the Work hero's "What should we build in <project>?".
-   * `subline` is the quiet "in a project…" under the Work hero's heading, for
-   * Work without a project yet.
+   * `headline` is the project half of the Work hero's "What should we build
+   * in <project> / <repo>?", reading "No project" without one.
    */
-  readonly appearance?: "toolbar" | "hero" | "headline" | "subline";
-  /**
-   * `subline` only: what follows the picker on its line, after a middle dot.
-   * Shown alone when no project can be picked here.
-   */
-  readonly trailing?: ReactNode;
+  readonly appearance?: "toolbar" | "hero" | "headline";
 }) {
   const { environmentId, threadId } = props;
   const environmentIds = useMemo(() => [environmentId], [environmentId]);
@@ -127,8 +123,10 @@ export function ComposerProjectPicker(props: {
   const searchRef = useRef<HTMLInputElement>(null);
 
   const projects = useMemo(
-    () => directory.labels.filter((entry) => entry.environmentId === environmentId),
-    [directory.labels, environmentId],
+    // Archived projects are not offered; one the thread is already in still
+    // names itself as `current`.
+    () => directory.active.filter((entry) => entry.environmentId === environmentId),
+    [directory.active, environmentId],
   );
   const draft = useComposerDraftStore((store) =>
     props.draftId === null ? undefined : store.draftThreadsByThreadKey[props.draftId],
@@ -155,11 +153,10 @@ export function ComposerProjectPicker(props: {
 
   const options = useMemo((): ProjectOption[] => {
     // "No project" is a choice like any project, so it leads the list;
-    // creating one is the lone action at the end.
+    // creating one is the lone action at the end. For Work it moves the draft
+    // to a repository in no project (DraftHeroHeadline).
     const needle = query.trim().toLowerCase();
-    // Work in a repository's project cannot leave it, only go to another.
-    const result: ProjectOption[] =
-      needle === "" && repositoryFolder === null ? [{ kind: "none", key: "none" }] : [];
+    const result: ProjectOption[] = needle === "" ? [{ kind: "none", key: "none" }] : [];
     for (const entry of projects) {
       if (needle !== "" && !entry.label.name.toLowerCase().includes(needle)) continue;
       result.push({
@@ -177,7 +174,7 @@ export function ComposerProjectPicker(props: {
       }
     }
     return result;
-  }, [canCreate, projects, query, repositoryFolder]);
+  }, [canCreate, projects, query]);
 
   // Chats, and Work drafts: existing Work follows its repository (moved from
   // its row's menu), and an agent's conversation belongs to the agent.
@@ -185,21 +182,24 @@ export function ComposerProjectPicker(props: {
   const isChat = surface !== "work" && surface !== "builder" && thread?.source.agent === undefined;
 
   const isHeadline = props.appearance === "headline";
-  const isSubline = props.appearance === "subline";
-  if (isSubline && (!canMove || !isWorkDraft || (projects.length === 0 && !canCreate))) {
-    return props.trailing ?? null;
-  }
+  const headlineIcon = (
+    <ProjectFolderIcon
+      color={current?.label.color}
+      className="inline-block"
+      style={HERO_INLINE_ICON_STYLE}
+    />
+  );
   if (!canMove || !(isChat || isWorkDraft)) {
     // The Work hero still names its project when it cannot be changed here.
-    return isHeadline && current ? (
-      <span className="inline-block max-w-64 truncate align-baseline">
-        <ProjectFolderIcon
-          color={current.label.color}
-          className="inline-block"
-          style={HERO_INLINE_ICON_STYLE}
-        />
-        {current.label.name}
-      </span>
+    return isHeadline ? (
+      <WorkHeroCrumbText
+        crumb={
+          current
+            ? { text: current.label.name, placeholder: false }
+            : { text: "No project", placeholder: true }
+        }
+        icon={headlineIcon}
+      />
     ) : null;
   }
   // A chat with turns goes into another project as a fork; the picker says so.
@@ -207,6 +207,8 @@ export function ComposerProjectPicker(props: {
 
   const assign = async (folder: { id: ProjectLabelId; name: string } | null) => {
     if (thread === null) {
+      // The hero answers it with a repository in no project; nothing to file.
+      if (folder === null && isWorkDraft && current !== null) pickNoProjectForWork(threadId);
       setPendingProjectFolder(
         threadId,
         folder
@@ -265,7 +267,7 @@ export function ComposerProjectPicker(props: {
 
   const triggerLabel = current ? `Project: ${current.label.name}` : "No project";
   const isHero = props.appearance === "hero";
-  const inSentence = isHero || isHeadline || isSubline;
+  const inSentence = isHero || isHeadline;
 
   const picker = (
     <Combobox
@@ -288,31 +290,22 @@ export function ComposerProjectPicker(props: {
         if (option) void choose(option);
       }}
     >
-      {isSubline ? (
-        // Its visible text names it, as the line's other choices are named.
-        <ComboboxTrigger
-          disabled={props.disabled}
-          data-hero-project-subline=""
-          render={<InlineButton tone="muted" />}
-          className="pointer-events-auto"
-        >
-          in a project…
-        </ComboboxTrigger>
-      ) : isHeadline ? (
+      {isHeadline ? (
         // Named mid-sentence: the visible project name is the accessible name.
+        // It shrinks (truncating) before the breadcrumb outgrows its line.
         <ComboboxTrigger
           disabled={props.disabled}
           data-hero-project-picker=""
-          render={<InlineButton tone="picker" />}
-          className="pointer-events-auto max-w-64 align-baseline"
-        >
-          <span className="block truncate">
-            <ProjectFolderIcon
-              color={current?.label.color}
-              className="inline-block"
-              style={HERO_INLINE_ICON_STYLE}
+          render={
+            <InlineButton
+              tone="picker"
+              className="pointer-events-auto min-w-0 max-w-64 shrink align-baseline"
             />
-            {current?.label.name ?? "a project"}
+          }
+        >
+          <span className={cn("block truncate", current === null && "text-muted-foreground")}>
+            {current ? headlineIcon : null}
+            {current?.label.name ?? "No project"}
           </span>
         </ComboboxTrigger>
       ) : isHero ? (
@@ -439,11 +432,5 @@ export function ComposerProjectPicker(props: {
       </ComboboxPopup>
     </Combobox>
   );
-  return isSubline && props.trailing ? (
-    <Fragment>
-      {picker} · {props.trailing}
-    </Fragment>
-  ) : (
-    picker
-  );
+  return picker;
 }

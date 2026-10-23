@@ -8,7 +8,9 @@ need a separate branch and working directory.
 An agent is a persistent specialist, such as "Spawn Ops", with its own conversation,
 responsibility and permissions. The sidebar's **Agents** tab lists them. Each row shows its status
 (**Needs approval**, **Needs you**, **Running** or **Idle**) and a
-count only when decisions are waiting on you.
+count only when decisions are waiting on you. Drag an agent up or down within its project, or
+focus it and press `Alt+Up` or `Alt+Down`, to change its place. New agents arrive at the top of
+their project. The server saves the order, like Work's.
 
 Choose **New agent** in the sidebar or command palette to create one. Tell the builder
 what the agent should take care of, in a sentence ("watch my GitHub PRs and summarize them
@@ -149,10 +151,9 @@ palette, or press `mod+alt+n`. It starts on your current machine; before sending
 from the machine menu to move it there. To move a draft into a project, pick the
 project in the heading.
 
-Work started in a project without a repository (**or just the project folder**
-under the heading, or **No repository (project folder)** in its repository menu)
-runs in the project's own folder, so the files the agent makes sit with the
-project's other files.
+Work started in a project without a repository (**No repository (project
+folder)** in the heading's repository menu) runs in the project's own folder, so
+the files the agent makes sit with the project's other files.
 
 Each thread without a project works in its own folder under `~/.cogenly/scratch` (the
 `scratch` folder of your T3 data directory), named after its date, the first words
@@ -211,12 +212,15 @@ edge to pin a thread. Section labels stay readable for the whole drag, and the s
 thread is over takes the accent color. Section labels also
 identify empty sections and a collapsed settled shelf.
 
-In **Work**, drag a card up or down in the first filter to change its place; the other cards
-slide aside to show where it will land. With a card focused, `Alt+Up` and `Alt+Down` move it one
-place. New Work arrives at the bottom, beside search. The server saves the order, so it survives
-a refresh and appears on your other connected devices. **Needs you** lists its tasks in the same
-order; **Snoozed** lists them by when they come back and **Settled** by when they settled, so
-cards don't move there.
+**Work** groups its cards under a heading per project, alphabetically, with **No project**
+last. A card's project is the one you filed it in, else the project its repository belongs to.
+Click a heading to fold its group away; the card you have open stays visible. In the first
+filter, drag a card up or down within its project to change its place; the other cards slide
+aside to show where it will land. With a card focused, `Alt+Up` and `Alt+Down` move it one
+place. New Work arrives at the bottom of its project, nearest search. The server saves the
+order, so it survives a refresh and appears on your other connected devices. **Needs you**
+lists its tasks in the same order; **Snoozed** lists them by when they come back and
+**Settled** by when they settled, so cards don't move there.
 
 On web and desktop, the list also animates section changes made with thread actions such as
 **Pin**, **Settle**, and **Snooze**. These transitions respect your system's reduced-motion
@@ -271,7 +275,7 @@ and their child processes, stop when you settle, archive, or delete the thread.
 
 Every shell command the agent runs appears in the terminal panel under the conversation
 (see [Terminal](terminal.md)), newest first and labelled with the command. The panel never
-opens by itself; its button shows a dot while a command runs. Running commands stream live
+opens by itself. Running commands stream live
 and have a stop button. Finished ones stay listed with their exit status. You can scroll, select and copy
 their output, and type into a command that still reads input. Cogenly does not open a
 shell of its own there. Agent terminal commands require full-access/default mode. To
@@ -307,11 +311,12 @@ repositories. A project can hold several repositories, but each repository and e
 thread is in at most one project. Work goes in its repository's project unless you move
 it. Projects are context only; they never change what an agent can access.
 
-A new task can start in a project: pick it in the task's heading, with **in a
-project…** on the line under it, or in the composer's project control, and the task
-moves to that project's most recently used repository. The line under the heading
-changes the repository, listing the project's own first; **No repository (project
-folder)** runs the task in the project's own folder instead.
+A new task's heading reads "What should we build in _project_ / _repository_?". Pick
+the project there or in the composer's project control, and the task moves to that
+project's most recently used repository, or to the project's folder when it has none.
+The repository menu lists only the project's own repositories (with **No project**,
+only repositories in no project); **No repository (project folder)** runs the task in
+the project's own folder instead.
 
 Projects have their own sidebar view: pick **Projects** in the navigation rail (or the
 mobile switcher), or press `mod+alt+4`. Open a project to see its repositories, chats
@@ -327,6 +332,21 @@ same while Cogenly runs: `list`, `create <name> [--color <color>]`,
 `add-repo`/`remove-repo <project> <repository>`. Name a project by its name or id and
 a repository by its folder or id; add `--json` for scripts. A folder Cogenly doesn't
 track yet needs `cogenly project add <folder>` first.
+
+Each project has one ongoing conversation on its page. Talk to it to set the project
+up (add repositories, link GitHub, drop in a brief, set instructions) or to start Work;
+it is the same thread every time you open the project, on any device, and it picks up
+where you left off. On a machine
+that cannot run threads without a project, the conversation runs in the project's first
+repository, so add one first. For a separate chat in the project, choose **New separate
+chat** from the project's **⋯** menu.
+
+When a project is done, right-click it in the list (or use the project's **⋯** menu) and
+choose **Archive**. An archived project leaves every project picker and move menu, but
+its chats, Work, agents and conversation stay as they are, and threads already in it
+still show its name. Neither you nor an agent can add threads or repositories to it
+until you unarchive it, though you can still move threads out. The count bar under the Projects list switches between active and
+**Archived** projects; choose **Unarchive** to bring one back.
 
 To file a thread, right-click it and choose **Move to folder**, or run **Move to folder…** from the command palette. Choose
 **Remove from folder** to take it out; Work then falls back to its repository's

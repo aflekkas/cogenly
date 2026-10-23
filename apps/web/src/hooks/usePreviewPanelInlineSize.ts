@@ -12,9 +12,9 @@ export interface PreviewPanelInlineSize {
 const PREVIEW_PANEL_WIDTH_STORAGE_KEY = "cogenly:preview-panel-width";
 export const PREVIEW_PANEL_MIN_WIDTH = 360;
 /**
- * Upper bound as a fraction of the viewport; only binds on wide screens.
- * On narrow windows the container clamp below is what preserves the
- * sibling column's usable width.
+ * Upper bound as a fraction of the viewport, used only until the row has been
+ * measured. Once it has, the container clamp below is the bound, so the panel
+ * can grow until the sibling column reaches its minimum.
  */
 const PREVIEW_PANEL_MAX_WIDTH_FRACTION = 0.7;
 /**
@@ -88,12 +88,13 @@ function useViewportClampedMaxWidth(
   return maxWidth;
 }
 export function getPreviewPanelMaxWidth(viewportWidth: number, containerWidth?: number): number {
-  const fractionCap = Math.floor(viewportWidth * PREVIEW_PANEL_MAX_WIDTH_FRACTION);
-  const containerCap =
-    containerWidth === undefined ? Infinity : Math.floor(containerWidth) - SIBLING_COLUMN_MIN_WIDTH;
+  const cap =
+    containerWidth === undefined
+      ? Math.floor(viewportWidth * PREVIEW_PANEL_MAX_WIDTH_FRACTION)
+      : Math.floor(containerWidth) - SIBLING_COLUMN_MIN_WIDTH;
   // Never below the panel's own minimum: when the row cannot fit both
   // columns' minimums the sibling yields, and useResizableWidth's clamp must
   // not see max < min (it would resolve the inversion to min and, via
   // drag-end persistence, overwrite the user's stored width).
-  return Math.max(PREVIEW_PANEL_MIN_WIDTH, Math.min(fractionCap, containerCap));
+  return Math.max(PREVIEW_PANEL_MIN_WIDTH, cap);
 }

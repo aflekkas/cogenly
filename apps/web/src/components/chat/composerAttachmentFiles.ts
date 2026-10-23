@@ -1,16 +1,23 @@
 import {
   type EnvironmentId,
   isProviderSendTurnSupportedImageMimeType,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import {
   clampFileAttachmentUploadBytes,
   fileAttachmentTooLargeMessage,
 } from "@t3tools/client-runtime/state/attachments";
 
-import type { ComposerFileAttachment, ComposerImageAttachment } from "../../composerDraftStore";
-import { isHeicImageFile } from "../../lib/imageCompression";
-import { isVideoAttachment } from "../../types";
+import {
+  type ComposerFileAttachment,
+  type ComposerImageAttachment,
+  composerFileMatchesReattachMarker,
+} from "../../composerDraftStore";
+import { isHeicImageFile, prepareImageForAttachment } from "../../lib/imageCompression";
+import { randomUUID } from "../../lib/utils";
+import { isVideoAttachment, videoMimeType } from "../../types";
 
 type ComposerAttachmentFileKind = "image" | "file" | "unsupported-image";
 
@@ -147,6 +154,135 @@ export function attachmentsToReleaseOnUploadCapabilityLoss(
   return attachments.filter(
     (attachment) => !(attachment.type === "file" && attachment.uploadedAttachmentId !== undefined),
   );
+}
+
+/**
+ * Sorts a batch of picked, pasted or dropped files into images still to compress and
+ * generic files ready for the draft, refusing what this message cannot take. Every
+ * composer funnels attachments through here. It runs synchronously so concurrent
+ * pastes see each other's reserved slots. A file matching a needs-reattach marker
+ * replaces it and takes no new slot; a draft full of markers would otherwise hit the
+ * capacity error before the replacement could land.
+ */
+export function acceptComposerAttachmentFiles(input: {
+  readonly files: ReadonlyArray<File>;
+  /** Attachments the draft already holds or has in flight. */
+  readonly reservedCount: number;
+  /** From fileAttachmentStagingLimit; null refuses generic files. */
+  readonly stagingLimit: number | null;
+  readonly reattachMarkers?: ReadonlyArray<ComposerFileAttachment>;
+  readonly source?: ComposerFileAttachment["source"];
+}): {
+  readonly images: File[];
+  readonly files: ComposerFileAttachment[];
+  /** The last refusal in the batch, or null when everything was taken. */
+  readonly error: string | null;
+} {
+  let reservedCount = input.reservedCount;
+  const replacedReattachMarkerIds = new Set<string>();
+  const images: File[] = [];
+  const files: ComposerFileAttachment[] = [];
+  let error: string | null = null;
+  for (const file of input.files) {
+    const attachmentKind = classifyComposerAttachmentFile(file);
+    const fileMimeType =
+      attachmentKind === "file"
+        ? (videoMimeType({ name: file.name, mimeType: file.type }) ??
+          (file.type || "application/octet-stream"))
+        : file.type;
+    const matchingReattachMarker =
+      attachmentKind === "file"
+        ? input.reattachMarkers?.find(
+            (marker) =>
+              !replacedReattachMarkerIds.has(marker.id) &&
+              composerFileMatchesReattachMarker(marker, {
+                name: file.name || "file",
+                mimeType: fileMimeType,
+                sizeBytes: file.size,
+              }),
+          )
+        : undefined;
+    if (matchingReattachMarker) {
+      replacedReattachMarkerIds.add(matchingReattachMarker.id);
+    }
+    if (!matchingReattachMarker && reservedCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+      error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
+      // Keep scanning: a later file in this batch can still replace a
+      // needs-reattach marker without needing a free slot.
+      continue;
+    }
+    if (attachmentKind === "unsupported-image") {
+      error = `'${file.name}' is not a supported image type. Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.`;
+      continue;
+    }
+    if (attachmentKind === "image") {
+      images.push(normalizeComposerImageFileMimeType(file));
+    } else {
+      if (input.stagingLimit === null) {
+        error = "This server does not support file attachments.";
+        continue;
+      }
+      if (file.size <= 0) {
+        error = `'${file.name}' is empty or could not be read.`;
+        continue;
+      }
+      if (file.size > input.stagingLimit) {
+        error = fileAttachmentTooLargeMessage(file.name, input.stagingLimit);
+        continue;
+      }
+      const attachmentFile =
+        file.type === fileMimeType
+          ? file
+          : new File([file], file.name, { type: fileMimeType, lastModified: file.lastModified });
+      files.push({
+        type: "file",
+        id: randomUUID(),
+        name: attachmentFile.name || "file",
+        mimeType: fileMimeType,
+        sizeBytes: attachmentFile.size,
+        file: attachmentFile,
+        ...(input.source ? { source: input.source } : {}),
+      });
+    }
+    if (!matchingReattachMarker) {
+      reservedCount += 1;
+    }
+  }
+  return { images, files, error };
+}
+
+/**
+ * Turns accepted image files into draft attachments with local previews. Images over
+ * the wire cap are downscaled to fit rather than refused; files already within it pass
+ * through byte-for-byte.
+ */
+export async function prepareComposerImageAttachments(files: ReadonlyArray<File>): Promise<{
+  readonly images: ComposerImageAttachment[];
+  readonly error: string | null;
+}> {
+  const images: ComposerImageAttachment[] = [];
+  let error: string | null = null;
+  for (const file of files) {
+    const compressed = await prepareImageForAttachment(file, PROVIDER_SEND_TURN_MAX_IMAGE_BYTES);
+    if (!compressed.ok) {
+      error =
+        compressed.reason === "unreadable"
+          ? `'${file.name}' could not be read as an image.`
+          : `'${file.name}' is too large to attach, even after compression.`;
+      continue;
+    }
+    const attachmentFile = compressed.file;
+    images.push({
+      type: "image",
+      id: randomUUID(),
+      name: attachmentFile.name || "image",
+      mimeType: attachmentFile.type,
+      sizeBytes: attachmentFile.size,
+      previewUrl: URL.createObjectURL(attachmentFile),
+      file: attachmentFile,
+    });
+  }
+  return { images, error };
 }
 
 /**

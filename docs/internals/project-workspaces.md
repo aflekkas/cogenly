@@ -50,6 +50,18 @@ it does not own a copy.
   an ordinary chat-surface thread the label points at. It is left out of the
   project's thread count and the Chats list, and it configures the project
   through the `project_*` MCP tools, which act on the caller's own project.
+  It runs in the Scratch project (so in the project directory); where Scratch
+  is off (a data dir inside a checkout, such as a dev worktree) it runs in the
+  project's first linked repository, and with neither it cannot start.
+- Archiving a project only sets `archivedAt` on the label. Its threads, chat,
+  repositories and filing are untouched; clients drop archived projects from
+  every picker and move menu (the label directory's `active`) but still name
+  them on threads already filed there.
+- The server refuses to file a thread or link a repository into an archived
+  project (`ProjectLabelService.readActive`, failing `archived`), so every
+  transport and agent gets the same refusal; moving out, unfiling and work in
+  threads already there stay allowed. Work started in a linked repository
+  without naming a project still follows that repository, archived or not.
 
 ## Rules that keep cross-environment projects possible
 

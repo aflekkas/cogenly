@@ -1,9 +1,8 @@
-import { PanelBottomIcon, PanelRightIcon } from "lucide-react";
+import { PanelRightIcon, SquareTerminalIcon } from "lucide-react";
 import { Maximize2, Minimize2 } from "lucide";
 import { MorphIcon } from "~/components/MorphIcon";
 import { memo } from "react";
 
-import { BadgeDot } from "../ui/badge-dot";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -16,8 +15,6 @@ export interface PanelLayoutControlsProps {
   /** The bottom panel of agent terminals; left out where the thread has none. */
   bottomPanel?: {
     open: boolean;
-    /** An agent command is running: the panel never opens for it, so the toggle shows a dot. */
-    activity: boolean;
     shortcutLabel: string | null;
     onToggle: () => void;
   };
@@ -35,10 +32,6 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
   onToggleRightPanel,
   bottomPanel,
 }: PanelLayoutControlsProps) {
-  const bottomPanelLabel =
-    bottomPanel?.activity === true
-      ? "Toggle terminal panel, agent command running"
-      : "Toggle terminal panel";
   return (
     <div
       className="flex h-full shrink-0 items-center gap-1 [-webkit-app-region:no-drag]"
@@ -46,19 +39,18 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
     >
       {bottomPanel ? (
         <Tooltip>
-          <TooltipTrigger render={<span className="relative flex shrink-0" />}>
+          <TooltipTrigger render={<span className="flex shrink-0" />}>
             <Toggle
               className="shrink-0 [-webkit-app-region:no-drag]"
               pressed={bottomPanel.open}
               onPressedChange={bottomPanel.onToggle}
-              aria-label={bottomPanelLabel}
+              aria-label="Toggle terminal panel"
               data-bottom-panel-toggle
               variant="ghost-muted"
               size="sm"
             >
-              <PanelBottomIcon className="size-4.5" />
+              <SquareTerminalIcon className="size-4.5" />
             </Toggle>
-            <BadgeDot tone={bottomPanel.activity && "success"} className="absolute top-1 right-1" />
           </TooltipTrigger>
           <TooltipPopup side="bottom">
             {`Toggle terminal panel${bottomPanel.shortcutLabel ? ` (${bottomPanel.shortcutLabel})` : ""}`}

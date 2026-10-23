@@ -11,6 +11,8 @@ import type { PanelTabStatus } from "../TabStrip.logic";
 /** As in T3 Code's terminal drawer: a fresh panel's height, and the floor a drag stops at. */
 export const BOTTOM_PANEL_DEFAULT_HEIGHT = 280;
 export const BOTTOM_PANEL_MIN_HEIGHT = 180;
+/** Shorter than this, a narrow panel trades its run list for a run menu so output keeps the room. */
+export const BOTTOM_PANEL_COMPACT_HEIGHT = 320;
 const BOTTOM_PANEL_MAX_VIEWPORT_RATIO = 0.75;
 /** What the chat column keeps above the panel: the header and a docked composer. */
 const BOTTOM_PANEL_CHAT_RESERVE = 220;
@@ -146,15 +148,30 @@ export function resolveActiveBottomPanelTab(
   return tabs.find((tab) => tab.id === tabId) ?? tabs[0] ?? null;
 }
 
+/** The run list's two collapsible groups. */
+export type RunGroup = "live" | "finished";
+
+/** Past this many finished runs, Finished starts folded while something runs. */
+const FINISHED_FOLD_THRESHOLD = 5;
+
 /**
- * The header toggle's dot: an agent command is running while the panel is
- * closed. The panel never opens by itself, so this is how a run gets noticed.
+ * Whether a run group shows its rows: as the user last left it in this
+ * drawer, else open, except a long Finished group under running commands.
+ * Finished alone is never folded by default, as it is then the whole list.
  */
-export function bottomPanelToggleShowsActivity(
-  open: boolean,
-  tabs: ReadonlyArray<Pick<BottomPanelTab, "liveRunCount">>,
+export function runGroupOpen(
+  group: RunGroup,
+  input: {
+    readonly stored: Partial<Record<RunGroup, boolean>> | undefined;
+    readonly liveCount: number;
+    readonly finishedCount: number;
+  },
 ): boolean {
-  return !open && tabs.some((tab) => tab.liveRunCount > 0);
+  const stored = input.stored?.[group];
+  if (stored !== undefined) return stored;
+  return (
+    group === "live" || input.liveCount === 0 || input.finishedCount <= FINISHED_FOLD_THRESHOLD
+  );
 }
 
 // Matches inside a JSON string too, where the result's own JSON is escaped.

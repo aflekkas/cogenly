@@ -32,6 +32,7 @@ import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as Events from "../orchestration-v2/EventSink.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Settings from "../serverSettings.ts";
+import * as ServerConfig from "../config.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Invocation from "../mcp/McpInvocationContext.ts";
@@ -179,6 +180,7 @@ const makeHarness = Effect.sync(() => {
     Layer.succeed(Scheduler.Scheduler, {
       register: <E, R>(_name: string, _work: Effect.Effect<void, E, R>) => Effect.void,
     }),
+    ServerConfig.layerTest(process.cwd(), { prefix: "t3-agent-builder-" }),
   );
   const database = Sqlite.layerMemory;
   const store = Store.layer.pipe(Layer.provide(database));

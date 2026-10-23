@@ -43,10 +43,12 @@ export function agentTerminalEntries(
         {
           terminalId: summary.terminalId,
           isAgent,
+          // The label is capped short on the wire; the full command is not.
           label:
-            isAgent && label.startsWith(AGENT_LABEL_PREFIX)
+            (isAgent ? summary.command : undefined) ??
+            (isAgent && label.startsWith(AGENT_LABEL_PREFIX)
               ? label.slice(AGENT_LABEL_PREFIX.length)
-              : label,
+              : label),
           status: summary.status,
           exitCode: summary.exitCode,
           exitSignal: summary.exitSignal,
@@ -198,23 +200,6 @@ export function terminalSections(entries: ReadonlyArray<AgentTerminalEntry>): Te
   return { runs: [...live, ...finished], liveRunCount: live.length };
 }
 
-/**
- * What the composer's Running bar shows: the newest running agent command, or
- * a count once several run. Null when no agent command is running.
- */
-export function runningAgentCommandsSummary(
-  entries: ReadonlyArray<AgentTerminalEntry>,
-): { readonly label: string; readonly terminalIds: ReadonlyArray<string> } | null {
-  const { runs, liveRunCount } = terminalSections(entries);
-  const live = runs.slice(0, liveRunCount);
-  const newest = live[0];
-  if (newest === undefined) return null;
-  return {
-    label: live.length === 1 ? newest.label : `${live.length} running`,
-    terminalIds: live.map((entry) => entry.terminalId),
-  };
-}
-
 /** The entry with `terminalId`, else the first one. */
 export function resolveSelected<T extends { readonly terminalId: string }>(
   entries: ReadonlyArray<T>,
@@ -237,7 +222,7 @@ export function adjacentTerminalId(
 
 // Commands that only set up the real one: `cd dir`, `export X=1`, `set -e`, `source env`.
 const SETUP_COMMAND = /^(?:cd|pushd|export|set|source|\.|unset|ulimit|umask)(?:\s|$)/;
-const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\S*)\s+/;
+const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"(?:[^"\\]|\\.)*"|\S*)(?:\s+|$)/;
 
 function stripSetupPrefix(segment: string): string {
   let rest = segment.trim();
@@ -249,19 +234,77 @@ function stripSetupPrefix(segment: string): string {
 }
 
 /**
+ * Top-level steps of a shell line, split on `&&`, `||`, `;` and newlines but
+ * never inside quotes or `( … )`, so `F="a; b"` stays one step.
+ */
+function shellSteps(text: string): string[] {
+  const steps: string[] = [];
+  let quote: '"' | "'" | null = null;
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (character === "\\" && quote !== "'") {
+      index += 1;
+      continue;
+    }
+    if (quote !== null) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "#" && (index === 0 || /\s/.test(text[index - 1]!))) {
+      // A comment runs to the line's end; its apostrophes open no quote.
+      const end = text.indexOf("\n", index);
+      index = (end === -1 ? text.length : end) - 1;
+    } else if (character === '"' || character === "'") quote = character;
+    else if (character === "(") depth += 1;
+    else if (character === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0) {
+      const pair = text.slice(index, index + 2);
+      const width =
+        pair === "&&" || pair === "||" ? 2 : character === ";" || character === "\n" ? 1 : 0;
+      if (width === 0) continue;
+      steps.push(text.slice(start, index));
+      start = index + width;
+      index += width - 1;
+    }
+  }
+  steps.push(text.slice(start));
+  return steps;
+}
+
+/** `(cd dir && cmd)` reads as `cd dir && cmd`; `(a) | (b)` is left alone. */
+function withoutSubshell(step: string): string {
+  if (!step.startsWith("(") || !step.endsWith(")")) return step;
+  const inner = step.slice(1, -1);
+  // The outer pair wraps the whole step only if nothing inside closes it early.
+  let depth = 0;
+  for (const character of inner) {
+    if (character === "(") depth += 1;
+    else if (character === ")" && --depth < 0) return step;
+  }
+  return depth === 0 ? inner.trim() : step;
+}
+
+/**
  * A short title for an agent command: the first step that does real work.
- * `bash -lc '…'` is unwrapped, `cd`/`export`/env-assignment steps are skipped,
- * and a heredoc body is dropped. The server collapses newlines into spaces, so
- * a bare `cd dir next-command` is split after `cd`'s one argument.
+ * `bash -lc '…'` and `( … )` subshells are unwrapped, `cd`/`export`/env-assignment
+ * steps are skipped, and a heredoc body is dropped. Older servers collapsed
+ * newlines into spaces, so a bare `cd dir next-command` is split after `cd`'s
+ * one argument. Rows truncate the result by width; nothing here shortens it.
  */
 export function commandTitle(command: string): string {
   let text = commandDisplayText(command).trim();
   const heredoc = text.indexOf("<<");
   if (heredoc !== -1) text = text.slice(0, heredoc).trim();
-  const segments = text
-    .split(/\s*(?:&&|\|\||;)\s*/)
-    .map(stripSetupPrefix)
-    .filter((segment) => segment.length > 0);
+  const segments: string[] = [];
+  const pending = shellSteps(text);
+  for (let step = pending.shift(); step !== undefined; step = pending.shift()) {
+    const segment = stripSetupPrefix(step);
+    const inner = withoutSubshell(segment);
+    if (inner !== segment) pending.unshift(...shellSteps(inner));
+    else if (segment.length > 0 && !segment.startsWith("#")) segments.push(segment);
+  }
   for (const segment of segments) {
     if (!SETUP_COMMAND.test(segment)) return segment;
     // `cd dir mkdir app` came from newline-separated lines: keep what follows the argument.

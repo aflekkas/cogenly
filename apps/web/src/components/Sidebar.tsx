@@ -4,7 +4,6 @@ import {
   type ProjectLabelId,
   type ScopedProjectRef,
 } from "@t3tools/contracts";
-import { ThreadTerminalStatusButton } from "./ThreadStatusIndicators";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import {
   dropThreadContext,
@@ -84,12 +83,27 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type TransitionEvent as ReactTransitionEvent,
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
+import {
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+  type UniqueIdentifier,
+} from "@dnd-kit/core";
+import { arrayMove, SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import {
+  SidebarSortContext,
+  SidebarSortableFoldRow,
+  sidebarGroupCollision,
+} from "./sidebar/SidebarSortable";
 
 import {
   isAtomCommandInterrupted,
@@ -133,6 +147,7 @@ import { useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
   useEnvironmentIdentities,
   useConnectedEnvironmentIds,
@@ -192,7 +207,12 @@ import {
   type SidebarSection,
   shouldListWorkDraft,
 } from "./Sidebar.logic";
-import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
+import {
+  SidebarDragLifecycle,
+  SidebarPointerSensor,
+  SidebarSortSensor,
+  type SidebarSortSensorOptions,
+} from "./Sidebar.pointer";
 import { createSidebarListMotion } from "./Sidebar.motion";
 import { ThreadWorktreeIndicator } from "./ThreadStatusIndicators";
 import { resolveSnoozePresets, snoozeWakeLabel, type SnoozePreset } from "./Sidebar.snooze";
@@ -211,7 +231,6 @@ import {
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../providerInstances";
-import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { showCopiedToast } from "./ui/copiedToast";
 import {
@@ -240,6 +259,7 @@ import {
   threadProjectFolderId,
   withoutProjectChats,
   workThreadFolder,
+  type EnvironmentProjectLabel,
   type ProjectLabelKey,
 } from "../projectLabels/projectLabels.logic";
 import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
@@ -256,6 +276,7 @@ import { useNavRailBadgeStore } from "./sidebar/navRailState";
 import {
   CHAT_DATE_GROUP_LABELS,
   SidebarAgentsList,
+  ProjectsShelfBar,
   SidebarModeSwitcher,
   SidebarProjectsList,
   CHAT_LIST_PAGE_SIZE,
@@ -285,6 +306,9 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } f
 import { SidebarChatStatusSlot } from "./sidebar/SidebarChatStatusSlot";
 import {
   SIDEBAR_CARD_CLASS_NAME,
+  SIDEBAR_DRAFT_CLASS_NAME,
+  SIDEBAR_DRAFT_TITLE_CLASS_NAME,
+  SidebarFoldRow,
   SidebarGroupHeader,
   SidebarList,
   sidebarRowClassName,
@@ -293,11 +317,13 @@ import {
 import { SidebarListEmptyState } from "./sidebar/SidebarListEmptyState";
 import {
   applyDrawnOrder,
+  groupWorkCards,
   moveInOrder,
+  placeInGroupOrder,
   planWorkCardReorder,
-  rowShowsInSection,
   toggleCollapsedSection,
   workCardLabel,
+  workGroupSectionKey,
 } from "./sidebar/workCards.logic";
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
 import { useSidebarScrollMemory } from "./sidebar/useSidebarScrollMemory";
@@ -318,6 +344,20 @@ interface SidebarRowFolder {
   readonly name: string;
   readonly color: string | undefined;
 }
+/** An unsent Work draft the list files with the cards. */
+interface WorkDraftEntry {
+  readonly draftId: DraftId;
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly createdAtMs: number;
+  readonly branch: string | null;
+  readonly threadId: ThreadId;
+}
+/** One card in Work's list: a thread, or a draft (keyed `draft:<id>`). */
+type WorkCardEntry =
+  | { readonly kind: "thread"; readonly key: string; readonly section: SidebarSection }
+  | { readonly kind: "draft"; readonly key: string; readonly draft: WorkDraftEntry };
+const EMPTY_SORT_ITEMS: string[] = [];
 // Collapsed shelves share one empty list so a route change alone does not
 // give the sidebar list a new identity.
 const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
@@ -521,9 +561,9 @@ function SnoozeMenuButton(props: {
   );
 }
 
-// Unsent work is marked by a quiet pen, on draft cards and on thread rows
-// with unsent composer text alike; their surface is the plain card's.
-// Drafts read as drafts: the warning (amber) status tone, like Approval.
+// Unsent work is marked by a pen, on draft cards and on thread rows with
+// unsent composer text alike, on the amber draft surface and title
+// (SIDEBAR_DRAFT_CLASS_NAME). The warning tone, like Approval.
 const draftPenClassName = "size-3 shrink-0 text-warning-foreground";
 
 // Work's count bar, in order: all tasks, then each filter.
@@ -552,12 +592,15 @@ function WorkCardLabel(props: {
   readonly folder: SidebarRowFolder | null;
   readonly repositoryName: string | null;
   readonly project: ProjectFaviconProject | null;
+  /** The card sits under its project's heading, so the line names the repository alone. */
+  readonly projectInHeading?: boolean | undefined;
   /** Right-click on the line opens its repository's menu, not the thread's. */
   readonly onContextMenu?: ((event: ReactMouseEvent) => void) | undefined;
 }) {
   const label = workCardLabel({
     projectName: props.folder?.name ?? null,
     repositoryName: props.repositoryName,
+    projectInHeading: props.projectInHeading === true,
   });
   return (
     <span className="flex min-w-0 flex-1 items-center gap-1.5" onContextMenu={props.onContextMenu}>
@@ -608,6 +651,18 @@ function SidebarSectionHeader(props: {
   );
 }
 
+/**
+ * What the Chats and Work list sits in: its tooltips' timing, and the dnd-kit
+ * context Work's cards sort in (SidebarSortContext).
+ */
+function SidebarThreadListProviders(props: ComponentProps<typeof SidebarSortContext>) {
+  return (
+    <TooltipProvider delay={150} closeDelay={0} timeout={400}>
+      <SidebarSortContext {...props} />
+    </TooltipProvider>
+  );
+}
+
 // One unsent draft session the user has invested content in. Two lines,
 // nothing else: project name, then the typed prompt. All the draft's
 // settings (model, env mode, branch, worktree) still travel with it —
@@ -623,6 +678,8 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   folder?: SidebarRowFolder | null;
   /** Work grouped by project names the repository instead; null for none. */
   repositoryName?: string | null;
+  /** Under its project's heading the card names the repository alone. */
+  projectInHeading?: boolean | undefined;
   project: ProjectFaviconProject | null;
   projectDisplayName: string | null;
   isActive: boolean;
@@ -714,12 +771,14 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
           aria-label={accessibility.label}
           aria-current={accessibility.current}
           data-testid="sidebar-draft-row"
-          className={sidebarRowClassName({ selected: props.isActive })}
+          className={sidebarRowClassName({ selected: props.isActive, draft: true })}
           onClick={handleActivate}
           onContextMenu={handleContextMenu}
           onKeyDown={handleKeyDown}
         >
-          <span className="min-w-0 flex-1 truncate text-sm text-foreground/80">{preview}</span>
+          <span className={cn("min-w-0 flex-1 truncate text-sm", SIDEBAR_DRAFT_TITLE_CLASS_NAME)}>
+            {preview}
+          </span>
           <span className="relative flex h-5 shrink-0 items-center justify-end">
             <span
               aria-hidden
@@ -744,6 +803,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
         data-testid="sidebar-draft-row"
         className={cn(
           SIDEBAR_CARD_CLASS_NAME,
+          SIDEBAR_DRAFT_CLASS_NAME,
           props.isActive
             ? "state-selected"
             : "state-hover bg-(--sidebar-card) text-sidebar-foreground",
@@ -759,6 +819,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
               folder={props.folder ?? null}
               repositoryName={props.repositoryName ?? null}
               project={props.project}
+              projectInHeading={props.projectInHeading}
             />
             <span className="relative ml-auto flex h-[18px] min-w-8 shrink-0 items-stretch justify-end text-xs">
               <span
@@ -775,10 +836,8 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
             <span
               aria-hidden
               className={cn(
-                "min-w-0 flex-1 truncate text-card font-medium transition-colors duration-(--motion-duration-base) motion-reduce:transition-none",
-                props.isActive
-                  ? "text-foreground"
-                  : "text-muted-foreground group-hover/sidebar-row:text-foreground",
+                "min-w-0 flex-1 truncate text-card font-medium",
+                SIDEBAR_DRAFT_TITLE_CLASS_NAME,
               )}
             >
               {preview}
@@ -799,7 +858,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
 });
 
 /**
- * One Work draft, listed after the Work cards by the sidebar. Reads its
+ * One Work draft, listed after the cards of its project's group. Reads its
  * own composer, so typing in another draft repaints nothing here. The open
  * draft's card is frozen at the moment it became the route, and a draft never
  * left has no card at all, as in SidebarDraftBlock.
@@ -819,6 +878,8 @@ const SidebarWorkDraftCard = memo(function SidebarWorkDraftCard(props: {
     environmentId: EnvironmentId,
     labelId: ProjectLabelId,
   ) => SidebarRowFolder | null;
+  /** The card sits under its project's heading. */
+  projectInHeading: boolean;
   isActive: boolean;
   onNavigate: (draftId: DraftId) => void;
   onContextMenu: (draftId: DraftId, position: { x: number; y: number }) => void;
@@ -859,6 +920,7 @@ const SidebarWorkDraftCard = memo(function SidebarWorkDraftCard(props: {
       branch={props.branch}
       folder={folder}
       repositoryName={props.repositoryName}
+      projectInHeading={props.projectInHeading}
       project={props.project}
       projectDisplayName={props.projectDisplayName}
       isActive={props.isActive}
@@ -1272,6 +1334,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   ) => void;
   // The folder the row is filed in, leading its meta line.
   folder: SidebarRowFolder | null;
+  // Under its project's heading the card names its repository alone.
+  projectInHeading?: boolean | undefined;
   // The action this row will take when the sweep is released.
   sweepAction: SidebarSweepAction | null;
   // Compact wake countdown ("2h") for rows in the snoozed shelf.
@@ -1312,7 +1376,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onSnooze: (threadRef: ScopedThreadRef, preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   // Pressing the row and dragging it out of the list drops the thread into a
-  // composer as context. Rows never reorder.
+  // composer as context. Sortable Work cards leave this to their slot.
   onContextDragStart: (threadRef: ScopedThreadRef, event: PointerEvent) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
@@ -1355,10 +1419,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const isContextMenuOpen = useSidebarContextMenuTarget((state) => state.threadKey === threadKey);
   const openPrLink = useOpenPrLink();
-  const runningTerminalIds = useThreadRunningTerminalIds({
-    environmentId: thread.environmentId,
-    threadId: thread.id,
-  });
   // Unsent composer text on this thread. The open thread shows its own
   // composer, so the marker only decorates rows you have navigated away from.
   const hasUnsentDraft = useThreadHasUnsentDraft(threadRef) && !props.isActive;
@@ -1662,7 +1722,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     // row. sidebar-row-motion fades the state change and fades the title out
     // under the hover actions (useSidebarRowActionsOverlap).
     SIDEBAR_CARD_CLASS_NAME,
-    variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
+    hasUnsentDraft && SIDEBAR_DRAFT_CLASS_NAME,
+    variantAction === "unsettle" &&
+      !hasUnsentDraft &&
+      "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     props.isActive || isSelected || isContextMenuOpen || props.sweepAction !== null
       ? "state-selected"
       : hasUnsentDraft
@@ -1716,25 +1779,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           className={cn(
             "transition-[color,opacity] duration-(--motion-duration-base) motion-reduce:transition-none",
             shouldRecede ? "font-normal" : "font-medium",
-            variant === "card"
-              ? cn(
-                  // Cards rest in grey and brighten when selected or asking for you.
-                  shouldRecede
-                    ? "text-secondary-label"
-                    : props.isActive || isUnread || isWoke || status === "input"
-                      ? "text-foreground"
-                      : "text-muted-foreground group-hover/sidebar-row:text-foreground",
-                )
-              : cn(
-                  "group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
-                  shouldRecede
-                    ? "text-secondary-label/70"
-                    : props.isActive || isWoke || status === "input"
-                      ? "text-foreground"
-                      : isUnread
-                        ? "text-muted-foreground"
-                        : "text-secondary-label/70",
-                ),
+            hasUnsentDraft
+              ? SIDEBAR_DRAFT_TITLE_CLASS_NAME
+              : variant === "card"
+                ? cn(
+                    // Cards rest in grey and brighten when selected or asking for you.
+                    shouldRecede
+                      ? "text-secondary-label"
+                      : props.isActive || isUnread || isWoke || status === "input"
+                        ? "text-foreground"
+                        : "text-muted-foreground group-hover/sidebar-row:text-foreground",
+                  )
+                : cn(
+                    "group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
+                    shouldRecede
+                      ? "text-secondary-label/70"
+                      : props.isActive || isWoke || status === "input"
+                        ? "text-foreground"
+                        : isUnread
+                          ? "text-muted-foreground"
+                          : "text-secondary-label/70",
+                  ),
           )}
         >
           <span aria-hidden>{thread.title}</span>
@@ -1742,13 +1807,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       </PendingTitleSlot>
     );
   const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
-  const terminalStatusIcon = (
-    <ThreadTerminalStatusButton
-      threadRef={threadRef}
-      terminalIds={runningTerminalIds}
-      onThreadActivate={onThreadActivate}
-    />
-  );
   // Same pen the new-thread draft rows lead with, so both kinds of unsent
   // work read the same way in the list.
   const draftIndicator = hasUnsentDraft ? (
@@ -1805,7 +1863,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           </span>
           {draftIndicator}
           {title}
-          {terminalStatusIcon}
           {isRegeneratingTitle ? (
             <span role="status" className="sr-only">
               Regenerating title
@@ -1952,6 +2009,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               folder={props.folder}
               repositoryName={props.repositoryName}
               project={props.project}
+              projectInHeading={props.projectInHeading}
               onContextMenu={
                 props.repositoryName && props.onRepositoryContextMenu
                   ? (event) => {
@@ -2200,7 +2258,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             ) : (
               <span className="flex-1" />
             )}
-            {terminalStatusIcon}
             {props.showWorkStatus ? <WorkRowStatusMarker thread={thread} /> : null}
 
             {diff ? (
@@ -2886,8 +2943,8 @@ export default function Sidebar() {
   // While a pinned chat is dragged, Pinned previews the drop order; the list
   // motion glides rows between slots as the order changes.
   const [pinDrag, setPinDrag] = useState<{ key: string; order: readonly string[] } | null>(null);
-  // While a Work card is dragged (or moved from the keyboard and saving), the
-  // Working list draws this order; the list motion glides cards between slots.
+  // While a Work card's move saves (a drop, or alt+arrow), the Working list
+  // draws this order, so the card never jumps back before the server agrees.
   const [workDrag, setWorkDrag] = useState<{ key: string; order: readonly string[] } | null>(null);
   const chatWindow = useMemo(
     () =>
@@ -3404,7 +3461,7 @@ export default function Sidebar() {
       }
       if (event.shiftKey) {
         event.preventDefault();
-        rangeSelectTo(threadKey, orderedThreadKeysRef.current);
+        rangeSelectTo(threadKey, drawnThreadKeysRef.current);
         return;
       }
       if (isTrailingDoubleClick(event.detail)) {
@@ -3545,16 +3602,32 @@ export default function Sidebar() {
   );
   const threadListRef = useRef<HTMLUListElement | null>(null);
   const listMotionRef = useRef<ReturnType<typeof createSidebarListMotion> | null>(null);
+  const remeasureFrameRef = useRef<number | null>(null);
   const attachListMotionRef = useCallback((node: HTMLUListElement | null) => {
     threadListRef.current = node;
     listMotionRef.current?.dispose();
     listMotionRef.current = node === null ? null : createSidebarListMotion(node);
     listMotionRef.current?.update(false);
+    if (node === null && remeasureFrameRef.current !== null) {
+      cancelAnimationFrame(remeasureFrameRef.current);
+      remeasureFrameRef.current = null;
+    }
+  }, []);
+  // Folding moves rows by their own height motion, not the list's: once a
+  // fold settles, the list motion takes the rows' new places as its start.
+  // Every row of a fold ends together, so one read per frame covers them.
+  const handleListTransitionEnd = useCallback((event: ReactTransitionEvent<HTMLUListElement>) => {
+    if (event.propertyName !== "grid-template-rows" || remeasureFrameRef.current !== null) return;
+    remeasureFrameRef.current = requestAnimationFrame(() => {
+      remeasureFrameRef.current = null;
+      listMotionRef.current?.remeasure();
+    });
   }, []);
 
   // One pointer gesture at a time: a row press that leaves the list drags
   // the thread into a composer as context, and an action-button press sweeps
-  // its action across neighboring rows. Neither ever reorders the list.
+  // its action across neighboring rows. Pinned chats reorder on the same
+  // gesture; Work's cards reorder through dnd-kit (SidebarSortSensor).
   const dragSensorRef = useRef<SidebarPointerSensor | null>(null);
   const contextDragKeyRef = useRef<string | null>(null);
   const cancelThreadDrag = useCallback(() => {
@@ -3646,23 +3719,36 @@ export default function Sidebar() {
   };
   // Work cards reorder when their server keeps a manual active order and this
   // client may operate threads there. Pinned threads keep the pinned order.
-  const canReorderWorkIn = (environmentId: EnvironmentId) =>
-    serverConfigs.get(environmentId)?.environment.capabilities.threadActiveReorder === true &&
-    readEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
-  /** The Working list's reorderable cards as drawn, when `key` is one of at least two. */
-  const workReorderOrder = (key: string): string[] | null => {
-    const rows = workRowsRef.current;
-    if (rows === null || rows.shown !== "active") return null;
-    const order = rows.threads.flatMap(({ key: candidate }) => {
+  const canReorderWorkIn = useCallback(
+    (environmentId: EnvironmentId) =>
+      serverConfigs.get(environmentId)?.environment.capabilities.threadActiveReorder === true &&
+      readEnvironmentScope(environmentId, AuthOrchestrationOperateScope),
+    [serverConfigs],
+  );
+  /** Every reorderable Work card as drawn, across groups: the order keys are planned in. */
+  const workReorderFullOrder = (): string[] =>
+    (workRowsRef.current?.threads ?? []).flatMap(({ key: candidate }) => {
       const thread = threadByKeyRef.current.get(candidate);
       return thread && thread.pinnedAt == null && canReorderWorkIn(thread.environmentId)
         ? [candidate]
         : [];
     });
-    return order.length > 1 && order.includes(key) ? order : null;
+  /** The sortable cards of `key`'s project group as drawn, when it can move in one. */
+  const workGroupOrderOf = (key: string): readonly string[] | null => {
+    const groupKey = workSortRef.current.groupOf.get(key);
+    return groupKey === undefined ? null : (workSortRef.current.orders.get(groupKey) ?? null);
   };
   const [workReorderAnnouncement, setWorkReorderAnnouncement] = useState("");
-  const commitWorkReorder = (key: string, order: readonly string[]) => {
+  // A sort drop draws the new order where dnd-kit already glides the card, so
+  // the list motion sits that update out rather than move the card twice.
+  const listMotionSkipRef = useRef(false);
+  /** Moves `key` to its place in `groupOrder` (its group's new order) and saves it. */
+  const commitWorkGroupReorder = (
+    key: string,
+    groupOrder: readonly string[],
+    options: { readonly sortDrop: boolean },
+  ) => {
+    const order = placeInGroupOrder(workReorderFullOrder(), groupOrder, key);
     const keysById = new Map(
       [...threadByKeyRef.current].map(([id, thread]) => [id, thread.activeOrderKey ?? null]),
     );
@@ -3671,6 +3757,7 @@ export default function Sidebar() {
       setWorkDrag(null);
       return;
     }
+    if (options.sortDrop) listMotionSkipRef.current = true;
     // The preview holds until the writes land, so the card never jumps back.
     setWorkDrag({ key, order });
     void Promise.all(
@@ -3694,23 +3781,23 @@ export default function Sidebar() {
       }
     });
   };
-  /** alt+ArrowUp / alt+ArrowDown on a focused Working card moves it one place. */
+  /** alt+ArrowUp / alt+ArrowDown on a focused Working card moves it one place in its project. */
   const handleWorkListKeyDown = (event: ReactKeyboardEvent<HTMLUListElement>) => {
     if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     const key = (event.target as HTMLElement).closest<HTMLElement>("[data-thread-item]")?.dataset
       .threadItem;
     if (key === undefined) return;
-    const order = workReorderOrder(key);
-    if (order === null) return;
+    const groupOrder = workGroupOrderOf(key);
+    if (groupOrder === null) return;
     event.preventDefault();
-    const next = moveInOrder(order, key, event.key === "ArrowUp" ? -1 : 1);
+    const next = moveInOrder(groupOrder, key, event.key === "ArrowUp" ? -1 : 1);
     if (next === null) return;
     const position = next.indexOf(key) + 1;
     setWorkReorderAnnouncement(
       `${threadByKeyRef.current.get(key)?.title ?? "Work"} moved to ${position} of ${next.length}`,
     );
-    commitWorkReorder(key, next);
+    commitWorkGroupReorder(key, next, { sortDrop: false });
     // Moving a row can drop focus from it; keep it on the card that moved.
     const focused = event.target as HTMLElement;
     requestAnimationFrame(() => {
@@ -3721,15 +3808,13 @@ export default function Sidebar() {
     (threadRef: ScopedThreadRef, event: PointerEvent) => {
       if (dragSensorRef.current !== null) return;
       const key = scopedThreadKey(threadRef);
-      // A pinned chat drags within Pinned to reorder it, and a Working card
-      // within Work. Positions are read once at the start, against the list,
-      // so the preview's own motion and scrolling never feed back into the
-      // drop slot.
-      const pinnedOrder = pinnedReorderOrder(key);
-      const workOrder = pinnedOrder === null ? workReorderOrder(key) : null;
-      const pinOrder = pinnedOrder ?? workOrder;
-      const setPreview = (next: { key: string; order: readonly string[] } | null) =>
-        workOrder !== null ? setWorkDrag(next) : setPinDrag(next);
+      // A sortable Work card's press belongs to its slot's dnd-kit sensor,
+      // which handles the drag out of the list too.
+      if (workSortRef.current.groupOf.has(key)) return;
+      // A pinned chat drags within Pinned to reorder it. Positions are read
+      // once at the start, against the list, so the preview's own motion and
+      // scrolling never feed back into the drop slot.
+      const pinOrder = pinnedReorderOrder(key);
       let pinStart: { pointerY: number; center: number; midpoints: number[] } | null = null;
       let pinPreview: readonly string[] | null = null;
       const listY = (y: number) => y - (threadListRef.current?.getBoundingClientRect().top ?? 0);
@@ -3753,7 +3838,8 @@ export default function Sidebar() {
           const list = threadListRef.current;
           if (pinOrder === null || list === null) return;
           const layout = new Map<string, { top: number; height: number }>();
-          for (const row of list.querySelectorAll<HTMLElement>(":scope > [data-thread-item]")) {
+          // Rows sit in their fold slots; offsets still measure from the list.
+          for (const row of list.querySelectorAll<HTMLElement>("[data-thread-item]")) {
             layout.set(row.dataset.threadItem!, { top: row.offsetTop, height: row.offsetHeight });
           }
           const moved = layout.get(key);
@@ -3777,16 +3863,15 @@ export default function Sidebar() {
           );
           if (pinPreview !== null && next.join("\0") === pinPreview.join("\0")) return;
           pinPreview = next;
-          setPreview({ key, order: next });
+          setPinDrag({ key, order: next });
         },
         onEnd: () => {
           if (pinPreview === null) return;
-          if (pinPreview.join("\0") === pinOrder?.join("\0")) setPreview(null);
-          else if (workOrder !== null) commitWorkReorder(key, pinPreview);
+          if (pinPreview.join("\0") === pinOrder?.join("\0")) setPinDrag(null);
           else commitPinDrag(key, pinPreview);
         },
         onCancel: () => {
-          if (pinPreview !== null) setPreview(null);
+          if (pinPreview !== null) setPinDrag(null);
         },
         onAbort: () => {},
       });
@@ -3836,7 +3921,7 @@ export default function Sidebar() {
       const sweepTo = (key: string | null) => {
         if (key === null || key === targetKey) return;
         targetKey = key;
-        sweptKeys = resolveSidebarSweepKeys(orderedThreadKeysRef.current, originKey, key, canApply);
+        sweptKeys = resolveSidebarSweepKeys(drawnThreadKeysRef.current, originKey, key, canApply);
         setActionSweep({ action, keys: new Set(sweptKeys) });
       };
       dragSensorRef.current = new SidebarPointerSensor({
@@ -3917,9 +4002,13 @@ export default function Sidebar() {
     visibleWorkingThreads,
     workingThreads.length,
   ]);
+  // A project picked in the Work hero rides on a draft until its first send,
+  // and files the draft's card under that project.
+  const pendingFolderByThreadId = usePendingProjectFolderStore((state) => state.byThreadId);
   // Work's cards as drawn, top to bottom: the filter's threads in reverse of
   // their order (new work lowest, by the dock), then the unsent drafts, newest
-  // lowest. While a card is dragged the Working list previews the drop.
+  // lowest. While a card is saving a move the list previews the new order.
+  // `groups` files them under project headings, each keeping that order.
   const workRows = useMemo(() => {
     if (sidebarMode !== "tasks") return null;
     const shown = openShelf ?? "active";
@@ -3944,16 +4033,127 @@ export default function Sidebar() {
             ).map((key) => byKey.get(key)!);
           })()
         : threads;
-    return {
-      shown,
-      threads: previewed,
-      drafts:
-        shown === "active" ? workDrafts.toSorted((a, b) => a.createdAtMs - b.createdAtMs) : [],
-    };
-  }, [attentionThreadKeys, openShelf, sidebarListItems, sidebarMode, workDrafts, workDrag]);
+    const drafts =
+      shown === "active" ? workDrafts.toSorted((a, b) => a.createdAtMs - b.createdAtMs) : [];
+    // One stable folder per project (rowFolderByKey), for the heading's mark.
+    const projectOf = (entry: EnvironmentProjectLabel | null | undefined) =>
+      entry
+        ? {
+            key: entry.key,
+            name: entry.label.name,
+            folder: rowFolderByKey.get(entry.key) ?? null,
+          }
+        : null;
+    const cards: WorkCardEntry[] = [
+      ...previewed.map((entry) => ({ kind: "thread" as const, ...entry })),
+      ...drafts.map((draft) => ({ kind: "draft" as const, key: `draft:${draft.draftId}`, draft })),
+    ];
+    const groups = groupWorkCards(cards, (card) => {
+      if (card.kind === "thread") {
+        const thread = threadByKey.get(card.key);
+        return projectOf(thread && workThreadFolder(thread, projectLabelDirectory));
+      }
+      const { draft } = card;
+      const picked = pendingFolderByThreadId[draft.threadId];
+      return projectOf(
+        picked?.environmentId === draft.environmentId
+          ? projectLabelDirectory.byKey.get(projectLabelKey(draft.environmentId, picked.folderId))
+          : projectLabelDirectory.folderByRepository.get(
+              scopedRepositoryKey(draft.environmentId, draft.projectId),
+            ),
+      );
+    });
+    return { shown, threads: previewed, groups };
+  }, [
+    attentionThreadKeys,
+    openShelf,
+    pendingFolderByThreadId,
+    projectLabelDirectory,
+    rowFolderByKey,
+    sidebarListItems,
+    sidebarMode,
+    threadByKey,
+    workDrafts,
+    workDrag,
+  ]);
   const workRowsRef = useRef(workRows);
   workRowsRef.current = workRows;
-  const workRowsOrderKey = workRows?.threads.map((entry) => entry.key).join("\0") ?? "";
+  // Rows as they read on screen, for range selection and action sweeps: in
+  // Work that is project by project. Settle-and-advance keeps the list order.
+  const drawnThreadKeysRef = useRef<readonly string[]>(orderedThreadKeys);
+  drawnThreadKeysRef.current =
+    workRows === null
+      ? orderedThreadKeys
+      : workRows.groups.flatMap((group) =>
+          group.cards.flatMap((card) => (card.kind === "thread" ? [card.key] : [])),
+        );
+  const workRowsOrderKey =
+    workRows?.groups.flatMap((group) => group.cards.map((card) => card.key)).join("\0") ?? "";
+  // Which Work cards can be dragged, and within which group: the open list's
+  // cards on servers that keep a manual order (pinned ones keep theirs), as
+  // drawn, in groups that show at least two of them.
+  const workSort = useMemo(() => {
+    const groupOf = new Map<string, string>();
+    const orders = new Map<string, string[]>();
+    if (workRows === null || workRows.shown !== "active") return { groupOf, orders };
+    for (const group of workRows.groups) {
+      const collapsed = collapsedInSpace.includes(workGroupSectionKey(group.key));
+      const keys = group.cards.flatMap((card) => {
+        if (card.kind !== "thread" || (collapsed && card.key !== routeThreadKey)) return [];
+        const thread = threadByKey.get(card.key);
+        const movable =
+          thread !== undefined && thread.pinnedAt == null && canReorderWorkIn(thread.environmentId);
+        return movable ? [card.key] : [];
+      });
+      if (keys.length < 2) continue;
+      orders.set(group.key, keys);
+      for (const key of keys) groupOf.set(key, group.key);
+    }
+    return { groupOf, orders };
+  }, [canReorderWorkIn, collapsedInSpace, routeThreadKey, threadByKey, workRows]);
+  const workSortRef = useRef(workSort);
+  workSortRef.current = workSort;
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const workSortSensorOptions = useMemo(
+    (): SidebarSortSensorOptions => ({
+      distance: SIDEBAR_DRAG_DISTANCE,
+      canActivate: () => dragSensorRef.current === null,
+      onAttach: (sensor) => {
+        dragSensorRef.current = sensor;
+      },
+      onFinish: () => {
+        dragSensorRef.current = null;
+        contextDragKeyRef.current = null;
+        endThreadContextDrag();
+      },
+      onMove: moveThreadContextDrag,
+      onDrop: dropThreadContextDrag,
+    }),
+    [dropThreadContextDrag, moveThreadContextDrag],
+  );
+  const workSortSensors = useSensors(useSensor(SidebarSortSensor, workSortSensorOptions));
+  // A card only ever lands among its own group's cards.
+  const workSortCollision = useMemo(
+    () => sidebarGroupCollision((id) => workSortRef.current.groupOf.get(id)),
+    [],
+  );
+  const describeWorkSortItem = useCallback(
+    (id: UniqueIdentifier) => threadByKeyRef.current.get(String(id))?.title ?? "Work",
+    [],
+  );
+  const handleWorkSortStart = useCallback(({ active }: DragStartEvent) => {
+    // A drag that leaves the list carries this thread into a composer.
+    contextDragKeyRef.current = String(active.id);
+  }, []);
+  const handleWorkSortEnd = ({ active, over }: DragEndEvent) => {
+    const key = String(active.id);
+    const groupOrder = workGroupOrderOf(key);
+    if (over === null || groupOrder === null) return;
+    const from = groupOrder.indexOf(key);
+    const to = groupOrder.indexOf(String(over.id));
+    if (from === -1 || to === -1 || from === to) return;
+    commitWorkGroupReorder(key, arrayMove([...groupOrder], from, to), { sortDrop: true });
+  };
   // Every shell event rebuilds sidebarListItems, but rows only move when the
   // rendered order or a row's section changes. Keying the motion pass on that
   // keeps ordinary updates from forcing a layout read and animating rows
@@ -3972,12 +4172,18 @@ export default function Sidebar() {
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
   const listMotionRevealRef = useRef({ chats: chatVisibleCount, settled: settledVisibleCount });
+  const listMotionCollapsedRef = useRef(collapsedInSpace);
   useLayoutEffect(() => {
     // Draft navigation can reveal a frozen row without changing the draft count.
     void sidebarListOrderKey;
-    // A drag preview or a folded heading moves rows without changing the items.
+    // A move's preview reorders rows without changing the items.
     void workRowsOrderKey;
-    void collapsedInSpace;
+    // A fold animates its rows' own height (SidebarFoldRow); the list motion
+    // only takes note of where everything is.
+    const folded = listMotionCollapsedRef.current !== collapsedInSpace;
+    listMotionCollapsedRef.current = collapsedInSpace;
+    const sortDropped = listMotionSkipRef.current;
+    listMotionSkipRef.current = false;
     // A mode switch replaces the whole list. Fading every row out (each as a
     // deep clone) and back in cost a long frame, so the list snaps to the new
     // mode; AppSidebarLayout plays the switch's one enter motion on the column.
@@ -3993,9 +4199,10 @@ export default function Sidebar() {
       chatVisibleCount > listMotionRevealRef.current.chats ||
       settledVisibleCount > listMotionRevealRef.current.settled;
     listMotionRevealRef.current = { chats: chatVisibleCount, settled: settledVisibleCount };
-    listMotionRef.current?.update(sidebarListHasRows && !modeChanged && !shelfChanged, {
-      inPlace: revealed,
-    });
+    listMotionRef.current?.update(
+      sidebarListHasRows && !modeChanged && !shelfChanged && !folded && !sortDropped,
+      { inPlace: revealed },
+    );
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     if (shelfChanged && !modeChanged) {
       // --motion-duration-base on ease-standard.
@@ -4946,6 +5153,7 @@ export default function Sidebar() {
               />
             ) : null}
             {sidebarMode === "agents" ? <AgentsShelfBar /> : null}
+            {sidebarMode === "projects" ? <ProjectsShelfBar /> : null}
             {threadHeader}
           </SidebarGroup>
         }
@@ -5044,11 +5252,14 @@ export default function Sidebar() {
             />
           ) : null}
           {!isSearchingThreads && modeListsThreads ? (
-            <TooltipProvider
+            // Work's cards sort within their project groups (SidebarSortableFoldRow).
+            <SidebarThreadListProviders
               key="sidebar-thread-tooltips-150"
-              delay={150}
-              closeDelay={0}
-              timeout={400}
+              sensors={workSortSensors}
+              collisionDetection={workSortCollision}
+              onDragStart={handleWorkSortStart}
+              onDragEnd={handleWorkSortEnd}
+              describe={describeWorkSortItem}
             >
               <SidebarDragLifecycle onUnmount={cancelThreadDrag} />
               {/* Announces keyboard reorders (alt+arrow) in Work. */}
@@ -5057,6 +5268,7 @@ export default function Sidebar() {
               </span>
               <SidebarList
                 ref={attachListMotionRef}
+                onTransitionEnd={handleListTransitionEnd}
                 // VoiceOver treats an exposed list as an interaction boundary,
                 // which hides its rows from ordinary linear navigation. A
                 // presentational list also makes its implicit listitems
@@ -5095,6 +5307,7 @@ export default function Sidebar() {
                   const renderThreadRow = (
                     thread: EnvironmentThreadShell,
                     section: SidebarSection,
+                    projectInHeading = false,
                   ) => {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
@@ -5157,6 +5370,7 @@ export default function Sidebar() {
                         repositoryName={repositoryNameFor(thread)}
                         onRepositoryContextMenu={handleRepositoryContextMenu}
                         folder={sidebarMode === "tasks" ? workFolderFor(thread) : folderFor(thread)}
+                        projectInHeading={projectInHeading}
                         sweepAction={actionSweep?.keys.has(threadKey) ? actionSweep.action : null}
                         snoozeWakeLabelText={
                           section === "snoozed" && thread.snoozedUntil != null
@@ -5222,35 +5436,94 @@ export default function Sidebar() {
                   // shows active work (and drafts), each other one only its shelf.
                   const shownSection = sidebarMode === "tasks" ? (openShelf ?? "active") : null;
                   const items: ReactNode[] = [];
-                  // Work is one flat list of cards in the order the user
-                  // arranged (workRows), drafts newest at the bottom by the
-                  // dock; each card names its project and repository itself.
+                  // Work's cards sit under project headings, "No project" last,
+                  // each group in the order the user arranged (workRows) with
+                  // its drafts newest at the bottom. A folded heading keeps
+                  // only the open card; cards drag within their group.
                   if (workRows !== null) {
-                    for (const entry of workRows.threads) {
-                      const thread = threadByKey.get(entry.key);
-                      if (thread) items.push(renderThreadRow(thread, entry.section));
-                    }
-                    for (const draft of workRows.drafts) {
-                      const projectKey = `${draft.environmentId}:${draft.projectId}` as const;
+                    for (const group of workRows.groups) {
+                      const sectionKey = workGroupSectionKey(group.key);
+                      const collapsed = collapsedInSpace.includes(sectionKey);
+                      const label = group.project?.name ?? "No project";
+                      const groupFolder = group.project?.folder;
+                      // Every group has a heading, "No project" included.
+                      const projectInHeading = true;
                       items.push(
-                        <SidebarWorkDraftCard
-                          key={`draft:${draft.draftId}`}
-                          draftId={draft.draftId}
-                          branch={draft.branch}
-                          project={projectByKey.get(projectKey) ?? null}
-                          projectDisplayName={projectDisplayNameByKey.get(projectKey) ?? null}
-                          environmentId={draft.environmentId}
-                          threadId={draft.threadId}
-                          repositoryName={repositoryNameFor(draft)}
-                          repositoryFolder={repositoryFolderFor(
-                            draft.environmentId,
-                            draft.projectId,
-                          )}
-                          folderForLabel={folderForLabel}
-                          isActive={draft.draftId === routeDraftIdForRows}
-                          onNavigate={navigateToDraft}
-                          onContextMenu={handleDraftContextMenu}
+                        <SidebarGroupHeader
+                          key={`work-group:${group.key}`}
+                          label={label}
+                          count={group.cards.length}
+                          icon={
+                            groupFolder ? (
+                              <ProjectFolderIcon color={groupFolder.color} className="size-3.5" />
+                            ) : undefined
+                          }
+                          collapse={{
+                            open: !collapsed,
+                            onToggle: () => toggleSection(sectionKey),
+                            ariaLabel: `${label}, ${collapsed ? "expand" : "collapse"}`,
+                          }}
                         />,
+                      );
+                      const sortItems = workSort.orders.get(group.key) ?? EMPTY_SORT_ITEMS;
+                      const cards = group.cards.map((card) => {
+                        if (card.kind === "thread") {
+                          const thread = threadByKey.get(card.key);
+                          if (!thread) return null;
+                          return (
+                            <SidebarSortableFoldRow
+                              key={card.key}
+                              id={card.key}
+                              open={!collapsed}
+                              sortable={
+                                workSort.groupOf.has(card.key) && renamingThreadKey !== card.key
+                              }
+                              reducedMotion={reducedMotion}
+                            >
+                              {renderThreadRow(thread, card.section, projectInHeading)}
+                            </SidebarSortableFoldRow>
+                          );
+                        }
+                        const { draft } = card;
+                        const projectKey = `${draft.environmentId}:${draft.projectId}` as const;
+                        return (
+                          <SidebarSortableFoldRow
+                            key={card.key}
+                            id={card.key}
+                            open={!collapsed}
+                            sortable={false}
+                            reducedMotion={reducedMotion}
+                          >
+                            <SidebarWorkDraftCard
+                              draftId={draft.draftId}
+                              branch={draft.branch}
+                              project={projectByKey.get(projectKey) ?? null}
+                              projectDisplayName={projectDisplayNameByKey.get(projectKey) ?? null}
+                              environmentId={draft.environmentId}
+                              threadId={draft.threadId}
+                              repositoryName={repositoryNameFor(draft)}
+                              repositoryFolder={repositoryFolderFor(
+                                draft.environmentId,
+                                draft.projectId,
+                              )}
+                              folderForLabel={folderForLabel}
+                              projectInHeading={projectInHeading}
+                              isActive={draft.draftId === routeDraftIdForRows}
+                              onNavigate={navigateToDraft}
+                              onContextMenu={handleDraftContextMenu}
+                            />
+                          </SidebarSortableFoldRow>
+                        );
+                      });
+                      items.push(
+                        <SortableContext
+                          key={`work-sort:${group.key}`}
+                          id={`work-sort:${group.key}`}
+                          items={sortItems}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          {cards}
+                        </SortableContext>,
                       );
                     }
                     return items;
@@ -5297,18 +5570,22 @@ export default function Sidebar() {
                           />,
                         );
                       }
-                      // A folded date group keeps only the open chat.
+                      // A folded date group keeps only the open chat; the
+                      // rest fold shut under the heading.
                       const chatGroup =
                         item.section === "active" && sidebarMode === "chats"
                           ? chatDateGroupByKey.get(item.key)
                           : undefined;
-                      if (
-                        chatGroup !== undefined &&
-                        !rowShowsInSection({
-                          collapsed: collapsedInSpace.includes(chatGroup),
-                          isOpen: item.key === routeThreadKey,
-                        })
-                      ) {
+                      if (chatGroup !== undefined) {
+                        items.push(
+                          <SidebarFoldRow
+                            key={item.key}
+                            // A fold hides every row; the open one stays selected.
+                            open={!collapsedInSpace.includes(chatGroup)}
+                          >
+                            {renderThreadRow(thread, item.section)}
+                          </SidebarFoldRow>,
+                        );
                         continue;
                       }
                       items.push(renderThreadRow(thread, item.section));
@@ -5376,7 +5653,7 @@ export default function Sidebar() {
                   />
                 ) : null}
               </SidebarList>
-            </TooltipProvider>
+            </SidebarThreadListProviders>
           ) : null}
           {!isSearchingThreads &&
           modeListsThreads &&

@@ -1124,6 +1124,14 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:deleteProjectLabel",
       tag: WS_METHODS.projectLabelsDelete,
     }),
+    archiveProjectLabel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:archiveProjectLabel",
+      tag: WS_METHODS.projectLabelsArchive,
+    }),
+    unarchiveProjectLabel: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:unarchiveProjectLabel",
+      tag: WS_METHODS.projectLabelsUnarchive,
+    }),
     linkProjectLabelRepository: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:linkProjectLabelRepository",
       tag: WS_METHODS.projectLabelsLinkRepository,

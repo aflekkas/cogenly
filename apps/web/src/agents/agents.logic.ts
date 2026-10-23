@@ -1,5 +1,16 @@
-import type { ModelSelection, OrchestrationV2Run } from "@t3tools/contracts";
-import type { AgentContact, AgentDraft, AgentMessage, AgentModelOption } from "./agents.types";
+import type {
+  ChatAttachment as ContractChatAttachment,
+  ModelSelection,
+  OrchestrationV2Run,
+} from "@t3tools/contracts";
+import { isFileAttachment, isImageAttachment, type ChatAttachment } from "~/types";
+import type {
+  AgentAttachmentSupport,
+  AgentContact,
+  AgentDraft,
+  AgentMessage,
+  AgentModelOption,
+} from "./agents.types";
 
 const GROUP_GAP_MS = 3 * 60_000;
 const SEPARATOR_GAP_MS = 30 * 60_000;
@@ -124,6 +135,49 @@ export function reconcileAgentMessages(
 ): ReadonlyArray<AgentMessage> {
   const ids = new Set(persisted.map((message) => message.id));
   return [...persisted, ...pending.filter((message) => !ids.has(message.id))];
+}
+
+/** Which uploads a text carries, so retrying the same text and files keeps its ids. */
+export function agentAttachmentIdentity(
+  attachments: ReadonlyArray<Pick<ChatAttachment, "id">>,
+): string {
+  return attachments.map((attachment) => attachment.id).join("\0");
+}
+
+/** The uploads as the server takes them; local previews stay on this client. */
+export function wireAgentAttachments(
+  attachments: ReadonlyArray<ChatAttachment>,
+): ReadonlyArray<ContractChatAttachment> {
+  return attachments.map((attachment) => {
+    if (isImageAttachment(attachment)) {
+      const { previewUrl: _previewUrl, ...wire } = attachment;
+      return wire;
+    }
+    if (isFileAttachment(attachment)) {
+      const { previewUrl: _previewUrl, downloadable: _downloadable, ...wire } = attachment;
+      return wire;
+    }
+    return attachment;
+  });
+}
+
+/**
+ * Whether texts to this environment's agents can carry uploads. Servers from before
+ * agent attachments silently drop them, so a missing capability hides the controls.
+ */
+export function agentAttachmentSupport(
+  capabilities:
+    | {
+        readonly agentAttachments?: boolean;
+        readonly attachmentUploads?: boolean;
+        readonly fileAttachments?: { readonly maxUploadBytes: number };
+      }
+    | undefined,
+): AgentAttachmentSupport | null {
+  if (capabilities?.agentAttachments !== true || capabilities.attachmentUploads !== true) {
+    return null;
+  }
+  return { maxFileBytes: capabilities.fileAttachments?.maxUploadBytes ?? null };
 }
 
 /** The editable profile, so a composer edit saves the same fields as the Details sheet. */

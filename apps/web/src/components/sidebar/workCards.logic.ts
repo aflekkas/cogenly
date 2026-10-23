@@ -1,24 +1,105 @@
 import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
 
 /**
- * Work is one flat list of cards, drawn top to bottom in reverse of the
- * server's active order: that order puts new, unarranged work first, and the
- * list stacks up from the search dock, so new work lands at the bottom by the
- * dock. Orders here read top to bottom as drawn.
+ * Work's cards are drawn top to bottom in reverse of the server's active
+ * order: that order puts new, unarranged work first, and the list stacks up
+ * from the search dock, so new work lands at the bottom by the dock. The list
+ * shows them under project headings (`groupWorkCards`), each group keeping
+ * that order. Orders here read top to bottom as drawn.
  */
 
 /**
  * A Work card's first line, after T3's: the repository, led by the project it
  * is in ("Spawn Partners · platform"); the project alone for repository-less
- * Work in a project; "No project" for neither.
+ * Work in a project; "No project" for neither. Under a group heading (its
+ * project, or "No project") the heading already names the project, so the
+ * card names only where it runs: the repository, else the project folder.
  */
 export function workCardLabel(input: {
   readonly projectName: string | null;
   readonly repositoryName: string | null;
+  readonly projectInHeading?: boolean;
 }): string {
   const { projectName, repositoryName } = input;
+  if (input.projectInHeading) {
+    return repositoryName ?? (projectName ? "Project folder" : "No repository");
+  }
   if (projectName && repositoryName) return `${projectName} · ${repositoryName}`;
   return repositoryName ?? projectName ?? "No project";
+}
+
+/** The group key Work without a project files under. Project keys never collide with it. */
+export const NO_PROJECT_WORK_GROUP = "none";
+
+export interface WorkCardGroup<T, P> {
+  /** The project's key, or NO_PROJECT_WORK_GROUP. */
+  readonly key: string;
+  /** The project; null for "No project". */
+  readonly project: P | null;
+  readonly cards: readonly T[];
+}
+
+/**
+ * Work's cards under project headings: projects by name, "No project" last.
+ * Inside a group the cards keep the order they came in, so the drawn order
+ * (and a drag's preview of it) carries through.
+ */
+export function groupWorkCards<T, P extends { readonly key: string; readonly name: string }>(
+  cards: readonly T[],
+  projectOf: (card: T) => P | null,
+): WorkCardGroup<T, P>[] {
+  const groups = new Map<string, { key: string; project: P | null; cards: T[] }>();
+  for (const card of cards) {
+    const project = projectOf(card);
+    const key = project?.key ?? NO_PROJECT_WORK_GROUP;
+    const group = groups.get(key);
+    if (group) group.cards.push(card);
+    else groups.set(key, { key, project, cards: [card] });
+  }
+  return [...groups.values()].toSorted((left, right) => {
+    if (left.project === null || right.project === null) {
+      return Number(left.project === null) - Number(right.project === null);
+    }
+    return (
+      left.project.name.localeCompare(right.project.name, undefined, { sensitivity: "base" }) ||
+      left.key.localeCompare(right.key)
+    );
+  });
+}
+
+/** The collapsed-section key of a Work project group, beside Chats' date groups. */
+export function workGroupSectionKey(groupKey: string): string {
+  return `project:${groupKey}`;
+}
+
+/**
+ * The full drawn order after a card moved inside its project group.
+ * `groupOrder` is the group's cards in their new order, a reordering of a
+ * subsequence of `order`. The card lands beside its new neighbour in the
+ * group, so every card outside the group keeps its place. Unchanged when the
+ * card is not in both.
+ */
+export function placeInGroupOrder(
+  order: readonly string[],
+  groupOrder: readonly string[],
+  movedId: string,
+): string[] {
+  const index = groupOrder.indexOf(movedId);
+  const rest = order.filter((key) => key !== movedId);
+  if (index === -1 || rest.length === order.length) return [...order];
+  const after = groupOrder[index + 1];
+  const afterAt = after === undefined ? -1 : rest.indexOf(after);
+  if (afterAt !== -1) {
+    rest.splice(afterAt, 0, movedId);
+    return rest;
+  }
+  const before = groupOrder[index - 1];
+  const beforeAt = before === undefined ? -1 : rest.indexOf(before);
+  if (beforeAt !== -1) {
+    rest.splice(beforeAt + 1, 0, movedId);
+    return rest;
+  }
+  return [...order];
 }
 
 /**
@@ -83,15 +164,4 @@ export function toggleCollapsedSection(
   if (next.length === 0) delete result[space];
   else result[space] = next;
   return result;
-}
-
-/**
- * Whether a row shows under its section heading: always while open; folded,
- * only the open thread, so the page you are on never vanishes behind it.
- */
-export function rowShowsInSection(input: {
-  readonly collapsed: boolean;
-  readonly isOpen: boolean;
-}): boolean {
-  return !input.collapsed || input.isOpen;
 }

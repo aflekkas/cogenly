@@ -105,7 +105,7 @@
 .agent-identity-name:hover {
   background: var(--muted);
 }
-.agent-identity-name:focus-visible {
+.agent-identity-name:focus-visible:not(:root[data-input-modality="pointer"] *) {
   outline: 2px solid var(--ring);
   outline-offset: 1px;
 }
@@ -441,7 +441,7 @@
 .agent-model-notice:hover {
   background: color-mix(in srgb, var(--warning, var(--muted)) 18%, transparent);
 }
-.agent-model-notice:focus-visible {
+.agent-model-notice:focus-visible:not(:root[data-input-modality="pointer"] *) {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }

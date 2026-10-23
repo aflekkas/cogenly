@@ -104,6 +104,10 @@ const layerTest = ManagedProjectFolders.layer.pipe(
         id === labelId
           ? Effect.succeed({ label: testLabel })
           : Effect.fail(new ProjectLabelError({ operation: "read", reason: "not_found" })),
+      readActive: (id) =>
+        id === labelId
+          ? Effect.succeed({ label: testLabel })
+          : Effect.fail(new ProjectLabelError({ operation: "read", reason: "not_found" })),
       linkRepository: (input) => {
         linked.push(input);
         return Effect.succeed({ label: testLabel });

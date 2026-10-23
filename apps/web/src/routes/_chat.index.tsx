@@ -18,6 +18,7 @@ import {
 } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
+import { WorkspacePageTitle } from "../components/WorkspacePageTitle";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useAgents } from "../agents/agentsClient";
@@ -223,12 +224,14 @@ function IndexEmptyState(props: {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       {props.pageTitle ? (
         <WorkspacePageHeader electron={isElectron}>
-          <h1
-            className="min-w-0 flex-1 truncate text-sm font-medium tracking-tight"
-            data-panel-flip="start"
-          >
-            {props.pageTitle}
-          </h1>
+          <WorkspacePageTitle>
+            <h1
+              className="min-w-0 flex-1 truncate text-sm font-medium tracking-tight"
+              data-panel-flip="start"
+            >
+              {props.pageTitle}
+            </h1>
+          </WorkspacePageTitle>
         </WorkspacePageHeader>
       ) : isElectron ? (
         <WorkspacePageHeader electron />

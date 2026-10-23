@@ -1,5 +1,5 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { Bot, ExternalLink, Square, SquareTerminal } from "lucide-react";
+import { Bot, ChevronDown, ExternalLink, Square, SquareTerminal } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { CopyButton } from "~/components/ui/copy-button";
@@ -17,6 +17,16 @@ import {
 } from "../AgentTerminalsPanel.logic";
 import { TerminalViewport } from "../TerminalViewport";
 import { Button } from "../ui/button";
+import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuTrigger,
+} from "../ui/menu";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -27,7 +37,7 @@ import {
   useDetectedRunUrl,
   useOpenRunUrl,
 } from "./terminalParts";
-import { runListTitle, shortenHomePath } from "./bottomPanel.logic";
+import { runListTitle, shortenHomePath, type RunGroup } from "./bottomPanel.logic";
 
 type IconActionSize = "icon-micro" | "icon-xs";
 
@@ -184,7 +194,7 @@ function RunRow({
         <RunStateGlyph state={state} />
         <span
           className={cn(
-            "min-w-0 flex-1 truncate font-mono",
+            "min-w-0 flex-1 fade-truncate font-mono",
             selected || live ? "text-foreground" : "text-muted-foreground",
           )}
         >
@@ -209,14 +219,96 @@ function RunRow({
 
 const runOptionId = (terminalId: string) => `agent-run-${terminalId}`;
 
-function GroupLabel({ children }: { children: string }) {
+/**
+ * "Running" or "Finished" over its rows, with its count; the heading folds
+ * the rows with the shared disclosure motion.
+ */
+function RunGroupSection(props: {
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
   return (
-    <div
-      role="presentation"
-      className="flex h-7 shrink-0 items-end px-3 pb-1 text-3xs text-muted-foreground/55 @max-[40rem]/terminals:pe-10"
-    >
-      {children}
+    <div role="group" aria-label={props.label} className="flex min-w-0 shrink-0 flex-col">
+      <div className="flex h-7 shrink-0 items-end px-3 pb-1 text-3xs text-muted-foreground/55">
+        <DisclosureTrigger
+          open={props.open}
+          onClick={props.onToggle}
+          // The list's own keys move through runs; Space and Enter belong to this button.
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          {props.label}
+          <span className="-ms-1 tabular-nums">({props.count})</span>
+        </DisclosureTrigger>
+      </div>
+      <DisclosurePanel open={props.open}>{props.children}</DisclosurePanel>
     </div>
+  );
+}
+
+/**
+ * The compact drawer's run list: the selected run's command on one line, a
+ * menu of every run behind it. Takes the list's place so output keeps the room.
+ */
+function RunSwitcher(props: {
+  runs: ReadonlyArray<AgentTerminalEntry>;
+  liveRunCount: number;
+  selected: AgentTerminalEntry;
+  onSelect: (terminalId: string) => void;
+}) {
+  const live = props.runs.slice(0, props.liveRunCount);
+  const finished = props.runs.slice(props.liveRunCount);
+  const item = (entry: AgentTerminalEntry) => (
+    <MenuRadioItem key={entry.terminalId} value={entry.terminalId}>
+      <RunStateGlyph state={terminalRunState(entry)} />
+      <span className="ms-2 min-w-0 flex-1 truncate font-mono text-xs">
+        {runListTitle(entry.label)}
+      </span>
+    </MenuRadioItem>
+  );
+  return (
+    <Menu>
+      <MenuTrigger
+        render={
+          <button
+            type="button"
+            aria-label={`Agent run: ${props.selected.label}. Switch run`}
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-start font-mono text-xs leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          />
+        }
+      >
+        <span className="min-w-0 truncate">
+          <span aria-hidden className="text-muted-foreground/50">
+            ${" "}
+          </span>
+          {props.selected.label}
+        </span>
+        {props.runs.length > 1 ? (
+          <ChevronDown aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+        ) : null}
+      </MenuTrigger>
+      <MenuPopup align="start" className="max-w-[min(32rem,90vw)]">
+        <MenuRadioGroup
+          value={props.selected.terminalId}
+          onValueChange={(terminalId) => props.onSelect(String(terminalId))}
+        >
+          {live.length > 0 ? (
+            <MenuGroup>
+              <MenuGroupLabel>Running ({live.length})</MenuGroupLabel>
+              {live.map(item)}
+            </MenuGroup>
+          ) : null}
+          {finished.length > 0 ? (
+            <MenuGroup>
+              <MenuGroupLabel>Finished ({finished.length})</MenuGroupLabel>
+              {finished.map(item)}
+            </MenuGroup>
+          ) : null}
+        </MenuRadioGroup>
+      </MenuPopup>
+    </Menu>
   );
 }
 
@@ -227,15 +319,16 @@ function RunStatusLine({ entry }: { entry: AgentTerminalEntry }) {
   const started = formatRunTimestamp(entry.startedAt);
   const ended = live ? null : formatRunTimestamp(entry.updatedAt);
   const duration = live ? null : runDurationMs(entry);
+  // Wall-clock times are secondary: a narrow drawer drops them, keeping the duration.
   const parts = [
     live
       ? started
-        ? `started ${started}`
+        ? { text: `started ${started}`, clock: true }
         : null
       : duration !== null
-        ? formatRunDuration(duration)
+        ? { text: formatRunDuration(duration), clock: false }
         : null,
-    ended ? `ended ${ended}` : null,
+    ended ? { text: `ended ${ended}`, clock: true } : null,
   ].filter((part) => part !== null);
   return (
     <span
@@ -247,11 +340,14 @@ function RunStatusLine({ entry }: { entry: AgentTerminalEntry }) {
         {live ? "Running" : terminalRunStateLabel(state)}
       </span>
       {parts.map((part) => (
-        <span key={part} className="flex items-center gap-1.5">
+        <span
+          key={part.text}
+          className={cn("flex items-center gap-1.5", part.clock && "@max-[26rem]/terminals:hidden")}
+        >
           <span aria-hidden className="text-muted-foreground/50">
             ·
           </span>
-          {part}
+          {part.text}
         </span>
       ))}
     </span>
@@ -266,11 +362,14 @@ function RunCommandHeader({
   threadRef,
   entry,
   canOperate,
+  switcher,
   onStop,
 }: {
   threadRef: ScopedThreadRef;
   entry: AgentTerminalEntry;
   canOperate: boolean;
+  /** In a compact drawer, narrow, the run menu that stands in for the run list. */
+  switcher: ReactNode;
   onStop: (entry: AgentTerminalEntry) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -283,10 +382,19 @@ function RunCommandHeader({
     setExpanded((value) => !value);
   };
   return (
-    // Wide, the actions end where the panel's corner × begins: its 0.75rem inset,
-    // 1.5rem button and the same 0.25rem gap the actions keep between themselves.
-    <div className="flex shrink-0 flex-col gap-0.5 border-b border-border/50 px-3 pt-1.5 pb-2 @min-[40rem]/terminals:pe-10">
+    // Wide, or narrow with the run menu on top, the actions end where the panel's
+    // corner × begins: its 0.75rem inset, 1.5rem button and the same 0.25rem gap
+    // the actions keep between themselves.
+    <div
+      className={cn(
+        "swap-motion flex shrink-0 flex-col gap-0.5 border-b border-border/50 px-3 pt-1.5 pb-2 @min-[40rem]/terminals:pe-10",
+        switcher && "pe-10",
+      )}
+    >
       <div className="flex min-w-0 items-start gap-2">
+        {switcher ? (
+          <div className="flex min-w-0 flex-1 @min-[40rem]/terminals:hidden">{switcher}</div>
+        ) : null}
         <code
           role="button"
           tabIndex={0}
@@ -300,8 +408,9 @@ function RunCommandHeader({
           className={cn(
             "min-w-0 flex-1 cursor-pointer rounded-sm font-mono text-xs leading-6 text-foreground outline-none select-text focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
             expanded
-              ? "max-h-24 overflow-y-auto break-all whitespace-pre-wrap"
+              ? "max-h-24 overflow-y-auto break-all whitespace-pre-wrap scroll-fade-y"
               : "truncate whitespace-nowrap",
+            switcher && "@max-[40rem]/terminals:hidden",
           )}
         >
           <span aria-hidden className="text-muted-foreground/50 select-none">
@@ -329,7 +438,8 @@ function RunCommandHeader({
         </div>
       </div>
       <div className="flex min-w-0 items-center gap-3 text-3xs text-muted-foreground">
-        <span className="flex min-w-0 flex-1 font-mono text-muted-foreground/80">
+        {/* Narrow, the folder is dropped first; how the run stands is what matters. */}
+        <span className="flex min-w-0 flex-1 font-mono text-muted-foreground/80 @max-[26rem]/terminals:hidden">
           <MiddleTruncate value={location} />
         </span>
         <RunStatusLine entry={entry} />
@@ -355,6 +465,11 @@ export interface AgentRunsViewProps {
   readonly onAddTerminalContext: (selection: TerminalContextSelection) => void;
   /** Shown above the run list, such as a switcher between agents. */
   readonly listHeader?: ReactNode;
+  /** A short drawer: narrow, a run menu in the header takes the run list's place. */
+  readonly compact: boolean;
+  /** Which run groups show their rows; see `runGroupOpen`. */
+  readonly groupsOpen: Readonly<Record<RunGroup, boolean>>;
+  readonly onGroupOpenChange: (group: RunGroup, open: boolean) => void;
 }
 
 /**
@@ -383,6 +498,14 @@ export function AgentRunsView(props: AgentRunsViewProps) {
     );
   }
 
+  const live = props.runs.slice(0, props.liveRunCount);
+  const finished = props.runs.slice(props.liveRunCount);
+  // Arrows move through the rows on screen; a folded group's runs are skipped.
+  const navigable = [
+    ...(props.groupsOpen.live ? live : []),
+    ...(props.groupsOpen.finished ? finished : []),
+  ];
+
   const onListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const step =
       event.key === "ArrowDown"
@@ -390,13 +513,13 @@ export function AgentRunsView(props: AgentRunsViewProps) {
         : event.key === "ArrowUp"
           ? -1
           : event.key === "End"
-            ? props.runs.length
+            ? navigable.length
             : event.key === "Home"
-              ? -props.runs.length
+              ? -navigable.length
               : 0;
     if (step !== 0) {
       event.preventDefault();
-      const next = adjacentTerminalId(props.runs, selectedId, step);
+      const next = adjacentTerminalId(navigable, selectedId, step);
       if (next !== null && next !== selectedId) props.onSelect(next);
       return;
     }
@@ -414,8 +537,6 @@ export function AgentRunsView(props: AgentRunsViewProps) {
     listRef.current?.focus();
   };
 
-  const live = props.runs.slice(0, props.liveRunCount);
-  const finished = props.runs.slice(props.liveRunCount);
   const rowProps = {
     threadRef: props.threadRef,
     canOperate: props.canOperate,
@@ -428,12 +549,25 @@ export function AgentRunsView(props: AgentRunsViewProps) {
   // Keyed by agent so switching agents fades the new list and run in (reveal-motion).
   const agentKey = props.threadRef.threadId;
 
+  const rows = (entries: ReadonlyArray<AgentTerminalEntry>) =>
+    entries.map((entry) => (
+      <RunRow
+        key={entry.terminalId}
+        entry={entry}
+        selected={entry.terminalId === selected.terminalId}
+        {...rowProps}
+      />
+    ));
+  const { groupsOpen, onGroupOpenChange } = props;
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col @min-[40rem]/terminals:flex-row">
       <div
         className={cn(
           "flex min-h-0 shrink-0 flex-col",
           "max-h-[38%] border-b border-border/50",
+          // Compact and narrow, the run menu in the header stands in for the list.
+          props.compact && "@max-[40rem]/terminals:border-b-0",
           "@min-[40rem]/terminals:max-h-none @min-[40rem]/terminals:w-60 @min-[40rem]/terminals:border-e @min-[40rem]/terminals:border-b-0",
         )}
       >
@@ -446,26 +580,34 @@ export function AgentRunsView(props: AgentRunsViewProps) {
           aria-label="Agent runs"
           aria-activedescendant={runOptionId(selected.terminalId)}
           onKeyDown={onListKeyDown}
-          className="reveal-motion flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className={cn(
+            "reveal-motion flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-1 outline-none scroll-fade-y focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+            // Narrow, with nothing above it, the list keeps clear of the corner ×
+            // (inset, size and gap) so a scrolled row never slides under it.
+            !props.listHeader && "@max-[40rem]/terminals:me-9",
+            props.compact && "@max-[40rem]/terminals:hidden",
+          )}
         >
-          {live.length > 0 ? <GroupLabel>Running</GroupLabel> : null}
-          {live.map((entry) => (
-            <RunRow
-              key={entry.terminalId}
-              entry={entry}
-              selected={entry.terminalId === selected.terminalId}
-              {...rowProps}
-            />
-          ))}
-          {finished.length > 0 ? <GroupLabel>Finished</GroupLabel> : null}
-          {finished.map((entry) => (
-            <RunRow
-              key={entry.terminalId}
-              entry={entry}
-              selected={entry.terminalId === selected.terminalId}
-              {...rowProps}
-            />
-          ))}
+          {live.length > 0 ? (
+            <RunGroupSection
+              label="Running"
+              count={live.length}
+              open={groupsOpen.live}
+              onToggle={() => onGroupOpenChange("live", !groupsOpen.live)}
+            >
+              {rows(live)}
+            </RunGroupSection>
+          ) : null}
+          {finished.length > 0 ? (
+            <RunGroupSection
+              label="Finished"
+              count={finished.length}
+              open={groupsOpen.finished}
+              onToggle={() => onGroupOpenChange("finished", !groupsOpen.finished)}
+            >
+              {rows(finished)}
+            </RunGroupSection>
+          ) : null}
         </div>
       </div>
       <section
@@ -480,10 +622,21 @@ export function AgentRunsView(props: AgentRunsViewProps) {
           threadRef={props.threadRef}
           entry={selected}
           canOperate={props.canOperate}
+          switcher={
+            props.compact ? (
+              <RunSwitcher
+                runs={props.runs}
+                liveRunCount={props.liveRunCount}
+                selected={selected}
+                onSelect={props.onSelect}
+              />
+            ) : null
+          }
           onStop={props.onStop}
         />
         <div
-          className="min-h-0 flex-1 bg-(--terminal-background)"
+          key={selected.terminalId}
+          className="swap-motion min-h-0 flex-1 bg-(--terminal-background) edge-fade-b"
           onKeyDownCapture={onOutputKeyDownCapture}
         >
           <TerminalViewport

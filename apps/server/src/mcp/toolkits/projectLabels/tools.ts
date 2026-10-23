@@ -44,7 +44,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: Tool.EmptyParams,
     success: ProjectLabelListResult,
     description:
-      "List project folders, their repositories and effective thread counts. Folders provide context only and never grant access.",
+      "List project folders, their repositories, project chat (projectChatThreadId) and effective thread counts. Archived folders carry archivedAt. Folders provide context only and never grant access.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -98,8 +98,25 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ProjectLabelKey,
     success: ProjectLabelDeleteResult,
     description:
-      "Delete a project folder. Its threads and repositories are kept; only the folder and its filing are removed.",
+      "Delete a project folder. Its threads and repositories are kept; only the folder and its filing are removed. Prefer t3_project_label_archive to put a finished project away.",
   }).annotate(Tool.Destructive, true),
+  Tool.make("t3_project_label_archive", {
+    ...shared,
+    parameters: ProjectLabelKey,
+    success: ProjectLabelMutationResult,
+    description:
+      "Archive a project folder: it leaves the project pickers and moves to the Archived list, but keeps its threads, project chat, repositories and filing. Undo with t3_project_label_unarchive.",
+  })
+    .annotate(Tool.Idempotent, true)
+    .annotate(Tool.Destructive, false),
+  Tool.make("t3_project_label_unarchive", {
+    ...shared,
+    parameters: ProjectLabelKey,
+    success: ProjectLabelMutationResult,
+    description: "Bring an archived project folder back to the active projects.",
+  })
+    .annotate(Tool.Idempotent, true)
+    .annotate(Tool.Destructive, false),
   Tool.make("t3_project_label_link_source", {
     ...shared,
     parameters: ProjectLabelSourceLinkInput,

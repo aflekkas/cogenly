@@ -3,9 +3,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyDrawnOrder,
+  groupWorkCards,
   moveInOrder,
+  NO_PROJECT_WORK_GROUP,
+  placeInGroupOrder,
   planWorkCardReorder,
-  rowShowsInSection,
   toggleCollapsedSection,
   workCardLabel,
 } from "./workCards.logic";
@@ -29,6 +31,81 @@ describe("workCardLabel", () => {
 
   it("says No project for Work in neither", () => {
     expect(workCardLabel({ projectName: null, repositoryName: null })).toBe("No project");
+  });
+
+  it("names the repository alone under its project's heading", () => {
+    expect(
+      workCardLabel({
+        projectName: "Spawn Partners",
+        repositoryName: "platform",
+        projectInHeading: true,
+      }),
+    ).toBe("platform");
+    // The heading names the project; the card says where it runs.
+    expect(
+      workCardLabel({
+        projectName: "Spawn Partners",
+        repositoryName: null,
+        projectInHeading: true,
+      }),
+    ).toBe("Project folder");
+    expect(workCardLabel({ projectName: null, repositoryName: null, projectInHeading: true })).toBe(
+      "No repository",
+    );
+  });
+});
+
+describe("groupWorkCards", () => {
+  const projects: Record<string, { key: string; name: string } | null> = {
+    a: { key: "env:zeta", name: "Zeta" },
+    b: null,
+    c: { key: "env:alpha", name: "alpha" },
+    d: { key: "env:zeta", name: "Zeta" },
+    e: null,
+  };
+  const grouped = groupWorkCards(["a", "b", "c", "d", "e"], (card) => projects[card] ?? null);
+
+  it("orders projects by name, ignoring case, with No project last", () => {
+    expect(grouped.map((group) => group.project?.name ?? null)).toEqual(["alpha", "Zeta", null]);
+    expect(grouped.at(-1)!.key).toBe(NO_PROJECT_WORK_GROUP);
+  });
+
+  it("keeps each group's cards in the order they were drawn", () => {
+    expect(grouped.map((group) => group.cards)).toEqual([["c"], ["a", "d"], ["b", "e"]]);
+  });
+
+  it("keeps same-named projects apart by key", () => {
+    const twins = groupWorkCards(["x", "y"], (card) => ({ key: `env-${card}:p`, name: "Same" }));
+    expect(twins.map((group) => group.key)).toEqual(["env-x:p", "env-y:p"]);
+  });
+});
+
+describe("placeInGroupOrder", () => {
+  // Groups interleave in the drawn order: a1, b1, a2, b2, a3.
+  const order = ["a1", "b1", "a2", "b2", "a3"];
+
+  it("puts the card before its new next neighbour in the group", () => {
+    expect(placeInGroupOrder(order, ["a3", "a1", "a2"], "a3")).toEqual([
+      "a3",
+      "a1",
+      "b1",
+      "a2",
+      "b2",
+    ]);
+  });
+
+  it("puts a card moved to the group's end after its new previous neighbour", () => {
+    expect(placeInGroupOrder(order, ["a2", "a3", "a1"], "a1")).toEqual([
+      "b1",
+      "a2",
+      "b2",
+      "a3",
+      "a1",
+    ]);
+  });
+
+  it("leaves the order alone for a card it does not know", () => {
+    expect(placeInGroupOrder(order, ["a1", "a2"], "z")).toEqual(order);
   });
 });
 
@@ -101,13 +178,5 @@ describe("toggleCollapsedSection", () => {
       JSON.stringify(toggleCollapsedSection({ chats: ["older"] }, "chats", "today")),
     );
     expect(stored).toEqual({ chats: ["older", "today"] });
-  });
-});
-
-describe("rowShowsInSection", () => {
-  it("keeps only the open thread under a folded heading", () => {
-    expect(rowShowsInSection({ collapsed: false, isOpen: false })).toBe(true);
-    expect(rowShowsInSection({ collapsed: true, isOpen: true })).toBe(true);
-    expect(rowShowsInSection({ collapsed: true, isOpen: false })).toBe(false);
   });
 });

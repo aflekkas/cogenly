@@ -1287,6 +1287,8 @@ export const CLAUDE_CONVERSATION_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__t3_project_label_create",
   "mcp__cogenly__t3_project_label_update",
   "mcp__cogenly__t3_project_label_delete",
+  "mcp__cogenly__t3_project_label_archive",
+  "mcp__cogenly__t3_project_label_unarchive",
   "mcp__cogenly__t3_project_label_link_source",
   "mcp__cogenly__t3_project_label_unlink_source",
   "mcp__cogenly__t3_project_label_link_repository",

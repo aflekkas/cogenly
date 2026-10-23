@@ -1,18 +1,20 @@
 /**
- * What a project says about itself at a glance: "1 repo · 1 chat · 3 Work",
- * leaving out what it has none of; null when it is empty. Work is a mass
- * noun, so it reads the same at any count.
+ * What a project says about itself at a glance: "1 repo · 1 chat · 3 Work ·
+ * 1 agent", leaving out what it has none of; null when it is empty. Work is a
+ * mass noun, so it reads the same at any count.
  */
 export function projectPanelSummary(counts: {
   readonly repositories: number;
   readonly chats: number;
   readonly work: number;
   readonly files: number;
+  readonly agents?: number;
 }): string | null {
   const parts = [
     plural(counts.repositories, "repo", "repos"),
     plural(counts.chats, "chat", "chats"),
     plural(counts.work, "Work", "Work"),
+    plural(counts.agents ?? 0, "agent", "agents"),
     plural(counts.files, "file", "files"),
   ].filter((part) => part !== null);
   return parts.length > 0 ? parts.join(" · ") : null;

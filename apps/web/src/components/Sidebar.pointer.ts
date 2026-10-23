@@ -1,4 +1,5 @@
-import { useLayoutEffect } from "react";
+import type { SensorProps } from "@dnd-kit/core";
+import { useLayoutEffect, type PointerEvent as ReactPointerEvent } from "react";
 
 // Search unmounts the drag context while its owning Sidebar remains mounted.
 export function SidebarDragLifecycle({ onUnmount }: { onUnmount: () => void }) {
@@ -159,5 +160,32 @@ export class SidebarPointerSensor {
       if (cancelled) this.props.onCancel();
       else this.props.onEnd();
     }
+  }
+}
+
+export type SidebarSortSensorOptions = Options & {
+  /** False while another sidebar gesture owns the pointer. */
+  canActivate: () => boolean;
+};
+
+/**
+ * The same gesture as a dnd-kit sensor, for the sidebar's sortable cards
+ * (Work, Agents): dnd-kit lifts the card and slides its neighbours, while
+ * `options.onMove` and `options.onDrop` can still hand a drag that leaves the
+ * list to the composer as context, which cancels the sort.
+ */
+export class SidebarSortSensor extends SidebarPointerSensor {
+  static activators = [
+    {
+      eventName: "onPointerDown" as const,
+      handler: ({ nativeEvent }: ReactPointerEvent, options: SidebarSortSensorOptions) =>
+        nativeEvent.isPrimary && nativeEvent.button === 0 && options.canActivate(),
+    },
+  ];
+  /** dnd-kit scrolls the list while a card is held near its edge. */
+  autoScrollEnabled = true;
+
+  constructor(props: SensorProps<SidebarSortSensorOptions>) {
+    super({ ...props, active: String(props.active) });
   }
 }

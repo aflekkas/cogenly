@@ -32,6 +32,8 @@ const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "g
 
 /** Launches the test saw, so lazy creation can be counted. */
 const launches = Ref.makeUnsafe<ReadonlyArray<ThreadId>>([]);
+/** The project each launch ran in. */
+const launchedProjects = Ref.makeUnsafe<ReadonlyArray<ProjectId>>([]);
 const removedPaths = Ref.makeUnsafe<ReadonlyArray<string>>([]);
 
 const insertThread = (threadId: ThreadId) =>
@@ -55,6 +57,7 @@ const launch = Layer.effect(
         Effect.gen(function* () {
           const threadId = input.threadId!;
           yield* Ref.update(launches, (all) => [...all, threadId]);
+          yield* Ref.update(launchedProjects, (all) => [...all, input.projectId]);
           yield* insertThread(threadId).pipe(Effect.provideService(SqlClient.SqlClient, sql));
           if (input.projectFolderId !== undefined)
             yield* service.moveThread({ threadId, folderId: input.projectFolderId });
@@ -109,14 +112,22 @@ const folders = Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
   ensureScratchProject: Effect.succeed({ projectId: scratch }),
 });
 
-const layer = ProjectHome.layer.pipe(
-  Layer.provide(Layer.mergeAll(launch, threads, files, folders, ProjectStore.layer)),
-  Layer.provideMerge(labels),
-  Layer.provide(NodeServices.layer),
-);
+// An environment without Scratch (its data dir inside a checkout).
+const noScratch = Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+  ensureScratchProject: Effect.fail(new ManagedProjectFolders.ScratchUnavailableError()),
+});
+
+const layerWith = (managedFolders: typeof folders) =>
+  ProjectHome.layer.pipe(
+    Layer.provide(Layer.mergeAll(launch, threads, files, managedFolders, ProjectStore.layer)),
+    Layer.provideMerge(labels),
+    Layer.provide(NodeServices.layer),
+  );
+const layer = layerWith(folders);
 
 const seed = Effect.gen(function* () {
   yield* Ref.set(launches, []);
+  yield* Ref.set(launchedProjects, []);
   yield* Ref.set(removedPaths, []);
   const sql = yield* SqlClient.SqlClient;
   yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${repo}, 'web', '/repos/web', '[]', ${at}, ${at})`;
@@ -192,6 +203,21 @@ describe("ProjectHome project chat", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("runs the chat in a linked repository where Scratch is unavailable", () =>
+    Effect.gen(function* () {
+      const id = yield* seed;
+      const home = yield* ProjectHome.ProjectHome;
+      const error = yield* home.ensureChat({ id, modelSelection }).pipe(Effect.flip);
+      expect(error.message).toBe("Add a repository to Spawn to talk to it on this environment.");
+      expect(yield* Ref.get(launches)).toEqual([]);
+      yield* home.addRepository({ id, repositoryId: repo });
+      const created = yield* home.ensureChat({ id, modelSelection });
+      expect(created.created).toBe(true);
+      expect(yield* Ref.get(launchedProjects)).toEqual([repo]);
+      expect((yield* labelOf(id)).projectChatThreadId).toBe(created.threadId);
+    }).pipe(Effect.provide(layerWith(noScratch))),
+  );
+
   it.effect("fails for a project that does not exist", () =>
     Effect.gen(function* () {
       yield* seed;
@@ -200,6 +226,111 @@ describe("ProjectHome project chat", () => {
         .ensureChat({ id: "label:missing" as ProjectLabelId, modelSelection })
         .pipe(Effect.flip);
       expect(error).toBeInstanceOf(ProjectLabelError);
+    }).pipe(Effect.provide(layer)),
+  );
+});
+
+describe("Project archiving", () => {
+  it.effect("archives and unarchives a project, keeping its chat and threads", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const id = yield* seed;
+        const home = yield* ProjectHome.ProjectHome;
+        const service = yield* Labels.ProjectLabelService;
+        const chat = yield* home.ensureChat({ id, modelSelection });
+        const filed = ThreadId.make("thread:filed");
+        yield* insertThread(filed);
+        yield* service.moveThread({ threadId: filed, folderId: id });
+        const live = yield* service.subscribe().pipe(Stream.toQueue({ capacity: 16 }));
+        expect((yield* Queue.take(live)).labels[0]?.archivedAt).toBeUndefined();
+
+        const archived = (yield* service.archive(id)).label;
+        expect(archived.archivedAt).toEqual(expect.any(String));
+        expect((yield* Queue.take(live)).labels[0]?.archivedAt).toBe(archived.archivedAt);
+        // Nothing filed in it moves: the chat, the thread and its count stay.
+        expect(archived.projectChatThreadId).toBe(chat.threadId);
+        expect(archived.threadCount).toBe(1);
+        expect((yield* service.getThreadLabels(filed)).labels.map((tag) => tag.labelId)).toEqual([
+          id,
+        ]);
+        // Archiving again keeps the original date.
+        expect((yield* service.archive(id)).label.archivedAt).toBe(archived.archivedAt);
+
+        const restored = (yield* service.unarchive(id)).label;
+        expect(restored.archivedAt).toBeUndefined();
+        expect(restored.projectChatThreadId).toBe(chat.threadId);
+        expect((yield* service.unarchive(id)).label.archivedAt).toBeUndefined();
+        expect((yield* labelOf(id)).archivedAt).toBeUndefined();
+      }),
+    ).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("refuses filing into an archived project until it is unarchived", () =>
+    Effect.gen(function* () {
+      const id = yield* seed;
+      const home = yield* ProjectHome.ProjectHome;
+      const service = yield* Labels.ProjectLabelService;
+      const other = (yield* service.create({ name: "Other" })).label.id;
+      const chat = yield* home.ensureChat({ id, modelSelection });
+      const filed = ThreadId.make("thread:filed");
+      const loose = ThreadId.make("thread:loose");
+      yield* insertThread(filed);
+      yield* insertThread(loose);
+      yield* service.moveThread({ threadId: filed, folderId: id });
+      yield* service.archive(id);
+
+      const refused = yield* service
+        .moveThread({ threadId: loose, folderId: id })
+        .pipe(Effect.flip);
+      expect(refused.reason).toBe("archived");
+      expect(refused.message).toBe("Spawn is archived. Unarchive it to add to it.");
+      expect(
+        (yield* service.setThreadLabels({ threadId: loose, labelIds: [id] }).pipe(Effect.flip))
+          .reason,
+      ).toBe("archived");
+      expect((yield* home.addRepository({ id, repositoryId: repo }).pipe(Effect.flip)).reason).toBe(
+        "archived",
+      );
+      expect((yield* service.getThreadLabels(loose)).labels).toEqual([]);
+      expect((yield* labelOf(id)).repositoryIds).toEqual([]);
+
+      // What is already filed keeps working: re-filing in place and reopening
+      // the project chat succeed without launching anything.
+      expect(yield* service.moveThread({ threadId: filed, folderId: id })).toEqual({
+        threadId: filed,
+        projectFolderId: id,
+      });
+      expect(yield* home.ensureChat({ id, modelSelection })).toEqual({
+        threadId: chat.threadId,
+        created: false,
+      });
+      expect(yield* Ref.get(launches)).toEqual([chat.threadId]);
+
+      // Moving out is allowed; moving back in is not.
+      expect(
+        (yield* service.moveThread({ threadId: filed, folderId: other })).projectFolderId,
+      ).toBe(other);
+      expect(
+        (yield* service.moveThread({ threadId: filed, folderId: id }).pipe(Effect.flip)).reason,
+      ).toBe("archived");
+      expect((yield* service.moveThread({ threadId: filed, folderId: null })).projectFolderId).toBe(
+        null,
+      );
+
+      yield* service.unarchive(id);
+      expect((yield* service.moveThread({ threadId: loose, folderId: id })).projectFolderId).toBe(
+        id,
+      );
+      expect((yield* home.addRepository({ id, repositoryId: repo })).action).toBe("added");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("fails to archive a project that does not exist", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const service = yield* Labels.ProjectLabelService;
+      const error = yield* service.archive("label:missing" as ProjectLabelId).pipe(Effect.flip);
+      expect(error.reason).toBe("not_found");
     }).pipe(Effect.provide(layer)),
   );
 });

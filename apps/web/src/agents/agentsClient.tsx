@@ -12,7 +12,9 @@ import type {
   ProviderApprovalDecision,
   ThreadId,
 } from "@t3tools/contracts";
+import type { ChatAttachment } from "~/types";
 import type {
+  AgentAttachmentSupport,
   AgentContact,
   AgentMessage,
   AgentDraft,
@@ -25,7 +27,10 @@ import type {
   CommitmentHistoryView,
 } from "./agents.types";
 import {
+  agentAttachmentIdentity,
+  agentAttachmentSupport,
   agentContactKey,
+  wireAgentAttachments,
   mergeLatestMessage,
   sortAgentContacts,
   messageDelivery,
@@ -67,12 +72,25 @@ export interface AgentsClient {
   markRead: (agent: AgentContact, messageId: string) => Promise<void>;
   /** Files the agent's conversation in a project folder; null takes it out of any. */
   setProject: (agent: AgentContact, projectFolderId: ProjectLabelId | null) => Promise<void>;
-  /** `onMessageId` learns the optimistic message's id before it renders, for send motion. */
+  /** Whether this connection can arrange the agent in the list; absent where it cannot. */
+  canReorder?: (agent: AgentContact) => boolean;
+  /** Saves the list's order keys (see `orderAgentsForList`) on the agents' conversations. */
+  reorder?: (
+    writes: ReadonlyArray<{ readonly agent: AgentContact; readonly orderKey: string }>,
+  ) => Promise<void>;
+  /**
+   * `attachments` are finished uploads; images may carry a local preview for the
+   * optimistic bubble. `onMessageId` learns the optimistic message's id before it
+   * renders, for send motion.
+   */
   send: (
     agent: AgentContact,
     text: string,
+    attachments?: ReadonlyArray<ChatAttachment>,
     onMessageId?: (messageId: string) => void,
   ) => Promise<void>;
+  /** What a text to this environment's agents may carry; null where it carries no files. */
+  attachmentSupport?: (environmentId: EnvironmentId) => AgentAttachmentSupport | null;
   respond: (
     agent: AgentContact,
     requestId: string,
@@ -303,6 +321,9 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   const sendAgent = useOrchestrationCommand(agentsRpc.send, { reportFailure: false });
   const markRead = useOrchestrationCommand(agentsRpc.markRead, { reportFailure: false });
   const setProject = useOrchestrationCommand(agentsRpc.setProject, { reportFailure: false });
+  const reorderActive = useOrchestrationCommand(threadEnvironment.reorderActive, {
+    reportFailure: false,
+  });
   const approval = useOrchestrationCommand(threadEnvironment.respondToApproval, {
     reportFailure: false,
   });
@@ -425,7 +446,8 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
             environmentId,
             state,
             updatedAt: shell?.updatedAt ?? record.updatedAt,
-            preview: latest?.text ?? "Say hello",
+            // A text that only carried files has no words to preview.
+            preview: latest ? latest.text.trim() || "Attachment" : "Say hello",
             messages: reconcileAgentMessages(
               mergeLatestMessage(
                 cached?.messages ?? [],
@@ -447,6 +469,13 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
             requests: cached?.requests ?? [],
             approvals,
             waitingInRun,
+            // The list's arranged order rides on the conversation thread, as Work's does.
+            orderKey: shell?.activeOrderKey ?? null,
+            orderable:
+              shell !== undefined &&
+              shell.pinnedAt == null &&
+              shell.settledOverride !== "settled" &&
+              shell.archivedAt == null,
           };
         });
       }),
@@ -479,7 +508,12 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   const pendingSends = useRef(
     new Map<
       string,
-      { text: string; commandId: CommandId; messageId: import("@t3tools/contracts").MessageId }
+      {
+        text: string;
+        attachmentIds: string;
+        commandId: CommandId;
+        messageId: import("@t3tools/contracts").MessageId;
+      }
     >(),
   );
   const persistTrigger = useCallback(
@@ -560,13 +594,35 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           }),
         );
       },
-      send: async (agent, text, onMessageId) => {
+      canReorder: (agent) =>
+        agent.orderable === true &&
+        configs.get(agent.environmentId)?.environment.capabilities.threadActiveReorder === true &&
+        readEnvironmentScope(agent.environmentId, AuthOrchestrationOperateScope),
+      reorder: async (writes) => {
+        const results = await Promise.all(
+          writes.map(({ agent, orderKey }) =>
+            reorderActive({
+              environmentId: agent.environmentId,
+              input: { threadId: agent.conversationThreadId, orderKey },
+            }),
+          ),
+        );
+        for (const result of results) commandValue(result);
+      },
+      send: async (agent, text, attachments = [], onMessageId) => {
         const key = agentContactKey(agent);
         const existing = pendingSends.current.get(key);
+        const attachmentIds = agentAttachmentIdentity(attachments);
+        // Retrying the same text and files reuses the ids, so the server applies it once.
         const identity =
-          existing?.text === text
+          existing?.text === text && existing.attachmentIds === attachmentIds
             ? existing
-            : { text, commandId: CommandId.make(randomUUID()), messageId: newMessageId() };
+            : {
+                text,
+                attachmentIds,
+                commandId: CommandId.make(randomUUID()),
+                messageId: newMessageId(),
+              };
         pendingSends.current.set(key, identity);
         onMessageId?.(identity.messageId);
         const updatePending = (delivery: NonNullable<AgentMessage["delivery"]>) =>
@@ -579,6 +635,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
                 id: identity.messageId,
                 role: "user",
                 text,
+                ...(attachments.length > 0 ? { attachments } : {}),
                 createdAt: previous?.createdAt ?? new Date().toISOString(),
                 optimistic: true,
                 delivery,
@@ -591,7 +648,16 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
           const result = commandValue(
             await sendAgent({
               environmentId: agent.environmentId,
-              input: { id: agent.id, ...identity, mode: "auto" },
+              input: {
+                id: agent.id,
+                commandId: identity.commandId,
+                messageId: identity.messageId,
+                text,
+                ...(attachments.length > 0
+                  ? { attachments: wireAgentAttachments(attachments) }
+                  : {}),
+                mode: "auto",
+              },
             }),
           );
           updatePending(result.delivery === "queued" ? "queued" : "delivered");
@@ -735,6 +801,8 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       },
       modelStatus: (agent, model) =>
         resolveAgentModelStatus(configs.get(agent.environmentId)?.providers, model),
+      attachmentSupport: (environmentId) =>
+        agentAttachmentSupport(configs.get(environmentId)?.environment.capabilities),
       ModelControls: LiveAgentModelControls,
       MemorySection: AgentFactsSection,
     }),
@@ -745,6 +813,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
       sendAgent,
       markRead,
       setProject,
+      reorderActive,
       approval,
       answer,
       saveMemory,
@@ -957,7 +1026,7 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
         (message) =>
           message.role !== "system" &&
           (message.role !== "user" || message.createdBy === "user") &&
-          message.text.trim(),
+          (message.text.trim() || message.attachments.length > 0),
       )
       .map((message) => {
         const run = projection.runs.find((candidate) => candidate.id === message.runId);
@@ -965,6 +1034,7 @@ export function useAgentConversation(agent: AgentContact | null): AgentContact |
           id: message.id,
           role: message.role as "user" | "assistant",
           text: message.text,
+          ...(message.attachments.length > 0 ? { attachments: message.attachments } : {}),
           createdAt: DateTime.formatIso(message.createdAt),
           updatedAt: DateTime.formatIso(message.updatedAt),
           streaming: message.streaming,

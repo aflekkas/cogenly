@@ -6,6 +6,7 @@ import {
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
   resolveDraftHeroState,
+  resolveEmptyServerThreadHero,
   resolveWorktreeSetupProgress,
   isPaintOnlyThreadTimeline,
   peekHeldThreadTimeline,
@@ -888,6 +889,77 @@ describe("draft hero submission transition", () => {
         backgroundSubmissionPending: true,
       }),
     ).toBe(true);
+  });
+
+  describe("resolveEmptyServerThreadHero", () => {
+    const emptyShell = {
+      latestRun: null,
+      itemCount: 0,
+      latestUserMessageAt: null,
+      settledOverride: null,
+      snoozedUntil: null,
+      source: {},
+    };
+    const emptyThread = {
+      isServerThread: true,
+      hasOwnEmptyState: false,
+      hasTimelineEntries: false,
+      isWorking: false,
+      hasHistoryToLoad: false,
+      hasWorktreeSetupCard: false,
+      draftHeroDockRequested: false,
+      shell: emptyShell,
+    };
+
+    it("opens a thread nobody has written in like a new one", () => {
+      expect(resolveEmptyServerThreadHero(emptyThread)).toBe(true);
+    });
+
+    it("docks once a message is on its way, and for any thread with history", () => {
+      expect(resolveEmptyServerThreadHero({ ...emptyThread, draftHeroDockRequested: true })).toBe(
+        false,
+      );
+      expect(resolveEmptyServerThreadHero({ ...emptyThread, hasTimelineEntries: true })).toBe(
+        false,
+      );
+      expect(resolveEmptyServerThreadHero({ ...emptyThread, isWorking: true })).toBe(false);
+      // Rows still loading: the shell already counts them.
+      expect(
+        resolveEmptyServerThreadHero({ ...emptyThread, shell: { ...emptyShell, itemCount: 3 } }),
+      ).toBe(false);
+      expect(
+        resolveEmptyServerThreadHero({
+          ...emptyThread,
+          shell: { ...emptyShell, latestRun: { id: "run-1" } },
+        }),
+      ).toBe(false);
+    });
+
+    it("keeps the timeline where its footer has a line to show", () => {
+      expect(
+        resolveEmptyServerThreadHero({
+          ...emptyThread,
+          shell: { ...emptyShell, settledOverride: "settled" },
+        }),
+      ).toBe(false);
+      expect(
+        resolveEmptyServerThreadHero({
+          ...emptyThread,
+          shell: { ...emptyShell, snoozedUntil: "2026-10-23T09:00:00.000Z" },
+        }),
+      ).toBe(false);
+      expect(
+        resolveEmptyServerThreadHero({
+          ...emptyThread,
+          shell: { ...emptyShell, source: { workHandoffs: [{}] } },
+        }),
+      ).toBe(false);
+    });
+
+    it("leaves drafts, agent conversations and embedded views to their own screens", () => {
+      expect(resolveEmptyServerThreadHero({ ...emptyThread, isServerThread: false })).toBe(false);
+      expect(resolveEmptyServerThreadHero({ ...emptyThread, hasOwnEmptyState: true })).toBe(false);
+    });
   });
 
   it("does not auto-navigate a background submission after server promotion", () => {

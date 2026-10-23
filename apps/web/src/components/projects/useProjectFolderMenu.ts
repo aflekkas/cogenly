@@ -11,16 +11,25 @@ import {
   type EnvironmentProjectLabel,
 } from "../../projectLabels/projectLabels.logic";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
+import { useProjectArchive } from "../../projectLabels/useProjectArchive";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 
-type FolderMenuId = "open" | "rename" | "recolor" | `color:${string}` | "link-github" | "delete";
+type FolderMenuId =
+  | "open"
+  | "rename"
+  | "recolor"
+  | `color:${string}`
+  | "link-github"
+  | "archive"
+  | "unarchive"
+  | "delete";
 
 /**
- * A project folder's context menu (Open, Rename, Color, Link GitHub, Delete)
- * through the desktop's native menu. `menuOpen` is true while it is up, so
- * the row can read as selected meanwhile. Rename and Link GitHub need a
- * dialog, which the caller hosts.
+ * A project folder's context menu (Open, Rename, Color, Link GitHub,
+ * Archive or Unarchive, Delete) through the desktop's native menu. `menuOpen`
+ * is true while it is up, so the row can read as selected meanwhile. Rename
+ * and Link GitHub need a dialog, which the caller hosts.
  */
 export function useProjectFolderMenu(
   entry: EnvironmentProjectLabel,
@@ -43,6 +52,7 @@ export function useProjectFolderMenu(
     reportFailure: false,
   });
   const deleteFolder = useDeleteProjectFolder();
+  const { archived, canArchive, setArchived } = useProjectArchive(environmentId, label);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const openMenu = async (position: { x: number; y: number }) => {
@@ -66,6 +76,9 @@ export function useProjectFolderMenu(
         })),
       },
       { id: "link-github", label: "Link GitHub…", icon: "link", disabled: !canUpdate },
+      archived
+        ? { id: "unarchive", label: "Unarchive", icon: "archive", disabled: !canArchive }
+        : { id: "archive", label: "Archive", icon: "archive", disabled: !canArchive },
       {
         id: "delete",
         label: "Delete…",
@@ -83,6 +96,7 @@ export function useProjectFolderMenu(
     if (id === "open") handlers.onOpen();
     else if (id === "rename") handlers.onRename();
     else if (id === "link-github") handlers.onLinkSources();
+    else if (id === "archive" || id === "unarchive") await setArchived(id === "archive");
     else if (id === "delete") {
       if (await deleteFolder(environmentId, label)) handlers.onDeleted();
     } else if (id.startsWith("color:")) {

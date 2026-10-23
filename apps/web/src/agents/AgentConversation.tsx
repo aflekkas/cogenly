@@ -1,6 +1,9 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import { ArrowUpRightIcon } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { toastManager } from "~/components/ui/toast";
+import { makeWorkspaceFileDropHandlers } from "~/components/chat/workspaceFileDrop";
+import type { ChatAttachment } from "~/types";
+import { ArrowUpRightIcon, PaperclipIcon } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
@@ -20,7 +23,8 @@ import {
   type TypingSlotState,
 } from "./agents.logic";
 import { useAgents, useAgentsClient } from "./agentsClient";
-import { AgentComposer } from "./AgentComposer";
+import { AgentComposer, type AgentComposerHandle } from "./AgentComposer";
+import { AgentMessageAttachments } from "./AgentMessageAttachments";
 import {
   Select,
   SelectItem,
@@ -115,12 +119,34 @@ function AgentView({
       }),
     [viewKey, canWrite],
   );
+  // Files dropped anywhere on the conversation land in its composer, as in a chat.
+  const composerRef = useRef<AgentComposerHandle>(null);
+  const canAttach = canWrite && (client.attachmentSupport?.(agent.environmentId) ?? null) !== null;
+  const [dropActive, setDropActive] = useState(false);
+  const dropHandlers = makeWorkspaceFileDropHandlers({
+    setDragActive: (active) => setDropActive(active && canAttach),
+    addFiles: (files) => composerRef.current?.addFiles(files),
+    addFolders: () =>
+      toastManager.add({ type: "error", title: "Drop files, not folders, to send them." }),
+  });
   return (
     <section
       className="agent-conversation"
       aria-label={`Conversation with ${agent.name}`}
       style={accentStyle(accent)}
+      {...(canAttach ? dropHandlers : {})}
     >
+      {dropActive && (
+        <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/[0.035] motion-safe:transition-opacity motion-safe:duration-(--motion-duration-fast) motion-safe:ease-out motion-safe:starting:opacity-0">
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-full border border-primary/25 bg-background/95 px-4 py-2.5 text-sm font-medium text-foreground shadow-lg"
+          >
+            <PaperclipIcon className="size-4 text-primary" aria-hidden="true" />
+            Drop files to attach
+          </div>
+        </div>
+      )}
       <AgentIdentity
         face={{
           ...avatarFaceProps(agent.avatar),
@@ -143,7 +169,12 @@ function AgentView({
           />
         }
       />
-      <ChatPane agent={agent} workspace={workspace} focusMessage={focusMessage} />
+      <ChatPane
+        agent={agent}
+        workspace={workspace}
+        focusMessage={focusMessage}
+        composerRef={composerRef}
+      />
       <OverlayPresence when={startingWork}>
         {() => (
           <AgentStartWork
@@ -176,10 +207,12 @@ function ChatPane({
   agent,
   workspace,
   focusMessage,
+  composerRef,
 }: {
   agent: AgentContact;
   workspace: AgentWorkspaceView;
   focusMessage: string | null;
+  composerRef: RefObject<AgentComposerHandle | null>;
 }) {
   const client = useAgentsClient();
   const [sending, setSending] = useState(false);
@@ -245,26 +278,28 @@ function ChatPane({
     document.addEventListener("visibilitychange", mark);
     return () => document.removeEventListener("visibilitychange", mark);
   }, [agent, client, canWrite]);
-  async function send(outgoing: string) {
-    if (sending) return;
+  async function send(outgoing: string, attachments: ReadonlyArray<ChatAttachment>) {
+    if (sending) return false;
     setSending(true);
     setError(null);
     try {
-      await client.send(agent, outgoing);
+      await client.send(agent, outgoing, attachments);
+      return true;
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Could not send. Retry your message below.",
       );
+      return false;
     } finally {
       setSending(false);
     }
   }
-  async function retry(outgoing: string) {
+  async function retry(outgoing: string, attachments: ReadonlyArray<ChatAttachment> = []) {
     if (sending) return;
     setSending(true);
     setError(null);
     try {
-      await client.send(agent, outgoing);
+      await client.send(agent, outgoing, attachments);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not retry your message.");
     } finally {
@@ -360,6 +395,12 @@ function ChatPane({
                       <ArrowUpRightIcon size={11} />
                     </button>
                   )}
+                  {message.attachments && message.attachments.length > 0 && (
+                    <AgentMessageAttachments
+                      environmentId={agent.environmentId}
+                      attachments={message.attachments}
+                    />
+                  )}
                   {message.role === "assistant" ? (
                     <div className="agent-markdown">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>
@@ -388,7 +429,7 @@ function ChatPane({
                           // Retry only helps once the agent is on a model that can run.
                           canRetry={!currentModelUnavailable}
                           disabled={sending || !canWrite}
-                          onRetry={() => void retry(message.text)}
+                          onRetry={() => void retry(message.text, message.attachments)}
                           onSwitchModel={() => setPickerOpen(true)}
                         />
                       ) : message.delivery === "sending" ? (
@@ -445,6 +486,7 @@ function ChatPane({
           </p>
         )}
         <AgentComposer
+          handleRef={composerRef}
           agent={agent}
           canWrite={canWrite}
           sending={sending}

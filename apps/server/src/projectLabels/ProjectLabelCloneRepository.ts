@@ -27,7 +27,7 @@ import type * as ProjectLabelService from "./ProjectLabelService.ts";
 export interface ProjectLabelCloneDeps {
   readonly labels: Pick<
     ProjectLabelService.ProjectLabelService["Service"],
-    "read" | "linkRepository"
+    "readActive" | "linkRepository"
   >;
   readonly clones: Pick<ProjectCloneTracker.ProjectCloneTracker["Service"], "start">;
   readonly projects: Pick<ProjectService.ProjectService["Service"], "create" | "update">;
@@ -56,7 +56,9 @@ export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.c
   input: ProjectLabelCloneRepositoryInput,
   deps: ProjectLabelCloneDeps,
 ) {
-  const { label } = yield* deps.labels.read(input.id);
+  // Before cloning: the link at the end is best-effort, so an archived
+  // project must refuse here rather than leave an unfiled clone.
+  const { label } = yield* deps.labels.readActive(input.id);
   const folderName = repositoryDirectoryNameFromRemote(input);
   if (folderName === "") {
     return yield* new SourceControlRepositoryError({

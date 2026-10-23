@@ -215,7 +215,7 @@ const fileSetup = (input: {
           }) as never,
       }),
       Layer.mock(Labels.ProjectLabelService)({
-        read: (id) => Effect.succeed({ label: { ...labelShape, id } }),
+        readActive: (id) => Effect.succeed({ label: { ...labelShape, id } }),
         // Mirrors the server gate: a chat with turns cannot be re-parented,
         // but its turnless fork can.
         moveThread: (move) =>

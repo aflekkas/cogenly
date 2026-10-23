@@ -41,6 +41,9 @@ import * as Folders from "../project/ManagedProjectFolders.ts";
 import * as Labels from "../projectLabels/ProjectLabelService.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
+import * as ThreadMessageIntake from "../orchestration-v2/ThreadMessageIntake.ts";
+import * as ServerConfig from "../config.ts";
+import * as FileSystem from "effect/FileSystem";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
@@ -106,6 +109,8 @@ const make = Effect.gen(function* () {
   const folders = yield* Folders.ManagedProjectFolders;
   const labels = yield* Labels.ProjectLabelService;
   const access = yield* Access.AgentAccessScope;
+  const serverConfig = yield* ServerConfig.ServerConfig;
+  const fileSystem = yield* FileSystem.FileSystem;
   const changes = yield* PubSub.sliding<void>(1);
   const changed = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
   const list = () => store.list().pipe(Effect.map((agents) => ({ agents })));
@@ -120,7 +125,20 @@ const make = Effect.gen(function* () {
             message:
               cause.reason === "not_found"
                 ? "That project no longer exists."
-                : "Could not move the agent to that project.",
+                : cause.reason === "archived"
+                  ? cause.message
+                  : "Could not move the agent to that project.",
+            cause,
+          }),
+      ),
+    );
+  // A pre-check for flows that launch a thread before filing it.
+  const requireActiveProject = (folderId: ProjectLabelId) =>
+    labels.readActive(folderId).pipe(
+      Effect.mapError(
+        (cause) =>
+          new AgentError({
+            message: cause.reason === "archived" ? cause.message : "That project no longer exists.",
             cause,
           }),
       ),
@@ -344,6 +362,9 @@ const make = Effect.gen(function* () {
         if (existing === null) {
           if (input.projectId === null)
             return yield* new AgentError({ message: "Choose a project to create an agent." });
+          // Before the launch, so a refused project leaves no orphan conversation.
+          if (input.projectFolderId !== undefined && input.projectFolderId !== null)
+            yield* requireActiveProject(input.projectFolderId);
           yield* launch.launch({
             agent: { id, role: "conversation" },
             commandId: CommandId.make(`agent-create:${id}`),
@@ -438,14 +459,7 @@ const make = Effect.gen(function* () {
               onSuccess: (scratch) => scratch.projectId,
             }),
           ));
-        if (input.projectFolderId !== undefined)
-          yield* labels
-            .read(input.projectFolderId)
-            .pipe(
-              Effect.mapError(
-                (cause) => new AgentError({ message: "That project no longer exists.", cause }),
-              ),
-            );
+        if (input.projectFolderId !== undefined) yield* requireActiveProject(input.projectFolderId);
         const key = yield* crypto.randomUUIDv4();
         const threadId = ThreadId.make(`agent-builder:${key}`);
         yield* launch.launch({
@@ -549,19 +563,29 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const agent = yield* store.get(input.id);
         // Backoff and daily caps govern background reservations only.
-        // An owner text always reaches the provider.
-        const result = yield* threads.sendToThread({
+        // An owner text always reaches the provider. Intake claims its pending
+        // uploads into the conversation, as it does for a chat send.
+        const result = yield* ThreadMessageIntake.sendToThread({
           projectId: yield* workspace(agent),
           commandId: input.commandId,
           messageId: input.messageId,
           threadId: agent.conversationThreadId,
           text: input.text,
-          attachments: [],
+          attachments: input.attachments ?? [],
           modelSelection: agent.modelSelection,
           mode: input.mode ?? "auto",
           createdBy: "user",
           creationSource: "web",
-        });
+        }).pipe(
+          Effect.provideService(Threads.ThreadManagementService, threads),
+          Effect.provideService(ServerConfig.ServerConfig, serverConfig),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          // The claim's reason ("not found", "size does not match") is the owner's to read.
+          Effect.catchTags({
+            AttachmentClaimError: (cause) =>
+              Effect.fail(new AgentError({ message: cause.message, cause })),
+          }),
+        );
         return {
           threadId: agent.conversationThreadId,
           runId: result.run.id,

@@ -5,13 +5,14 @@
  *
  * Every action here is a user's: the panel never opens because an agent
  * started a command. New runs only add or update tabs (derived from the
- * thread's terminals in bottomPanel.logic), and the header toggle shows a dot.
+ * thread's terminals in bottomPanel.logic).
  */
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { type ScopedThreadRef } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import type { RunGroup } from "./components/terminals/bottomPanel.logic";
 import { resolveStorage } from "./lib/storage";
 
 export interface ThreadBottomPanelState {
@@ -24,6 +25,8 @@ export interface ThreadBottomPanelState {
   selectedRunByTabId?: Record<string, string>;
   /** Closed tabs, holding their newest run key when closed (see bottomPanelTabs). */
   hiddenTabs?: Record<string, string>;
+  /** Run groups the user folded or opened; unset follows `runGroupOpen`'s default. */
+  runGroupsOpen?: Partial<Record<RunGroup, boolean>>;
 }
 
 interface BottomPanelStoreState {
@@ -35,11 +38,12 @@ interface BottomPanelStoreState {
   selectRun: (ref: ScopedThreadRef, tabId: string, terminalId: string) => void;
   /**
    * Opens the panel on one agent command, for a click on a run in the
-   * timeline or the composer's Running bar. Un-hides the tab.
+   * timeline. Un-hides the tab.
    */
   showRun: (ref: ScopedThreadRef, tabId: string, terminalId: string) => void;
   /** Closes a tab until its agent runs another command. */
   hideTab: (ref: ScopedThreadRef, tabId: string, latestRunKey: string) => void;
+  setRunGroupOpen: (ref: ScopedThreadRef, group: RunGroup, open: boolean) => void;
   removeThread: (ref: ScopedThreadRef) => void;
 }
 
@@ -63,6 +67,9 @@ function compact(state: ThreadBottomPanelState): ThreadBottomPanelState {
   }
   if (state.hiddenTabs && Object.keys(state.hiddenTabs).length > 0) {
     next.hiddenTabs = state.hiddenTabs;
+  }
+  if (state.runGroupsOpen && Object.keys(state.runGroupsOpen).length > 0) {
+    next.runGroupsOpen = state.runGroupsOpen;
   }
   return next;
 }
@@ -102,6 +109,9 @@ export function migratePersistedBottomPanelState(persisted: unknown): {
         : {}),
       ...(entry.hiddenTabs && typeof entry.hiddenTabs === "object"
         ? { hiddenTabs: entry.hiddenTabs }
+        : {}),
+      ...(entry.runGroupsOpen && typeof entry.runGroupsOpen === "object"
+        ? { runGroupsOpen: entry.runGroupsOpen }
         : {}),
     });
   }
@@ -170,6 +180,14 @@ export const useBottomPanelStore = create<BottomPanelStoreState>()(
               hiddenTabs: { ...current.hiddenTabs, [tabId]: latestRunKey },
             };
           }),
+        ),
+      setRunGroupOpen: (ref, group, open) =>
+        set((state) =>
+          update(state.byThreadKey, ref, (current) =>
+            current.runGroupsOpen?.[group] === open
+              ? current
+              : { ...current, runGroupsOpen: { ...current.runGroupsOpen, [group]: open } },
+          ),
         ),
       removeThread: (ref) =>
         set((state) => {

@@ -46,7 +46,6 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
-  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   PROVIDER_WORKSPACE_SNAPSHOT_TTL_MS,
 } from "@t3tools/contracts";
@@ -146,19 +145,15 @@ import {
   type ComposerBannerStackContent,
   type ComposerBannerStackItem,
 } from "./ComposerBannerStack";
-import { prepareImageForAttachment } from "../../lib/imageCompression";
+import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import {
-  fileAttachmentTooLargeMessage,
-  formatAttachmentSize,
-} from "@t3tools/client-runtime/state/attachments";
-import {
+  acceptComposerAttachmentFiles,
   attachmentsToReleaseOnUploadCapabilityLoss,
   composerOtherFilesForPresentation,
-  classifyComposerAttachmentFile,
   fileAttachmentCapabilityBlockReason,
   fileAttachmentStagingLimit,
   isPreviewableComposerVideo,
-  normalizeComposerImageFileMimeType,
+  prepareComposerImageAttachments,
   shouldHandleComposerAttachmentPaste,
 } from "./composerAttachmentFiles";
 import {
@@ -266,7 +261,6 @@ import {
   composerSuggestionOptionId,
 } from "./ComposerCommandMenu";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
-import { ComposerRunningBar } from "./ComposerRunningBar";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ImageMarkupDialog } from "./ImageMarkupDialog";
 import {
@@ -348,7 +342,6 @@ import {
   type SessionPhase,
   type Thread,
   type ThreadShell,
-  videoMimeType,
 } from "../../types";
 import {
   buildComposerPromptHistoryEntries,
@@ -4874,80 +4867,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // accepted files reserve their attachment slots (via the pending counter)
     // before the first await, keeping the total under the limit.
     const pendingCount = pendingImageCompressionsRef.current.get(attachmentTargetKey) ?? 0;
-    let reservedCount = countReservedAttachments();
-    // A pick that matches a needs-reattach marker replaces it in the draft, so
-    // it must not consume a slot; a draft full of markers would otherwise hit
-    // the capacity error before the replacement path could run.
-    const reattachMarkers = composerFilesRef.current.filter(composerFileNeedsReattach);
-    const replacedReattachMarkerIds = new Set<string>();
-    const acceptedImages: File[] = [];
-    const acceptedFiles: ComposerFileAttachment[] = [];
-    let error: string | null = null;
-    for (const file of files) {
-      const attachmentKind = classifyComposerAttachmentFile(file);
-      const fileMimeType =
-        attachmentKind === "file"
-          ? (videoMimeType({ name: file.name, mimeType: file.type }) ??
-            (file.type || "application/octet-stream"))
-          : file.type;
-      const matchingReattachMarker =
-        attachmentKind === "file"
-          ? reattachMarkers.find(
-              (marker) =>
-                !replacedReattachMarkerIds.has(marker.id) &&
-                composerFileMatchesReattachMarker(marker, {
-                  name: file.name || "file",
-                  mimeType: fileMimeType,
-                  sizeBytes: file.size,
-                }),
-            )
-          : undefined;
-      if (matchingReattachMarker) {
-        replacedReattachMarkerIds.add(matchingReattachMarker.id);
-      }
-      if (!matchingReattachMarker && reservedCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
-        error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
-        // Keep scanning: a later file in this batch can still replace a
-        // needs-reattach marker without needing a free slot.
-        continue;
-      }
-      if (attachmentKind === "unsupported-image") {
-        error = `'${file.name}' is not a supported image type. Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.`;
-        continue;
-      }
-      if (attachmentKind === "image") {
-        acceptedImages.push(normalizeComposerImageFileMimeType(file));
-      } else {
-        if (fileStagingLimit === null) {
-          error = "This server does not support file attachments.";
-          continue;
-        }
-        if (file.size <= 0) {
-          error = `'${file.name}' is empty or could not be read.`;
-          continue;
-        }
-        if (file.size > fileStagingLimit) {
-          error = fileAttachmentTooLargeMessage(file.name, fileStagingLimit);
-          continue;
-        }
-        const attachmentFile =
-          file.type === fileMimeType
-            ? file
-            : new File([file], file.name, { type: fileMimeType, lastModified: file.lastModified });
-        acceptedFiles.push({
-          type: "file",
-          id: randomUUID(),
-          name: attachmentFile.name || "file",
-          mimeType: fileMimeType,
-          sizeBytes: attachmentFile.size,
-          file: attachmentFile,
-          ...(options?.source ? { source: options.source } : {}),
-        });
-      }
-      if (!matchingReattachMarker) {
-        reservedCount += 1;
-      }
-    }
+    const {
+      images: acceptedImages,
+      files: acceptedFiles,
+      error,
+    } = acceptComposerAttachmentFiles({
+      files,
+      reservedCount: countReservedAttachments(),
+      stagingLimit: fileStagingLimit,
+      reattachMarkers: composerFilesRef.current.filter(composerFileNeedsReattach),
+      ...(options?.source ? { source: options.source } : {}),
+    });
     setThreadError(threadId, error);
     let insertedAny = false;
     if (acceptedFiles.length > 0) {
@@ -4982,34 +4912,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (questionAttachmentTarget)
       changeQuestionAttachmentPreparation(questionAttachmentTarget, acceptedImages.length);
     try {
-      const nextImages: ComposerImageAttachment[] = [];
-      let compressionError: string | null = null;
-      for (const file of acceptedImages) {
-        // Images over the wire cap are downscaled to fit rather than
-        // refused; files already within it pass through byte-for-byte.
-        const compressed = await prepareImageForAttachment(
-          file,
-          PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
-        );
-        if (!compressed.ok) {
-          compressionError =
-            compressed.reason === "unreadable"
-              ? `'${file.name}' could not be read as an image.`
-              : `'${file.name}' is too large to attach, even after compression.`;
-          continue;
-        }
-        const attachmentFile = compressed.file;
-        const previewUrl = URL.createObjectURL(attachmentFile);
-        nextImages.push({
-          type: "image",
-          id: randomUUID(),
-          name: attachmentFile.name || "image",
-          mimeType: attachmentFile.type,
-          sizeBytes: attachmentFile.size,
-          previewUrl,
-          file: attachmentFile,
-        });
-      }
+      const { images: nextImages, error: compressionError } =
+        await prepareComposerImageAttachments(acceptedImages);
       if (
         questionAttachmentTarget &&
         !useQuestionAttachmentPreparation.getState().counts[questionAttachmentTarget]
@@ -5997,7 +5901,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           </AttachmentPresence>
         </ComposerBanner.Column>
       </ComposerBanner.Dock>
-      <ComposerRunningBar environmentId={environmentId} threadId={activeThreadId} />
       <div className="relative">
         <ComposerSurface.Main
           ref={composerMainSurfaceRef}

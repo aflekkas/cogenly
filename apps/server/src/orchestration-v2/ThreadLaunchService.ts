@@ -875,8 +875,9 @@ const make = Effect.gen(function* () {
         )("Reusing an existing thread requires a thread id.");
       }
 
-      // Resolve the project before anything is created, so a bad pick fails
-      // the launch instead of leaving an unfiled thread behind.
+      // Resolve the project before anything is created, so a bad pick or an
+      // archived project fails the launch instead of leaving an unfiled
+      // thread behind.
       const fileInProject =
         input.projectFolderId === undefined
           ? null
@@ -885,7 +886,7 @@ const make = Effect.gen(function* () {
                 Effect.fail(mapError(input, "resolve-project")("Projects are unavailable.")),
               onSome: (labels) => {
                 const folderId = input.projectFolderId!;
-                return labels.read(folderId).pipe(
+                return labels.readActive(folderId).pipe(
                   Effect.mapError(mapError(input, "resolve-project")),
                   Effect.as((threadId: ThreadId) =>
                     labels

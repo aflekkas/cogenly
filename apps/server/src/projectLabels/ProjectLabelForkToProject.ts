@@ -15,7 +15,10 @@ import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingEr
 import type * as ProjectLabelService from "./ProjectLabelService.ts";
 
 export interface ForkThreadToProjectDeps {
-  readonly labels: Pick<ProjectLabelService.ProjectLabelService["Service"], "read" | "moveThread">;
+  readonly labels: Pick<
+    ProjectLabelService.ProjectLabelService["Service"],
+    "readActive" | "moveThread"
+  >;
   readonly threads: Pick<
     ThreadManagementService.ThreadManagementService["Service"],
     "dispatch" | "getThreadRecords"
@@ -77,7 +80,8 @@ export const forkThreadToProject: (
     return yield* forkFailure(
       "This chat has no turns yet; file it with moveThread instead of forking.",
     );
-  yield* deps.labels.read(input.labelId);
+  // Before forking, so an archived project leaves no stray fork behind.
+  yield* deps.labels.readActive(input.labelId);
   const commandId = CommandId.make(
     `server:fork-to-project:${yield* deps.crypto.randomUUIDv4().pipe(Effect.orDie)}`,
   );

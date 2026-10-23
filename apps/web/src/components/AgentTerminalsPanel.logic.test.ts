@@ -15,7 +15,6 @@ import {
   formatRunDuration,
   isAgentTerminalRunning,
   runDurationMs,
-  runningAgentCommandsSummary,
   terminalRunState,
   terminalRunStateLabel,
   terminalRunStateMessage,
@@ -163,41 +162,6 @@ describe("terminalSections", () => {
   });
 });
 
-describe("runningAgentCommandsSummary", () => {
-  it("names the one running agent command and ignores shells and finished runs", () => {
-    const summary = runningAgentCommandsSummary(
-      agentTerminalEntries([
-        session({ terminalId: "agent-live", label: "agent · pnpm dev", status: "running" }),
-        session({ terminalId: "agent-done", status: "exited", exitCode: 0 }),
-        session({ terminalId: "term-1", hasRunningSubprocess: true }),
-      ]),
-    );
-    expect(summary).toEqual({ label: "pnpm dev", terminalIds: ["agent-live"] });
-  });
-
-  it("counts several running commands, newest first", () => {
-    const summary = runningAgentCommandsSummary(
-      agentTerminalEntries([
-        session({ terminalId: "agent-old", startedAt: "2026-10-16T09:00:00.000Z" }),
-        session({
-          terminalId: "agent-new",
-          startedAt: "2026-10-16T10:00:00.000Z",
-          status: "starting",
-        }),
-      ]),
-    );
-    expect(summary).toEqual({ label: "2 running", terminalIds: ["agent-new", "agent-old"] });
-  });
-
-  it("is null when no agent command runs", () => {
-    expect(
-      runningAgentCommandsSummary(
-        agentTerminalEntries([session({ terminalId: "agent-x", status: "exited", exitCode: 1 })]),
-      ),
-    ).toBeNull();
-  });
-});
-
 describe("adjacentTerminalId", () => {
   const entries = [{ terminalId: "a" }, { terminalId: "b" }, { terminalId: "c" }];
 
@@ -226,6 +190,20 @@ describe("commandTitle", () => {
     expect(
       commandTitle(`cd /tmp/x mkdir app cat > package.json <<'EOF' { "name": "app" } EOF`),
     ).toBe("mkdir app cat > package.json");
+  });
+
+  it("finds the real step of a long command without cutting it", () => {
+    expect(
+      commandTitle(
+        `export PATH="$PWD/node_modules/.bin:$PATH"; F="apps/web/src/components/preview/PreviewView.tsx; x"; vp lint "$F"`,
+      ),
+    ).toBe(`vp lint "$F"`);
+    expect(
+      commandTitle(
+        "export PATH=$PWD/node_modules/.bin:$PATH\n# don't skip the tests\n(cd apps/web && vp test run packages/client-runtime/src/preview/serverBrowserStream.test.ts)",
+      ),
+    ).toBe("vp test run packages/client-runtime/src/preview/serverBrowserStream.test.ts");
+    expect(commandTitle("(cd a && make) | tee log")).toBe("(cd a && make) | tee log");
   });
 
   it("keeps pipelines and falls back to the setup step when that is all there is", () => {

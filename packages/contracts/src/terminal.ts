@@ -9,6 +9,9 @@ import { ProviderInstanceId } from "./providerInstance.ts";
  */
 export const DEFAULT_TERMINAL_ID = "term-1";
 
+/** How much of an agent command a terminal summary carries; heredoc file writes run far longer. */
+export const TERMINAL_COMMAND_MAX_LENGTH = 2_000;
+
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const TerminalColsSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).check(
   Schema.isLessThanOrEqualTo(1000),
@@ -136,6 +139,11 @@ export const TerminalSummary = Schema.Struct({
   updatedAt: Schema.String,
   /** When an agent command started; absent for user terminals. */
   startedAt: Schema.optional(Schema.String),
+  /**
+   * An agent terminal's command as it ran, newlines kept. `label` is capped
+   * short, which cuts long commands mid-word; clients title, show and copy this.
+   */
+  command: Schema.optional(Schema.String.check(Schema.isMaxLength(TERMINAL_COMMAND_MAX_LENGTH))),
 });
 export type TerminalSummary = typeof TerminalSummary.Type;
 

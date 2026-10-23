@@ -13,6 +13,7 @@ import { useThreadShell } from "~/state/entities";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { WorkspacePageTitle } from "../WorkspacePageTitle";
 import { formatWorkHandoffSourceDetail } from "../work/WorkHandoffMarkers";
 import {
   buildThreadLineageChain,
@@ -62,7 +63,15 @@ const HEADER_TITLE_MAX_WIDTH_CLASS = "max-w-[min(40rem,calc(100%-10rem))]";
  * a deeper chain keeps its root and direct parent and folds the middle into a
  * "…" menu. Until the thread's shell loads, the title shows alone.
  */
-export function ThreadHeaderTitle(props: {
+export function ThreadHeaderTitle(props: Parameters<typeof ThreadHeaderTitleContent>[0]) {
+  return (
+    <WorkspacePageTitle>
+      <ThreadHeaderTitleContent {...props} />
+    </WorkspacePageTitle>
+  );
+}
+
+function ThreadHeaderTitleContent(props: {
   readonly shell: EnvironmentThreadShell | null;
   readonly title: string;
   /** For Work started from a chat: how many of the chat's messages the handoff carried. */

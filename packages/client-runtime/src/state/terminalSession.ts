@@ -55,14 +55,6 @@ export interface KnownTerminalSession {
   readonly state: TerminalSessionState;
 }
 
-export function selectRunningSubprocessTerminalIds(
-  sessions: ReadonlyArray<KnownTerminalSession>,
-): ReadonlyArray<string> {
-  return sessions
-    .filter((session) => session.state.hasRunningSubprocess)
-    .map((session) => session.target.terminalId);
-}
-
 export const EMPTY_TERMINAL_BUFFER_STATE = Object.freeze<TerminalBufferState>({
   output: EMPTY_TERMINAL_OUTPUT_STATE,
   status: "closed",

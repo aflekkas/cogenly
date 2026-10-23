@@ -65,6 +65,23 @@ export function sortProjectLabels<T extends { readonly label: { readonly name: s
   );
 }
 
+/** Archived projects keep their threads but leave every picker and move menu. */
+export function isProjectLabelArchived(label: {
+  readonly archivedAt?: string | undefined;
+}): boolean {
+  return label.archivedAt !== undefined;
+}
+
+/** Folders split into the ones pickers offer and the archived ones, each keeping its order. */
+export function partitionArchivedProjectLabels<
+  T extends { readonly label: { readonly archivedAt?: string | undefined } },
+>(labels: ReadonlyArray<T>): { readonly active: T[]; readonly archived: T[] } {
+  const active: T[] = [];
+  const archived: T[] = [];
+  for (const entry of labels) (isProjectLabelArchived(entry.label) ? archived : active).push(entry);
+  return { active, archived };
+}
+
 /** The folder a thread is filed in, as the server resolved it (explicit, else its repository's). */
 export function threadProjectFolderId(thread: {
   readonly source: { readonly projectFolderId?: ProjectLabelId | null | undefined };
@@ -107,7 +124,7 @@ export interface ThreadFolderState {
   readonly viaRepository: boolean;
   /** Only an explicit filing can be removed; removing restores the repository default. */
   readonly removable: boolean;
-  /** Folders on the thread's environment it can move to, alphabetical. */
+  /** Active folders on the thread's environment it can move to, alphabetical. */
   readonly options: ReadonlyArray<EnvironmentProjectLabel>;
 }
 
@@ -130,7 +147,12 @@ export function threadFolderState(
     source,
     viaRepository: source === "repository",
     removable: source === "explicit",
-    options: directory.labels.filter((entry) => entry.environmentId === thread.environmentId),
+    // An archived folder is never offered, though a thread already in one
+    // still names it as `current`.
+    options: directory.labels.filter(
+      (entry) =>
+        entry.environmentId === thread.environmentId && !isProjectLabelArchived(entry.label),
+    ),
   };
 }
 

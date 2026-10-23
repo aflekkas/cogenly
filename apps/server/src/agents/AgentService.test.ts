@@ -1,4 +1,9 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 import * as Folders from "../project/ManagedProjectFolders.ts";
+import * as ServerConfig from "../config.ts";
+import { createPendingAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
 import * as Option from "effect/Option";
 import * as AgentEvents from "./AgentEventBus.ts";
 import * as EventReactor from "./AgentEventReactor.ts";
@@ -18,6 +23,7 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  ChatAttachmentId,
   CommandId,
   EventId,
   ProjectId,
@@ -147,7 +153,7 @@ const makeHarness = Effect.sync(() => {
               nodeId: null,
               role: "user" as const,
               text: input.text,
-              attachments: [],
+              attachments: input.attachments,
               streaming: false,
               createdAt: DateTime.makeUnsafe(fixture.createdAt),
               updatedAt: DateTime.makeUnsafe(fixture.createdAt),
@@ -210,6 +216,7 @@ const makeHarness = Effect.sync(() => {
     }),
     Layer.mock(Secrets.SecretRequests)({}),
     Layer.mock(Git.GitWorkflowService)({ isRepository: () => Effect.succeed(true) }),
+    ServerConfig.layerTest(process.cwd(), { prefix: "t3-agent-service-" }),
   );
   const database = Sqlite.layerMemory;
   const store = Store.layer.pipe(Layer.provide(database));
@@ -386,6 +393,76 @@ describe("agent execution", () => {
         expect(result.delivery).toBe("queued");
         expect(h.calls[0]?.mode).toBe("queue");
         expect(h.calls[0]?.text).toBe("Remember green");
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+
+  it.effect("owner texts claim their uploads into the conversation, as a chat send does", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const config = yield* ServerConfig.ServerConfig;
+        yield* store.save(h.fixture);
+        const pendingId = ChatAttachmentId.make(createPendingAttachmentId());
+        NodeFS.writeFileSync(
+          NodePath.join(config.attachmentsDir, `${pendingId}.png`),
+          new Uint8Array([1, 2, 3]),
+        );
+        yield* agents.send({
+          id: h.fixture.id,
+          commandId: CommandId.make("send:image"),
+          messageId: MessageId.make("send:image"),
+          text: "",
+          attachments: [
+            {
+              type: "image",
+              id: pendingId,
+              name: "screen.png",
+              mimeType: "image/png",
+              sizeBytes: 3,
+            },
+          ],
+        });
+        const sent = h.calls[0]?.attachments[0];
+        expect(h.calls[0]?.threadId).toBe(h.fixture.conversationThreadId);
+        expect(sent?.id).not.toBe(pendingId);
+        expect(
+          NodeFS.readFileSync(
+            resolveAttachmentPath({ attachmentsDir: config.attachmentsDir, attachment: sent! })!,
+          ),
+        ).toEqual(Buffer.from([1, 2, 3]));
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+
+  it.effect("a missing upload fails the text before it reaches the conversation", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        yield* store.save(h.fixture);
+        const error = yield* agents
+          .send({
+            id: h.fixture.id,
+            commandId: CommandId.make("send:missing"),
+            messageId: MessageId.make("send:missing"),
+            text: "Look",
+            attachments: [
+              {
+                type: "image",
+                id: ChatAttachmentId.make(createPendingAttachmentId()),
+                name: "gone.png",
+                mimeType: "image/png",
+                sizeBytes: 3,
+              },
+            ],
+          })
+          .pipe(Effect.flip);
+        expect(error.message).toContain("gone.png");
+        expect(h.calls).toEqual([]);
       }).pipe(Effect.provide(h.layer));
     }),
   );

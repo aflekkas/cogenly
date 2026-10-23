@@ -50,19 +50,19 @@ describe("listColumnLayoutStore", () => {
     expect(
       mainColumnCrampedBesidePanel({ ...layout, viewportWidth: 2000, rightPanelOpen: true }),
     ).toBe(false);
-    // 1440px still fits both: the panel shrinks toward 360, the main column stays over 640.
+    // 1200px still fits both: the panel shrinks toward 360, the main column stays over 320.
     expect(
-      mainColumnCrampedBesidePanel({ ...layout, viewportWidth: 1440, rightPanelOpen: true }),
+      mainColumnCrampedBesidePanel({ ...layout, viewportWidth: 1200, rightPanelOpen: true }),
     ).toBe(false);
   });
 
-  it("calls a narrow window cramped only when the panel at its minimum leaves under 640px", () => {
-    // 48 + 290 + 360 + 640 = 1338
+  it("calls a narrow window cramped only when the panel at its minimum leaves under 320px", () => {
+    // 48 + 290 + 360 + 320 = 1018
     expect(
-      mainColumnCrampedBesidePanel({ ...layout, viewportWidth: 1338, rightPanelOpen: true }),
+      mainColumnCrampedBesidePanel({ ...layout, viewportWidth: 1018, rightPanelOpen: true }),
     ).toBe(false);
     expect(
-      mainColumnCrampedBesidePanel({ ...layout, viewportWidth: 1337, rightPanelOpen: true }),
+      mainColumnCrampedBesidePanel({ ...layout, viewportWidth: 1017, rightPanelOpen: true }),
     ).toBe(true);
     expect(
       mainColumnCrampedBesidePanel({ ...layout, viewportWidth: 1000, rightPanelOpen: false }),
@@ -70,7 +70,7 @@ describe("listColumnLayoutStore", () => {
   });
 
   it("fits the panel again once the column closes or the window grows", () => {
-    const narrow = { ...layout, viewportWidth: 1200 };
+    const narrow = { ...layout, viewportWidth: 1000 };
     expect(rightPanelFitsAgain({ ...narrow, listColumnOpen: true })).toBe(false);
     expect(rightPanelFitsAgain({ ...narrow, listColumnOpen: false })).toBe(true);
     expect(rightPanelFitsAgain({ ...narrow, viewportWidth: 1400, listColumnOpen: true })).toBe(

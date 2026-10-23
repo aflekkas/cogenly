@@ -12,8 +12,11 @@ import {
   agentStatusLabel,
   INITIAL_TYPING_SLOT,
   stepTypingSlot,
+  agentAttachmentIdentity,
+  agentAttachmentSupport,
+  wireAgentAttachments,
 } from "./agents.logic";
-import { ProviderInstanceId } from "@t3tools/contracts";
+import { ChatAttachmentId, ProviderInstanceId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import type { AgentContact, AgentMessage } from "./agents.types";
 
@@ -26,6 +29,50 @@ const message = (id: string, role: AgentMessage["role"], createdAt: string): Age
   createdAt,
   text: id,
 });
+describe("agent text attachments", () => {
+  const image = {
+    type: "image" as const,
+    id: ChatAttachmentId.make("pending-00000000-0000-4000-8000-000000000001"),
+    name: "screen.png",
+    mimeType: "image/png",
+    sizeBytes: 3,
+  };
+  it("keeps the local preview on this client and sends the upload as stored", () => {
+    const file = {
+      type: "file" as const,
+      id: ChatAttachmentId.make("pending-00000000-0000-4000-8000-000000000002"),
+      name: "notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 5,
+    };
+    expect(wireAgentAttachments([{ ...image, previewUrl: "blob:local" }, file])).toEqual([
+      image,
+      file,
+    ]);
+  });
+  it("reuses a retry's ids only for the same files", () => {
+    const other = { ...image, id: ChatAttachmentId.make("pending-other") };
+    expect(agentAttachmentIdentity([image])).toBe(agentAttachmentIdentity([image]));
+    expect(agentAttachmentIdentity([image])).not.toBe(agentAttachmentIdentity([image, other]));
+    expect(agentAttachmentIdentity([])).not.toBe(agentAttachmentIdentity([image]));
+  });
+  it("offers attachments only where the server claims them for agents", () => {
+    expect(agentAttachmentSupport(undefined)).toBeNull();
+    expect(agentAttachmentSupport({ attachmentUploads: true })).toBeNull();
+    expect(agentAttachmentSupport({ agentAttachments: true })).toBeNull();
+    expect(agentAttachmentSupport({ agentAttachments: true, attachmentUploads: true })).toEqual({
+      maxFileBytes: null,
+    });
+    expect(
+      agentAttachmentSupport({
+        agentAttachments: true,
+        attachmentUploads: true,
+        fileAttachments: { maxUploadBytes: 1024 },
+      }),
+    ).toEqual({ maxFileBytes: 1024 });
+  });
+});
+
 describe("texting timeline", () => {
   it("groups only adjacent messages by the same sender within three minutes", () => {
     const rows = conversationRows(

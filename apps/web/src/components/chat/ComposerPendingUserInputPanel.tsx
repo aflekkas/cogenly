@@ -202,14 +202,16 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         setCollapsedQuestionId(open ? null : activeQuestion.id);
       }}
     >
+      {/* One inset for header, question and options: the icon-less header content
+          (Root px-1 + Content ps-2, sm:ps-1.5) sets it, py-0.5 makes the top match,
+          and the Body and option rows below line up their text with it. */}
       <CollapsibleTrigger
-        render={<ComposerBanner.Row render={<button type="button" />} />}
+        render={<ComposerBanner.Row className="py-0.5" render={<button type="button" />} />}
         title={
           isCollapsed ? "Show the question and its options" : "Hide the question and its options"
         }
         data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
       >
-        <ComposerBanner.Icon />
         <ComposerBanner.Content>
           <span className="shrink-0 font-medium text-muted-foreground">
             {activeQuestion.header}
@@ -253,7 +255,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       </CollapsibleTrigger>
       <CollapsiblePanel>
         <ComposerBanner.Scroll>
-          <ComposerBanner.Body className="pe-1 pb-1 wrap-anywhere">
+          {/* pb-2 keeps the last option's surface clear of the composer seam's 10px shade. */}
+          <ComposerBanner.Body className="ps-2 pe-2 pb-2 wrap-anywhere sm:ps-1.5 sm:pe-1.5">
             <ChatMarkdown
               text={activeQuestion.question}
               cwd={cwd}
@@ -263,7 +266,9 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
             {activeQuestion.multiSelect ? (
               <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
             ) : null}
-            <div className="mt-2 space-y-0.5">
+            {/* Rows bleed into the Body's padding so their labels share the question's
+                inset and their number hints sit under the header chevron. */}
+            <div className="-mx-1.5 mt-2 space-y-0.5">
               {activeQuestion.options.map((option, index) => {
                 const optionValue = option.value ?? option.label;
                 const isOptimisticallySelected =
@@ -274,7 +279,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   (!customAnswerActive && progress.selectedOptionValues.includes(optionValue));
                 const shortcutKey = index < 9 ? index + 1 : null;
                 const className = cn(
-                  "group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
+                  "group flex w-full items-center gap-2 rounded-md py-2 ps-1.5 pe-0.5 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
                   isSelected
                     ? "bg-muted/55 text-foreground"
                     : "bg-transparent text-foreground/85 hover:bg-muted/30",
@@ -290,7 +295,9 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                       ) : null}
                     </div>
                     {isSelected ? (
-                      <CheckIcon className="size-3.5 shrink-0 text-primary" />
+                      <span className="flex size-5 shrink-0 items-center justify-center">
+                        <CheckIcon className="size-3.5 text-primary" />
+                      </span>
                     ) : shortcutKey !== null ? (
                       <kbd
                         className={cn(

@@ -9,7 +9,9 @@ import {
   ScheduledTaskId,
   ThreadId,
   TrimmedNonEmptyString,
+  TrimmedString,
 } from "./baseSchemas.ts";
+import { ChatAttachment } from "./chatAttachment.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 import { RuntimeMode } from "./providerPolicy.ts";
@@ -144,14 +146,26 @@ export const AgentMarkReadResult = Schema.Struct({ agent: AgentListItem });
 export const AgentMutationResult = Schema.Struct({ agent: Agent });
 /** Deletes identity, triggers and memory, stops active work, and retains thread history. */
 export const AgentDeleteResult = Schema.Struct({ deleted: Schema.Boolean });
-/** Uses the normal queue/steer path. Stable commandId/messageId make retries safe. */
+/**
+ * Uses the normal queue/steer path. Stable commandId/messageId make retries safe.
+ * Attachments are pending uploads, claimed into the conversation like a chat send;
+ * a text may be empty only when it carries one.
+ */
 export const AgentSendInput = Schema.Struct({
   id: AgentId,
   commandId: CommandId,
   messageId: MessageId,
-  text: TrimmedNonEmptyString,
+  text: TrimmedString,
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   mode: Schema.optional(Schema.Literals(["auto", "queue", "steer"])),
-});
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      input.text.length > 0 ||
+      (input.attachments?.length ?? 0) > 0 ||
+      "A message needs text or an attachment.",
+  ),
+);
 export type AgentSendInput = typeof AgentSendInput.Type;
 export const AgentSendResult = Schema.Struct({
   threadId: ThreadId,

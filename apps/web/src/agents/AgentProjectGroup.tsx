@@ -76,7 +76,9 @@ export function AgentProjectGroup(props: {
         />
       ) : null}
       <GroupCollapse open={open}>
-        <SidebarList aria-label={props.heading ? name : undefined}>{props.children}</SidebarList>
+        <SidebarList density="cards" aria-label={props.heading ? name : undefined}>
+          {props.children}
+        </SidebarList>
       </GroupCollapse>
     </li>
   );

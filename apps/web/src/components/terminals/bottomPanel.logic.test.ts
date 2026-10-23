@@ -7,10 +7,10 @@ import {
   bottomPanelMaxHeight,
   bottomPanelTabs,
   bottomPanelTabStatus,
-  bottomPanelToggleShowsActivity,
   clampBottomPanelHeight,
   findRunForToolCall,
   resolveActiveBottomPanelTab,
+  runGroupOpen,
   runListTitle,
   shortenHomePath,
 } from "./bottomPanel.logic";
@@ -109,12 +109,22 @@ describe("bottomPanelTabs", () => {
   });
 });
 
-describe("bottom panel never opens for an agent", () => {
-  it("only marks the header toggle while a command runs and the panel is closed", () => {
-    const running = [{ liveRunCount: 1 }];
-    expect(bottomPanelToggleShowsActivity(false, running)).toBe(true);
-    expect(bottomPanelToggleShowsActivity(true, running)).toBe(false);
-    expect(bottomPanelToggleShowsActivity(false, [{ liveRunCount: 0 }])).toBe(false);
+describe("runGroupOpen", () => {
+  it("folds a long Finished group under running commands until the user says otherwise", () => {
+    const many = { liveCount: 1, finishedCount: 12 };
+    expect(runGroupOpen("finished", { stored: undefined, ...many })).toBe(false);
+    expect(runGroupOpen("live", { stored: undefined, ...many })).toBe(true);
+    expect(runGroupOpen("finished", { stored: { finished: true }, ...many })).toBe(true);
+    expect(runGroupOpen("live", { stored: { live: false }, ...many })).toBe(false);
+  });
+
+  it("keeps Finished open when it is short or the only group", () => {
+    expect(runGroupOpen("finished", { stored: undefined, liveCount: 1, finishedCount: 3 })).toBe(
+      true,
+    );
+    expect(runGroupOpen("finished", { stored: undefined, liveCount: 0, finishedCount: 40 })).toBe(
+      true,
+    );
   });
 });
 

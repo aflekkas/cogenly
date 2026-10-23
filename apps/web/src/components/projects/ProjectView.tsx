@@ -9,6 +9,8 @@ import type {
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   MoreHorizontalIcon,
   PaletteIcon,
   PanelRightIcon,
@@ -37,6 +39,7 @@ import {
   projectLabelPaletteColor,
 } from "../../projectLabels/projectLabels.logic";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
+import { useProjectArchive } from "../../projectLabels/useProjectArchive";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { getSidebarProjectSettingsKey } from "../../sidebarProjectGrouping";
@@ -139,14 +142,21 @@ function ProjectNameEditor(props: {
   );
 }
 
-/** Rename, color, details and delete, in the header's ⋯ menu. */
+/**
+ * A separate chat in the project, rename, color, details, archive and delete,
+ * in the header's ⋯ menu.
+ */
 function ProjectHeaderMenu(props: {
   readonly label: ProjectLabelWithRepositories;
   readonly canEdit: boolean;
   readonly canDelete: boolean;
+  readonly archived: boolean;
+  readonly canArchive: boolean;
+  readonly onNewChat: () => void;
   readonly onRename: () => void;
   readonly onRecolor: (color: string) => void;
   readonly onEditDetails: () => void;
+  readonly onToggleArchived: () => void;
   readonly onDelete: () => void;
 }) {
   return (
@@ -157,6 +167,11 @@ function ProjectHeaderMenu(props: {
         <MoreHorizontalIcon />
       </MenuTrigger>
       <MenuPopup align="end">
+        <MenuItem onClick={props.onNewChat}>
+          <SquarePenIcon />
+          New separate chat
+        </MenuItem>
+        <MenuSeparator />
         <MenuItem disabled={!props.canEdit} onClick={props.onRename}>
           <PencilIcon />
           Rename
@@ -189,6 +204,10 @@ function ProjectHeaderMenu(props: {
           Edit details…
         </MenuItem>
         <MenuSeparator />
+        <MenuItem disabled={!props.canArchive} onClick={props.onToggleArchived}>
+          {props.archived ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
+          {props.archived ? "Unarchive" : "Archive"}
+        </MenuItem>
         <MenuItem variant="destructive" disabled={!props.canDelete} onClick={props.onDelete}>
           <TrashIcon />
           Delete…
@@ -200,7 +219,8 @@ function ProjectHeaderMenu(props: {
 
 /**
  * One project in the main area, as its home: a compact header, the project's
- * own chat in the main column, and the cards it is built from (instructions,
+ * one persistent conversation in the main column (the same thread on every
+ * visit and device, `projectChatThreadId`), and the cards it is built from (instructions,
  * repositories, sources, files, recent threads, agents) in a column that
  * scrolls on its own. Narrow windows move the cards into a sheet the header
  * toggles. Picking another project fades the new page in.
@@ -242,6 +262,7 @@ function ProjectPage(props: {
     reportFailure: false,
   });
   const deleteFolder = useDeleteProjectFolder();
+  const archive = useProjectArchive(environmentId, label);
   const { startScratchThread } = useScratchProject();
   const [renaming, setRenaming] = useState(false);
   const [editingDetails, setEditingDetails] = useState(false);
@@ -367,24 +388,28 @@ function ProjectPage(props: {
               await update({ name }, `Could not rename ${label.name}`);
             }}
           />
-          {label.description ? (
-            <p className="truncate text-xs text-muted-foreground">{label.description}</p>
+          {archive.archived || label.description ? (
+            <p className="swap-motion truncate text-xs text-muted-foreground">
+              {[archive.archived ? "Archived" : null, label.description || null]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
           ) : null}
         </div>
         <span className="flex shrink-0 items-center gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() =>
-              void startScratchThread(environmentId, {
-                surface: "chat",
-                projectFolderId: labelId,
-              })
-            }
-          >
-            <SquarePenIcon />
-            New chat
-          </Button>
+          {archive.archived ? (
+            <span key="unarchive" className="swap-motion flex">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!archive.canArchive}
+                onClick={() => void archive.setArchived(false)}
+              >
+                <ArchiveRestoreIcon />
+                Unarchive
+              </Button>
+            </span>
+          ) : null}
           {cardsInline ? null : (
             <Button
               size="icon-sm"
@@ -400,9 +425,18 @@ function ProjectPage(props: {
             label={label}
             canEdit={canEdit}
             canDelete={canDelete}
+            archived={archive.archived}
+            canArchive={archive.canArchive}
+            onNewChat={() =>
+              void startScratchThread(environmentId, {
+                surface: "chat",
+                projectFolderId: labelId,
+              })
+            }
             onRename={() => setRenaming(true)}
             onRecolor={(color) => void update({ color }, `Could not recolor ${label.name}`)}
             onEditDetails={() => setEditingDetails(true)}
+            onToggleArchived={() => void archive.setArchived(!archive.archived)}
             onDelete={() => void remove()}
           />
         </span>

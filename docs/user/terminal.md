@@ -4,18 +4,19 @@ In a Work thread, the terminal panel sits under the conversation and shows the c
 agents ran. Open it with the panel button at the top right, `mod+J`, or **Show output** on a
 command in the conversation. Chats have no terminal.
 
-The panel never opens by itself. While it is closed, a dot on its button means an agent command
-is running.
+The panel never opens by itself.
 
 Each agent that ran a command gets a tab: the thread's own agent, and each subagent with its
-own conversation. A tab lists that agent's commands, running ones at the top; select one to see
+own conversation. A tab lists that agent's commands under **Running** and **Finished**; click a
+heading to fold it. A long Finished list starts folded while commands run. Select one to see
 its full command, working directory, output, and how it ended. A dev server that prints a local
 address gets an **Open** button, which follows your **Open links in** setting (Cmd/Ctrl-click
 opens the system browser). **Stop** ends a running command; it stays listed with its exit
 status.
 
 Closing a tab hides it until that agent runs another command. Drag the panel's top edge to
-resize it. Each thread remembers whether its panel was open and how tall it was.
+resize it; a short, narrow panel swaps the list for a menu beside the command. Each thread
+remembers whether its panel was open, how tall it was, and which lists you folded.
 
 In the command list, Up and Down move between commands, Enter moves focus into the output, and
 Esc returns to the list.

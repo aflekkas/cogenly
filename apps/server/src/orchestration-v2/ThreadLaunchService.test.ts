@@ -30,6 +30,7 @@ import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as ThreadLaunch from "./ThreadLaunchService.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
+import { userFacingDispatchErrorMessage } from "./UserFacingErrors.ts";
 
 const projectId = ProjectId.make("project:scratch");
 const threadId = ThreadId.make("thread:draft");
@@ -42,7 +43,9 @@ type Step =
   | { readonly kind: "read-label"; readonly id: ProjectLabelId }
   | { readonly kind: "file"; readonly threadId: ThreadId; readonly folderId: string | null };
 
-function harness(options: { readonly labelMissing?: boolean } = {}) {
+function harness(
+  options: { readonly labelMissing?: boolean; readonly labelArchived?: boolean } = {},
+) {
   const steps: Step[] = [];
   const createdWorktreePaths: Array<string | null> = [];
   const projection = {
@@ -93,12 +96,20 @@ function harness(options: { readonly labelMissing?: boolean } = {}) {
           getThreadProjection: () => Effect.succeed(projection),
         }),
         Layer.mock(ProjectLabelService.ProjectLabelService)({
-          read: (id) =>
+          readActive: (id) =>
             Effect.suspend(() => {
               steps.push({ kind: "read-label", id });
               return options.labelMissing === true
                 ? Effect.fail(new ProjectLabelError({ operation: "read", reason: "not_found" }))
-                : Effect.succeed({ label: { id } as never });
+                : options.labelArchived === true
+                  ? Effect.fail(
+                      new ProjectLabelError({
+                        operation: "readActive",
+                        reason: "archived",
+                        projectName: "Spawn Partners",
+                      }),
+                    )
+                  : Effect.succeed({ label: { id } as never });
             }),
           moveThread: (input) =>
             Effect.sync(() => {
@@ -183,6 +194,19 @@ describe("ThreadLaunchService project filing", () => {
       const launches = yield* ThreadLaunch.ThreadLaunchService;
       const error = yield* Effect.flip(launches.launch(launchInput({ projectFolderId: folderId })));
       expect(error._tag).toBe("ThreadLaunchError");
+      expect(steps).toEqual([{ kind: "read-label", id: folderId }]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("refuses an archived project before creating the thread, saying why", () => {
+    const { steps, layer } = harness({ labelArchived: true });
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const error = yield* Effect.flip(launches.launch(launchInput({ projectFolderId: folderId })));
+      expect(error._tag).toBe("ThreadLaunchError");
+      expect(userFacingDispatchErrorMessage(error)).toBe(
+        "Spawn Partners is archived. Unarchive it to add to it.",
+      );
       expect(steps).toEqual([{ kind: "read-label", id: folderId }]);
     }).pipe(Effect.provide(layer));
   });

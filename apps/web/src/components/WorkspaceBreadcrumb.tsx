@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 
 import { cn } from "../lib/utils";
+import { WorkspacePageTitle } from "./WorkspacePageTitle";
 
 interface WorkspaceBreadcrumbProps {
   readonly ariaLabel: string;
@@ -10,14 +11,16 @@ interface WorkspaceBreadcrumbProps {
 
 export function WorkspaceBreadcrumb({ ariaLabel, children, className }: WorkspaceBreadcrumbProps) {
   return (
-    // Leads the top bar, so it rides the pane's left edge when the sidebar toggles.
-    <nav aria-label={ariaLabel} className={cn("min-w-0", className)} data-panel-flip="start">
-      {/* Keep the flexible container draggable in Electron. Interactive
-          descendants are excluded by the shared .drag-region CSS rules. */}
-      <ol className="m-0 flex min-w-0 list-none items-center gap-2 p-0 text-sm sm:gap-3">
-        {children}
-      </ol>
-    </nav>
+    <WorkspacePageTitle>
+      {/* Leads the top bar, so it rides the pane's left edge when the sidebar toggles. */}
+      <nav aria-label={ariaLabel} className={cn("min-w-0", className)} data-panel-flip="start">
+        {/* Keep the flexible container draggable in Electron. Interactive
+            descendants are excluded by the shared .drag-region CSS rules. */}
+        <ol className="m-0 flex min-w-0 list-none items-center gap-2 p-0 text-sm sm:gap-3">
+          {children}
+        </ol>
+      </nav>
+    </WorkspacePageTitle>
   );
 }
 

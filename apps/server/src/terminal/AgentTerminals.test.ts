@@ -120,6 +120,19 @@ it.effect(
     ),
 );
 
+it.effect("an agent run's summary carries its whole command past the label's cap", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, manager } = yield* make;
+      const command = `export PATH="$PWD/node_modules/.bin:$PATH"\ncd apps/web && vp test run ${"packages/client-runtime/src/preview/serverBrowserStream.test.ts ".repeat(3).trim()}`;
+      yield* manager.runAgent({ threadId: "A", command, cwd, background: true });
+      const [listed] = yield* manager.listAgents("A");
+      expect(listed?.label.length).toBeLessThanOrEqual(128);
+      expect(listed?.command).toBe(command);
+    }),
+  ),
+);
+
 it.effect("foreground timeout kills the command and preserves output", () =>
   provide(
     Effect.gen(function* () {

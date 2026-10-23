@@ -42,6 +42,7 @@ import {
   ClaudeSettings,
   CodexSettings,
   ProviderInstanceId,
+  TERMINAL_COMMAND_MAX_LENGTH,
 } from "@t3tools/contracts";
 import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
@@ -450,7 +451,12 @@ function summary(session: TerminalSessionState): TerminalSummary {
     hasRunningSubprocess: session.hasRunningSubprocess,
     label: terminalWireLabel(session),
     updatedAt: session.updatedAt,
-    ...(session.agent ? { startedAt: session.agent.startedAt } : {}),
+    ...(session.agent
+      ? {
+          startedAt: session.agent.startedAt,
+          command: session.agent.command.slice(0, TERMINAL_COMMAND_MAX_LENGTH),
+        }
+      : {}),
   };
 }
 

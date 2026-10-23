@@ -12,7 +12,7 @@ import {
   ComboboxSearchInput,
   ComboboxTrigger,
 } from "../components/ui/combobox";
-import { sortProjectLabels } from "./projectLabels.logic";
+import { isProjectLabelArchived, sortProjectLabels } from "./projectLabels.logic";
 import { ProjectFolderIcon } from "./ProjectFolderMark";
 import { ProjectTag } from "./ProjectTag";
 
@@ -37,10 +37,14 @@ export function ProjectLabelPicker(props: {
   const selected = new Set<string>(props.selectedIds);
   const options = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return sortProjectLabels(props.labels.map((label) => ({ label })))
-      .map((entry) => entry.label)
-      .filter((label) => needle === "" || label.name.toLowerCase().includes(needle));
-  }, [props.labels, query]);
+    return (
+      sortProjectLabels(props.labels.map((label) => ({ label })))
+        .map((entry) => entry.label)
+        // Archived projects are not offered, but a chosen one stays to un-choose.
+        .filter((label) => !isProjectLabelArchived(label) || props.selectedIds.includes(label.id))
+        .filter((label) => needle === "" || label.name.toLowerCase().includes(needle))
+    );
+  }, [props.labels, props.selectedIds, query]);
   return (
     <Combobox
       items={options}

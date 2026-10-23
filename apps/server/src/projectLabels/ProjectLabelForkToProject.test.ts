@@ -96,12 +96,12 @@ function setup(input: {
       })) as Threads["dispatch"],
   } satisfies Threads;
   const labels = {
-    read: ((id: ProjectLabelId) =>
+    readActive: ((id: ProjectLabelId) =>
       input.labelMissing === true
         ? Effect.fail(new ProjectLabelError({ operation: "read", reason: "not_found" }))
         : Effect.succeed({
             label: { id } as ProjectLabelWithRepositories,
-          })) as Labels["read"],
+          })) as Labels["readActive"],
     moveThread: ((move: Parameters<Labels["moveThread"]>[0]) =>
       Effect.sync(() => {
         moved.push(move);

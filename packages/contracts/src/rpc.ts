@@ -510,6 +510,8 @@ export const WS_METHODS = {
   projectLabelsCreate: "projectLabels.create",
   projectLabelsUpdate: "projectLabels.update",
   projectLabelsDelete: "projectLabels.delete",
+  projectLabelsArchive: "projectLabels.archive",
+  projectLabelsUnarchive: "projectLabels.unarchive",
   projectLabelsLinkRepository: "projectLabels.linkRepository",
   projectLabelsUnlinkRepository: "projectLabels.unlinkRepository",
   projectLabelsGetThreadLabels: "projectLabels.getThreadLabels",
@@ -1867,6 +1869,16 @@ const WsProjectLabelsDeleteRpc = Rpc.make(WS_METHODS.projectLabelsDelete, {
   success: ProjectLabels.ProjectLabelDeleteResult,
   error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
+const WsProjectLabelsArchiveRpc = Rpc.make(WS_METHODS.projectLabelsArchive, {
+  payload: ProjectLabels.ProjectLabelKey,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsUnarchiveRpc = Rpc.make(WS_METHODS.projectLabelsUnarchive, {
+  payload: ProjectLabels.ProjectLabelKey,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsLinkRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsLinkRepository, {
   payload: ProjectLabels.ProjectLabelRepository,
   success: ProjectLabels.ProjectLabelMutationResult,
@@ -2320,6 +2332,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsCreateRpc,
   WsProjectLabelsUpdateRpc,
   WsProjectLabelsDeleteRpc,
+  WsProjectLabelsArchiveRpc,
+  WsProjectLabelsUnarchiveRpc,
   WsProjectLabelsLinkRepositoryRpc,
   WsProjectLabelsUnlinkRepositoryRpc,
   WsProjectLabelsGetThreadLabelsRpc,

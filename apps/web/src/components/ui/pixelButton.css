@@ -55,7 +55,7 @@
     transition: opacity var(--motion-duration-fast) var(--ease-out);
   }
 
-  &:focus-visible {
+  &:focus-visible:not(:root[data-input-modality="pointer"] *) {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }

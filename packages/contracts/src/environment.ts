@@ -102,6 +102,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   attachmentUploads: Schema.optionalKey(Schema.Boolean),
   /** Uploaded files may accompany question answers. */
   questionAttachments: Schema.optionalKey(Schema.Boolean),
+  /** Uploaded files may accompany a text to an agent. Older servers drop them. */
+  agentAttachments: Schema.optionalKey(Schema.Boolean),
   /** Missing on servers that only accept image attachments. */
   fileAttachments: Schema.optionalKey(
     Schema.Struct({

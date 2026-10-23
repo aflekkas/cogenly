@@ -137,24 +137,54 @@ function holdsRepository(project: EnvironmentProjectLabel, refs: ReadonlyArray<R
   );
 }
 
+/** Whether a repository belongs to `project`, or with none, to no project of `projects`. */
+function belongsTo(
+  project: EnvironmentProjectLabel | null,
+  projects: ReadonlyArray<EnvironmentProjectLabel>,
+  refs: ReadonlyArray<RepositoryRef>,
+) {
+  return project === null
+    ? !projects.some((candidate) => holdsRepository(candidate, refs))
+    : holdsRepository(project, refs);
+}
+
+/**
+ * The repositories the Work hero's repository picker lists: the ones
+ * `project` holds (on its machine), or without a project the ones no project
+ * holds. Picking a repository never changes the project. Order is kept.
+ */
+export function repositoriesInProject<Item>(input: {
+  readonly items: ReadonlyArray<Item>;
+  readonly refsOf: (item: Item) => ReadonlyArray<RepositoryRef>;
+  readonly project: EnvironmentProjectLabel | null;
+  /** Every known project, to tell which repositories are in none. */
+  readonly projects: ReadonlyArray<EnvironmentProjectLabel>;
+}): Item[] {
+  return input.items.filter((item) => belongsTo(input.project, input.projects, input.refsOf(item)));
+}
+
 /**
  * The repository a Work draft moves to when its project is picked: the
- * current one while the project holds it, else the project's most recently
- * active one (the first on a tie). Null when the project holds none, and the
- * draft keeps its repository.
+ * current one while it belongs to the project, else the project's most
+ * recently active one (the first on a tie). A null project ("No project")
+ * picks among the repositories in no project of `projects`. Null when there
+ * is none, and Work runs in the project folder instead.
  */
 export function projectDefaultRepository<Item>(input: {
   readonly items: ReadonlyArray<Item>;
   readonly refsOf: (item: Item) => ReadonlyArray<RepositoryRef>;
-  readonly project: EnvironmentProjectLabel;
+  readonly project: EnvironmentProjectLabel | null;
+  /** Every known project; only read for a null project. */
+  readonly projects?: ReadonlyArray<EnvironmentProjectLabel>;
   readonly isCurrent: (item: Item) => boolean;
   /** Latest thread activity in the repository, as epoch ms; -Infinity when none. */
   readonly lastActiveAt: (item: Item) => number;
 }): Item | null {
   let best: Item | null = null;
   let bestAt = Number.NEGATIVE_INFINITY;
+  const projects = input.projects ?? [];
   for (const item of input.items) {
-    if (!holdsRepository(input.project, input.refsOf(item))) continue;
+    if (!belongsTo(input.project, projects, input.refsOf(item))) continue;
     if (input.isCurrent(item)) return item;
     const at = input.lastActiveAt(item);
     if (best === null || at > bestAt) {
@@ -183,21 +213,6 @@ export function workDraftFolderId(input: {
   return own?.key === project.key ? null : project.label.id;
 }
 
-/**
- * Whether a repository-picker group shows its repositories. Groups start
- * open; one the user collapsed stays shut until a search matches inside it.
- */
-export function isRepositoryGroupOpen(input: {
-  readonly groupKey: string;
-  readonly collapsedKeys: ReadonlyArray<string>;
-  /** True while the search has text; a matching group then opens on its own. */
-  readonly searching: boolean;
-  readonly hasMatches: boolean;
-}): boolean {
-  if (input.searching) return input.hasMatches;
-  return !input.collapsedKeys.includes(input.groupKey);
-}
-
 /** The collapsed groups after toggling `groupKey`. */
 export function toggleCollapsedGroup(
   collapsedKeys: ReadonlyArray<string>,
@@ -209,27 +224,14 @@ export function toggleCollapsedGroup(
 }
 
 /**
- * The line under the Work hero's heading, by what the draft has:
- * - `repository`: a project and a repository ("in <repo> · or just the project folder");
- * - `project-folder`: a project, no repository ("in the project folder · pick a repository…");
- * - `pick-project`: a repository, no project ("in a project… · or start without a repository");
- * - `pick-either`: neither ("in a project… · in a repository…").
- * Chats have no line.
+ * What the Work hero's repository picker offers beside the repositories: its
+ * "No repository" row, offered while Work can start without a repository and
+ * checked once it does. Chats pick no repository.
  */
-export type WorkHeroSubline =
-  | "none"
-  | "repository"
-  | "project-folder"
-  | "pick-project"
-  | "pick-either";
-
 export interface WorkHeroLine {
-  readonly subline: WorkHeroSubline;
-  /**
-   * The repository picker's "No repository (project folder)" row: offered in
-   * a project when Work can start without a repository, checked once it does.
-   */
   readonly projectFolderRow: "hidden" | "offered" | "selected";
+  /** The row's text: in a project Work runs in the project's folder. */
+  readonly projectFolderRowLabel: string;
 }
 
 export function workHeroLine(input: {
@@ -240,17 +242,52 @@ export function workHeroLine(input: {
   /** Whether this machine can host Work without a repository. */
   readonly canStartWithoutRepository: boolean;
 }): WorkHeroLine {
-  if (input.isChat) return { subline: "none", projectFolderRow: "hidden" };
-  if (input.hasProject) {
-    return input.hasRepository
-      ? {
-          subline: "repository",
-          projectFolderRow: input.canStartWithoutRepository ? "offered" : "hidden",
-        }
-      : { subline: "project-folder", projectFolderRow: "selected" };
-  }
+  const projectFolderRowLabel = input.hasProject
+    ? "No repository (project folder)"
+    : "No repository";
+  if (input.isChat) return { projectFolderRow: "hidden", projectFolderRowLabel };
+  if (!input.hasRepository) return { projectFolderRow: "selected", projectFolderRowLabel };
   return {
-    subline: input.hasRepository ? "pick-project" : "pick-either",
-    projectFolderRow: "hidden",
+    projectFolderRow: input.canStartWithoutRepository ? "offered" : "hidden",
+    projectFolderRowLabel,
+  };
+}
+
+/** One half of the Work hero's breadcrumb; a placeholder reads muted, with no icon. */
+export interface WorkHeroCrumb {
+  readonly text: string;
+  readonly placeholder: boolean;
+}
+
+/**
+ * The Work hero's sentence, "What should we build in <project> / <repository>?",
+ * shared by the new-Work screen and an unwritten Work thread. Both halves are
+ * always named: "No project" without a project, and without a repository
+ * "project folder" in a project or "no repository" outside one.
+ */
+export function workHeroBreadcrumb(input: {
+  readonly projectName: string | null;
+  /** Null while the repository is still unknown here. */
+  readonly repositoryName: string | null;
+  /** False for Work in the no-project home, which runs without a repository. */
+  readonly hasRepository: boolean;
+}): {
+  readonly project: WorkHeroCrumb;
+  readonly repository: WorkHeroCrumb;
+  readonly label: string;
+} {
+  const projectName = input.projectName?.trim() || null;
+  const project: WorkHeroCrumb = projectName
+    ? { text: projectName, placeholder: false }
+    : { text: "No project", placeholder: true };
+  const repository: WorkHeroCrumb = !input.hasRepository
+    ? { text: projectName ? "project folder" : "no repository", placeholder: true }
+    : input.repositoryName
+      ? { text: input.repositoryName, placeholder: false }
+      : { text: "a repository", placeholder: true };
+  return {
+    project,
+    repository,
+    label: `What should we build in ${project.text} / ${repository.text}?`,
   };
 }

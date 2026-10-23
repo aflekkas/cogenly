@@ -1,5 +1,5 @@
 import type { PreviewAnnotationPayload } from "@t3tools/contracts";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { DeviceHubAccess } from "../device/hubAccess.ts";
 import {
@@ -169,5 +169,60 @@ describe("preview stream pick protocol", () => {
     socket.serverMessage(controlMessage({ canOperate: false }));
     expect(client.send({ type: "pickHitTest", x: 1, y: 2 })).toBe(false);
     expect(socket.sent).toEqual([]);
+  });
+});
+
+describe("preview stream frame pacing", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const frame = (socket: FakeWebSocket) => socket.emit("message", { data: new ArrayBuffer(1) });
+  const acks = (socket: FakeWebSocket) =>
+    socket.sent.filter((message) => JSON.parse(message).type === "ack").length;
+
+  it("acks every frame at once by default", () => {
+    const { socket } = connect();
+    frame(socket);
+    frame(socket);
+    expect(acks(socket)).toBe(2);
+  });
+
+  it("releases one ack per interval for a paced viewer", () => {
+    vi.useFakeTimers();
+    installWebSocket();
+    const frames: Array<ArrayBuffer> = [];
+    const client = createPreviewStreamClient(
+      {
+        access,
+        threadId: "thread_1",
+        tabId: "tab_1",
+        maxWidth: 320,
+        maxHeight: 200,
+        interactive: false,
+        minFrameIntervalMs: 1_000,
+      },
+      {
+        onFrame: (jpeg) => frames.push(jpeg),
+        onViewport: () => {},
+        onConnectedChange: () => {},
+        onUnauthorized: () => {},
+      },
+    );
+    const socket = FakeWebSocket.instances[0]!;
+    socket.emit("open");
+    expect(socket.url).toContain("interactive=false");
+    // A burst still paints, but the screencast only hears back once a second.
+    frame(socket);
+    frame(socket);
+    frame(socket);
+    expect(frames).toHaveLength(3);
+    expect(acks(socket)).toBe(0);
+    vi.advanceTimersByTime(1_000);
+    expect(acks(socket)).toBe(1);
+    vi.advanceTimersByTime(1_000);
+    expect(acks(socket)).toBe(2);
+    // Stopping drops what is still owed.
+    client.stop();
+    vi.advanceTimersByTime(5_000);
+    expect(acks(socket)).toBe(2);
   });
 });

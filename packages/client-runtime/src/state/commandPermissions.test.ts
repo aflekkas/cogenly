@@ -197,6 +197,8 @@ describe("command permissions", () => {
     WS_METHODS.projectLabelsCreate,
     WS_METHODS.projectLabelsUpdate,
     WS_METHODS.projectLabelsDelete,
+    WS_METHODS.projectLabelsArchive,
+    WS_METHODS.projectLabelsUnarchive,
     WS_METHODS.projectLabelsLinkRepository,
     WS_METHODS.projectLabelsUnlinkRepository,
     WS_METHODS.projectLabelsMoveThread,

@@ -32,6 +32,12 @@ export const ProjectLabel = Schema.Struct({
    * project, for every provider. Older servers and caches decode as empty.
    */
   instructions: instructions.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /**
+   * Set while the project is archived (`projectLabels.archive`, undone by
+   * `projectLabels.unarchive`). Archived projects keep their threads, chat and
+   * filing; clients leave them out of pickers and list them under Archived.
+   */
+  archivedAt: Schema.optional(IsoDateTime),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -254,12 +260,17 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
       "invalid_membership",
       "invalid_path",
       "fork_required",
+      "archived",
     ]),
+    /** The project's name, so an `archived` refusal can say which one. */
+    projectName: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     switch (this.reason) {
+      case "archived":
+        return `${this.projectName ?? "This project"} is archived. Unarchive it to add to it.`;
       case "not_found":
         return "The folder, repository, thread, or file was not found.";
       case "invalid_membership":
@@ -418,7 +429,7 @@ export type ProjectRecallInput = typeof ProjectRecallInput.Type;
  *   ({ id, instructions }), injected into every thread filed in the project.
  * - Configuration RPCs (all guarded): projectLabels.update (instructions),
  *   linkRepository / unlinkRepository, linkSource / unlinkSource,
- *   addResource / removeResource, ensureProjectChat.
+ *   addResource / removeResource, ensureProjectChat, archive / unarchive.
  * - MCP tools for agents in a project's threads (target the caller's own
  *   project unless `projectFolderId` names another): project_overview,
  *   project_instructions_get, project_instructions_set, project_repository_add,
