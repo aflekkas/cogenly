@@ -31,10 +31,11 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import {
-  buildTemporaryWorktreeBranchName,
+  buildWorktreeBranchName,
   flattenTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
   WORKTREE_BRANCH_PREFIX,
+  worktreeFolderSlug,
 } from "@t3tools/shared/git";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
@@ -49,7 +50,6 @@ import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import type * as Orchestrator from "./Orchestrator.ts";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
-import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
 export type ThreadLaunchWorkspaceStrategy =
@@ -394,14 +394,26 @@ const make = Effect.gen(function* () {
             );
         });
 
-      // The server owns worktree naming: without an explicit branch, provision
-      // under a temporary `t3/<hash>` name so the worktree never waits on
-      // name generation, then rename in the background below.
+      // The server owns worktree naming: without an explicit branch, decide
+      // the final name before the worktree exists — a deterministic
+      // `c/<slug>` from the request text — so the worktree folder, named by
+      // the slug, never has to move and no rename follows. Temporary
+      // branches sent by older clients are still renamed in the background
+      // below.
       const requestedBranch = input.workspaceStrategy.branch;
       let branch: string | null;
       if (input.workspaceStrategy.type === "worktree" && requestedBranch === undefined) {
-        const uuid = yield* randomUuidV4;
-        branch = buildTemporaryWorktreeBranchName(() => uuid.replaceAll("-", ""));
+        const existing = yield* git.listLocalBranchNames(project.workspaceRoot).pipe(
+          // Dedup is best-effort: an unreadable branch list just means the
+          // first slug is tried and Git reports a real collision.
+          Effect.catchCause((cause) =>
+            Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed([] as Array<string>),
+          ),
+        );
+        branch = buildWorktreeBranchName(initialMessage?.text ?? "", {
+          branches: existing,
+          folders: existing.map(worktreeFolderSlug),
+        }).branch;
       } else {
         branch = requestedBranch ?? null;
       }
@@ -515,10 +527,11 @@ const make = Effect.gen(function* () {
       }
       workspaceRecorded = true;
 
-      // Rename temporary branches (server-invented above, or sent by clients
-      // that name worktrees themselves) in the background so generation latency
+      // Rename legacy temporary branches (sent by clients that name
+      // worktrees themselves) in the background so generation latency
       // never delays provisioning or the provider turn. The temporary name
-      // simply sticks if generation or the rename fails.
+      // simply sticks if generation or the rename fails. Server-decided
+      // `c/` branches are final and never renamed, so their folder stays.
       if (
         reused === undefined &&
         worktreePath !== null &&

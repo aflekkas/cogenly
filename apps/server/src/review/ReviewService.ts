@@ -20,7 +20,12 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { isFilesystemRoot, managedWorktreesDirectories } from "../worktreesDirectory.ts";
+import { resolveProjectsRootDirectory } from "../project/ProjectsRoot.ts";
+import {
+  isFilesystemRoot,
+  managedWorktreesDirectories,
+  projectWorktreesDirectories,
+} from "../worktreesDirectory.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 export class ReviewService extends Context.Service<
@@ -74,16 +79,36 @@ export const make = Effect.gen(function* () {
     cwd: string,
   ) {
     const worktreesDirectories = yield* settings.getSettings.pipe(
-      Effect.orElseSucceed(() => ({ worktreesDirectory: "", previousWorktreesDirectories: [] })),
+      Effect.orElseSucceed(() => ({
+        worktreesDirectory: "",
+        previousWorktreesDirectories: [],
+        projectsRoot: "",
+      })),
     );
     const home = yield* HostProcess.HomeDirectory;
+    // Project-local worktrees live under `<projectsRoot>/<entry>/worktrees`.
+    const projectsRoot = resolveProjectsRootDirectory(
+      worktreesDirectories.projectsRoot,
+      home,
+      config.baseDir,
+      path,
+    );
+    const projectEntries = yield* fileSystem
+      .readDirectory(projectsRoot)
+      .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
     const [candidate, workspaceRoot, worktreesRoots] = yield* Effect.all([
       canonicalizePath(cwd),
       canonicalizePath(config.cwd),
       // A managed root that cannot be resolved, or resolves to a filesystem
       // root through a symlink, is skipped rather than failing every review.
       Effect.forEach(
-        managedWorktreesDirectories(worktreesDirectories, config.worktreesDir, path, home),
+        managedWorktreesDirectories(
+          worktreesDirectories,
+          config.worktreesDir,
+          path,
+          home,
+          projectWorktreesDirectories(projectsRoot, projectEntries, path),
+        ),
         (directory) => canonicalizePath(directory).pipe(Effect.orElseSucceed(() => null)),
       ).pipe(
         Effect.map((roots) =>

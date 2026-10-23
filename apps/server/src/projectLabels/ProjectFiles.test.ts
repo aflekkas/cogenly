@@ -70,6 +70,38 @@ describe("project files", () => {
     }).pipe(Effect.provide(filesLayer("label-files-list"))),
   );
 
+  it.effect("never lists or reads the reserved worktrees folder", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const files = yield* Files.ProjectFiles;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const label = labelRef("label:worktrees", "Worktrees Me");
+      yield* seedLabel(label.id, label.name);
+      const { dir } = yield* folders.ensureForLabel(label);
+      yield* fs.makeDirectory(path.join(dir, "worktrees", "repo", "fix-login"), {
+        recursive: true,
+      });
+      yield* fs.writeFileString(
+        path.join(dir, "worktrees", "repo", "fix-login", "code.ts"),
+        "code\n",
+      );
+      yield* fs.writeFileString(path.join(dir, "top.txt"), "top\n");
+      const { resources } = yield* files.listResources(label.id);
+      const paths = resources.map((resource) => resource.relativePath);
+      expect(paths).toContain("top.txt");
+      expect(paths.some((p) => p === "worktrees" || p.startsWith("worktrees/"))).toBe(false);
+      const read = yield* files
+        .readResource({ id: label.id, relativePath: "worktrees/repo/fix-login/code.ts" })
+        .pipe(Effect.flip);
+      expect(read.reason).toBe("invalid_path");
+      const recall = yield* files.searchResources({ labelId: label.id, query: "code" });
+      expect(recall.matches.map((match) => match.relativePath)).not.toContain(
+        "worktrees/repo/fix-login/code.ts",
+      );
+    }).pipe(Effect.provide(filesLayer("label-files-worktrees"))),
+  );
+
   it.effect("reads paged text and marks other files binary", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

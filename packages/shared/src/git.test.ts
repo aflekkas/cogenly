@@ -5,7 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   applyGitStatusStreamEvent,
   formatGeneratedBranchName,
-  buildTemporaryWorktreeBranchName,
+  buildWorktreeBranchName,
   flattenTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
@@ -14,6 +14,7 @@ import {
   resolveAutoFeatureBranchName,
   sanitizeFeatureBranchName,
   WORKTREE_BRANCH_PREFIX,
+  worktreeFolderSlug,
 } from "./git.ts";
 
 describe("normalizeGitRemoteUrl", () => {
@@ -169,28 +170,55 @@ describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
   });
 });
 
-describe("isTemporaryWorktreeBranch", () => {
-  it("matches the generated temporary worktree refName format", () => {
-    expect(
-      isTemporaryWorktreeBranch(
-        buildTemporaryWorktreeBranchName((byteLength) => {
-          expect(byteLength).toBe(4);
-          return "DEADBEEF";
-        }),
-      ),
-    ).toBe(true);
+describe("buildWorktreeBranchName", () => {
+  it("slugs the first words of the request under the c/ prefix", () => {
+    expect(buildWorktreeBranchName("Fix the login redirect loop please and thanks")).toEqual({
+      branch: "c/fix-the-login-redirect-loop",
+      slug: "fix-the-login-redirect-loop",
+    });
+    expect(buildWorktreeBranchName("  Fix: LOGIN redirect!! ")).toEqual({
+      branch: "c/fix-login-redirect",
+      slug: "fix-login-redirect",
+    });
   });
 
-  it("matches generated temporary worktree refs", () => {
+  it("falls back to a plain slug when the request names nothing", () => {
+    expect(buildWorktreeBranchName("")).toEqual({ branch: "c/update", slug: "update" });
+    expect(buildWorktreeBranchName("!!!")).toEqual({ branch: "c/update", slug: "update" });
+  });
+
+  it("dedupes against taken branches and folders with a numeric suffix", () => {
+    expect(
+      buildWorktreeBranchName("Fix login", {
+        branches: ["c/fix-login", "c/fix-login-2"],
+        folders: [],
+      }),
+    ).toEqual({ branch: "c/fix-login-3", slug: "fix-login-3" });
+    expect(buildWorktreeBranchName("Fix login", { branches: [], folders: ["fix-login"] })).toEqual({
+      branch: "c/fix-login-2",
+      slug: "fix-login-2",
+    });
+  });
+
+  it("is not a temporary branch", () => {
+    expect(isTemporaryWorktreeBranch(buildWorktreeBranchName("Fix login").branch)).toBe(false);
+  });
+});
+
+describe("worktreeFolderSlug", () => {
+  it("strips the c/ prefix and flattens other namespaces", () => {
+    expect(worktreeFolderSlug("c/fix-login")).toBe("fix-login");
+    expect(worktreeFolderSlug("c/fix/login")).toBe("fix-login");
+    expect(worktreeFolderSlug("feature/login")).toBe("feature-login");
+    expect(worktreeFolderSlug("main")).toBe("main");
+  });
+});
+
+describe("isTemporaryWorktreeBranch", () => {
+  it("matches legacy generated temporary worktree refs", () => {
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/deadbeef`)).toBe(true);
     expect(isTemporaryWorktreeBranch(` ${WORKTREE_BRANCH_PREFIX}/deadbeef `)).toBe(true);
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/DEADBEEF`)).toBe(true);
-  });
-
-  it("normalizes a UUID-shaped random callback to the canonical 8-hex form", () => {
-    expect(buildTemporaryWorktreeBranchName(() => "f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12")).toBe(
-      `${WORKTREE_BRANCH_PREFIX}/f4ae4e0e`,
-    );
   });
 
   it("matches legacy t3code temporary worktree refs", () => {

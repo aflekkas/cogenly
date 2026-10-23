@@ -41,6 +41,7 @@ import {
 } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import { fileHeaderMimeType } from "../workspace/fileHeaderMimeType.ts";
+import { WORKTREES_SEGMENT } from "../worktreesDirectory.ts";
 import {
   PROJECT_LABEL_ID_FILE,
   PROJECT_LABEL_RESOURCES_SEGMENT,
@@ -50,7 +51,8 @@ import {
 /**
  * ProjectFiles - the one way to reach project-label resource files (rule 5
  * of the project-workspaces doc). Resources are everything at the project
- * directory's top level that is not a git work tree and not the id file,
+ * directory's top level that is not a git work tree, not the id file and
+ * not the reserved `worktrees/` folder,
  * recursively, plus anything under `Resources/`. Identity is relative path
  * plus sha256; no absolute path crosses the wire. The SQLite index is
  * derived and rebuildable from disk.
@@ -324,7 +326,8 @@ const make = Effect.gen(function* () {
     );
     const stack: Array<{ full: string; relative: string }> = [...top]
       .sort()
-      .filter((entry) => entry !== PROJECT_LABEL_ID_FILE)
+      // The id file and the reserved `worktrees/` folder are not resources.
+      .filter((entry) => entry !== PROJECT_LABEL_ID_FILE && entry !== WORKTREES_SEGMENT)
       .map((entry) => ({ full: path.join(dir, entry), relative: entry }));
     while (stack.length > 0) {
       const current = stack.pop();
@@ -528,7 +531,9 @@ const make = Effect.gen(function* () {
     full: string,
   ) {
     const top = relative.split("/")[0] ?? "";
-    if (top === PROJECT_LABEL_ID_FILE) return yield* invalidPath(operation);
+    if (top === PROJECT_LABEL_ID_FILE || top === WORKTREES_SEGMENT) {
+      return yield* invalidPath(operation);
+    }
     if (yield* isDirectory(path.join(dir, top))) {
       if (yield* isGitWorkTree(path.join(dir, top))) return yield* invalidPath(operation);
     }
@@ -910,6 +915,16 @@ const make = Effect.gen(function* () {
           },
         })
         .pipe(
+          // The reserved `worktrees/` folder churns with every checkout;
+          // none of it is a resource, so it never triggers a rescan.
+          Stream.filter((event) => {
+            const relative = path.isAbsolute(event.path)
+              ? path.relative(dir, event.path)
+              : event.path;
+            return (
+              relative.split(/[\\/]/).find((segment) => segment.length > 0) !== WORKTREES_SEGMENT
+            );
+          }),
           Stream.debounce(WATCH_DEBOUNCE),
           Stream.take(1),
           Stream.runDrain,
