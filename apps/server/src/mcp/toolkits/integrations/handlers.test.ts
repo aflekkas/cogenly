@@ -1,9 +1,12 @@
 import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
+  IntegrationId,
   IntegrationName,
   ProviderInstanceId,
   ThreadId,
+  type Integration,
+  type IntegrationCreateInput,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -78,6 +81,84 @@ it.effect("integration_tools lists an integration's tools for a live thread", ()
     const { result, upstreamCalls } = yield* listTools(threadScope(liveId));
     expect(result).toEqual({ name: "gmail", tools: [] });
     expect(upstreamCalls).toBe(1);
+  }),
+);
+
+/** integration_add as a live thread whose MCP request reached `origin`. */
+const addIntegration = Effect.fn("test.addIntegration")(function* (
+  input: Pick<IntegrationCreateInput, "auth">,
+) {
+  const signIns: Array<{ id: string; origin: Integrations.SignInOrigin }> = [];
+  const integration: Integration = {
+    id: IntegrationId.make("integration:linear"),
+    name: IntegrationName.make("linear"),
+    displayName: "Linear",
+    transport: "http",
+    url: "https://mcp.linear.app/mcp",
+    headers: {},
+    enabled: true,
+    scope: { type: "all" },
+    hint: "",
+    ...input,
+    createdAt: "2026-10-23T00:00:00.000Z" as Integration["createdAt"],
+    updatedAt: "2026-10-23T00:00:00.000Z" as Integration["updatedAt"],
+    deletedAt: null,
+  };
+  const scope = { ...threadScope(liveId), httpOrigin: "http://127.0.0.1:3773" };
+  const dependencies = Layer.mergeAll(
+    Layer.succeed(Invocation.McpInvocationContext, scope),
+    Layer.mock(Threads.ThreadManagementService)({
+      getThreadShell: (id) => Effect.succeed(shells.get(id) ?? null),
+    }),
+    Layer.mock(Integrations.Integrations)({
+      create: () => Effect.succeed({ integration }),
+      list: () =>
+        Effect.succeed({
+          integrations: [
+            {
+              integration,
+              status: integration.auth ? ("needs_sign_in" as const) : ("unknown" as const),
+              toolCount: null,
+            },
+          ],
+        }),
+      beginSignIn: (id, origin) =>
+        Effect.sync(() => {
+          signIns.push({ id, origin });
+          return {
+            authorizationUrl: "https://mcp.linear.app/authorize?state=s",
+            redirectUri: "http://127.0.0.1:3773/oauth/integrations/callback",
+          };
+        }),
+    }),
+    Layer.mock(AgentStore.AgentStore)({}),
+  );
+  const toolkit = yield* IntegrationsToolkit.pipe(
+    Effect.provide(Access.HandlersLayer.layer(Handlers.layer).pipe(Layer.provide(dependencies))),
+  );
+  const { auth: _, ...fields } = integration;
+  const results = yield* toolkit
+    .handle("integration_add", { ...fields, ...input })
+    .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+  return { result: results.at(-1)?.result, signIns };
+});
+
+it.effect("integration_add hands an agent the sign-in link for an OAuth server", () =>
+  Effect.gen(function* () {
+    const { result, signIns } = yield* addIntegration({ auth: { type: "oauth" } });
+    expect(result).toMatchObject({
+      signIn: { authorizationUrl: "https://mcp.linear.app/authorize?state=s" },
+    });
+    expect(signIns).toEqual([
+      {
+        id: "integration:linear",
+        origin: { origin: "http://127.0.0.1:3773", fromAgent: true },
+      },
+    ]);
+
+    const plain = yield* addIntegration({});
+    expect(plain.result).not.toHaveProperty("signIn");
+    expect(plain.signIns).toHaveLength(0);
   }),
 );
 

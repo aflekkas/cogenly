@@ -48,10 +48,37 @@ context line is built in `RuntimePolicy` through `buildProjectManifest`, so
 all three adapters carry it with no per-provider code.
 
 `integrations.list` reports `connected` only while the tool cache holds the
-current version. A passing `testConnection` refills that cache; a failing one
-leaves it alone, so Settings also keeps its last test result per integration
-version to show the failure reason.
+current version, `error` with a message when the last upstream round trip for
+this version failed, and `needs_sign_in` for an OAuth integration without a
+usable grant. A passing `testConnection` refills that cache; Settings also
+keeps its last test result per integration version to show the failure reason.
+`integrations.subscribe` pushes the list after every change and status flip.
 
-Deferred: upstream OAuth (tokens will be vault items) and `stdio` transport
-(the transport union is designed to admit it). Clients have no RPC for an
-integration's tool list; only agents see tools, through `integration_tools`.
+## OAuth sign-in
+
+An integration with `auth: { type: "oauth" }` signs in per the MCP
+authorization spec ([IntegrationOAuth.ts](../../apps/server/src/integrations/IntegrationOAuth.ts)).
+Constraints that are not obvious from the code:
+
+- The redirect URI is `<origin>/oauth/integrations/callback` on the origin the
+  request that started sign-in reached (the WebSocket upgrade for Settings, the
+  MCP request for agents), like `/oauth/mcp`. A browser elsewhere cannot open a
+  loopback origin, so an agent's loopback request uses the origin of the last
+  finished sign-in instead. Dynamic registrations record their redirect URIs and
+  are reused only for the same one.
+- The callback is unauthenticated: the browser that consents need not hold a
+  Cogenly session. The single-use `state`, bound in memory to the PKCE verifier
+  and to the integration's URL at the time, is the authority; pending sign-ins
+  do not survive a restart. Its path is untraced because the query carries the
+  code.
+- Non-secret OAuth state (endpoints, client registration, expiry, signed-in) is
+  persisted inside the integration payload but never leaves the service; tokens
+  are a vault item ([vault](./vault.md)). A new URL or client id drops both.
+- One refresh per account at a time: waiters re-read the token under the lock
+  and use what the refresh produced. A token-endpoint refusal of the grant marks
+  the integration `needs_sign_in`, and later calls fail before any request, so
+  a revoked grant never loops.
+
+Deferred: `stdio` transport (the transport union is designed to admit it).
+Clients have no RPC for an integration's tool list; only agents see tools,
+through `integration_tools`.

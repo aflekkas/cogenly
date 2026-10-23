@@ -1032,6 +1032,8 @@ const makeWsRpcHandlers = (
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
+  /** The origin this socket's upgrade reached; integration sign-in returns there. */
+  requestOrigin: string | undefined,
 ) =>
   Effect.gen(function* () {
     const currentSessionId = currentSession.sessionId;
@@ -1690,6 +1692,9 @@ const makeWsRpcHandlers = (
         integrations.update(input, { approveCredentials: true }),
       [WS_METHODS.integrationsDelete]: (input) => integrations.remove(input.id),
       [WS_METHODS.integrationsTestConnection]: (input) => integrations.testConnection(input.id),
+      [WS_METHODS.integrationsBeginSignIn]: (input) =>
+        integrations.beginSignIn(input.id, { origin: requestOrigin }),
+      [WS_METHODS.integrationsSubscribe]: () => integrations.subscribe(),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
       [WS_METHODS.machinesList]: () => machines.list,
       [WS_METHODS.machinesSubscribe]: () => machines.subscribe,
@@ -2915,6 +2920,7 @@ export const layer: Layer.Layer<never, never, WsLayerServices> = Layer.unwrap(
               clientAnalyticsProps,
               previewAutomationBroker,
               serverBrowser,
+              Option.getOrUndefined(Option.map(requestUrl, (url) => url.origin)),
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               // Request fibers run in the handlers' context, so this reporter sees

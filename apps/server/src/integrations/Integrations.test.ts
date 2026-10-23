@@ -20,6 +20,7 @@ import * as Vault from "../vault/Vault.ts";
 import { runMigrations } from "../persistence/Migrations.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import * as Integrations from "./Integrations.ts";
+import * as Tokens from "./IntegrationTokens.ts";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
@@ -135,9 +136,17 @@ const fakeUpstreamWith = (redirectTo?: string) =>
   );
 const fakeUpstream = fakeUpstreamWith();
 
+/** These tests never sign in; OAuth has its own suite over the real vault. */
+const noTokensLayer = Layer.succeed(Tokens.IntegrationTokens, {
+  read: () => Effect.succeed(Option.none()),
+  write: () => Effect.die("no OAuth in this suite"),
+  remove: () => Effect.void,
+});
+
 const layerWith = (options: Integrations.IntegrationsOptions = {}) =>
   Integrations.layerWith(options).pipe(
     Layer.provide(credentialsLayer),
+    Layer.provide(noTokensLayer),
     Layer.provideMerge(database),
     Layer.provideMerge(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
@@ -666,6 +675,7 @@ const vaultLayer = () => {
   const stored = new Map<string, Uint8Array>();
   return Integrations.layer.pipe(
     Layer.provide(Credentials.layer),
+    Layer.provide(Tokens.layer),
     Layer.provideMerge(Vault.layer),
     Layer.provide(
       Layer.mock(ServerSecretStore.ServerSecretStore)({

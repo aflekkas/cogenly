@@ -30,6 +30,7 @@ import { OtlpTracer, OtlpSerialization } from "effect/observability";
 
 import * as ServerConfig from "./config.ts";
 import { HEALTH_PATH } from "./health.ts";
+import { CALLBACK_PATH as INTEGRATION_OAUTH_CALLBACK_PATH } from "./integrations/IntegrationOAuth.ts";
 import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
 import { githubMediaResponse } from "./assets/GitHubMediaFetch.ts";
 import { IMAGE_PROXY_PATH, imageProxyResponse } from "./assets/ImageProxyFetch.ts";
@@ -404,6 +405,8 @@ const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([
   OTLP_TRACES_PROXY_PATH,
   // Supervisors poll this; its spans would drown the trace file.
   HEALTH_PATH,
+  // Its query carries an authorization code and state.
+  INTEGRATION_OAUTH_CALLBACK_PATH,
 ]);
 
 // Skips the HTTP server span for UNTRACED_REQUEST_PATHS. That span starts

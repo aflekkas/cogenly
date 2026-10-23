@@ -27,6 +27,38 @@ Each integration has a switch to turn it off without removing it, and a menu
 to edit, test, or remove it. "Not checked" means nothing has listed its tools
 since it last changed; testing it or an agent using it updates the status.
 
+## Sign in with OAuth
+
+Most hosted MCP servers (Linear, Notion, Atlassian, GitHub, Intercom, Wispr
+Flow) want you to sign in rather than paste a token. Turn on **Sign in with
+OAuth** when you add one, leave the headers empty, and choose **Sign in**. Your
+browser opens the service's consent page; approve it and the integration turns
+**Connected**. Agents keep access after that, including scheduled runs on a
+server nobody is watching: Cogenly stores the tokens in your vault and renews
+them on its own.
+
+If the service later stops accepting the sign-in (you revoked access, or it
+expired), the integration shows **Needs sign-in**. Choose **Sign in** again;
+**Reconnect** in the menu does the same for a connected one.
+
+Some services, such as Slack, don't let Cogenly register itself. Create an app
+with the service, add the redirect URL shown in the editor (your Cogenly
+address followed by `/oauth/integrations/callback`), store the app's client
+secret in your vault, and enter the client ID and pick the secret with the key
+button. The browser you sign in with must be able to open that Cogenly
+address, so sign in from the address you normally use to reach Cogenly.
+
+Ask an agent to connect one ("Connect Linear: https://mcp.linear.app/mcp") and
+it replies with a sign-in link for you to open.
+
+## More than one account
+
+Connect a service once per account, for example two Slack workspaces or a
+personal and a work Gmail. Give each its own name (`slack-acme`,
+`slack-personal`) and an **Account** label; agents see "Slack · Acme" next to
+the name and pick the right one. Each connection signs in, and is used,
+separately.
+
 Or ask in any chat or Work thread:
 
 > Connect my Gmail: the MCP server is at https://example.com/mcp and the API
@@ -63,8 +95,6 @@ Agents can also set integrations up for you (`integration_add`,
 
 ## Not yet
 
-Upstream OAuth sign-in ("Sign in with Google" for an integration) is deferred;
-v1 uses static header credentials from your vault. Local `stdio` MCP servers
-are also deferred — v1 speaks remote HTTP MCP.
+Local `stdio` MCP servers are deferred — integrations speak remote HTTP MCP.
 
 Agents can change or remove only integrations available in their project. Widening an integration’s project scope, or pointing one that holds a pasted token or vault credential at a new server, requires you to make the change in Settings → Integrations.

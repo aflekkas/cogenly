@@ -131,6 +131,7 @@ import * as RelayDeliveryProof from "./scheduledTasks/RelayDeliveryProof.ts";
 import * as HeldHooksWaker from "./relay/HeldHooksWaker.ts";
 import * as McpOAuth from "./auth/McpOAuth.ts";
 import * as McpOAuthHttp from "./auth/mcpOAuthHttp.ts";
+import * as IntegrationOAuthHttp from "./integrations/integrationOAuthHttp.ts";
 import {
   relayHookBaseUrl,
   ScheduledTaskTimeZone,
@@ -741,6 +742,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerAttachmentUploadRoute,
     ServerHttp.layerImageProxyRoute,
     Health.layerHealthRoute,
+    IntegrationOAuthHttp.layer,
     DeviceHubProxy.layer,
     PeerHttp.layer,
     ServerBrowserStream.routeLayer,

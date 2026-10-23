@@ -132,6 +132,9 @@ const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
   upstream_error: "The server answered with an error.",
   invalid_request: "The server rejected the request.",
   approval_required: "Widening project access needs owner approval.",
+  sign_in_required: "Sign in to this service to use it.",
+  client_id_required:
+    "This service does not register apps automatically. Create an OAuth app with it and enter its client ID and secret.",
 };
 
 export function integrationReasonText(reason: IntegrationError["reason"]): string {
@@ -161,10 +164,24 @@ export function toolCountLabel(count: number | null): string | null {
 }
 
 export interface IntegrationStatusView {
-  readonly tone: "success" | "error" | "neutral";
+  readonly tone: "success" | "error" | "warning" | "neutral";
   readonly label: string;
   readonly reason: string | null;
   readonly toolCount: number | null;
+  /** When the server last heard from the upstream, if it has. */
+  readonly checkedAt?: string;
+}
+
+/** "Linear · Spawn Partners": how two accounts of one service read apart. */
+export function integrationTitle(integration: Integration): string {
+  const account = integration.accountLabel?.trim();
+  return account ? `${integration.displayName} · ${account}` : integration.displayName;
+}
+
+/** The sign-in action an OAuth integration offers, or null when it has none. */
+export function signInAction(summary: IntegrationSummary): "Sign in" | "Reconnect" | null {
+  if (summary.integration.auth?.type !== "oauth") return null;
+  return summary.status === "needs_sign_in" ? "Sign in" : "Reconnect";
 }
 
 /** A test from this page, tied to the integration version it ran against. */
@@ -185,14 +202,40 @@ export function integrationStatus(
   if (!summary.integration.enabled) {
     return { tone: "neutral", label: "Off", reason: null, toolCount: null };
   }
+  const checked = summary.checkedAt === undefined ? {} : { checkedAt: summary.checkedAt };
+  // The server knows a sign-in is missing better than any earlier test does.
+  if (summary.status === "needs_sign_in") {
+    return {
+      tone: "warning",
+      label: "Needs sign-in",
+      reason: summary.message ?? null,
+      toolCount: null,
+      ...checked,
+    };
+  }
   const test = lastTest?.updatedAt === summary.integration.updatedAt ? lastTest.result : undefined;
   if (test !== undefined) {
     return test.status === "connected"
       ? { tone: "success", label: "Connected", reason: null, toolCount: test.toolCount }
       : { tone: "error", label: "Error", reason: testResultReason(test), toolCount: null };
   }
+  if (summary.status === "error") {
+    return {
+      tone: "error",
+      label: "Error",
+      reason: summary.message ?? null,
+      toolCount: null,
+      ...checked,
+    };
+  }
   if (summary.status === "connected") {
-    return { tone: "success", label: "Connected", reason: null, toolCount: summary.toolCount };
+    return {
+      tone: "success",
+      label: "Connected",
+      reason: null,
+      toolCount: summary.toolCount,
+      ...checked,
+    };
   }
   return { tone: "neutral", label: "Not checked", reason: null, toolCount: null };
 }
@@ -228,6 +271,13 @@ export interface IntegrationDraft {
   readonly hint: string;
   readonly scope: "all" | "projects";
   readonly labelIds: ReadonlyArray<ProjectLabelId>;
+  readonly accountLabel: string;
+  /** Sign in with OAuth instead of (or besides) header credentials. */
+  readonly oauth: boolean;
+  /** For servers without automatic client registration, e.g. a Slack app. */
+  readonly clientId: string;
+  /** A `{{credential:item.field}}` reference to the client secret. */
+  readonly clientSecret: string;
 }
 
 export const EMPTY_INTEGRATION_DRAFT: IntegrationDraft = {
@@ -239,6 +289,10 @@ export const EMPTY_INTEGRATION_DRAFT: IntegrationDraft = {
   hint: "",
   scope: "all",
   labelIds: [],
+  accountLabel: "",
+  oauth: false,
+  clientId: "",
+  clientSecret: "",
 };
 
 export function draftFromIntegration(integration: Integration): IntegrationDraft {
@@ -251,6 +305,10 @@ export function draftFromIntegration(integration: Integration): IntegrationDraft
     hint: integration.hint,
     scope: integration.scope.type,
     labelIds: integration.scope.type === "projects" ? integration.scope.labelIds : [],
+    accountLabel: integration.accountLabel ?? "",
+    oauth: integration.auth?.type === "oauth",
+    clientId: integration.auth?.clientId ?? "",
+    clientSecret: integration.auth?.clientSecret ?? "",
   };
 }
 
@@ -294,6 +352,19 @@ export function validateIntegrationDraft(
   }
   const scope: IntegrationScope =
     draft.scope === "all" ? { type: "all" } : { type: "projects", labelIds: [...draft.labelIds] };
+  const clientId = draft.clientId.trim();
+  const clientSecret = draft.clientSecret.trim();
+  if (draft.oauth && clientSecret !== "") {
+    const refs = credentialReferencesIn(clientSecret);
+    if (
+      refs.length !== 1 ||
+      refs[0]!.field === "" ||
+      !/^\{\{credential:[^}]*\}\}$/.test(clientSecret)
+    )
+      return { error: "Pick the client secret from the vault with the key button." };
+    if (clientId === "") return { error: "A client secret needs its client ID." };
+  }
+  const accountLabel = draft.accountLabel.trim();
   return {
     fields: {
       name,
@@ -303,6 +374,16 @@ export function validateIntegrationDraft(
       headers: headers.headers,
       scope,
       hint: draft.hint.trim(),
+      ...(accountLabel === "" ? {} : { accountLabel }),
+      ...(draft.oauth
+        ? {
+            auth: {
+              type: "oauth" as const,
+              ...(clientId === "" ? {} : { clientId }),
+              ...(clientSecret === "" ? {} : { clientSecret }),
+            },
+          }
+        : {}),
     },
   };
 }
@@ -311,6 +392,15 @@ export function updateInputFromDraft(
   integration: Integration,
   fields: ValidDraft,
 ): IntegrationUpdateInput {
+  // Scopes are not edited here, so a stored choice survives the save.
+  const auth =
+    fields.auth === undefined
+      ? integration.auth === undefined
+        ? undefined
+        : null
+      : integration.auth?.scope === undefined
+        ? fields.auth
+        : { ...fields.auth, scope: integration.auth.scope };
   return {
     id: integration.id,
     displayName: fields.displayName,
@@ -319,6 +409,8 @@ export function updateInputFromDraft(
     headers: fields.headers,
     scope: fields.scope,
     hint: fields.hint,
+    accountLabel: fields.accountLabel ?? "",
+    ...(auth === undefined ? {} : { auth }),
   };
 }
 

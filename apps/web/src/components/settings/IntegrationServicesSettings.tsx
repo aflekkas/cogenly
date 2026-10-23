@@ -16,6 +16,7 @@ import type {
 import {
   BlocksIcon,
   KeyRoundIcon,
+  LogInIcon,
   MoreHorizontalIcon,
   PencilIcon,
   PlugZapIcon,
@@ -28,6 +29,9 @@ import { useState } from "react";
 import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { requestConfirmDialog } from "../../confirmDialog";
+import { ensureLocalApi } from "../../localApi";
+import { useEnvironmentHttpBaseUrl } from "../../state/environments";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { ProjectLabelChips, ProjectLabelPicker } from "../../projectLabels/ProjectLabelPicker";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { integrationsRpc } from "../../rpc/integrations";
@@ -80,9 +84,11 @@ import {
   insertCredentialReference,
   integrationErrorText,
   integrationStatus,
+  integrationTitle,
   referenceableVaultItems,
   rowsToHeaders,
   scopeLabel,
+  signInAction,
   testResultReason,
   toolCountLabel,
   unresolvedCredentialReferences,
@@ -100,6 +106,26 @@ import { searchableSetting } from "./settingsSearch";
 const EMPTY_SUMMARIES: ReadonlyArray<IntegrationSummary> = [];
 const EMPTY_VAULT_ITEMS: ReadonlyArray<VaultItemMetadata> = [];
 const READ_ONLY_MESSAGE = "This connection cannot change integrations.";
+
+/**
+ * Opens the service's sign-in page from a click. A web browser blocks a tab
+ * opened after an await, so the tab opens first and follows the link once the
+ * server returns it; the desktop app hands the link to the system browser.
+ */
+async function openSignInPage(link: () => Promise<string | null>) {
+  const tab = window.desktopBridge ? null : window.open("", "_blank");
+  const url = await link();
+  if (url === null) {
+    tab?.close();
+    return;
+  }
+  if (tab) {
+    tab.opener = null;
+    tab.location.href = url;
+    return;
+  }
+  await ensureLocalApi().shell.openExternal(url);
+}
 
 /** The value, or null after toasting a failure that was not a cancel. */
 function settled<A, E>(title: string, result: AtomCommandResult<A, E>): A | null {
@@ -236,9 +262,14 @@ function IntegrationRow({
   const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
   const remove = useOrchestrationCommand(integrationsRpc.remove, { reportFailure: false });
   const test = useOrchestrationCommand(integrationsRpc.testConnection, { reportFailure: false });
+  const beginSignIn = useOrchestrationCommand(integrationsRpc.beginSignIn, {
+    reportFailure: false,
+  });
   const [busy, setBusy] = useState(false);
   const status = integrationStatus(summary, lastTest);
   const tools = toolCountLabel(status.toolCount);
+  const title = integrationTitle(integration);
+  const signIn = signInAction(summary);
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     try {
@@ -276,9 +307,20 @@ function IntegrationRow({
             },
       );
     });
+  // The row updates itself when the callback lands: the list is live.
+  const signInNow = () =>
+    run(() =>
+      openSignInPage(async () => {
+        const started = settled(
+          `Could not start sign-in to ${title}`,
+          await beginSignIn({ environmentId, input: { id: integration.id } }),
+        );
+        return started?.authorizationUrl ?? null;
+      }),
+    );
   const removeNow = () =>
     run(async () => {
-      const message = `Remove “${integration.displayName}”?\nAgents can no longer use it. Vault items it referenced stay in the vault.`;
+      const message = `Remove “${title}”?\nAgents can no longer use it. Vault items it referenced stay in the vault; its sign-in is deleted.`;
       const confirmed =
         (await requestConfirmDialog(message, { variant: "destructive" })) ??
         window.confirm(message);
@@ -291,24 +333,39 @@ function IntegrationRow({
 
   return (
     <SettingsRow
-      title={integration.displayName}
+      title={title}
       description={`${integration.name} · ${urlHost(integration.url)} · ${scopeLabel(integration.scope, labels)}`}
       status={
         <div className="flex flex-wrap items-center gap-2">
-          <Badge
-            size="sm"
-            variant={
-              status.tone === "success" ? "success" : status.tone === "error" ? "error" : "outline"
-            }
-          >
+          <Badge size="sm" variant={status.tone === "neutral" ? "outline" : status.tone}>
             {status.label}
           </Badge>
           {tools ? <span>{tools}</span> : null}
-          {status.reason ? <span className="text-destructive">{status.reason}</span> : null}
+          {status.reason ? (
+            <span className={status.tone === "error" ? "text-destructive" : undefined}>
+              {status.reason}
+            </span>
+          ) : null}
+          {status.checkedAt ? (
+            <span className="text-muted-foreground">
+              Checked {formatRelativeTimeLabel(status.checkedAt)}
+            </span>
+          ) : null}
         </div>
       }
       control={
         <div className="flex items-center gap-2">
+          {signIn === "Sign in" && integration.enabled ? (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={busy || !canWrite}
+              onClick={() => void signInNow()}
+            >
+              <LogInIcon className="size-3" />
+              Sign in
+            </Button>
+          ) : null}
           <Switch
             checked={integration.enabled}
             disabled={busy || !canWrite}
@@ -337,6 +394,12 @@ function IntegrationRow({
                 <PlugZapIcon />
                 Test connection
               </MenuItem>
+              {signIn === null ? null : (
+                <MenuItem disabled={!integration.enabled} onClick={() => void signInNow()}>
+                  <LogInIcon />
+                  {signIn}
+                </MenuItem>
+              )}
               <MenuSeparator />
               <MenuItem variant="destructive" onClick={() => void removeNow()}>
                 <Trash2Icon />
@@ -362,6 +425,12 @@ function IntegrationEditorDialog(props: {
   const create = useOrchestrationCommand(integrationsRpc.create, { reportFailure: false });
   const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
   const test = useOrchestrationCommand(integrationsRpc.testConnection, { reportFailure: false });
+  const beginSignIn = useOrchestrationCommand(integrationsRpc.beginSignIn, {
+    reportFailure: false,
+  });
+  const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
+  const callbackUrl =
+    httpBaseUrl === null ? null : new URL("/oauth/integrations/callback", httpBaseUrl).href;
   const vault = useEnvironmentQuery(vaultRpc.list({ environmentId, input: {} }));
   const vaultItems = vault.data?.items ?? EMPTY_VAULT_ITEMS;
   // Becomes the created integration after a first save, so a test then edits it.
@@ -369,7 +438,7 @@ function IntegrationEditorDialog(props: {
   const [draft, setDraft] = useState<IntegrationDraft>(() =>
     props.integration ? draftFromIntegration(props.integration) : EMPTY_INTEGRATION_DRAFT,
   );
-  const [pending, setPending] = useState<"save" | "test" | null>(null);
+  const [pending, setPending] = useState<"save" | "test" | "sign-in" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<IntegrationTestResult | null>(null);
   const edit = (next: Partial<IntegrationDraft>) => {
@@ -426,6 +495,23 @@ function IntegrationEditorDialog(props: {
       if (result === null) return;
       setTestResult(result);
       props.onTested(integration, result);
+    } finally {
+      setPending(null);
+    }
+  };
+  /** Saves, then opens the service's sign-in page; the row turns connected when it lands. */
+  const signIn = async () => {
+    setPending("sign-in");
+    try {
+      await openSignInPage(async () => {
+        const integration = await persist();
+        if (!integration) return null;
+        const started = settled(
+          "Could not start sign-in",
+          await beginSignIn({ environmentId, input: { id: integration.id } }),
+        );
+        return started?.authorizationUrl ?? null;
+      });
     } finally {
       setPending(null);
     }
@@ -501,6 +587,69 @@ function IntegrationEditorDialog(props: {
                   placeholder="https://example.com/mcp"
                   onChange={(event) => edit({ url: event.currentTarget.value })}
                 />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="integration-account">Account (optional)</Label>
+                <Input
+                  id="integration-account"
+                  value={draft.accountLabel}
+                  maxLength={200}
+                  placeholder="Work"
+                  onChange={(event) => edit({ accountLabel: event.currentTarget.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Tells two connections to one service apart, like two Slack workspaces.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="integration-oauth">Sign in with OAuth</Label>
+                  <Switch
+                    id="integration-oauth"
+                    checked={draft.oauth}
+                    onCheckedChange={(checked) => edit({ oauth: Boolean(checked) })}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Most hosted servers, like Linear, Notion and GitHub, use this. You sign in once in
+                  your browser; agents keep access after that.
+                </p>
+                <AnimatedHeight>
+                  {draft.oauth ? (
+                    <div className="space-y-2 pt-1">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Input
+                          aria-label="Client ID"
+                          value={draft.clientId}
+                          maxLength={500}
+                          placeholder="Client ID"
+                          onChange={(event) => edit({ clientId: event.currentTarget.value })}
+                        />
+                        <div className="flex items-center gap-2">
+                          <Input
+                            className="min-w-0 flex-1"
+                            aria-label="Client secret"
+                            value={draft.clientSecret}
+                            maxLength={500}
+                            placeholder="Client secret from the vault"
+                            onChange={(event) => edit({ clientSecret: event.currentTarget.value })}
+                          />
+                          <VaultReferenceMenu
+                            items={vaultItems}
+                            loading={vault.data === null && vault.error === null}
+                            onPick={(reference) => edit({ clientSecret: reference })}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Only for services that don't register Cogenly by themselves, such as Slack:
+                        create an app there
+                        {callbackUrl ? `, add ${callbackUrl} as its redirect URL,` : ""} and enter
+                        its client ID and the vault item holding its secret.
+                      </p>
+                    </div>
+                  ) : null}
+                </AnimatedHeight>
               </div>
               <div className="space-y-1.5">
                 <div className="text-xs font-medium text-muted-foreground">Headers</div>
@@ -623,6 +772,18 @@ function IntegrationEditorDialog(props: {
               </div>
               <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
+                  {draft.oauth ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={stored !== null && !stored.enabled}
+                      onClick={() => void signIn()}
+                    >
+                      <LogInIcon />
+                      {pending === "sign-in" ? "Opening…" : "Sign in"}
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     size="sm"
@@ -635,7 +796,7 @@ function IntegrationEditorDialog(props: {
                   </Button>
                   {stored === null ? (
                     <span className="text-xs text-muted-foreground">
-                      Testing adds the integration first.
+                      {draft.oauth ? "Either adds" : "Testing adds"} the integration first.
                     </span>
                   ) : !stored.enabled ? (
                     <span className="text-xs text-muted-foreground">

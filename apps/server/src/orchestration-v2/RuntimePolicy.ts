@@ -133,6 +133,7 @@ export const layerFromProjectStore: Layer.Layer<
                 name: integration.name,
                 displayName: integration.displayName,
                 hint: integration.hint,
+                accountLabel: integration.accountLabel,
               })),
             ),
             Effect.catch(() => Effect.succeed([])),

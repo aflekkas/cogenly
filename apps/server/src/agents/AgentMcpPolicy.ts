@@ -258,6 +258,8 @@ const make = Effect.gen(function* () {
             url: update.url ?? current.url,
             transport: update.transport ?? current.transport,
             headers: update.headers ?? current.headers,
+            // A client secret reference is part of the destination too.
+            auth: update.auth === undefined ? (current.auth ?? null) : update.auth,
           };
           if (
             Integrations.integrationDestinationChanged(current, payload) ||
