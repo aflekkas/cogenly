@@ -8,12 +8,11 @@ import { useEffect, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { DialogClose } from "~/components/ui/dialog";
 import { MorphIcon } from "~/components/MorphIcon";
-import { WizardHeader, WizardPanel, WizardSteps, WizardFooter } from "~/components/ui/wizard";
+import { WizardHeader, WizardPanel, WizardFooter } from "~/components/ui/wizard";
 import { Spinner } from "~/components/ui/spinner";
-import { Switch } from "~/components/ui/switch";
 import { deviceEnvironment } from "~/state/device";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
+import { useEnvironmentScope } from "~/state/session";
 import { cn } from "~/lib/utils";
 
 const platformName = (platform: DevicePlatform) => (platform === "ios" ? "iOS" : "Android");
@@ -80,126 +79,101 @@ export function platformSetupStatus(state: DeviceServiceState, platform: DeviceP
   };
 }
 
+/**
+ * Status and troubleshooting for device support: what is installed, whether
+ * each platform works, and a way to retry. Nothing here gates using devices;
+ * installs start by themselves the first time a device is needed.
+ */
 export function DeviceSetup(props: {
   readonly environmentId: EnvironmentId;
   readonly state: DeviceServiceState;
-  readonly onComplete?: () => void;
 }) {
   const canConfigure = useEnvironmentScope(props.environmentId, AuthSettingsWriteScope);
   const configure = useAtomCommand(deviceEnvironment.configure);
   const list = useAtomCommand(deviceEnvironment.list, { reportFailure: false });
-  const [pending, setPending] = useState<"hub" | "check" | "agent" | "complete" | null>(null);
-  const [step, setStep] = useState(0);
+  const [pending, setPending] = useState<"enable" | "check" | null>(null);
   const enabled = props.state.hostStatus !== "disabled";
   const { ready, busy } = deviceHubReadiness(props.state);
-  const localPlatformsUnavailable = props.state.hosts.some(
-    (host) => host.kind === "local" && !host.platforms.some((platform) => platform.available),
-  );
 
   // Remote hosts report platforms only after a probe, like the Device panel's refresh on open.
   useEffect(() => {
     if (enabled) void list({ environmentId: props.environmentId, input: {} });
   }, [enabled, list, props.environmentId]);
 
-  const update = async (
-    kind: NonNullable<typeof pending>,
-    input: { enabled?: boolean; agentAccessEnabled?: boolean; onboardingCompleted?: boolean },
-  ) => {
-    if (!readEnvironmentScope(props.environmentId, AuthSettingsWriteScope)) return;
-    setPending(kind);
-    try {
-      const result = await configure({ environmentId: props.environmentId, input });
-      if (kind === "complete" && result._tag === "Success") props.onComplete?.();
-    } finally {
-      setPending(null);
-    }
-  };
-
   return (
     <>
       <WizardHeader
-        title="Set up devices"
-        description="Review what runs on this environment before using simulators and emulators."
-      >
-        <WizardSteps
-          steps={["Device hub", "Simulators", "Agent access"]}
-          currentStep={step}
-          onStepChange={setStep}
-          isStepDisabled={(requested) => busy || pending !== null || requested > step}
-        />
-      </WizardHeader>
+        title="Device setup"
+        description="What device support has installed on this environment, and what each platform needs."
+      />
 
       <WizardPanel>
         <div className="flex flex-col gap-5">
-          {step !== 0 ? (
-            <DeviceHostUpdates state={props.state} environmentId={props.environmentId} />
-          ) : null}
-          {step === 0 ? (
-            <section className="space-y-3 text-sm">
-              <h3 className="font-medium">Enable the device hub</h3>
-              <div className="flex items-start justify-between gap-4">
-                <p className="text-muted-foreground">{deviceHubDescription}</p>
-                <Switch
-                  checked={enabled}
-                  disabled={!canConfigure || busy || pending !== null}
-                  aria-label="Enable device hub"
-                  onCheckedChange={(checked) =>
-                    void update("hub", {
-                      enabled: Boolean(checked),
-                      ...(checked ? {} : { agentAccessEnabled: false }),
-                    })
-                  }
-                />
-              </div>
-              {/* A machine's own install card already says what is happening;
-                the generic line would repeat it. */}
-              {deviceHostUpdateShown(props.state) ? (
+          <section className="space-y-3 text-sm">
+            <h3 className="font-medium">Device hub</h3>
+            {enabled ? (
+              deviceHostUpdateShown(props.state) ? (
                 <DeviceHostUpdates state={props.state} environmentId={props.environmentId} />
               ) : (
-                <DeviceHubSetupStatus
-                  state={props.state}
-                  pending={pending === "hub" || (busy && pending !== "agent")}
-                />
-              )}
-            </section>
-          ) : null}
-
-          {step === 1 || (step === 0 && enabled && localPlatformsUnavailable) ? (
-            <section className="space-y-3 text-sm">
-              <h3 className="font-medium">Check simulator support</h3>
-              <DevicePlatformSetup
-                state={props.state}
-                checking={pending === "check"}
-                disabled={!enabled || busy || pending !== null}
-                onCheck={() => {
-                  setPending("check");
-                  void list({ environmentId: props.environmentId, input: {} }).finally(() =>
-                    setPending(null),
-                  );
-                }}
-              />
-            </section>
-          ) : null}
-
-          {step === 2 ? (
-            <section className="space-y-3 text-sm">
-              <h3 className="font-medium">Allow agent control</h3>
+                <>
+                  <DeviceHubSetupStatus state={props.state} pending={busy} />
+                  {!ready && !busy ? (
+                    <p className="text-xs text-muted-foreground">
+                      Device support installs itself the first time a device is needed.
+                    </p>
+                  ) : null}
+                </>
+              )
+            ) : (
               <div className="flex items-start justify-between gap-4">
-                <p className="text-muted-foreground">{agentDeviceDescription}</p>
-                <Switch
-                  checked={props.state.agentAccessEnabled}
-                  disabled={!canConfigure || !enabled || busy || pending !== null}
-                  aria-label="Allow agents to control devices"
-                  onCheckedChange={(checked) =>
-                    void update("agent", { agentAccessEnabled: Boolean(checked) })
-                  }
-                />
+                <p className="text-muted-foreground">
+                  Device support is turned off for this environment.
+                </p>
+                <Button
+                  size="compact"
+                  variant="outline"
+                  disabled={!canConfigure || pending !== null}
+                  onClick={() => {
+                    setPending("enable");
+                    void configure({
+                      environmentId: props.environmentId,
+                      input: { enabled: true },
+                    }).finally(() => setPending(null));
+                  }}
+                >
+                  {pending === "enable" ? "Turning on…" : "Turn on"}
+                </Button>
               </div>
-              <AgentDeviceSetupStatus state={props.state} pending={pending === "agent"} />
-              <p className="text-xs text-muted-foreground">
-                Leave this off to keep manual device controls without giving agents access.
-              </p>
-            </section>
+            )}
+          </section>
+
+          {enabled ? (
+            <>
+              <section className="space-y-3 text-sm">
+                <h3 className="font-medium">Simulator support</h3>
+                <DevicePlatformSetup
+                  state={props.state}
+                  checking={pending === "check"}
+                  disabled={busy || pending !== null}
+                  onCheck={() => {
+                    setPending("check");
+                    void list({ environmentId: props.environmentId, input: {} }).finally(() =>
+                      setPending(null),
+                    );
+                  }}
+                />
+              </section>
+
+              <section className="space-y-3 text-sm">
+                <h3 className="font-medium">Agent access</h3>
+                <p className="text-muted-foreground">
+                  {props.state.agentAccessEnabled
+                    ? "New agent sessions can start and control devices, with required tools set up automatically."
+                    : "Agents cannot use devices. Turn this on in Settings → Integrations → Devices."}
+                </p>
+                <AgentDeviceSetupStatus state={props.state} pending={false} />
+              </section>
+            </>
           ) : null}
           {props.state.hostStatus === "failed" && props.state.hostStatusDetail ? (
             <p role="alert" className="text-xs text-destructive">
@@ -210,29 +184,7 @@ export function DeviceSetup(props: {
       </WizardPanel>
 
       <WizardFooter>
-        {step === 0 ? (
-          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
-        ) : (
-          <Button
-            variant="outline"
-            disabled={busy || pending !== null}
-            onClick={() => setStep(step - 1)}
-          >
-            Back
-          </Button>
-        )}
-        {step < 2 ? (
-          <Button disabled={!ready || pending !== null} onClick={() => setStep(step + 1)}>
-            Continue
-          </Button>
-        ) : (
-          <Button
-            disabled={!canConfigure || !ready || pending !== null}
-            onClick={() => void update("complete", { onboardingCompleted: true })}
-          >
-            {pending === "complete" ? "Saving…" : "Done"}
-          </Button>
-        )}
+        <DialogClose render={<Button variant="outline" />}>Close</DialogClose>
       </WizardFooter>
     </>
   );

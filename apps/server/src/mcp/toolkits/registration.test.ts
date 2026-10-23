@@ -201,7 +201,6 @@ const layerStubServices = Layer.mergeAll(
       hosts: [],
       devices: [],
       sessions: [],
-      onboardingCompleted: true,
       agentAccessEnabled: true,
       hubBasePath: "/api/devices/hub",
       revision: 0,

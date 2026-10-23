@@ -701,7 +701,7 @@ function DeviceIntegrationControls({
           }
           return configure({
             environmentId: environment.environmentId,
-            input: { ...input, ...(input.enabled ? { onboardingCompleted: true } : {}) },
+            input,
           });
         }),
       );

@@ -193,7 +193,6 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     Effect.map((value) => ({
       enabled: value.enableDeviceSupport,
       agentAccessEnabled: value.enableAgentDeviceAccess,
-      onboardingCompleted: value.deviceOnboardingCompleted,
     })),
     Effect.mapError(
       (cause) =>
@@ -216,7 +215,6 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       hostStatuses: {},
       devices: [],
       sessions: [],
-      onboardingCompleted: initialSettings.onboardingCompleted,
       agentAccessEnabled: initialSettings.agentAccessEnabled,
       hubBasePath: DEVICE_HUB_ROUTE_PREFIX,
       revision: 0,
@@ -262,7 +260,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
         return yield* new DeviceHostUnavailableError({
           hostId: host.id,
           reason:
-            "Device support is off. Enable it in the Device panel before installing or starting device tools.",
+            "Device support is off. Turn it on in Settings → Integrations → Devices before installing or starting device tools.",
         });
       }
       const ready = yield* host
@@ -539,9 +537,6 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
               ...(input.agentAccessEnabled === undefined
                 ? {}
                 : { enableAgentDeviceAccess: input.agentAccessEnabled }),
-              ...(input.onboardingCompleted === undefined
-                ? {}
-                : { deviceOnboardingCompleted: input.onboardingCompleted }),
             })
             .pipe(
               Effect.mapError(
@@ -567,7 +562,6 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
             sessions: nextEnabled ? state.sessions : [],
             bootingDevices: nextEnabled ? state.bootingDevices : [],
             agentAccessEnabled: nextAgentAccess,
-            onboardingCompleted: input.onboardingCompleted ?? state.onboardingCompleted,
           }));
         }),
       );

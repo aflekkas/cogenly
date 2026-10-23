@@ -4126,10 +4126,6 @@ export default function ChatView(props: ChatViewProps) {
   });
   const addDeviceSurface = () => {
     if (!activeThreadRef || !activeThreadCapabilities.device) return;
-    if (!deviceState.onboardingCompleted || deviceState.hostStatus === "disabled") {
-      setDeviceSetupThread(activeThreadRef);
-      return;
-    }
     useRightPanelStore.getState().open(activeThreadRef, "device");
   };
   // A device the agent opens floats over chat like an agent-driven browser,
@@ -9024,10 +9020,7 @@ export default function ChatView(props: ChatViewProps) {
           key={renderedRightPanelSurface.id}
           surface={renderedRightPanelSurface}
           visible={rightPanelOpen}
-          onDismissSetup={() => {
-            closeRightPanelSurface(renderedRightPanelSurface);
-            useRightPanelStore.getState().show(activeThreadRef);
-          }}
+          onOpenSetup={() => setDeviceSetupThread(activeThreadRef)}
         />
       </Suspense>
     ) : (renderedRightPanelSurface?.kind === "files" ||
@@ -9219,14 +9212,7 @@ export default function ChatView(props: ChatViewProps) {
       >
         <WizardPopup>
           {activeThreadRef ? (
-            <DeviceSetup
-              environmentId={activeThreadRef.environmentId}
-              state={deviceState}
-              onComplete={() => {
-                useRightPanelStore.getState().open(activeThreadRef, "device");
-                setDeviceSetupThread(null);
-              }}
-            />
+            <DeviceSetup environmentId={activeThreadRef.environmentId} state={deviceState} />
           ) : null}
         </WizardPopup>
       </Dialog>

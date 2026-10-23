@@ -146,7 +146,6 @@ export const DeviceServiceState = Schema.Struct({
   bootingDevices: Schema.optional(
     Schema.Array(Schema.Struct({ ...DeviceSummary.fields, threadId: ThreadId })),
   ),
-  onboardingCompleted: Schema.Boolean,
   agentAccessEnabled: Schema.Boolean,
   /** Origin-relative path the client prefixes to hub routes. */
   hubBasePath: Schema.String,
@@ -167,7 +166,6 @@ export type DeviceListInput = typeof DeviceListInput.Type;
 export const DeviceConfigureInput = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
   agentAccessEnabled: Schema.optional(Schema.Boolean),
-  onboardingCompleted: Schema.optional(Schema.Boolean),
 });
 export type DeviceConfigureInput = typeof DeviceConfigureInput.Type;
 

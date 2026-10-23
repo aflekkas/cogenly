@@ -128,7 +128,7 @@ const handlers = {
       if (state.hostStatus === "disabled") {
         return yield* new DeviceToolUnavailableError({
           reason:
-            "Device support is off. Ask the user to enable it in the Device panel before installing or starting device tools.",
+            "Device support is off. Ask the user to turn it on in Settings → Integrations → Devices, then try again.",
         });
       }
       const hostId = input?.hostId;
@@ -155,7 +155,7 @@ const handlers = {
       if (state.hostStatus === "disabled") {
         return yield* new DeviceToolUnavailableError({
           reason:
-            "Device support is off. Ask the user to enable it in the Device panel before installing or starting device tools.",
+            "Device support is off. Ask the user to turn it on in Settings → Integrations → Devices, then try again.",
         });
       }
       const target = yield* pickDevice(state.devices, input);

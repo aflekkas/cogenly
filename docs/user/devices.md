@@ -7,21 +7,23 @@ yourself. Agents get the same device through `device_*` tools and the
 
 ## Open a device
 
-In a Work thread, click the device button at the top right, or choose **Device** from the right
-panel's **+** menu. Chats have no devices. On first use,
-the panel walks through three steps: starting the device hub, checking iOS and
-Android support, and choosing whether agents may control devices. Opening the
-panel alone does not download or start anything. If the hub is already
-installed, the setup screen says so and reuses it.
+In a Work thread, choose **Device** from the right panel's **+** menu and pick a
+simulator or emulator, grouped by host. It opens as its own tab; a device that is
+already open is checked and selecting it switches to its tab. Chats have no devices.
 
-Choose a running device to watch it, or choose **Start** next to a stopped
-device to boot it. The panel shows when you or an agent starts a device.
-Each device opens in its own tab. Use **+ → Device** to open another, and
-double-click a tab name or choose **Rename** from its context menu to rename it.
+Devices are on by default. Cogenly installs and starts the device hub the first
+time a device is needed, whether you open one or an agent asks for one, so there is
+nothing to set up first. **Device setup** (at the bottom of the **+ → Device** menu
+and in the panel) shows what is installed, whether iOS and Android work on each
+host, and offers a retry when an install fails.
+
+A stopped device boots when you open it, and the tab shows it starting. The panel
+also shows when an agent starts a device.
+Double-click a tab name or choose **Rename** from its context menu to rename it.
 Only the visible tab streams video; switching tabs keeps both devices running.
 Turn off the device hub in **Settings → Integrations → Devices** to stop the
-helper processes; simulators and emulators keep running until you power them
-off.
+helper processes and keep it off; simulators and emulators keep running until you
+power them off.
 
 Simulators run on the machine that hosts the environment server. iOS needs
 macOS with Xcode. Android needs the SDK Platform-Tools, Android Emulator,
@@ -64,10 +66,11 @@ viewer stops streaming and leaves the device available to the agent. Device
 activity also appears in the thread timeline.
 
 Agents drive the device through the `agent-device` command line. Cogenly
-installs and starts it only after **Agent device access** is enabled. iOS
+installs and starts it when an agent first opens a device, as long as **Agent
+device access** is on (the default). iOS
 taps build a small test runner on first use, which takes a couple of minutes
-once per server. Restart an existing agent session after granting access so it
-receives the device CLI environment.
+once per server. Restart an existing agent session after turning access back on
+so it receives the device CLI environment.
 
 To keep agents away from simulators, turn off **Agent device access** in
 **Settings → Integrations → Devices**. This hides the device tools from agents

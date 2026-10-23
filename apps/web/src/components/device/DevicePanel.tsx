@@ -1,4 +1,5 @@
 import { DeviceHostUpdates } from "./DeviceHostUpdates";
+import { AuthSettingsWriteScope } from "@t3tools/contracts";
 import type {
   DevicePlatform,
   DeviceServiceState,
@@ -11,17 +12,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useRightPanelStore, type RightPanelSurface } from "~/rightPanelStore";
 import { Button } from "~/components/ui/button";
 import { DiscoveryList, DiscoveryListRow } from "~/components/ui/discovery-list";
-import { Dialog } from "~/components/ui/dialog";
-import { WizardPopup } from "~/components/ui/wizard";
 import { Spinner } from "~/components/ui/spinner";
 import { cn } from "~/lib/utils";
 import { deviceEnvironment, useDeviceState } from "~/state/device";
 import { formatEnvironmentQueryError } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { useEnvironmentScope } from "~/state/session";
 import { DeviceLoadingView } from "./DeviceLoadingView";
 import { deviceKey } from "./deviceTabMenu";
 import { useDeviceOpenPending } from "./useDeviceTabActions";
-import { DeviceSetup, deviceHubReadiness } from "./DeviceSetup";
+import { deviceHubReadiness } from "./DeviceSetup";
 import { DeviceWorkspace } from "./DeviceWorkspace";
 import { PreviewPanelShell, type PreviewPanelMode } from "../preview/PreviewPanelShell";
 
@@ -34,12 +34,15 @@ export function DevicePanel(props: {
   readonly threadRef: ScopedThreadRef;
   readonly surface: Extract<RightPanelSurface, { kind: "device" }>;
   readonly visible: boolean;
-  readonly onDismissSetup: () => void;
+  /** Opens the status and troubleshooting dialog. */
+  readonly onOpenSetup: () => void;
 }) {
   const { environmentId, threadId } = props.threadRef;
   const { state, loaded } = useDeviceState(environmentId);
   const list = useAtomCommand(deviceEnvironment.list, { reportFailure: false });
   const open = useAtomCommand(deviceEnvironment.open);
+  const configure = useAtomCommand(deviceEnvironment.configure);
+  const canConfigure = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
   const close = useAtomCommand(deviceEnvironment.close);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [pendingDevice, setPendingDevice] = useState<DeviceSummary | null>(null);
@@ -145,26 +148,8 @@ export function DevicePanel(props: {
       .map((platform) => ({ ...platform, hostId: host.id, hostLabel: host.label })),
   );
 
-  const needsSetup = loaded && (!state.onboardingCompleted || hostDisabled);
-  // Setup stays mounted beside the panel, so finishing it animates the dialog
-  // out instead of swapping it for the panel at once.
-  const setupDialog = loaded ? (
-    <Dialog
-      open={props.visible && needsSetup}
-      onOpenChange={(isOpen) => {
-        if (!isOpen) props.onDismissSetup();
-      }}
-    >
-      <WizardPopup>
-        <DeviceSetup environmentId={environmentId} state={state} />
-      </WizardPopup>
-    </Dialog>
-  ) : null;
-  if (needsSetup) return <>{setupDialog}</>;
-
   return (
     <>
-      {setupDialog}
       <PreviewPanelShell mode={props.mode}>
         {hostReady && !activeDevice && state.hostStatusDetail ? (
           <div
@@ -242,9 +227,11 @@ export function DevicePanel(props: {
                   <>
                     <Smartphone className="size-6 opacity-60" />
                     <p className="max-w-sm">
-                      {state.hostStatus === "failed"
-                        ? (state.hostStatusDetail ?? "The device hub failed to start.")
-                        : "No simulators or emulators were found on this environment."}
+                      {hostDisabled
+                        ? "Device support is turned off for this environment."
+                        : state.hostStatus === "failed"
+                          ? (state.hostStatusDetail ?? "The device hub failed to start.")
+                          : "No simulators or emulators were found on this environment."}
                     </p>
                   </>
                 ) : null}
@@ -295,14 +282,31 @@ export function DevicePanel(props: {
                   </p>
                 ) : null}
                 {loaded && !hostBusy ? (
-                  <Button
-                    className={grouped.length > 0 ? "self-start" : "self-center"}
-                    variant={grouped.length > 0 ? "ghost" : "outline"}
-                    size="sm"
-                    onClick={() => void list({ environmentId, input: {} })}
+                  <div
+                    className={cn("flex gap-2", grouped.length > 0 ? "self-start" : "self-center")}
                   >
-                    Refresh devices
-                  </Button>
+                    {hostDisabled ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!canConfigure}
+                        onClick={() => void configure({ environmentId, input: { enabled: true } })}
+                      >
+                        Turn on
+                      </Button>
+                    ) : (
+                      <Button
+                        variant={grouped.length > 0 ? "ghost" : "outline"}
+                        size="sm"
+                        onClick={() => void list({ environmentId, input: {} })}
+                      >
+                        Refresh devices
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={props.onOpenSetup}>
+                      Device setup
+                    </Button>
+                  </div>
                 ) : null}
               </div>
             </div>
