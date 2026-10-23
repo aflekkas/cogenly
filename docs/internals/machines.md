@@ -36,21 +36,47 @@ must enforce their own domain limits; these scopes do not make arbitrary RPC
 forwarding safe.
 
 The spoke pins the hub environment ID and Ed25519 public key from the admin's
-join code. Before join and each reconnect, a secret-free `/peer/identity` challenge
-checks that pin before sending any grant or peer token. Join and the socket
-hello also sign fresh nonces with both environment IDs. The hub pins the spoke
-environment ID to its proof-bound session and checks subsequent self reports against it. Keep the environment ID,
-environment key, and peer secrets together across restarts. Key replacement
-requires unpairing and pairing again.
+join code. Before join and each reconnect, a secret-free `/peer/identity`
+challenge checks that pin before sending any grant or peer token. Identity,
+join and hello use separate signature domains. Join and hello bind the hub key,
+spoke proof-key thumbprint, both machine reports, nonce, granted scopes, expiry,
+and SHA-256 digest of the access token. Join also binds the grant digest. The
+spoke verifies the complete signed result before saving it. The hub verifies a
+separate P-256 body proof before consuming a grant or trusting a spoke report;
+DPoP alone authenticates an HTTP request's target and credential, not its body.
+Keep the environment ID, environment key and peer secrets together across
+restarts. Key replacement requires unpairing and pairing again.
 
-DPoP and the signed hello authenticate endpoints; TLS encrypts network traffic.
-The shared peer-route policy requires HTTPS/WSS, with HTTP/WS allowed only for
-literal loopback or localhost (a local SSH forward). A tailnet name or
-100.64/10 address does not exempt a route from TLS. Supplied join routes replace
-advertised routes rather than silently adding fallbacks. Entire route lists are
-validated before dialing, cannot mix TLS with loopback plaintext, and are
-validated again on reconnect, including links saved by older versions. HTTP
-redirects are never followed. Pairing does not provision a tunnel.
+A socket ticket selects a session; it does not establish possession of the
+spoke's proof key. Each socket gets a fresh connection ID and ephemeral P-256
+hub key. The spoke signs the challenge, its own ephemeral key, hub pin, report,
+nonce and token digest with the key bound to its access token. The hub checks
+that token against the ticket's session and verifies the proof before marking
+the spoke online. Its signed hello also binds the challenge and both ephemeral
+keys. Both ends derive a session key with ECDH and HKDF-SHA-256, using the signed
+hello digest as salt and a protocol-specific context. Protocol version 2 is
+required; both machines must be upgraded together.
+
+Every later RPC envelope, including replies, inbox pushes such as `Unpaired`,
+and transport controls, carries an HMAC-SHA-256 over the connection ID,
+direction, strictly increasing per-direction sequence number, method and SHA-256
+digest of the exact serialized payload. Verification happens before RPC decoding
+or dispatch. A bad MAC, gap, replay, reflection or old-session frame poisons the
+connection and closes it; it cannot deliver a result, run a handler or erase the
+spoke's pairing. Each reconnect starts with new keys and counters. The canonical
+transcripts and frame boundary live in
+[peerCrypto.ts](../../apps/server/src/machines/peerCrypto.ts) and
+[peerFrames.ts](../../apps/server/src/machines/peerFrames.ts).
+
+Endpoint proofs and frame MACs protect authenticity through relays; TLS protects
+confidentiality. A relay can still observe traffic where TLS terminates, drop
+frames, or force reconnects. The shared peer-route policy requires HTTPS/WSS,
+with HTTP/WS allowed only for literal loopback or localhost (a local SSH forward).
+A tailnet name or 100.64/10 address does not exempt a route from TLS. Supplied
+join routes replace advertised routes rather than silently adding fallbacks.
+Entire route lists are validated before dialing, cannot mix TLS with loopback
+plaintext, and are validated again on reconnect, including links saved by older
+versions. HTTP redirects are never followed. Pairing does not provision a tunnel.
 
 ## Private ingress boundary
 
