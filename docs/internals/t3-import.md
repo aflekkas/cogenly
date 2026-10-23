@@ -93,7 +93,9 @@ never reads secrets, sign-ins, or provider environment variables.
 
 ## Shared folders
 
-Imported threads keep their T3 worktree paths under `~/.t3/scratch` and `~/.t3/worktrees`. Cogenly
+Projects at or under `~/.t3/scratch` (T3 Code's no-project folder and the per-chat folders it
+makes there) are filed under Cogenly's "No project" rather than becoming repository records; the
+offline CLI, which has no Scratch to file into, leaves them out. Imported threads keep their T3 worktree paths under `~/.t3/scratch` and `~/.t3/worktrees`. Cogenly
 manages only its own worktree directories, so it never cleans these. Do not add `~/.t3` paths to
 Cogenly's managed worktree settings.
 

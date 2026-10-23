@@ -5,7 +5,9 @@ import * as NodePath from "node:path";
 
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
+  ProjectId,
   T3_IMPORT_RUNNING_NOTE,
   T3_IMPORT_STATUS_HEARTBEAT_MS,
   type T3ImportJob,
@@ -27,6 +29,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import { layerOffline } from "./T3ImportOfflineLayer.ts";
 import { T3ImportService, withStatusHeartbeat } from "./T3ImportService.ts";
 import { created, makeT3Fixture, message, run, T3_PROJECT } from "./T3Import.testkit.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 
 const fixture = makeT3Fixture();
 fixture.append(created("thread-a"));
@@ -164,6 +167,59 @@ describe("T3ImportService", () => {
       expect(NodeFS.readdirSync(snapshotRoot)).toEqual([]);
     }).pipe(Effect.provide(makeLayer({ freeBytes: () => 0 }))),
   );
+
+  it.effect("files T3 Code's no-project chats under No project instead of a repository", () => {
+    const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-import-home-"));
+    const scratch = makeT3Fixture({
+      workspaceRoot: NodePath.join(home, ".t3", "scratch", "2026-10-03-chat"),
+    });
+    scratch.append(created("thread-s"));
+    scratch.close();
+    const noProject = ProjectId.make("no-project");
+    const scratchLayer = layerOffline({ sourceDir: scratch.dir, snapshotRoot }).pipe(
+      Layer.provide(
+        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+          scratchRoot: Effect.succeed(Option.some(NodePath.join(home, "cogenly-scratch"))),
+          ensureScratchProject: Effect.succeed({ projectId: noProject }),
+        }),
+      ),
+      Layer.provide(Layer.succeed(HostProcess.HomeDirectory, home)),
+      Layer.provideMerge(ServerSettings.layerTest()),
+      Layer.provideMerge(Sqlite.layerConfig),
+      Layer.provideMerge(
+        Layer.fresh(ServerConfig.layerTest(process.cwd(), { prefix: "t3-import-scratch-test-" })),
+      ),
+      Layer.provide(NodeServices.layer),
+    );
+    return Effect.gen(function* () {
+      const service = yield* T3ImportService;
+      const sql = yield* SqlClient.SqlClient;
+      const detected = yield* waitFor(service, () => true);
+      expect(detected.source.projects.map((project) => project.isScratch)).toEqual([true]);
+
+      yield* service.scan({ scope: { sourceProjectIds: [T3_PROJECT] } });
+      const scanned = yield* waitFor(service, (status) => status.job._tag === "Scanned");
+      if (scanned.job._tag !== "Scanned") throw new Error("not scanned");
+      expect(scanned.job.report.projects[0]).toMatchObject({
+        action: "merge",
+        projectTitle: "No project",
+      });
+
+      yield* service.run({ reportId: scanned.job.report.reportId, includeSettings: false });
+      const done = yield* waitFor(
+        service,
+        (status) => status.job._tag === "Completed" || status.job._tag === "Failed",
+      );
+      if (done.job._tag !== "Completed") throw new Error(JSON.stringify(done.job));
+      expect(
+        yield* sql`SELECT project_id FROM orchestration_v2_projection_threads WHERE thread_id = 'thread-s'`,
+      ).toEqual([{ project_id: noProject }]);
+      // No repository record was made for T3 Code's scratch folder.
+      expect(
+        yield* sql`SELECT 1 FROM projection_projects WHERE workspace_root LIKE '%/.t3/scratch%'`,
+      ).toEqual([]);
+    }).pipe(Effect.provide(scratchLayer));
+  });
 });
 
 describe("the status heartbeat", () => {

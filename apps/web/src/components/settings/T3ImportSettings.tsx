@@ -419,28 +419,26 @@ function ProjectOption({
   disabled: boolean;
   onChange: (checked: boolean) => void;
 }) {
-  // Scratch holds many one-off folders; it comes in a later pass.
-  const later = project.isScratch;
   return (
     <li>
       <label
         className={
-          later || disabled
+          disabled
             ? "flex items-center gap-2.5 rounded-md py-1 text-sm opacity-64"
             : "flex cursor-pointer items-center gap-2.5 rounded-md py-1 text-sm"
         }
       >
         <Checkbox
-          checked={later ? false : checked}
-          disabled={later || disabled}
+          checked={checked}
+          disabled={disabled}
           onCheckedChange={(next) => onChange(next === true)}
         />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5">
             <span className="truncate font-medium">{project.title}</span>
-            {later ? (
+            {project.isScratch ? (
               <Badge size="sm" variant="outline">
-                Later
+                Files under No project
               </Badge>
             ) : project.existingProjectTitle ? (
               <Badge size="sm" variant="info">

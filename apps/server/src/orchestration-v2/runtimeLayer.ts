@@ -279,10 +279,6 @@ const layerAgentSessionImporterProvided = AgentSessionImporter.layer.pipe(
   ),
 );
 
-const layerT3ImportProvided = T3Import.layer.pipe(
-  Layer.provide(Layer.mergeAll(layerProjectService, layerEventSinkProvided)),
-);
-
 const layerThreadManagementProvided = ThreadManagementService.layerWithLegacyImporter.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -306,6 +302,12 @@ const layerProjectLabelsProvided = ProjectLabels.layer.pipe(
 const layerManagedProjectFoldersProvided = ManagedProjectFolders.layer.pipe(
   Layer.provide(layerProjectService),
   Layer.provide(Layer.mergeAll(layerProjectLabelsProvided, ProjectLabelFolders.layer)),
+);
+// Scratch chats from T3 Code file under "No project", which ManagedProjectFolders owns.
+const layerT3ImportProvided = T3Import.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(layerProjectService, layerEventSinkProvided, layerManagedProjectFoldersProvided),
+  ),
 );
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
   Layer.provide(
