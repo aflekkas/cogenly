@@ -76,6 +76,13 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.agentsApprove]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsReject]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsStartWork]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsList]: AuthOrchestrationReadScope,
+  // Creating or changing an integration hands agents a new credentialed
+  // upstream, and testing one spends a resolved credential on the network.
+  [WS_METHODS.integrationsCreate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsUpdate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsDelete]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsTestConnection]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsSupersede]: AuthOrchestrationOperateScope,

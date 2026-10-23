@@ -6,6 +6,7 @@ import type * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import type * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
+import * as Integrations from "./integrations/Integrations.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
@@ -1075,6 +1076,7 @@ const makeWsRpcHandlers = (
     const agentWorkspace = yield* AgentWorkspace.AgentWorkspaceService;
     const agentStore = yield* AgentStore.AgentStore;
     const facts = yield* Facts.FactService;
+    const integrations = yield* Integrations.Integrations;
     const visualStates = yield* VisualStates.VisualStateService;
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
@@ -1663,6 +1665,11 @@ const makeWsRpcHandlers = (
       [WS_METHODS.agentsReject]: (input) => agentWorkspace.reject(input.id),
       [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
+      [WS_METHODS.integrationsList]: () => integrations.list(),
+      [WS_METHODS.integrationsCreate]: (input) => integrations.create(input),
+      [WS_METHODS.integrationsUpdate]: (input) => integrations.update(input),
+      [WS_METHODS.integrationsDelete]: (input) => integrations.remove(input.id),
+      [WS_METHODS.integrationsTestConnection]: (input) => integrations.testConnection(input.id),
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
       [WS_METHODS.visualStateGet]: (input) =>
@@ -2724,6 +2731,7 @@ type WsRequestServices =
   | Exports.ExportService
   | ExternalLauncher.ExternalLauncher
   | Facts.FactService
+  | Integrations.Integrations
   | FileSystem.FileSystem
   | GitHubRest.GitHubRest
   | GitWorkflowService.GitWorkflowService

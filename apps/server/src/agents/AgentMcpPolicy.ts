@@ -5,6 +5,7 @@ import {
   AgentApprovalAction,
   OrchestratorMcpFailure,
   OrchestratorMcpScheduleTaskInput,
+  IntegrationCreateInput,
   type AgentPermissions,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -22,6 +23,7 @@ import { resolveRuntimeMode } from "../mcp/OrchestratorMcpService.ts";
 const decodeWorkStart = Schema.decodeUnknownEffect(WorkStartInput);
 const decodeStartWork = Schema.decodeUnknownEffect(AgentStartWorkInput);
 const decodeSchedule = Schema.decodeUnknownEffect(OrchestratorMcpScheduleTaskInput);
+const decodeIntegrationAdd = Schema.decodeUnknownEffect(IntegrationCreateInput);
 const decodeAction = Schema.decodeUnknownEffect(AgentApprovalAction);
 const isMcpFailure = Schema.is(OrchestratorMcpFailure);
 const isRecord = Schema.is(Schema.Record(Schema.String, Schema.Unknown));
@@ -204,6 +206,22 @@ const make = Effect.gen(function* () {
           };
         }
         if (name === "start_agent_work") return { handled: false };
+        // Connecting an integration hands every agent a new credentialed
+        // upstream, so a persistent agent proposes it and the owner approves
+        // (approving creates it). The owner's own turns are not agents here:
+        // actor is null for them and they fall through to the tool.
+        if (name === "integration_add") {
+          const payload = yield* decodeIntegrationAdd(input);
+          const action = yield* decodeAction({
+            actionKind: "integration_add",
+            payload,
+          });
+          const { approval } = yield* workspace.requestApproval(agent.id, action, actor);
+          return yield* denied(
+            `Integration proposal awaiting owner approval: ${approval.id}`,
+            "agent_approval_required",
+          );
+        }
         if (name === "schedule_task") {
           const schedule = yield* decodeSchedule(input);
           const action = yield* decodeAction({

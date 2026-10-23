@@ -90,6 +90,7 @@ import Migration0079 from "./Migrations/079_ProjectHome.ts";
 import Migration0080 from "./Migrations/080_ProjectLabelArchive.ts";
 import Migration0081 from "./Migrations/081_ProjectLabelRepositoryRemotes.ts";
 import Migration0082 from "./Migrations/082_Vault.ts";
+import Migration0083 from "./Migrations/083_Integrations.ts";
 import Migration0073 from "./Migrations/073_AgentsFullAccess.ts";
 import Migration0070 from "./Migrations/070_AgentEventTriggers.ts";
 import Migration0067 from "./Migrations/067_AgentScope.ts";
@@ -192,6 +193,7 @@ export const migrationEntries = [
   [80, "ProjectLabelArchive", Migration0080],
   [81, "ProjectLabelRepositoryRemotes", Migration0081],
   [82, "Vault", Migration0082],
+  [83, "Integrations", Migration0083],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

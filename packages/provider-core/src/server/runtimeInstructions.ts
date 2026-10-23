@@ -39,6 +39,37 @@ function toSingleLine(value: string): string {
 /** Resource paths listed in the project manifest before `+N more`. */
 export const PROJECT_MANIFEST_MAX_RESOURCES = 30;
 
+/** One connected integration as the context line names it. */
+export interface IntegrationContextEntry {
+  readonly name: string;
+  readonly displayName: string;
+  readonly hint?: string | undefined;
+}
+
+/**
+ * The one line every provider turn gets about connected integrations, e.g.
+ * "Connected integrations: gmail (Gmail, aflekkas@…), linear. Use
+ * integration_tools / integration_call." Empty when none are connected.
+ */
+export function buildIntegrationsContextLine(
+  integrations: ReadonlyArray<IntegrationContextEntry>,
+): string {
+  if (integrations.length === 0) return "";
+  const names = integrations.map((integration) => {
+    const hint = integration.hint?.trim() ?? "";
+    const label =
+      hint.length > 0
+        ? hint
+        : integration.displayName !== integration.name
+          ? integration.displayName
+          : "";
+    return label.length > 0
+      ? `${toSingleLine(integration.name)} (${toSingleLine(label)})`
+      : toSingleLine(integration.name);
+  });
+  return `Connected integrations: ${names.join(", ")}. Use integration_tools / integration_call.`;
+}
+
 /**
  * Compact manifest of the thread's project folder, appended to the turn
  * context for chats and Work threads filed in a project. Paths are
@@ -53,6 +84,8 @@ export function buildProjectManifest(input: {
   readonly instructions?: string | undefined;
   /** True for the project's own chat, which also gets PROJECT_CHAT_INSTRUCTIONS. */
   readonly projectChat?: boolean | undefined;
+  /** Connected integrations visible from this project; adds one tiny line. */
+  readonly integrations?: ReadonlyArray<IntegrationContextEntry> | undefined;
 }): string {
   const shown = input.resources.slice(0, PROJECT_MANIFEST_MAX_RESOURCES);
   const files =
@@ -62,8 +95,10 @@ export function buildProjectManifest(input: {
   const more = input.total - shown.length;
   const manifest = `<project_manifest>The thread's project folder is "${toSingleLine(input.name)}" at ${toSingleLine(input.directory)}. Project files:\n${files}${more > 0 ? `\n+${more} more` : ""}\nUse project_recall to search these files and project_file_read to read one.</project_manifest>`;
   const instructions = input.instructions?.trim() ?? "";
+  const integrationsLine = buildIntegrationsContextLine(input.integrations ?? []);
   return [
     manifest,
+    ...(integrationsLine.length === 0 ? [] : [integrationsLine]),
     ...(instructions.length === 0
       ? []
       : [

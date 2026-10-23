@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   CONVERSATION_MODE_INSTRUCTIONS,
   HOW_COGENLY_WORKS_INSTRUCTIONS,
+  buildIntegrationsContextLine,
   buildProjectManifest,
   buildRuntimeInstructions,
 } from "./runtimeInstructions.ts";
@@ -107,6 +108,30 @@ describe("buildProjectManifest", () => {
     });
     expect(manifest).toContain("(no project files yet)");
     expect(manifest).not.toContain("+");
+  });
+});
+
+describe("integrations context line", () => {
+  it("names connected integrations with hints and stays empty when none", () => {
+    expect(buildIntegrationsContextLine([])).toBe("");
+    expect(
+      buildIntegrationsContextLine([
+        { name: "gmail", displayName: "Gmail", hint: "Gmail, aflekkas@example.com" },
+        { name: "linear", displayName: "Linear" },
+      ]),
+    ).toBe(
+      "Connected integrations: gmail (Gmail, aflekkas@example.com), linear (Linear). Use integration_tools / integration_call.",
+    );
+  });
+
+  it("adds exactly one line to the project manifest", () => {
+    const base = { name: "P", directory: "/projects/P", resources: [], total: 0 };
+    const withIntegrations = buildProjectManifest({
+      ...base,
+      integrations: [{ name: "gmail", displayName: "Gmail", hint: "" }],
+    });
+    expect(withIntegrations).toContain("Connected integrations: gmail (Gmail).");
+    expect(buildProjectManifest(base)).not.toContain("Connected integrations:");
   });
 });
 

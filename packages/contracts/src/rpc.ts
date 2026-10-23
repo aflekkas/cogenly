@@ -4,6 +4,7 @@ import * as Visual from "./visual.ts";
 import * as Exports from "./export.ts";
 import * as T3Import from "./t3Import.ts";
 import * as ProjectLabels from "./projectLabel.ts";
+import * as Integrations from "./integration.ts";
 import * as Work from "./work.ts";
 import * as Vault from "./vault.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
@@ -581,6 +582,13 @@ export const WS_METHODS = {
   vaultUsage: "vault.usage",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
+
+  // Cogenly-managed integrations (upstream MCP servers behind the gateway)
+  integrationsList: "integrations.list",
+  integrationsCreate: "integrations.create",
+  integrationsUpdate: "integrations.update",
+  integrationsDelete: "integrations.delete",
+  integrationsTestConnection: "integrations.testConnection",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -2048,6 +2056,32 @@ const WsAgentsActivityRpc = Rpc.make(WS_METHODS.agentsActivity, {
   success: AgentWorkspace.AgentActivityResult,
   error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
 });
+const WsIntegrationsListRpc = Rpc.make(WS_METHODS.integrationsList, {
+  payload: Schema.Struct({}),
+  success: Integrations.IntegrationListResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsIntegrationsCreateRpc = Rpc.make(WS_METHODS.integrationsCreate, {
+  payload: Integrations.IntegrationCreateInput,
+  success: Integrations.IntegrationMutationResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsIntegrationsUpdateRpc = Rpc.make(WS_METHODS.integrationsUpdate, {
+  payload: Integrations.IntegrationUpdateInput,
+  success: Integrations.IntegrationMutationResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsIntegrationsDeleteRpc = Rpc.make(WS_METHODS.integrationsDelete, {
+  payload: Integrations.IntegrationKey,
+  success: Integrations.IntegrationDeleteResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsIntegrationsTestConnectionRpc = Rpc.make(WS_METHODS.integrationsTestConnection, {
+  payload: Integrations.IntegrationKey,
+  success: Integrations.IntegrationTestResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+
 const WsFactsListRpc = Rpc.make(WS_METHODS.factsList, {
   payload: Facts.FactListInput,
   success: Facts.FactListResult,
@@ -2391,6 +2425,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsAgentsRejectRpc,
   WsAgentsStartWorkRpc,
   WsAgentsActivityRpc,
+  WsIntegrationsListRpc,
+  WsIntegrationsCreateRpc,
+  WsIntegrationsUpdateRpc,
+  WsIntegrationsDeleteRpc,
+  WsIntegrationsTestConnectionRpc,
   WsFactsListRpc,
   WsFactsCreateRpc,
   WsFactsUpdateRpc,

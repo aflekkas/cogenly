@@ -33,6 +33,7 @@ import * as Store from "./AgentStore.ts";
 import * as Agents from "./AgentService.ts";
 import * as Work from "../work/WorkHandoffService.ts";
 import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
+import * as Integrations from "../integrations/Integrations.ts";
 
 const decodeEventContext = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEventContext));
 const isAgentError = Schema.is(AgentError);
@@ -149,6 +150,9 @@ const make = Effect.gen(function* () {
     scope.agent.permissions.draft &&
     (item.agentId === scope.agent.id ||
       item.labelIds.some((id) => scope.draftableLabelIds.includes(id)));
+  // Optional so workspaces built without the gateway (unit tests) still
+  // approve other actions; an integration approval then fails clearly.
+  const integrations = yield* Effect.serviceOption(Integrations.Integrations);
   const lock = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const uuid = (prefix: string) =>
@@ -538,6 +542,14 @@ const make = Effect.gen(function* () {
                   };
                   yield* sql`UPDATE vault_items SET policy_json = ${yield* encodeVaultPolicy(policy)}, updated_at = ${yield* now} WHERE id = ${action.payload.vaultItemId}`;
                 }
+                break;
+              }
+              case "integration_add": {
+                if (integrations._tag === "None")
+                  return yield* fail("Integrations are unavailable on this server.");
+                yield* integrations.value
+                  .create(action.payload)
+                  .pipe(Effect.mapError((cause) => fail(cause.message)));
                 break;
               }
             }

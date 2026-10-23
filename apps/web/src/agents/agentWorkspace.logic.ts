@@ -305,6 +305,11 @@ export function describeApproval(
             : `On ${action.payload.domain}. Approving lets this agent use the item from now on.`,
         ],
       };
+    case "integration_add":
+      return {
+        title: `Connect ${action.payload.displayName} (${action.payload.name})`,
+        details: [action.payload.url],
+      };
   }
 }
 
