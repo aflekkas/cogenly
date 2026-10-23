@@ -90,14 +90,23 @@ const make = Effect.gen(function* () {
     }>`SELECT * FROM shared_documents WHERE kind=${kind} AND id=${id}`;
     const row = rows[0];
     if (!row) return undefined;
-    return yield* Schema.decodeUnknownEffect(SharedDocumentChange)({
-      kind,
-      id,
-      fields: yield* decodeJson(row.fields_json),
-      clocks: yield* decodeJson(row.clocks_json),
-      tombstone: row.tombstone_json ? yield* decodeClock(row.tombstone_json) : null,
-      updatedBy: row.updated_by_env,
-    });
+    return yield* Effect.gen(function* () {
+      return yield* Schema.decodeUnknownEffect(SharedDocumentChange)({
+        kind,
+        id,
+        fields: yield* decodeJson(row.fields_json),
+        clocks: yield* decodeJson(row.clocks_json),
+        tombstone: row.tombstone_json ? yield* decodeClock(row.tombstone_json) : null,
+        updatedBy: row.updated_by_env,
+      });
+    }).pipe(
+      Effect.catchTags({
+        SchemaError: () =>
+          Effect.logWarning("Skipping undecodable shared document", { kind }).pipe(
+            Effect.as(undefined),
+          ),
+      }),
+    );
   }, Effect.mapError(storage));
   const observe = Effect.fn("SharedState.observe")(function* (received?: HybridClock) {
     const rows = yield* sql<{
@@ -245,7 +254,18 @@ const make = Effect.gen(function* () {
     let cursor = after,
       bytes = 0;
     for (const row of rows) {
-      const change = yield* decodeChange(row.change_json);
+      const change = yield* decodeChange(row.change_json).pipe(
+        Effect.catchTags({
+          SchemaError: () =>
+            Effect.logWarning("Skipping undecodable shared change", { cursor: row.cursor }).pipe(
+              Effect.as(undefined),
+            ),
+        }),
+      );
+      if (!change) {
+        cursor = row.cursor;
+        continue;
+      }
       if (change.updatedBy !== target && (!localOnly || change.updatedBy === environmentId)) {
         const size = new TextEncoder().encode(row.change_json).length;
         // Domain text has no aggregate byte limit. Send a large document alone so

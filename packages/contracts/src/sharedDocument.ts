@@ -15,11 +15,18 @@ export const SharedRepositoryRemote = Schema.String.check(
 const Counter = Schema.Int.check(
   Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 );
-const Id = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,199}$/));
+export const SharedDocumentId = Schema.String.check(
+  Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,199}$/),
+);
+// v0.1.17 derived task IDs from URI-encoded MCP request keys. Keep their
+// references and webhook URLs stable; new task IDs use bounded hashes.
+const LegacyScheduleId = Schema.String.check(
+  Schema.isPattern(/^scheduled-task:command:mcp:(?:[a-zA-Z0-9:._~!()*'-]|%[a-fA-F0-9]{2})+$/),
+);
 export const HybridClock = Schema.Struct({
   wall: Counter,
   logical: Counter,
-  node: Id,
+  node: SharedDocumentId,
 });
 export type HybridClock = typeof HybridClock.Type;
 export const SharedDocumentKind = Schema.Literals(["project", "agent", "schedule"]);
@@ -27,7 +34,7 @@ export type SharedDocumentKind = typeof SharedDocumentKind.Type;
 /** A delta contains only fields authored by this edit; relay preserves their clocks. */
 export const SharedDocumentChange = Schema.Struct({
   kind: SharedDocumentKind,
-  id: Id,
+  id: Schema.Union([SharedDocumentId, LegacyScheduleId]),
   fields: Schema.Record(Schema.String, Schema.Json),
   clocks: Schema.Record(Schema.String, HybridClock),
   tombstone: Schema.NullOr(HybridClock),

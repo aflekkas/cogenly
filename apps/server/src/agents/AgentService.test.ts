@@ -289,6 +289,29 @@ const makeHarness = Effect.sync(() => {
 });
 
 describe("agent execution", () => {
+  it.effect("schedule command ids stay portable and idempotent for arbitrary request keys", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        yield* store.save(h.fixture);
+        const schedules = yield* Schedules.ScheduledTaskService;
+        for (const key of ["nightly%20digest", "nightly%3Adigest", "x".repeat(300)]) {
+          const input = {
+            ...h.triggerInput,
+            commandId: CommandId.make(`command:mcp:session:schedule-task:${key}`),
+          };
+          const first = (yield* schedules.upsert(input)).task;
+          expect(first.id).toMatch(/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,199}$/);
+          expect((yield* schedules.upsert(input)).task.id).toBe(first.id);
+        }
+        const valid = CommandId.make("command:mcp:session:schedule-task:valid-key");
+        expect((yield* schedules.upsert({ ...h.triggerInput, commandId: valid })).task.id).toBe(
+          `scheduled-task:${valid}`,
+        );
+      }).pipe(Effect.provide(h.layer));
+    }).pipe(Effect.scoped),
+  );
   it.effect.each(["starting", "running", "completed", "failed"] as const)(
     "restart recovery leaves another machine's %s run untouched",
     (status) =>

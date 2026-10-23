@@ -47,6 +47,36 @@ const batch = (changes: SharedDocumentChange[], after = 0) => ({
   changes,
 });
 describe("SharedState", () => {
+  it.effect("skips undecodable persisted rows and advances past them", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      const invalid = { ...change(project), id: "bad%id" };
+      yield* sql`INSERT INTO shared_documents(kind,id,fields_json,clocks_json,updated_by_env) VALUES ('project',${invalid.id},${JSON.stringify(project)},${JSON.stringify(invalid.clocks)},${peer})`;
+      yield* sql`INSERT INTO shared_changes(change_json) VALUES (${JSON.stringify(invalid)})`;
+      yield* sql`INSERT INTO shared_changes(change_json) VALUES ('not-json')`;
+      yield* state.write("project", "label:good", project);
+      expect(yield* state.get("project", invalid.id)).toBeUndefined();
+      const outgoing = yield* state.readBatch(0, peer, true);
+      expect(outgoing.cursor).toBe(3);
+      expect(outgoing.changes.map((doc) => doc.id)).toEqual(["label:good"]);
+    }).pipe(Effect.provide(layer)),
+  );
+  it.effect("keeps legacy encoded schedule ids readable, editable, deletable and syncable", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      const id = "scheduled-task:command:mcp:session:schedule-task:nightly%20digest%3Aone";
+      const legacy = { ...change({ title: "Legacy" }), kind: "schedule" as const, id };
+      yield* sql`INSERT INTO shared_documents(kind,id,fields_json,clocks_json,updated_by_env) VALUES ('schedule',${id},${JSON.stringify(legacy.fields)},${JSON.stringify(legacy.clocks)},${peer})`;
+      yield* sql`INSERT INTO shared_changes(change_json) VALUES (${JSON.stringify(legacy)})`;
+      expect((yield* state.get("schedule", id))?.fields.title).toBe("Legacy");
+      expect((yield* state.readBatch(0, local, false)).changes[0]?.id).toBe(id);
+      yield* state.write("schedule", id, { title: "Edited" });
+      yield* state.write("schedule", id, {}, true);
+      expect((yield* state.get("schedule", id))?.tombstone).not.toBeNull();
+    }).pipe(Effect.provide(layer)),
+  );
   it.effect("bootstraps good rows even when a legacy row cannot be captured", () =>
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;

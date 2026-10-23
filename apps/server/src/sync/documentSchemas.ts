@@ -8,11 +8,14 @@ import {
   TrimmedNonEmptyString,
   SharedStateError,
   SharedRepositoryRemote,
-  type SharedDocumentChange,
+  SharedDocumentChange,
+  SharedDocumentId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+const decodeChange = Schema.decodeUnknownEffect(SharedDocumentChange);
+const isPortableId = Schema.is(SharedDocumentId);
 const PortableId = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,199}$/));
 const Remote = SharedRepositoryRemote;
 const RelativePath = Schema.String.check(
@@ -107,6 +110,10 @@ const partials = {
 export const validateChange = (change: SharedDocumentChange) =>
   Effect.gen(function* () {
     const invalid = () => new SharedStateError({ reason: "invalid-document" });
+    yield* decodeChange(change).pipe(
+      Effect.mapError((cause) => new SharedStateError({ reason: "invalid-document", cause })),
+    );
+    if (change.kind !== "schedule" && !isPortableId(change.id)) return yield* invalid();
     const keys = Object.keys(change.fields);
     if (
       keys.length !== Object.keys(change.clocks).length ||

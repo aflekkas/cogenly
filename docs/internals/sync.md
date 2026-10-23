@@ -40,6 +40,9 @@ Sync uses the domain's text and collection limits. A document exceeding the norm
 batch byte budget travels alone, so a valid configuration cannot wedge a cursor.
 Legacy rows that cannot be captured are logged and skipped during bootstrap;
 capture failure during repository backfill never fails a project read.
+Undecodable stored changes are logged and skipped while advancing their cursor.
+Legacy URI-encoded MCP schedule IDs remain readable on disk and on the wire to
+preserve task references and webhook URLs; new IDs hash keys that are not portable.
 
 Shared repository identity is its remote. Local checkout IDs, absolute paths,
 thread bindings, credentials, run counters and fallback position/reset time do

@@ -26,6 +26,15 @@ describe("shared configuration schemas", () => {
   ])("accepts domain workspace references %s", (workspaceStrategy) =>
     validateChange(change("schedule", { workspaceStrategy })),
   );
+  it.effect.each(["bad%id", "has space", "x".repeat(201)])(
+    "rejects invalid new document id %s",
+    (id) =>
+      Effect.gen(function* () {
+        expect(
+          (yield* Effect.result(validateChange({ ...change("project", { name: "P" }), id })))._tag,
+        ).toBe("Failure");
+      }),
+  );
   it.effect("accepts domain schedule text, long fallback chains and documents above 96 KiB", () =>
     Effect.gen(function* () {
       yield* validateChange(
