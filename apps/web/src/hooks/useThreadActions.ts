@@ -55,6 +55,9 @@ import {
 import { useUiStateStore } from "../uiStateStore";
 import { holdThreadUnread, releaseThreadUnreadHold } from "../lib/threadReadState";
 import { clearThreadPreviewState } from "../previewStateStore";
+import { useRightPanelStore } from "../rightPanelStore";
+import { useBottomPanelStore } from "../bottomPanelStore";
+import { useThreadDetailsDockStore } from "../components/chat/threadDetailsDockStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
@@ -123,6 +126,13 @@ export class ThreadPinningUnsupportedError extends Schema.TaggedError<ThreadPinn
   override get message(): string {
     return "This environment's server does not support pinning yet. Update the server to use Pin.";
   }
+}
+
+/** Forgets a deleted thread's panel layout: right panel, terminal panel, details dock. */
+function clearThreadPanelState(threadRef: ScopedThreadRef) {
+  useRightPanelStore.getState().removeThread(threadRef);
+  useBottomPanelStore.getState().removeThread(threadRef);
+  useThreadDetailsDockStore.getState().removeThread(threadRef);
 }
 
 /** Key that sorts before every arranged pinned thread, so a fresh pin lands
@@ -458,6 +468,7 @@ export function useThreadActions() {
         if (result._tag === "Success") {
           refreshArchivedThreadsForEnvironment(target.environmentId);
           clearThreadPreviewState(target);
+          clearThreadPanelState(target);
         }
         return result;
       }
@@ -564,6 +575,7 @@ export function useThreadActions() {
         threadRef,
       );
       clearThreadPreviewState(threadRef);
+      clearThreadPanelState(threadRef);
 
       if (shouldNavigateToFallback) {
         const fallbackThread = fallbackThreadId

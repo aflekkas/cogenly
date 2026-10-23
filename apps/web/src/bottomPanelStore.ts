@@ -1,7 +1,8 @@
 /**
  * The bottom panel under the chat: its agent-command tabs, per thread. Like
  * T3 Code's terminal drawer, whether it is open and how tall it is are kept
- * per thread, so a thread comes back the way it was left.
+ * per thread, so a thread comes back the way it was left. The most recently
+ * changed threads are kept (recentThreadEntries).
  *
  * Every action here is a user's: the panel never opens because an agent
  * started a command. New runs only add or update tabs (derived from the
@@ -13,6 +14,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import type { RunGroup } from "./components/terminals/bottomPanel.logic";
+import { setRecentThreadEntry, withoutThreadEntry } from "./lib/recentThreadEntries";
 import { resolveStorage } from "./lib/storage";
 
 export interface ThreadBottomPanelState {
@@ -83,7 +85,7 @@ function update(
   const current = byThreadKey[key] ?? EMPTY_STATE;
   const next = updater(current);
   if (next === current) return {};
-  return { byThreadKey: { ...byThreadKey, [key]: compact(next) } };
+  return { byThreadKey: setRecentThreadEntry(byThreadKey, key, compact(next)) };
 }
 
 export function migratePersistedBottomPanelState(persisted: unknown): {
@@ -191,10 +193,8 @@ export const useBottomPanelStore = create<BottomPanelStoreState>()(
         ),
       removeThread: (ref) =>
         set((state) => {
-          const key = scopedThreadKey(ref);
-          if (!(key in state.byThreadKey)) return state;
-          const { [key]: _removed, ...byThreadKey } = state.byThreadKey;
-          return { byThreadKey };
+          const byThreadKey = withoutThreadEntry(state.byThreadKey, scopedThreadKey(ref));
+          return byThreadKey === state.byThreadKey ? state : { byThreadKey };
         }),
     }),
     {
