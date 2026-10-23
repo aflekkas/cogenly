@@ -13,6 +13,7 @@ import {
   DesktopBrowserCommand,
   DesktopBrowserEvent,
   type DesktopBrowserEvent as DesktopBrowserEventType,
+  type DesktopBrowserPointerBox,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as NodePath from "node:path";
@@ -38,6 +39,15 @@ const AGENT_DOWNLOAD_WINDOW_MS = 5_000;
 export interface DesktopBrowserTabKey {
   readonly threadId: string;
   readonly tabId: string;
+}
+
+/** Where the server's agent is about to act on a tab, and the element it acts on, if any. */
+export interface DesktopAgentPointer {
+  readonly key: DesktopBrowserTabKey;
+  readonly phase: "move" | "click";
+  readonly x: number;
+  readonly y: number;
+  readonly box?: DesktopBrowserPointerBox;
 }
 
 /** A tab's debugger, as the preview manager lends it to the relay. */
@@ -88,23 +98,13 @@ export class DesktopBrowserHost extends Context.Service<
     /** Points a server tab's download at the server; false for any other download. */
     readonly placeDownload: (source: Electron.WebContents, item: Electron.DownloadItem) => boolean;
     /** The agent's cursor positions for attached tabs, keyed by their server tab. */
-    readonly pointers: Stream.Stream<{
-      readonly key: DesktopBrowserTabKey;
-      readonly phase: "move" | "click";
-      readonly x: number;
-      readonly y: number;
-    }>;
+    readonly pointers: Stream.Stream<DesktopAgentPointer>;
   }
 >()("@t3tools/desktop/preview/DesktopBrowserHost") {}
 
 export const make = Effect.gen(function* () {
   const outbox = yield* PubSub.unbounded<DesktopBrowserEventType>();
-  const pointers = yield* PubSub.sliding<{
-    readonly key: DesktopBrowserTabKey;
-    readonly phase: "move" | "click";
-    readonly x: number;
-    readonly y: number;
-  }>(16);
+  const pointers = yield* PubSub.sliding<DesktopAgentPointer>(16);
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const tabs = new Map<string, AttachedTab>();
   const emit = (event: DesktopBrowserEventType) => runFork(PubSub.publish(outbox, event));
@@ -195,8 +195,16 @@ export const make = Effect.gen(function* () {
       const tab = tabs.get(keyOf(command.value));
       if (!tab) return;
       if (command.value.type === "pointer") {
-        const { threadId, tabId, phase, x, y } = command.value;
-        runFork(PubSub.publish(pointers, { key: { threadId, tabId }, phase, x, y }));
+        const { threadId, tabId, phase, x, y, box } = command.value;
+        runFork(
+          PubSub.publish(pointers, {
+            key: { threadId, tabId },
+            phase,
+            x,
+            y,
+            ...(box ? { box } : {}),
+          }),
+        );
         return;
       }
       if (command.value.type === "release") {

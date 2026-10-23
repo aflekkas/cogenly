@@ -13,6 +13,7 @@ import {
   DesktopBrowserCommand,
   DesktopBrowserEvent,
   type DesktopBrowserCommand as DesktopBrowserCommandType,
+  type DesktopBrowserPointerBox,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -65,7 +66,12 @@ export class DesktopBrowserChannel extends Context.Service<
     /** Draws the agent's cursor over a tab the desktop renders. */
     readonly pointer: (
       key: DesktopTabKey,
-      pointer: { readonly phase: "move" | "click"; readonly x: number; readonly y: number },
+      pointer: {
+        readonly phase: "move" | "click";
+        readonly x: number;
+        readonly y: number;
+        readonly box?: DesktopBrowserPointerBox;
+      },
     ) => Effect.Effect<void>;
   }
 >()("t3/preview/DesktopBrowserChannel") {}

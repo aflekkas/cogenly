@@ -329,6 +329,7 @@ import {
 } from "./sidebar/workCards.logic";
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
 import { useSidebarListAnchor } from "./sidebar/useSidebarListAnchor";
+import { sidebarListEdge } from "./sidebar/sidebarListAnchor.logic";
 import { useAgentListFilter } from "../agents/agentListFilter";
 import { AgentsShelfBar } from "../agents/AgentsShelfBar";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -1085,6 +1086,8 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
   animateFolder: boolean;
   isActive: boolean;
   jumpLabel: string | null;
+  /** Compact last-activity time ("20m"), recomputed on the sidebar's minute tick. */
+  timeLabel: string;
   isRenaming: boolean;
   renamingTitle: string;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
@@ -1302,10 +1305,14 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
           )}
           <SidebarChatProjectLine project={props.folder} animate={props.animateFolder} />
         </span>
-        <SidebarChatStatusSlot
-          isRunning={isRunning}
-          dot={needsYou ? "warning" : isUnread ? "info" : null}
-        />
+        {/* With a project line, the time stays on the title line. */}
+        <span className={cn("flex shrink-0", props.folder && "mt-1 self-start")}>
+          <SidebarChatStatusSlot
+            isRunning={isRunning}
+            dot={needsYou ? "warning" : isUnread ? "info" : null}
+            timeLabel={props.timeLabel}
+          />
+        </span>
         {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
       </div>
     </li>
@@ -4161,8 +4168,9 @@ export default function Sidebar() {
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
   const sidebarModeListRef = useRef<HTMLDivElement | null>(null);
-  // Each list (a mode and its filter, or search) keeps its own place. Lists
-  // fill from the bottom, against the dock; Chats and search run best first
+  // Each list (a mode and its filter, or search) keeps its own place. Active
+  // lists fill from the bottom, against the dock; Chats, search and the
+  // put-away shelves (Settled newest first, Snoozed soonest wake first) run
   // from the top.
   const agentListFilter = useAgentListFilter();
   useSidebarListAnchor(
@@ -4174,7 +4182,7 @@ export default function Sidebar() {
         : sidebarMode === "agents"
           ? `agents:${agentListFilter}`
           : sidebarMode,
-    isSearchingThreads || sidebarMode === "chats" ? "top" : "bottom",
+    sidebarListEdge({ searching: isSearchingThreads, mode: sidebarMode, shelf: openShelf ?? null }),
   );
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
@@ -5274,15 +5282,6 @@ export default function Sidebar() {
                   actionSweep !== null && "**:pointer-events-none",
                 )}
               >
-                {sidebarMode === "tasks" && settledShelfExpanded && hiddenSettledCount > 0 ? (
-                  // Settled grows upward from the newest row by the search
-                  // dock, so older pages land above the first row.
-                  <SidebarListRevealSentinel
-                    key={`settled:${settledVisibleCount}`}
-                    edge="top"
-                    onReveal={revealMoreSettled}
-                  />
-                ) : null}
                 {(() => {
                   // Only the row being renamed gets the button, and only when
                   // its server can regenerate and is not already doing so.
@@ -5315,6 +5314,7 @@ export default function Sidebar() {
                           animateFolder={chatProjectMetaAnimates}
                           isActive={routeThreadKey === threadKey}
                           jumpLabel={showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
+                          timeLabel={threadTimeLabel(thread)}
                           isRenaming={renamingThreadKey === threadKey}
                           renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
                           onThreadClick={handleThreadClick}
@@ -5533,7 +5533,7 @@ export default function Sidebar() {
                     );
                   const chatDateGroupOf =
                     sidebarMode === "chats" ? createChatDateGrouper(new Date()) : null;
-                  // Settled is one flat list, newest settled at the bottom.
+                  // Settled is one flat list, newest settled at the top.
                   const flatShelfRows: ReactNode[] | null = shownSection === "settled" ? [] : null;
                   for (const item of sidebarListItems) {
                     if (item.kind === "thread") {
@@ -5632,9 +5632,18 @@ export default function Sidebar() {
                         break;
                     }
                   }
-                  if (flatShelfRows) items.push(...flatShelfRows.toReversed());
+                  if (flatShelfRows) items.push(...flatShelfRows);
                   return items;
                 })()}
+                {sidebarMode === "tasks" && settledShelfExpanded && hiddenSettledCount > 0 ? (
+                  // Settled runs newest first from the top, so older pages
+                  // land below the last row.
+                  <SidebarListRevealSentinel
+                    key={`settled:${settledVisibleCount}`}
+                    edge="bottom"
+                    onReveal={revealMoreSettled}
+                  />
+                ) : null}
                 {chatWindow !== null && chatWindow.hiddenCount > 0 ? (
                   <SidebarListRevealSentinel
                     key={`chats:${chatVisibleCount}`}

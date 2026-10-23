@@ -1,5 +1,5 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { Bot, ChevronDown, ExternalLink, Square, SquareTerminal } from "lucide-react";
+import { Bot, ChevronDown, ExternalLink, SquareTerminal } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { CopyButton } from "~/components/ui/copy-button";
@@ -15,6 +15,7 @@ import {
   terminalSignalName,
   type AgentTerminalEntry,
 } from "../AgentTerminalsPanel.logic";
+import { StopGlyph } from "../StopGlyph";
 import { TerminalViewport } from "../TerminalViewport";
 import { Button } from "../ui/button";
 import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
@@ -115,7 +116,7 @@ function LiveRunActions(props: {
           {...(props.size ? { size: props.size } : {})}
           onClick={() => props.onStop(props.entry)}
         >
-          <Square className="size-2.5 fill-current" />
+          <StopGlyph className="size-3.5" />
         </IconAction>
       ) : null}
     </>

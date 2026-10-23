@@ -583,7 +583,7 @@ export const V2ItemExpansion = memo(function V2ItemExpansion(props: {
     case "file_search":
       args ??= item.pattern?.trim() ? [{ label: "pattern", value: item.pattern }] : undefined;
       body = item.results?.length ? (
-        <ul className="max-h-64 space-y-1 overflow-auto">
+        <ul className="scroll-fade-y max-h-64 space-y-1 overflow-auto">
           {item.results.map((result) => (
             <li key={JSON.stringify(result)}>
               <span className="font-mono text-foreground/80">
@@ -605,7 +605,7 @@ export const V2ItemExpansion = memo(function V2ItemExpansion(props: {
         value: query,
       }));
       body = item.results?.length ? (
-        <ul className="max-h-64 space-y-1.5 overflow-auto">
+        <ul className="scroll-fade-y max-h-64 space-y-1.5 overflow-auto">
           {item.results.map((result) => {
             const safeHref = resolveExternalWebLinkHref(result.url);
             return (

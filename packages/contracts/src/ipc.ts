@@ -516,6 +516,8 @@ export interface DesktopPreviewPointerEvent {
   y: number;
   sequence: number;
   createdAt: string;
+  /** The element the agent acts on, in viewport CSS pixels, so the panel can outline it. */
+  box?: { x: number; y: number; width: number; height: number };
 }
 
 /** A `target="_blank"` link the previewed page asked to open beside itself. */
@@ -1249,7 +1251,6 @@ export interface DesktopPreviewBridge {
   cancelPickElement: (tabId: string) => Promise<void>;
   captureScreenshot: (tabId: string) => Promise<DesktopPreviewScreenshotArtifact>;
   revealArtifact: (path: string) => Promise<void>;
-  copyArtifactToClipboard: (path: string) => Promise<void>;
   pictureInPicture: {
     open: (tabId: string) => Promise<void>;
     close: (tabId: string) => Promise<void>;

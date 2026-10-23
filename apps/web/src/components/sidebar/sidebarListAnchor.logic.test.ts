@@ -1,9 +1,27 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { offsetFromEdge, scrollTopForOffset } from "./sidebarListAnchor.logic";
+import { offsetFromEdge, scrollTopForOffset, sidebarListEdge } from "./sidebarListAnchor.logic";
 
 // 1000px of rows in a 400px viewport: scrollTop runs 0..600.
 const box = { scrollHeight: 1000, clientHeight: 400 };
+
+describe("sidebarListEdge", () => {
+  it("anchors Work's active lists and Agents to the dock", () => {
+    expect(sidebarListEdge({ searching: false, mode: "tasks", shelf: null })).toBe("bottom");
+    expect(sidebarListEdge({ searching: false, mode: "tasks", shelf: "attention" })).toBe("bottom");
+    expect(sidebarListEdge({ searching: false, mode: "agents", shelf: null })).toBe("bottom");
+  });
+
+  it("runs Settled and Snoozed from the top, newest or soonest first", () => {
+    expect(sidebarListEdge({ searching: false, mode: "tasks", shelf: "settled" })).toBe("top");
+    expect(sidebarListEdge({ searching: false, mode: "tasks", shelf: "snoozed" })).toBe("top");
+  });
+
+  it("runs Chats and search from the top", () => {
+    expect(sidebarListEdge({ searching: false, mode: "chats", shelf: null })).toBe("top");
+    expect(sidebarListEdge({ searching: true, mode: "tasks", shelf: null })).toBe("top");
+  });
+});
 
 describe("offsetFromEdge", () => {
   it("measures a bottom-anchored list from its last rows", () => {
@@ -31,6 +49,30 @@ describe("scrollTopForOffset", () => {
     const before = offsetFromEdge("bottom", { ...box, scrollTop: 450 });
     // 300px of older rows land on top; the same rows stay in view.
     expect(scrollTopForOffset("bottom", before, { ...box, scrollHeight: 1300 })).toBe(750);
+  });
+
+  // A settled card leaving a bottom-anchored list: the list re-pins to its
+  // last rows, so on screen only the rows above the gap move (down, closing
+  // it) and the rows below stay put. The sidebar's row motion measures rows on
+  // screen for exactly this reason (Sidebar.motion.ts).
+  it("moves only the rows above a row that leaves a bottom-anchored list", () => {
+    const card = 88;
+    const before = { ...box, scrollTop: 600 };
+    const after = { ...box, scrollHeight: box.scrollHeight - card };
+    const scrollTop = scrollTopForOffset("bottom", offsetFromEdge("bottom", before), after);
+    expect(scrollTop).toBe(600 - card);
+    const onScreen = (offsetTop: number, top: number) => offsetTop - top;
+    // A row above the gap keeps its offset; the scroll brings it down by a card.
+    expect(onScreen(400, scrollTop) - onScreen(400, before.scrollTop)).toBe(card);
+    // A row below the gap loses a card of offset and the scroll matches it.
+    expect(onScreen(900 - card, scrollTop) - onScreen(900, before.scrollTop)).toBe(0);
+  });
+
+  it("leaves a top-anchored list's rows above the gap still", () => {
+    const card = 88;
+    const before = { ...box, scrollTop: 200 };
+    const after = { ...box, scrollHeight: box.scrollHeight - card };
+    expect(scrollTopForOffset("top", offsetFromEdge("top", before), after)).toBe(200);
   });
 
   it("clamps to the content", () => {

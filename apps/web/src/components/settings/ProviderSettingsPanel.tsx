@@ -202,7 +202,7 @@ function ProviderSettingsPlaceholder({
         divided={false}
         className={cn(
           providerCardHeightClassName,
-          "scrollbar-gutter-both flex overflow-x-hidden overflow-y-auto",
+          "scroll-fade-y scrollbar-gutter-both flex overflow-x-hidden overflow-y-auto",
         )}
       >
         <Empty>
@@ -974,6 +974,12 @@ export function EnvironmentProviderSettings({
         onModelOrderChange={(modelOrder) => {
           void updateModelPreferences({
             setProviderModelOrder: { provider: row.instanceId, modelOrder },
+          });
+        }}
+        effortDefaults={settings.modelEffortDefaults?.[row.instanceId]}
+        onEffortDefaultChange={(model, option) => {
+          void updateModelPreferences({
+            setModelEffortDefault: { provider: row.instanceId, model, option },
           });
         }}
         onInstallRecommended={

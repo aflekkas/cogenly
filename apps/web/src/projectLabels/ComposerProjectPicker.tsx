@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 
 import {
   ComposerControl,
+  ComposerControlChevron,
   ComposerControlIcon,
   type ComposerControlSize,
 } from "../components/chat/ComposerControl";
@@ -342,6 +343,7 @@ export function ComposerProjectPicker(props: {
             >
               {current ? current.label.name : "No project"}
             </span>
+            <ComposerControlChevron size={props.size} />
           </TooltipTrigger>
           <TooltipPopup side="top">
             {forks ? "Fork into a project" : current ? "Change project" : "Add to a project"}

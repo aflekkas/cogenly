@@ -287,7 +287,6 @@ import {
   DownloadIcon,
   GitBranchIcon,
   ShieldQuestionIcon,
-  SquareIcon,
   TargetIcon,
   WifiOffIcon,
 } from "lucide-react";
@@ -449,7 +448,11 @@ import {
   type QueuedRunsControlHandle,
   type EditQueuedRunRequest,
 } from "./chat/QueuedRunsControl";
-import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import type {
+  ComposerBannerStackContent,
+  ComposerBannerStackItem,
+} from "./chat/ComposerBannerStack";
+import { BackgroundWorkBanner } from "./chat/BackgroundWorkBanner";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 import { classifyThreadKind, hasRightPanel, threadCapabilities } from "../threadCapabilities";
 import {
@@ -3417,6 +3420,34 @@ export default function ChatView(props: ChatViewProps) {
     LAYOUT_MOTION_DURATION,
     !isEmptyServerThreadHero,
   );
+  // The centred hero centres on the composer itself, not on whatever hangs
+  // below it: the context strip (Work's worktree and branch, the machine) often
+  // arrives after the screen paints, and would otherwise push the headline and
+  // composer up as it grows. The lane reserves the same height above, so a new
+  // chat and a new Work draft land in the same place and only the strip moves.
+  const [draftHeroBelowSurface, setDraftHeroBelowSurface] = useState(0);
+  useLayoutEffect(() => {
+    if (!isDraftHeroState || !composerOverlayElement) {
+      setDraftHeroBelowSurface(0);
+      return;
+    }
+    const stack = composerOverlayElement.querySelector<HTMLElement>(
+      '[data-chat-composer-stack="true"]',
+    );
+    const surface = composerOverlayElement.querySelector<HTMLElement>(
+      '[data-chat-composer-main-surface="true"]',
+    );
+    if (!stack || !surface) return;
+    const measure = () => {
+      const below = Math.max(
+        0,
+        Math.round(stack.getBoundingClientRect().bottom - surface.getBoundingClientRect().bottom),
+      );
+      setDraftHeroBelowSurface((current) => (current === below ? current : below));
+    };
+    measure();
+    return observeResize([stack, surface], measure);
+  }, [composerOverlayElement, isDraftHeroState]);
   const { turnDiffSummaries } = useTurnDiffSummaries(serverProjection);
 
   /**
@@ -5554,7 +5585,7 @@ export default function ChatView(props: ChatViewProps) {
     };
   }, [activeGoal, activeThread, isWorking, sendStandaloneCommandStable]);
 
-  const backgroundWorkBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+  const backgroundWorkBannerItem = useMemo<ComposerBannerStackContent | null>(() => {
     const presentation = presentPendingBackgroundWork(activeBackgroundTasks);
     if (presentation === null || !activeThread) {
       return null;
@@ -5563,59 +5594,16 @@ export default function ChatView(props: ChatViewProps) {
       id: `background-work:${activeThread.id}`,
       variant: "default",
       priority: "activity",
-      // A dev server can run for hours after the agent is done, so only work
-      // that will wake the agent pulses.
-      icon: (
-        <span
-          className={cn(
-            "size-1.5 rounded-full bg-foreground",
-            presentation.waiting && "animate-status-pulse",
-          )}
-          aria-hidden="true"
+      content: (
+        <BackgroundWorkBanner
+          environmentId={activeThread.environmentId}
+          threadId={activeThread.id}
+          presentation={presentation}
+          canStop={canOperateThread}
+          stopping={isStoppingBackgroundWork}
+          onStop={() => void handleStopBackgroundWorkStable()}
+          onOpenThread={onOpenRelatedThreadStable}
         />
-      ),
-      title: presentation.title,
-      // A single named item is already in the title.
-      description:
-        presentation.items.length === 1 && presentation.items[0]?.childThreadId === undefined
-          ? undefined
-          : presentation.items.map((item, index) => {
-              const childThreadId = item.childThreadId;
-              const separator = index < presentation.items.length - 1 ? "," : null;
-              return (
-                <Fragment key={item.taskId}>
-                  {index > 0 ? " " : null}
-                  {childThreadId === undefined ? (
-                    <>
-                      {item.label}
-                      {separator}
-                    </>
-                  ) : (
-                    <span className="whitespace-nowrap">
-                      <InlineButton
-                        tone="muted"
-                        aria-label={`Open subagent ${item.label}`}
-                        onClick={() => onOpenRelatedThreadStable(childThreadId)}
-                      >
-                        {item.label}
-                      </InlineButton>
-                      {separator}
-                    </span>
-                  )}
-                </Fragment>
-              );
-            }),
-      actions: (
-        <Button
-          size="xs"
-          variant="outline"
-          aria-label={isStoppingBackgroundWork ? undefined : "Stop background work"}
-          disabled={!canOperateThread || isStoppingBackgroundWork}
-          onClick={() => void handleStopBackgroundWorkStable()}
-        >
-          <SquareIcon className="fill-current" aria-hidden="true" />
-          {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
-        </Button>
       ),
     };
   }, [
@@ -5862,7 +5850,9 @@ export default function ChatView(props: ChatViewProps) {
           },
         })
       : null;
-  const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
+  const composerBannerItems = useMemo<
+    Array<ComposerBannerStackItem | ComposerBannerStackContent>
+  >(() => {
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const backgroundWorkItems = [
       childInputBannerItem,
@@ -9420,7 +9410,15 @@ export default function ChatView(props: ChatViewProps) {
                   className="pointer-events-auto absolute inset-x-0 bottom-0 top-(--chat-composer-backdrop-top,100%) bg-background"
                 />
               )}
-              <div ref={attachDraftHeroTransitionGroup} className="chat-composer-lane w-full">
+              <div
+                ref={attachDraftHeroTransitionGroup}
+                className="chat-composer-lane w-full"
+                style={
+                  isDraftHeroState && draftHeroBelowSurface > 0
+                    ? { paddingTop: draftHeroBelowSurface }
+                    : undefined
+                }
+              >
                 <div
                   data-chat-composer-stack="true"
                   // The centred hero and composer glide by their center when a

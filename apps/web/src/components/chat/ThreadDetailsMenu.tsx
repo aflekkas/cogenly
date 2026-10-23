@@ -19,7 +19,6 @@ import {
   MessageSquareIcon,
   MoreHorizontalIcon,
   PlusIcon,
-  SquareIcon,
   UnplugIcon,
 } from "lucide-react";
 import { Children, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -40,6 +39,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { buildThreadRouteParams } from "~/threadRoutes";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
+import { StopGlyph } from "../StopGlyph";
 import {
   revealInFileExplorerLabelForKind,
   revealInFileExplorerLabelForOs,
@@ -500,16 +500,16 @@ const ROW_TRAILING_HIDE_CLASS =
  * folded under "Previous agents (N)" with its failed count. Each list shows a
  * page at a time.
  */
-function ThreadLineageSection(props: {
+/**
+ * Renders an agent row (provider glyph and status dot, title, elapsed time,
+ * hover stop) with its own stop state. The Lineage section and the composer's
+ * "Waiting on subagents" strip share it, so both lists look and act the same.
+ */
+function useThreadAgentRowRenderer(props: {
   readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly summary: ThreadAgentsSummary;
-  readonly canDetach: boolean;
   readonly onOpenThread: (threadId: string) => void;
-  readonly children: ReactNode;
 }) {
   const [stoppingKey, setStoppingKey] = useState<string | null>(null);
-  const [detaching, setDetaching] = useState(false);
   const providers = useServerConfigs().get(props.environmentId)?.providers;
   const markColorByInstanceId = useMemo(
     () => resolveProviderInstanceAccentColors(providers ?? []),
@@ -519,8 +519,6 @@ function ThreadLineageSection(props: {
   const stopWorkflow = useAtomCommand(orchestrationEnvironment.stopWorkflow, {
     reportFailure: false,
   });
-  const stopSession = useAtomCommand(threadEnvironment.stopSession, { reportFailure: false });
-  const { summary } = props;
 
   const stop = async (row: ThreadAgentRow, target: ThreadAgentStopTarget) => {
     if (stoppingKey !== null) return;
@@ -550,6 +548,52 @@ function ThreadLineageSection(props: {
     }
   };
 
+  return (row: ThreadAgentRow) => (
+    <ThreadAgentListRow
+      key={row.key}
+      row={row}
+      providers={providers}
+      accentColor={markColorByInstanceId.get(row.providerInstanceId ?? "")}
+      stopping={stoppingKey === row.key}
+      stopDisabled={stoppingKey !== null}
+      onStop={(target) => void stop(row, target)}
+      onOpenThread={props.onOpenThread}
+    />
+  );
+}
+
+/**
+ * A thread's running direct agents as Lineage rows, for the composer's
+ * "Waiting on subagents" strip. Renders nothing while none are running.
+ */
+export function ThreadRunningAgentsList(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly onOpenThread: (threadId: string) => void;
+}) {
+  const { summary } = useThreadDetailsModel(props);
+  const renderRow = useThreadAgentRowRenderer(props);
+  if (summary.active.length === 0) return null;
+  return (
+    <ul aria-label="Running agents" className="m-0 list-none p-0">
+      {summary.active.map(renderRow)}
+    </ul>
+  );
+}
+
+function ThreadLineageSection(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly summary: ThreadAgentsSummary;
+  readonly canDetach: boolean;
+  readonly onOpenThread: (threadId: string) => void;
+  readonly children: ReactNode;
+}) {
+  const [detaching, setDetaching] = useState(false);
+  const stopSession = useAtomCommand(threadEnvironment.stopSession, { reportFailure: false });
+  const { summary } = props;
+  const renderRow = useThreadAgentRowRenderer(props);
+
   const detach = async () => {
     if (detaching) return;
     setDetaching(true);
@@ -562,19 +606,6 @@ function ThreadLineageSection(props: {
       toastManager.add({ type: "error", title: "Could not disconnect the agent session" });
     }
   };
-
-  const renderRow = (row: ThreadAgentRow) => (
-    <ThreadAgentListRow
-      key={row.key}
-      row={row}
-      providers={providers}
-      accentColor={markColorByInstanceId.get(row.providerInstanceId ?? "")}
-      stopping={stoppingKey === row.key}
-      stopDisabled={stoppingKey !== null}
-      onStop={(target) => void stop(row, target)}
-      onOpenThread={props.onOpenThread}
-    />
-  );
 
   return (
     <ThreadDetailsSection
@@ -795,7 +826,7 @@ function ThreadAgentListRow(props: {
               {props.stopping ? (
                 <Spinner size="sm" aria-hidden />
               ) : (
-                <SquareIcon aria-hidden className="size-3 fill-current" />
+                <StopGlyph className="size-3.5" />
               )}
             </TooltipTrigger>
             <TooltipPopup side="left">Stop</TooltipPopup>

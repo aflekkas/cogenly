@@ -120,6 +120,16 @@ function previewProfileName(
 
 const localApi = typeof window === "undefined" ? null : ensureLocalApi();
 
+/** The "Screenshot saved" toast still on screen, so back-to-back captures share it. */
+let openScreenshotToast: {
+  readonly id: ReturnType<typeof toastManager.add>;
+  count: number;
+} | null = null;
+
+function screenshotToastTitle(count: number): string {
+  return count > 1 ? `${count} screenshots saved` : "Screenshot saved";
+}
+
 /** Resolves stream access only while a server tab shows a file it downloaded. */
 function ServerTabFileNotShown(props: {
   readonly threadRef: ScopedThreadRef;
@@ -735,58 +745,37 @@ export function PreviewView({
             children: revealInFileExplorerLabel(navigator.platform),
             onClick: () => void bridge.revealArtifact(artifact.path),
           };
+          // Captures taken while the last one's toast is still up update it
+          // with a count; its actions act on the newest screenshot.
+          const count = (openScreenshotToast?.count ?? 0) + 1;
           let pathCopied = false;
-          let imageCopied = false;
           let toastId: ReturnType<typeof toastManager.add>;
 
-          const updateScreenshotToast = (
+          const screenshotToast = (
             type: "success" | "error" = "success",
-            title = "Screenshot saved",
+            title = screenshotToastTitle(count),
             description?: string,
-          ) => {
-            toastManager.update(
-              toastId,
-              stackedThreadToast({
-                type,
-                title,
-                description,
-                actionProps: {
-                  children: imageCopied ? "Copied" : "Copy image",
-                  disabled: imageCopied,
-                  onClick: copyImage,
+          ) =>
+            stackedThreadToast({
+              type,
+              title,
+              description,
+              actionProps: revealAction,
+              data: {
+                secondaryActionProps: {
+                  children: pathCopied ? "Copied" : "Copy path",
+                  disabled: pathCopied,
+                  onClick: copyPath,
                 },
-                data: {
-                  additionalActions: [
-                    {
-                      id: "copy-path",
-                      props: {
-                        children: pathCopied ? "Copied" : "Copy path",
-                        disabled: pathCopied,
-                        onClick: copyPath,
-                      },
-                    },
-                  ],
-                  secondaryActionProps: {
-                    ...revealAction,
-                  },
-                  secondaryActionVariant: "outline",
-                },
-              }),
-            );
-          };
+                secondaryActionVariant: "outline",
+              },
+            });
 
           const pathFeedback = createCopyFeedback({
             resetMs: COPY_FEEDBACK_MS,
             onStatus: (status) => {
               pathCopied = status === "copied";
-              updateScreenshotToast();
-            },
-          });
-          const imageFeedback = createCopyFeedback({
-            resetMs: COPY_FEEDBACK_MS,
-            onStatus: (status) => {
-              imageCopied = status === "copied";
-              updateScreenshotToast();
+              toastManager.update(toastId, screenshotToast());
             },
           });
           const copyPath = () => {
@@ -794,48 +783,25 @@ export function PreviewView({
               .run(() => writeTextToClipboard(artifact.path, "screenshot path"))
               .then((outcome) => {
                 if (outcome.kind !== "failed") return;
-                updateScreenshotToast(
-                  "error",
-                  "Unable to copy screenshot path",
-                  outcome.error.message,
+                toastManager.update(
+                  toastId,
+                  screenshotToast("error", "Unable to copy screenshot path", outcome.error.message),
                 );
               });
           };
 
-          const copyImage = () => {
-            void imageFeedback
-              .run(() => bridge.copyArtifactToClipboard(artifact.path).then(() => true))
-              .then((outcome) => {
-                if (outcome.kind !== "failed") return;
-                updateScreenshotToast("error", "Unable to copy screenshot", outcome.error.message);
-              });
-          };
-
-          toastId = toastManager.add(
-            stackedThreadToast({
-              type: "success",
-              title: "Screenshot saved",
-              actionProps: {
-                children: "Copy image",
-                onClick: copyImage,
+          if (openScreenshotToast) {
+            toastId = openScreenshotToast.id;
+            toastManager.update(toastId, screenshotToast());
+          } else {
+            toastId = toastManager.add({
+              ...screenshotToast(),
+              onRemove: () => {
+                if (openScreenshotToast?.id === toastId) openScreenshotToast = null;
               },
-              data: {
-                additionalActions: [
-                  {
-                    id: "copy-path",
-                    props: {
-                      children: "Copy path",
-                      onClick: copyPath,
-                    },
-                  },
-                ],
-                secondaryActionProps: {
-                  ...revealAction,
-                },
-                secondaryActionVariant: "outline",
-              },
-            }),
-          );
+            });
+          }
+          openScreenshotToast = { id: toastId, count };
         },
         (error) => {
           toastManager.add({

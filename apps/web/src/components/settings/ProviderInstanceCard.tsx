@@ -25,6 +25,7 @@ import {
   type ProviderInstanceId,
   type EnvironmentId,
   type ProviderDriverKind,
+  type ProviderOptionSelection,
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
@@ -620,6 +621,11 @@ interface ProviderInstanceCardProps {
     affectedModels?: ReadonlyArray<string>,
   ) => void;
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void;
+  /** Per-model default reasoning effort, keyed by model slug. */
+  readonly effortDefaults?: Readonly<Record<string, ProviderOptionSelection>> | undefined;
+  readonly onEffortDefaultChange?:
+    | ((slug: string, option: ProviderOptionSelection | null) => void)
+    | undefined;
   readonly onRunUpdate?: (() => void) | undefined;
   readonly onInstallRecommended?: (() => void) | undefined;
   readonly isUpdating?: boolean | undefined;
@@ -670,6 +676,8 @@ export function ProviderInstanceCard({
   modelOrder,
   onHiddenModelsChange,
   onModelOrderChange,
+  effortDefaults,
+  onEffortDefaultChange,
   onRunUpdate,
   onInstallRecommended,
   isUpdating = false,
@@ -1255,6 +1263,8 @@ export function ProviderInstanceCard({
               onChange={updateCustomModels}
               onHiddenModelsChange={onHiddenModelsChange}
               onModelOrderChange={onModelOrderChange}
+              {...(effortDefaults ? { effortDefaults } : {})}
+              {...(onEffortDefaultChange ? { onEffortDefaultChange } : {})}
             />
           </div>
         </SettingsSection>

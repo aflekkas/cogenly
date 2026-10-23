@@ -10,6 +10,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
+  ChevronLeftIcon,
   MoreHorizontalIcon,
   PaletteIcon,
   PencilIcon,
@@ -17,9 +18,8 @@ import {
   SquarePenIcon,
   TrashIcon,
 } from "lucide-react";
-import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 
-import { isElectron } from "../../env";
 import { useScratchProject } from "../../hooks/useScratchProject";
 import { useSidebarProjectGroups } from "../../hooks/useSidebarProjectGroups";
 import { useClientSettings } from "../../hooks/useSettings";
@@ -30,6 +30,11 @@ import {
   useEnvironmentRepositories,
 } from "../../projectLabels/ProjectLabelEditorDialog";
 import { ProjectFolderIcon } from "../../projectLabels/ProjectFolderMark";
+import { ProjectSourceLinksDialog } from "../../projectLabels/ProjectSourceLinks";
+import {
+  projectExtraSourceLinks,
+  projectGitHubOrg,
+} from "../../projectLabels/projectSourceLinks.logic";
 import {
   PROJECT_LABEL_COLORS,
   projectLabelKey,
@@ -58,22 +63,19 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
+import { GitHubIcon } from "../Icons";
 import { OverlayPresence } from "../ui/overlay-presence";
 import { ScrollArea } from "../ui/scroll-area";
-import { SidebarInset } from "../ui/sidebar";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
-import { WorkspacePageHeader } from "../WorkspacePageHeader";
-import { WorkspacePageTitle } from "../WorkspacePageTitle";
 import {
   AgentsCard,
   FilesCard,
-  InstructionsCard,
   RecentCard,
   RepositoriesCard,
   SourcesCard,
 } from "./ProjectHomeCards";
 import { sortRecentFirst } from "./projectPanel.logic";
-import { useProjectInstructions } from "./useProjectInstructions";
+import { PROJECTS_SETTINGS_PATH } from "./ProjectsOverview";
 import { useProjectResources } from "./useProjectResources";
 
 /**
@@ -211,29 +213,31 @@ function ProjectHeaderMenu(props: {
   );
 }
 
+/** One card in the page's balanced columns: kept whole, with the column gap below it. */
+function ProjectCardSlot(props: { readonly children: ReactNode }) {
+  return <div className="mb-3 break-inside-avoid">{props.children}</div>;
+}
+
 /** Recent shows every chat and Work filed in the project. */
 const NOTHING_EXCLUDED: ReadonlySet<string> = new Set();
 
 /**
- * One project's page, opened from the Projects page like a Usage-style page:
- * a header with its name and actions, then the cards it is built from
- * (instructions, repositories, sources, files, recent threads, agents) in a
- * grid that scrolls with the page. Conversation about the project happens in
- * any thread: agents edit all of it with the project tools. Picking another
- * project fades the new page in.
+ * One project's page in Settings → Projects: a row with its name, GitHub org
+ * and actions, then the cards it is built from (repositories, recent threads,
+ * sources, files, agents) in balanced columns that scroll with the page.
+ * Instructions, like everything else here, are something any thread's agent
+ * sets with the project tools. Picking another project fades the new page in.
  */
 export function ProjectView(props: {
   readonly environmentId: EnvironmentId;
   readonly labelId: ProjectLabelId;
 }) {
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
-      <ProjectPage
-        key={projectLabelKey(props.environmentId, props.labelId)}
-        environmentId={props.environmentId}
-        labelId={props.labelId}
-      />
-    </SidebarInset>
+    <ProjectPage
+      key={projectLabelKey(props.environmentId, props.labelId)}
+      environmentId={props.environmentId}
+      labelId={props.labelId}
+    />
   );
 }
 
@@ -276,7 +280,7 @@ function ProjectPage(props: {
   );
   const chats = useMemo(() => sortRecentFirst(contents?.chats ?? [], chatActivityAt), [contents]);
   const work = useMemo(() => sortRecentFirst(contents?.work ?? [], chatActivityAt), [contents]);
-  const instructions = useProjectInstructions(environmentId, label);
+  const [editingSources, setEditingSources] = useState(false);
 
   const openRepositorySettings = (repositoryId: ProjectId) => {
     const group = projectGroups.find((candidate) =>
@@ -304,8 +308,9 @@ function ProjectPage(props: {
       reportProjectFolderFailure(failure, result);
     }
   };
+  const backToProjects = () => void navigate({ to: PROJECTS_SETTINGS_PATH });
   // The deleted project's page is gone, so it leaves no history entry to return to.
-  const leave = () => void navigate({ to: "/project", replace: true });
+  const leave = () => void navigate({ to: PROJECTS_SETTINGS_PATH, replace: true });
   const remove = async () => {
     if (label === null) return;
     if (await deleteFolder(environmentId, label)) leave();
@@ -323,7 +328,6 @@ function ProjectPage(props: {
             ];
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader electron={isElectron} />
         <div className="swap-motion flex flex-col gap-1 px-6 pt-4">
           <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
           {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
@@ -332,12 +336,19 @@ function ProjectPage(props: {
     );
   }
 
+  const org = projectGitHubOrg(label.sourceLinks);
+  const showSources = org === null || projectExtraSourceLinks(label.sourceLinks).length > 0;
+
   return (
     <div className="swap-motion flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-      <WorkspacePageHeader electron={isElectron}>
-        {/* The leading title sits in the titlebar after back/forward, like every page's. */}
-        <WorkspacePageTitle>
-          <div className="flex min-w-0 items-center gap-2 [-webkit-app-region:no-drag]">
+      {/* The cards give keyboard access, so the viewport stays out of the tab order. */}
+      <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
+        <WorkspacePageContainer width="expanded">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <Button size="sm" variant="ghost-muted" onClick={backToProjects}>
+              <ChevronLeftIcon />
+              Projects
+            </Button>
             <ProjectFolderIcon color={label.color} className="size-4 shrink-0" />
             <ProjectNameEditor
               key={label.name}
@@ -358,86 +369,112 @@ function ProjectPage(props: {
                   .join(" · ")}
               </span>
             ) : null}
-          </div>
-        </WorkspacePageTitle>
-        <span className="ms-auto flex shrink-0 items-center gap-1">
-          {archive.archived ? (
-            <span key="unarchive" className="swap-motion flex">
+            <span className="ms-auto flex shrink-0 items-center gap-1">
+              {/* The project's GitHub org, its one GitHub setting; agents and the
+                  repository picker search it. */}
               <Button
                 size="sm"
-                variant="ghost"
-                disabled={!archive.canArchive}
-                onClick={() => void archive.setArchived(false)}
+                variant="ghost-muted"
+                disabled={!canEdit}
+                aria-label={org === null ? "Set GitHub org" : `GitHub org: ${org}. Change`}
+                onClick={() => setEditingSources(true)}
               >
-                <ArchiveRestoreIcon />
-                Unarchive
+                <GitHubIcon />
+                {org ?? "Set GitHub org"}
               </Button>
+              {archive.archived ? (
+                <span key="unarchive" className="swap-motion flex">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={!archive.canArchive}
+                    onClick={() => void archive.setArchived(false)}
+                  >
+                    <ArchiveRestoreIcon />
+                    Unarchive
+                  </Button>
+                </span>
+              ) : null}
+              <ProjectHeaderMenu
+                label={label}
+                canEdit={canEdit}
+                canDelete={canDelete}
+                archived={archive.archived}
+                canArchive={archive.canArchive}
+                onNewChat={() =>
+                  void startScratchThread(environmentId, {
+                    surface: "chat",
+                    projectFolderId: labelId,
+                  })
+                }
+                onRename={() => setRenaming(true)}
+                onRecolor={(color) =>
+                  void update(
+                    { color: projectLabelPaletteColor(color) },
+                    `Could not recolor ${label.name}`,
+                  )
+                }
+                onEditDetails={() => setEditingDetails(true)}
+                onToggleArchived={() => void archive.setArchived(!archive.archived)}
+                onDelete={() => void remove()}
+              />
             </span>
-          ) : null}
-          <ProjectHeaderMenu
-            label={label}
-            canEdit={canEdit}
-            canDelete={canDelete}
-            archived={archive.archived}
-            canArchive={archive.canArchive}
-            onNewChat={() =>
-              void startScratchThread(environmentId, {
-                surface: "chat",
-                projectFolderId: labelId,
-              })
-            }
-            onRename={() => setRenaming(true)}
-            onRecolor={(color) =>
-              void update(
-                { color: projectLabelPaletteColor(color) },
-                `Could not recolor ${label.name}`,
-              )
-            }
-            onEditDetails={() => setEditingDetails(true)}
-            onToggleArchived={() => void archive.setArchived(!archive.archived)}
-            onDelete={() => void remove()}
-          />
-        </span>
-      </WorkspacePageHeader>
-      {/* The cards give keyboard access, so the viewport stays out of the tab order. */}
-      <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
-        <WorkspacePageContainer width="expanded">
-          {/* Each card sizes to its content (items-start), so none is clipped. */}
+          </div>
+          {/* Balanced columns: each card sizes to its content and the next one
+              fills under the shortest column, so no gap opens under a short card. */}
           <section
             aria-label={`${label.name} details`}
-            className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3"
+            className="columns-1 gap-3 md:columns-2 xl:columns-3"
           >
-            <div className="md:col-span-2 xl:col-span-3">
-              <InstructionsCard instructions={instructions} canEdit={canEdit} />
-            </div>
-            <RepositoriesCard
-              environmentId={environmentId}
-              label={label}
-              folder={entry}
-              repositories={repositories}
-              linkedRepositories={linkedRepositories}
-              folderByRepository={directory.folderByRepository}
-              onOpenRepository={openRepositorySettings}
-            />
-            <SourcesCard environmentId={environmentId} label={label} />
-            <FilesCard
-              environmentId={environmentId}
-              label={label}
-              resources={files.resources}
-              loaded={files.isLoaded}
-              error={files.error}
-            />
-            <RecentCard
-              environmentId={environmentId}
-              label={label}
-              chats={chats}
-              work={work}
-              exclude={NOTHING_EXCLUDED}
-            />
-            <AgentsCard environmentId={environmentId} label={label} />
+            <ProjectCardSlot>
+              <RepositoriesCard
+                environmentId={environmentId}
+                label={label}
+                folder={entry}
+                repositories={repositories}
+                linkedRepositories={linkedRepositories}
+                folderByRepository={directory.folderByRepository}
+                onOpenRepository={openRepositorySettings}
+              />
+            </ProjectCardSlot>
+            <ProjectCardSlot>
+              <RecentCard
+                environmentId={environmentId}
+                label={label}
+                chats={chats}
+                work={work}
+                exclude={NOTHING_EXCLUDED}
+              />
+            </ProjectCardSlot>
+            <ProjectCardSlot>
+              <AgentsCard environmentId={environmentId} label={label} />
+            </ProjectCardSlot>
+            {showSources ? (
+              <ProjectCardSlot>
+                <SourcesCard environmentId={environmentId} label={label} />
+              </ProjectCardSlot>
+            ) : null}
+            <ProjectCardSlot>
+              <FilesCard
+                environmentId={environmentId}
+                label={label}
+                resources={files.resources}
+                loaded={files.isLoaded}
+                error={files.error}
+              />
+            </ProjectCardSlot>
           </section>
         </WorkspacePageContainer>
       </ScrollArea>
+      <OverlayPresence when={editingSources && label}>
+        {(label) => (
+          <ProjectSourceLinksDialog
+            environmentId={environmentId}
+            label={label}
+            onClose={() => setEditingSources(false)}
+          />
+        )}
+      </OverlayPresence>
       <OverlayPresence when={editingDetails && label}>
         {(label) => (
           <ProjectLabelEditorDialog

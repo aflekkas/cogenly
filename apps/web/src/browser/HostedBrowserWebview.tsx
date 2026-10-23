@@ -19,7 +19,10 @@ import { browserViewportSettingKey } from "./browserViewportLayout";
 import { BrowserDeviceToolbar } from "./BrowserDeviceToolbar";
 import { BrowserViewportResizeHandles } from "./BrowserViewportResizeHandles";
 import { acquireDesktopTab, type AcquiredDesktopTab, withDesktopTab } from "./desktopTabLifetime";
-import { resolveHostedBrowserWebviewWrapperStyle } from "./hostedBrowserWebviewStyle";
+import {
+  hostedBrowserWebviewSurface,
+  resolveHostedBrowserWebviewWrapperStyle,
+} from "./hostedBrowserWebviewStyle";
 import { usePreviewWebviewConfig } from "./previewWebviewConfigState";
 import { useBrowserViewportResize } from "./useBrowserViewportResize";
 import {
@@ -34,6 +37,8 @@ interface ElectronWebview extends HTMLElement {
   preload?: string;
   webpreferences?: string;
   getWebContentsId: () => number;
+  getURL: () => string;
+  isLoading: () => boolean;
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
 }
 
@@ -206,6 +211,51 @@ export function HostedBrowserWebview(props: {
     };
   }, [clientSettingsHydrated, config, initialSrc, runtimeTabId, webviewGeneration]);
 
+  // A guest paints nothing until its page loads, so the webview's own
+  // background shows: the app theme then, white behind a loaded page.
+  const [surfaceState, setSurfaceState] = useState<{
+    readonly generation: number;
+    readonly tone: "theme" | "page";
+  }>({ generation: 0, tone: "theme" });
+  const surface = surfaceState.generation === webviewGeneration ? surfaceState.tone : "theme";
+  useEffect(() => {
+    const generation = webviewGeneration;
+    const setSurface = (tone: "theme" | "page") => setSurfaceState({ generation, tone });
+    const webview = webviewRef.current;
+    if (!clientSettingsHydrated || !webview || !config) return;
+    const readUrl = () => {
+      try {
+        return webview.getURL();
+      } catch {
+        return null;
+      }
+    };
+    const startNavigation = (event: Event) => {
+      const details = event as Event & { isMainFrame?: boolean; isInPlace?: boolean };
+      if (details.isMainFrame === false || details.isInPlace === true) return;
+      setSurface("theme");
+    };
+    const finishLoad = () =>
+      setSurface(hostedBrowserWebviewSurface({ loading: false, url: readUrl() }));
+    // A page that finished loading before these listeners attached.
+    const frame = window.requestAnimationFrame(() => {
+      let loading = true;
+      try {
+        loading = webview.isLoading();
+      } catch {
+        // Not attached yet: did-finish-load will report it.
+      }
+      if (!loading) finishLoad();
+    });
+    webview.addEventListener("did-start-navigation", startNavigation);
+    webview.addEventListener("did-finish-load", finishLoad);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      webview.removeEventListener("did-start-navigation", startNavigation);
+      webview.removeEventListener("did-finish-load", finishLoad);
+    };
+  }, [clientSettingsHydrated, config, webviewGeneration]);
+
   const active = presentation.visible && presentation.rect !== null;
   const lastRect = presentation.rect;
   const normalizedZoomFactor = Number.isFinite(zoomFactor) && zoomFactor > 0 ? zoomFactor : 1;
@@ -340,7 +390,8 @@ export function HostedBrowserWebview(props: {
           }
           aria-hidden={active ? undefined : true}
           className={cn(
-            "absolute flex overflow-hidden bg-white",
+            "absolute flex overflow-hidden",
+            surface === "page" ? "bg-white" : "bg-background",
             active && !layout.fillsPanel && "ring-1 ring-border/70 shadow-sm",
           )}
           style={{

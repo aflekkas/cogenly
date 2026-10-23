@@ -1,11 +1,23 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
-import { validateProjectsOverviewSearch } from "../components/projects/ProjectsOverview";
+import {
+  ProjectsOverview,
+  validateProjectsOverviewSearch,
+} from "../components/projects/ProjectsOverview";
+import { ProjectView } from "../components/projects/ProjectView";
 
-// Projects moved out of Settings into the sidebar; old links land on the overview.
+// Settings → Projects: the grid, or one project's page when the search names it.
+function ProjectsSettingsRoute() {
+  const search = Route.useSearch();
+  if (search.projectEnvironmentId !== undefined && search.projectLabelId !== undefined) {
+    return (
+      <ProjectView environmentId={search.projectEnvironmentId} labelId={search.projectLabelId} />
+    );
+  }
+  return <ProjectsOverview {...search} />;
+}
+
 export const Route = createFileRoute("/settings/project-tags")({
   validateSearch: validateProjectsOverviewSearch,
-  beforeLoad: ({ search }) => {
-    throw redirect({ to: "/project", search, replace: true });
-  },
+  component: ProjectsSettingsRoute,
 });

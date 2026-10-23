@@ -14,6 +14,7 @@ import {
 export type SettingsPath =
   | "/settings/projects"
   | "/settings/general"
+  | "/settings/project-tags"
   | "/settings/memory"
   | "/settings/diagnostics"
   | "/settings/appearance"
@@ -94,6 +95,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/diagnostics": "Diagnostics",
   "/settings/projects": "Repository",
   "/settings/general": "General",
+  "/settings/project-tags": "Projects",
   "/settings/memory": "Memory",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
@@ -245,12 +247,35 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["new thread project provider reasoning effort"],
   },
   {
+    // The Appearance page as a whole; its rows below land on themselves.
+    id: "appearance",
+    title: "Appearance",
+    to: "/settings/appearance",
+    searchTerms: ["look theme colors display"],
+  },
+  {
     id: "color-scheme",
     title: "Color scheme",
     to: "/settings/appearance",
-    searchTerms: ["appearance light dark system mode"],
-    // The scheme tiles sit at the top of the Appearance section.
-    targetId: "appearance",
+    searchTerms: ["appearance light dark system mode theme"],
+  },
+  {
+    id: "accent-color",
+    title: "Accent color",
+    to: "/settings/appearance",
+    searchTerms: ["appearance theme brand primary color orange blue violet green pink"],
+  },
+  {
+    id: "font-size",
+    title: "Font size",
+    to: "/settings/appearance",
+    searchTerms: ["appearance text size zoom small large scale"],
+  },
+  {
+    id: "reduce-motion",
+    title: "Reduce motion",
+    to: "/settings/appearance",
+    searchTerms: ["appearance animation motion accessibility"],
   },
   {
     id: "project-grouping",
@@ -798,6 +823,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/archived",
     searchTerms: ["restore reopen deleted history projects"],
   },
+  {
+    id: "project-folders",
+    title: "Projects",
+    to: "/settings/project-tags",
+    searchTerms: ["folders new project archive github org sources files agents repositories"],
+  },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 
 export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
@@ -808,6 +839,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/diagnostics": "environment",
   "/settings/projects": "project",
   "/settings/general": null,
+  "/settings/project-tags": null,
   "/settings/memory": null,
   "/settings/data": null,
   "/settings/import": null,

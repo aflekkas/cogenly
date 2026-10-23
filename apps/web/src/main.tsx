@@ -12,6 +12,7 @@ import { getRouter } from "./router";
 import { installNavigationHistoryTracker } from "./navigationHistory";
 import { installDocumentVisibilityAttribute } from "./lib/documentVisibility";
 import { installInputModalityAttribute } from "./lib/inputModality";
+import { installAppearancePreferences } from "./appearancePreferences";
 import {
   syncDocumentElectronPlatformClasses,
   syncDocumentWindowControlsOverlayClass,
@@ -28,6 +29,7 @@ const history = isElectron ? createHashHistory() : createBrowserHistory();
 installNavigationHistoryTracker(history);
 installDocumentVisibilityAttribute();
 installInputModalityAttribute();
+installAppearancePreferences();
 
 const router = getRouter(history);
 

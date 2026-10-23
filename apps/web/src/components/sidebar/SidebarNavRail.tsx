@@ -9,7 +9,7 @@
  */
 import { useAtomValue } from "@effect/atom-react";
 import { PanelLeft, PanelLeftClose } from "lucide";
-import { ChartNoAxesColumnIcon, FolderIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { ChartNoAxesColumnIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement,
@@ -34,7 +34,7 @@ import { primaryServerKeybindingsAtom } from "../../state/server";
 import { useUiStateStore } from "../../uiStateStore";
 import { useSidebar, useSidebarVisibility } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { isProjectsPage, isSidebarUtilityPage } from "./mainAppLocation";
+import { isSidebarUtilityPage } from "./mainAppLocation";
 import { routeHidesListColumn, SIDEBAR_TOGGLE_DISABLED_LABEL } from "./listColumnRoutes";
 import { SIDEBAR_MODE_ICONS } from "./modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./modes/sidebarModes.logic";
@@ -102,8 +102,7 @@ export function SidebarNavRail({
   const onUtilityPage = isSidebarUtilityPage(pathname);
   const onSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const onUsage = pathname === "/usage";
-  const onProjects = isProjectsPage(pathname);
-  // Usage, Projects and an empty Agents list have no list column, so the
+  // Usage and an empty Agents list have no list column, so the
   // toggle stays in place but disabled there.
   const agentsEmpty = useAgentsEmpty();
   const listColumnHidden = routeHidesListColumn(pathname, {
@@ -113,8 +112,6 @@ export function SidebarNavRail({
     context: { usagePageOpen: onUsage },
   });
   const searchShortcut = shortcutLabelForCommand(keybindings, "commandPalette.toggle");
-  // Stored under the old mode command's id; it opens the Projects page now.
-  const projectsShortcut = shortcutLabelForCommand(keybindings, "sidebar.mode.projects");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   // Hovering the toggle floats the collapsed list column out from under the
   // rail (ListColumnPeek); clicking it docks the column.
@@ -265,19 +262,6 @@ export function SidebarNavRail({
             className={cn(RAIL_BUTTON_CLASS, railButtonTone(false))}
           >
             <SearchIcon aria-hidden />
-          </button>
-        </RailTooltip>
-        <RailTooltip label={projectsShortcut ? `Projects (${projectsShortcut})` : "Projects"}>
-          <button
-            type="button"
-            aria-label="Projects"
-            aria-current={onProjects ? "page" : undefined}
-            // Projects again from a project's page goes back to the grid.
-            onClick={() => void navigate({ to: "/project" })}
-            {...preloadOnIntent("projects")}
-            className={cn(RAIL_BUTTON_CLASS, railButtonTone(onProjects))}
-          >
-            <FolderIcon aria-hidden />
           </button>
         </RailTooltip>
         <RailTooltip label="Usage">

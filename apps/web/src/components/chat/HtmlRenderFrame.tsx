@@ -150,35 +150,13 @@ export function HtmlRenderFrame(props: {
   }, [cacheFailed, cachedExpiresAt, cachedUrl, refresh, src]);
 
   return (
-    <div ref={boxRef} className="group/html-render relative" style={{ height }}>
-      {!ready && !failed ? (
-        <HtmlRenderSkeleton
-          title={title}
-          height={height}
-          outline={htmlRenderOutlineBoxes(props.htmlRender, width)}
-        />
-      ) : null}
-      {src !== null ? (
-        <>
-          <HtmlRenderDocument
-            src={src}
-            title={title}
-            threadRef={props.threadRef}
-            renderId={attachmentId}
-            className={cn(
-              "block size-full motion-safe:transition-opacity motion-safe:duration-200",
-              !ready && "opacity-0",
-            )}
-            onContentHeight={fitPage}
-            onLoad={showPage}
-            onFullscreenChange={onFullscreenChange}
-          />
-          {submitted ? (
-            <div className="pointer-events-none absolute end-2 top-2 transition-opacity duration-150 group-hover/html-render:opacity-0">
-              <HtmlRenderSubmittedBadge />
-            </div>
-          ) : null}
-          <div className="absolute end-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100">
+    // The frame's chrome sits in a slim row above the page, never over it: a
+    // page's own controls often live in its top corner.
+    <div className="group/html-render">
+      <div className="flex h-7 items-center justify-end gap-1.5">
+        {submitted ? <HtmlRenderSubmittedBadge /> : null}
+        {src !== null ? (
+          <div className="flex opacity-0 transition-opacity duration-(--motion-duration-fast) ease-standard focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100">
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -207,24 +185,48 @@ export function HtmlRenderFrame(props: {
               <TooltipPopup side="left">Open full screen</TooltipPopup>
             </Tooltip>
           </div>
-          <OverlayPresence when={expandedSrc}>
-            {(expandedSrc) => (
-              <HtmlRenderDialog
-                src={expandedSrc}
-                title={title}
-                threadRef={props.threadRef}
-                renderId={attachmentId}
-                submitted={submitted}
-                onClose={() => setExpandedSrc(null)}
-              />
+        ) : null}
+      </div>
+      <div ref={boxRef} className="relative" style={{ height }}>
+        {!ready && !failed ? (
+          <HtmlRenderSkeleton
+            title={title}
+            height={height}
+            outline={htmlRenderOutlineBoxes(props.htmlRender, width)}
+          />
+        ) : null}
+        {src !== null ? (
+          <HtmlRenderDocument
+            src={src}
+            title={title}
+            threadRef={props.threadRef}
+            renderId={attachmentId}
+            className={cn(
+              "block size-full motion-safe:transition-opacity motion-safe:duration-200",
+              !ready && "opacity-0",
             )}
-          </OverlayPresence>
-        </>
-      ) : failed ? (
-        <p className="flex size-full items-center justify-center text-muted-foreground text-xs">
-          Unable to load {title}
-        </p>
-      ) : null}
+            onContentHeight={fitPage}
+            onLoad={showPage}
+            onFullscreenChange={onFullscreenChange}
+          />
+        ) : failed ? (
+          <p className="flex size-full items-center justify-center text-muted-foreground text-xs">
+            Unable to load {title}
+          </p>
+        ) : null}
+      </div>
+      <OverlayPresence when={expandedSrc}>
+        {(expandedSrc) => (
+          <HtmlRenderDialog
+            src={expandedSrc}
+            title={title}
+            threadRef={props.threadRef}
+            renderId={attachmentId}
+            submitted={submitted}
+            onClose={() => setExpandedSrc(null)}
+          />
+        )}
+      </OverlayPresence>
     </div>
   );
 }

@@ -1,18 +1,18 @@
 import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { ProjectView } from "../components/projects/ProjectView";
+import { projectSettingsSearch } from "../components/projects/ProjectsOverview";
 
-function ProjectRoute() {
-  const { environmentId, labelId } = Route.useParams();
-  return (
-    <ProjectView
-      environmentId={environmentId as EnvironmentId}
-      labelId={labelId as ProjectLabelId}
-    />
-  );
-}
-
+// A project's page lives in Settings → Projects; links to the old page land there.
 export const Route = createFileRoute("/_chat/project/$environmentId/$labelId")({
-  component: ProjectRoute,
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/settings/project-tags",
+      search: projectSettingsSearch(
+        params.environmentId as EnvironmentId,
+        params.labelId as ProjectLabelId,
+      ),
+      replace: true,
+    });
+  },
 });

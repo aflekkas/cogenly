@@ -217,7 +217,7 @@ export function DevicePanel(props: {
               }
             />
           ) : (
-            <div className="scrollbar-gutter-both flex size-full flex-col overflow-y-auto px-5 py-8 text-sm text-muted-foreground">
+            <div className="scroll-fade-y scrollbar-gutter-both flex size-full flex-col overflow-y-auto px-5 py-8 text-sm text-muted-foreground">
               <div
                 className={cn(
                   "mx-auto flex w-full max-w-xl flex-col gap-6",

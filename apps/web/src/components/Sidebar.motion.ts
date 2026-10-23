@@ -1,9 +1,5 @@
 // Matches --motion-duration-base and ease-standard in index.css.
 const motionTiming = { duration: 220, easing: "cubic-bezier(0.32, 0.72, 0, 1)" };
-// Rows normally ride their displaced neighbour's travel. Absent a moving
-// neighbour, a row still travels on its own, clamped so a tall card does not
-// slide its full height.
-const rowTravel = (height: number) => Math.min(height, 40);
 // A project filter change or a bulk snooze swaps a large part of the list at
 // once. Fades are the expensive part: every removed row gets a deep clone and
 // every clone and entering row gets its own animation, and the layout reads
@@ -11,10 +7,10 @@ const rowTravel = (height: number) => Math.min(height, 40);
 // so only the fade count decides whether an update animates.
 const MAX_FADED_ROWS_PER_UPDATE = 40;
 
-// Section labels (Today, Pinned…) appear and leave in place with an opacity
-// fade: they travel only when they ride a block of rows that actually moves.
-const fadesInPlace = (node: HTMLElement) => node.hasAttribute("data-sidebar-group-label");
-
+/** `top` is where the row's layout box sits on screen (window coordinates, its
+ * own running transforms excluded), so a list that shifts as a whole between
+ * updates — a bottom-anchored list re-pinning its scroll, or a `justify-end`
+ * column shrinking — moves only the rows that actually moved on screen. */
 type RowPosition = { top: number; left: number; width: number; height: number };
 
 function progress(animation: Animation) {
@@ -27,6 +23,8 @@ function progress(animation: Animation) {
  * positioned so every direct child's offsetTop has the same origin. */
 export function createSidebarListMotion(parent: HTMLUListElement) {
   let positions: Map<HTMLElement, RowPosition> | null = null;
+  // Window y of the parent's offset origin, read once per update.
+  const frameTop = () => parent.getBoundingClientRect().top + parent.clientTop;
   let disposed = false;
   const reducedMotion = parent.ownerDocument.defaultView?.matchMedia(
     "(prefers-reduced-motion: reduce)",
@@ -49,7 +47,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     entering.clear();
     exiting.clear();
   };
-  const fadeOut = (node: HTMLElement, position: RowPosition, travel: number) => {
+  const fadeOut = (node: HTMLElement, position: RowPosition, travel: number, origin: number) => {
     if (position.height === 0) return;
     // React owns the removed row; only a noninteractive copy stays for the fade.
     const clone = node.cloneNode(true) as HTMLElement;
@@ -69,7 +67,8 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     clone.inert = true;
     Object.assign(clone.style, {
       position: "absolute",
-      top: `${position.top + remainingOffset(node)}px`,
+      // Where the row was on screen, in the parent's current coordinates.
+      top: `${position.top + remainingOffset(node) - origin}px`,
       left: `${position.left}px`,
       width: `${position.width}px`,
       height: `${position.height}px`,
@@ -130,14 +129,14 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     );
   };
 
-  const measure = () =>
+  const measure = (origin: number) =>
     new Map(
       Array.from(parent.children)
         .filter((node): node is HTMLElement => node instanceof HTMLElement && !exiting.has(node))
         .map((node) => [
           node,
           {
-            top: node.offsetTop,
+            top: origin + node.offsetTop,
             left: node.offsetLeft,
             width: node.offsetWidth,
             height: node.offsetHeight,
@@ -152,7 +151,8 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     update(animate: boolean, options?: { readonly inPlace?: boolean }) {
       const inPlace = options?.inPlace === true;
       if (disposed) return;
-      const next = measure();
+      const origin = frameTop();
+      const next = measure(origin);
       let fadeCount = 0;
       if (positions !== null) {
         for (const [node, position] of positions) {
@@ -196,17 +196,10 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         for (const [node, position] of positions!) {
           if (next.has(node)) continue;
           const delta = ridingDelta(oldOrder, oldOrder.indexOf(node), (n) => next.has(n));
-          fadeOut(
-            node,
-            position,
-            reduced
-              ? 0
-              : delta !== undefined
-                ? -delta
-                : fadesInPlace(node)
-                  ? 0
-                  : rowTravel(position.height),
-          );
+          // A leaving row fades where it stands, riding its neighbour above
+          // when that neighbour moves (so they never overlap); it never slides
+          // on its own.
+          fadeOut(node, position, reduced || delta === undefined ? 0 : -delta, origin);
         }
       }
       for (const [node, entry] of entering) {
@@ -225,13 +218,9 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
           if (previousTop === undefined) {
             if (position.height > 0) {
               const delta = ridingDelta(nextOrder, index, (n) => positions!.has(n));
-              const travel = reduced
-                ? 0
-                : delta !== undefined
-                  ? delta
-                  : fadesInPlace(node)
-                    ? 0
-                    : -rowTravel(position.height);
+              // An arriving row fades in where it lands, or rides the block it
+              // arrives with; it never rises on its own.
+              const travel = reduced || delta === undefined ? 0 : delta;
               const animation = node.animate(
                 [
                   { opacity: 0, transform: `translateY(${travel}px)` },
@@ -263,7 +252,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
      * carry on; nothing new animates. */
     remeasure() {
       if (disposed || positions === null) return;
-      positions = measure();
+      positions = measure(frameTop());
     },
     suspend,
     dispose() {

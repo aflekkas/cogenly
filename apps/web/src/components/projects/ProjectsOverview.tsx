@@ -1,12 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { FolderIcon, FolderPlusIcon, LaptopMinimalIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAgents } from "../../agents/agentsClient";
-import { isElectron } from "../../env";
-import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
 import { openCreateProjectDialog } from "../../projectLabels/CreateProjectDialogHost";
 import { ProjectFolderIcon } from "../../projectLabels/ProjectFolderMark";
 import { ProjectLabelEditorDialog } from "../../projectLabels/ProjectLabelEditorDialog";
@@ -33,11 +31,8 @@ import {
 } from "../ui/empty";
 import { OverlayPresence } from "../ui/overlay-presence";
 import { ScrollArea } from "../ui/scroll-area";
-import { SidebarInset } from "../ui/sidebar";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
-import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { latestProjectActivity, projectPanelSummary } from "./projectPanel.logic";
 import { useProjectFolderMenu } from "./useProjectFolderMenu";
 
@@ -45,7 +40,13 @@ export interface ProjectsOverviewSearch {
   readonly create?: true | undefined;
   /** The machine a new project is created on; defaults to the primary one. */
   readonly environmentId?: EnvironmentId | undefined;
+  /** The open project's machine and id: Settings → Projects shows its page instead of the grid. */
+  readonly projectEnvironmentId?: EnvironmentId | undefined;
+  readonly projectLabelId?: ProjectLabelId | undefined;
 }
+
+const nonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
 
 export function validateProjectsOverviewSearch(
   raw: Record<string, unknown>,
@@ -54,10 +55,23 @@ export function validateProjectsOverviewSearch(
     ...(raw.create === true || raw.create === "1" || raw.create === "true"
       ? { create: true as const }
       : {}),
-    ...(typeof raw.environmentId === "string" && raw.environmentId.length > 0
+    ...(nonEmptyString(raw.environmentId)
       ? { environmentId: raw.environmentId as EnvironmentId }
       : {}),
+    ...(nonEmptyString(raw.projectEnvironmentId) && nonEmptyString(raw.projectLabelId)
+      ? {
+          projectEnvironmentId: raw.projectEnvironmentId as EnvironmentId,
+          projectLabelId: raw.projectLabelId as ProjectLabelId,
+        }
+      : {}),
   };
+}
+
+/** Settings → Projects, or one project's page there. */
+export const PROJECTS_SETTINGS_PATH = "/settings/project-tags";
+
+export function projectSettingsSearch(environmentId: EnvironmentId, labelId: ProjectLabelId) {
+  return { projectEnvironmentId: environmentId, projectLabelId: labelId };
 }
 
 type ProjectsFilter = "active" | "archived";
@@ -127,12 +141,11 @@ function ProjectTile(props: {
 }
 
 /**
- * The Projects page, opened from the rail's footer like Usage: every project
- * across connected machines as a grid, the active ones or the archived ones.
- * A project opens its own page. `?create` opens the new-project dialog at once.
+ * Settings → Projects: every project across connected machines as a grid, the
+ * active ones or the archived ones. A project opens its page in the same
+ * section. `?create` opens the new-project dialog at once.
  */
 export function ProjectsOverview(props: ProjectsOverviewSearch) {
-  useEscapeToGoBack();
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const createEnvironmentId = props.environmentId ?? primaryEnvironmentId;
@@ -176,16 +189,15 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
   const shown = shownFilter === "archived" ? directory.archived : directory.active;
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
+    <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader electron={isElectron}>
-          <div className="flex w-full min-w-0 items-center gap-3 py-2">
-            <WorkspaceBreadcrumb ariaLabel="Projects breadcrumb" className="min-w-0">
-              <WorkspaceBreadcrumbItem current>
-                <h1>Projects</h1>
-              </WorkspaceBreadcrumbItem>
-            </WorkspaceBreadcrumb>
-            <span className="ms-auto flex shrink-0 items-center gap-2">
+        <WorkspacePageContainer width="expanded" className="pb-0">
+          <div className="flex w-full min-w-0 items-center gap-3">
+            <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+              Repositories, chats, Work, files and agents grouped by effort. Agents can change any
+              project from a thread.
+            </p>
+            <span className="flex shrink-0 items-center gap-2">
               {directory.archived.length > 0 ? (
                 <ToggleGroup
                   aria-label="Which projects"
@@ -211,7 +223,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               </Button>
             </span>
           </div>
-        </WorkspacePageHeader>
+        </WorkspacePageContainer>
 
         {/* The tiles give keyboard access, so the viewport stays out of the tab order. */}
         <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
@@ -265,8 +277,8 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                       environmentLabel={environmentLabel(entry.environmentId)}
                       onOpen={() =>
                         void navigate({
-                          to: "/project/$environmentId/$labelId",
-                          params: { environmentId: entry.environmentId, labelId: entry.label.id },
+                          to: PROJECTS_SETTINGS_PATH,
+                          search: projectSettingsSearch(entry.environmentId, entry.label.id),
                         })
                       }
                       onRename={() => setRenaming(entry)}
@@ -297,6 +309,6 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
           />
         )}
       </OverlayPresence>
-    </SidebarInset>
+    </>
   );
 }

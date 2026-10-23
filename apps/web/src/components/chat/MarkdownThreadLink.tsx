@@ -82,7 +82,7 @@ export function MarkdownThreadLink(props: {
           </Link>
         }
       />
-      <ThreadHoverCardPopup side="top">
+      <ThreadHoverCardPopup side="top" layer="content">
         <ThreadHoverCard title={title}>
           {shownProject ? (
             <div className="flex min-w-0 items-center gap-2">

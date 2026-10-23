@@ -83,6 +83,15 @@ describe("floating preview corners", () => {
     });
   });
 
+  it("keeps right corners clear of the minimap strip", () => {
+    expect(floatingPreviewCornerPosition("top-right", pane, card, { ...insets, right: 24 }).x).toBe(
+      1000 - 24 - 200 - 16,
+    );
+    expect(floatingPreviewCornerPosition("top-left", pane, card, { ...insets, right: 24 }).x).toBe(
+      16,
+    );
+  });
+
   it("never pushes a bottom corner above the top inset in a short pane", () => {
     const short = { width: 1000, height: 300 };
     expect(floatingPreviewCornerPosition("bottom-left", short, card, insets).y).toBe(56);

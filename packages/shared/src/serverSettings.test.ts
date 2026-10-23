@@ -53,6 +53,39 @@ describe("fallbackTextGenerationModelSelection", () => {
 });
 
 describe("serverSettings helpers", () => {
+  it("sets and clears one model's default effort without touching others", () => {
+    const codex = ProviderInstanceId.make("codex");
+    const set = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      setModelEffortDefault: {
+        provider: codex,
+        model: "gpt-6-astra",
+        option: { id: "reasoningEffort", value: "high" },
+      },
+    });
+    const both = applyServerSettingsPatch(set, {
+      setModelEffortDefault: {
+        provider: codex,
+        model: "gpt-6.1-sol",
+        option: { id: "reasoningEffort", value: "low" },
+      },
+    });
+    expect(both.modelEffortDefaults[codex]).toEqual({
+      "gpt-6-astra": { id: "reasoningEffort", value: "high" },
+      "gpt-6.1-sol": { id: "reasoningEffort", value: "low" },
+    });
+    const one = applyServerSettingsPatch(both, {
+      setModelEffortDefault: { provider: codex, model: "gpt-6-astra", option: null },
+    });
+    expect(one.modelEffortDefaults[codex]).toEqual({
+      "gpt-6.1-sol": { id: "reasoningEffort", value: "low" },
+    });
+    expect(
+      applyServerSettingsPatch(one, {
+        setModelEffortDefault: { provider: codex, model: "gpt-6.1-sol", option: null },
+      }).modelEffortDefaults,
+    ).toEqual({});
+  });
+
   it("changes a cleanup rule without replacing the machine's other rules", () => {
     const enabled = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       storageCleanup: { worktreeAfterDays: 8, worktreeOnMerge: true, logsAfterDays: 30 },

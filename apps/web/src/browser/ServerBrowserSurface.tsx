@@ -37,6 +37,12 @@ import {
 } from "react";
 
 import { AgentCursorMark } from "~/components/preview/AgentBrowserCursor";
+import {
+  composeFrames,
+  containFrame,
+  placeAgentTarget,
+  type AgentSurfaceRect,
+} from "~/components/preview/agentBrowserCursorLogic";
 import { CommandBlock } from "~/components/CommandBlock";
 import { Button } from "~/components/ui/button";
 import { Spinner } from "~/components/ui/spinner";
@@ -1256,6 +1262,7 @@ interface AgentCursorPlacement {
   readonly sequence: number;
   readonly left: number;
   readonly top: number;
+  readonly outline: AgentSurfaceRect | null;
 }
 
 /** Places the agent cursor over the letterboxed frame, the inverse of the viewer's own pointer mapping. */
@@ -1266,13 +1273,18 @@ function placeAgentCursor(
 ): AgentCursorPlacement | null {
   if (!canvas || !viewport || canvas.width < 1 || canvas.height < 1) return null;
   const box = { width: canvas.clientWidth, height: canvas.clientHeight };
-  const fit = Math.min(box.width / canvas.width, box.height / canvas.height);
-  const width = canvas.width * fit;
-  const height = canvas.height * fit;
+  // The frame letterboxes into the canvas box; page pixels then scale onto the frame.
+  const letterbox = containFrame({ width: canvas.width, height: canvas.height }, box);
+  if (!letterbox) return null;
+  const pageToFrame = {
+    offsetX: 0,
+    offsetY: 0,
+    scaleX: canvas.width / viewport.width,
+    scaleY: canvas.height / viewport.height,
+  };
   return {
     phase: pointer.phase,
     sequence: pointer.sequence,
-    left: (box.width - width) / 2 + (pointer.x * width) / viewport.width,
-    top: (box.height - height) / 2 + (pointer.y * height) / viewport.height,
+    ...placeAgentTarget(pointer, composeFrames(pageToFrame, letterbox)),
   };
 }

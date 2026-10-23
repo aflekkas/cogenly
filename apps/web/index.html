@@ -30,6 +30,16 @@
           document.documentElement.classList.add("dark");
           document.documentElement.style.colorScheme = "dark";
         }
+        // Accent, font size and reduced motion (src/appearancePreferences.ts).
+        try {
+          const prefs = JSON.parse(localStorage.getItem("cogenly:appearance-preferences") || "{}");
+          const root = document.documentElement;
+          const accents = ["blue", "violet", "green", "pink", "teal", "amber", "red"];
+          if (accents.includes(prefs.accent)) root.setAttribute("data-accent", prefs.accent);
+          if (prefs.fontSize === "small" || prefs.fontSize === "large")
+            root.setAttribute("data-font-size", prefs.fontSize);
+          if (prefs.motion === "reduce") root.setAttribute("data-reduce-motion", "");
+        } catch {}
       })();
     </script>
     <style>

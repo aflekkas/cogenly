@@ -507,6 +507,117 @@ export function resolvePromptInjectedEffort(
   return null;
 }
 
+/** Option ids providers use for reasoning effort (Codex and Muse, Claude, ACP providers). */
+export const REASONING_EFFORT_OPTION_IDS = ["reasoningEffort", "effort", "reasoning"] as const;
+
+type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
+
+/** A model's reasoning effort option, or null when it has none to configure. */
+export function findReasoningEffortDescriptor(
+  caps: ModelCapabilities | null | undefined,
+): SelectDescriptor | null {
+  for (const id of REASONING_EFFORT_OPTION_IDS) {
+    const descriptor = caps?.optionDescriptors?.find((candidate) => candidate.id === id);
+    if (descriptor?.type === "select" && descriptor.options.length > 0) return descriptor;
+  }
+  return null;
+}
+
+/** The catalog's own default effort for a descriptor, before any user default. */
+export function builtInEffortDefault(descriptor: SelectDescriptor): string | undefined {
+  return descriptor.currentValue ?? descriptor.options.find((option) => option.isDefault)?.id;
+}
+
+/**
+ * A model's starting reasoning effort: the user's configured default when the
+ * model offers it, else the catalog default. Unsupported or mismatched
+ * configured values (another option id, an effort the model dropped) fall back.
+ */
+export function resolveModelEffortDefault(
+  caps: ModelCapabilities | null | undefined,
+  configured: ProviderOptionSelection | null | undefined,
+): string | undefined {
+  const descriptor = findReasoningEffortDescriptor(caps);
+  if (!descriptor) return undefined;
+  if (
+    configured &&
+    configured.id === descriptor.id &&
+    typeof configured.value === "string" &&
+    descriptor.options.some((option) => option.id === configured.value)
+  ) {
+    return configured.value;
+  }
+  return builtInEffortDefault(descriptor);
+}
+
+/**
+ * Capabilities whose effort option starts at the user's configured default, so
+ * every place that falls back to the catalog default (new drafts, the Work
+ * hero, model switches) picks it up. Unchanged when nothing applies.
+ */
+export function withModelEffortDefault(
+  caps: ModelCapabilities,
+  configured: ProviderOptionSelection | null | undefined,
+): ModelCapabilities {
+  const descriptor = findReasoningEffortDescriptor(caps);
+  if (!descriptor || !configured) return caps;
+  const value = resolveModelEffortDefault(caps, configured);
+  if (value === undefined || value === builtInEffortDefault(descriptor)) return caps;
+  return {
+    ...caps,
+    optionDescriptors: (caps.optionDescriptors ?? []).map((candidate) =>
+      candidate === descriptor
+        ? {
+            ...descriptor,
+            currentValue: value,
+            options: descriptor.options.map(({ isDefault: _isDefault, ...option }) =>
+              option.id === value ? { ...option, isDefault: true } : option,
+            ),
+          }
+        : candidate,
+    ),
+  };
+}
+
+/** Applies one provider instance's per-model effort defaults to its model list. */
+export function applyModelEffortDefaults<
+  M extends { readonly slug: string; readonly capabilities?: ModelCapabilities | null },
+>(
+  models: ReadonlyArray<M>,
+  defaults: Readonly<Record<string, ProviderOptionSelection>> | undefined,
+): ReadonlyArray<M> {
+  if (!defaults || Object.keys(defaults).length === 0) return models;
+  let changed = false;
+  const next = models.map((model) => {
+    const configured = defaults[model.slug];
+    if (!configured || !model.capabilities) return model;
+    const capabilities = withModelEffortDefault(model.capabilities, configured);
+    if (capabilities === model.capabilities) return model;
+    changed = true;
+    return { ...model, capabilities };
+  });
+  return changed ? next : models;
+}
+
+/**
+ * A model selection with the configured default effort filled in when the
+ * selection names no effort of its own. Server-side, for work started without
+ * options (agents, MCP launches); explicit choices always win.
+ */
+export function fillModelSelectionEffortDefault(
+  selection: ModelSelection,
+  configured: ProviderOptionSelection | null | undefined,
+): ModelSelection {
+  if (!configured) return selection;
+  const options = selection.options ?? [];
+  if (
+    options.some((option) => (REASONING_EFFORT_OPTION_IDS as readonly string[]).includes(option.id))
+  ) {
+    return selection;
+  }
+  return { ...selection, options: [...options, configured] };
+}
+
 export function applyClaudePromptEffortPrefix(
   text: string,
   effort: string | null | undefined,

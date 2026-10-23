@@ -29,6 +29,24 @@
   }
 }
 
+/* Reduced motion follows the OS, or Settings → Appearance → Reduce motion
+   (data-reduce-motion on <html>, appearancePreferences.ts) when it is on. */
+@custom-variant motion-reduce {
+  @media (prefers-reduced-motion: reduce) {
+    @slot;
+  }
+  &:is(:root[data-reduce-motion] *) {
+    @slot;
+  }
+}
+@custom-variant motion-safe {
+  @media (prefers-reduced-motion: no-preference) {
+    &:not(:root[data-reduce-motion] *) {
+      @slot;
+    }
+  }
+}
+
 /* Secondary hovering pointers reveal sidebar actions on touch-primary devices. */
 @custom-variant any-hover {
   @media (any-hover: hover) {
@@ -121,6 +139,14 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+/* Settings → Appearance → Font size scales every rem-sized surface. */
+:root[data-font-size="small"] {
+  font-size: 15px;
+}
+:root[data-font-size="large"] {
+  font-size: 17px;
+}
+
 :root {
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
@@ -163,8 +189,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --command-shell-inset: 0.5rem;
   --command-content-inset: 1rem;
   --floating-content-inset: 0.75rem;
-  /* App layer order: docked sheets, then dialogs and popovers (50 and up). */
+  /*
+   * App layer order: docked sheets, hover cards anchored in page content, the
+   * floating browser preview, then dialogs, toasts and popovers (50 and up).
+   */
   --z-sheet: 46;
+  --z-content-overlay: 47;
+  --z-floating-preview: 48;
   --desktop-window-right-resize-inset: 0px;
   --workspace-topbar-height: 52px;
   --workspace-controls-top: 0px;
@@ -1133,6 +1164,14 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   inherits: false;
   initial-value: 0px;
 }
+/* Space at the top of a scroller kept fully clear once scrolled, before the
+   start fade begins: a header floating over it never shows text through. Not
+   inherited, so nested scrollers keep their own start. */
+@property --scroll-fade-start-hold {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
 /* Space at the bottom of a scroller that an overlay covers; the end fade
    finishes above it. Not inherited, so nested scrollers start from 0px. */
 @property --scroll-fade-end-inset {
@@ -1198,7 +1237,11 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
       linear-gradient(
         to bottom,
         transparent,
-        transparent min(var(--scroll-fade-hold, 0px), var(--scroll-fade-start-y)),
+        transparent
+          min(
+            max(var(--scroll-fade-start-hold), var(--scroll-fade-hold, 0px)),
+            var(--scroll-fade-start-y)
+          ),
         black var(--scroll-fade-start-y),
         black calc(100% - var(--scroll-fade-end-inset) - var(--scroll-fade-end-y)),
         transparent
@@ -1213,7 +1256,11 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
       linear-gradient(
         to bottom,
         transparent,
-        transparent min(var(--scroll-fade-hold, 0px), var(--scroll-fade-start-y)),
+        transparent
+          min(
+            max(var(--scroll-fade-start-hold), var(--scroll-fade-hold, 0px)),
+            var(--scroll-fade-start-y)
+          ),
         black var(--scroll-fade-start-y),
         black calc(100% - var(--scroll-fade-end-inset) - var(--scroll-fade-end-y)),
         transparent
@@ -3392,6 +3439,64 @@ code {
   cursor: pointer;
 }
 
+/* Settings → Appearance → Accent color (data-accent on <html>,
+   appearancePreferences.ts). Orange is the brand ramp defined with the theme
+   tokens; every other preset sets one base per theme and derives the ramp,
+   so send buttons, CTAs, highlights and the agent cursor follow it. Unlayered
+   so it outranks the theme blocks. */
+:root[data-accent="blue"] {
+  --accent-preset: #2563eb;
+}
+:root.dark[data-accent="blue"] {
+  --accent-preset: #4c8dff;
+}
+:root[data-accent="violet"] {
+  --accent-preset: #7c3aed;
+}
+:root.dark[data-accent="violet"] {
+  --accent-preset: #9d6bff;
+}
+:root[data-accent="green"] {
+  --accent-preset: #15803d;
+}
+:root.dark[data-accent="green"] {
+  --accent-preset: #2fb565;
+}
+:root[data-accent="pink"] {
+  --accent-preset: #db2777;
+}
+:root.dark[data-accent="pink"] {
+  --accent-preset: #f0559a;
+}
+:root[data-accent="teal"] {
+  --accent-preset: #0f766e;
+}
+:root.dark[data-accent="teal"] {
+  --accent-preset: #1fb3a5;
+}
+:root[data-accent="amber"] {
+  --accent-preset: #b45309;
+}
+:root.dark[data-accent="amber"] {
+  --accent-preset: #e8930c;
+}
+:root[data-accent="red"] {
+  --accent-preset: #c42b2b;
+}
+:root.dark[data-accent="red"] {
+  --accent-preset: #f04a4a;
+}
+:root[data-accent]:not([data-accent="orange"]) {
+  --brand-accent-fill: var(--accent-preset);
+  --brand-accent-fill-hover: color-mix(in oklab, var(--accent-preset) 88%, white);
+  --brand-accent-fill-deep: color-mix(in oklab, var(--accent-preset) 84%, black);
+  --brand-accent-tint: color-mix(in srgb, var(--accent-preset) 13%, transparent);
+  --brand-accent-cta-top: var(--accent-preset);
+  --brand-accent-cta-bottom: var(--brand-accent-fill-deep);
+  --brand-accent-cta-top-hover: var(--brand-accent-fill-hover);
+  --brand-accent-cta-bottom-hover: var(--accent-preset);
+}
+
 /* Transcript and composer text, as in the reference: 15px on a 26px line.
    Unlayered so it outranks the text-sm the components carry. */
 :root {
@@ -3468,6 +3573,9 @@ code {
   }
   .messages-timeline-scroll {
     --scroll-fade-end-inset: var(--chat-composer-cover, 0px);
+    /* Scrolled text clears out under the header's whole height, then fades in
+       below it, so nothing reads through the title row. */
+    --scroll-fade-start-hold: var(--chat-header-overlap, 0px);
     --scroll-fade-start-size: calc(var(--chat-header-overlap, 0px) + var(--scroll-fade-size));
     height: calc(100% + var(--chat-header-overlap, 0px));
     margin-top: calc(-1 * var(--chat-header-overlap, 0px));

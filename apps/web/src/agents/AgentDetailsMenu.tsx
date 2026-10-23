@@ -70,7 +70,7 @@ export function AgentDetailsMenu({
         <TooltipPopup side="bottom">Agent details</TooltipPopup>
       </Tooltip>
       <PopoverPopup side="bottom" align="end" collisionPadding={8} width="lg" padding="none">
-        <div className="flex max-h-(--available-height) flex-col overflow-y-auto">
+        <div className="scroll-fade-y flex max-h-(--available-height) flex-col overflow-y-auto overscroll-contain">
           <ThreadDetailsSection headingId="agent-details-heading" title="Agent" separated={false}>
             <div className="flex items-center gap-2.5 px-2.5 pt-1 pb-1.5">
               <AgentFace {...avatarFaceProps(agent.avatar)} state={agent.state} size={32} />

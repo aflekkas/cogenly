@@ -206,6 +206,8 @@ export interface PreviewStreamPointer {
   readonly x: number;
   readonly y: number;
   readonly sequence: number;
+  /** The element the agent acts on, in viewport CSS pixels; null when it acts on a point. */
+  readonly box: PreviewStreamPickHover["box"];
 }
 
 /** Answer to `pickHitTest`: hovered element box and label, both null on a miss. */
@@ -411,7 +413,8 @@ export function createPreviewStreamClient(
         typeof y === "number" &&
         typeof sequence === "number"
       ) {
-        events.onPointer?.({ phase, x, y, sequence });
+        // Older servers send no box; the cursor still moves without an outline.
+        events.onPointer?.({ phase, x, y, sequence, box: isPickHoverBox(box) ? box : null });
       } else if (type === "popup" && typeof tabId === "string") {
         events.onPopup?.(tabId);
       } else if (type === "clipboard" && typeof text === "string") {

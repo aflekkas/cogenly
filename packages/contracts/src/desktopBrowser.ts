@@ -28,6 +28,15 @@ export const DesktopBrowserEvent = Schema.Union([
 ]);
 export type DesktopBrowserEvent = typeof DesktopBrowserEvent.Type;
 
+/** An element's box in viewport CSS pixels. */
+export const DesktopBrowserPointerBox = Schema.Struct({
+  x: Schema.Finite,
+  y: Schema.Finite,
+  width: Schema.Finite,
+  height: Schema.Finite,
+});
+export type DesktopBrowserPointerBox = typeof DesktopBrowserPointerBox.Type;
+
 /** Server -> desktop. */
 export const DesktopBrowserCommand = Schema.Union([
   /** One CDP message for the tab's relay. */
@@ -41,6 +50,8 @@ export const DesktopBrowserCommand = Schema.Union([
     phase: Schema.Literals(["move", "click"]),
     x: Schema.Finite,
     y: Schema.Finite,
+    /** The element it acts on, in viewport CSS pixels, so the desktop can outline it. */
+    box: Schema.optionalKey(DesktopBrowserPointerBox),
   }),
 ]);
 export type DesktopBrowserCommand = typeof DesktopBrowserCommand.Type;

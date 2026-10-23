@@ -96,16 +96,25 @@ function TooltipTrigger(props: TooltipPrimitive.Trigger.Props) {
   );
 }
 
+/** Which app layer a tooltip opens on (index.css `--z-*`). */
+type TooltipLayer = "overlay" | "content";
+
 /**
  * Treats the native titlebar strip as off-screen, so a tooltip that would open
  * under the window controls flips to its other side. Rendered inside the
  * portal so only open tooltips track the titlebar.
  */
-function TooltipPositioner(props: TooltipPrimitive.Positioner.Props) {
+function TooltipPositioner({
+  layer = "overlay",
+  ...props
+}: TooltipPrimitive.Positioner.Props & { layer?: TooltipLayer }) {
   const titlebarHeight = useNativeTitlebarHeight();
   return (
     <TooltipPrimitive.Positioner
-      className="pointer-events-none z-[140] h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none"
+      className={cn(
+        "pointer-events-none h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none",
+        layer === "content" ? "z-(--z-content-overlay)" : "z-[140]",
+      )}
       collisionPadding={{
         top: COLLISION_PADDING + titlebarHeight,
         right: COLLISION_PADDING,
@@ -155,9 +164,15 @@ function TooltipPopup({
   variant = "default",
   anchor,
   collisionBoundary,
+  layer = "overlay",
   children,
   ...props
 }: TooltipPrimitive.Popup.Props & {
+  /**
+   * `content` is for hover cards that preview something in the page, such as a
+   * timeline row: they stay under floating windows like the browser preview.
+   */
+  layer?: TooltipLayer;
   align?: TooltipPrimitive.Positioner.Props["align"];
   side?: TooltipPrimitive.Positioner.Props["side"];
   sideOffset?: TooltipPrimitive.Positioner.Props["sideOffset"];
@@ -177,6 +192,7 @@ function TooltipPopup({
       <TooltipPositioner
         align={align}
         anchor={anchor}
+        layer={layer}
         side={side}
         sideOffset={sideOffset}
         {...(collisionBoundary !== undefined ? { collisionBoundary } : {})}

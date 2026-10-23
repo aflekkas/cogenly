@@ -1,8 +1,15 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 
-import { type FloatingPreviewCorner, floatingPreviewTabKey } from "./floatingBrowserPreview.logic";
+import { resolveStorage } from "~/lib/storage";
+
+import {
+  type FloatingPreviewCorner,
+  type FloatingPreviewPoint,
+  floatingPreviewTabKey,
+} from "./floatingBrowserPreview.logic";
 
 export interface FloatingPreviewTarget {
   readonly threadRef: ScopedThreadRef;
@@ -17,19 +24,37 @@ interface FloatingBrowserPreviewState {
   readonly shownCounts: Readonly<Record<string, number>>;
   /** The tab whose card the user closed; looking at the tab again clears it. */
   readonly dismissedKey: string | null;
+  /** The chat-pane corner the card docks in, unless it was dropped somewhere else. */
   readonly corner: FloatingPreviewCorner;
+  /** Where the user dropped the card, in window coordinates; null when docked to a corner. */
+  readonly freePosition: FloatingPreviewPoint | null;
   readonly dismiss: (key: string) => void;
   readonly setCorner: (corner: FloatingPreviewCorner) => void;
+  readonly setFreePosition: (position: FloatingPreviewPoint) => void;
 }
 
-export const useFloatingBrowserPreviewStore = create<FloatingBrowserPreviewState>()((set) => ({
-  target: null,
-  shownCounts: {},
-  dismissedKey: null,
-  corner: "bottom-right",
-  dismiss: (key) => set({ dismissedKey: key }),
-  setCorner: (corner) => set((state) => (state.corner === corner ? state : { corner })),
-}));
+export const useFloatingBrowserPreviewStore = create<FloatingBrowserPreviewState>()(
+  persist(
+    (set) => ({
+      target: null,
+      shownCounts: {},
+      dismissedKey: null,
+      corner: "bottom-right",
+      freePosition: null,
+      dismiss: (key) => set({ dismissedKey: key }),
+      setCorner: (corner) => set({ corner, freePosition: null }),
+      setFreePosition: (position) => set({ freePosition: position }),
+    }),
+    {
+      name: "cogenly:floating-browser-preview:v1",
+      storage: createJSONStorage(() =>
+        resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
+      ),
+      // Only where the user put the card survives a reload.
+      partialize: (state) => ({ corner: state.corner, freePosition: state.freePosition }),
+    },
+  ),
+);
 
 /**
  * A browser panel reports the tab it shows while visible. That tab becomes the

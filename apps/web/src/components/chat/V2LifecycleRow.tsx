@@ -518,7 +518,8 @@ export function SubagentHoverCardGroup({ children }: { children: ReactNode }) {
       <Tooltip handle={handle}>
         {({ payload }) =>
           payload ? (
-            <ThreadHoverCardPopup>
+            // Previews a timeline row, so the floating browser preview stays above it.
+            <ThreadHoverCardPopup layer="content">
               <SubagentHoverContent {...payload} />
             </ThreadHoverCardPopup>
           ) : null

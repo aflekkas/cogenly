@@ -189,7 +189,8 @@ export function useSidebarModeState(input: {
       if (command === OPEN_PROJECTS_COMMAND) {
         event.preventDefault();
         event.stopPropagation();
-        void navigate({ to: "/project" });
+        // Projects live in Settings → Projects.
+        void navigate({ to: "/settings/project-tags" });
         return;
       }
       const next = command ? MODE_BY_COMMAND[command] : undefined;

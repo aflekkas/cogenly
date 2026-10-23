@@ -372,6 +372,8 @@ import { useDelayedStatus } from "../../hooks/useDelayedStatus";
 import { useElementState } from "../../hooks/useElementState";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { useUpdateEnvironmentModelPreferences } from "../../hooks/useSettings";
+import type { SetModelEffortDefault } from "./TraitsPicker";
 import { ComposerDictationControl, type ComposerDictationHandle } from "./ComposerDictationControl";
 import { LAYOUT_MOTION_DURATION, readPanelAnimationsActive } from "../../panelAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -1470,7 +1472,7 @@ export interface ChatComposerProps {
   isRevertingCheckpoint?: boolean;
   sendDisabledReason: string | null;
   isPreparingWorktree: boolean;
-  bannerItems: readonly ComposerBannerStackItem[];
+  bannerItems: readonly (ComposerBannerStackItem | ComposerBannerStackContent)[];
   /** Tokens a stale session would re-read; null when the thread is not offered compaction. */
   resumeCompactionTokens: number | null;
   /** The Compact chip is off, so the next send keeps full history. */
@@ -2892,6 +2894,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     scheduleComposerFocus();
   };
   const setPromptFromTraitsStable = useStableCallback(setPromptFromTraits);
+  const updateModelPreferences = useUpdateEnvironmentModelPreferences(environmentId);
+  const setEffortDefaultStable: SetModelEffortDefault = useStableCallback(
+    (setModelEffortDefault: Parameters<SetModelEffortDefault>[0]) => {
+      void updateModelPreferences({ setModelEffortDefault });
+    },
+  );
 
   const providerTraitsMenuContent = renderProviderTraitsMenuContent({
     provider: selectedProvider,
@@ -2905,6 +2913,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     prompt,
     onPromptChange: setPromptFromTraitsStable,
     planModeEnabled: settings.planModeEnabled,
+    onSetEffortDefault: setEffortDefaultStable,
   });
   const providerTraitsPickerInput = {
     provider: selectedProvider,
@@ -2919,6 +2928,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onPromptChange: setPromptFromTraitsStable,
     planModeEnabled: settings.planModeEnabled,
     isComposerOwned: true,
+    onSetEffortDefault: setEffortDefaultStable,
   } satisfies Parameters<typeof renderProviderTraitsPicker>[0];
   const providerTraitsPicker = renderProviderTraitsPicker(providerTraitsPickerInput);
   const [inlineRestingControlsHost, setInlineRestingControlsHost] =
@@ -4554,12 +4564,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? [
           {
             id: "traits",
-            content: (
-              <>
-                <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
-                {restingProviderTraitsPicker}
-              </>
-            ),
+            // Model and effort are one group (how the agent runs), so no divider between them.
+            content: restingProviderTraitsPicker,
           },
         ]
       : []),
@@ -4583,14 +4589,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? [
           {
             id: "project",
+            // The divider separates where the agent runs from how it runs.
             content: (
-              <ComposerProjectPicker
-                environmentId={routeThreadRef.environmentId}
-                threadId={activeThreadId}
-                draftId={routeKind === "draft" ? draftId : null}
-                size={composerControlsCollapsed ? "xs" : "sm"}
-                disabled={isSendBusy}
-              />
+              <>
+                <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
+                <ComposerProjectPicker
+                  environmentId={routeThreadRef.environmentId}
+                  threadId={activeThreadId}
+                  draftId={routeKind === "draft" ? draftId : null}
+                  size={composerControlsCollapsed ? "xs" : "sm"}
+                  disabled={isSendBusy}
+                />
+              </>
             ),
           },
         ]

@@ -29,16 +29,7 @@ import type {
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { matchesKeybindingShortcut } from "@t3tools/shared/keybindings";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
-import {
-  BrowserWindow,
-  ClipboardItem,
-  app,
-  type Session,
-  clipboard,
-  nativeImage,
-  shell,
-  webContents,
-} from "electron";
+import { BrowserWindow, app, nativeTheme, type Session, shell, webContents } from "electron";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -63,6 +54,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
+import { windowBackgroundColor } from "../window/windowBackground.ts";
 import { MENU_ACTION_CHANNEL, PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopBrowserHost from "./DesktopBrowserHost.ts";
 import * as PreviewPasskeys from "./Passkeys.ts";
@@ -1648,7 +1640,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.setWindowOpenHandler((details) => {
           const action = previewWindowOpenAction(details);
           if (action === "popup") {
-            return { action: "allow", overrideBrowserWindowOptions: POPUP_WINDOW_OPTIONS };
+            return {
+              action: "allow",
+              overrideBrowserWindowOptions: {
+                ...POPUP_WINDOW_OPTIONS,
+                // No white flash before the popup's page paints in a dark app.
+                backgroundColor: windowBackgroundColor(nativeTheme.shouldUseDarkColors),
+              },
+            };
           }
           if (action === "deny") return { action: "deny" };
           if (action === "new-tab") {
@@ -2919,7 +2918,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               minimizable: false,
               resizable: true,
               skipTaskbar: true,
-              backgroundColor: "#111111",
+              backgroundColor: windowBackgroundColor(nativeTheme.shouldUseDarkColors),
               ...(hostPlatform === "darwin" ? { type: "panel" as const } : {}),
               webPreferences: {
                 preload: pictureInPicturePreloadPath,
@@ -3316,39 +3315,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
-  const copyArtifactToClipboard = Effect.fn("PreviewManager.copyArtifactToClipboard")(function* (
-    artifactPath: string,
-  ) {
-    const resolvedPath = yield* resolveArtifactPath(artifactPath);
-    const image = yield* attempt(
-      { operation: "copyArtifactToClipboard.load", artifactPath: resolvedPath },
-      () => nativeImage.createFromPath(resolvedPath),
-    );
-    if (image.isEmpty()) {
-      return yield* new PreviewArtifactImageLoadError({ artifactPath: resolvedPath });
-    }
-    yield* attemptPromise(
-      { operation: "copyArtifactToClipboard.write", artifactPath: resolvedPath },
-      () =>
-        clipboard.write([
-          new ClipboardItem({
-            "image/png": new Blob([Uint8Array.from(image.toPNG())], { type: "image/png" }),
-          }),
-        ]),
-    );
-  });
-
   let pointerSequence = 0;
   /**
    * The server reports where an agent action is about to land on a tab it
    * drives here. The live cursor and desktop recordings draw it like any agent.
    */
-  const emitAgentPointer = Effect.fn("PreviewManager.emitAgentPointer")(function* (pointer: {
-    readonly key: { readonly threadId: string; readonly tabId: string };
-    readonly phase: "move" | "click";
-    readonly x: number;
-    readonly y: number;
-  }) {
+  const emitAgentPointer = Effect.fn("PreviewManager.emitAgentPointer")(function* (
+    pointer: DesktopBrowserHost.DesktopAgentPointer,
+  ) {
     const tab = [...(yield* SynchronizedRef.get(tabsRef)).values()].find(
       (candidate) =>
         candidate.serverTab?.threadId === pointer.key.threadId &&
@@ -3362,6 +3336,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       y: pointer.y,
       sequence: ++pointerSequence,
       createdAt: yield* currentIso,
+      ...(pointer.box ? { box: pointer.box } : {}),
     };
     const recording = (yield* SynchronizedRef.get(frameCaptureSessionsRef)).get(tab.tabId);
     const webContentsId = tab.webContentsId;
@@ -3435,7 +3410,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     cancelPickElement,
     captureScreenshot,
     closeTab,
-    copyArtifactToClipboard,
     createTab,
     goBack,
     goForward,
@@ -3577,15 +3551,6 @@ export class PreviewArtifactPathOutsideDirectoryError extends Schema.TaggedError
   }
 }
 
-export class PreviewArtifactImageLoadError extends Schema.TaggedError<PreviewArtifactImageLoadError>()(
-  "PreviewArtifactImageLoadError",
-  { artifactPath: Schema.String },
-) {
-  override get message(): string {
-    return `Preview artifact could not be loaded as an image: ${this.artifactPath}`;
-  }
-}
-
 export class PreviewAutomationDevToolsOpenError extends Schema.TaggedError<PreviewAutomationDevToolsOpenError>()(
   "PreviewAutomationDevToolsOpenError",
   { webContentsId: Schema.Number },
@@ -3613,7 +3578,6 @@ export const PreviewManagerError = Schema.Union([
   PreviewRecordingCaptureUnavailableError,
   PreviewOperationError,
   PreviewArtifactPathOutsideDirectoryError,
-  PreviewArtifactImageLoadError,
   PreviewAutomationDevToolsOpenError,
   PreviewAutomationDebuggerAttachedError,
 ]);
@@ -3692,7 +3656,6 @@ export class PreviewManager extends Context.Service<
       tabId: string,
     ) => Effect.Effect<DesktopPreviewScreenshotArtifact, PreviewManagerError>;
     readonly revealArtifact: (path: string) => Effect.Effect<void, PreviewManagerError>;
-    readonly copyArtifactToClipboard: (path: string) => Effect.Effect<void, PreviewManagerError>;
     readonly openPictureInPicture: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly closePictureInPicture: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly startRecording: (
@@ -3846,7 +3809,6 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     cancelPickElement: operations.cancelPickElement,
     captureScreenshot: operations.captureScreenshot,
     revealArtifact: operations.revealArtifact,
-    copyArtifactToClipboard: operations.copyArtifactToClipboard,
     openPictureInPicture: operations.openPictureInPicture,
     closePictureInPicture: operations.closePictureInPicture,
     startRecording: operations.startRecording,

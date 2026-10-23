@@ -114,7 +114,7 @@ export function DeviceToolsPanel(props: {
           <X />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-fade-y min-h-0 flex-1 overflow-y-auto">
         {error ? (
           <p className="border-b bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>
         ) : null}
@@ -641,7 +641,7 @@ function EventLogSection(props: {
         </span>
       </CollapsibleTrigger>
       <CollapsiblePanel>
-        <ol className="max-h-64 overflow-y-auto px-3 py-2 font-mono text-2xs leading-relaxed">
+        <ol className="scroll-fade-y max-h-64 overflow-y-auto px-3 py-2 font-mono text-2xs leading-relaxed">
           {entries.length === 0 ? (
             <li className="text-muted-foreground">No events yet.</li>
           ) : (

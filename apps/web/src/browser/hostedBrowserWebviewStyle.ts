@@ -17,6 +17,21 @@ export interface HostedBrowserWebviewWrapperStyle {
 
 export const HIDDEN_BROWSER_WEBVIEW_OFFSET = -100_000;
 
+/**
+ * What shows behind a desktop tab's guest page. Until a real page has finished
+ * loading (a new or blank tab, or a page mid-navigation) the guest has nothing
+ * painted, so the surface takes the app's theme instead of glaring white. A
+ * loaded page gets white behind it, the browser default for unstyled pages.
+ */
+export function hostedBrowserWebviewSurface(input: {
+  readonly loading: boolean;
+  readonly url: string | null;
+}): "theme" | "page" {
+  if (input.loading) return "theme";
+  const url = input.url?.trim() ?? "";
+  return url === "" || url === "about:blank" ? "theme" : "page";
+}
+
 export function resolveHostedBrowserWebviewWrapperStyle(input: {
   readonly active: boolean;
   readonly renderingActive: boolean;

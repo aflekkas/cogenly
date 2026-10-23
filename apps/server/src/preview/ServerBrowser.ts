@@ -202,6 +202,8 @@ export type ServerBrowserViewerOutput =
       readonly x: number;
       readonly y: number;
       readonly sequence: number;
+      /** The element acted on, so the viewer can outline it; null for point actions. */
+      readonly box: ServerBrowserPage.PointerTargetBox | null;
     }
   | {
       readonly _tag: "fileChooser";
@@ -1214,7 +1216,7 @@ const make = Effect.gen(function* () {
         "PreviewAutomationExecutionError",
         `Upload paths must be absolute: ${relative}`,
       );
-    if (await ServerBrowserPage.setInputFiles(tab.page, input)) return undefined;
+    if (await ServerBrowserPage.setInputFiles(tab.page, input, pointerFor(tab))) return undefined;
     const open = tab.fileChooser;
     if (!open)
       throw new ServerBrowserPage.ServerBrowserOperationError(
@@ -1810,19 +1812,19 @@ const make = Effect.gen(function* () {
    */
   const pointerFor =
     (tab: ServerTab): ServerBrowserPage.PointerReporter =>
-    async ({ x, y }, phase) => {
+    async ({ x, y, box }, phase) => {
       const encoder = tab.recording?.encoder;
       // A desktop-rendered tab is always on screen in the desktop app.
       if (tab.viewers.size === 0 && !encoder && !tab.desktop) return;
       const show = (next: "move" | "click") => {
         const sequence = ++pointerSequence;
         for (const viewer of tab.viewers)
-          viewer.push({ _tag: "pointer", phase: next, x, y, sequence });
+          viewer.push({ _tag: "pointer", phase: next, x, y, sequence, box });
         if (tab.desktop)
           runFork(
             desktopChannel.pointer(
               { threadId: tab.threadId, tabId: tab.tabId },
-              { phase: next, x, y },
+              { phase: next, x, y, ...(box ? { box } : {}) },
             ),
           );
         void encoder
@@ -2210,11 +2212,15 @@ const make = Effect.gen(function* () {
         );
       case "press":
         return recordAction(tab, "press", () =>
-          ServerBrowserPage.press(tab.page, input as PreviewAutomationPressInput),
+          ServerBrowserPage.press(tab.page, input as PreviewAutomationPressInput, pointerFor(tab)),
         );
       case "scroll":
         return recordAction(tab, "scroll", () =>
-          ServerBrowserPage.scroll(tab.page, input as PreviewAutomationScrollInput),
+          ServerBrowserPage.scroll(
+            tab.page,
+            input as PreviewAutomationScrollInput,
+            pointerFor(tab),
+          ),
         );
       case "evaluate":
         return ServerBrowserPage.evaluate(

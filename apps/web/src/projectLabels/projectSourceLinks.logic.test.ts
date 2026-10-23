@@ -16,10 +16,33 @@ import {
   ownerSearchErrorMessage,
   ownerSearchProjects,
   parseProjectSourceLink,
+  projectExtraSourceLinks,
+  projectGitHubOrg,
   remoteRepositoryRows,
   sortProjectSourceLinks,
   type OwnerSearchState,
 } from "./projectSourceLinks.logic";
+
+describe("projectGitHubOrg / projectExtraSourceLinks", () => {
+  const org: ProjectSourceLink = { kind: "github-owner", owner: "Spawn-Partners" };
+  const covered: ProjectSourceLink = {
+    kind: "github-repo",
+    owner: "spawn-partners",
+    repo: "platform",
+  };
+  const outside: ProjectSourceLink = { kind: "github-repo", owner: "acme", repo: "tools" };
+  const second: ProjectSourceLink = { kind: "github-owner", owner: "acme-labs" };
+
+  it("takes the first linked owner as the project's org", () => {
+    expect(projectGitHubOrg([covered, org, second])).toBe("Spawn-Partners");
+    expect(projectGitHubOrg([covered])).toBeNull();
+  });
+
+  it("lists further owners and only repositories no owner covers", () => {
+    expect(projectExtraSourceLinks([org, covered, outside, second])).toEqual([second, outside]);
+    expect(projectExtraSourceLinks([covered])).toEqual([covered]);
+  });
+});
 
 const env = EnvironmentId.make("env");
 
