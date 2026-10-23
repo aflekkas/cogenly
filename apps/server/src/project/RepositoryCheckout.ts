@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
@@ -99,6 +100,18 @@ const make = Effect.gen(function* () {
   const clones = yield* ProjectCloneTracker.ProjectCloneTracker;
   const labels = yield* ProjectLabelService.ProjectLabelService;
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  // The folder's own `.git` (a directory, or a file for a linked worktree),
+  // not `git rev-parse`: an empty folder inside some other repository is
+  // inside a work tree, yet holds no checkout of this repository.
+  const hasOwnCheckout = (workspaceRoot: string) =>
+    fileSystem.exists(path.join(workspaceRoot, ".git")).pipe(
+      Effect.flatMap((exists) =>
+        exists ? git.isRepository(workspaceRoot) : Effect.succeed(false),
+      ),
+      Effect.orElseSucceed(() => false),
+    );
 
   const waitForClone = (repositoryId: ProjectId) =>
     Effect.scoped(
@@ -139,7 +152,7 @@ const make = Effect.gen(function* () {
     const workspaceRoot = project.workspaceRoot;
     const repositoryName = repositoryDirectoryName(workspaceRoot) ?? project.title ?? repositoryId;
 
-    if (yield* git.isRepository(workspaceRoot).pipe(Effect.orElseSucceed(() => false))) {
+    if (yield* hasOwnCheckout(workspaceRoot)) {
       return;
     }
 
@@ -262,7 +275,7 @@ const make = Effect.gen(function* () {
             : (settled.error ?? "The repository could not be cloned."),
       });
     }
-    if (!(yield* git.isRepository(workspaceRoot).pipe(Effect.orElseSucceed(() => false)))) {
+    if (!(yield* hasOwnCheckout(workspaceRoot))) {
       return yield* new RepositoryCheckoutError({
         repositoryId,
         repositoryName,

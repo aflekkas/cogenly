@@ -162,6 +162,22 @@ describe("RepositoryCheckout.ensureCheckout", () => {
     });
   });
 
+  it.effect("clones an empty folder that sits inside some other repository", () => {
+    const bare = makeBareRemote();
+    const projectsRoot = tempRoot();
+    git(projectsRoot, ["init", "--initial-branch=main"]);
+    const workspaceRoot = NodePath.join(projectsRoot, "smile-express");
+    NodeFS.mkdirSync(workspaceRoot);
+    const box: Box = { workspaceRoot, remote: bare, cloneCalls: 0 };
+    return Effect.gen(function* () {
+      yield* run(box);
+      expect(box.cloneCalls).toBe(1);
+      expect(NodeFS.readFileSync(NodePath.join(workspaceRoot, "README.md"), "utf8")).toBe(
+        "hello\n",
+      );
+    });
+  });
+
   it.effect("clones when the folder is missing entirely", () => {
     const bare = makeBareRemote();
     const workspaceRoot = NodePath.join(tempRoot(), "smile-express");
