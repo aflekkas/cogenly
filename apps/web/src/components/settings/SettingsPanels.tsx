@@ -59,6 +59,7 @@ import {
   useAppearancePreferences,
 } from "../../appearancePreferences";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { UsageMeterModeToggle } from "../usage/UsageMeter";
 import {
   useScopedSettings,
   useScopedSettingsMixed,
@@ -430,6 +431,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(appearance.accent !== DEFAULT_APPEARANCE_PREFERENCES.accent ? ["Accent color"] : []),
       ...(appearance.fontSize !== DEFAULT_APPEARANCE_PREFERENCES.fontSize ? ["Font size"] : []),
       ...(appearance.motion !== DEFAULT_APPEARANCE_PREFERENCES.motion ? ["Reduce motion"] : []),
+      ...(appearance.usageMeter !== DEFAULT_APPEARANCE_PREFERENCES.usageMeter
+        ? ["Usage meters"]
+        : []),
       ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
         ? ["Diff colors"]
         : []),
@@ -1100,6 +1104,19 @@ export function AppearanceSettingsPanel() {
               onChange={(fontSize) => update({ fontSize })}
             />
           }
+        />
+        <SettingsRow
+          {...searchableSetting("usage-meters")}
+          description="Whether usage limit bars show quota remaining (draining) or quota used (filling up) on this device."
+          resetAction={
+            preferences.usageMeter !== DEFAULT_APPEARANCE_PREFERENCES.usageMeter ? (
+              <SettingResetButton
+                label="usage meters"
+                onClick={() => update({ usageMeter: DEFAULT_APPEARANCE_PREFERENCES.usageMeter })}
+              />
+            ) : null
+          }
+          control={<UsageMeterModeToggle />}
         />
         <SettingsRow
           {...searchableSetting("reduce-motion")}

@@ -27,16 +27,25 @@ export type FontSizePreference = (typeof FONT_SIZES)[number];
 export const MOTION_PREFERENCES = ["system", "reduce"] as const;
 export type MotionPreference = (typeof MOTION_PREFERENCES)[number];
 
+/**
+ * What usage-limit bars fill with: "remaining" drains as quota is spent,
+ * "used" fills up. Read by React only, so it sets no <html> attribute.
+ */
+export const USAGE_METER_MODES = ["remaining", "used"] as const;
+export type UsageMeterMode = (typeof USAGE_METER_MODES)[number];
+
 export interface AppearancePreferences {
   readonly accent: AccentColor;
   readonly fontSize: FontSizePreference;
   readonly motion: MotionPreference;
+  readonly usageMeter: UsageMeterMode;
 }
 
 export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   accent: "orange",
   fontSize: "default",
   motion: "system",
+  usageMeter: "remaining",
 };
 
 export const APPEARANCE_PREFERENCES_STORAGE_KEY = "cogenly:appearance-preferences";
@@ -62,6 +71,11 @@ export function parseAppearancePreferences(raw: string | null): AppearancePrefer
     accent: oneOf(ACCENT_COLORS, record.accent, DEFAULT_APPEARANCE_PREFERENCES.accent),
     fontSize: oneOf(FONT_SIZES, record.fontSize, DEFAULT_APPEARANCE_PREFERENCES.fontSize),
     motion: oneOf(MOTION_PREFERENCES, record.motion, DEFAULT_APPEARANCE_PREFERENCES.motion),
+    usageMeter: oneOf(
+      USAGE_METER_MODES,
+      record.usageMeter,
+      DEFAULT_APPEARANCE_PREFERENCES.usageMeter,
+    ),
   };
 }
 

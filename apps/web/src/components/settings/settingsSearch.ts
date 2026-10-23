@@ -282,6 +282,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["appearance text size zoom small large scale"],
   },
   {
+    id: "usage-meters",
+    title: "Usage meters",
+    to: "/settings/appearance",
+    searchTerms: ["appearance usage limits quota bars remaining left used fills drains"],
+  },
+  {
     id: "reduce-motion",
     title: "Reduce motion",
     to: "/settings/appearance",

@@ -9,7 +9,6 @@ import {
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import {
-  elapsedShare,
   formatDuration,
   formatResetsIn,
   type LimitPace,
@@ -36,6 +35,8 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { MeterMarker, MeterSpan, useUsageMeter } from "./UsageMeter";
+import { quotaLabel, windowMeter } from "./usageMeter.logic";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
 import { barColorForDriver } from "@t3tools/provider-core/client";
 import { providerClients } from "../settings/providerDriverMeta";
@@ -74,9 +75,10 @@ export function PaceIcon({ pace }: { readonly pace: LimitPace }) {
 
 /**
  * One window as a full-width bar from the moment it opened to its reset.
- * The fill is the share of quota spent; the hairline is how far into the
- * window the clock is, which is also where even spending would have put the
- * fill. Hover for the exact figures and reset time.
+ * The fill is quota left or used, per the usage meter preference; the hairline
+ * is how far into the window the clock is, read the same way (time left or
+ * elapsed), which is also where even spending would have put the fill. Hover
+ * for the exact figures and reset time.
  */
 function WindowBar({
   color,
@@ -88,16 +90,14 @@ function WindowBar({
   readonly now: number;
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
-  const remaining = remainingPercent(window);
-  const elapsed = elapsedShare(window, now);
-  // The fill is quota left, so the even-spending mark is the time left.
-  const timeLeft = elapsed === null ? null : Math.round((1 - elapsed) * 100);
+  const { mode, switching } = useUsageMeter();
+  const meter = windowMeter(window, now, mode);
   const resetsIn = formatResetsIn(window, now);
   const resetsAt = window.resetsAt
     ? formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)
     : null;
-  const summary = `${window.label}: ${remaining}% left${
-    timeLeft === null ? "" : `, ${timeLeft}% of the window left`
+  const summary = `${window.label}: ${meter.quota}${
+    meter.clock === null ? "" : `, ${meter.clock}`
   }${resetsIn ? `, ${resetsIn}` : ""}`;
 
   return (
@@ -113,26 +113,27 @@ function WindowBar({
         }
       >
         <div className="absolute inset-x-0 inset-y-1.5 rounded-full bg-muted" />
-        {remaining > 0 ? (
-          <div
-            className="absolute inset-y-1.5 left-0 rounded-full"
-            style={{ width: `${remaining}%`, backgroundColor: color }}
-          />
-        ) : null}
-        {timeLeft !== null ? (
-          <span
-            aria-hidden
+        <MeterSpan
+          size={meter.fill}
+          switching={switching}
+          className="absolute inset-y-1.5 rounded-full"
+          style={{ backgroundColor: color }}
+        />
+        {meter.marker !== null ? (
+          <MeterMarker
+            position={meter.marker}
+            switching={switching}
             className="absolute inset-y-0.5 w-px -translate-x-1/2 bg-foreground/60"
-            style={{ left: `${timeLeft}%` }}
           />
         ) : null}
       </TooltipTrigger>
       <TooltipPopup side="top">
         <div className="flex flex-col gap-0.5">
           <span className="text-foreground">
-            {remaining}% left{timeLeft !== null ? ` · ${timeLeft}% of the window left` : ""}
+            {meter.quota}
+            {meter.clock !== null ? ` · ${meter.clock}` : ""}
           </span>
-          {timeLeft !== null ? (
+          {meter.clock !== null ? (
             <span className="text-muted-foreground">The line is where even spending would be.</span>
           ) : null}
           {resetsAt ? (
@@ -163,6 +164,7 @@ export function LimitWindows({
   readonly compact?: boolean;
 }) {
   const color = barColor(driver);
+  const { mode } = useUsageMeter();
   return (
     <div
       className={
@@ -179,7 +181,7 @@ export function LimitWindows({
             <span className="flex min-w-0 items-center gap-2 text-xs">
               <span className="truncate text-muted-foreground">{window.label}</span>
               <span className="ms-auto shrink-0 font-medium text-foreground tabular-nums">
-                {remainingPercent(window)}% left
+                {quotaLabel(remainingPercent(window), mode)}
               </span>
             </span>
             <WindowBar color={color} window={window} now={now} />

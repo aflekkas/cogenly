@@ -23,6 +23,7 @@ import {
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageLimitsSection } from "./UsageLimits";
+import { UsageMeterModeToggle } from "./UsageMeter";
 
 interface LimitsEnvironment {
   readonly environmentId: EnvironmentId;
@@ -126,8 +127,10 @@ export function UsagePage() {
                 </>
               ) : null}
             </WorkspaceBreadcrumb>
+            <div className="ms-auto">
+              <UsageMeterModeToggle />
+            </div>
             <Button
-              className="ms-auto"
               onClick={refresh}
               aria-label="Refresh limits"
               aria-busy={isRefreshing}

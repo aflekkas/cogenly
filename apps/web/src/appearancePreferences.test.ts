@@ -18,8 +18,17 @@ describe("parseAppearancePreferences", () => {
       parseAppearancePreferences(
         JSON.stringify({ accent: "blue", fontSize: "huge", motion: "reduce" }),
       ),
-    ).toEqual({ accent: "blue", fontSize: "default", motion: "reduce" });
+    ).toEqual({ accent: "blue", fontSize: "default", motion: "reduce", usageMeter: "remaining" });
     expect(parseAppearancePreferences(JSON.stringify({ accent: "#3b82f6" })).accent).toBe("orange");
+  });
+
+  it("reads the usage meter mode and ignores unknown ones", () => {
+    expect(parseAppearancePreferences(JSON.stringify({ usageMeter: "used" })).usageMeter).toBe(
+      "used",
+    );
+    expect(parseAppearancePreferences(JSON.stringify({ usageMeter: "spent" })).usageMeter).toBe(
+      "remaining",
+    );
   });
 });
 
@@ -34,7 +43,12 @@ describe("appearanceRootAttributes", () => {
 
   it("marks a chosen accent, font size and reduced motion", () => {
     expect(
-      appearanceRootAttributes({ accent: "teal", fontSize: "large", motion: "reduce" }),
+      appearanceRootAttributes({
+        accent: "teal",
+        fontSize: "large",
+        motion: "reduce",
+        usageMeter: "used",
+      }),
     ).toEqual({
       "data-accent": "teal",
       "data-font-size": "large",
