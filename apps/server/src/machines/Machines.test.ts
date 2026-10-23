@@ -345,6 +345,22 @@ describe("machines", () => {
         assert.strictEqual(spokeGrant.reason, "hub-is-spoke");
         const hubJoin = yield* hub.machines.prepareJoin.pipe(Effect.flip);
         assert.strictEqual(hubJoin.reason, "spoke-is-hub");
+
+        // Unpairing from the spoke side removes it on the hub too.
+        yield* awaitLinkState(first, (state) => state.status === "online");
+        assert.deepStrictEqual(yield* first.machines.unpair({ environmentId: hub.environmentId }), {
+          unpaired: true,
+        });
+        assert.deepStrictEqual((yield* first.machines.list).link, { _tag: "standalone" });
+        const remaining = yield* hub.machines.subscribe.pipe(
+          Stream.filter((result) => result.link._tag === "hub" && result.link.spokes === 1),
+          Stream.runHead,
+          Effect.map(Option.getOrThrow),
+        );
+        assert.deepStrictEqual(
+          remaining.machines.map((machine) => machine.environmentId),
+          [hub.environmentId, second.environmentId],
+        );
       }).pipe(Effect.scoped),
     30_000,
   );
