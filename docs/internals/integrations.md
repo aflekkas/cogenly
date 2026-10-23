@@ -37,6 +37,10 @@ indistinguishable from missing ones outside their projects. The per-turn
 context line is built in `RuntimePolicy` through `buildProjectManifest`, so
 all three adapters carry it with no per-provider code.
 
-Deferred: upstream OAuth (tokens will be vault items), `stdio` transport
-(the transport union is designed to admit it), and the Settings UI (the WS
-RPCs and guarded scopes already exist).
+`integrations.list` reports `connected` only while the tool cache holds the
+current version, and `testConnection` bypasses that cache, so Settings keeps
+its own last test result per integration version to show test outcomes.
+
+Deferred: upstream OAuth (tokens will be vault items) and `stdio` transport
+(the transport union is designed to admit it). Clients have no RPC for an
+integration's tool list; only agents see tools, through `integration_tools`.
