@@ -178,7 +178,12 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
       expect(filled).toMatchObject({ status: "filled", field: "password", domain: "github.com" });
       expect(JSON.stringify(filled)).not.toContain("octo-password-123");
       expect(typed).toEqual([
-        { text: "octo-password-123", locator: "input[name=password]", clear: true },
+        {
+          expectedOrigin: "https://github.com",
+          text: "octo-password-123",
+          locator: "input[name=password]",
+          clear: true,
+        },
       ]);
 
       for (const expression of [
@@ -359,10 +364,30 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
         expect(JSON.stringify(filled)).not.toContain(text);
       }
       expect(typed).toEqual([
-        { text: "4242 4242 4242 4242", locator: "input[name=cardNumber]", clear: true },
-        { text: "08/27", locator: "input[name=cardExpiry]", clear: true },
-        { text: "987", locator: "input[name=cardCvc]", clear: true },
-        { text: "Ada Cardholder", locator: "input[name=cardholderName]", clear: true },
+        {
+          expectedOrigin: "https://shop.test",
+          text: "4242 4242 4242 4242",
+          locator: "input[name=cardNumber]",
+          clear: true,
+        },
+        {
+          expectedOrigin: "https://shop.test",
+          text: "08/27",
+          locator: "input[name=cardExpiry]",
+          clear: true,
+        },
+        {
+          expectedOrigin: "https://shop.test",
+          text: "987",
+          locator: "input[name=cardCvc]",
+          clear: true,
+        },
+        {
+          expectedOrigin: "https://shop.test",
+          text: "Ada Cardholder",
+          locator: "input[name=cardholderName]",
+          clear: true,
+        },
       ]);
 
       pageUrl = "https://evil.test/checkout";

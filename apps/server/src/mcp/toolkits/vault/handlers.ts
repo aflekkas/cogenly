@@ -113,6 +113,7 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
           containsVaultSecret: true,
           input: {
             text: result.value,
+            expectedOrigin: new URL(status.url!).origin,
             ...(rest.locator ? { locator: rest.locator } : {}),
             ...(rest.selector ? { selector: rest.selector } : {}),
             clear: true,
