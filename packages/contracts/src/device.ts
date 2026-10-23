@@ -547,6 +547,62 @@ export const DeviceToolCloseInput = Schema.Struct({
 });
 export type DeviceToolCloseInput = typeof DeviceToolCloseInput.Type;
 
+/**
+ * What an agent needs to get devices working: whether support is on, what is
+ * installed per host, why a platform is missing, and the concrete next steps.
+ * `nextSteps` are written to be relayed to the user or run with the terminal
+ * tool; steps that need the user (an Xcode or Android SDK install) say so.
+ */
+export const DeviceSetupPlatformStatus = Schema.Struct({
+  platform: DevicePlatform,
+  available: Schema.Boolean,
+  deviceCount: Schema.Int,
+  /** Available and at least one device was found. */
+  ready: Schema.Boolean,
+  reason: Schema.optional(Schema.String),
+  nextSteps: Schema.Array(Schema.String),
+});
+export type DeviceSetupPlatformStatus = typeof DeviceSetupPlatformStatus.Type;
+
+export const DeviceSetupHostStatus = Schema.Struct({
+  hostId: DeviceHostId,
+  label: TrimmedNonEmptyString,
+  kind: Schema.Literals(["local", "ssh"]),
+  status: DeviceHostStatus,
+  detail: Schema.optional(Schema.String),
+  hubInstalled: Schema.Boolean,
+  agentDeviceInstalled: Schema.Boolean,
+  platforms: Schema.Array(DeviceSetupPlatformStatus),
+  nextSteps: Schema.Array(Schema.String),
+});
+export type DeviceSetupHostStatus = typeof DeviceSetupHostStatus.Type;
+
+export const DeviceSetupStatus = Schema.Struct({
+  enabled: Schema.Boolean,
+  agentAccessEnabled: Schema.Boolean,
+  /** At least one host can stream at least one device right now. */
+  ready: Schema.Boolean,
+  hosts: Schema.Array(DeviceSetupHostStatus),
+  nextSteps: Schema.Array(Schema.String),
+});
+export type DeviceSetupStatus = typeof DeviceSetupStatus.Type;
+
+export const DeviceToolSetupInput = Schema.Struct({
+  hostId: Schema.optional(
+    DeviceHostId.annotate({ description: "Limit to one device host. Defaults to all hosts." }),
+  ),
+  enableDeviceSupport: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "Turn device support on first when the user has turned it off. Only pass this when the user asked you to set devices up; it changes their setting.",
+    }),
+  ),
+}).annotate({
+  description:
+    "Installs the device hub and agent tools if needed, retries a failed install, and re-checks which platforms work. Returns the same status as device_setup_status, so read its nextSteps for anything that needs the user.",
+});
+export type DeviceToolSetupInput = typeof DeviceToolSetupInput.Type;
+
 export class DeviceToolUnavailableError extends Schema.TaggedError<DeviceToolUnavailableError>()(
   "DeviceToolUnavailableError",
   {

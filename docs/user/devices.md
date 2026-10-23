@@ -72,6 +72,11 @@ taps build a small test runner on first use, which takes a couple of minutes
 once per server. Restart an existing agent session after turning access back on
 so it receives the device CLI environment.
 
+Agents can also check and repair device setup themselves: they can see which
+platforms work and why one does not, retry a failed install, and tell you which
+Xcode or Android SDK step needs you. Turning device support itself back on is
+left to you unless you ask the agent to.
+
 To keep agents away from simulators, turn off **Agent device access** in
 **Settings → Integrations → Devices**. This hides the device tools from agents
 started from then on; your own Device panel is unaffected.

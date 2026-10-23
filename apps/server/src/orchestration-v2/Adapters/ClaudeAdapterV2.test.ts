@@ -20,6 +20,7 @@ import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools
 import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
 import { ImageToolkit } from "../../mcp/toolkits/images/tools.ts";
 import { ProjectFilesToolkit } from "../../mcp/toolkits/projectFiles/tools.ts";
+import { DeviceToolkit } from "../../mcp/toolkits/device/tools.ts";
 import { EnvironmentToolkit } from "../../mcp/toolkits/environment/tools.ts";
 import { ProjectToolkit } from "../../mcp/toolkits/project/tools.ts";
 import { WorktreeToolkit } from "../../mcp/toolkits/worktree/tools.ts";
@@ -536,6 +537,9 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       ...Object.values(HtmlToolkit.tools),
       ...Object.values(ImageToolkit.tools),
       ...Object.values(ProjectFilesToolkit.tools),
+      // The other read-only device tools start helpers or need an open device,
+      // so only the inspection-only status tool is pre-approved.
+      DeviceToolkit.tools.device_setup_status,
     ]
       .filter((tool) => Context.get(tool.annotations, Tool.Readonly))
       .map((tool) => `mcp__cogenly__${tool.name}`)

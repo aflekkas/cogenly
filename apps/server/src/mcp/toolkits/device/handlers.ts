@@ -3,6 +3,7 @@ import {
   type DeviceHostId,
   type DeviceId,
   type DevicePlatform,
+  type DeviceSetupStatus,
   type DeviceSummary,
   DeviceToolUnavailableError,
   LOCAL_DEVICE_HOST_ID,
@@ -117,6 +118,22 @@ const pickDevice = (
     return candidates.find((device) => device.booted) ?? candidates[0]!;
   });
 
+/** One host's report, with readiness recomputed from that host alone. */
+const scopeSetupStatus = (
+  status: DeviceSetupStatus,
+  hostId: string | undefined,
+): DeviceSetupStatus => {
+  if (!hostId) return status;
+  const hosts = status.hosts.filter((host) => host.hostId === hostId);
+  return {
+    ...status,
+    hosts,
+    ready:
+      status.enabled &&
+      hosts.some((host) => host.status === "ready" && host.platforms.some((p) => p.ready)),
+  };
+};
+
 const toolError = (error: DeviceError | DeviceToolUnavailableError) => error;
 
 const handlers = {
@@ -128,7 +145,7 @@ const handlers = {
       if (state.hostStatus === "disabled") {
         return yield* new DeviceToolUnavailableError({
           reason:
-            "Device support is off. Ask the user to turn it on in Settings → Integrations → Devices, then try again.",
+            "Device support is off. Ask the user to turn it on in Settings → Integrations → Devices (or call device_setup with enableDeviceSupport=true if they asked you to set devices up), then try again.",
         });
       }
       const hostId = input?.hostId;
@@ -147,6 +164,28 @@ const handlers = {
       };
     }).pipe(Effect.mapError(toolError)),
   ),
+  device_setup_status: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      yield* requireDeviceAccess;
+      const devices = yield* DeviceService.DeviceService;
+      return yield* devices.setupStatus.pipe(
+        Effect.map((status) => scopeSetupStatus(status, input?.hostId)),
+      );
+    }).pipe(Effect.mapError(toolError)),
+  ),
+  device_setup: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      yield* requireDeviceAccess;
+      const devices = yield* DeviceService.DeviceService;
+      const status = yield* devices.setup({
+        ...(input.hostId === undefined ? {} : { hostId: input.hostId }),
+        ...(input.enableDeviceSupport === undefined
+          ? {}
+          : { enableDeviceSupport: input.enableDeviceSupport }),
+      });
+      return scopeSetupStatus(status, input.hostId);
+    }).pipe(Effect.mapError(toolError)),
+  ),
   device_open: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* requireDeviceAccess;
@@ -155,7 +194,7 @@ const handlers = {
       if (state.hostStatus === "disabled") {
         return yield* new DeviceToolUnavailableError({
           reason:
-            "Device support is off. Ask the user to turn it on in Settings → Integrations → Devices, then try again.",
+            "Device support is off. Ask the user to turn it on in Settings → Integrations → Devices (or call device_setup with enableDeviceSupport=true if they asked you to set devices up), then try again.",
         });
       }
       const target = yield* pickDevice(state.devices, input);

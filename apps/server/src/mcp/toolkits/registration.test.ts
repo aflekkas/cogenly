@@ -620,7 +620,14 @@ const smokeCases = [
   },
   {
     toolkit: "device",
-    names: ["device_close", "device_list", "device_open", "device_screenshot"],
+    names: [
+      "device_close",
+      "device_list",
+      "device_open",
+      "device_screenshot",
+      "device_setup",
+      "device_setup_status",
+    ],
     tool: "device_list",
     args: {},
     expected: {

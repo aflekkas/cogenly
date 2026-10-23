@@ -28,6 +28,8 @@ import {
   DevicePlatformUnavailableError,
   type DeviceServiceState,
   type DeviceSession,
+  type DeviceSetupStatus,
+  type DeviceToolSetupInput,
   type DeviceShutdownInput,
   type DeviceSummary,
   type SshDeviceHostConfig,
@@ -39,6 +41,7 @@ import * as FileSystem from "effect/FileSystem";
 import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
 import * as Path from "effect/Path";
 import { ensureAgentDevice, ensureDeviceHub } from "./DeviceToolchain.ts";
+import { buildDeviceSetupStatus } from "./DeviceSetupStatus.ts";
 import * as ServerConfig from "../config.ts";
 import {
   agentDeviceConfigPath,
@@ -130,6 +133,13 @@ export class DeviceService extends Context.Service<
     readonly updateTool: (tool: "hub" | "agent") => Effect.Effect<DeviceServiceState, DeviceError>;
     readonly inspect: Effect.Effect<DeviceServiceState>;
     readonly retryHost: (hostId: DeviceHostId) => Effect.Effect<DeviceServiceState, DeviceError>;
+    /** What is installed, which platforms work and why not, and the next steps. Installs nothing. */
+    readonly setupStatus: Effect.Effect<DeviceSetupStatus, DeviceError>;
+    /**
+     * Installs or starts what is missing on each host, retries a failed install, and
+     * re-checks platforms. Turns device support on first only when asked.
+     */
+    readonly setup: (input: DeviceToolSetupInput) => Effect.Effect<DeviceSetupStatus, DeviceError>;
     readonly open: (input: DeviceOpenInput) => Effect.Effect<DeviceSession, DeviceError>;
     readonly close: (input: DeviceCloseInput) => Effect.Effect<void, DeviceError>;
     readonly shutdown: (input: DeviceShutdownInput) => Effect.Effect<void, DeviceError>;
@@ -572,6 +582,36 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     },
   );
 
+  const setupStatus: DeviceService["Service"]["setupStatus"] = Effect.gen(function* () {
+    const current = yield* readDeviceSettings;
+    const summaries = yield* Effect.forEach(hosts.values(), (host) => host.summary);
+    const { state } = yield* SynchronizedRef.get(stateRef);
+    return buildDeviceSetupStatus({
+      enabled: current.enabled,
+      agentAccessEnabled: current.agentAccessEnabled,
+      hosts: summaries,
+      hostStatuses: state.hostStatuses,
+      devices: state.devices,
+    });
+  }).pipe(Effect.withSpan("DeviceService.setupStatus"));
+
+  const setup: DeviceService["Service"]["setup"] = Effect.fn("DeviceService.setup")(
+    function* (input) {
+      if (input.hostId) yield* resolveHost(input.hostId);
+      if (input.enableDeviceSupport && !(yield* readDeviceSettings).enabled) {
+        yield* configure({ enabled: true });
+      }
+      if ((yield* readDeviceSettings).enabled) {
+        const targets = input.hostId ? [input.hostId] : [...hosts.keys()];
+        yield* Effect.forEach(targets, (hostId) => retryHost(hostId), {
+          concurrency: 4,
+          discard: true,
+        });
+      }
+      return yield* setupStatus;
+    },
+  );
+
   const findDevice = (
     state: DeviceServiceState,
     hostId: DeviceHostId,
@@ -914,6 +954,8 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
           }),
         ),
       retryHost,
+      setupStatus,
+      setup,
       inspect,
       agentCli: Effect.fail(
         new DeviceHostUnavailableError({

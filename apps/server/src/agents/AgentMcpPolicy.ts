@@ -327,7 +327,9 @@ const make = Effect.gen(function* () {
         // They cannot safely be reduced to an execute grant by parsing model text.
         // Adding a project (create or clone) is ordinary execute work for an agent.
         if (
-          /^(terminal_|preview_(?!close$|list$)|device_|project_(?:update|delete)$)/.test(name) &&
+          /^(terminal_|preview_(?!close$|list$)|device_(?!setup_status$)|project_(?:update|delete)$)/.test(
+            name,
+          ) &&
           !["send", "create_pr", "merge", "deploy", "delete"].every(
             (key) => agent.permissions[key as keyof AgentPermissions],
           )

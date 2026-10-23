@@ -272,6 +272,8 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "browser",
   ),
   device_list: tool(["List", "Listing", "Listed", "simulators and emulators"], "device", "device"),
+  device_setup_status: tool(["Check", "Checking", "Checked", "device setup"], "device", "device"),
+  device_setup: tool(["Set up", "Setting up", "Set up", "devices"], "device", "device"),
   device_open: tool(
     ["Open", "Opening", "Opened", "a device in the Device panel"],
     "device",
