@@ -5,13 +5,10 @@ import {
   type SourceControlRepositoryError,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
 import * as Labels from "../../../projectLabels/ProjectLabelService.ts";
 import * as Clone from "../../../projectLabels/ProjectLabelCloneRepository.ts";
-import * as Fork from "../../../projectLabels/ProjectLabelForkToProject.ts";
-import * as Threads from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Clones from "../../../project/ProjectCloneTracker.ts";
 import * as Projects from "../../../project/ProjectService.ts";
 import * as Identities from "../../../project/RepositoryIdentityResolver.ts";
@@ -28,20 +25,15 @@ const failure = (error: { reason: string; message: string }) =>
         : "orchestration_error",
     message: error.message,
   });
-// The server gate (ProjectLabelService.moveThread) refuses to re-parent a chat
-// with turns; point MCP callers at the fork-based filing tool instead.
+// moveThread re-homes the same thread, but never while a turn is in flight.
 const moveFailure = (error: ProjectLabelError) =>
-  error.reason === "fork_required"
+  error.reason === "thread_active"
     ? new OrchestratorMcpFailure({
         code: "invalid_request",
         message:
-          "This chat already has turns, so it cannot be moved into a project. Call t3_project_label_file_thread to fork it into the project; the original chat stays in place.",
+          "A turn is running in this thread, so it cannot be moved yet. Wait for the turn to finish, then move it; the chat keeps its history and its next turn runs in the new project folder.",
       })
     : failure(error);
-const forkFailure = (error: ProjectLabelError | OrchestrationDispatchCommandError) =>
-  error._tag === "ProjectLabelError"
-    ? failure(error)
-    : new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message });
 const cloneFailure = (
   error: ProjectLabelError | SourceControlRepositoryError | OrchestrationDispatchCommandError,
 ) =>
@@ -69,38 +61,19 @@ export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
     (input) =>
       Effect.gen(function* () {
         const labels = yield* Labels.ProjectLabelService;
-        // Turnless chats and Work threads file in place; the gate answers
-        // fork_required for a chat with turns, which forks instead.
+        // Re-home: the same thread is re-filed, whatever its history. Its
+        // next turn runs in the project folder with a fresh provider session
+        // seeded from that history.
         const moved = yield* labels
           .moveThread({ threadId: input.threadId, folderId: input.labelId })
-          .pipe(
-            Effect.map((result) => result.projectFolderId),
-            Effect.catchIf(
-              (error) => error.reason === "fork_required",
-              () => Effect.succeed(undefined),
-            ),
-            Effect.mapError(failure),
-          );
-        if (moved !== undefined)
-          return {
-            threadId: input.threadId,
-            sourceThreadId: input.threadId,
-            projectFolderId: moved ?? input.labelId,
-            forked: false,
-            message: "Filed the thread into the project.",
-          };
-        const fork = yield* Fork.forkThreadToProject(input, {
-          labels,
-          threads: yield* Threads.ThreadManagementService,
-          crypto: yield* Crypto.Crypto,
-        }).pipe(Effect.mapError(forkFailure));
+          .pipe(Effect.mapError(moveFailure));
         return {
-          threadId: fork.threadId,
+          threadId: input.threadId,
           sourceThreadId: input.threadId,
-          projectFolderId: input.labelId,
-          forked: true,
+          projectFolderId: moved.projectFolderId ?? input.labelId,
+          forked: false,
           message:
-            "The chat had turns, so it was forked into the project as a new chat carrying its history. The original chat was left in place.",
+            "Filed the thread into the project. The chat keeps its history; its next turn runs in the project folder.",
         };
       }),
   ),

@@ -201,7 +201,7 @@ export function ComposerProjectPicker(props: {
       />
     ) : null;
   }
-  // A chat with turns goes into another project as a fork; the picker says so.
+  // Chats re-home into another project in place; forks are explicit only.
   const forks = thread !== null && threadForksIntoProjects(thread);
 
   const assign = async (folder: { id: ProjectLabelId; name: string } | null) => {
@@ -223,8 +223,8 @@ export function ComposerProjectPicker(props: {
       folder,
       previous: priorFiling(threadFolderState(thread, directory)),
     });
-    // A fork may wait for a running turn; its toast reports it, so the
-    // picker closes now rather than staying open for the whole turn.
+    // An explicit fork may wait for a running turn; its toast reports it,
+    // so the picker closes now rather than staying open for the whole turn.
     if (folder !== null && threadForksIntoProjects(thread)) return;
     await moved;
   };

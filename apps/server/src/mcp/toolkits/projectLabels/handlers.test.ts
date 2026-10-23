@@ -181,6 +181,7 @@ it.effect("lets a chat-surface thread organize project folders", () =>
 
 const fileSetup = (input: {
   readonly turned: boolean;
+  readonly active?: boolean;
   readonly access?: "read-only" | "full-access";
 }) =>
   Effect.gen(function* () {
@@ -217,21 +218,21 @@ const fileSetup = (input: {
       Layer.mock(Labels.ProjectLabelService)({
         readActive: (id) => Effect.succeed({ label: { ...labelShape, id } }),
         list: () => Effect.succeed({ labels: [] }),
-        // Mirrors the server gate: a chat with turns cannot be re-parented,
-        // but its turnless fork can.
+        // Mirrors the server gate: any thread re-files in place, but never
+        // while a turn is running in it.
         moveThread: (move) =>
-          input.turned && move.threadId === threadId
+          input.active === true && move.threadId === threadId
             ? Effect.fail(
-                new ProjectLabelError({ operation: "moveThread", reason: "fork_required" }),
+                new ProjectLabelError({ operation: "moveThread", reason: "thread_active" }),
               )
             : Effect.sync(() => {
                 moved.push(move.threadId);
                 return { threadId: move.threadId, projectFolderId: move.folderId };
               }),
         setThreadLabels: (labels) =>
-          input.turned && labels.threadId === threadId
+          input.active === true && labels.threadId === threadId
             ? Effect.fail(
-                new ProjectLabelError({ operation: "moveThread", reason: "fork_required" }),
+                new ProjectLabelError({ operation: "moveThread", reason: "thread_active" }),
               )
             : Effect.succeed({ labels: [] }),
       }),
@@ -262,7 +263,7 @@ it.effect("files a turnless chat or Work thread into a project in place", () =>
   }),
 );
 
-it.effect("forks a chat with turns into the project and leaves the original in place", () =>
+it.effect("re-homes a chat with turns into the project, keeping the same thread", () =>
   Effect.gen(function* () {
     const { toolkit, dependencies, threadId, labelId, moved, dispatched } = yield* fileSetup({
       turned: true,
@@ -272,14 +273,14 @@ it.effect("forks a chat with turns into the project and leaves the original in p
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
     const result = results.at(-1)?.result as { threadId: ThreadId; message: string };
     expect(result).toMatchObject({
+      threadId,
       sourceThreadId: threadId,
       projectFolderId: labelId,
-      forked: true,
+      forked: false,
     });
-    expect(result.threadId).not.toBe(threadId);
-    expect(result.message).toContain("original chat was left in place");
-    expect(dispatched).toEqual(["thread.fork"]);
-    expect(moved).toEqual([result.threadId]);
+    expect(result.message).toContain("keeps its history");
+    expect(dispatched).toEqual([]);
+    expect(moved).toEqual([threadId]);
   }),
 );
 
@@ -301,10 +302,11 @@ it.effect("keeps read-only callers from filing threads into a project", () =>
 it.effect.each([
   { tool: "t3_thread_move_project_folder" as const },
   { tool: "t3_thread_set_project_labels" as const },
-])("$tool refuses to re-parent a chat with turns and points at the fork", ({ tool }) =>
+])("$tool refuses to move a thread while a turn is running in it", ({ tool }) =>
   Effect.gen(function* () {
     const { toolkit, dependencies, threadId, labelId, moved, dispatched } = yield* fileSetup({
       turned: true,
+      active: true,
     });
     const last =
       tool === "t3_thread_move_project_folder"
@@ -322,7 +324,7 @@ it.effect.each([
           );
     expect(last).toMatchObject({
       code: "invalid_request",
-      message: expect.stringContaining("t3_project_label_file_thread"),
+      message: expect.stringContaining("turn is running"),
     });
     expect(moved).toEqual([]);
     expect(dispatched).toEqual([]);

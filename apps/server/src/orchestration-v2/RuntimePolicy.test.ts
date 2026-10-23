@@ -120,6 +120,42 @@ const layerTest = RuntimePolicy.layerFromProjectStore.pipe(
 );
 
 it.layer(layerTest)("RuntimePolicyV2", (it) => {
+  it.effect("starts a fresh provider session only when a started thread changes cwd", () =>
+    Effect.sync(() => {
+      const changed = RuntimePolicy.providerSessionCwdChanged;
+      // A re-homed chat: scratch folder before, project folder after.
+      assert.isTrue(
+        changed({
+          previousCwd: "/scratch/2026-01-01-chat",
+          nextCwd: "/projects/Spawn Partners",
+          hasPriorStartedRun: true,
+        }),
+      );
+      // Same cwd, a first turn, and unresolved cwd on either side all keep
+      // the existing session.
+      assert.isFalse(
+        changed({
+          previousCwd: "/projects/Spawn Partners",
+          nextCwd: "/projects/Spawn Partners",
+          hasPriorStartedRun: true,
+        }),
+      );
+      assert.isFalse(
+        changed({
+          previousCwd: "/scratch/2026-01-01-chat",
+          nextCwd: "/projects/Spawn Partners",
+          hasPriorStartedRun: false,
+        }),
+      );
+      assert.isFalse(
+        changed({ previousCwd: undefined, nextCwd: "/projects/Spawn Partners", hasPriorStartedRun: true }),
+      );
+      assert.isFalse(
+        changed({ previousCwd: "/scratch/2026-01-01-chat", nextCwd: null, hasPriorStartedRun: true }),
+      );
+    }),
+  );
+
   it.effect("uses the project root for local-checkout threads", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicy.RuntimePolicyV2;
