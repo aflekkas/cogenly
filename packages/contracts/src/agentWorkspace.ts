@@ -12,7 +12,11 @@ import {
 import { ModelSelection } from "./modelSelection.ts";
 import { ScheduledTaskUpsertInput } from "./scheduledTask.ts";
 import { OrchestrationV2ThreadLaunchWorkspaceStrategy } from "./orchestrationV2.ts";
-import { IntegrationCreateInput, IntegrationUpdateInput } from "./integration.ts";
+import {
+  IntegrationAddInput,
+  IntegrationCreateInput,
+  IntegrationUpdateInput,
+} from "./integration.ts";
 import { VaultField } from "./vault.ts";
 
 export const AgentStartWorkInput = Schema.Struct({
@@ -58,7 +62,7 @@ export const AgentApprovalAction = Schema.Union([
   }),
   Schema.Struct({
     actionKind: Schema.Literal("integration_add"),
-    payload: IntegrationCreateInput,
+    payload: IntegrationAddInput,
   }),
   Schema.Struct({
     actionKind: Schema.Literal("integration_update"),

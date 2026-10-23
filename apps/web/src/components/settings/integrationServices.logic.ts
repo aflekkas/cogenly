@@ -120,6 +120,9 @@ export const VAULT_FIELD_LABEL: Readonly<Record<VaultField, string>> = {
 };
 
 const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
+  google_client_missing:
+    "Store your Google OAuth client JSON in vault item google-oauth-client and allow accounts.google.com.",
+  local_runtime_missing: "Install uv (brew install uv on macOS), then restart Cogenly.",
   storage: "Cogenly could not read or save this integration.",
   not_found: "This integration no longer exists.",
   conflict: "Another integration already uses this name.",
@@ -178,10 +181,18 @@ export function integrationTitle(integration: Integration): string {
   return account ? `${integration.displayName} · ${account}` : integration.displayName;
 }
 
-/** The sign-in action an OAuth integration offers, or null when it has none. */
+/**
+ * The sign-in action an integration offers, or null when it has none. A
+ * managed account's process keeps its grant, so it only ever offers a first
+ * sign-in.
+ */
 export function signInAction(summary: IntegrationSummary): "Sign in" | "Reconnect" | null {
-  if (summary.integration.auth?.type !== "oauth") return null;
-  return summary.status === "needs_sign_in" ? "Sign in" : "Reconnect";
+  if (summary.status === "needs_sign_in") {
+    return summary.integration.auth?.type === "oauth" || summary.integration.transport === "local"
+      ? "Sign in"
+      : null;
+  }
+  return summary.integration.auth?.type === "oauth" ? "Reconnect" : null;
 }
 
 /** A test from this page, tied to the integration version it ran against. */
@@ -203,6 +214,16 @@ export function integrationStatus(
     return { tone: "neutral", label: "Off", reason: null, toolCount: null };
   }
   const checked = summary.checkedAt === undefined ? {} : { checkedAt: summary.checkedAt };
+  // A failed managed process says more than any test of it.
+  const managed = summary.managed;
+  if (managed?.state === "failed" || managed?.state === "missing_runtime") {
+    return {
+      tone: "error",
+      label: managed.state === "missing_runtime" ? "Missing runtime" : "Failed",
+      reason: summary.message ?? managed.message ?? (managed.stderrTail || null),
+      toolCount: null,
+    };
+  }
   // The server knows a sign-in is missing better than any earlier test does.
   if (summary.status === "needs_sign_in") {
     return {
@@ -212,6 +233,10 @@ export function integrationStatus(
       toolCount: null,
       ...checked,
     };
+  }
+  if (managed?.state === "starting" || managed?.state === "stopped") {
+    const label = managed.state === "starting" ? "Starting" : "Stopped";
+    return { tone: "neutral", label, reason: null, toolCount: null };
   }
   const test = lastTest?.updatedAt === summary.integration.updatedAt ? lastTest.result : undefined;
   if (test !== undefined) {
@@ -404,7 +429,7 @@ export function updateInputFromDraft(
   return {
     id: integration.id,
     displayName: fields.displayName,
-    transport: fields.transport,
+    transport: integration.transport,
     url: fields.url,
     headers: fields.headers,
     scope: fields.scope,

@@ -1,4 +1,5 @@
 import {
+  IntegrationAddInput,
   IntegrationError,
   OrchestratorMcpFailure,
   type Integration,
@@ -13,9 +14,11 @@ import * as AgentStore from "../../../agents/AgentStore.ts";
 import * as ProjectFiles from "../../../projectLabels/ProjectFiles.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
+import { GOOGLE_CLIENT_HELP } from "../../../integrations/local/GoogleWorkspace.ts";
 import { IntegrationsToolkit } from "./tools.ts";
 
 const isIntegrationError = Schema.is(IntegrationError);
+const decodeAdd = Schema.decodeUnknownEffect(IntegrationAddInput);
 
 /** What an agent can act on, per reason; anything else is a server-side fault. */
 const AGENT_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
@@ -31,6 +34,9 @@ const AGENT_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
     "A vault item in this integration's headers isn't allowed for its server. Ask the owner to add the server to the item's allowed domains, or to save the integration in Settings → Integrations to approve it.",
   not_found: "No connected integration with that name is available in this project.",
   disabled: "That integration is disabled.",
+  google_client_missing: GOOGLE_CLIENT_HELP,
+  local_runtime_missing:
+    "uvx is missing. Install uv with brew install uv (macOS) or https://docs.astral.sh/uv/getting-started/installation/ (Linux), then restart Cogenly.",
 };
 const SERVER_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
   upstream_timeout:
@@ -92,12 +98,14 @@ const byName = (name: string) =>
   });
 
 /**
- * The integration, plus a sign-in link when it signs in with OAuth and has no
- * usable grant yet. The link returns to the origin this MCP request reached.
+ * The integration, plus a sign-in link when it signs in (remote OAuth or a
+ * managed local account) and has no usable grant yet. A remote link returns
+ * to the origin this MCP request reached; a local one to its callback origin.
  */
 const withSignIn = (integration: Integration) =>
   Effect.gen(function* () {
-    if (integration.auth?.type !== "oauth") return { integration };
+    if (integration.auth?.type !== "oauth" && integration.transport !== "local")
+      return { integration };
     const service = yield* Integrations.Integrations;
     const { integrations } = yield* service.list().pipe(Effect.mapError(failure));
     const status = integrations.find(
@@ -150,7 +158,22 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
   integration_add: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
-      const { integration } = yield* service.create(input).pipe(Effect.mapError(failure));
+      const scope = yield* Invocation.McpInvocationContext;
+      const decoded = yield* decodeAdd(input).pipe(
+        Effect.mapError(
+          () =>
+            new OrchestratorMcpFailure({
+              code: "invalid_request",
+              message:
+                "Pass either a remote server (name, displayName, transport, url, headers, scope, hint) or a managed Google account (preset: google-workspace, accountLabel).",
+            }),
+        ),
+      );
+      const request =
+        "preset" in decoded && decoded.callbackOrigin === undefined && scope.httpOrigin
+          ? { ...decoded, callbackOrigin: scope.httpOrigin }
+          : decoded;
+      const { integration } = yield* service.create(request).pipe(Effect.mapError(failure));
       return yield* withSignIn(integration);
     }),
   ),

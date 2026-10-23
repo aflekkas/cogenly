@@ -20,9 +20,17 @@ export const IntegrationName = TrimmedNonEmptyString.check(
 );
 export type IntegrationName = typeof IntegrationName.Type;
 
-/** `http` is the only transport in v1; `stdio` joins this union later. */
-export const IntegrationTransport = Schema.Literals(["http"]);
+/** Local endpoints are allocated by Cogenly, never taken from user-entered URLs. */
+export const IntegrationTransport = Schema.Literals(["http", "local"]);
 export type IntegrationTransport = typeof IntegrationTransport.Type;
+
+/** The account is the integration's `accountLabel`, as for remote integrations. */
+export const LocalIntegrationConfig = Schema.Struct({
+  preset: Schema.Literal("google-workspace"),
+  version: TrimmedNonEmptyString,
+  callbackOrigin: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
+});
+export type LocalIntegrationConfig = typeof LocalIntegrationConfig.Type;
 
 /** All projects, or only the listed project folders (by label id). */
 export const IntegrationScope = Schema.Union([
@@ -63,6 +71,7 @@ const integrationFields = {
   name: IntegrationName,
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   transport: IntegrationTransport,
+  local: Schema.optional(LocalIntegrationConfig),
   url: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
   headers: IntegrationHeaders,
   enabled: Schema.Boolean,
@@ -96,6 +105,39 @@ export const IntegrationCreateInput = Schema.Struct({
 });
 export type IntegrationCreateInput = typeof IntegrationCreateInput.Type;
 
+/** The preset supplies the package, version, command, services and vault references. */
+export const GoogleWorkspaceAddInput = Schema.Struct({
+  preset: Schema.Literal("google-workspace"),
+  accountLabel: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+  name: Schema.optional(IntegrationName),
+  callbackOrigin: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2000))),
+  scope: Schema.optional(IntegrationScope),
+});
+export type GoogleWorkspaceAddInput = typeof GoogleWorkspaceAddInput.Type;
+export const IntegrationAddInput = Schema.Union([IntegrationCreateInput, GoogleWorkspaceAddInput]);
+export type IntegrationAddInput = typeof IntegrationAddInput.Type;
+
+/**
+ * `integration_add` arguments as one object, since MCP tools need an object
+ * root; the handler decodes them as `IntegrationAddInput`.
+ */
+export const IntegrationAddToolInput = Schema.Struct({
+  preset: Schema.optional(GoogleWorkspaceAddInput.fields.preset),
+  name: Schema.optional(IntegrationName),
+  displayName: Schema.optional(integrationFields.displayName),
+  transport: Schema.optional(IntegrationTransport),
+  local: integrationFields.local,
+  url: Schema.optional(integrationFields.url),
+  headers: Schema.optional(IntegrationHeaders),
+  enabled: Schema.optional(Schema.Boolean),
+  scope: Schema.optional(IntegrationScope),
+  hint: Schema.optional(integrationFields.hint),
+  accountLabel: integrationFields.accountLabel,
+  auth: integrationFields.auth,
+  callbackOrigin: GoogleWorkspaceAddInput.fields.callbackOrigin,
+});
+export type IntegrationAddToolInput = typeof IntegrationAddToolInput.Type;
+
 export const IntegrationUpdateInput = Schema.Struct({
   id: IntegrationId,
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
@@ -116,8 +158,9 @@ export const IntegrationKey = Schema.Struct({ id: IntegrationId });
 export type IntegrationKey = typeof IntegrationKey.Type;
 
 /**
- * `needs_sign_in`: OAuth has no usable grant (never signed in, or revoked).
- * `error`: the last check failed; `message` says why.
+ * `needs_sign_in`: no usable grant (never signed in, or revoked), for remote
+ * OAuth and managed local accounts alike. `error`: the last check failed, or a
+ * managed process failed; `message` says why.
  */
 export const IntegrationConnectionStatus = Schema.Literals([
   "connected",
@@ -135,6 +178,15 @@ export const IntegrationSummary = Schema.Struct({
   toolCount: Schema.NullOr(Schema.Number),
   message: Schema.optional(Schema.String),
   checkedAt: Schema.optional(IsoDateTime),
+  /** The process behind a `local` integration, which Cogenly runs. */
+  managed: Schema.optional(
+    Schema.Struct({
+      state: Schema.Literals(["starting", "running", "failed", "missing_runtime", "stopped"]),
+      version: Schema.String,
+      stderrTail: Schema.String,
+      message: Schema.optional(Schema.String),
+    }),
+  ),
 });
 export type IntegrationSummary = typeof IntegrationSummary.Type;
 
@@ -143,7 +195,12 @@ export const IntegrationListResult = Schema.Struct({
 });
 export type IntegrationListResult = typeof IntegrationListResult.Type;
 
-/** A browser link that starts OAuth sign-in; it returns to `redirectUri` on this server. */
+/**
+ * A browser link that starts sign-in; it returns to `redirectUri` on this
+ * server. Remote OAuth links go straight to the authorization server; a
+ * managed local account's link is a short-lived Cogenly page that asks its
+ * process for one.
+ */
 export const IntegrationSignIn = Schema.Struct({
   authorizationUrl: Schema.String,
   redirectUri: Schema.String,
@@ -184,6 +241,10 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
     "sign_in_required",
     /** The server has no dynamic client registration; the owner must supply a client id. */
     "client_id_required",
+    /** The Google preset needs the owner's OAuth client in the vault. */
+    "google_client_missing",
+    /** A managed local server's runtime (e.g. uvx) is not installed. */
+    "local_runtime_missing",
   ]),
   cause: Schema.optional(Schema.Defect()),
 }) {

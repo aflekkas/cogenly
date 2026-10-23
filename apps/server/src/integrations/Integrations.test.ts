@@ -21,6 +21,7 @@ import { runMigrations } from "../persistence/Migrations.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import * as Integrations from "./Integrations.ts";
 import * as Tokens from "./IntegrationTokens.ts";
+import { IntegrationEndpointPolicy } from "./RemoteEndpoint.ts";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
@@ -145,6 +146,7 @@ const noTokensLayer = Layer.succeed(Tokens.IntegrationTokens, {
 
 const layerWith = (options: Integrations.IntegrationsOptions = {}) =>
   Integrations.layerWith(options).pipe(
+    Layer.provide(Layer.succeed(IntegrationEndpointPolicy, () => Effect.succeed(undefined))),
     Layer.provide(credentialsLayer),
     Layer.provide(noTokensLayer),
     Layer.provideMerge(database),
@@ -674,6 +676,7 @@ describe("Integrations gateway", () => {
 const vaultLayer = () => {
   const stored = new Map<string, Uint8Array>();
   return Integrations.layer.pipe(
+    Layer.provide(Layer.succeed(IntegrationEndpointPolicy, () => Effect.succeed(undefined))),
     Layer.provide(Credentials.layer),
     Layer.provide(Tokens.layer),
     Layer.provideMerge(Vault.layer),

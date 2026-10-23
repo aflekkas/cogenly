@@ -79,6 +79,27 @@ Constraints that are not obvious from the code:
   the integration `needs_sign_in`, and later calls fail before any request, so
   a revoked grant never loops.
 
-Deferred: `stdio` transport (the transport union is designed to admit it).
+## Managed local servers
+
+A `local` integration is a fixed preset (today only Google Workspace,
+[local/](../../apps/server/src/integrations/local/)), never a command from
+Settings or MCP: Cogenly pins the package, runs one process per account on a
+loopback port only the runner allocates, and passes the OAuth client through
+the environment, never argv. Loopback is reachable only this way; remote URLs,
+including OAuth discovery and token endpoints, go through
+[RemoteEndpoint.ts](../../apps/server/src/integrations/RemoteEndpoint.ts),
+which refuses non-public addresses and pins the connection to the checked DNS
+answers.
+
+There is one sign-in entry point: `beginSignIn` returns an `IntegrationSignIn`
+for both kinds, and `needs_sign_in` means the same thing for both. A local
+link is a ten-minute capability ticket on the account's fixed callback origin
+(Google needs that exact redirect URI registered), which asks the process for
+its consent URL; the callback is routed to the process by the OAuth `state` it
+issued. The process keeps the Google grant on disk, so Cogenly does not hold
+those tokens. Any committed edit retires the running definition (a stale
+in-flight request cannot restart it); an empty update changes nothing, so
+asking for a fresh link does not kill a pending sign-in.
+
 Clients have no RPC for an integration's tool list; only agents see tools,
 through `integration_tools`.

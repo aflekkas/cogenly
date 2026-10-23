@@ -100,7 +100,17 @@ const addInput = {
 };
 
 describe("integration_add approval gating", () => {
-  it.effect("requires owner approval for a persistent agent, never for the owner", () =>
+  it.effect.each([
+    { kind: "remote", input: addInput },
+    {
+      kind: "Google preset",
+      input: {
+        preset: "google-workspace",
+        accountLabel: "personal",
+        callbackOrigin: "https://cogenly.example.com",
+      },
+    },
+  ])("requires owner approval for a persistent agent's $kind, never for the owner", ({ input }) =>
     Effect.gen(function* () {
       yield* runMigrations();
       const sql = yield* SqlClient.SqlClient;
@@ -110,7 +120,7 @@ describe("integration_add approval gating", () => {
 
       approvalRequests = 0;
       const denied = yield* policy
-        .beforeTool(scopeFor(true), "integration_add", addInput, false)
+        .beforeTool(scopeFor(true), "integration_add", input, false)
         .pipe(Effect.result);
       expect(denied._tag).toBe("Failure");
       if (denied._tag === "Failure") {
@@ -120,7 +130,7 @@ describe("integration_add approval gating", () => {
       expect(approvalRequests).toBe(1);
 
       // The owner's own turn has no agent actor, so no approval is requested.
-      const owner = yield* policy.beforeTool(scopeFor(false), "integration_add", addInput, false);
+      const owner = yield* policy.beforeTool(scopeFor(false), "integration_add", input, false);
       expect(owner).toEqual({ handled: false });
       expect(approvalRequests).toBe(1);
     }).pipe(Effect.provide(layer)),

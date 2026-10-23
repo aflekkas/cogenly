@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { base64UrlEncode } from "../auth/utils.ts";
+import { IntegrationEndpointPolicy, withPublicEndpoint } from "./RemoteEndpoint.ts";
 
 /**
  * The OAuth 2.1 client the gateway uses to sign in to upstream MCP servers,
@@ -183,8 +184,12 @@ export const secretAuthMethod = (server: OAuthServer): ClientAuthMethod =>
 
 export const make = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient;
+  const endpointPolicy = yield* IntegrationEndpointPolicy;
 
-  /** One bounded request; redirects are never followed, so codes and secrets stay put. */
+  /**
+   * One bounded request to a public address; redirects are never followed, so
+   * codes and secrets stay put.
+   */
   const send = (request: HttpClientRequest.HttpClientRequest, operation: string) =>
     Effect.gen(function* () {
       const response = yield* client
@@ -206,6 +211,10 @@ export const make = Effect.gen(function* () {
       );
       return { status: response.status, headers: response.headers, text };
     }).pipe(
+      (effect) =>
+        withPublicEndpoint(request.url, effect).pipe(
+          Effect.provideService(IntegrationEndpointPolicy, endpointPolicy),
+        ),
       Effect.timeout(METADATA_TIMEOUT),
       Effect.mapError((cause) =>
         isIntegrationError(cause)

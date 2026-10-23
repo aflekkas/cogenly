@@ -3,7 +3,8 @@ import {
   IntegrationError,
   IntegrationId,
   type IntegrationCallResult,
-  type IntegrationCreateInput,
+  type IntegrationAddInput,
+  type IntegrationMutationResult,
   type IntegrationListResult,
   type IntegrationName,
   type IntegrationSignIn,
@@ -34,6 +35,9 @@ import { redactValue } from "../vault/VaultRedactor.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import * as OAuth from "./IntegrationOAuth.ts";
 import * as Tokens from "./IntegrationTokens.ts";
+import * as Local from "./local/LocalIntegrations.ts";
+import { GOOGLE_WORKSPACE_VERSION } from "./local/GoogleWorkspace.ts";
+import { IntegrationEndpointPolicy, withPublicEndpoint } from "./RemoteEndpoint.ts";
 
 /**
  * Server-only OAuth state, persisted with the integration and stripped before
@@ -298,9 +302,9 @@ export class Integrations extends Context.Service<
       labelId: ProjectLabelId | null,
     ) => Effect.Effect<IntegrationListResult, IntegrationError>;
     readonly create: (
-      input: IntegrationCreateInput,
+      input: IntegrationAddInput,
       options?: IntegrationWriteOptions,
-    ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
+    ) => Effect.Effect<IntegrationMutationResult, IntegrationError>;
     /**
      * A changed origin drops every credential approval unless this write approves anew.
      * `holdStoredSecrets` (every agent write) refuses a destination change that would
@@ -312,7 +316,7 @@ export class Integrations extends Context.Service<
         readonly preserveCredentialDestination?: boolean;
         readonly holdStoredSecrets?: boolean;
       },
-    ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
+    ) => Effect.Effect<IntegrationMutationResult, IntegrationError>;
     /** Tombstones the integration; its name becomes reusable. */
     readonly remove: (
       id: IntegrationId,
@@ -421,6 +425,8 @@ const make = (options: IntegrationsOptions = {}) =>
     const credentials = yield* Credentials.IntegrationCredentials;
     const tokenStore = yield* Tokens.IntegrationTokens;
     const protocol = yield* OAuth.make;
+    const local = yield* Effect.serviceOption(Local.LocalIntegrations);
+    const endpointPolicy = yield* IntegrationEndpointPolicy;
     const ttlMs = options.toolCacheTtlMs ?? DEFAULT_TOOL_CACHE_TTL_MS;
     const timeoutMs = options.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS;
     const cache = yield* Ref.make(new Map<string, CachedTools>());
@@ -524,34 +530,75 @@ const make = (options: IntegrationsOptions = {}) =>
         return found;
       });
 
+    /**
+     * A managed local account's process and the status it implies. Listing
+     * (re)starts an enabled account's process; a failed process is an error,
+     * and a running one without a Google grant needs sign-in like remote OAuth.
+     */
+    const managedState = (integration: StoredIntegration) =>
+      Effect.gen(function* () {
+        if (integration.transport !== "local" || !integration.enabled || Option.isNone(local))
+          return undefined;
+        yield* local.value.start(integration).pipe(Effect.ignore);
+        const process = yield* local.value.status(integration.id);
+        if (process === undefined) return undefined;
+        const signedIn = yield* local.value
+          .signedIn(integration.id)
+          .pipe(Effect.orElseSucceed(() => false));
+        const check = (yield* Ref.get(checks)).get(integration.id);
+        const status: IntegrationSummary["status"] =
+          process.state === "failed" || process.state === "missing_runtime"
+            ? "error"
+            : process.state === "stopped"
+              ? "disconnected"
+              : !signedIn
+                ? "needs_sign_in"
+                : process.state === "starting"
+                  ? "unknown"
+                  : check?.updatedAt === integration.updatedAt && !check.ok
+                    ? "error"
+                    : "connected";
+        return { process, status };
+      });
+
     const summaries = (integrations: ReadonlyArray<StoredIntegration>) =>
       Effect.gen(function* () {
         const entries = yield* Ref.get(cache);
         const checked = yield* Ref.get(checks);
         return {
-          integrations: integrations.map((integration) => {
-            const prefix = `${integration.id}:${integration.updatedAt}`;
-            const cached =
-              entries.get(prefix) ??
-              [...entries.values()].find((entry) => entry.key.startsWith(`${prefix}:`));
-            const check = checked.get(integration.id);
-            const current = check?.updatedAt === integration.updatedAt ? check : undefined;
-            const status: IntegrationSummary["status"] =
-              usesOAuth(integration) && !integration.oauthState?.signedIn
-                ? "needs_sign_in"
-                : current !== undefined && !current.ok
-                  ? "error"
-                  : cached === undefined
-                    ? "unknown"
-                    : "connected";
-            return {
-              integration: redactIntegration(integration),
-              status,
-              toolCount: status === "connected" && cached ? cached.result.tools.length : null,
-              ...(current?.message === undefined ? {} : { message: current.message }),
-              ...(current === undefined ? {} : { checkedAt: current.checkedAt as never }),
-            } satisfies IntegrationSummary;
-          }),
+          integrations: yield* Effect.forEach(integrations, (integration) =>
+            Effect.gen(function* () {
+              const prefix = `${integration.id}:${integration.updatedAt}`;
+              const cached =
+                entries.get(prefix) ??
+                [...entries.values()].find((entry) => entry.key.startsWith(`${prefix}:`));
+              const check = checked.get(integration.id);
+              const current = check?.updatedAt === integration.updatedAt ? check : undefined;
+              const failed = current !== undefined && !current.ok;
+              const managed = yield* managedState(integration);
+              const status: IntegrationSummary["status"] =
+                managed !== undefined
+                  ? managed.status
+                  : usesOAuth(integration) && !integration.oauthState?.signedIn
+                    ? "needs_sign_in"
+                    : failed
+                      ? "error"
+                      : cached === undefined
+                        ? "unknown"
+                        : "connected";
+              const message =
+                (managed?.status === "error" ? managed.process.message : undefined) ??
+                current?.message;
+              return {
+                integration: redactIntegration(integration),
+                status,
+                toolCount: status === "connected" && cached ? cached.result.tools.length : null,
+                ...(message === undefined ? {} : { message }),
+                ...(current === undefined ? {} : { checkedAt: current.checkedAt as never }),
+                ...(managed === undefined ? {} : { managed: managed.process }),
+              } satisfies IntegrationSummary;
+            }),
+          ),
         };
       });
 
@@ -828,6 +875,10 @@ const make = (options: IntegrationsOptions = {}) =>
           sessionId: response.headers["mcp-session-id"] ?? sessionId,
         };
       }).pipe(
+        (effect) =>
+          withPublicEndpoint(integration.url, effect).pipe(
+            Effect.provideService(IntegrationEndpointPolicy, endpointPolicy),
+          ),
         Effect.timeout(Duration.millis(timeoutMs)),
         Effect.catchTags({
           TimeoutError: () =>
@@ -896,6 +947,14 @@ const make = (options: IntegrationsOptions = {}) =>
       bearer?: string,
     ) =>
       Effect.gen(function* () {
+        if (integration.transport === "local") {
+          if (Option.isNone(local))
+            return yield* new IntegrationError({
+              operation: method,
+              reason: "upstream_unreachable",
+            });
+          return yield* local.value.rpc(integration, method, params, labelId);
+        }
         const endpoint = new URL(integration.url);
         if (
           integration.credentialOrigin !== undefined &&
@@ -1031,6 +1090,24 @@ const make = (options: IntegrationsOptions = {}) =>
         Effect.mapError(failure("write", "storage")),
       );
 
+    if (Option.isSome(local)) {
+      yield* rows().pipe(
+        Effect.flatMap((all) =>
+          Effect.forEach(
+            all.filter((item) => item.transport === "local" && item.enabled),
+            (item) => local.value.start(item).pipe(Effect.ignore),
+            { discard: true },
+          ),
+        ),
+        Effect.ignore,
+      );
+      // Process restarts and finished Google sign-ins reach Settings like any other change.
+      yield* local.value.changes.pipe(
+        Stream.runForEach(() => notify),
+        Effect.forkScoped,
+      );
+    }
+
     return Integrations.of({
       list: () => rows().pipe(Effect.flatMap(summaries)),
       listForProject: (labelId) =>
@@ -1040,8 +1117,35 @@ const make = (options: IntegrationsOptions = {}) =>
           ),
           Effect.flatMap(summaries),
         ),
-      create: (input, options) =>
+      create: (request, options) =>
         Effect.gen(function* () {
+          const input =
+            "preset" in request
+              ? Option.isSome(local)
+                ? yield* local.value.prepare(request)
+                : yield* new IntegrationError({
+                    operation: "connect Google",
+                    reason: "upstream_unreachable",
+                  })
+              : request;
+          if (
+            input.transport === "local" &&
+            (input.local?.preset !== "google-workspace" ||
+              input.local.version !== GOOGLE_WORKSPACE_VERSION ||
+              input.url !== "https://accounts.google.com" ||
+              Object.keys(input.headers).length > 0 ||
+              input.auth !== undefined ||
+              !input.accountLabel?.trim())
+          ) {
+            return yield* new IntegrationError({ operation: "create", reason: "invalid_request" });
+          }
+          // A full definition (e.g. an approved proposal) passes the same checks as the preset.
+          if (input.transport === "local" && input.local && Option.isSome(local))
+            yield* local.value.prepare({
+              preset: input.local.preset,
+              accountLabel: input.accountLabel?.trim() ?? "",
+              callbackOrigin: input.local.callbackOrigin,
+            });
           yield* validateUrl(input.url);
           yield* validateAuth(input.auth, "create");
           for (const template of Object.values(input.headers)) {
@@ -1066,6 +1170,7 @@ const make = (options: IntegrationsOptions = {}) =>
             name: input.name,
             displayName: input.displayName,
             transport: input.transport,
+            ...(input.local ? { local: input.local } : {}),
             url: input.url,
             headers: input.headers,
             credentialOrigin: new URL(input.url).origin,
@@ -1082,12 +1187,23 @@ const make = (options: IntegrationsOptions = {}) =>
             deletedAt: null,
           };
           yield* persist(integration);
+          // The process starts now so a sign-in link answers quickly; listing retries a failure.
+          if (integration.transport === "local" && Option.isSome(local))
+            yield* local.value.start(integration).pipe(Effect.ignore);
           yield* notify;
           return { integration: redactIntegration(integration) };
         }).pipe(Effect.mapError(failure("create", "storage"))),
       update: (masked, options) =>
         Effect.gen(function* () {
           const current = yield* getById(masked.id);
+          if (
+            (current.transport === "local" && integrationDestinationChanged(current, masked)) ||
+            (current.transport !== "local" && masked.transport === "local")
+          )
+            return yield* new IntegrationError({
+              operation: "update local integration",
+              reason: "invalid_request",
+            });
           if (!integrationVisibleTo({ ...current, enabled: true }, options?.callerLabelId))
             return yield* new IntegrationError({ operation: "update", reason: "not_found" });
           if (options?.preserveScope && integrationScopeWidened(current, masked))
@@ -1095,6 +1211,10 @@ const make = (options: IntegrationsOptions = {}) =>
               operation: "update",
               reason: "approval_required",
             });
+          // Nothing to change (an agent asking for a fresh sign-in link): keep the
+          // version, so a managed process and its pending sign-in keep running.
+          if (Object.entries(masked).every(([key, value]) => key === "id" || value === undefined))
+            return { integration: redactIntegration(current), changed: false };
           // A masked value is one the caller left as it was.
           const input: IntegrationUpdateInput =
             masked.headers === undefined
@@ -1170,10 +1290,17 @@ const make = (options: IntegrationsOptions = {}) =>
           yield* persist(integration);
           if (!keepSignIn) yield* dropTokens(current);
           yield* invalidate(integration.id);
-          return { integration: redactIntegration(integration) };
+          return { integration: redactIntegration(integration), changed: true };
         }).pipe(
           sql.withTransaction,
-          Effect.tap(() => notify),
+          // Once committed, the old process gives way; the next list starts the new version.
+          Effect.tap(({ integration, changed }) =>
+            changed && integration.transport === "local" && Option.isSome(local)
+              ? local.value.stop(integration.id, integration)
+              : Effect.void,
+          ),
+          Effect.tap(({ changed }) => (changed ? notify : Effect.void)),
+          Effect.map(({ integration }) => ({ integration })),
           Effect.mapError(failure("update", "storage")),
         ),
       remove: (id, options) =>
@@ -1192,6 +1319,7 @@ const make = (options: IntegrationsOptions = {}) =>
           yield* persist({ ...rest, deletedAt: at, updatedAt: at });
           yield* dropTokens(current);
           yield* invalidate(id);
+          if (current.transport === "local" && Option.isSome(local)) yield* local.value.stop(id);
           yield* notify;
           return { deleted: true };
         }).pipe(Effect.mapError(failure("delete", "storage"))),
@@ -1275,10 +1403,26 @@ const make = (options: IntegrationsOptions = {}) =>
       beginSignIn: (id, from) =>
         Effect.gen(function* () {
           const integration = yield* getById(id);
-          if (!usesOAuth(integration))
-            return yield* new IntegrationError({ operation: "sign in", reason: "invalid_request" });
           if (!integration.enabled)
             return yield* new IntegrationError({ operation: "sign in", reason: "disabled" });
+          // A managed account signs in through its own process, on its fixed callback origin.
+          if (integration.transport === "local") {
+            if (Option.isNone(local))
+              return yield* new IntegrationError({
+                operation: "sign in",
+                reason: "upstream_unreachable",
+              });
+            yield* local.value.start(integration);
+            const link = yield* local.value.signInLink(integration);
+            if (link === undefined)
+              return yield* new IntegrationError({
+                operation: "sign in (already signed in)",
+                reason: "invalid_request",
+              });
+            return link;
+          }
+          if (!usesOAuth(integration))
+            return yield* new IntegrationError({ operation: "sign in", reason: "invalid_request" });
           const requested = from.origin === undefined ? null : URL.parse(from.origin);
           const known = yield* Ref.get(lastBrowserOrigin);
           const origin =

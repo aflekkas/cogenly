@@ -307,10 +307,20 @@ export function describeApproval(
         ],
       };
     case "integration_add":
-      return {
-        title: `Connect ${action.payload.displayName} (${action.payload.name})`,
-        details: [action.payload.url],
-      };
+      return "preset" in action.payload
+        ? {
+            title: `Connect Google · ${action.payload.accountLabel}`,
+            details: [
+              "Gmail, Calendar, Drive, Docs and Sheets, run by Cogenly",
+              ...(action.payload.callbackOrigin === undefined
+                ? []
+                : [`Sign-in returns to ${action.payload.callbackOrigin}`]),
+            ],
+          }
+        : {
+            title: `Connect ${action.payload.displayName} (${action.payload.name})`,
+            details: [action.payload.url],
+          };
     case "integration_update":
       return {
         title: `Change integration ${action.payload.id}`,

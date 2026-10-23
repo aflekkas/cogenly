@@ -215,6 +215,33 @@ describe("integrationStatus", () => {
 });
 
 describe("display helpers", () => {
+  it("shows current process health ahead of a stale successful connection test", () => {
+    const runningTest = {
+      updatedAt: integration.updatedAt,
+      result: { status: "connected" as const, toolCount: 1, message: "" },
+    };
+    expect(
+      integrationStatus(
+        summary({ managed: { state: "failed", version: "2.1.2", stderrTail: "Process exited" } }),
+        runningTest,
+      ),
+    ).toMatchObject({ label: "Failed", tone: "error", reason: "Process exited" });
+    expect(
+      integrationStatus(
+        summary({ managed: { state: "starting", version: "2.1.2", stderrTail: "" } }),
+        undefined,
+      ),
+    ).toMatchObject({ label: "Starting" });
+    // A managed Google account without a grant signs in like a remote OAuth one.
+    const google = summary({
+      integration: { ...integration, transport: "local", headers: {} },
+      status: "needs_sign_in",
+      managed: { state: "running", version: "2.1.2", stderrTail: "" },
+    });
+    expect(integrationStatus(google, runningTest)).toMatchObject({ label: "Needs sign-in" });
+    expect(signInAction(google)).toBe("Sign in");
+    expect(signInAction({ ...google, status: "connected" })).toBeNull();
+  });
   it("shows a host and a scope", () => {
     expect(urlHost("https://mcp.example.com:8443/x")).toBe("mcp.example.com:8443");
     expect(urlHost("not a url")).toBe("not a url");
@@ -230,6 +257,18 @@ describe("display helpers", () => {
 });
 
 describe("drafts", () => {
+  it("keeps a managed account local when editing its display name", () => {
+    const local = { ...integration, transport: "local" as const, headers: {} };
+    const fields = validateIntegrationDraft({
+      ...draftFromIntegration(local),
+      displayName: "Google · work",
+    });
+    if ("error" in fields) throw new Error(fields.error);
+    expect(updateInputFromDraft(local, fields.fields)).toMatchObject({
+      transport: "local",
+      displayName: "Google · work",
+    });
+  });
   it("follows the display name until the name is edited", () => {
     const named = withDisplayName(EMPTY_INTEGRATION_DRAFT, "My Linear");
     expect(named.name).toBe("my-linear");

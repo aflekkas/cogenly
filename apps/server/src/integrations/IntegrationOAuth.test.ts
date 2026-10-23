@@ -34,6 +34,7 @@ import { CALLBACK_PATH } from "./IntegrationOAuth.ts";
 import * as Integrations from "./Integrations.ts";
 import * as IntegrationOAuthHttp from "./integrationOAuthHttp.ts";
 import * as Tokens from "./IntegrationTokens.ts";
+import { IntegrationEndpointPolicy } from "./RemoteEndpoint.ts";
 
 /**
  * A local OAuth 2.1 authorization server and MCP resource server in one:
@@ -239,6 +240,8 @@ const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 const gatewayLayer = () => {
   const stored = new Map<string, Uint8Array>();
   return Integrations.layer.pipe(
+    // The mock servers listen on loopback, which production refuses.
+    Layer.provide(Layer.succeed(IntegrationEndpointPolicy, () => Effect.succeed(undefined))),
     Layer.provide(Credentials.layer),
     Layer.provide(Tokens.layer),
     Layer.provideMerge(Vault.layer),
