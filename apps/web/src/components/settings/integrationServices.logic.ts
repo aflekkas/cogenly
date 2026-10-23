@@ -203,9 +203,9 @@ export interface IntegrationTest {
 }
 
 /**
- * What a row shows. The list only reports tools an agent listed recently, and
- * a test does not fill that cache, so the latest test of the current version
- * wins; an edit makes it stale.
+ * What a row shows. Tests belong to one integration version and expire when
+ * a subscription reports a newer server outcome. Both timestamps use the
+ * server clock, so a client's clock cannot keep an old result alive.
  */
 export function integrationStatus(
   summary: IntegrationSummary,
@@ -239,7 +239,12 @@ export function integrationStatus(
     const label = managed.state === "starting" ? "Starting" : "Stopped";
     return { tone: "neutral", label, reason: null, toolCount: null };
   }
-  const test = lastTest?.updatedAt === summary.integration.updatedAt ? lastTest.result : undefined;
+  const test =
+    lastTest?.updatedAt === summary.integration.updatedAt &&
+    (summary.checkedAt === undefined ||
+      (lastTest.result.checkedAt !== undefined && lastTest.result.checkedAt > summary.checkedAt))
+      ? lastTest.result
+      : undefined;
   if (test !== undefined) {
     return test.status === "connected"
       ? { tone: "success", label: "Connected", reason: null, toolCount: test.toolCount }

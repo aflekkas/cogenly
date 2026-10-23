@@ -255,6 +255,8 @@ export const IntegrationDeleteResult = Schema.Struct({ deleted: Schema.Boolean }
 export type IntegrationDeleteResult = typeof IntegrationDeleteResult.Type;
 
 export const IntegrationTestResult = Schema.Struct({
+  /** Server time when this test began; later subscription outcomes supersede it. */
+  checkedAt: Schema.optional(IsoDateTime),
   status: IntegrationConnectionStatus,
   toolCount: Schema.Number,
   message: Schema.String,

@@ -1377,6 +1377,7 @@ const make = (options: IntegrationsOptions = {}) =>
               reason: "disabled",
             });
           }
+          const checkedAt = yield* now;
           const result = yield* fetchTools(integration).pipe(
             // A passing test is a fresh tool list, so the list view shows it.
             Effect.tap((tools) =>
@@ -1402,7 +1403,7 @@ const make = (options: IntegrationsOptions = {}) =>
               }),
             ),
           );
-          return result;
+          return { ...result, checkedAt };
         }).pipe(Effect.mapError(failure("test connection", "storage"))),
       listTools: (name, labelId) => listTools(name, labelId),
       callTool: (name, tool, args, labelId) =>

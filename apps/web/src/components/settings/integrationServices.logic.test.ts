@@ -129,6 +129,32 @@ describe("headers", () => {
 });
 
 describe("integrationStatus", () => {
+  it.each(["connected", "error"] as const)(
+    "expires an old test when the server reports %s later",
+    (status) => {
+      const view = integrationStatus(
+        summary({
+          status,
+          toolCount: 7,
+          message: "Latest server failure",
+          checkedAt: "2026-10-01T00:00:02.000Z",
+        }),
+        {
+          updatedAt: integration.updatedAt,
+          result: {
+            status: status === "connected" ? "disconnected" : "connected",
+            toolCount: 2,
+            message: "Old test",
+            checkedAt: "2026-10-01T00:00:01.000Z",
+          },
+        },
+      );
+      expect(view.label).toBe(status === "connected" ? "Connected" : "Error");
+      expect(view.toolCount).toBe(status === "connected" ? 7 : null);
+      expect(view.reason).toBe(status === "error" ? "Latest server failure" : null);
+    },
+  );
+
   const failed = {
     updatedAt: integration.updatedAt,
     result: {
