@@ -1784,6 +1784,22 @@ const make = Effect.gen(function* () {
         }
         const runId = run.id;
         const nodeId = run.rootNodeId;
+        // The answer is consumed when it is stored, so a taken name must fail
+        // before the user types anything rather than after.
+        if (input.saveToVault) {
+          const name = input.saveToVault.name;
+          const { items } = yield* vault
+            .list({})
+            .pipe(
+              Effect.mapError(() => failure("orchestration_error", "Unable to read the vault.")),
+            );
+          if (items.some((item) => item.name === name)) {
+            return yield* failure(
+              "invalid_request",
+              `A vault item named "${name}" already exists. Pick another name, or use the existing item.`,
+            );
+          }
+        }
         const key = yield* requestKey(input.clientRequestId);
         // Turn item ids are global; scope the key to this thread. A retry with
         // the same clientRequestId finds this card, answered or not.
