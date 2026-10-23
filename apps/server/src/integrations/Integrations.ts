@@ -3,7 +3,8 @@ import {
   IntegrationError,
   IntegrationId,
   type IntegrationCallResult,
-  type IntegrationCreateInput,
+  type IntegrationAddInput,
+  type IntegrationMutationResult,
   type IntegrationListResult,
   type IntegrationName,
   type IntegrationSummary,
@@ -27,6 +28,9 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as Credentials from "./IntegrationCredentials.ts";
+import * as Local from "./local/LocalIntegrations.ts";
+import { GOOGLE_WORKSPACE_VERSION } from "./local/GoogleWorkspace.ts";
+import { IntegrationEndpointPolicy, withPublicEndpoint } from "./local/RemoteEndpoint.ts";
 
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(Integration));
 const encode = Schema.encodeEffect(Schema.fromJsonString(Integration));
@@ -223,9 +227,9 @@ export class Integrations extends Context.Service<
       labelId: ProjectLabelId | null,
     ) => Effect.Effect<IntegrationListResult, IntegrationError>;
     readonly create: (
-      input: IntegrationCreateInput,
+      input: IntegrationAddInput,
       options?: IntegrationWriteOptions,
-    ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
+    ) => Effect.Effect<IntegrationMutationResult, IntegrationError>;
     /**
      * A changed origin drops every credential approval unless this write approves anew.
      * `holdStoredSecrets` (every agent write) refuses a destination change that would
@@ -237,7 +241,7 @@ export class Integrations extends Context.Service<
         readonly preserveCredentialDestination?: boolean;
         readonly holdStoredSecrets?: boolean;
       },
-    ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
+    ) => Effect.Effect<IntegrationMutationResult, IntegrationError>;
     /** Tombstones the integration; its name becomes reusable. */
     readonly remove: (
       id: IntegrationId,
@@ -308,6 +312,8 @@ const make = (options: IntegrationsOptions = {}) =>
     const crypto = yield* Crypto.Crypto;
     const client = yield* HttpClient.HttpClient;
     const credentials = yield* Credentials.IntegrationCredentials;
+    const local = yield* Effect.serviceOption(Local.LocalIntegrations);
+    const endpointPolicy = yield* IntegrationEndpointPolicy;
     const ttlMs = options.toolCacheTtlMs ?? DEFAULT_TOOL_CACHE_TTL_MS;
     const timeoutMs = options.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS;
     const cache = yield* Ref.make(new Map<string, CachedTools>());
@@ -368,17 +374,41 @@ const make = (options: IntegrationsOptions = {}) =>
       Effect.gen(function* () {
         const entries = yield* Ref.get(cache);
         return {
-          integrations: integrations.map((integration) => {
-            const prefix = `${integration.id}:${integration.updatedAt}`;
-            const cached =
-              entries.get(prefix) ??
-              [...entries.values()].find((entry) => entry.key.startsWith(`${prefix}:`));
-            return {
-              integration: redactIntegration(integration),
-              status: cached === undefined ? "unknown" : "connected",
-              toolCount: cached === undefined ? null : cached.result.tools.length,
-            } satisfies IntegrationSummary;
-          }),
+          integrations: yield* Effect.forEach(integrations, (integration) =>
+            Effect.gen(function* () {
+              const managed =
+                integration.transport === "local" && integration.enabled && Option.isSome(local)
+                  ? yield* local.value
+                      .start(integration)
+                      .pipe(Effect.ignore, Effect.andThen(local.value.status(integration.id)))
+                  : undefined;
+              const signInUrl =
+                integration.transport === "local" && Option.isSome(local)
+                  ? yield* local.value
+                      .signInLink(integration)
+                      .pipe(Effect.orElseSucceed(() => undefined))
+                  : undefined;
+              const prefix = `${integration.id}:${integration.updatedAt}`;
+              const cached =
+                entries.get(prefix) ??
+                [...entries.values()].find((entry) => entry.key.startsWith(`${prefix}:`));
+              return {
+                integration: redactIntegration(integration),
+                status: managed
+                  ? managed.state === "running"
+                    ? "connected"
+                    : managed.state === "starting"
+                      ? "unknown"
+                      : "disconnected"
+                  : cached === undefined
+                    ? "unknown"
+                    : "connected",
+                ...(managed ? { managed } : {}),
+                ...(signInUrl ? { signInUrl } : {}),
+                toolCount: cached === undefined ? null : cached.result.tools.length,
+              } satisfies IntegrationSummary;
+            }),
+          ),
         };
       });
 
@@ -462,6 +492,10 @@ const make = (options: IntegrationsOptions = {}) =>
           sessionId: response.headers["mcp-session-id"] ?? sessionId,
         };
       }).pipe(
+        (effect) =>
+          withPublicEndpoint(integration.url, effect).pipe(
+            Effect.provideService(IntegrationEndpointPolicy, endpointPolicy),
+          ),
         Effect.timeout(Duration.millis(timeoutMs)),
         Effect.catchTags({
           TimeoutError: () =>
@@ -482,6 +516,14 @@ const make = (options: IntegrationsOptions = {}) =>
       labelId?: ProjectLabelId | null,
     ) =>
       Effect.gen(function* () {
+        if (integration.transport === "local") {
+          if (Option.isNone(local))
+            return yield* new IntegrationError({
+              operation: method,
+              reason: "upstream_unreachable",
+            });
+          return yield* local.value.rpc(integration, method, params, labelId);
+        }
         const endpoint = new URL(integration.url);
         if (
           integration.credentialOrigin !== undefined &&
@@ -592,6 +634,19 @@ const make = (options: IntegrationsOptions = {}) =>
         Effect.mapError(failure("write", "storage")),
       );
 
+    if (Option.isSome(local)) {
+      yield* rows().pipe(
+        Effect.flatMap((all) =>
+          Effect.forEach(
+            all.filter((item) => item.transport === "local" && item.enabled),
+            (item) => local.value.start(item).pipe(Effect.ignore),
+            { discard: true },
+          ),
+        ),
+        Effect.ignore,
+      );
+    }
+
     return Integrations.of({
       list: () => rows().pipe(Effect.flatMap(summaries)),
       listForProject: (labelId) =>
@@ -601,8 +656,28 @@ const make = (options: IntegrationsOptions = {}) =>
           ),
           Effect.flatMap(summaries),
         ),
-      create: (input, options) =>
+      create: (request, options) =>
         Effect.gen(function* () {
+          const input =
+            "preset" in request
+              ? Option.isSome(local)
+                ? yield* local.value.prepare(request)
+                : yield* new IntegrationError({
+                    operation: "connect Google",
+                    reason: "upstream_unreachable",
+                  })
+              : request;
+          if (
+            input.transport === "local" &&
+            (input.local?.preset !== "google-workspace" ||
+              input.local.version !== GOOGLE_WORKSPACE_VERSION ||
+              input.url !== "https://accounts.google.com" ||
+              Object.keys(input.headers).length > 0)
+          ) {
+            return yield* new IntegrationError({ operation: "create", reason: "invalid_request" });
+          }
+          if (input.transport === "local" && input.local && Option.isSome(local))
+            yield* local.value.prepare(input.local);
           yield* validateUrl(input.url);
           for (const template of Object.values(input.headers)) {
             for (const ref of credentialRefsIn(template)) {
@@ -626,6 +701,7 @@ const make = (options: IntegrationsOptions = {}) =>
             name: input.name,
             displayName: input.displayName,
             transport: input.transport,
+            ...(input.local ? { local: input.local } : {}),
             url: input.url,
             headers: input.headers,
             credentialOrigin: new URL(input.url).origin,
@@ -640,11 +716,28 @@ const make = (options: IntegrationsOptions = {}) =>
             deletedAt: null,
           };
           yield* persist(integration);
-          return { integration: redactIntegration(integration) };
+          const signInUrl =
+            integration.transport === "local" && Option.isSome(local)
+              ? yield* local.value.signInLink(integration)
+              : undefined;
+          if (integration.transport === "local" && Option.isSome(local))
+            yield* local.value.start(integration).pipe(Effect.ignore);
+          return {
+            integration: redactIntegration(integration),
+            ...(signInUrl ? { signInUrl } : {}),
+          };
         }).pipe(Effect.mapError(failure("create", "storage"))),
       update: (masked, options) =>
         Effect.gen(function* () {
           const current = yield* getById(masked.id);
+          if (
+            (current.transport === "local" && integrationDestinationChanged(current, masked)) ||
+            (current.transport !== "local" && masked.transport === "local")
+          )
+            return yield* new IntegrationError({
+              operation: "update local integration",
+              reason: "invalid_request",
+            });
           if (!integrationVisibleTo({ ...current, enabled: true }, options?.callerLabelId))
             return yield* new IntegrationError({ operation: "update", reason: "not_found" });
           if (options?.preserveScope && integrationScopeWidened(current, masked))
@@ -712,6 +805,8 @@ const make = (options: IntegrationsOptions = {}) =>
           };
           yield* persist(integration);
           yield* invalidate(integration.id);
+          if (current.transport === "local" && Option.isSome(local))
+            yield* local.value.stop(current.id);
           return { integration: redactIntegration(integration) };
         }).pipe(sql.withTransaction, Effect.mapError(failure("update", "storage"))),
       remove: (id, options) =>
@@ -728,6 +823,7 @@ const make = (options: IntegrationsOptions = {}) =>
           const at = yield* now;
           yield* persist({ ...current, deletedAt: at, updatedAt: at });
           yield* invalidate(id);
+          if (current.transport === "local" && Option.isSome(local)) yield* local.value.stop(id);
           return { deleted: true };
         }).pipe(Effect.mapError(failure("delete", "storage"))),
       testConnection: (id) =>

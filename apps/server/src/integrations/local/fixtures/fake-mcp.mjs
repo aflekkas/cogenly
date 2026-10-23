@@ -1,7 +1,11 @@
 import * as NodeHttp from "node:http";
 import * as NodeReadline from "node:readline";
+import * as NodeFS from "node:fs";
+import * as NodeCrypto from "node:crypto";
 
 let initialized = false;
+let authCount = 0;
+const authStates = new Set();
 const handle = (body, reply) => {
   if (body.method === "initialize") {
     reply({
@@ -15,6 +19,14 @@ const handle = (body, reply) => {
     throw new Error("Missing initialized notification");
   } else if (body.method === "tools/list") {
     reply({ tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object" } }] });
+  } else if (body.params?.name === "start_google_auth") {
+    authCount++;
+    const state = NodeCrypto.randomUUID();
+    authStates.add(state);
+    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    url.searchParams.set("state", state);
+    url.searchParams.set("redirect_uri", process.env.GOOGLE_OAUTH_REDIRECT_URI);
+    reply({ content: [{ type: "text", text: `Open [Google sign-in](${url.href})` }] });
   } else if (body.params?.name === "crash") {
     process.stderr.write("crashing with " + process.env.FIXTURE_SECRET.slice(0, 5));
     process.stderr.write(process.env.FIXTURE_SECRET.slice(5) + "\n");
@@ -29,6 +41,7 @@ const handle = (body, reply) => {
             argv: process.argv,
             secretPresent: Boolean(process.env.FIXTURE_SECRET),
             pid: process.pid,
+            authCount,
           }),
         },
       ],
@@ -39,6 +52,18 @@ const handle = (body, reply) => {
 if (process.env.FIXTURE_TRANSPORT === "http") {
   const server = NodeHttp.createServer(async (request, response) => {
     if (request.url.startsWith("/oauth2callback?")) {
+      if (process.env.WORKSPACE_MCP_CREDENTIALS_DIR) {
+        const state = new URL(request.url, "http://localhost").searchParams.get("state");
+        if (!authStates.delete(state)) {
+          response.writeHead(400).end();
+          return;
+        }
+        NodeFS.writeFileSync(
+          `${process.env.WORKSPACE_MCP_CREDENTIALS_DIR}/fixture@example.com.json`,
+          JSON.stringify({ refresh_token: "fixture-only" }),
+          { mode: 0o600 },
+        );
+      }
       response.end("connected");
       return;
     }

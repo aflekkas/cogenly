@@ -6,6 +6,8 @@ import * as VisualStates from "../htmlRender/VisualState.ts";
 import * as GlobalSearch from "../search/GlobalSearch.ts";
 import * as Facts from "../context/FactService.ts";
 import * as Integrations from "../integrations/Integrations.ts";
+import * as LocalIntegrations from "../integrations/local/LocalIntegrations.ts";
+import * as LocalMcpRunner from "../integrations/local/LocalMcpRunner.ts";
 import * as IntegrationCredentials from "../integrations/IntegrationCredentials.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
 import * as Exports from "../export/ExportService.ts";
@@ -358,8 +360,16 @@ export const layerVaultProvided = Vault.layer.pipe(
   Layer.provide(layerProjectFilesProvided),
   Layer.provide(layerApprovalChanges),
 );
+const layerIntegrationCredentials = IntegrationCredentials.layer.pipe(
+  Layer.provide(layerVaultProvided),
+);
+const layerLocalIntegrationsProvided = LocalIntegrations.layer.pipe(
+  Layer.provide(LocalMcpRunner.layer),
+  Layer.provide(layerIntegrationCredentials),
+);
 const layerIntegrationsProvided = Integrations.layer.pipe(
-  Layer.provide(IntegrationCredentials.layer.pipe(Layer.provide(layerVaultProvided))),
+  Layer.provide(layerIntegrationCredentials),
+  Layer.provide(layerLocalIntegrationsProvided),
 );
 const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(
@@ -521,6 +531,7 @@ export const layer = Layer.mergeAll(
 );
 
 const layerProductionBase = Layer.mergeAll(
+  layerLocalIntegrationsProvided,
   Facts.layer,
   layerIntegrationsProvided,
   Retrieval.layer,

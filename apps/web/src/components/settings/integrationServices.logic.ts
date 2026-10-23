@@ -120,6 +120,9 @@ export const VAULT_FIELD_LABEL: Readonly<Record<VaultField, string>> = {
 };
 
 const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
+  google_client_missing:
+    "Store the google-oauth-client login in the vault (client ID as username, secret as password; allow accounts.google.com).",
+  local_runtime_missing: "Install uv (brew install uv on macOS), then restart Cogenly.",
   storage: "Cogenly could not read or save this integration.",
   not_found: "This integration no longer exists.",
   conflict: "Another integration already uses this name.",
@@ -184,6 +187,29 @@ export function integrationStatus(
 ): IntegrationStatusView {
   if (!summary.integration.enabled) {
     return { tone: "neutral", label: "Off", reason: null, toolCount: null };
+  }
+  if (summary.managed) {
+    const managed = summary.managed;
+    return {
+      tone:
+        managed.state === "failed" || managed.state === "missing_runtime"
+          ? "error"
+          : managed.state === "running" && !summary.signInUrl
+            ? "success"
+            : "neutral",
+      label:
+        managed.state === "running"
+          ? summary.signInUrl
+            ? "Sign in required"
+            : "Running"
+          : managed.state === "starting"
+            ? "Starting"
+            : managed.state === "missing_runtime"
+              ? "Missing runtime"
+              : "Failed",
+      reason: managed.message ?? (managed.stderrTail || null),
+      toolCount: summary.toolCount,
+    };
   }
   const test = lastTest?.updatedAt === summary.integration.updatedAt ? lastTest.result : undefined;
   if (test !== undefined) {
@@ -314,7 +340,7 @@ export function updateInputFromDraft(
   return {
     id: integration.id,
     displayName: fields.displayName,
-    transport: fields.transport,
+    transport: integration.transport,
     url: fields.url,
     headers: fields.headers,
     scope: fields.scope,

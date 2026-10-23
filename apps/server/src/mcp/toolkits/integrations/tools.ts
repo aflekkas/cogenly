@@ -2,7 +2,7 @@ import {
   IntegrationByNameInput,
   IntegrationCallInput,
   IntegrationCallResult,
-  IntegrationCreateInput,
+  IntegrationAddInput,
   IntegrationDeleteResult,
   IntegrationListResult,
   IntegrationMutationResult,
@@ -60,10 +60,10 @@ export const IntegrationsToolkit = Toolkit.make(
     .annotate(Tool.OpenWorld, true),
   Tool.make("integration_add", {
     ...shared,
-    parameters: IntegrationCreateInput,
+    parameters: IntegrationAddInput,
     success: IntegrationMutationResult,
     description:
-      "Connect a new remote MCP integration (http transport). Header values may reference vault credentials as {{credential:<item>.<field>}}; never put raw secrets in headers. Persistent agents need owner approval first.",
+      "Connect a remote MCP integration, or a managed Google account with preset: google-workspace and accountLabel. For a VPS, set callbackOrigin to its reachable HTTPS origin. Store google-oauth-client in the vault first (username: client ID, password: client secret, allowed domain: accounts.google.com), using request_secret with saveToVault. See docs/user/integrations.md#connect-google. Return the signInUrl to the user. Header values may reference vault credentials as {{credential:<item>.<field>}}; never put raw secrets in headers. Persistent agents need owner approval first.",
   }).annotate(Tool.Destructive, false),
   Tool.make("integration_update", {
     ...shared,

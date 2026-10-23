@@ -8,6 +8,7 @@ import * as AgentStore from "../../../agents/AgentStore.ts";
 import * as ProjectFiles from "../../../projectLabels/ProjectFiles.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
+import { GOOGLE_CLIENT_HELP } from "../../../integrations/local/GoogleWorkspace.ts";
 import { IntegrationsToolkit } from "./tools.ts";
 
 const isIntegrationError = Schema.is(IntegrationError);
@@ -15,6 +16,8 @@ const failure = (cause: unknown): OrchestratorMcpFailure =>
   isIntegrationError(cause)
     ? new OrchestratorMcpFailure({
         code:
+          cause.reason === "google_client_missing" ||
+          cause.reason === "local_runtime_missing" ||
           cause.reason === "not_found" ||
           cause.reason === "disabled" ||
           cause.reason === "credential_unresolved" ||
@@ -23,23 +26,27 @@ const failure = (cause: unknown): OrchestratorMcpFailure =>
             ? "invalid_request"
             : "orchestration_error",
         message:
-          cause.reason === "approval_required"
-            ? "This integration change needs owner approval: it widens access, or moves stored credentials to a new destination. Ask the owner to make it in Settings → Integrations."
-            : cause.reason === "credential_unresolved"
-              ? "An integration credential could not be resolved. Ask the owner to check the vault item named in its headers."
-              : cause.reason === "credential_not_allowed"
-                ? "A vault item in this integration's headers isn't allowed for its server. Ask the owner to add the server to the item's allowed domains, or to save the integration in Settings → Integrations to approve it."
-                : cause.reason === "upstream_timeout"
-                  ? "The integration did not answer in time. Try again, or ask the owner to check it in Settings."
-                  : cause.reason === "upstream_unreachable"
-                    ? "The integration could not be reached. Ask the owner to check it in Settings."
-                    : cause.reason === "not_found"
-                      ? "No connected integration with that name is available in this project."
-                      : cause.reason === "disabled"
-                        ? "That integration is disabled."
-                        : cause.reason === "conflict"
-                          ? "An integration with that name already exists."
-                          : "The integration request could not be completed.",
+          cause.reason === "google_client_missing"
+            ? GOOGLE_CLIENT_HELP
+            : cause.reason === "local_runtime_missing"
+              ? "uvx is missing. Install uv with brew install uv (macOS) or https://docs.astral.sh/uv/getting-started/installation/ (Linux), then restart Cogenly."
+              : cause.reason === "approval_required"
+                ? "This integration change needs owner approval: it widens access, or moves stored credentials to a new destination. Ask the owner to make it in Settings → Integrations."
+                : cause.reason === "credential_unresolved"
+                  ? "An integration credential could not be resolved. Ask the owner to check the vault item named in its headers."
+                  : cause.reason === "credential_not_allowed"
+                    ? "A vault item in this integration's headers isn't allowed for its server. Ask the owner to add the server to the item's allowed domains, or to save the integration in Settings → Integrations to approve it."
+                    : cause.reason === "upstream_timeout"
+                      ? "The integration did not answer in time. Try again, or ask the owner to check it in Settings."
+                      : cause.reason === "upstream_unreachable"
+                        ? "The integration could not be reached. Ask the owner to check it in Settings."
+                        : cause.reason === "not_found"
+                          ? "No connected integration with that name is available in this project."
+                          : cause.reason === "disabled"
+                            ? "That integration is disabled."
+                            : cause.reason === "conflict"
+                              ? "An integration with that name already exists."
+                              : "The integration request could not be completed.",
       })
     : new OrchestratorMcpFailure({
         code: "orchestration_error",
@@ -112,7 +119,12 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
   integration_add: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
-      return yield* service.create(input).pipe(Effect.mapError(failure));
+      const scope = yield* Invocation.McpInvocationContext;
+      const request =
+        "preset" in input && input.callbackOrigin === undefined && scope.httpOrigin
+          ? { ...input, callbackOrigin: scope.httpOrigin }
+          : input;
+      return yield* service.create(request).pipe(Effect.mapError(failure));
     }),
   ),
   integration_update: McpToolAccess.writesEnvironment((input) =>

@@ -20,9 +20,17 @@ export const IntegrationName = TrimmedNonEmptyString.check(
 );
 export type IntegrationName = typeof IntegrationName.Type;
 
-/** `http` is the only transport in v1; `stdio` joins this union later. */
-export const IntegrationTransport = Schema.Literals(["http"]);
+/** Local endpoints are allocated by Cogenly, never taken from user-entered URLs. */
+export const IntegrationTransport = Schema.Literals(["http", "local"]);
 export type IntegrationTransport = typeof IntegrationTransport.Type;
+
+export const LocalIntegrationConfig = Schema.Struct({
+  preset: Schema.Literal("google-workspace"),
+  version: TrimmedNonEmptyString,
+  accountLabel: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+  callbackOrigin: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
+});
+export type LocalIntegrationConfig = typeof LocalIntegrationConfig.Type;
 
 /** All projects, or only the listed project folders (by label id). */
 export const IntegrationScope = Schema.Union([
@@ -45,6 +53,7 @@ const integrationFields = {
   name: IntegrationName,
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   transport: IntegrationTransport,
+  local: Schema.optional(LocalIntegrationConfig),
   url: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
   headers: IntegrationHeaders,
   enabled: Schema.Boolean,
@@ -76,6 +85,18 @@ export const IntegrationCreateInput = Schema.Struct({
 });
 export type IntegrationCreateInput = typeof IntegrationCreateInput.Type;
 
+/** The preset supplies the package, version, command, services and vault references. */
+export const GoogleWorkspaceAddInput = Schema.Struct({
+  preset: Schema.Literal("google-workspace"),
+  accountLabel: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+  name: Schema.optional(IntegrationName),
+  callbackOrigin: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2000))),
+  scope: Schema.optional(IntegrationScope),
+});
+export type GoogleWorkspaceAddInput = typeof GoogleWorkspaceAddInput.Type;
+export const IntegrationAddInput = Schema.Union([IntegrationCreateInput, GoogleWorkspaceAddInput]);
+export type IntegrationAddInput = typeof IntegrationAddInput.Type;
+
 export const IntegrationUpdateInput = Schema.Struct({
   id: IntegrationId,
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
@@ -103,6 +124,15 @@ export const IntegrationSummary = Schema.Struct({
   integration: Integration,
   status: IntegrationConnectionStatus,
   toolCount: Schema.NullOr(Schema.Number),
+  managed: Schema.optional(
+    Schema.Struct({
+      state: Schema.Literals(["starting", "running", "failed", "missing_runtime", "stopped"]),
+      version: Schema.String,
+      stderrTail: Schema.String,
+      message: Schema.optional(Schema.String),
+    }),
+  ),
+  signInUrl: Schema.optional(Schema.String),
 });
 export type IntegrationSummary = typeof IntegrationSummary.Type;
 
@@ -111,7 +141,11 @@ export const IntegrationListResult = Schema.Struct({
 });
 export type IntegrationListResult = typeof IntegrationListResult.Type;
 
-export const IntegrationMutationResult = Schema.Struct({ integration: Integration });
+export const IntegrationMutationResult = Schema.Struct({
+  integration: Integration,
+  signInUrl: Schema.optional(Schema.String),
+  message: Schema.optional(Schema.String),
+});
 export type IntegrationMutationResult = typeof IntegrationMutationResult.Type;
 
 export const IntegrationDeleteResult = Schema.Struct({ deleted: Schema.Boolean });
@@ -138,6 +172,8 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
     "upstream_error",
     "invalid_request",
     "approval_required",
+    "google_client_missing",
+    "local_runtime_missing",
   ]),
   cause: Schema.optional(Schema.Defect()),
 }) {

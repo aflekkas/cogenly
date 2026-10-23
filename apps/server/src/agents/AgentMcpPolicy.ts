@@ -5,7 +5,7 @@ import {
   AgentApprovalAction,
   OrchestratorMcpFailure,
   OrchestratorMcpScheduleTaskInput,
-  IntegrationCreateInput,
+  IntegrationAddInput,
   IntegrationUpdateByNameInput,
   type AgentPermissions,
 } from "@t3tools/contracts";
@@ -27,7 +27,7 @@ import * as Integrations from "../integrations/Integrations.ts";
 const decodeWorkStart = Schema.decodeUnknownEffect(WorkStartInput);
 const decodeStartWork = Schema.decodeUnknownEffect(AgentStartWorkInput);
 const decodeSchedule = Schema.decodeUnknownEffect(OrchestratorMcpScheduleTaskInput);
-const decodeIntegrationAdd = Schema.decodeUnknownEffect(IntegrationCreateInput);
+const decodeIntegrationAdd = Schema.decodeUnknownEffect(IntegrationAddInput);
 const decodeIntegrationUpdate = Schema.decodeUnknownEffect(IntegrationUpdateByNameInput);
 const decodeAction = Schema.decodeUnknownEffect(AgentApprovalAction);
 const isMcpFailure = Schema.is(OrchestratorMcpFailure);
