@@ -1387,12 +1387,17 @@ const ConversationTimeline = memo(function ConversationTimeline({
       <TimelineListFooter composerInset={contentInsetEndAdjustment}>
         {/* Subagents that finished before this thread's agent has heard back. */}
         {citationThreadRef !== null && !paintOnly ? (
-          <PendingSubagentCompletions
-            parentRef={citationThreadRef}
-            timestampFormat={timestampFormat}
-            providerStatuses={providerStatuses}
-            onOpenThread={onOpenThread}
-          />
+          // Same frame and lane as every row, so these sit in the message column.
+          <div className="messages-timeline-row-frame">
+            <div className="chat-content-lane overflow-x-clip">
+              <PendingSubagentCompletions
+                parentRef={citationThreadRef}
+                timestampFormat={timestampFormat}
+                providerStatuses={providerStatuses}
+                onOpenThread={onOpenThread}
+              />
+            </div>
+          </div>
         ) : null}
         {footer}
       </TimelineListFooter>
