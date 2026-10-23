@@ -4,8 +4,8 @@ import {
   buildTimelineMinimapMarks,
   resolveTimelineMinimapMarkBudget,
   resolveTimelineMinimapMarkOrdinal,
-  resolveTimelineMinimapViewportWindow,
-  resolveTimelineMinimapWindowStyle,
+  resolveTimelineMinimapCurrentIndex,
+  resolveTimelineMinimapHighlightOrdinal,
   TIMELINE_MINIMAP_MIN_MARK_SPACING_PX,
 } from "./timelineMinimap.logic";
 
@@ -78,7 +78,7 @@ describe("resolveTimelineMinimapMarkOrdinal", () => {
   });
 });
 
-describe("resolveTimelineMinimapViewportWindow", () => {
+describe("resolveTimelineMinimapCurrentIndex", () => {
   const itemBounds = [
     { top: 0, height: 100 },
     { top: 400, height: 100 },
@@ -86,21 +86,28 @@ describe("resolveTimelineMinimapViewportWindow", () => {
     { top: 1_600, height: 100 },
   ];
 
-  it("spans every message on screen as one window", () => {
+  it("is the message that starts above the reading line", () => {
+    // Viewport 300..900: the reading line sits at 500.
     expect(
-      resolveTimelineMinimapViewportWindow({ scrollTop: 350, scrollBottom: 1_000, itemBounds }),
-    ).toEqual({ start: 1, end: 2 });
+      resolveTimelineMinimapCurrentIndex({ scrollTop: 300, scrollBottom: 900, itemBounds }),
+    ).toBe(1);
   });
 
-  it("sits on the message the reader is under inside a long reply", () => {
+  it("stays on the message the reader is under inside a long reply", () => {
     expect(
-      resolveTimelineMinimapViewportWindow({ scrollTop: 1_000, scrollBottom: 1_500, itemBounds }),
-    ).toEqual({ start: 2, end: 2 });
+      resolveTimelineMinimapCurrentIndex({ scrollTop: 1_000, scrollBottom: 1_500, itemBounds }),
+    ).toBe(2);
+  });
+
+  it("is the last message once the thread is scrolled to its end", () => {
+    expect(
+      resolveTimelineMinimapCurrentIndex({ scrollTop: 1_100, scrollBottom: 1_800, itemBounds }),
+    ).toBe(3);
   });
 
   it("is empty before any message has a position", () => {
     expect(
-      resolveTimelineMinimapViewportWindow({
+      resolveTimelineMinimapCurrentIndex({
         scrollTop: 0,
         scrollBottom: 500,
         itemBounds: [{ top: null, height: null }],
@@ -109,11 +116,24 @@ describe("resolveTimelineMinimapViewportWindow", () => {
   });
 });
 
-describe("resolveTimelineMinimapWindowStyle", () => {
-  it("pads a one-message window so it stays visible", () => {
-    expect(resolveTimelineMinimapWindowStyle({ start: 2, end: 2 }, 5)).toEqual({
-      top: "calc(50% - 4px)",
-      height: "calc(0% + 8px)",
-    });
+describe("resolveTimelineMinimapHighlightOrdinal", () => {
+  const marks = buildTimelineMinimapMarks(typed(100), 10);
+
+  it("brightens only the mark holding the message being read", () => {
+    expect(
+      resolveTimelineMinimapHighlightOrdinal(marks, { hoverIndex: null, currentIndex: 42 }),
+    ).toBe(4);
+  });
+
+  it("moves the one bright mark to the hovered mark instead of adding a second", () => {
+    expect(
+      resolveTimelineMinimapHighlightOrdinal(marks, { hoverIndex: 87, currentIndex: 42 }),
+    ).toBe(8);
+  });
+
+  it("draws no bright mark before the position is known", () => {
+    expect(
+      resolveTimelineMinimapHighlightOrdinal(marks, { hoverIndex: null, currentIndex: null }),
+    ).toBeNull();
   });
 });

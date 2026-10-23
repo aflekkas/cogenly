@@ -39,10 +39,9 @@ import {
 import {
   buildTimelineMinimapMarks,
   resolveTimelineMinimapMarkBudget,
+  resolveTimelineMinimapCurrentIndex,
+  resolveTimelineMinimapHighlightOrdinal,
   resolveTimelineMinimapMarkOrdinal,
-  resolveTimelineMinimapViewportWindow,
-  resolveTimelineMinimapWindowStyle,
-  type TimelineMinimapViewportWindow,
 } from "./timelineMinimap.logic";
 import {
   COMPOSER_CONTEXT_KINDS,
@@ -1371,7 +1370,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     };
   }, [citationAlwaysRender, restoringAlwaysRender, fullscreenAppRowId]);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
-  const [minimapWindow, setMinimapWindow] = useState<TimelineMinimapViewportWindow | null>(null);
+  const [minimapCurrentIndex, setMinimapCurrentIndex] = useState<number | null>(null);
   const maintainVisibleContentPosition = useMemo(
     () => ({
       data: true,
@@ -1547,16 +1546,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
       height: resolveTimelineRowHeight(state, item.rowIndex),
     }));
 
-    // Changes only when a message crosses the viewport edge, not every scroll tick.
-    const nextWindow = resolveTimelineMinimapViewportWindow({
-      scrollTop,
-      scrollBottom,
-      itemBounds,
-    });
-    setMinimapWindow((current) =>
-      current?.start === nextWindow?.start && current?.end === nextWindow?.end
-        ? current
-        : nextWindow,
+    // Changes only when a message crosses the reading line, not every scroll tick.
+    setMinimapCurrentIndex(
+      resolveTimelineMinimapCurrentIndex({ scrollTop, scrollBottom, itemBounds }),
     );
   }, [
     citationPositioning,
@@ -1974,7 +1966,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                   items={minimapItems}
                   hasPersistentGutter={minimapHasPersistentGutter}
                   hitStripWidth={minimapHitStripWidth}
-                  viewportWindow={minimapWindow}
+                  currentIndex={minimapCurrentIndex}
                   onWheel={forwardMinimapWheel}
                   onSelect={(item) => {
                     onManualNavigation();
@@ -2073,14 +2065,15 @@ function onMouseButtonsReleased(onRelease: () => void): () => void {
 function TimelineMinimap({
   hasPersistentGutter,
   hitStripWidth,
-  viewportWindow,
+  currentIndex,
   items,
   onWheel,
   onSelect,
 }: {
   hasPersistentGutter: boolean;
   hitStripWidth: number;
-  viewportWindow: TimelineMinimapViewportWindow | null;
+  /** The message being read; its mark is the one drawn bright at rest. */
+  currentIndex: number | null;
   items: ReadonlyArray<TimelineMinimapItem>;
   onWheel: (event: WheelEvent) => void;
   onSelect: (item: TimelineMinimapItem) => void;
@@ -2166,20 +2159,15 @@ function TimelineMinimap({
           ? "-100%"
           : "-50%";
   const resolvedCurrentIndex =
-    viewportWindow !== null && viewportWindow.start < items.length ? viewportWindow.start : null;
+    currentIndex !== null && currentIndex < items.length ? currentIndex : null;
   const previousItem =
     resolvedCurrentIndex === null ? null : (items[resolvedCurrentIndex - 1] ?? null);
   const nextItem = resolvedCurrentIndex === null ? null : (items[resolvedCurrentIndex + 1] ?? null);
-  // Memoized: useLastPresent below compares by reference.
-  const windowStyle = useMemo(
-    () =>
-      viewportWindow !== null && viewportWindow.end < items.length
-        ? resolveTimelineMinimapWindowStyle(viewportWindow, items.length)
-        : null,
-    [viewportWindow, items.length],
-  );
-  // Keeps its last place while fading out instead of vanishing mid-move.
-  const shownWindowStyle = useLastPresent(windowStyle);
+  // Exactly one bright mark: the hovered one, else where the reader is.
+  const highlightOrdinal = resolveTimelineMinimapHighlightOrdinal(marks, {
+    hoverIndex: resolvedActiveIndex,
+    currentIndex: resolvedCurrentIndex,
+  });
 
   // Hover and clicks land on drawn marks: a bucket answers with its typed message.
   const resolveActiveIndexFromPointer = useCallback(
@@ -2316,19 +2304,6 @@ function TimelineMinimap({
             type="button"
           >
             <div className="absolute top-0 right-3 h-full w-px bg-border/15" />
-            {/* "You are here": one soft thumb spanning the messages on screen.
-                It moves only when a message crosses the viewport edge. */}
-            {shownWindowStyle ? (
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "pointer-events-none absolute -right-0.5 w-3 rounded-full bg-foreground/10 transition-[top,height,opacity] duration-150 ease-out motion-reduce:transition-opacity",
-                  windowStyle ? "opacity-100" : "opacity-0",
-                )}
-                data-minimap-window
-                style={shownWindowStyle}
-              />
-            ) : null}
             {marks.map((mark, ordinal) => {
               const activeDistance =
                 activeMarkOrdinal === null ? null : Math.abs(ordinal - activeMarkOrdinal);
@@ -2357,11 +2332,12 @@ function TimelineMinimap({
                   key={mark.key}
                   style={{ top: `${mark.topPercent}%` }}
                 >
-                  {/* The hovered line brightens by fading an overlay, never by repainting its fill. */}
+                  {/* The one bright mark (hovered, else being read) fades an overlay in,
+                      never repainting its fill, so moving it is an opacity cross-fade. */}
                   <span
                     className={cn(
-                      "absolute inset-0 rounded-full bg-muted-foreground/70 transition-opacity duration-200 ease-out",
-                      activeDistance === 0 ? "opacity-100" : "opacity-0",
+                      "absolute inset-0 rounded-full bg-muted-foreground/70 transition-opacity duration-(--motion-duration-base) ease-out",
+                      ordinal === highlightOrdinal ? "opacity-100" : "opacity-0",
                     )}
                   />
                 </span>

@@ -10,8 +10,8 @@ export const TIMELINE_MINIMAP_MIN_MARK_SPACING_PX = 6;
 /** Marks drawn before the rail has been measured once. */
 const TIMELINE_MINIMAP_UNMEASURED_MARK_BUDGET = 48;
 
-/** Half the viewport window's minimum height, so a single turn still reads. */
-const TIMELINE_MINIMAP_WINDOW_PAD_PX = 4;
+/** The reading line, as a fraction of the viewport from its top. */
+const TIMELINE_MINIMAP_READING_LINE = 1 / 3;
 
 export interface TimelineMinimapMark {
   /** Bucket ordinal: stable while the thread grows, so marks are not remounted. */
@@ -25,11 +25,6 @@ export interface TimelineMinimapMark {
   readonly topPercent: number;
   /** The bucket holds a message the user typed, not only agent or automation sends. */
   readonly typed: boolean;
-}
-
-export interface TimelineMinimapViewportWindow {
-  readonly start: number;
-  readonly end: number;
 }
 
 export function resolveTimelineMinimapMarkBudget(railHeightPx: number): number {
@@ -95,44 +90,41 @@ export function resolveTimelineMinimapMarkOrdinal(
 }
 
 /**
- * The run of messages the viewport shows, first to last. Between messages (deep
- * in a long reply) it collapses onto the message the reader is under.
+ * The message being read: the last one that starts above the reading line a
+ * third of the way down the viewport. Scrolled to the end, it is the last
+ * message, even when that one is too short to reach the line.
  */
-export function resolveTimelineMinimapViewportWindow(input: {
+export function resolveTimelineMinimapCurrentIndex(input: {
   readonly scrollTop: number;
   readonly scrollBottom: number;
   readonly itemBounds: ReadonlyArray<{
     readonly top: number | null;
     readonly height: number | null;
   }>;
-}): TimelineMinimapViewportWindow | null {
-  let preceding: number | null = null;
-  let first: number | null = null;
-  let last: number | null = null;
+}): number | null {
+  const readingLine =
+    input.scrollTop + (input.scrollBottom - input.scrollTop) * TIMELINE_MINIMAP_READING_LINE;
+  let current: number | null = null;
+  let firstInView: number | null = null;
+  let last: { readonly index: number; readonly bottom: number } | null = null;
   for (const [index, item] of input.itemBounds.entries()) {
     if (item.top === null) continue;
-    const inView =
-      item.top < input.scrollBottom && item.top + Math.max(1, item.height ?? 1) > input.scrollTop;
-    if (inView) {
-      first ??= index;
-      last = index;
-    } else if (item.top <= input.scrollTop) {
-      preceding = index;
-    }
+    if (item.top <= readingLine) current = index;
+    else if (firstInView === null && item.top < input.scrollBottom) firstInView = index;
+    last = { index, bottom: item.top + Math.max(1, item.height ?? 1) };
   }
-  if (first !== null && last !== null) return { start: first, end: last };
-  return preceding === null ? null : { start: preceding, end: preceding };
+  if (last !== null && last.bottom <= input.scrollBottom) return last.index;
+  return current ?? firstInView;
 }
 
-/** Inline geometry for the viewport window, padded so one message still shows. */
-export function resolveTimelineMinimapWindowStyle(
-  window: TimelineMinimapViewportWindow,
-  itemCount: number,
-): { readonly top: string; readonly height: string } {
-  const top = resolveTimelineMinimapTopPercent(window.start, itemCount);
-  const bottom = resolveTimelineMinimapTopPercent(window.end, itemCount);
-  return {
-    top: `calc(${top}% - ${TIMELINE_MINIMAP_WINDOW_PAD_PX}px)`,
-    height: `calc(${bottom - top}% + ${TIMELINE_MINIMAP_WINDOW_PAD_PX * 2}px)`,
-  };
+/**
+ * The one mark drawn bright: the hovered or focused one while the pointer is
+ * on the rail, else the one holding the message being read.
+ */
+export function resolveTimelineMinimapHighlightOrdinal(
+  marks: ReadonlyArray<TimelineMinimapMark>,
+  input: { readonly hoverIndex: number | null; readonly currentIndex: number | null },
+): number | null {
+  const index = input.hoverIndex ?? input.currentIndex;
+  return index === null ? null : resolveTimelineMinimapMarkOrdinal(marks, index);
 }
