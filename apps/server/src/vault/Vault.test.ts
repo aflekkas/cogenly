@@ -457,6 +457,40 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("reuses pending approvals but creates a fresh request after revocation", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault,
+        sql = yield* SqlClient.SqlClient;
+      const { item } = yield* vault.create({
+        name: "revoke",
+        type: "note",
+        secretFields: { value: "revoked-secret" },
+      });
+      const request = {
+        itemId: item.id,
+        field: "value" as const,
+        threadId,
+        caller: { kind: "thread" as const, threadId },
+      };
+      const first = yield* vault.use(request),
+        pending = yield* vault.use(request);
+      expect(first.status).toBe("approval_required");
+      if (first.status !== "approval_required" || pending.status !== "approval_required")
+        throw new Error("Expected approval");
+      expect(pending.approvalId).toBe(first.approvalId);
+      yield* sql`UPDATE agent_approvals SET status = 'approved' WHERE id = ${first.approvalId}`;
+      yield* vault.update({
+        id: item.id,
+        policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [] },
+      });
+      const retry = yield* vault.use(request);
+      if (retry.status !== "approval_required") throw new Error("Expected fresh approval");
+      expect(retry.approvalId).not.toBe(first.approvalId);
+      const rows = yield* sql`SELECT status FROM agent_approvals`;
+      expect(rows.map((r) => r.status).sort()).toEqual(["approved", "pending"]);
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("retains delivered revisions after deletion and refuses registry overflow", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;

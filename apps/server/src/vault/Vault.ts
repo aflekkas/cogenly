@@ -687,6 +687,8 @@ const make = Effect.gen(function* () {
 
   const use: Vault["Service"]["use"] = (input) =>
     Effect.gen(function* () {
+      const callingThreadId =
+        input.caller.kind === "thread" ? ThreadId.make(input.caller.threadId) : input.threadId;
       const scope =
         input.caller.kind === "agent" || input.caller.kind === "thread"
           ? yield* projectForThread(
@@ -711,7 +713,7 @@ const make = Effect.gen(function* () {
       const record = (outcome: string) =>
         audit({
           itemId: row.id,
-          threadId: input.threadId,
+          threadId: callingThreadId,
           agentId,
           action,
           domain: input.domain,
@@ -743,7 +745,6 @@ const make = Effect.gen(function* () {
         if (input.caller.kind === "agent" || input.caller.kind === "thread") {
           const callerKey =
             input.caller.kind === "agent" ? input.caller.agentId : input.caller.threadId;
-          approvalId = `approval:vault:${row.id}:${callerKey}:${input.field}:${input.domain ?? ""}`;
           const actionJson = encodeApprovalActionJson({
             actionKind: "vault_use",
             payload: {
@@ -751,12 +752,18 @@ const make = Effect.gen(function* () {
               vaultItemName: row.name as never,
               field: input.field,
               domain: input.domain ?? null,
-              threadId: input.threadId ?? null,
+              threadId: callingThreadId ?? null,
             },
           });
-          yield* sql`INSERT OR IGNORE INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${approvalId}, ${agentId}, ${actionJson}, 'pending', ${yield* now}, ${null})`.pipe(
-            Effect.mapError(wrap),
-          );
+          approvalId = yield* Effect.gen(function* () {
+            const pending = yield* sql<{
+              id: string;
+            }>`SELECT id FROM agent_approvals WHERE status = 'pending' AND agent_id IS ${agentId} AND action_json = ${actionJson} ORDER BY requested_at LIMIT 1`;
+            if (pending[0]) return pending[0].id;
+            const id = `approval:vault:${row.id}:${callerKey}:${yield* crypto.randomUUIDv4()}`;
+            yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${id}, ${agentId}, ${actionJson}, 'pending', ${yield* now}, ${null})`;
+            return id;
+          }).pipe(sql.withTransaction, Effect.mapError(wrap));
         }
         yield* record("approval_required");
         return {
