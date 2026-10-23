@@ -166,11 +166,19 @@ function ProgressLine({
   );
 }
 
+/**
+ * A status line's remount key: its text with the numbers taken out, so a new
+ * status fades in while a ticking count ("Downloading · 41%") updates in place.
+ */
+function statusMotionKey(text: string): string {
+  return text.replace(/\d+(\.\d+)?/g, "#");
+}
+
 function HeroStatus({ tone, label }: { tone: UpdatesHeroTone; label: string }) {
   return (
     // Keyed by state so each new status fades in place instead of snapping.
     <span
-      key={`${tone}:${label}`}
+      key={`${tone}:${statusMotionKey(label)}`}
       aria-live="polite"
       className={cn(
         "swap-motion flex min-w-0 items-center gap-1.25 text-xs tabular-nums",
@@ -963,7 +971,7 @@ export function NavRailUpdates({
                 ) : null}
                 <div className="mt-2 flex min-h-6 items-center justify-between gap-2 border-t pt-2">
                   <span
-                    key={footerText}
+                    key={statusMotionKey(footerText)}
                     className="swap-motion min-w-0 truncate text-2xs text-muted-foreground tabular-nums"
                   >
                     {footerText}
