@@ -51,6 +51,7 @@ const APPROVAL_EYEBROW: Record<AgentApproval["actionKind"], string> = {
   start_work: "Wants to start Work",
   schedule_trigger: "Wants a new trigger",
   change_permissions: "Wants different permissions",
+  vault_use: "Wants to use a vault item",
 };
 
 /**

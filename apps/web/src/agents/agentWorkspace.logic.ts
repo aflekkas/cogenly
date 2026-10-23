@@ -296,6 +296,15 @@ export function describeApproval(
         title: "Change its permissions",
         details: policyDiff(context.agent, action.payload),
       };
+    case "vault_use":
+      return {
+        title: `Use “${action.payload.vaultItemName}” (${action.payload.field})`,
+        details: [
+          action.payload.domain === null
+            ? "Approving lets this agent use the item from now on."
+            : `On ${action.payload.domain}. Approving lets this agent use the item from now on.`,
+        ],
+      };
   }
 }
 
