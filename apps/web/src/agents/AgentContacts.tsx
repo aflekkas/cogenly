@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import { EllipsisIcon } from "lucide-react";
 import {
   useCallback,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -25,6 +26,7 @@ import {
 } from "~/components/Sidebar.pointer";
 import { PanOnHoverText } from "~/components/sidebar/PanOnHoverText";
 import { SidebarChatStatusSlot } from "~/components/sidebar/SidebarChatStatusSlot";
+import { playListSwitchMotion } from "~/components/sidebar/listSwitchMotion";
 import { SIDEBAR_CARD_CLASS_NAME, SidebarList } from "~/components/sidebar/SidebarList";
 import { SidebarListEmptyState } from "~/components/sidebar/SidebarListEmptyState";
 import {
@@ -273,6 +275,14 @@ export function AgentContacts({
     [agents],
   );
   const { onTransitionEnd } = useAgentGroupFlip(listRef, flipFolders);
+  // Switching the count bar's filter remounts the list (keyed below); the new
+  // one blur-fades in, as Work's shelves do.
+  const shownFilterRef = useRef(filter);
+  useLayoutEffect(() => {
+    if (shownFilterRef.current === filter) return;
+    shownFilterRef.current = filter;
+    playListSwitchMotion(listRef.current);
+  }, [filter]);
   const shownCount = groups.reduce((count, group) => count + group.agents.length, 0);
   return (
     <>

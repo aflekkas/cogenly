@@ -328,6 +328,7 @@ import {
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
 import { useSidebarScrollMemory } from "./sidebar/useSidebarScrollMemory";
 import { AgentsShelfBar } from "../agents/AgentsShelfBar";
+import { playListSwitchMotion } from "./sidebar/listSwitchMotion";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
   composerDraftHasUserContent,
@@ -4190,8 +4191,8 @@ export default function Sidebar() {
     const modeChanged = listMotionModeRef.current !== sidebarMode;
     listMotionModeRef.current = sidebarMode;
     // Switching the Work count bar's filter swaps the list the same way, with
-    // a short opacity fade (no travel) so the new list reads as arriving
-    // rather than redrawn.
+    // a short blur fade (no travel) so the new list reads as arriving rather
+    // than redrawn.
     const shelfChanged = listMotionShelfRef.current !== openShelf;
     listMotionShelfRef.current = openShelf;
     // A revealed page fades its rows in where they land; nothing travels.
@@ -4203,14 +4204,7 @@ export default function Sidebar() {
       sidebarListHasRows && !modeChanged && !shelfChanged && !folded && !sortDropped,
       { inPlace: revealed },
     );
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    if (shelfChanged && !modeChanged) {
-      // --motion-duration-base on ease-standard.
-      sidebarModeListRef.current?.animate([{ opacity: 0 }, { opacity: 1 }], {
-        duration: 220,
-        easing: "cubic-bezier(0.32, 0.72, 0, 1)",
-      });
-    }
+    if (shelfChanged && !modeChanged) playListSwitchMotion(sidebarModeListRef.current);
   }, [
     chatVisibleCount,
     openShelf,
