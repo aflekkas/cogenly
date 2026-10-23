@@ -249,12 +249,17 @@ interface JsonRpcResponse {
 
 const parseRpcBody = (text: string): JsonRpcResponse | undefined => {
   const trimmed = text.trim();
-  const candidates = trimmed.startsWith("data:")
-    ? trimmed
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice("data:".length).trim())
-    : [trimmed];
+  const candidates = [trimmed];
+  let data: Array<string> = [];
+  for (const line of text.split(/\r\n|\r|\n/)) {
+    if (line === "") {
+      if (data.length > 0) candidates.push(data.join("\n"));
+      data = [];
+    } else if (line.startsWith("data:")) {
+      data.push(line.slice(5).replace(/^ /, ""));
+    }
+  }
+  if (data.length > 0) candidates.push(data.join("\n"));
   for (const candidate of candidates.toReversed()) {
     try {
       const parsed: unknown = JSON.parse(candidate);

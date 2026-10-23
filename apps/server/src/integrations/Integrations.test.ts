@@ -331,6 +331,24 @@ describe("Integrations gateway", () => {
     ),
   );
 
+  it.effect.each([
+    'event: message\nid: 1\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[]}}\n\n',
+    ': heartbeat\r\nid: 2\r\nevent: message\r\ndata: {"jsonrpc":"2.0",\r\ndata: "id":1,"result":{"tools":[]}}\r\n\r\n',
+  ])("accepts SSE fields before data, including multiline data (%#)", (body) =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      yield* service.create(createInput("https://upstream.example/mcp"));
+      expect(yield* service.listTools(IntegrationName.make("gmail"), null)).toEqual({
+        name: "gmail",
+        tools: [],
+      });
+    }).pipe(
+      Effect.provide(layerWith()),
+      Effect.provideService(FetchHttpClient.Fetch, async () => new Response(body)),
+    ),
+  );
+
   it.effect("rejects an upstream body over 4 MiB", () =>
     Effect.gen(function* () {
       yield* runMigrations();
