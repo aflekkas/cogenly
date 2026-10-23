@@ -65,6 +65,10 @@ provider sign-in status. Agents can also inspect the list with `machines_list`.
 A sleeping computer appears offline and reconnects when it wakes. Provider
 sign-ins remain separate on each machine.
 
+If a machine shows the wrong name or kind, fix it on that machine with
+`cogenly machines rename "Work laptop"` or `cogenly machines rename --kind
+cloud-server`. `--reset` goes back to the detected name and kind.
+
 ## Unpair a machine
 
 Use its name or environment ID from the list:
