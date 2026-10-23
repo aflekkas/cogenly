@@ -1,68 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import {
-  planDatabaseMaintenance,
-  planLogPruning,
-  planWorktreeCleanup,
-  type WorktreeCandidate,
-} from "./ServerHousekeeping.ts";
-
-const candidate = (overrides: Partial<WorktreeCandidate>): WorktreeCandidate => ({
-  worktreePath: "/worktrees/repo/branch",
-  threadState: "deleted",
-  hasUncommittedChanges: false,
-  hasUnpushedCommits: false,
-  isLinkedWorktree: true,
-  ...overrides,
-});
-
-describe("planWorktreeCleanup safety rule", () => {
-  it("removes a clean, pushed worktree whose thread was deleted", () => {
-    const plan = planWorktreeCleanup([candidate({})]);
-    expect(plan.remove).toEqual(["/worktrees/repo/branch"]);
-    expect(plan.keep).toEqual([]);
-  });
-
-  it("removes a clean, pushed worktree whose thread was archived or is gone", () => {
-    const plan = planWorktreeCleanup([
-      candidate({ worktreePath: "/wt/archived", threadState: "archived" }),
-      candidate({ worktreePath: "/wt/missing", threadState: "missing" }),
-    ]);
-    expect(plan.remove).toEqual(["/wt/archived", "/wt/missing"]);
-  });
-
-  it("never removes a worktree with uncommitted changes", () => {
-    const plan = planWorktreeCleanup([candidate({ hasUncommittedChanges: true })]);
-    expect(plan.remove).toEqual([]);
-    expect(plan.keep).toEqual([
-      { worktreePath: "/worktrees/repo/branch", reason: "has uncommitted changes" },
-    ]);
-  });
-
-  it("never removes a worktree with unpushed commits", () => {
-    const plan = planWorktreeCleanup([candidate({ hasUnpushedCommits: true })]);
-    expect(plan.remove).toEqual([]);
-    expect(plan.keep).toEqual([
-      { worktreePath: "/worktrees/repo/branch", reason: "has unpushed commits" },
-    ]);
-  });
-
-  it("keeps active threads, non-linked folders, and uninspectable worktrees", () => {
-    const plan = planWorktreeCleanup([
-      candidate({ worktreePath: "/wt/active", threadState: "active" }),
-      candidate({ worktreePath: "/wt/main", isLinkedWorktree: false }),
-      candidate({ worktreePath: "/wt/unknown", hasUncommittedChanges: null }),
-      candidate({ worktreePath: "/wt/unknown-push", hasUnpushedCommits: null }),
-    ]);
-    expect(plan.remove).toEqual([]);
-    expect(plan.keep.map((entry) => entry.reason)).toEqual([
-      "thread is still active",
-      "not a linked worktree",
-      "could not inspect git state",
-      "could not inspect git state",
-    ]);
-  });
-});
+import { planDatabaseMaintenance, planLogPruning } from "./ServerHousekeeping.ts";
 
 describe("planLogPruning", () => {
   const now = 1_800_000_000_000;

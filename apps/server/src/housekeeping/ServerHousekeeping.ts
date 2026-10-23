@@ -2,13 +2,14 @@
  * ServerHousekeeping - Built-in periodic cleanup owned by the server.
  *
  * No cron, no scheduled agent task, no provider turn. Each run:
- * - removes orphaned agent worktrees whose thread is deleted or archived
- *   (or gone entirely), but only when Git proves the worktree has neither
- *   uncommitted changes nor unpushed commits — anything else is logged and
- *   kept;
- * - prunes log files older than the retention window;
+ * - prunes log files older than `storageCleanup.logsAfterDays`, only when the
+ *   user set one, and only files that really live under the logs directory;
  * - runs `PRAGMA optimize` and, when incremental auto_vacuum is on and free
  *   pages exist, a bounded `PRAGMA incremental_vacuum`.
+ *
+ * Worktrees are left to StorageCleanup, which follows the user's cleanup
+ * rules: removing them here deleted git-ignored files such as `.env` from
+ * threads that were only archived.
  *
  * The decisions live in the pure planners below so they are unit-tested
  * without a filesystem; `runNow` only gathers facts and applies the plan.
@@ -28,18 +29,15 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerConfig from "../config.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 
 const DAY_MS = 86_400_000;
-/** Log retention when `storageCleanup.logsAfterDays` is unset. */
-const DEFAULT_LOG_RETENTION_DAYS = 30;
 /** Free pages returned per housekeeping pass; matches DatabaseStorage. */
 const VACUUM_PAGES_PER_PASS = 1024;
 
 export class ServerHousekeepingError extends Schema.TaggedError<ServerHousekeepingError>()(
   "ServerHousekeepingError",
   {
-    operation: Schema.Literals(["list-worktrees", "list-logs", "database"]),
+    operation: Schema.Literals(["settings", "list-logs", "database"]),
     path: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
@@ -52,57 +50,6 @@ export class ServerHousekeepingError extends Schema.TaggedError<ServerHousekeepi
 export const isServerHousekeepingError = Schema.is(ServerHousekeepingError);
 
 // ── Pure planners ────────────────────────────────────────────────────────────
-
-export type WorktreeThreadState = "deleted" | "archived" | "active" | "missing";
-
-export interface WorktreeCandidate {
-  readonly worktreePath: string;
-  readonly threadState: WorktreeThreadState;
-  /** Null when Git could not inspect the worktree; unknown is never removed. */
-  readonly hasUncommittedChanges: boolean | null;
-  /** Null when Git could not determine push state; unknown is never removed. */
-  readonly hasUnpushedCommits: boolean | null;
-  readonly isLinkedWorktree: boolean;
-}
-
-export interface PlannedWorktreeKeep {
-  readonly worktreePath: string;
-  readonly reason: string;
-}
-
-/**
- * The worktree safety rule: a worktree is removed only when its thread is
- * deleted, archived, or gone, it is a linked worktree, and Git proved it has
- * no uncommitted changes and no unpushed commits. Every other candidate is
- * kept with the reason, so the caller can log and skip it.
- */
-export const planWorktreeCleanup = (
-  candidates: ReadonlyArray<WorktreeCandidate>,
-): {
-  readonly remove: ReadonlyArray<string>;
-  readonly keep: ReadonlyArray<PlannedWorktreeKeep>;
-} => {
-  const remove: string[] = [];
-  const keep: PlannedWorktreeKeep[] = [];
-  for (const candidate of candidates) {
-    const keepWith = (reason: string) =>
-      keep.push({ worktreePath: candidate.worktreePath, reason });
-    if (candidate.threadState === "active") {
-      keepWith("thread is still active");
-    } else if (!candidate.isLinkedWorktree) {
-      keepWith("not a linked worktree");
-    } else if (candidate.hasUncommittedChanges === null || candidate.hasUnpushedCommits === null) {
-      keepWith("could not inspect git state");
-    } else if (candidate.hasUncommittedChanges) {
-      keepWith("has uncommitted changes");
-    } else if (candidate.hasUnpushedCommits) {
-      keepWith("has unpushed commits");
-    } else {
-      remove.push(candidate.worktreePath);
-    }
-  }
-  return { remove, keep };
-};
 
 export interface LogFileCandidate {
   readonly path: string;
@@ -146,8 +93,6 @@ export const planDatabaseMaintenance = (input: {
 // ── Service ──────────────────────────────────────────────────────────────────
 
 export interface HousekeepingReport {
-  readonly removedWorktrees: ReadonlyArray<string>;
-  readonly keptWorktrees: ReadonlyArray<PlannedWorktreeKeep>;
   readonly removedLogFiles: number;
   readonly databaseOptimizeRun: boolean;
   readonly databaseVacuumRun: boolean;
@@ -165,93 +110,18 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const sql = yield* SqlClient.SqlClient;
-  const git = yield* GitVcsDriver.GitVcsDriver;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
-  const listCandidates = Effect.fn("ServerHousekeeping.listCandidates")(function* () {
-    const rows = yield* sql<{
-      worktreePath: string;
-      workspaceRoot: string;
-      state: string;
-    }>`
-      SELECT DISTINCT
-        json_extract(t.payload_json, '$.worktreePath') AS "worktreePath",
-        p.workspace_root AS "workspaceRoot",
-        CASE
-          WHEN t.deleted_at IS NOT NULL THEN 'deleted'
-          WHEN json_extract(t.payload_json, '$.archivedAt') IS NOT NULL THEN 'archived'
-          ELSE 'active'
-        END AS state
-      FROM orchestration_v2_projection_threads t
-      JOIN projection_projects p ON p.project_id = t.project_id
-      WHERE json_extract(t.payload_json, '$.worktreePath') IS NOT NULL
-    `.pipe(
-      Effect.mapError(
-        (cause) =>
-          new ServerHousekeepingError({
-            operation: "list-worktrees",
-            path: config.dbPath,
-            cause,
-          }),
-      ),
+  // A symlink under logs/ must not lead the pruner to files elsewhere.
+  const insideLogs = (logsRoot: string, target: string) =>
+    fs.realPath(target).pipe(
+      Effect.map((real) => real === logsRoot || real.startsWith(`${logsRoot}${path.sep}`)),
+      Effect.orElseSucceed(() => false),
     );
-    const workspaceByPath = new Map<string, string>();
-    const stateByPath = new Map<string, WorktreeThreadState>();
-    for (const row of rows) {
-      const resolved = path.resolve(row.worktreePath);
-      workspaceByPath.set(resolved, row.workspaceRoot);
-      const state = row.state as WorktreeThreadState;
-      // A path shared by several threads is only orphaned when none is active.
-      if (stateByPath.get(resolved) !== "active") stateByPath.set(resolved, state);
-    }
-    const candidates: WorktreeCandidate[] = [];
-    for (const [worktreePath, threadState] of stateByPath) {
-      if (threadState === "active") {
-        candidates.push({
-          worktreePath,
-          threadState,
-          hasUncommittedChanges: null,
-          hasUnpushedCommits: null,
-          isLinkedWorktree: false,
-        });
-        continue;
-      }
-      if (!(yield* fs.exists(worktreePath).pipe(Effect.orElseSucceed(() => false)))) continue;
-      const isLinkedWorktree = yield* fs.stat(path.join(worktreePath, ".git")).pipe(
-        Effect.map((stat) => stat.type === "File"),
-        Effect.orElseSucceed(() => false),
-      );
-      if (!isLinkedWorktree) {
-        candidates.push({
-          worktreePath,
-          threadState,
-          hasUncommittedChanges: null,
-          hasUnpushedCommits: null,
-          isLinkedWorktree,
-        });
-        continue;
-      }
-      const status = yield* git
-        .statusDetailsLocal(worktreePath, { includeDivergence: true })
-        .pipe(Effect.orElseSucceed(() => null));
-      candidates.push({
-        worktreePath,
-        threadState,
-        hasUncommittedChanges: status === null ? null : status.hasWorkingTreeChanges,
-        hasUnpushedCommits:
-          status === null
-            ? null
-            : status.hasUpstream
-              ? status.aheadCount > 0
-              : status.aheadOfDefaultCount > 0,
-        isLinkedWorktree,
-      });
-    }
-    return { candidates, workspaceByPath };
-  });
 
   const collectLogFiles = Effect.fn("ServerHousekeeping.collectLogFiles")(function* (
+    logsRoot: string,
     directory: string,
     into: LogFileCandidate[],
   ): Effect.fn.Return<void, ServerHousekeepingError> {
@@ -264,6 +134,7 @@ const make = Effect.gen(function* () {
         ),
       )) {
       const target = path.join(directory, name);
+      if (!(yield* insideLogs(logsRoot, target))) continue;
       const stat = yield* fs
         .stat(target)
         .pipe(
@@ -272,7 +143,7 @@ const make = Effect.gen(function* () {
           ),
         );
       if (stat.type === "Directory") {
-        yield* collectLogFiles(target, into);
+        yield* collectLogFiles(logsRoot, target, into);
       } else if (stat.type === "File" && stat.mtime._tag === "Some") {
         into.push({ path: target, modifiedAtMs: stat.mtime.value.getTime() });
       }
@@ -284,7 +155,7 @@ const make = Effect.gen(function* () {
       Effect.mapError(
         (cause) =>
           new ServerHousekeepingError({
-            operation: "list-worktrees",
+            operation: "settings",
             path: config.settingsPath,
             cause,
           }),
@@ -292,44 +163,23 @@ const make = Effect.gen(function* () {
     );
     const now = yield* Clock.currentTimeMillis;
 
-    const { candidates, workspaceByPath } = yield* listCandidates();
-    const plan = planWorktreeCleanup(candidates);
-    const removedWorktrees: string[] = [];
-    const keptWorktrees: PlannedWorktreeKeep[] = [...plan.keep];
-    for (const worktreePath of plan.remove) {
-      const workspaceRoot = workspaceByPath.get(worktreePath);
-      // `git worktree remove` without force refuses dirty worktrees itself,
-      // so a change landing after our status check still cannot be deleted.
-      const removed = yield* workspaceRoot === undefined
-        ? Effect.succeed(false)
-        : git.removeWorktree({ cwd: workspaceRoot, path: worktreePath }).pipe(
-            Effect.as(true),
-            Effect.orElseSucceed(() => false),
-          );
-      if (removed) {
-        removedWorktrees.push(worktreePath);
-        yield* Effect.logInfo("Housekeeping removed orphaned worktree", { worktreePath });
-      } else {
-        keptWorktrees.push({ worktreePath, reason: "git worktree remove failed" });
-        yield* Effect.logWarning("Housekeeping skipped worktree removal", { worktreePath });
-      }
-    }
-    for (const kept of plan.keep) {
-      yield* Effect.logInfo("Housekeeping kept worktree", {
-        worktreePath: kept.worktreePath,
-        reason: kept.reason,
-      });
-    }
-
     let removedLogFiles = 0;
-    if (yield* fs.exists(config.logsDir).pipe(Effect.orElseSucceed(() => false))) {
+    const logsAfterDays = settings.storageCleanup.logsAfterDays;
+    if (
+      logsAfterDays !== null &&
+      (yield* fs.exists(config.logsDir).pipe(Effect.orElseSucceed(() => false)))
+    ) {
+      const logsRoot = yield* fs
+        .realPath(config.logsDir)
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServerHousekeepingError({ operation: "list-logs", path: config.logsDir, cause }),
+          ),
+        );
       const files: LogFileCandidate[] = [];
-      yield* collectLogFiles(config.logsDir, files);
-      const logPlan = planLogPruning(
-        files,
-        now,
-        settings.storageCleanup.logsAfterDays ?? DEFAULT_LOG_RETENTION_DAYS,
-      );
+      yield* collectLogFiles(logsRoot, logsRoot, files);
+      const logPlan = planLogPruning(files, now, logsAfterDays);
       for (const filePath of logPlan.remove) {
         yield* fs.remove(filePath).pipe(Effect.orElseSucceed(() => undefined));
         removedLogFiles++;
@@ -379,17 +229,11 @@ const make = Effect.gen(function* () {
     }
 
     const report: HousekeepingReport = {
-      removedWorktrees,
-      keptWorktrees,
       removedLogFiles,
       databaseOptimizeRun: dbPlan.runOptimize,
       databaseVacuumRun: dbPlan.runIncrementalVacuum,
     };
-    yield* Effect.logInfo("Housekeeping pass finished", {
-      removedWorktrees: removedWorktrees.length,
-      keptWorktrees: keptWorktrees.length,
-      removedLogFiles,
-    });
+    yield* Effect.logInfo("Housekeeping pass finished", { removedLogFiles });
     return report;
   });
 
