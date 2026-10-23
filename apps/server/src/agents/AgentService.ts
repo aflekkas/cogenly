@@ -48,6 +48,13 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { conversationCarryOver } from "./context.ts";
+import {
+  advanceFallback,
+  chainIndexOf,
+  classifyProviderFailure,
+  decideFallback,
+  fallbackChainOf,
+} from "./providerFallback.ts";
 
 const encodeEventContext = Schema.encodeEffect(Schema.fromJsonString(AgentEventContext));
 const encodeEventSchedule = Schema.encodeEffect(Schema.fromJsonString(ScheduledTaskSchedule));
@@ -231,7 +238,7 @@ const make = Effect.gen(function* () {
             return;
           }
           const projection = yield* projections
-            .getThreadRecords(record.workThreadId, ["runs", "messages"])
+            .getThreadRecords(record.workThreadId, ["runs", "messages", "turnItems"])
             .pipe(
               Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
             );
@@ -280,19 +287,52 @@ const make = Effect.gen(function* () {
             .map((m) => m.text)
             .join("\n")
             .trim();
+          // A usage-limit / signed-out failure advances the fallback chain
+          // instead of just backing off on the same provider; other
+          // failures keep the normal backoff in `outcome`.
+          const failureItem = succeeded
+            ? undefined
+            : projection.turnItems.find((item) => item.type === "error" && item.runId === run.id);
+          const advance =
+            failureItem?.type === "error"
+              ? advanceFallback({
+                  chainLength: fallbackChainOf(agent).length,
+                  failedIndex: chainIndexOf(fallbackChainOf(agent), record.modelSelection),
+                  reason: classifyProviderFailure(failureItem.failure),
+                  resetAt: failureItem.failure.resetAt,
+                  nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+                })
+              : null;
           const updated = yield* sql.withTransaction(
             Effect.gen(function* () {
               yield* store.outcome(agent.id, succeeded);
+              if (advance !== null)
+                yield* store.setFallback(agent.id, {
+                  index: advance.index,
+                  reason: advance.reason,
+                  until: advance.until,
+                });
               const summary =
                 response.slice(0, 1200) ||
                 (succeeded
                   ? "Work finished."
                   : "This run failed. Open the work details to inspect it.");
-              yield* store.finishRun(record.id, succeeded ? "completed" : "failed", summary);
+              yield* store.finishRun(
+                record.id,
+                succeeded ? "completed" : "failed",
+                summary,
+                advance === null ? undefined : { reason: advance.reason, resetAt: advance.resetAt },
+              );
               return {
                 ...record,
                 status: succeeded ? ("completed" as const) : ("failed" as const),
                 summary,
+                ...(advance === null
+                  ? {}
+                  : {
+                      fallbackReason: advance.reason,
+                      fallbackResetAt: advance.resetAt,
+                    }),
               };
             }),
           );
@@ -387,8 +427,27 @@ const make = Effect.gen(function* () {
         )
           yield* fileConversation(conversationThreadId, input.projectFolderId);
         const { kickoff: _kickoff, projectFolderId: _projectFolderId, ...profile } = input;
+        // Editing the primary or the chain restarts fallback from the primary.
+        const sameSelection = (a: Agent["modelSelection"], b: Agent["modelSelection"]) => {
+          const aOptions = Object.entries(a.options ?? {});
+          const bOptions = new Map(Object.entries(b.options ?? {}));
+          return (
+            a.instanceId === b.instanceId &&
+            a.model === b.model &&
+            aOptions.length === bOptions.size &&
+            aOptions.every(([key, value]) => bOptions.get(key) === value)
+          );
+        };
+        const chainChanged =
+          existing !== null &&
+          (!sameSelection(input.modelSelection, existing.modelSelection) ||
+            (input.fallbackChain ?? []).length !== (existing.fallbackChain ?? []).length ||
+            (input.fallbackChain ?? []).some(
+              (entry, index) => !sameSelection(entry, (existing.fallbackChain ?? [])[index]!),
+            ));
         const agent = yield* store.save({
           ...profile,
+          fallbackChain: input.fallbackChain ?? existing?.fallbackChain ?? [],
           projectFolderId: null,
           responsibility: input.responsibility ?? existing?.responsibility ?? "",
           permissions: input.permissions ?? existing?.permissions ?? defaultAgentPermissions,
@@ -399,6 +458,9 @@ const make = Effect.gen(function* () {
           updatedAt: at,
           consecutiveFailures: existing?.consecutiveFailures ?? 0,
           backoffUntil: existing?.backoffUntil ?? null,
+          fallbackIndex: chainChanged ? 0 : (existing?.fallbackIndex ?? 0),
+          fallbackReason: chainChanged ? null : (existing?.fallbackReason ?? null),
+          fallbackUntil: chainChanged ? null : (existing?.fallbackUntil ?? null),
         });
         if (existing !== null) {
           yield* threads.dispatch({
@@ -602,6 +664,8 @@ const make = Effect.gen(function* () {
         let agent = yield* store.get(task.agentId);
         const id = `agent-work:${fireKey}`;
         const workThreadId = ThreadId.make(id);
+        let usedSelection = agent.modelSelection;
+        let usedFallbackReason: Agent["fallbackReason"] = null;
         const accepted = yield* sql.withTransaction(
           Effect.gen(function* () {
             if (context !== undefined) {
@@ -617,6 +681,11 @@ const make = Effect.gen(function* () {
               if (prior.length) return false;
             }
             if (!(yield* store.reserve(agent.id))) return false;
+            const decision = decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now));
+            if (decision.restored)
+              yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
+            usedSelection = decision.selection;
+            usedFallbackReason = decision.reason;
             if (context !== undefined) {
               const inherited = {
                 ...context,
@@ -639,6 +708,8 @@ const make = Effect.gen(function* () {
               completedAt: null,
               summary: null,
               posted: false,
+              modelSelection: usedSelection,
+              ...(usedFallbackReason === null ? {} : { fallbackReason: usedFallbackReason }),
             });
             return true;
           }),
@@ -659,7 +730,7 @@ const make = Effect.gen(function* () {
             threadId: workThreadId,
             projectId: agent.projectId ?? task.projectId,
             title: `${agent.name}: ${task.title}`,
-            modelSelection: agent.modelSelection,
+            modelSelection: usedSelection,
             runtimeMode: agent.runtimeMode,
             interactionMode: task.interactionMode,
             workspaceStrategy: task.workspaceStrategy,

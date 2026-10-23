@@ -55,6 +55,8 @@ export const AgentBuilderProposal = Schema.Struct({
   permissions: AgentBuilderProposalPermissions,
   /** The new agent's model; absent means the owner's default. */
   model: Schema.optional(ModelSelection),
+  /** Ordered fallback provider instance + model pairs after `model`. */
+  fallbackChain: Schema.optional(Schema.Array(ModelSelection)),
   /** Project folder to file the agent's conversation in; absent means the builder's own project. */
   projectFolderId: Schema.optional(ProjectLabelId),
 });

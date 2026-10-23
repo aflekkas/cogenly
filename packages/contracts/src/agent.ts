@@ -1,4 +1,5 @@
 import { AgentEventContext } from "./agentEvent.ts";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
@@ -60,11 +61,22 @@ const AgentPolicyFields = {
   permissions: AgentPermissions,
   notifyPolicy: Schema.Literals(["action_required", "meaningful_changes", "all"]),
 };
+/** Why a run left the agent's primary provider entry: its usage limit or its sign-in. */
+export const AgentFallbackReason = Schema.Literals(["usage_limit", "auth"]);
+export type AgentFallbackReason = typeof AgentFallbackReason.Type;
 const AgentFields = {
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   avatar: AgentAvatar,
   instructions: Schema.String.check(Schema.isMaxLength(32000)),
   modelSelection: ModelSelection,
+  /**
+   * Ordered provider instance + model pairs to try after the primary
+   * `modelSelection` when it hits a usage limit or is not signed in.
+   * Absent in agents saved before fallback chains; decodes to no chain.
+   */
+  fallbackChain: Schema.optional(Schema.Array(ModelSelection)).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   runtimeMode: RuntimeMode,
   projectId: Schema.NullOr(ProjectId),
   /** Autonomous job starts per UTC day. Owner-initiated conversation turns are not capped. */
@@ -85,12 +97,22 @@ export const Agent = Schema.Struct({
   consecutiveFailures: Schema.Int,
   /** Failed background starts back off exponentially; agents are never paused. */
   backoffUntil: Schema.NullOr(IsoDateTime),
+  /** Index into [modelSelection, ...fallbackChain] the next background run uses. */
+  fallbackIndex: Schema.optional(Schema.Int).pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  /** Why the chain advanced, and when the primary entry is retried. */
+  fallbackReason: Schema.optional(Schema.NullOr(AgentFallbackReason)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  fallbackUntil: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type Agent = typeof Agent.Type;
 /** Omit id to create. A project is required for creation; null on edits keeps the conversation's workspace. */
 export const AgentUpsertInput = Schema.Struct({
   id: Schema.optional(AgentId),
   ...AgentFields,
+  fallbackChain: Schema.optional(Schema.Array(ModelSelection)),
   responsibility: Schema.optional(AgentPolicyFields.responsibility),
   permissions: Schema.optional(AgentPermissions),
   notifyPolicy: Schema.optional(AgentPolicyFields.notifyPolicy),
@@ -111,6 +133,8 @@ export const AgentOwnProfileUpdateInput = Schema.Struct({
   ),
   responsibility: Schema.optional(AgentPolicyFields.responsibility),
   instructions: Schema.optional(AgentFields.instructions),
+  modelSelection: Schema.optional(ModelSelection),
+  fallbackChain: Schema.optional(Schema.Array(ModelSelection)),
 });
 export type AgentOwnProfileUpdateInput = typeof AgentOwnProfileUpdateInput.Type;
 export const AgentKey = Schema.Struct({ id: AgentId });
@@ -208,6 +232,12 @@ export const AgentWorkRun = Schema.Struct({
   completedAt: Schema.NullOr(IsoDateTime),
   summary: Schema.NullOr(Schema.String),
   posted: Schema.Boolean,
+  /** The provider instance + model this run actually used; absent on runs predating fallback chains. */
+  modelSelection: Schema.optional(ModelSelection),
+  /** Set when this run used a fallback entry (or advanced the chain): why. */
+  fallbackReason: Schema.optional(AgentFallbackReason),
+  /** The failing entry's known reset time, when the provider reported one. */
+  fallbackResetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
 export type AgentWorkRun = typeof AgentWorkRun.Type;
 export const AgentRunsResult = Schema.Struct({ runs: Schema.Array(AgentWorkRun) });

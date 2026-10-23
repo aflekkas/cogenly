@@ -80,6 +80,17 @@ waits a little longer before the next one. To stop a trigger, turn it off under
 **Schedule**. Messages sent while an agent is busy use its normal queue or steering
 behavior.
 
+An agent can also have a fallback chain: an ordered list of other provider
+instances and models to run on when its main one stops it. If a background run
+hits a usage limit ("You've hit your weekly limit") or finds that provider
+signed out, the next run uses the next entry in the chain instead of waiting
+on the same provider, and **Recent activity** shows which instance the run
+actually used and why it switched. When the provider names a reset time, the
+agent returns to its main instance then; otherwise it tries the main one
+again after an hour. Other failures, and agents without a chain, behave as
+before. Ask the agent in its chat to set or change its fallback chain, for
+example "fall back to Codex if Claude hits its limit".
+
 Coding work an agent starts appears in **Work** with your own threads, named by its
 repository and marked with the agent's name.
 

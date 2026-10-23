@@ -4,6 +4,9 @@ import {
   AgentPermissions,
   AgentError,
   AgentId,
+  type AgentFallbackReason,
+  ModelSelection as ModelSelectionSchema,
+  type ModelSelection,
   FactId,
   type RunId,
   type ContextPrincipal,
@@ -40,6 +43,12 @@ const decodeNote = Schema.decodeUnknownEffect(AgentMemoryNote);
 const decodeEventContext = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEventContext));
 const encodeEventContext = Schema.encodeSync(Schema.fromJsonString(AgentEventContext));
 const decodeRun = Schema.decodeUnknownEffect(AgentWorkRun);
+const decodeSelectionJson = (json: string | null) =>
+  json == null
+    ? Effect.succeed(undefined)
+    : Schema.decodeUnknownEffect(Schema.fromJsonString(ModelSelectionSchema))(json).pipe(
+        Effect.catch(() => Effect.succeed(undefined)),
+      );
 const encodePermissions = Schema.encodeEffect(Schema.fromJsonString(AgentPermissions));
 const decodeLatestMessage = Schema.decodeUnknownEffect(
   Schema.fromJsonString(AgentListItem.fields.latestMessage),
@@ -77,12 +86,25 @@ export class AgentStore extends Context.Service<
     /** Reserve background work only; owner messages never consume this allowance. */
     readonly reserve: (id: AgentId) => Effect.Effect<boolean, AgentError>;
     readonly outcome: (id: AgentId, succeeded: boolean) => Effect.Effect<Agent, AgentError>;
+    /** Persist where the fallback chain currently points; index 0 clears it. */
+    readonly setFallback: (
+      id: AgentId,
+      state: {
+        readonly index: number;
+        readonly reason: AgentFallbackReason | null;
+        readonly until: string | null;
+      },
+    ) => Effect.Effect<void, AgentError>;
     readonly createRun: (run: AgentWorkRun) => Effect.Effect<void, AgentError>;
     readonly runs: (id?: AgentId) => Effect.Effect<ReadonlyArray<AgentWorkRun>, AgentError>;
     readonly finishRun: (
       id: string,
       status: "completed" | "failed",
       summary: string,
+      fallback?: {
+        readonly reason: AgentFallbackReason;
+        readonly resetAt: string | null;
+      },
     ) => Effect.Effect<void, AgentError>;
     readonly markRunning: (id: string) => Effect.Effect<void, AgentError>;
     readonly markPosted: (id: string) => Effect.Effect<void, AgentError>;
@@ -169,6 +191,9 @@ const make = Effect.gen(function* () {
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (r) =>
           Effect.gen(function* () {
+            const usedSelection = yield* decodeSelectionJson(
+              typeof r.model_selection_json === "string" ? r.model_selection_json : null,
+            );
             return yield* decodeRun({
               id: r.run_id,
               agentId: r.agent_id,
@@ -185,6 +210,11 @@ const make = Effect.gen(function* () {
               completedAt: r.completed_at,
               summary: r.summary,
               posted: r.posted === 1,
+              ...(usedSelection === undefined ? {} : { modelSelection: usedSelection }),
+              ...(typeof r.fallback_reason !== "string"
+                ? {}
+                : { fallbackReason: r.fallback_reason as AgentFallbackReason }),
+              ...(!("fallback_reset_at" in r) ? {} : { fallbackResetAt: r.fallback_reset_at }),
             });
           }),
         ),
@@ -303,16 +333,22 @@ const make = Effect.gen(function* () {
         yield* sql`UPDATE agents SET payload_json = json_set(payload_json, '$.updatedAt', ${DateTime.formatIso(at)}), consecutive_failures = ${failures}, backoff_until = ${until} WHERE agent_id = ${id}`;
         return yield* get(id);
       }).pipe(Effect.mapError(storeError)),
+    setFallback: (id, state) =>
+      Effect.gen(function* () {
+        const at = DateTime.formatIso(yield* DateTime.now);
+        yield* sql`UPDATE agents SET payload_json = json_set(payload_json, '$.updatedAt', ${at}, '$.fallbackIndex', ${state.index}, '$.fallbackReason', ${state.reason === null ? null : state.reason}, '$.fallbackUntil', ${state.until}) WHERE agent_id = ${id}`;
+      }).pipe(Effect.mapError(storeError)),
     createRun: (run) =>
-      sql`INSERT INTO agent_work_runs(run_id, agent_id, trigger_id, work_thread_id, status, created_at, trigger_kind, trigger_context_json) VALUES (${run.id}, ${run.agentId}, ${run.triggerId}, ${run.workThreadId}, ${run.status}, ${run.createdAt}, ${run.triggerKind ?? "trigger"}, ${run.triggerContext === undefined ? null : encodeEventContext(run.triggerContext)})`.pipe(
+      sql`INSERT INTO agent_work_runs(run_id, agent_id, trigger_id, work_thread_id, status, created_at, trigger_kind, trigger_context_json, model_selection_json, fallback_reason) VALUES (${run.id}, ${run.agentId}, ${run.triggerId}, ${run.workThreadId}, ${run.status}, ${run.createdAt}, ${run.triggerKind ?? "trigger"}, ${run.triggerContext === undefined ? null : encodeEventContext(run.triggerContext)}, ${run.modelSelection === undefined ? null : JSON.stringify(run.modelSelection)}, ${run.fallbackReason ?? null})`.pipe(
         Effect.asVoid,
         Effect.mapError(storeError),
       ),
-    finishRun: (id, status, summary) =>
+    finishRun: (id, status, summary, fallback) =>
       now.pipe(
-        Effect.flatMap(
-          (at) =>
-            sql`UPDATE agent_work_runs SET status = ${status}, completed_at = ${at}, summary = ${summary} WHERE run_id = ${id}`,
+        Effect.flatMap((at) =>
+          fallback === undefined
+            ? sql`UPDATE agent_work_runs SET status = ${status}, completed_at = ${at}, summary = ${summary} WHERE run_id = ${id}`
+            : sql`UPDATE agent_work_runs SET status = ${status}, completed_at = ${at}, summary = ${summary}, fallback_reason = ${fallback.reason}, fallback_reset_at = ${fallback.resetAt} WHERE run_id = ${id}`,
         ),
         Effect.asVoid,
         Effect.mapError(storeError),
