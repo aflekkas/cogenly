@@ -30,6 +30,10 @@ import {
   PeerTicketResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Cause from "effect/Cause";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as Semaphore from "effect/Semaphore";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -174,6 +178,11 @@ const make = Effect.gen(function* () {
     lastError: null,
     machines: [],
   });
+  const pairingChanges = yield* Semaphore.make(1);
+  const linkWrites = yield* Semaphore.make(1);
+  let generation = 0;
+  let forgetting = 0;
+  let connecting: Fiber.Fiber<HubAttemptError["reason"]> | undefined;
   let active: { readonly client: HubClient; readonly failed: Deferred.Deferred<void> } | undefined;
 
   const withSecrets = <A, E>(effect: Effect.Effect<A, E, ServerSecretStore.ServerSecretStore>) =>
@@ -188,6 +197,16 @@ const make = Effect.gen(function* () {
 
   const storage = (operation: MachineError["operation"]) => (cause: unknown) =>
     new MachineError({ operation, reason: "storage", cause });
+
+  // Check the generation under the same lock as deletion, including delayed writes.
+  const saveLink = (expectedGeneration: number, link: HubLinkRecord) =>
+    linkWrites.withPermit(
+      Effect.suspend(() =>
+        expectedGeneration === generation
+          ? withSecrets(writeHubLink(link)).pipe(Effect.as(true), Effect.uninterruptible)
+          : Effect.succeed(false),
+      ),
+    );
 
   const randomNonce = crypto.randomUUIDv4().pipe(Effect.orDie);
 
@@ -247,6 +266,7 @@ const make = Effect.gen(function* () {
     if (Option.isSome(existing)) {
       return yield* new MachineError({ operation: "join", reason: "already-paired" });
     }
+    const joiningGeneration = ++generation;
     const { code } = input;
     const routes = yield* Effect.try({
       try: () => normalizePeerRoutes(input.hubUrls.length > 0 ? input.hubUrls : code.routes),
@@ -336,21 +356,20 @@ const make = Effect.gen(function* () {
         return yield* new MachineError({ operation: "join", reason: "hub-identity-mismatch" });
       }
       const now = yield* DateTime.now;
-      yield* withSecrets(
-        writeHubLink({
-          hubEnvironmentId: code.hubEnvironmentId,
-          hubName: joined.hub.name,
-          hubPublicKey: code.hubPublicKey,
-          routes: [route, ...routes.filter((entry) => entry !== route)],
-          accessToken: joined.accessToken,
-          expiresAt: joined.expiresAt,
-          scopes: joined.scopes,
-          pairedAt: now,
-          hub: joined.hub,
-          lastSeenAt: now,
-          revokedAt: null,
-        }),
-      ).pipe(Effect.mapError(storage("join")));
+      const saved = yield* saveLink(joiningGeneration, {
+        hubEnvironmentId: code.hubEnvironmentId,
+        hubName: joined.hub.name,
+        hubPublicKey: code.hubPublicKey,
+        routes: [route, ...routes.filter((entry) => entry !== route)],
+        accessToken: joined.accessToken,
+        expiresAt: joined.expiresAt,
+        scopes: joined.scopes,
+        pairedAt: now,
+        hub: joined.hub,
+        lastSeenAt: now,
+        revokedAt: null,
+      }).pipe(Effect.mapError(storage("join")));
+      if (!saved) return yield* new MachineError({ operation: "join", reason: "hub-unreachable" });
       yield* setState({ status: "connecting", route, lastError: null, machines: [] });
       yield* Queue.offer(kick, undefined);
       return;
@@ -359,14 +378,32 @@ const make = Effect.gen(function* () {
       operation: "join",
       reason: refused ? "grant-rejected" : "hub-unreachable",
     });
-  });
+  }, pairingChanges.withPermit);
 
   // Forget the hub: credential, pinned key and proof key. A later pairing
   // starts from a fresh proof key.
-  const forget = withSecrets(removeHubLink.pipe(Effect.andThen(removePeerDpopKey))).pipe(
-    Effect.andThen(setState({ status: "connecting", route: null, lastError: null, machines: [] })),
-    Effect.andThen(Queue.offer(kick, undefined)),
-  );
+  const forget = (cancelConnect: boolean, expectedGeneration?: number) =>
+    Effect.suspend(() => {
+      if (expectedGeneration !== undefined && expectedGeneration !== generation) return Effect.void;
+      generation++;
+      forgetting++;
+      return Effect.gen(function* () {
+        // A secret-store write may finish despite interruption. Join the entire
+        // attempt before deleting its credential and proof key.
+        if (cancelConnect && connecting !== undefined) yield* Fiber.interrupt(connecting);
+        yield* linkWrites.withPermit(
+          withSecrets(removeHubLink.pipe(Effect.andThen(removePeerDpopKey))),
+        );
+        yield* setState({ status: "connecting", route: null, lastError: null, machines: [] });
+      }).pipe(
+        Effect.ensuring(
+          Effect.gen(function* () {
+            forgetting--;
+            yield* Queue.offer(kick, undefined);
+          }),
+        ),
+      );
+    });
 
   const leave: HubLink["Service"]["leave"] = Effect.gen(function* () {
     const existing = yield* withSecrets(readHubLink).pipe(Effect.mapError(storage("unpair")));
@@ -379,9 +416,9 @@ const make = Effect.gen(function* () {
         Effect.ignore,
       );
     }
-    yield* forget.pipe(Effect.mapError(storage("unpair")));
+    yield* forget(true).pipe(Effect.mapError(storage("unpair")));
     return true;
-  }).pipe(Effect.withSpan("HubLink.leave"));
+  }).pipe(pairingChanges.withPermit, Effect.withSpan("HubLink.leave"));
 
   const view: HubLink["Service"]["view"] = Effect.gen(function* () {
     const link = yield* withSecrets(readHubLink).pipe(Effect.mapError(storage("list")));
@@ -423,7 +460,13 @@ const make = Effect.gen(function* () {
 
   // Requests the hub sends down the socket run like calls from it, with the
   // scopes this link holds: pairing grants the same rights both ways.
-  const handlePush = (client: HubClient, link: HubLinkRecord, push: PeerPush) => {
+  const handlePush = (
+    client: HubClient,
+    link: HubLinkRecord,
+    push: PeerPush,
+    expectedGeneration: number,
+  ) => {
+    if (expectedGeneration !== generation) return Effect.void;
     switch (push._tag) {
       case "Machines":
         return setState({ machines: push.machines });
@@ -431,7 +474,7 @@ const make = Effect.gen(function* () {
         // The hub closes the socket right after this; forgetting must finish
         // even when that close interrupts the inbox.
         return Effect.logInfo("The hub unpaired this machine.").pipe(
-          Effect.andThen(forget),
+          Effect.andThen(forget(false, expectedGeneration)),
           Effect.ignore({ log: true }),
           Effect.uninterruptible,
         );
@@ -456,7 +499,7 @@ const make = Effect.gen(function* () {
   };
 
   /** One connection over one route, until it drops. Never succeeds. */
-  const connectRoute = (link: HubLinkRecord, route: string) =>
+  const connectRoute = (link: HubLinkRecord, route: string, expectedGeneration: number) =>
     Effect.scoped(
       Effect.gen(function* () {
         yield* verifyIdentity(route, link);
@@ -592,21 +635,30 @@ const make = Effect.gen(function* () {
         });
 
         const now = yield* DateTime.now;
-        yield* withSecrets(
-          writeHubLink({
-            ...link,
-            hub: hello.hub,
-            hubName: hello.hub.name,
-            lastSeenAt: now,
-            routes: [route, ...link.routes.filter((entry) => entry !== route)],
+        const saved = yield* saveLink(expectedGeneration, {
+          ...link,
+          hub: hello.hub,
+          hubName: hello.hub.name,
+          lastSeenAt: now,
+          routes: [route, ...link.routes.filter((entry) => entry !== route)],
+        }).pipe(
+          Effect.tapError((cause) => Effect.logError(cause)),
+          Effect.orElseSucceed(() => true),
+        );
+        if (!saved || expectedGeneration !== generation) {
+          return yield* new HubAttemptError({ reason: "dropped" });
+        }
+        const connection = { client, failed: frames.failed };
+        active = connection;
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            if (active === connection) active = undefined;
           }),
-        ).pipe(Effect.ignore({ log: true }));
-        active = { client, failed: frames.failed };
-        yield* Effect.addFinalizer(() => Effect.sync(() => (active = undefined)));
+        );
         yield* setState({ status: "online", route, lastError: null });
 
         yield* client[PEER_METHODS.inbox]({}).pipe(
-          Stream.runForEach((push) => handlePush(client, link, push)),
+          Stream.runForEach((push) => handlePush(client, link, push, expectedGeneration)),
           Effect.ensuring(Deferred.succeed(closed, undefined)),
           Effect.ignore,
           Effect.forkScoped,
@@ -629,7 +681,7 @@ const make = Effect.gen(function* () {
     );
 
   /** Every route in order; the first one that connects is used until it drops. */
-  const connectOnce = (link: HubLinkRecord) =>
+  const connectOnce = (link: HubLinkRecord, expectedGeneration: number) =>
     Effect.gen(function* () {
       let worst: HubAttemptError["reason"] = "unreachable";
       const routes = yield* Effect.try({
@@ -639,7 +691,7 @@ const make = Effect.gen(function* () {
       if (Option.isNone(routes)) return "untrusted" as const;
       for (const route of routes.value) {
         yield* setState({ status: "connecting", route });
-        const outcome = yield* connectRoute(link, route).pipe(Effect.flip);
+        const outcome = yield* connectRoute(link, route, expectedGeneration).pipe(Effect.flip);
         if (outcome.reason === "dropped") return outcome.reason;
         if (
           outcome.reason === "refused" ||
@@ -657,17 +709,52 @@ const make = Effect.gen(function* () {
   const dialLoop = Effect.gen(function* () {
     let failures = 0;
     while (true) {
+      if (forgetting > 0) {
+        yield* Queue.take(kick);
+        continue;
+      }
+      const expectedGeneration = generation;
       const link = yield* withSecrets(readHubLink).pipe(
         Effect.orElseSucceed(() => Option.none<HubLinkRecord>()),
       );
+      if (expectedGeneration !== generation || forgetting > 0) continue;
       if (Option.isNone(link)) {
         failures = 0;
         yield* Queue.take(kick);
         continue;
       }
+      const attempt = yield* pairingChanges.withPermit(
+        Effect.gen(function* () {
+          // Leaving also holds this permit: an attempt cannot start between its
+          // cancellation snapshot and deletion, even if the link read was delayed.
+          if (expectedGeneration !== generation || forgetting > 0) return undefined;
+          const attempt = yield* connectOnce(link.value, expectedGeneration).pipe(Effect.forkChild);
+          connecting = attempt;
+          return attempt;
+        }),
+      );
+      if (attempt === undefined) continue;
       const outcome = yield* Effect.raceFirst(
-        connectOnce(link.value),
+        Fiber.await(attempt).pipe(
+          Effect.flatMap((exit) =>
+            Exit.isSuccess(exit)
+              ? Effect.succeed(exit.value)
+              : Cause.hasInterrupts(exit.cause)
+                ? Effect.succeed("changed" as const)
+                : Effect.failCause(exit.cause),
+          ),
+        ),
         Queue.take(kick).pipe(Effect.as("changed" as const)),
+      ).pipe(
+        Effect.ensuring(
+          Fiber.interrupt(attempt).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                if (connecting === attempt) connecting = undefined;
+              }),
+            ),
+          ),
+        ),
       );
       if (outcome === "changed") {
         failures = 0;

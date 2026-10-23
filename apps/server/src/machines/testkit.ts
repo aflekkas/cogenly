@@ -36,8 +36,11 @@ import * as PeerHttp from "./peerHttp.ts";
 import * as PeerHub from "./PeerHub.ts";
 
 interface MachineOverrides {
+  readonly secrets?: (
+    secrets: ServerSecretStore.ServerSecretStore["Service"],
+  ) => ServerSecretStore.ServerSecretStore["Service"];
   readonly fetch?: typeof globalThis.fetch;
-  readonly crypto?: (crypto: Crypto.Crypto["Service"]) => Crypto.Crypto["Service"];
+  readonly crypto?: (crypto: Crypto.Crypto) => Crypto.Crypto;
   readonly auth?: (
     auth: EnvironmentAuth.EnvironmentAuth["Service"],
   ) => EnvironmentAuth.EnvironmentAuth["Service"];
@@ -79,7 +82,13 @@ const machineLayer = (
 ) => {
   const infra = Layer.mergeAll(
     SqlitePersistence.layerMemory,
-    ServerSecretStore.layer,
+    Layer.effect(
+      ServerSecretStore.ServerSecretStore,
+      Effect.gen(function* () {
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        return overrides.secrets?.(secrets) ?? secrets;
+      }),
+    ).pipe(Layer.provide(ServerSecretStore.layer)),
     ServerEnvironment.layerIdentity,
   ).pipe(
     Layer.provideMerge(
