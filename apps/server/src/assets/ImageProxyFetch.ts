@@ -201,22 +201,39 @@ export const probeImageUrl = Effect.fn("ImageProxyFetch.probeImageUrl")(function
   );
 });
 
+/** One deadline for the whole fetch: every hop, its DNS, and the full body. */
+const IMAGE_FETCH_TIMEOUT = "15 seconds";
+
 /**
- * Serves a third-party image through this origin so chat clients dodge
- * hotlink protection, mixed content, and tracker cookies. Https only, images
- * only, bounded in size and time.
+ * The body as one buffer, or null once it passes the cap. Counting bytes, not
+ * chunks: stopping early ends the stream, which cancels the upstream read.
  */
-export const imageProxyResponse = Effect.fn("ImageProxyFetch.imageProxyResponse")(function* (
-  rawUrl: string,
-) {
-  const parsed = parseImageProxyTarget(rawUrl);
-  if (!("url" in parsed)) {
-    return HttpServerResponse.text(parsed.error.message, { status: parsed.error.status });
-  }
-  const response = yield* fetchFollowingRedirects(parsed.url).pipe(
-    Effect.timeout("15 seconds"),
-    Effect.orElseSucceed(() => null),
-  );
+const readCappedBody = <E, R>(stream: Stream.Stream<Uint8Array, E, R>) =>
+  Effect.gen(function* () {
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    yield* stream.pipe(
+      Stream.runForEachWhile((chunk) =>
+        Effect.sync(() => {
+          length += chunk.length;
+          if (length > MAX_PROXIED_IMAGE_BYTES) return false;
+          chunks.push(chunk);
+          return true;
+        }),
+      ),
+    );
+    if (length > MAX_PROXIED_IMAGE_BYTES) return null;
+    const body = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return body;
+  });
+
+const fetchProxiedImage = Effect.fn("ImageProxyFetch.fetchProxiedImage")(function* (url: string) {
+  const response = yield* fetchFollowingRedirects(url);
   if (response === null) {
     return HttpServerResponse.text("The image could not be fetched.", { status: 502 });
   }
@@ -234,23 +251,20 @@ export const imageProxyResponse = Effect.fn("ImageProxyFetch.imageProxyResponse"
     const parsedLength = Number(value);
     return Number.isInteger(parsedLength) && parsedLength >= 0 ? parsedLength : undefined;
   })();
-  // Refuse an over-limit body before buffering a byte of it; the capped
-  // stream below catches upstreams that lie about (or omit) the length. One
-  // byte past the cap distinguishes "exactly the limit" from "over it".
+  // Refuse an over-limit body before buffering a byte of it; the capped read
+  // below catches upstreams that lie about (or omit) the length.
   if (declaredLength !== undefined && declaredLength > MAX_PROXIED_IMAGE_BYTES) {
     return HttpServerResponse.text("The image is larger than the proxy limit.", { status: 413 });
   }
-  const chunks = yield* response.stream.pipe(
-    Stream.take(MAX_PROXIED_IMAGE_BYTES + 1),
-    Stream.runCollect,
-  );
-  let bodyLength = 0;
-  for (const chunk of chunks) bodyLength += chunk.length;
+  const body = yield* readCappedBody(response.stream);
+  if (body === null) {
+    return HttpServerResponse.text("The image is larger than the proxy limit.", { status: 413 });
+  }
   const decision = selectProxiedImageResponse({
     status: response.status,
     contentType: response.headers["content-type"],
     declaredLength,
-    bodyLength,
+    bodyLength: body.length,
   });
   // Unreachable: refusals return above before buffering. Kept so the decision
   // table stays total for its own callers.
@@ -262,14 +276,30 @@ export const imageProxyResponse = Effect.fn("ImageProxyFetch.imageProxyResponse"
   if (decision.status !== 200) {
     return HttpServerResponse.text(decision.message, { status: decision.status });
   }
-  const body = new Uint8Array(bodyLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.length;
-  }
   return HttpServerResponse.uint8Array(body, {
     contentType: decision.contentType,
     headers: imageProxyResponseHeaders(decision.contentType),
   });
+});
+
+/**
+ * Serves a third-party image through this origin so chat clients dodge
+ * hotlink protection, mixed content, and tracker cookies. Https only, images
+ * only, bounded in size and time. The fetch has its own scope, so the
+ * upstream request is aborted the moment it finishes, fails, or times out.
+ */
+export const imageProxyResponse = Effect.fn("ImageProxyFetch.imageProxyResponse")(function* (
+  rawUrl: string,
+) {
+  const parsed = parseImageProxyTarget(rawUrl);
+  if (!("url" in parsed)) {
+    return HttpServerResponse.text(parsed.error.message, { status: parsed.error.status });
+  }
+  return yield* fetchProxiedImage(parsed.url).pipe(
+    Effect.scoped,
+    Effect.timeout(IMAGE_FETCH_TIMEOUT),
+    Effect.orElseSucceed(() =>
+      HttpServerResponse.text("The image could not be fetched.", { status: 502 }),
+    ),
+  );
 });

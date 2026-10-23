@@ -1,10 +1,16 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse, HttpServerResponse } from "effect/http";
 
 import type { ResolvedAddress } from "../security/PublicAddress.ts";
-import { ImageProxyHostLookup, imageProxyResponse } from "./ImageProxyFetch.ts";
+import {
+  ImageProxyHostLookup,
+  MAX_PROXIED_IMAGE_BYTES,
+  imageProxyResponse,
+} from "./ImageProxyFetch.ts";
 
 const PUBLIC: ResolvedAddress = { address: "93.184.216.34", family: 4 };
 const IMAGE_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
@@ -107,6 +113,76 @@ describe("imageProxyResponse address checks", () => {
       assert.deepEqual(requested, [
         `https://cdn.test/redirect?to=${encodeURIComponent("https://internal.test/a.png")}`,
       ]);
+    }),
+  );
+});
+
+/** An image upstream whose body chunks come from `pull`, recording reads and cancellation. */
+const bodyUpstream = (
+  pull: (controller: ReadableStreamDefaultController<Uint8Array>) => unknown,
+) => {
+  const state = { pulls: 0, cancelled: false };
+  const layer = Layer.mergeAll(
+    Layer.succeed(ImageProxyHostLookup, async () => [PUBLIC]),
+    Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) =>
+        Effect.sync(() =>
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(
+              new ReadableStream<Uint8Array>({
+                pull: (controller) => {
+                  state.pulls += 1;
+                  return pull(controller) as Promise<void> | undefined;
+                },
+                cancel: () => {
+                  state.cancelled = true;
+                },
+              }),
+              { headers: { "content-type": "image/png" } },
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  return { state, layer };
+};
+
+describe("imageProxyResponse body limits", () => {
+  it.effect("stops reading an endless body at the byte cap and cancels the upstream", () =>
+    Effect.gen(function* () {
+      const chunk = new Uint8Array(1024 * 1024);
+      const { state, layer } = bodyUpstream((controller) => controller.enqueue(chunk));
+      const response = HttpServerResponse.toWeb(
+        yield* imageProxyResponse("https://cdn.test/endless.png").pipe(Effect.provide(layer)),
+      );
+      assert.equal(response.status, 413);
+      assert.isAtMost(state.pulls, MAX_PROXIED_IMAGE_BYTES / chunk.length + 3);
+      assert.isTrue(state.cancelled);
+    }),
+  );
+
+  it.effect("times out a body that stalls after its headers and cancels the upstream", () =>
+    Effect.gen(function* () {
+      let markStalled = () => {};
+      const stalled = new Promise<void>((resolve) => (markStalled = resolve));
+      const { state, layer } = bodyUpstream((controller) => {
+        if (state.pulls === 1) return controller.enqueue(IMAGE_BYTES);
+        markStalled();
+        return new Promise<void>(() => {});
+      });
+      const fiber = yield* imageProxyResponse("https://cdn.test/stalled.png").pipe(
+        Effect.provide(layer),
+        Effect.forkChild,
+      );
+      // The headers and first bytes are in; only the rest of the body is late.
+      yield* Effect.promise(() => stalled);
+      yield* TestClock.adjust("15 seconds");
+      const response = HttpServerResponse.toWeb(yield* Fiber.join(fiber));
+      assert.equal(response.status, 502);
+      assert.isTrue(state.cancelled);
     }),
   );
 });
