@@ -544,17 +544,33 @@ export const layer: Layer.Layer<
       // cwd, and skip the resume further down so the fresh session is seeded
       // with a portable context handoff instead. This is the same
       // resume-fallback path a provider switch uses, for every adapter.
+      // The previous run's own cwd, not the session's: a shared session (Codex
+      // serves every thread of an instance from one app-server) has one cwd
+      // for many threads.
+      const previousStartedRun = projection.runs.findLast(
+        (source) =>
+          source.ordinal < run.ordinal &&
+          source.startedAt !== null &&
+          source.providerThreadId === run.providerThreadId,
+      );
+      const previousRootNode = projection.nodes.find(
+        (candidate) => candidate.id === previousStartedRun?.rootNodeId,
+      );
       const cwdChanged = RuntimePolicy.providerSessionCwdChanged({
-        previousCwd: existingSessionProjection?.cwd,
+        previousCwd: projection.checkpointScopes.find(
+          (candidate) => candidate.id === previousRootNode?.checkpointScopeId,
+        )?.cwd,
         nextCwd: resolvedRuntimePolicy.cwd,
-        hasPriorStartedRun: projection.runs.some(
-          (source) => source.ordinal < run.ordinal && source.startedAt !== null,
-        ),
+        hasPriorStartedRun: previousStartedRun !== undefined,
       });
-      if (cwdChanged)
-        yield* providerSessions
-          .close(providerSessionId)
-          .pipe(Effect.ignoreCause({ log: true }));
+      // Closing a shared session would stop every other thread on it; there
+      // skipping the resume below is enough, since its threads carry their own cwd.
+      if (
+        cwdChanged &&
+        existingSessionProjection?.capabilities.sessions
+          .supportsMultipleProviderThreadsPerSession !== true
+      )
+        yield* providerSessions.close(providerSessionId).pipe(Effect.ignoreCause({ log: true }));
       const sessionResult = yield* Effect.result(
         providerSessions.open({
           threadId: projection.thread.id,

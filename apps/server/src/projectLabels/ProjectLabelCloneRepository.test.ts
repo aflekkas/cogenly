@@ -1,12 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
-import {
-  ProjectId,
-  ProjectLabelId,
-  type ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
+import { ProjectId, ProjectLabelId, type ProjectLabelWithRepositories } from "@t3tools/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
-import type * as Path from "effect/Path";
-import { posix } from "node:path";
+import * as Path from "effect/Path";
 
 import {
   cloneRepositoryIntoLabel,
@@ -65,7 +61,7 @@ describe("cloneRepositoryIntoLabel", () => {
         crypto: {
           randomUUIDv4: () => Effect.succeed("00000000-0000-4000-8000-000000000000"),
         } as unknown as ProjectLabelCloneDeps["crypto"],
-        path: posix as unknown as Path.Path,
+        path: yield* Path.Path,
         home: "/home",
         cogenlyHome: "/cogenly",
         refreshGitStatus: () => Effect.void,
@@ -82,6 +78,6 @@ describe("cloneRepositoryIntoLabel", () => {
       // once the clone lands.
       expect(linked).toEqual([started.projectId, started.projectId]);
       expect(resolved).toEqual([{ cwd: "/projects/Spawn Partners/Platform", refresh: true }]);
-    }),
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

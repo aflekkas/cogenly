@@ -5,6 +5,7 @@ import {
   type SourceControlRepositoryError,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
 import * as Labels from "../../../projectLabels/ProjectLabelService.ts";
