@@ -285,7 +285,7 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
               ? Effect.succeed({
                   available: true,
                   visible: true,
-                  tabId: null,
+                  tabId: "tab-checkout",
                   url: pageUrl,
                   title: "Checkout",
                   loading: false,
