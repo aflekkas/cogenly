@@ -473,6 +473,31 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("scrubs short passwords as whole tokens and delivered TOTP codes for good", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+      const { item } = yield* vault.create({
+        name: "Short",
+        type: "login",
+        secretFields: { password: "p4ss", totpSecret: secret },
+      });
+      expect(yield* vault.scrubText("pw p4ss, not p4ssword")).toBe(
+        "pw [redacted vault secret], not p4ssword",
+      );
+      yield* TestClock.setTime(1_800_000_015_000);
+      const filled = yield* vault.use({
+        itemId: item.id,
+        field: "totp",
+        caller: { kind: "server" },
+      });
+      const code = filled.status === "allowed" ? filled.value : "";
+      // Long after its window, the code that was actually filled is still scrubbed.
+      yield* TestClock.setTime(1_800_000_015_000 + 10 * 60_000);
+      expect(yield* vault.scrubText(`code ${code}`)).toBe("code [redacted vault secret]");
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("scrubs the TOTP codes valid around now", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;

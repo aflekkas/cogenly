@@ -1,8 +1,10 @@
 /** Replaces vault secret values in text shown to agents. Pure helpers. */
 
 const VAULT_REDACTION = "[redacted vault secret]";
-/** Shorter values are too likely to be ordinary words or numbers to scrub safely. */
-const MIN_SCRUB_LENGTH = 6;
+/** Shorter values are too likely to be ordinary words or numbers to scrub inside other text. */
+export const MIN_SCRUB_LENGTH = 6;
+/** Values from here up to `MIN_SCRUB_LENGTH` are scrubbed as whole tokens only. */
+export const MIN_TOKEN_SCRUB_LENGTH = 3;
 
 /** Longest first, so a value that contains another is removed whole. */
 const orderedSecrets = (secrets: Iterable<string>): Array<string> =>

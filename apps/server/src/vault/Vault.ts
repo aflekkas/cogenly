@@ -42,6 +42,8 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as VaultCrypto from "./VaultCrypto.ts";
 import { evaluateVaultPolicy, hostMatchesAnyDomain, type VaultUseCaller } from "./VaultPolicy.ts";
 import {
+  MIN_SCRUB_LENGTH,
+  MIN_TOKEN_SCRUB_LENGTH,
   VAULT_WITHHELD,
   redactShortSecrets,
   redactShortValue,
@@ -165,6 +167,41 @@ const cardExpiryOf = (stored: StoredFields): string | undefined => {
   if (!month || !year) return undefined;
   return `${month.padStart(2, "0")}/${year.slice(-2)}`;
 };
+
+/**
+ * Every shape a stored secret may echo back in. Card values come back in
+ * shapes other than the stored one: a page may return the number digits-only
+ * or grouped, and the expiry as MM/YYYY.
+ */
+const scrubFormsOf = (stored: StoredFields): Array<string> => {
+  const forms: Array<string> = [];
+  for (const value of Object.values(stored))
+    if (typeof value === "string" && value.length > 0) forms.push(value);
+  const digits = cardDigits(stored);
+  if (digits.length > 0) forms.push(digits, digits.replace(/(\d{4})(?=\d)/g, "$1 "));
+  const expiry = cardExpiryOf(stored);
+  if (expiry !== undefined) {
+    forms.push(expiry);
+    const year = (stored.cardExpiryYear ?? "").trim();
+    if (year.length === 4) forms.push(`${expiry.slice(0, 3)}${year}`);
+  }
+  return forms;
+};
+
+/** Values long enough to scrub anywhere, and shorter ones scrubbed only as whole tokens. */
+const addScrubForms = (
+  forms: Iterable<string>,
+  secrets: Set<string>,
+  shortSecrets: Set<string>,
+) => {
+  for (const form of forms) {
+    if (form.length >= MIN_SCRUB_LENGTH) secrets.add(form);
+    else if (form.length >= MIN_TOKEN_SCRUB_LENGTH) shortSecrets.add(form);
+  }
+};
+
+/** Bound on values retained for scrubbing after the vault stops holding them. */
+const RETAINED_SECRET_LIMIT = 1_000;
 
 const fieldsOf = (stored: StoredFields): VaultItemMetadata["fields"] =>
   FIELD_KEYS.filter((field) => {
@@ -323,6 +360,7 @@ const make = Effect.gen(function* () {
   }>({ version: 0, loaded: null });
 
   const processSecrets = yield* Ref.make(new Set<string>());
+  const retainedSecrets = yield* Ref.make(new Map<string, true>());
   const environmentId = yield* identity.getEnvironmentId;
 
   // VaultMachineKeyStore (file-backed today; Keychain replaces this on macOS).
@@ -505,24 +543,7 @@ const make = Effect.gen(function* () {
     for (const row of rows) {
       const stored = yield* decryptStored(row).pipe(Effect.option);
       if (Option.isNone(stored)) continue;
-      for (const value of Object.values(stored.value))
-        if (typeof value === "string" && value.length > 0) secrets.add(value);
-      // Card values echo back in shapes other than the stored one: a page may
-      // return the number digits-only or grouped, and the expiry as MM/YYYY.
-      // The CVC and MM/YY are too short for the general pass, so they go to
-      // the whole-token short pass instead.
-      const digits = cardDigits(stored.value);
-      if (digits.length > 0) {
-        secrets.add(digits);
-        secrets.add(digits.replace(/(\d{4})(?=\d)/g, "$1 "));
-      }
-      const expiry = cardExpiryOf(stored.value);
-      if (expiry !== undefined) {
-        shortSecrets.add(expiry);
-        const year = (stored.value.cardExpiryYear ?? "").trim();
-        if (year.length === 4) secrets.add(`${expiry.slice(0, 3)}${year}`);
-      }
-      if (stored.value.cardCvc) shortSecrets.add(stored.value.cardCvc);
+      addScrubForms(scrubFormsOf(stored.value), secrets, shortSecrets);
       if (stored.value.totpSecret) totpSecrets.push(stored.value.totpSecret);
     }
     return { secrets, shortSecrets, totpSecrets };
@@ -550,17 +571,40 @@ const make = Effect.gen(function* () {
    * enough to collide with ordinary numbers, so they take the whole-token pass.
    */
   const scrubSets = Effect.gen(function* () {
-    const { secrets, shortSecrets, totpSecrets } = yield* ensureScrubSecrets;
-    if (totpSecrets.length === 0) return { secrets, shortSecrets };
+    const cached = yield* ensureScrubSecrets;
+    const retained = yield* Ref.get(retainedSecrets);
+    if (cached.totpSecrets.length === 0 && retained.size === 0) return cached;
+    const secrets = new Set(cached.secrets);
+    const shortSecrets = new Set(cached.shortSecrets);
+    addScrubForms(retained.keys(), secrets, shortSecrets);
     const nowMs = yield* Clock.currentTimeMillis;
-    const withCodes = new Set(shortSecrets);
-    for (const secret of totpSecrets)
+    for (const secret of cached.totpSecrets)
       for (const offset of [-30_000, 0, 30_000]) {
         const code = Option.liftThrowable(totp)(secret, { atMs: nowMs + offset });
-        if (Option.isSome(code)) withCodes.add(code.value);
+        if (Option.isSome(code)) shortSecrets.add(code.value);
       }
-    return { secrets, shortSecrets: withCodes };
+    return { secrets, shortSecrets };
   });
+
+  /**
+   * Values this process handed out stay scrubbed after the vault stops
+   * holding them: a TOTP code outlives its window, and an old password stays
+   * in pages and buffers after a rotation. Oldest entries go first past the cap.
+   */
+  const retainSecrets = (values: Iterable<string>) =>
+    Ref.update(retainedSecrets, (current) => {
+      const next = new Map(current);
+      for (const value of values) {
+        if (value.length < MIN_TOKEN_SCRUB_LENGTH) continue;
+        next.delete(value);
+        next.set(value, true);
+      }
+      for (const oldest of next.keys()) {
+        if (next.size <= RETAINED_SECRET_LIMIT) break;
+        next.delete(oldest);
+      }
+      return next;
+    });
 
   /** Unscrubbed text never leaves: a scrub set that cannot load withholds the result. */
   const withheldOnFailure = <A>(withheld: () => A) =>
@@ -778,6 +822,7 @@ const make = Effect.gen(function* () {
         return yield* new VaultError({ reason: "field_missing" });
       }
       yield* record("allowed");
+      yield* retainSecrets([value]);
       return { status: "allowed", item, field: input.field, value } as const;
     }).pipe(Effect.mapError(wrap));
 
