@@ -49,6 +49,7 @@ import * as Machines from "./Machines.ts";
 import * as PeerChannels from "./PeerChannels.ts";
 import * as PeerHttp from "./peerHttp.ts";
 import * as PeerHub from "./PeerHub.ts";
+import { normalizePeerRoute, normalizePeerRoutes } from "./peerRoutes.ts";
 import { createPeerDpopProof, getOrCreatePeerDpopKey } from "./peerCrypto.ts";
 
 const Echo = makePeerChannel({
@@ -220,7 +221,87 @@ const startProxy = (target: Machine) =>
     ({ server }) => Effect.sync(() => server.close()),
   );
 
+const startHttpObserver = (handler: NodeHttp.RequestListener) =>
+  Effect.acquireRelease(
+    Effect.callback<{ server: NodeHttp.Server; url: string }>((resume) => {
+      const server = NodeHttp.createServer(handler);
+      server.listen(0, "127.0.0.1", () =>
+        resume(
+          Effect.succeed({
+            server,
+            url: `http://127.0.0.1:${(server.address() as NodeNet.AddressInfo).port}/`,
+          }),
+        ),
+      );
+    }),
+    ({ server }) =>
+      Effect.sync(() => {
+        server.closeAllConnections();
+        server.close();
+      }),
+  );
+
 describe("machines", () => {
+  it("permits TLS or loopback routes, without a plaintext fallback", () => {
+    assert.strictEqual(normalizePeerRoute("wss://hub.example/path"), "https://hub.example/");
+    assert.strictEqual(normalizePeerRoute("ws://[::1]:4773/"), "http://[::1]:4773/");
+    for (const route of [
+      "http://hub.ts.net/",
+      "http://100.64.0.2/",
+      "ws://10.0.0.1/",
+      "http://example.com/",
+      "https://user:secret@hub.example/",
+    ]) {
+      assert.throws(() => normalizePeerRoute(route));
+    }
+    assert.throws(() => normalizePeerRoutes(["https://hub.example/", "http://127.0.0.1:4773/"]));
+  });
+
+  it.live(
+    "rejects unsafe route lists before dialing and sends no grant to an untrusted hub or redirect",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* startMachine("hub", "cloud-server");
+        const spoke = yield* startMachine("spoke", "computer");
+        const identity = yield* spoke.machines.prepareJoin;
+        const code = yield* hub.machines.createPeerGrant({
+          spokeKeyThumbprint: identity.keyThumbprint,
+        });
+        const received: { path: string; authorization: string | undefined }[] = [];
+        const observer = yield* startHttpObserver((request, response) => {
+          received.push({ path: request.url!, authorization: request.headers.authorization });
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify({ hubEnvironmentId: hub.environmentId, signature: "wrong" }));
+        });
+        for (const routes of [
+          [observer.url, "http://100.64.0.2/"],
+          ["https://hub.example/", observer.url],
+        ]) {
+          const error = yield* spoke.machines.joinHub({ hubUrls: routes, code }).pipe(Effect.flip);
+          assert.strictEqual(error.reason, "invalid-input");
+          assert.deepStrictEqual(received, []);
+        }
+        const wrong = yield* spoke.machines
+          .joinHub({ hubUrls: [observer.url], code })
+          .pipe(Effect.flip);
+        assert.strictEqual(wrong.reason, "hub-identity-mismatch");
+        assert.deepStrictEqual(received, [{ path: "/peer/identity", authorization: undefined }]);
+        const redirect = yield* startHttpObserver((_request, response) => {
+          response.writeHead(307, { location: observer.url + "peer/join" });
+          response.end();
+        });
+        const redirected = yield* spoke.machines
+          .joinHub({ hubUrls: [redirect.url], code })
+          .pipe(Effect.flip);
+        assert.strictEqual(redirected.reason, "hub-unreachable");
+        assert.strictEqual(received.length, 1);
+        // Neither preflight spent the grant; the intended hub still accepts it.
+        yield* spoke.machines.joinHub({ hubUrls: [hub.url], code });
+        yield* awaitLinkState(spoke, (state) => state.status === "online");
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
   it.live(
     "pairs a spoke with its hub, carries calls both ways, and unpairs from the hub",
     () =>

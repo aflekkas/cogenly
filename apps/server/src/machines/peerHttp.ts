@@ -8,6 +8,9 @@
 import {
   AuthSyncReplicateScope,
   PEER_JOIN_PATH,
+  PEER_IDENTITY_PATH,
+  PeerIdentityRequest,
+  PeerIdentityResult,
   PEER_METHODS,
   PEER_SOCKET_PATH,
   PEER_TICKET_PATH,
@@ -55,6 +58,22 @@ export const layer = Layer.unwrap(
     const sessions = yield* SessionStore.SessionStore;
     const secrets = yield* ServerSecretStore.ServerSecretStore;
     const crypto = yield* Crypto.Crypto;
+
+    const identity = HttpRouter.add(
+      "POST",
+      PEER_IDENTITY_PATH,
+      Effect.gen(function* () {
+        const body = yield* HttpServerRequest.schemaBodyJson(PeerIdentityRequest).pipe(
+          Effect.option,
+        );
+        if (body._tag === "None") return refuse(400, "invalid_request");
+        const result = yield* hub.proveIdentity(body.value).pipe(Effect.option);
+        if (result._tag === "None") return refuse(500, "internal_error");
+        return yield* HttpServerResponse.schemaJson(PeerIdentityResult)(result.value, {
+          headers: { "cache-control": "no-store" },
+        }).pipe(Effect.orDie);
+      }),
+    );
 
     const join = HttpRouter.add(
       "POST",
@@ -164,6 +183,6 @@ export const layer = Layer.unwrap(
       }).pipe(Effect.provide(RpcSerialization.layerJson), Effect.withSpan("peer.socket")),
     );
 
-    return Layer.mergeAll(join, ticket, socket);
+    return Layer.mergeAll(identity, join, ticket, socket);
   }),
 );

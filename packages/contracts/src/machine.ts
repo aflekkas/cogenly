@@ -188,9 +188,21 @@ export const isMachineError = Schema.is(MachineError);
 // ---------------------------------------------------------------------------
 
 /** HTTP paths a spoke uses before the socket opens. */
+export const PEER_IDENTITY_PATH = "/peer/identity";
 export const PEER_JOIN_PATH = "/peer/join";
 export const PEER_TICKET_PATH = "/peer/ticket";
 export const PEER_SOCKET_PATH = "/peer";
+
+/** A secret-free challenge, verified before sending a grant or peer token. */
+export const PeerIdentityRequest = Schema.Struct({
+  spokeEnvironmentId: EnvironmentId,
+  nonce: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+});
+export type PeerIdentityRequest = typeof PeerIdentityRequest.Type;
+export const PeerIdentityResult = Schema.Struct({
+  hubEnvironmentId: EnvironmentId,
+  signature: TrimmedNonEmptyString,
+});
 
 export const PeerJoinRequest = Schema.Struct({
   grant: TrimmedNonEmptyString,
