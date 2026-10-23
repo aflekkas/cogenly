@@ -34,7 +34,7 @@ const result = Schema.Struct({
 const run = Tool.make("terminal_run", {
   ...shared,
   description:
-    "Run a shell command in a visible PTY owned by this thread (full-access/default mode required). Use this for all shell commands. cwd defaults to the thread workspace; cwd outside it, including symlink escapes, is rejected. Foreground waits up to timeoutMs (default 120000, max 600000), then kills the process tree. background=true returns immediately for servers/watchers. Output retains a bounded head and tail with omitted-character markers. All agent PTYs and children are killed when the thread settles or is deleted.",
+    "Run a shell command in a visible PTY owned by this thread (full-access/default mode required). Use this for all shell commands. cwd defaults to the thread workspace; cwd outside it, including symlink escapes, is rejected. Foreground waits up to timeoutMs (default 120000, max 600000), then kills the process tree. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. background=true returns immediately for servers/watchers. Output retains a bounded head and tail with omitted-character markers. All agent PTYs and children are killed when the thread settles or is deleted.",
   parameters: Schema.Struct({
     command: TrimmedNonEmptyString.check(Schema.isMaxLength(65_536)),
     cwd: Schema.optional(TrimmedNonEmptyString),

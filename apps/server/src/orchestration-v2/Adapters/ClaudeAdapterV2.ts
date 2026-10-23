@@ -1224,7 +1224,7 @@ export function makeClaudeQueryOptions(input: {
         // commands through the terminal tools.
         (input.conversationMode === true || !input.disallowedTools?.includes("Bash")
           ? ""
-          : "\nUse mcp__cogenly__terminal_run for every shell command so the owner sees it live. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. Terminals and their children are killed when this thread settles."),
+          : "\nUse mcp__cogenly__terminal_run for every shell command so the owner sees it live. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children are killed when this thread settles."),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
