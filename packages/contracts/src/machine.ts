@@ -108,8 +108,8 @@ export const MachinePeerIdentity = Schema.Struct({
 export type MachinePeerIdentity = typeof MachinePeerIdentity.Type;
 
 export const MachineCreatePeerGrantInput = Schema.Struct({
-  /** Omitted only by the headless CLI; the first redeemer's key is then bound. */
-  spokeKeyThumbprint: Schema.optionalKey(TrimmedNonEmptyString),
+  /** The intended spoke must prepare its proof key before the hub issues a grant. */
+  spokeKeyThumbprint: TrimmedNonEmptyString,
   spokeName: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type MachineCreatePeerGrantInput = typeof MachineCreatePeerGrantInput.Type;

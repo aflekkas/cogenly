@@ -1,17 +1,29 @@
-import { assert, describe, it } from "@effect/vitest";
+import * as NetService from "@t3tools/shared/Net";
+import * as Layer from "effect/Layer";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { assert, it } from "@effect/vitest";
 import { EnvironmentId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import { Command } from "effect/cli";
+import * as Stdio from "effect/Stdio";
+import * as Stream from "effect/Stream";
 
-import { decodeJoinCode, encodeJoinCode } from "./machines.ts";
+import {
+  decodeJoinCode,
+  encodeJoinCode,
+  readMachineJoinCode,
+  machinesCommand,
+} from "./machines.ts";
 
-describe("machine join codes", () => {
+it.layer(Layer.merge(NodeServices.layer, NetService.layer))("machine join codes", (it) => {
   const code = {
     grant: "grant-secret",
     hubEnvironmentId: EnvironmentId.make("environment-hub"),
     hubName: "Cloud server · Contabo",
     hubPublicKey: "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA\n-----END PUBLIC KEY-----",
-    routes: ["http://100.64.0.2:3773/"],
+    routes: ["https://hub.example/"],
     expiresAt: DateTime.makeUnsafe("2026-10-23T12:00:00.000Z"),
   };
 
@@ -20,6 +32,53 @@ describe("machine join codes", () => {
       const encoded = yield* encodeJoinCode(code);
       assert.match(encoded, /^cogenly-join:[A-Za-z0-9_-]+$/);
       assert.deepStrictEqual(yield* decodeJoinCode(`  ${encoded}\n`), code);
+    }),
+  );
+
+  it.effect("reads a code split across stdin chunks, with surrounding whitespace", () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeJoinCode(code);
+      const bytes = new TextEncoder().encode(`  ${encoded}\n`);
+      const decoded = yield* readMachineJoinCode(true).pipe(
+        Effect.provide(
+          Stdio.layerTest({ stdin: Stream.make(bytes.slice(0, 20), bytes.slice(20)) }),
+        ),
+      );
+      assert.deepStrictEqual(decoded, code);
+    }),
+  );
+
+  it.effect(
+    "requires explicit stdin mode and rejects empty or oversized input without echoing it",
+    () =>
+      Effect.gen(function* () {
+        const implicit = yield* readMachineJoinCode(false).pipe(
+          Effect.provide(Stdio.layerTest({})),
+          Effect.flip,
+        );
+        assert.include(implicit.message, "--code-stdin");
+        for (const text of ["", "secret".repeat(3000)]) {
+          const error = yield* readMachineJoinCode(true).pipe(
+            Effect.provide(
+              Stdio.layerTest({ stdin: Stream.succeed(new TextEncoder().encode(text)) }),
+            ),
+            Effect.flip,
+          );
+          assert.notInclude(error.message, "secret");
+          assert.isUndefined(error.cause);
+        }
+      }),
+  );
+
+  it.effect("refuses a positional join secret and pairing without a prepared key", () =>
+    Effect.gen(function* () {
+      for (const argv of [["join", "https://hub.example", "secret-code"], ["pair"]]) {
+        const exit = yield* Command.runWith(machinesCommand, {
+          version: "test",
+          renderErrors: false,
+        })(argv).pipe(Effect.exit);
+        assert.isTrue(Exit.isFailure(exit));
+      }
     }),
   );
 

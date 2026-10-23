@@ -176,14 +176,15 @@ const make = Effect.gen(function* () {
     "Machines.createPeerGrant",
   )(function* (input) {
     yield* requireNotSpoke("create-grant", "hub-is-spoke");
+    if (!input.spokeKeyThumbprint?.trim()) {
+      return yield* new MachineError({ operation: "create-grant", reason: "invalid-input" });
+    }
     const storage = (cause: unknown) =>
       new MachineError({ operation: "create-grant", reason: "storage", cause });
     const grant = yield* auth
       .issuePeerGrant({
         label: input.spokeName ?? "Machine",
-        ...(input.spokeKeyThumbprint === undefined
-          ? {}
-          : { proofKeyThumbprint: input.spokeKeyThumbprint }),
+        proofKeyThumbprint: input.spokeKeyThumbprint,
       })
       .pipe(Effect.mapError(storage));
     const self = yield* identity.self;

@@ -14,9 +14,10 @@ or launch work remotely. Provider reports contain status, never login tokens.
 An admin-connected client calls `machines.prepareJoin` on the spoke, passes its
 key thumbprint to `machines.createPeerGrant` on the hub, and hands the resulting
 join code to `machines.joinHub` on the spoke. Only the spoke server redeems it.
-The hub grant expires after ten minutes and can be spent once. The CLI fallback
-can omit the thumbprint: that code is a secret usable by the first redeemer,
-whose proof key is then bound. Transfer it privately.
+The hub grant expires after ten minutes and can be spent once. The CLI follows the same prepare → grant → join exchange: grants always bind
+the intended spoke key before issuance, and old unbound grants are refused.
+Transfer the code privately. The CLI reads it through a hidden prompt or
+`--code-stdin`, never a positional argument or a suggested command line.
 
 The hub issues a one-year DPoP session with subject `peer`, holding
 `sync:replicate` and `peer:delegate`. Neither scope belongs to legacy, standard,

@@ -478,8 +478,11 @@ describe("machines", () => {
         const second = yield* startMachine("second", "computer");
         const third = yield* startMachine("third", "computer");
 
-        // An unbound grant (the CLI fallback) pairs whoever redeems it first, once.
-        const open = yield* hub.machines.createPeerGrant({});
+        // A key-bound grant pairs only its intended spoke, once.
+        const preparedFirst = yield* first.machines.prepareJoin;
+        const open = yield* hub.machines.createPeerGrant({
+          spokeKeyThumbprint: preparedFirst.keyThumbprint,
+        });
         const selfPair = yield* hub.machines
           .joinHub({ hubUrls: [hub.url], code: open })
           .pipe(Effect.flip);
@@ -529,7 +532,9 @@ describe("machines", () => {
         yield* awaitLinkState(second, (state) => state.status === "online");
 
         // A spoke cannot also be a hub, and a hub cannot join another.
-        const spokeGrant = yield* first.machines.createPeerGrant({}).pipe(Effect.flip);
+        const spokeGrant = yield* first.machines
+          .createPeerGrant({ spokeKeyThumbprint: preparedFirst.keyThumbprint })
+          .pipe(Effect.flip);
         assert.strictEqual(spokeGrant.reason, "hub-is-spoke");
         const hubJoin = yield* hub.machines.prepareJoin.pipe(Effect.flip);
         assert.strictEqual(hubJoin.reason, "spoke-is-hub");
@@ -798,7 +803,10 @@ describe("machines", () => {
 
         // A peer grant never becomes a client session, and a client session
         // never passes for a peer.
-        const second = yield* auth.issuePeerGrant({ label: "Other" });
+        const second = yield* auth.issuePeerGrant({
+          label: "Other",
+          proofKeyThumbprint: key.thumbprint,
+        });
         const exchanged = yield* auth
           .exchangeBootstrapCredentialForAccessToken(second.credential, undefined, {
             deviceType: "bot",
