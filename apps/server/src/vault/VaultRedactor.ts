@@ -97,6 +97,91 @@ export const redactShortValue = <A>(value: A, secrets: Iterable<string>): A => {
   return mapStrings(value, (text) => redactShortSecrets(text, list), true);
 };
 
+const isWordChar = (char: string | undefined): boolean =>
+  char !== undefined && /[A-Za-z0-9]/.test(char);
+
+const byFirstChar = (values: ReadonlyArray<string>): Map<string, Array<string>> => {
+  const map = new Map<string, Array<string>>();
+  for (const value of values) {
+    const list = map.get(value[0]!);
+    if (list) list.push(value);
+    else map.set(value[0]!, [value]);
+  }
+  return map;
+};
+
+export interface ScrubSets {
+  readonly secrets: Iterable<string>;
+  readonly shortSecrets: Iterable<string>;
+}
+
+/**
+ * Redacts output that arrives in chunks, such as a PTY's, where a secret can
+ * be split across callbacks. Each `push` redacts against the sets current at
+ * that moment: long secrets anywhere, short ones as whole tokens. Only a tail
+ * that could still grow into a secret is held back; `final` flushes it.
+ */
+export const streamRedactor = () => {
+  let pending = "";
+  // The last character already emitted, for the whole-token rule.
+  let previous: string | undefined;
+  return {
+    hasPending: () => pending.length > 0,
+    push: (chunk: string, sets: ScrubSets, final = false): string => {
+      const input = pending + chunk;
+      const long = orderedSecrets(sets.secrets);
+      const short = [...new Set([...sets.shortSecrets].filter((value) => value.length > 0))].sort(
+        (a, b) => b.length - a.length,
+      );
+      const longByFirst = byFirstChar(long);
+      const shortByFirst = byFirstChar(short);
+      const before = (index: number) => (index === 0 ? previous : input[index - 1]);
+      let hold = input.length;
+      if (!final) {
+        const longest = Math.max(0, ...long.map((s) => s.length), ...short.map((s) => s.length));
+        for (let start = Math.max(0, input.length - longest); start < input.length; start += 1) {
+          const rest = input.slice(start);
+          const first = input[start]!;
+          if (
+            (longByFirst.get(first) ?? []).some(
+              (s) => s.length > rest.length && s.startsWith(rest),
+            ) ||
+            (!isWordChar(before(start)) &&
+              (shortByFirst.get(first) ?? []).some(
+                (s) => s.length >= rest.length && s.startsWith(rest),
+              ))
+          ) {
+            hold = start;
+            break;
+          }
+        }
+      }
+      let output = "";
+      let index = 0;
+      while (index < hold) {
+        const first = input[index]!;
+        const match =
+          (longByFirst.get(first) ?? []).find((s) => input.startsWith(s, index)) ??
+          (isWordChar(before(index))
+            ? undefined
+            : (shortByFirst.get(first) ?? []).find(
+                (s) => input.startsWith(s, index) && !isWordChar(input[index + s.length]),
+              ));
+        if (match) {
+          output += VAULT_REDACTION;
+          index += match.length;
+        } else {
+          output += first;
+          index += 1;
+        }
+      }
+      if (index > 0) previous = input[index - 1];
+      pending = input.slice(index);
+      return output;
+    },
+  };
+};
+
 /** A PTY may split a token across data callbacks. Hold only a possible secret
  * prefix so raw values never enter terminal events, history or disk logs. */
 export const processOutputRedactor = (values: Iterable<string>) => {

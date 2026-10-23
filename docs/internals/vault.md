@@ -126,8 +126,12 @@ result is replaced by a withheld notice and the error is logged.
 Delivered process values and their base64, URL-encoded and JSON-escaped forms
 stay registered for the server lifetime, including old revisions after
 replacement/deletion. This deliberately outlives a PTY: descendants and retained
-output may outlive it. Account terminals also redact across PTY chunk boundaries
-before output enters events or persisted history. Tokens are resolved after
+output may outlive it. Every terminal redacts vault values (stored, retained and
+process ones) at ingestion, across PTY chunk boundaries, before output enters
+events, history or disk logs; it holds back only a tail that could still become
+a secret, and withholds output if the vault cannot be checked. The terminal
+layer shares the server's single Vault instance (`layerVaultProvided`), so
+values retained by one path are scrubbed on the other. Tokens are resolved after
 provider environment configuration and overlay only the selected terminal's
 environment; they never enter settings or launch arguments. Provider-native
 shell delivery is separate work because provider sessions can share threads.

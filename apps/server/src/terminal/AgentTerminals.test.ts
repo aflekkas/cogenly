@@ -324,3 +324,43 @@ it.effect("an evicted finished run replays its persisted log on attach without s
     }),
   ),
 );
+
+it.effect("vault secrets split across output chunks never reach events or history", () =>
+  provide(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-terminal-test-" });
+      const process = new FakePty();
+      const manager = yield* Manager.makeWithOptions({
+        logsDir: cwd,
+        ptyAdapter: { spawn: () => Effect.succeed(process) },
+        processKillGraceMs: 0,
+        processTable: Effect.succeed([]),
+        outputScrubSets: Effect.succeed({ secrets: ["octo-password-123"], shortSecrets: ["987"] }),
+      });
+      const events = yield* Queue.unbounded<string>();
+      yield* manager.subscribe((event) =>
+        event.type === "output" ? Queue.offer(events, event.data).pipe(Effect.asVoid) : Effect.void,
+      );
+      const started = yield* manager.runAgent({
+        threadId: "A",
+        command: "cat",
+        cwd,
+        background: true,
+      });
+      process.output("login octo-pass");
+      process.output("word-123 and cvc 98");
+      process.output("7 done\r\n");
+      process.output("tail octo");
+      process.finish(0);
+      let published = "";
+      while (!published.endsWith("tail octo")) published += yield* Queue.take(events);
+      expect(published).toBe(
+        "login [redacted vault secret] and cvc [redacted vault secret] done\r\ntail octo",
+      );
+      const history = yield* manager.readAgent({ threadId: "A", terminalId: started.terminalId });
+      expect(history.output).not.toContain("octo-password-123");
+      expect(history.output).not.toContain(" 987 ");
+    }),
+  ),
+);

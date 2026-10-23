@@ -350,7 +350,8 @@ const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
-const layerVaultProvided = Vault.layer.pipe(Layer.provide(ServerEnvironment.layerIdentity));
+/** One Vault per server: terminals share it, so delivered values stay scrubbed everywhere. */
+export const layerVaultProvided = Vault.layer.pipe(Layer.provide(ServerEnvironment.layerIdentity));
 const layerIntegrationsProvided = Integrations.layer.pipe(
   Layer.provide(IntegrationCredentials.layer.pipe(Layer.provide(layerVaultProvided))),
 );

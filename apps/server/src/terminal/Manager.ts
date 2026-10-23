@@ -11,6 +11,8 @@ import type { AccountError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import { AgentOutput } from "./AgentOutput.ts";
+import * as Vault from "../vault/Vault.ts";
+import { VAULT_WITHHELD, streamRedactor, type ScrubSets } from "../vault/VaultRedactor.ts";
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import {
   DEFAULT_TERMINAL_ID,
@@ -324,6 +326,8 @@ interface AgentTerminalOpenInput extends TerminalOpenInput {
 }
 
 interface TerminalSessionState {
+  /** Vault redaction for the running process's output; see outputScrubSets. */
+  outputRedactor?: ReturnType<typeof streamRedactor>;
   agent?: {
     readonly command: string;
     readonly redactOutput?: CredentialDelivery["redactOutput"];
@@ -370,6 +374,7 @@ type PendingProcessEvent =
 
 type DrainProcessEventAction =
   | { type: "idle" }
+  | { type: "skip" }
   | {
       type: "output";
       threadId: string;
@@ -1421,6 +1426,11 @@ function normalizedRuntimeEnv(
 
 interface TerminalManagerOptions {
   logsDir: string;
+  /**
+   * Vault secrets output is redacted against before it reaches history, disk
+   * or events; null means the vault cannot be checked, so output is withheld.
+   */
+  outputScrubSets?: Effect.Effect<ScrubSets | null>;
   historyLineLimit?: number;
   historyByteLimit?: number;
   ptyAdapter: PtyAdapter.PtyAdapter["Service"];
@@ -1501,6 +1511,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
   const nativeTelemetry = yield* NativeTelemetryClient.NativeTelemetryClient;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const path = yield* Path.Path;
+  const vault = yield* Effect.serviceOption(Vault.Vault);
   const resolveProviderInstanceEnvironment = Effect.fn(
     "terminal.resolveProviderInstanceEnvironment",
   )((rawProviderInstanceId: string, env: Record<string, string> | undefined) =>
@@ -1513,6 +1524,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
   );
   return yield* makeWithOptions({
     logsDir: terminalLogsDir,
+    ...(Option.isSome(vault) ? { outputScrubSets: vault.value.outputScrubSets } : {}),
     ptyAdapter,
     processTable: nativeTelemetry.processTable.pipe(
       Effect.mapError(
@@ -2117,6 +2129,15 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     expectedPid: number,
   ) {
     while (true) {
+      const scrub = options.outputScrubSets ? yield* options.outputScrubSets : undefined;
+      // Vault values never enter history, disk logs or events; a held tail
+      // that could still be a secret is flushed before the exit.
+      const redact = (data: string, final: boolean) =>
+        session.outputRedactor === undefined || scrub === undefined
+          ? data
+          : scrub === null
+            ? `${VAULT_WITHHELD}\r\n`
+            : session.outputRedactor.push(data, scrub, final);
       const action: DrainProcessEventAction = yield* Effect.sync(() => {
         if (session.pid !== expectedPid || !session.process || session.status !== "running") {
           session.pendingProcessEvents = [];
@@ -2133,16 +2154,21 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           return { type: "idle" } as const;
         }
 
-        session.pendingProcessEventIndex += 1;
-        if (session.pendingProcessEventIndex >= session.pendingProcessEvents.length) {
-          session.pendingProcessEvents = [];
-          session.pendingProcessEventIndex = 0;
+        const flushing = nextEvent.type === "exit" && session.outputRedactor?.hasPending() === true;
+        if (!flushing) {
+          session.pendingProcessEventIndex += 1;
+          if (session.pendingProcessEventIndex >= session.pendingProcessEvents.length) {
+            session.pendingProcessEvents = [];
+            session.pendingProcessEventIndex = 0;
+          }
         }
 
-        if (nextEvent.type === "output") {
+        if (nextEvent.type === "output" || flushing) {
+          const data = redact(nextEvent.type === "output" ? nextEvent.data : "", flushing);
+          if (data.length === 0) return { type: "skip" } as const;
           const sanitized = sanitizeTerminalHistoryChunk(
             session.pendingHistoryControlSequence,
-            nextEvent.data,
+            data,
           );
           session.pendingHistoryControlSequence = sanitized.pendingControlSequence;
           if (sanitized.visibleText.length > 0) {
@@ -2157,7 +2183,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             terminalId: session.terminalId,
             sequence: eventStamp.sequence,
             history: sanitized.visibleText.length > 0 ? session.history : null,
-            data: nextEvent.data,
+            data,
           } as const;
         }
 
@@ -2194,6 +2220,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       if (action.type === "idle") {
         return;
       }
+      if (action.type === "skip") continue;
 
       if (action.type === "output") {
         if (action.history !== null) {
@@ -2393,6 +2420,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               session.process = ptyProcess;
               session.pid = processPid;
               session.status = "running";
+              if (options.outputScrubSets) session.outputRedactor = streamRedactor();
               // onExit may replay an exit immediately; accept it before subscribing.
               session.unsubscribeData = spawnResult.process.onData((raw) => {
                 const data = session.agent?.redactOutput ? session.agent.redactOutput(raw) : raw;

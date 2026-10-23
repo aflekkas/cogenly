@@ -45,6 +45,7 @@ import {
   MIN_SCRUB_LENGTH,
   MIN_TOKEN_SCRUB_LENGTH,
   VAULT_WITHHELD,
+  type ScrubSets,
   redactShortSecrets,
   redactShortValue,
   redactText,
@@ -335,6 +336,11 @@ export class Vault extends Context.Service<
     }) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
     /** Retained through server lifetime: descendants and retained output may outlive a PTY. */
     readonly registerProcessSecrets: (values: ReadonlyArray<string>) => Effect.Effect<void>;
+    /**
+     * The sets streaming output (terminals) is redacted against right now,
+     * process values included; null when the vault cannot be checked.
+     */
+    readonly outputScrubSets: Effect.Effect<ScrubSets | null>;
     readonly scrubText: (text: string) => Effect.Effect<string>;
     readonly scrubValue: <A>(value: A) => Effect.Effect<A>;
   }
@@ -938,6 +944,18 @@ const make = Effect.gen(function* () {
         }
         return next;
       }),
+    outputScrubSets: Effect.gen(function* () {
+      const sets = yield* scrubSets;
+      const process = yield* Ref.get(processSecrets);
+      if (process.size === 0) return sets;
+      return { secrets: [...sets.secrets, ...process], shortSecrets: sets.shortSecrets };
+    }).pipe(
+      Effect.catch((error: VaultError) =>
+        Effect.logError("Vault secrets could not be loaded for output redaction.", error).pipe(
+          Effect.as(null),
+        ),
+      ),
+    ),
     scrubText: (text) =>
       scrubSets.pipe(
         Effect.map(({ secrets, shortSecrets }) =>

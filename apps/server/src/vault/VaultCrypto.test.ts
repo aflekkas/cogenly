@@ -9,7 +9,13 @@ import {
   wrapDataKey,
 } from "./VaultCrypto.ts";
 import { evaluateVaultPolicy, hostMatchesDomain } from "./VaultPolicy.ts";
-import { redactShortSecrets, redactShortValue, redactText, redactValue } from "./VaultRedactor.ts";
+import {
+  redactShortSecrets,
+  redactShortValue,
+  redactText,
+  redactValue,
+  streamRedactor,
+} from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
 describe("vault crypto", () => {
@@ -166,6 +172,20 @@ describe("redactor", () => {
       a: ["x [redacted vault secret] y"],
       n: 42,
     });
+  });
+
+  it("redacts a stream across chunk boundaries, holding only a possible secret", () => {
+    const redactor = streamRedactor();
+    const sets = { secrets: ["hunter2-long"], shortSecrets: ["987"] };
+    expect(redactor.push("pw hunter2", sets)).toBe("pw ");
+    expect(redactor.push("-long ok cvc 98", sets)).toBe("[redacted vault secret] ok cvc ");
+    // `9876` is a longer number, not the CVC, so it is released as it is.
+    expect(redactor.push("76 and 98", sets)).toBe("9876 and ");
+    expect(redactor.push("7", sets)).toBe("");
+    expect(redactor.push(" end", sets)).toBe("[redacted vault secret] end");
+    expect(redactor.push("hun", sets)).toBe("");
+    expect(redactor.hasPending()).toBe(true);
+    expect(redactor.push("", sets, true)).toBe("hun");
   });
 
   it("redacts property names too, keeping entries whose names collide", () => {
