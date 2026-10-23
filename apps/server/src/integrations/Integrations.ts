@@ -242,10 +242,24 @@ export class Integrations extends Context.Service<
   }
 >()("cogenly-server/integrations/Integrations") {}
 
-interface JsonRpcResponse {
-  readonly result?: unknown;
-  readonly error?: { readonly message?: unknown };
-}
+const RpcEnvelope = {
+  jsonrpc: Schema.Literal("2.0"),
+  id: Schema.NullOr(Schema.Union([Schema.String, Schema.Number])),
+};
+const JsonRpcResponse = Schema.Union([
+  Schema.Struct({ ...RpcEnvelope, result: Schema.Unknown, error: Schema.optional(Schema.Never) }),
+  Schema.Struct({
+    ...RpcEnvelope,
+    result: Schema.optional(Schema.Never),
+    error: Schema.Struct({
+      code: Schema.Number,
+      message: Schema.String,
+      data: Schema.optional(Schema.Unknown),
+    }),
+  }),
+]);
+type JsonRpcResponse = typeof JsonRpcResponse.Type;
+const decodeRpcBody = Schema.decodeUnknownOption(Schema.fromJsonString(JsonRpcResponse));
 
 const parseRpcBody = (text: string): JsonRpcResponse | undefined => {
   const trimmed = text.trim();
@@ -261,12 +275,8 @@ const parseRpcBody = (text: string): JsonRpcResponse | undefined => {
   }
   if (data.length > 0) candidates.push(data.join("\n"));
   for (const candidate of candidates.toReversed()) {
-    try {
-      const parsed: unknown = JSON.parse(candidate);
-      if (typeof parsed === "object" && parsed !== null) return parsed as JsonRpcResponse;
-    } catch {
-      // Try the next SSE event; a body with no JSON is handled by the caller.
-    }
+    const parsed = decodeRpcBody(candidate);
+    if (Option.isSome(parsed)) return parsed.value;
   }
   return undefined;
 };

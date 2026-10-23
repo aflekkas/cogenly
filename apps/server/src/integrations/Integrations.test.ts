@@ -349,6 +349,28 @@ describe("Integrations gateway", () => {
     ),
   );
 
+  it.effect.each([
+    { jsonrpc: "2.0", id: 1, error: null },
+    { jsonrpc: "2.0", id: 1, error: "broken" },
+    { jsonrpc: "2.0", id: 1 },
+    { jsonrpc: "1.0", id: 1, result: { tools: [] } },
+    { jsonrpc: "2.0", id: 1, result: { tools: [] }, error: { code: -1, message: "both" } },
+  ])("maps malformed JSON-RPC to upstream_error (%#)", (body) =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      yield* service.create(createInput("https://upstream.example/mcp"));
+      const result = yield* service
+        .listTools(IntegrationName.make("gmail"), null)
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") expect(result.failure.reason).toBe("upstream_error");
+    }).pipe(
+      Effect.provide(layerWith()),
+      Effect.provideService(FetchHttpClient.Fetch, async () => new Response(JSON.stringify(body))),
+    ),
+  );
+
   it.effect("rejects an upstream body over 4 MiB", () =>
     Effect.gen(function* () {
       yield* runMigrations();
