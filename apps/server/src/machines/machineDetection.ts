@@ -12,9 +12,7 @@ import type {
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect has no reverse DNS lookup.
 import * as NodeDns from "node:dns/promises";
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect has no network interface listing.
 import * as NodeOS from "node:os";
 
 import * as ProcessRunner from "../processRunner.ts";

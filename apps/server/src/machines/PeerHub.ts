@@ -6,9 +6,7 @@
  */
 import {
   type AuthClientMetadata,
-  type AuthPeerScope,
   type AuthSessionId,
-  AuthSyncReplicateScope,
   EnvironmentId,
   MachineError,
   type MachineInfo,
@@ -24,7 +22,7 @@ import {
   type PeerReplyInput,
   isAuthPeerScope,
 } from "@t3tools/contracts";
-import * as Cause from "effect/Cause";
+import type * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -51,7 +49,10 @@ import { signPeerHello } from "./peerCrypto.ts";
 
 export class PeerJoinRefusedError extends Schema.TaggedError<PeerJoinRefusedError>()(
   "PeerJoinRefusedError",
-  { reason: Schema.Literals(["hub-is-spoke", "grant-rejected"]), cause: Schema.optional(Schema.Defect()) },
+  {
+    reason: Schema.Literals(["hub-is-spoke", "grant-rejected"]),
+    cause: Schema.optional(Schema.Defect()),
+  },
 ) {
   override get message(): string {
     return this.reason === "hub-is-spoke"
@@ -60,7 +61,7 @@ export class PeerJoinRefusedError extends Schema.TaggedError<PeerJoinRefusedErro
   }
 }
 
-/** One open `/peer` socket, served by the RPC handlers in peerHttp.ts. */
+/** The handlers of one open `/peer` socket, served by peerHttp.ts. */
 export interface PeerHubConnection {
   readonly hello: (input: PeerHelloInput) => Effect.Effect<PeerHelloResult, PeerProtocolError>;
   readonly ping: (input: {
@@ -69,8 +70,12 @@ export interface PeerHubConnection {
   readonly machines: Effect.Effect<ReadonlyArray<MachineInfo>, PeerProtocolError>;
   readonly inbox: Stream.Stream<PeerPush, PeerProtocolError>;
   readonly reply: (input: PeerReplyInput) => Effect.Effect<{}, PeerProtocolError>;
-  readonly call: (input: PeerCallInput) => Effect.Effect<Schema.Json, PeerCallError | PeerProtocolError>;
+  readonly call: (
+    input: PeerCallInput,
+  ) => Effect.Effect<Schema.Json, PeerCallError | PeerProtocolError>;
   readonly leave: Effect.Effect<{}, PeerProtocolError>;
+  /** Completes when the hub drops this socket: unpaired, or replaced by a newer one. */
+  readonly closed: Effect.Effect<void>;
 }
 
 export class PeerHub extends Context.Service<
@@ -79,6 +84,7 @@ export class PeerHub extends Context.Service<
     /** Spend a peer grant presented by a spoke whose proof key was verified. */
     readonly redeem: (input: {
       readonly grant: string;
+      readonly nonce: string;
       readonly proofKeyThumbprint: string;
       readonly spoke: MachineSelfReport;
       readonly client: AuthClientMetadata;
@@ -88,7 +94,7 @@ export class PeerHub extends Context.Service<
       session: EnvironmentAuth.PeerSession,
     ) => Effect.Effect<
       { readonly ticket: string },
-      PeerProtocolError | EnvironmentAuth.ServerAuthInternalError | MachineError
+      PeerProtocolError | EnvironmentAuth.ServerAuthInternalError
     >;
     /** Serve one `/peer` socket until the surrounding scope closes. */
     readonly connect: (
@@ -106,7 +112,7 @@ export class PeerHub extends Context.Service<
     /** Emits whenever a spoke pairs, unpairs, connects, disconnects or reports. */
     readonly changes: Stream.Stream<void>;
   }
->()("t3/machines/PeerHub") {}
+>()("cogenly-server/machines/PeerHub") {}
 
 interface SpokeRow {
   readonly environmentId: EnvironmentId;
@@ -119,9 +125,9 @@ interface SpokeRow {
 interface LiveConnection {
   readonly id: number;
   readonly environmentId: EnvironmentId;
-  readonly sessionId: AuthSessionId;
   readonly outbox: Queue.Queue<PeerPush, Cause.Done>;
   readonly pending: Map<string, Deferred.Deferred<Schema.Json, PeerCallError>>;
+  readonly closed: Deferred.Deferred<void>;
 }
 
 const decodeReport = Schema.decodeUnknownEffect(Schema.fromJsonString(MachineSelfReport));
@@ -229,6 +235,25 @@ const make = Effect.gen(function* () {
     }
   });
 
+  // Stops serving a socket: its pending calls fail, its inbox ends and the
+  // route closes it. Only the newest socket of a spoke counts as online.
+  const drop = (connection: LiveConnection) =>
+    Effect.gen(function* () {
+      for (const pending of connection.pending.values()) {
+        yield* Deferred.fail(pending, new PeerCallError({ channel: "", reason: "disconnected" }));
+      }
+      yield* Queue.end(connection.outbox);
+      yield* Deferred.succeed(connection.closed, undefined);
+      if (live.get(connection.environmentId)?.id === connection.id) {
+        live.delete(connection.environmentId);
+        return true;
+      }
+      return false;
+    });
+
+  // The grant reached the spoke through an admin client signed in to both
+  // servers. The nonce signature lets the spoke check it reached the hub that
+  // client named, by the key it pins from then on.
   const redeem: PeerHub["Service"]["redeem"] = Effect.fn("PeerHub.redeem")(function* (input) {
     const joinedHub = yield* withSecrets(readHubLink).pipe(Effect.mapError(storage("join")));
     if (Option.isSome(joinedHub)) {
@@ -253,26 +278,37 @@ const make = Effect.gen(function* () {
       Effect.map((rows) => rows.find((row) => row.environmentId === input.spoke.environmentId)),
       Effect.mapError(storage("join")),
     );
-    // Re-pairing the same machine replaces its old credential.
+    // Re-pairing the same machine replaces its old credential and socket.
     if (existing !== undefined) {
+      const connection = live.get(existing.environmentId);
+      if (connection !== undefined) yield* drop(connection);
       yield* auth.revokeSession(existing.sessionId).pipe(Effect.mapError(storage("join")));
-      yield* sql`DELETE FROM machine_peers WHERE environment_id = ${existing.environmentId}`.pipe(
-        Effect.mapError(storage("join")),
-      );
     }
     const now = DateTime.formatIso(yield* DateTime.now);
     const report = yield* encodeReport(input.spoke).pipe(Effect.mapError(storage("join")));
     yield* sql`INSERT INTO machine_peers (environment_id, session_id, report_json, paired_at, last_seen_at)
-      VALUES (${input.spoke.environmentId}, ${issued.session.sessionId}, ${report}, ${now}, ${now})`.pipe(
-      Effect.mapError(storage("join")),
-    );
+      VALUES (${input.spoke.environmentId}, ${issued.session.sessionId}, ${report}, ${now}, ${now})
+      ON CONFLICT (environment_id) DO UPDATE SET
+        session_id = excluded.session_id,
+        report_json = excluded.report_json,
+        paired_at = excluded.paired_at,
+        last_seen_at = excluded.last_seen_at`.pipe(Effect.mapError(storage("join")));
     yield* publishChange;
     const self = yield* identity.self;
+    const signature = yield* withSecrets(
+      signPeerHello({
+        hubEnvironmentId: self.environmentId,
+        spokeEnvironmentId: input.spoke.environmentId,
+        nonce: input.nonce,
+      }),
+    ).pipe(Effect.mapError(storage("join")));
     return {
       accessToken: issued.token,
       expiresAt: issued.expiresAt,
       hubEnvironmentId: self.environmentId,
       scopes: issued.session.scopes.filter(isAuthPeerScope),
+      signature,
+      hub: self,
     } satisfies PeerJoinResult;
   });
 
@@ -291,7 +327,7 @@ const make = Effect.gen(function* () {
       if (connection !== undefined) {
         // Tell the spoke before its socket closes, so it forgets the credential.
         yield* Queue.offer(connection.outbox, { _tag: "Unpaired" });
-        yield* Queue.end(connection.outbox);
+        yield* drop(connection);
       }
       yield* auth.revokeSession(row.sessionId).pipe(Effect.mapError(storage("unpair")));
       yield* sql`DELETE FROM machine_peers WHERE environment_id = ${row.environmentId}`.pipe(
@@ -329,6 +365,11 @@ const make = Effect.gen(function* () {
         payload: encoded,
       });
       const value = yield* Deferred.await(reply).pipe(
+        Effect.mapError((error) =>
+          error.channel === ""
+            ? new PeerCallError({ channel: channel.name, reason: error.reason })
+            : error,
+        ),
         Effect.ensuring(Effect.sync(() => connection.pending.delete(id))),
       );
       return yield* decodePeerResult(channel, value);
@@ -337,24 +378,25 @@ const make = Effect.gen(function* () {
   const connect: PeerHub["Service"]["connect"] = (session) =>
     Effect.gen(function* () {
       const scopes = session.scopes.filter(isAuthPeerScope);
+      const closed = yield* Deferred.make<void>();
       let current: LiveConnection | undefined;
+      // Every method but hello needs a hello on this socket, and only while
+      // the socket is still the spoke's current one.
       const requireHello = Effect.suspend(() =>
         current === undefined
           ? Effect.fail(new PeerProtocolError({ reason: "hello-required" }))
-          : Effect.succeed(current),
+          : live.get(current.environmentId)?.id === current.id
+            ? Effect.succeed(current)
+            : Effect.fail(new PeerProtocolError({ reason: "not-paired" })),
       );
 
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
+          yield* Deferred.succeed(closed, undefined);
           if (current === undefined) return;
-          const closing = current;
-          for (const pending of closing.pending.values()) {
-            yield* Deferred.fail(pending, new PeerCallError({ channel: "", reason: "disconnected" }));
-          }
-          yield* Queue.end(closing.outbox);
-          if (live.get(closing.environmentId)?.id === closing.id) {
-            live.delete(closing.environmentId);
-            yield* touch(closing.environmentId);
+          const wasLive = yield* drop(current);
+          if (wasLive) {
+            yield* touch(current.environmentId);
             yield* publishChange;
           }
         }),
@@ -364,6 +406,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const row = yield* rowForSession(session.sessionId);
           if (row === undefined) return yield* new PeerProtocolError({ reason: "not-paired" });
+          // The credential is pinned to the machine that redeemed the grant.
           if (row.environmentId !== input.spoke.environmentId) {
             return yield* new PeerProtocolError({ reason: "machine-mismatch" });
           }
@@ -379,15 +422,15 @@ const make = Effect.gen(function* () {
             const connection: LiveConnection = {
               id: nextConnectionId++,
               environmentId: row.environmentId,
-              sessionId: session.sessionId,
               outbox: yield* Queue.unbounded<PeerPush, Cause.Done>(),
               pending: new Map(),
+              closed,
             };
             // A spoke that reconnects before its old socket noticed the drop
-            // replaces it; the old inbox ends so that socket winds down.
+            // replaces it; the old socket winds down.
             const replaced = live.get(row.environmentId);
-            if (replaced !== undefined) yield* Queue.end(replaced.outbox);
             live.set(row.environmentId, connection);
+            if (replaced !== undefined) yield* drop(replaced);
             current = connection;
           }
           yield* touch(row.environmentId, input.spoke);
@@ -437,13 +480,24 @@ const make = Effect.gen(function* () {
         );
 
       // The spoke unpairs itself: same cleanup as unpairing it from here.
-      const leave: PeerHubConnection["leave"] = Effect.gen(function* () {
-        const row = yield* rowForSession(session.sessionId);
-        if (row !== undefined) yield* unpairRow(row).pipe(Effect.ignore({ log: true }));
-        return {};
-      });
+      const leave: PeerHubConnection["leave"] = requireHello.pipe(
+        Effect.andThen(rowForSession(session.sessionId)),
+        Effect.flatMap((row) =>
+          row === undefined ? Effect.void : unpairRow(row).pipe(Effect.ignore({ log: true })),
+        ),
+        Effect.as({}),
+      );
 
-      return { hello, ping, machines, inbox, reply, call, leave } satisfies PeerHubConnection;
+      return {
+        hello,
+        ping,
+        machines,
+        inbox,
+        reply,
+        call,
+        leave,
+        closed: Deferred.await(closed),
+      } satisfies PeerHubConnection;
     });
 
   return PeerHub.of({
@@ -456,8 +510,5 @@ const make = Effect.gen(function* () {
     changes: Stream.fromPubSub(changed),
   });
 });
-
-/** The link methods every peer must hold sync for; `peer.call` checks per channel. */
-export const PEER_LINK_SCOPE: AuthPeerScope = AuthSyncReplicateScope;
 
 export const layer = Layer.effect(PeerHub, make);

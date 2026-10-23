@@ -33,7 +33,7 @@ export class MachineIdentity extends Context.Service<
     /** Emits when the name, role or icon setting changes. */
     readonly changes: Stream.Stream<void>;
   }
->()("t3/machines/MachineIdentity") {}
+>()("cogenly-server/machines/MachineIdentity") {}
 
 const make = Effect.gen(function* () {
   const environment = yield* ServerEnvironment.ServerEnvironment;

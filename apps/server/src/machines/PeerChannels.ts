@@ -3,7 +3,7 @@
  * (sync, delegation) defines a `PeerChannel` in contracts and registers its
  * handler here on the receiving side, for the life of its own scope. Calls in
  * either direction end up in `dispatch`, which checks the calling link's
- * scopes before decoding anything.
+ * scopes before decoding anything. Senders use `Machines.call`.
  */
 import {
   type AuthPeerScope,
@@ -23,18 +23,18 @@ export interface PeerCaller {
   readonly scopes: ReadonlyArray<AuthPeerScope>;
 }
 
-type ChannelCodec = Schema.Codec<unknown, unknown, never, never>;
 export type PeerChannelHandler<C extends PeerChannel> = (
   payload: C["payload"]["Type"],
   caller: PeerCaller,
 ) => Effect.Effect<C["success"]["Type"], C["error"]["Type"]>;
 
 interface Registered {
-  readonly channel: PeerChannel;
-  readonly handle: (payload: unknown, caller: PeerCaller) => Effect.Effect<unknown, unknown>;
+  readonly scope: AuthPeerScope;
+  readonly handle: (payload: Schema.Json, caller: PeerCaller) => Effect.Effect<Schema.Json, PeerCallError>;
 }
 
-const json = (schema: Schema.Top) => Schema.toCodecJson(schema as ChannelCodec);
+type JsonCodec = Schema.Codec<unknown, unknown, never, never>;
+const json = (schema: Schema.Top) => Schema.toCodecJson(schema as JsonCodec);
 
 /** Encode a channel payload for the wire. */
 export const encodePeerPayload = <C extends PeerChannel>(
@@ -46,7 +46,7 @@ export const encodePeerPayload = <C extends PeerChannel>(
     Effect.mapError(() => new PeerCallError({ channel: channel.name, reason: "invalid-payload" })),
   );
 
-/** Decode a channel reply; a channel error comes back as `PeerCallError.error`. */
+/** Decode a channel reply. */
 export const decodePeerResult = <C extends PeerChannel>(
   channel: C,
   value: Schema.Json,
@@ -69,7 +69,7 @@ export const decodePeerChannelError = <C extends PeerChannel>(
 export class PeerChannels extends Context.Service<
   PeerChannels,
   {
-    /** Serve `channel` until the surrounding scope closes. */
+    /** Serve `channel` until the surrounding scope closes. One handler per name. */
     readonly register: <C extends PeerChannel>(
       channel: C,
       handler: PeerChannelHandler<C>,
@@ -80,58 +80,62 @@ export class PeerChannels extends Context.Service<
       readonly caller: PeerCaller;
     }) => Effect.Effect<Schema.Json, PeerCallError>;
   }
->()("t3/machines/PeerChannels") {}
+>()("cogenly-server/machines/PeerChannels") {}
 
 const make = Effect.sync(() => {
   const handlers = new Map<string, Registered>();
 
-  const register: PeerChannels["Service"]["register"] = (channel, handler) =>
-    Effect.acquireRelease(
-      Effect.sync(() => {
-        if (handlers.has(channel.name)) {
-          throw new Error(`Peer channel ${channel.name} is already registered.`);
-        }
-        handlers.set(channel.name, {
-          channel,
-          handle: handler as Registered["handle"],
-        });
-      }),
-      () => Effect.sync(() => handlers.delete(channel.name)),
-    );
-
-  const dispatch: PeerChannels["Service"]["dispatch"] = ({ channel: name, payload, caller }) =>
-    Effect.gen(function* () {
-      const registered = handlers.get(name);
-      if (registered === undefined) {
-        return yield* new PeerCallError({ channel: name, reason: "unknown-channel" });
-      }
-      const { channel } = registered;
-      if (!caller.scopes.includes(channel.scope)) {
-        return yield* new PeerCallError({ channel: name, reason: "forbidden" });
-      }
-      const decoded = yield* Schema.decodeUnknownEffect(json(channel.payload))(payload).pipe(
-        Effect.mapError(() => new PeerCallError({ channel: name, reason: "invalid-payload" })),
-      );
-      const result = yield* registered.handle(decoded, caller).pipe(
-        Effect.catch((error) =>
-          Schema.encodeUnknownEffect(json(channel.error))(error).pipe(
-            Effect.orElseSucceed(() => undefined),
-            Effect.flatMap((encoded) =>
-              Effect.fail(
-                new PeerCallError({
-                  channel: name,
-                  reason: "handler-failed",
-                  ...(encoded === undefined ? {} : { error: encoded as Schema.Json }),
-                }),
+  const register: PeerChannels["Service"]["register"] = (channel, handler) => {
+    const fail = (reason: PeerCallError["reason"], error?: Schema.Json) =>
+      new PeerCallError({ channel: channel.name, reason, ...(error === undefined ? {} : { error }) });
+    const handle: Registered["handle"] = (payload, caller) =>
+      Schema.decodeUnknownEffect(json(channel.payload))(payload).pipe(
+        Effect.mapError(() => fail("invalid-payload")),
+        Effect.flatMap((decoded) =>
+          handler(decoded, caller).pipe(
+            Effect.catch((error) =>
+              Schema.encodeUnknownEffect(json(channel.error))(error).pipe(
+                Effect.option,
+                Effect.flatMap((encoded) =>
+                  Effect.fail(
+                    fail(
+                      "handler-failed",
+                      encoded._tag === "Some" ? (encoded.value as Schema.Json) : undefined,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
         ),
+        Effect.flatMap((result) =>
+          Schema.encodeUnknownEffect(json(channel.success))(result).pipe(
+            Effect.map((encoded) => encoded as Schema.Json),
+            Effect.mapError(() => fail("handler-failed")),
+          ),
+        ),
       );
-      return (yield* Schema.encodeUnknownEffect(json(channel.success))(result).pipe(
-        Effect.mapError(() => new PeerCallError({ channel: name, reason: "handler-failed" })),
-      )) as Schema.Json;
-    });
+    return Effect.acquireRelease(
+      Effect.suspend(() =>
+        handlers.has(channel.name)
+          ? Effect.die(new Error(`Peer channel ${channel.name} is already registered.`))
+          : Effect.sync(() => void handlers.set(channel.name, { scope: channel.scope, handle })),
+      ),
+      () => Effect.sync(() => void handlers.delete(channel.name)),
+    );
+  };
+
+  const dispatch: PeerChannels["Service"]["dispatch"] = ({ channel, payload, caller }) =>
+    Effect.suspend(() => {
+      const registered = handlers.get(channel);
+      if (registered === undefined) {
+        return Effect.fail(new PeerCallError({ channel, reason: "unknown-channel" }));
+      }
+      if (!caller.scopes.includes(registered.scope)) {
+        return Effect.fail(new PeerCallError({ channel, reason: "forbidden" }));
+      }
+      return registered.handle(payload, caller);
+    }).pipe(Effect.withSpan("PeerChannels.dispatch", { attributes: { channel } }));
 
   return PeerChannels.of({ register, dispatch });
 });

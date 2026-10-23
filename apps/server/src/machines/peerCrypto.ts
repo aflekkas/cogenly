@@ -96,6 +96,23 @@ export const removePeerDpopKey = ServerSecretStore.ServerSecretStore.pipe(
   Effect.flatMap((secrets) => secrets.remove(PEER_DPOP_KEY_SECRET)),
 );
 
+const encodeProofHeader = Schema.encodeSync(
+  Schema.fromJsonString(
+    Schema.Struct({ typ: Schema.String, alg: Schema.String, jwk: DpopPublicJwk }),
+  ),
+);
+const encodeProofPayload = Schema.encodeSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      htm: Schema.String,
+      htu: Schema.String,
+      jti: Schema.String,
+      iat: Schema.Number,
+      ath: Schema.optionalKey(Schema.String),
+    }),
+  ),
+);
+
 /** An RFC 9449 proof for one request, bound to `accessToken` when given. */
 export const createPeerDpopProof = Effect.fn("createPeerDpopProof")(function* (input: {
   readonly key: PeerDpopKey;
@@ -107,10 +124,10 @@ export const createPeerDpopProof = Effect.fn("createPeerDpopProof")(function* (i
   const jti = yield* crypto.randomUUIDv4();
   const now = yield* DateTime.now;
   const header = Buffer.from(
-    JSON.stringify({ typ: "dpop+jwt", alg: "ES256", jwk: input.key.publicJwk }),
+    encodeProofHeader({ typ: "dpop+jwt", alg: "ES256", jwk: input.key.publicJwk }),
   ).toString("base64url");
   const payload = Buffer.from(
-    JSON.stringify({
+    encodeProofPayload({
       htm: input.method.toUpperCase(),
       htu: normalizeDpopHtu(input.url) ?? input.url,
       jti,

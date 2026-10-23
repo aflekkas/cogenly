@@ -194,6 +194,8 @@ export const PEER_SOCKET_PATH = "/peer";
 
 export const PeerJoinRequest = Schema.Struct({
   grant: TrimmedNonEmptyString,
+  /** Random, single-use; the hub signs it like a `peer.hello` nonce. */
+  nonce: TrimmedNonEmptyString,
   spoke: MachineSelfReport,
 });
 export type PeerJoinRequest = typeof PeerJoinRequest.Type;
@@ -203,6 +205,9 @@ export const PeerJoinResult = Schema.Struct({
   expiresAt: Schema.DateTimeUtc,
   hubEnvironmentId: EnvironmentId,
   scopes: Schema.Array(AuthPeerScope),
+  /** Base64url Ed25519 signature over `peerHelloSigningInput` for the join nonce. */
+  signature: TrimmedNonEmptyString,
+  hub: MachineSelfReport,
 });
 export type PeerJoinResult = typeof PeerJoinResult.Type;
 
@@ -337,7 +342,7 @@ export const PEER_METHODS = {
 
 /** Authorizes every `/peer` call against the connection's peer scopes. */
 export class PeerScopeAuthorization extends RpcMiddleware.Service<PeerScopeAuthorization>()(
-  "t3/contracts/PeerScopeAuthorization",
+  "cogenly/contracts/PeerScopeAuthorization",
   { error: EnvironmentAuthorizationError },
 ) {}
 
