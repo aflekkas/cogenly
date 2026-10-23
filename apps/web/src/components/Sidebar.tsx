@@ -16,11 +16,7 @@ import { WorkRowStatusMarker } from "./work/WorkRowStatusMarker";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as Schema from "effect/Schema";
-import {
-  canSnooze,
-  effectiveSnoozed,
-  threadWokeAt,
-} from "@t3tools/client-runtime/state/thread-settled";
+import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
 import { createInboxReturnTracker } from "@t3tools/client-runtime/state/thread-inbox";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import {
@@ -190,10 +186,10 @@ import {
   isTrailingDoubleClick,
   resolveAdjacentThreadId,
   resolveSidebarSweepKeys,
-  resolveSidebarThreadSection,
   resolveSidebarRowAccessibility,
   resolveSidebarThreadStatus,
   resolveThreadLastVisitedAt,
+  resolveThreadListSection,
   searchSidebarThreads,
   shouldNavigateAfterThreadPark,
   shouldRecedeSidebarThread,
@@ -2866,16 +2862,10 @@ export default function Sidebar() {
           active.push(thread);
           continue;
         }
-        const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
-        // Threads on servers without the settlement capability (old server,
-        // or descriptor not loaded yet) never classify as settled: the user
-        // could not un-settle them, so auto-settling them would strand rows in
-        // a tail with no working affordances.
-        const supportsSettlement = capabilities?.threadSettlement === true;
-        const supportsSnooze = capabilities?.threadSnooze === true;
-        const section = resolveSidebarThreadSection({
-          snoozed: supportsSnooze && effectiveSnoozed(thread, { now: preciseNow }),
-          settled: supportsSettlement && thread.settledOverride === "settled",
+        const section = resolveThreadListSection(thread, {
+          chatsMode: false,
+          capabilities: serverConfigs.get(thread.environmentId)?.environment.capabilities,
+          now: preciseNow,
         });
         (section === "snoozed" ? snoozed : section === "settled" ? settled : inbox(thread)).push(
           thread,

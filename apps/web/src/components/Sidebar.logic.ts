@@ -142,6 +142,30 @@ export function resolveSidebarThreadSection(input: {
   return "active";
 }
 
+/**
+ * The section the list files a visible thread under. Chats are one plain list
+ * with no lifecycle shelves. Elsewhere a thread parks as snoozed or settled only
+ * where its server supports it (an old server, or one whose descriptor has not
+ * loaded, never parks a thread: the user could not bring it back). The list and
+ * the rail's attention dots both file threads with this, so they agree.
+ */
+export function resolveThreadListSection(
+  thread: ThreadSnoozeShell & Pick<SidebarThreadSummary, "settledOverride">,
+  input: {
+    readonly chatsMode: boolean;
+    readonly capabilities:
+      | { readonly threadSettlement?: boolean; readonly threadSnooze?: boolean }
+      | undefined;
+    readonly now: string;
+  },
+): SidebarSection {
+  if (input.chatsMode) return "active";
+  return resolveSidebarThreadSection({
+    snoozed: input.capabilities?.threadSnooze === true && effectiveSnoozed(thread, input),
+    settled: input.capabilities?.threadSettlement === true && thread.settledOverride === "settled",
+  });
+}
+
 export type SidebarListMarker = "working-header" | "snoozed-header" | "settled-header";
 
 export type SidebarListItem =
