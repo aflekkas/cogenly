@@ -35,7 +35,7 @@ function makeBareRemote(): string {
   git(seed, ["add", "."]);
   git(seed, ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"]);
   const bare = NodePath.join(root, "remote.git");
-  git(root, ["init", "--bare", bare]);
+  git(root, ["init", "--bare", "--initial-branch=main", bare]);
   git(seed, ["push", bare, "main"]);
   return bare;
 }
