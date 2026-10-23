@@ -310,7 +310,7 @@ export const PreviewEvaluateResult = Schema.Struct({
 const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Evaluate JavaScript in the tab selected by tabId, or this agent session's current tab when omitted. Acts like clicking: it works on your own tabs and on the user's tabs, and takes control from the user if they are driving. To read a tab without taking control, use preview_snapshot. Returns {value} with a serializable result up to 64 KB; the expression may mutate page state.",
+      "Evaluate JavaScript in the tab selected by tabId, or this agent session's current tab when omitted. Acts like clicking: it works on your own tabs and on the user's tabs, and takes control from the user if they are driving. To read a tab without taking control, use preview_snapshot. Returns {value} with a serializable result up to 64 KB; the expression may mutate page state. Evaluation is disabled for the lifetime of a tab after vault_fill; use snapshots and focused actions there.",
     parameters: PreviewAutomationEvaluateInput,
     success: PreviewEvaluateResult,
     failure: PreviewToolFailure,

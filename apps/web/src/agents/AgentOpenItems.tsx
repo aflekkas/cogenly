@@ -53,6 +53,7 @@ const APPROVAL_EYEBROW: Record<AgentApproval["actionKind"], string> = {
   change_permissions: "Wants different permissions",
   vault_use: "Wants to use a vault item",
   integration_add: "Wants to connect an integration",
+  integration_update: "Wants to change an integration",
 };
 
 /**

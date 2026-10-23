@@ -1,9 +1,11 @@
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, PreviewTabId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
@@ -21,6 +23,7 @@ import * as Handlers from "./handlers.ts";
 import { VaultToolkit } from "./tools.ts";
 
 const threadId = ThreadId.make("thread:vault-handler");
+const tabId = PreviewTabId.make("tab:vault-handler");
 
 const memoryStore = () => {
   const values = new Map<string, Uint8Array>();
@@ -45,6 +48,8 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const typed: Array<unknown> = [];
+      let evaluated = 0;
+      let failTyping = false;
       let pageUrl = "https://github.com/login";
       const dependencies = Layer.mergeAll(
         Layer.succeed(Invocation.McpInvocationContext, {
@@ -61,22 +66,7 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
         }),
         liveThreadsLayer,
         Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
-        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({
-          invoke: (request) =>
-            request.operation === "status"
-              ? Effect.succeed({
-                  available: true,
-                  visible: true,
-                  tabId: null,
-                  url: pageUrl,
-                  title: "Login",
-                  loading: false,
-                } as never)
-              : Effect.sync(() => {
-                  typed.push(request.input);
-                  return {} as never;
-                }),
-        }),
+        PreviewAutomationBroker.layer.pipe(Layer.provide(NodeCrypto.layer)),
         Vault.layer.pipe(
           Layer.provideMerge(Sqlite.layerMemory),
           Layer.provideMerge(NodeServices.layer),
@@ -90,6 +80,56 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
         ),
       );
       const context = yield* Layer.build(dependencies);
+      const broker = Context.get(context, PreviewAutomationBroker.PreviewAutomationBroker);
+      const scope = Context.get(context, Invocation.McpInvocationContext);
+      if (scope.thread === undefined) return yield* Effect.die("Missing test thread");
+      const threadScope = { ...scope, thread: scope.thread };
+      const attachHost = Effect.fnUntraced(function* () {
+        const connected = yield* Deferred.make<void>();
+        const events = yield* broker.connect({
+          clientId: "test-browser",
+          environmentId: scope.environmentId,
+        });
+        const fiber = yield* events.pipe(
+          Stream.runForEach((event) => {
+            if (event.type === "connected") return Deferred.succeed(connected, undefined);
+            const request = event.request;
+            if (request.operation === "type") typed.push(request.input);
+            if (request.operation === "evaluate") evaluated += 1;
+            return broker.respond({
+              clientId: "test-browser",
+              connectionId: event.connectionId,
+              requestId: request.requestId,
+              ...(request.operation === "type" && failTyping
+                ? {
+                    ok: false,
+                    error: {
+                      _tag: "PreviewAutomationExecutionError",
+                      message: "Typing failed after input",
+                    },
+                  }
+                : {
+                    ok: true,
+                    result:
+                      request.operation === "evaluate"
+                        ? "321-drowssap-otco"
+                        : {
+                            available: true,
+                            visible: true,
+                            tabId: request.tabId ?? tabId,
+                            url: pageUrl,
+                            title: "Login",
+                            loading: false,
+                          },
+                  }),
+            });
+          }),
+          Effect.forkChild,
+        );
+        yield* Deferred.await(connected);
+        return fiber;
+      });
+      let host = yield* attachHost();
       const toolkit = yield* VaultToolkit.pipe(
         Effect.provide(Access.HandlersLayer.layer(Handlers.layer)),
         Effect.provideContext(context),
@@ -112,6 +152,15 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
       const listed = yield* call("vault_list", {});
       expect(JSON.stringify(listed)).not.toContain("octo-password-123");
 
+      // Ordinary evaluation works until the vault sends a value to this tab.
+      yield* broker.invoke({
+        scope: threadScope,
+        operation: "evaluate",
+        input: { expression: "1 + 1" },
+        tabId,
+      });
+      expect(evaluated).toBe(1);
+
       const filled = yield* call("vault_fill", {
         name: "GitHub",
         field: "password",
@@ -123,6 +172,74 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
         { text: "octo-password-123", locator: "input[name=password]", clear: true },
       ]);
 
+      for (const expression of [
+        "document.querySelector('input').value.split('').map(c => c.charCodeAt(0))",
+        "document.querySelector('input').value.split('').reverse().join('')",
+        "btoa(document.querySelector('input').value)",
+      ]) {
+        for (const target of [{ tabId }, {}]) {
+          const blocked = yield* broker
+            .invoke({ scope: threadScope, operation: "evaluate", input: { expression }, ...target })
+            .pipe(Effect.result);
+          expect(blocked._tag).toBe("Failure");
+          if (blocked._tag === "Failure")
+            expect(blocked.failure.message).toContain("disabled on this tab after a vault fill");
+        }
+      }
+      // Navigation, a new provider session and host reconnection cannot clear the seal.
+      yield* broker.invoke({
+        scope: threadScope,
+        operation: "navigate",
+        input: { url: "https://github.com/other" },
+        tabId,
+      });
+      yield* Fiber.interrupt(host);
+      host = yield* attachHost();
+      const nextScope = {
+        ...threadScope,
+        thread: { ...threadScope.thread, providerSessionId: "next-session" },
+      };
+      for (const target of [{ tabId }, {}]) {
+        expect(
+          (yield* broker
+            .invoke({
+              scope: nextScope,
+              operation: "evaluate",
+              input: { expression: "document.querySelector('input').value" },
+              ...target,
+            })
+            .pipe(Effect.result))._tag,
+        ).toBe("Failure");
+      }
+      expect(evaluated).toBe(1);
+      expect(
+        yield* broker.invoke({ scope: nextScope, operation: "snapshot", input: {}, tabId }),
+      ).toMatchObject({ tabId });
+      const freshTab = PreviewTabId.make("tab:fresh");
+      yield* broker.invoke({
+        scope: nextScope,
+        operation: "evaluate",
+        input: { expression: "1 + 1" },
+        tabId: freshTab,
+      });
+      expect(evaluated).toBe(2);
+
+      // A failed fill may already have typed, so it seals the destination too.
+      failTyping = true;
+      yield* call("vault_fill", { name: "GitHub", field: "password", tabId: freshTab });
+      expect(
+        (yield* broker
+          .invoke({
+            scope: threadScope,
+            operation: "evaluate",
+            input: { expression: "btoa(document.querySelector('input').value)" },
+            tabId: freshTab,
+          })
+          .pipe(Effect.result))._tag,
+      ).toBe("Failure");
+      expect(evaluated).toBe(2);
+      failTyping = false;
+
       pageUrl = "https://evil.test/login";
       const denied = yield* call("vault_fill", {
         name: "GitHub",
@@ -130,13 +247,14 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
         locator: "input[name=password]",
       });
       expect(denied).toMatchObject({ status: "denied" });
-      expect(typed).toHaveLength(1);
+      expect(typed).toHaveLength(2);
 
       // The scrub hook in McpToolAccess redacts stored values from any result.
       const vault = Context.get(context, Vault.Vault);
       expect(
         yield* vault.scrubText("echo octo-password-123").pipe(Effect.provideContext(context)),
       ).toBe("echo [redacted vault secret]");
+      yield* Fiber.interrupt(host);
     }),
   ),
 );

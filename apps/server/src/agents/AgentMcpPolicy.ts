@@ -6,6 +6,7 @@ import {
   OrchestratorMcpFailure,
   OrchestratorMcpScheduleTaskInput,
   IntegrationCreateInput,
+  IntegrationUpdateByNameInput,
   type AgentPermissions,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -19,11 +20,13 @@ import { McpInvocationContext, type McpInvocationScope } from "../mcp/McpInvocat
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import { readCaller, assertLiveCaller } from "../mcp/threadAccess.ts";
 import { resolveRuntimeMode } from "../mcp/OrchestratorMcpService.ts";
+import * as Integrations from "../integrations/Integrations.ts";
 
 const decodeWorkStart = Schema.decodeUnknownEffect(WorkStartInput);
 const decodeStartWork = Schema.decodeUnknownEffect(AgentStartWorkInput);
 const decodeSchedule = Schema.decodeUnknownEffect(OrchestratorMcpScheduleTaskInput);
 const decodeIntegrationAdd = Schema.decodeUnknownEffect(IntegrationCreateInput);
+const decodeIntegrationUpdate = Schema.decodeUnknownEffect(IntegrationUpdateByNameInput);
 const decodeAction = Schema.decodeUnknownEffect(AgentApprovalAction);
 const isMcpFailure = Schema.is(OrchestratorMcpFailure);
 const isRecord = Schema.is(Schema.Record(Schema.String, Schema.Unknown));
@@ -57,6 +60,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const access = yield* Access.AgentAccessScope;
   const threads = yield* Threads.ThreadManagementService;
+  const integrations = yield* Effect.serviceOption(Integrations.Integrations);
   const actorFor = (scope: McpInvocationScope) =>
     scope.thread === undefined
       ? Effect.succeed(null)
@@ -221,6 +225,35 @@ const make = Effect.gen(function* () {
             `Integration proposal awaiting owner approval: ${approval.id}`,
             "agent_approval_required",
           );
+        }
+        if (name === "integration_update") {
+          const update = yield* decodeIntegrationUpdate(input);
+          if (integrations._tag === "None")
+            return yield* denied("Integrations are unavailable.", "agent_policy_unavailable");
+          const listed = yield* integrations.value.list();
+          const current = listed.integrations.find(
+            ({ integration }) => integration.name === update.name,
+          )?.integration;
+          if (current === undefined)
+            return yield* denied(
+              "No connected integration with that name exists.",
+              "invalid_request",
+            );
+          const payload = {
+            ...update,
+            id: current.id,
+            url: update.url ?? current.url,
+            transport: update.transport ?? current.transport,
+            headers: update.headers ?? current.headers,
+          };
+          if (Integrations.integrationDestinationChanged(current, payload)) {
+            const action = yield* decodeAction({ actionKind: "integration_update", payload });
+            const { approval } = yield* workspace.requestApproval(agent.id, action, actor);
+            return yield* denied(
+              `Integration change awaiting owner approval: ${approval.id}`,
+              "agent_approval_required",
+            );
+          }
         }
         if (name === "schedule_task") {
           const schedule = yield* decodeSchedule(input);

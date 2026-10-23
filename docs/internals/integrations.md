@@ -23,6 +23,12 @@ resolver sits behind the small `IntegrationCredentials` interface, backed by
 the [vault](./vault.md): a reference is a vault item name and field, and a
 missing item or field counts as no credential.
 
+Persistent agents must obtain owner approval to add an integration or change its
+URL, transport, or headers. Update approvals freeze those fields together so a
+pending proposal cannot inherit newly attached credentials. Ordinary agent edits
+preserve that destination in the service, and credential resolution checks the
+stored approved origin. Settings edits authorize the new origin directly.
+
 Integration definitions live in the `integrations` table (migration 083) as
 payload JSON with a tombstone, shaped to become shared documents under sync:
 edits resolve per field later without a schema change. Upstream tool lists

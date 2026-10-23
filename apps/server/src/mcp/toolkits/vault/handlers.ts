@@ -64,7 +64,8 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
         })
         .pipe(Effect.mapError((cause) => failure(cause.message, "orchestration_error")));
       const domain = status.url ? normalizeHost(status.url) || null : null;
-      if (!domain) return yield* failure("vault_fill needs an active preview tab with a page URL.");
+      if (!domain || !status.tabId)
+        return yield* failure("vault_fill needs an active preview tab with a page URL.");
       const agent = yield* agents
         .forThread(scope.thread.threadId)
         .pipe(
@@ -107,13 +108,14 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
         .invoke({
           scope,
           operation: "type",
+          containsVaultSecret: true,
           input: {
             text: result.value,
             ...(rest.locator ? { locator: rest.locator } : {}),
             ...(rest.selector ? { selector: rest.selector } : {}),
             clear: true,
           },
-          ...(tabId ? { tabId } : {}),
+          tabId: status.tabId,
         })
         .pipe(Effect.mapError((cause) => failure(cause.message, "orchestration_error")));
       return {

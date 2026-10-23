@@ -99,10 +99,10 @@ export class Declaration<out Handler> {
     declare = (handle) => {
       const declaration = new Declaration(builtHere, (params: Parameters<typeof handle>[0]) =>
         handle(params).pipe(
-          // Central scrub: every MCP tool result is redacted against the
-          // vault before serialization, so a secret echoed by a page
-          // (preview_evaluate), a terminal, or any other tool never reaches
-          // the model. No Vault service in scope means nothing to scrub.
+          // Second layer: scrub exact vault values from every tool result
+          // before serialization. Transformed values need source-level
+          // protection, such as the broker's evaluation seal after vault_fill.
+          // No Vault service in scope means nothing to scrub.
           Effect.flatMap((result) =>
             Effect.serviceOption(Vault.Vault).pipe(
               Effect.flatMap((vault) =>
