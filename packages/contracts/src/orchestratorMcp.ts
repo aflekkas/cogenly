@@ -647,16 +647,30 @@ export const OrchestratorMcpRequestSecretInput = Schema.Struct({
     description:
       "Reuse when retrying a call that lost its result, so the user sees one card and its answer is returned again. Use a new id to ask again after timed_out or cancelled.",
   }),
+  saveToVault: Schema.optional(
+    Schema.Struct({
+      name: TrimmedNonEmptyString,
+      type: Schema.Literals(["login", "api_key", "card", "note"]),
+      domains: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+    }),
+  ).annotate({
+    description:
+      "Keep the user's answer as a vault item with this name instead of a one-use secretRef, so it can be reused (e.g. vault_fill) without asking again.",
+  }),
 });
 export type OrchestratorMcpRequestSecretInput = typeof OrchestratorMcpRequestSecretInput.Type;
 
 export const OrchestratorMcpRequestSecretResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("saved").annotate({ description: "secretRef holds the value." }),
-    secretRef: SecretRef.annotate({
+    secretRef: Schema.optional(SecretRef).annotate({
       description:
-        "Pass it to a tool that accepts a secretRef; it works once, and you never see the value.",
+        "Pass it to a tool that accepts a secretRef; it works once, and you never see the value. Absent when saveToVault stored the value instead.",
     }),
+    vaultItemId: Schema.optional(TrimmedNonEmptyString).annotate({
+      description: "Vault item created from the answer when saveToVault was requested.",
+    }),
+    vaultItemName: Schema.optional(TrimmedNonEmptyString),
   }),
   Schema.Struct({
     status: Schema.Literals(["declined", "cancelled", "timed_out"]).annotate({
