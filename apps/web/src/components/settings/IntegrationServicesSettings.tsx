@@ -39,7 +39,7 @@ import {
   VideoIcon,
   XIcon,
 } from "lucide-react";
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 
 import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { GitHubIcon } from "~/components/Icons";
@@ -119,6 +119,7 @@ import {
   type IntegrationDraft,
   type IntegrationTest,
 } from "./integrationServices.logic";
+import { createIntegrationStatusFade } from "./integrationStatusMotion";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -378,6 +379,17 @@ function IntegrationAccountRow({
   });
   const [busy, setBusy] = useState(false);
   const status = integrationStatus(summary, lastTest);
+  const statusNode = useRef<HTMLDivElement>(null);
+  const statusFade = useRef<ReturnType<typeof createIntegrationStatusFade> | null>(null);
+  useLayoutEffect(() => {
+    if (!statusNode.current) return;
+    const fade = createIntegrationStatusFade(statusNode.current);
+    statusFade.current = fade;
+    return () => fade.dispose();
+  }, []);
+  useLayoutEffect(() => {
+    statusFade.current?.update(status.label);
+  }, [status.label]);
   const title = integrationTitle(integration);
   const signIn = signInAction(summary);
   const label = inCatalog
@@ -468,10 +480,16 @@ function IntegrationAccountRow({
           {status.checkedAt ? ` · Checked ${formatRelativeTimeLabel(status.checkedAt)}` : ""}
         </div>
       </div>
-      <Badge size="sm" variant={status.tone === "neutral" ? "outline" : status.tone}>
-        {status.label}
-      </Badge>
-      {signIn === "Sign in" && integration.enabled ? (
+      <div ref={statusNode} className="flex w-27 shrink-0 justify-end">
+        <Badge size="sm" variant={status.tone === "neutral" ? "outline" : status.tone}>
+          {status.label}
+        </Badge>
+      </div>
+      <div
+        className={`flex w-21 shrink-0 justify-end transition-opacity duration-(--motion-duration-base) ease-out ${signIn === "Sign in" && integration.enabled ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        aria-hidden={signIn !== "Sign in" || !integration.enabled}
+        inert={signIn !== "Sign in" || !integration.enabled}
+      >
         <Button
           size="xs"
           variant="outline"
@@ -481,7 +499,7 @@ function IntegrationAccountRow({
           <LogInIcon className="size-3" />
           Sign in
         </Button>
-      ) : null}
+      </div>
       <Menu>
         <MenuTrigger
           render={
