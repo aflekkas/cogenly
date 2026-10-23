@@ -119,6 +119,7 @@ import { markdownImageGallery, markdownImageItems } from "./chat/markdownImageGa
 import {
   groupInlineImageGalleries,
   isInlineWebImageSource,
+  remoteImageAssetResource,
   withoutPartialTrailingImage,
   type InlineImageHastNode,
 } from "./chat/markdownInlineImages";
@@ -190,6 +191,7 @@ import { useProjects } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { shellEnvironment } from "../state/shell";
 import { assetEnvironment } from "../state/assets";
+import { usePrimaryEnvironmentId } from "../state/environments";
 import { readEnvironmentScope, usePreparedConnection, useEnvironmentScope } from "../state/session";
 import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -1520,6 +1522,7 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
         | "workspace-file"
         | "media-file"
         | "github-media"
+        | "remote-image"
         | "tool-output-image";
     }
   >;
@@ -1541,6 +1544,8 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
   readonly originalUrl?: string | undefined;
   /** The workspace media frame, on by default; off for media that keeps the author's own box. */
   readonly framed?: boolean | undefined;
+  /** Ease the image in once decoded instead of showing it at once (web images). */
+  readonly fadeIn?: boolean | undefined;
   /** Loaded instead of the failure state when no URL can be signed, such as against a server
       too old to know this resource. Only safe when the client can reach it directly. */
   readonly fallbackSrc?: string | undefined;
@@ -1641,6 +1646,7 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
       imageProps={props.imageProps}
       actionsSource={actionsSource}
       originalUrl={props.originalUrl}
+      fadeIn={props.fadeIn}
       onImageExpand={props.onImageExpand}
     />
   );
@@ -3039,6 +3045,9 @@ const CHAT_MARKDOWN_COMPONENTS = {
       threadRef,
       renderContextReference,
     } = use(ChatMarkdownRendererContext);
+    // Markdown with no thread (a draft, a card) still signs its web images with the primary server.
+    const primaryEnvironmentId = usePrimaryEnvironmentId();
+    const imageEnvironmentId = environmentId ?? primaryEnvironmentId;
     const imageExpand = use(MarkdownLinkContext) ? undefined : expandMedia;
     const contextReference = typeof src === "string" ? parseComposerContextHref(src) : null;
     if (contextReference) {
@@ -3070,6 +3079,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
           width={width}
           height={height}
           copyMarkdown={copyMarkdown}
+          environmentId={environmentId}
           onImageExpand={expandMedia}
         />
       );
@@ -3117,6 +3127,27 @@ const CHAT_MARKDOWN_COMPONENTS = {
       // Third-party https images load through the server's image proxy; the authored URL stays
       // the "open source" target.
       const webImage = kind === "image" ? inlineWebImageSource(imageSource.uri) : null;
+      const remoteImageResource = remoteImageAssetResource(webImage);
+      if (webImage?.kind === "remote" && remoteImageResource !== null && imageEnvironmentId) {
+        return (
+          <ChatMarkdownAssetImage
+            environmentId={imageEnvironmentId}
+            resource={remoteImageResource}
+            alt={altText}
+            copyMarkdown={copyMarkdown}
+            standalone={standalone}
+            className={className}
+            style={authoredSizeStyle}
+            imageProps={imageProps}
+            originalUrl={webImage.url}
+            framed={false}
+            fadeIn
+            // A server too old to sign this resource still has the cookie-authenticated proxy.
+            fallbackSrc={webImage.src}
+            onImageExpand={imageExpand}
+          />
+        );
+      }
       const mediaSrc =
         webImage?.kind === "remote"
           ? webImage.src

@@ -9,23 +9,32 @@ import {
 } from "react";
 import { ImageOffIcon } from "lucide-react";
 import { mediaUrlReference } from "@t3tools/client-runtime/media-reference";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { useAssetUrlRefresh, useAssetUrlState } from "../../assets/assetUrls";
 import { resolvePrimaryEnvironmentHttpUrl } from "../../environments/primary";
 import { cn } from "../../lib/utils";
+import { usePrimaryEnvironmentId } from "../../state/environments";
 import { MediaActions, type MediaActionSource } from "../media/MediaActions";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { markdownImageGallery, markdownImageItems } from "./markdownImageGallery";
 import {
   IMAGE_PROXY_PATH,
   inlineImageAspectRatio,
+  remoteImageAssetResource,
   resolveInlineImageSource,
+  resolveRemoteImageSrc,
   type InlineImageSource,
 } from "./markdownInlineImages";
 
+/** A signed URL this close to lapsing is treated as lapsed when its image fails to load. */
+const SIGNED_URL_EXPIRY_MARGIN_MS = 60_000;
+
 /**
  * Where a web image in assistant markdown loads from: third-party https
- * images through the primary environment's image proxy (same base URL and
- * session as the app's other API calls), the app's own origins directly.
- * `url` stays the authored URL for "open source" links.
+ * images through the image proxy, the app's own origins directly. A proxied
+ * image's `src` is only the fallback for a server that cannot sign it; current
+ * servers hand out a signed `remote-image` asset URL instead (see
+ * `remoteImageAssetResource`). `url` stays the authored URL for "open source" links.
  */
 export function inlineWebImageSource(src: string): InlineImageSource | null {
   const origins = typeof window === "undefined" ? [] : [window.location.origin];
@@ -131,17 +140,29 @@ export function MarkdownGalleryImage(props: {
   width?: unknown;
   height?: unknown;
   copyMarkdown: string;
+  /** The environment whose server signs the image URL; the primary one when absent. */
+  environmentId: EnvironmentId | null;
   onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }) {
   const single = use(GalleryCountContext) <= 1;
   const [source] = useState(() => inlineWebImageSource(props.src));
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentId = props.environmentId ?? primaryEnvironmentId;
+  const resource = environmentId === null ? null : remoteImageAssetResource(source);
+  const signedUrl = useAssetUrlState(environmentId, resource);
+  const refreshSignedUrl = useAssetUrlRefresh(environmentId, resource);
+  const [remintTried, setRemintTried] = useState(false);
   const [failed, setFailed] = useState(source?.kind !== "remote");
   const [loaded, setLoaded] = useState<{
     ratio: number;
     width: number;
     instant: boolean;
   } | null>(null);
-  const current = source?.kind === "remote" && !failed ? source.src : null;
+  const resolvedSrc =
+    source?.kind === "remote"
+      ? resolveRemoteImageSrc(source, resource === null ? null : signedUrl)
+      : null;
+  const current = !failed ? resolvedSrc : null;
   const name = props.alt.trim() || "image";
   const originalUrl = source?.url ?? props.src;
   const reference = mediaUrlReference(originalUrl);
@@ -220,11 +241,23 @@ export function MarkdownGalleryImage(props: {
             }}
             onError={() => {
               setLoaded(null);
+              // A signed URL that lapsed while the thread sat open is re-minted once, so the
+              // image comes back instead of showing "unavailable".
+              if (
+                signedUrl._tag === "Success" &&
+                signedUrl.url === current &&
+                !remintTried &&
+                signedUrl.expiresAt <= Date.now() + SIGNED_URL_EXPIRY_MARGIN_MS
+              ) {
+                setRemintTried(true);
+                refreshSignedUrl().catch(() => setFailed(true));
+                return;
+              }
               setFailed(true);
             }}
           />
         </MediaActions>
-      ) : (
+      ) : failed ? (
         <span
           data-markdown-copy={props.copyMarkdown}
           className={cn(
@@ -235,7 +268,7 @@ export function MarkdownGalleryImage(props: {
         >
           <ImageOffIcon aria-hidden className="size-4" />
         </span>
-      )}
+      ) : null}
     </div>
   );
 }

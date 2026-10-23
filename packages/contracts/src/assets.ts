@@ -66,6 +66,12 @@ export const AssetResource = Schema.Union([
     cwd: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
     url: TrimmedNonEmptyString.check(Schema.isMaxLength(2048)),
   }),
+  // A third-party https image an agent embedded in markdown. An `<img>` carries no bearer token,
+  // so the client cannot reach an authenticated proxy route; the server signs the URL instead and
+  // fetches it for whoever holds the signature.
+  Schema.TaggedStruct("remote-image", {
+    url: TrimmedNonEmptyString.check(Schema.isMaxLength(2048)),
+  }),
 ]);
 export type AssetResource = typeof AssetResource.Type;
 
@@ -312,6 +318,15 @@ export class AssetGitHubMediaUrlValidationError extends Schema.TaggedError<Asset
   }
 }
 
+export class AssetRemoteImageUrlValidationError extends Schema.TaggedError<AssetRemoteImageUrlValidationError>()(
+  "AssetRemoteImageUrlValidationError",
+  {},
+) {
+  override get message(): string {
+    return "Only public https image URLs can be proxied.";
+  }
+}
+
 export const AssetAccessError = Schema.Union([
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
@@ -326,6 +341,7 @@ export const AssetAccessError = Schema.Union([
   AssetProjectFaviconInspectionError,
   AssetProjectFaviconNotFoundError,
   AssetGitHubMediaUrlValidationError,
+  AssetRemoteImageUrlValidationError,
   AssetSigningKeyLoadError,
 ]);
 export type AssetAccessError = typeof AssetAccessError.Type;
