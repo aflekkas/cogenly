@@ -184,7 +184,8 @@ function VaultItemRow(props: {
   const [showUsage, setShowUsage] = useState(false);
   const [busy, setBusy] = useState(false);
   const disabled = busy || !props.canWrite;
-  const label = item.label ? (item.type === "card" ? `Expires ${item.label}` : item.label) : null;
+  const label = item.label ?? null;
+  const cardLast4 = item.type === "card" && item.cardLast4 ? `•••• ${item.cardLast4}` : null;
   return (
     <li className="flex flex-col gap-1.5 px-3 py-3 sm:px-4">
       <div className="flex items-start gap-2">
@@ -194,6 +195,9 @@ function VaultItemRow(props: {
             {VAULT_TYPE_LABELS[item.type]}
           </Badge>
           {label ? <span className="truncate text-xs text-muted-foreground">{label}</span> : null}
+          {cardLast4 ? (
+            <span className="truncate text-xs text-muted-foreground">{cardLast4}</span>
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
           <Button

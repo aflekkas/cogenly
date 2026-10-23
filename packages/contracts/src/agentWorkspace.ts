@@ -13,6 +13,7 @@ import { ModelSelection } from "./modelSelection.ts";
 import { ScheduledTaskUpsertInput } from "./scheduledTask.ts";
 import { OrchestrationV2ThreadLaunchWorkspaceStrategy } from "./orchestrationV2.ts";
 import { IntegrationCreateInput } from "./integration.ts";
+import { VaultField } from "./vault.ts";
 
 export const AgentStartWorkInput = Schema.Struct({
   agentId: AgentId,
@@ -31,7 +32,7 @@ export const AgentApprovalAction = Schema.Union([
     payload: Schema.Struct({
       vaultItemId: TrimmedNonEmptyString,
       vaultItemName: TrimmedNonEmptyString,
-      field: Schema.Literals(["username", "password", "totp", "value"]),
+      field: VaultField,
       domain: Schema.NullOr(Schema.String),
       threadId: Schema.NullOr(ThreadId),
     }),

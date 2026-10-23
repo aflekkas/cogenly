@@ -72,7 +72,12 @@ describe("vaultCreateInput", () => {
       draft({
         label: " Work ",
         allowedDomains: "github.com",
-        secrets: { username: "me", password: "pw", totpSecret: "", value: "ignored" },
+        secrets: {
+          ...vaultDraftFromItem(null).secrets,
+          username: "me",
+          password: "pw",
+          value: "ignored",
+        },
       }),
     );
     expect(input.label).toBe("Work");
@@ -81,18 +86,51 @@ describe("vaultCreateInput", () => {
     expect(input.policy).toEqual({ mode: "ask", allowedAgentIds: [], allowedDomains: [] });
   });
 
-  it("stores a card's expiry as its label", () => {
+  it("stores a card in its own encrypted fields, expiry included", () => {
     const input = vaultCreateInput(
       draft({
         type: "card",
-        label: "08/27",
+        label: " Personal ",
         allowedDomains: "shop.com",
-        secrets: { username: "A Person", password: "123", totpSecret: "", value: "4242" },
+        secrets: {
+          ...draft().secrets,
+          cardNumber: "4242 4242 4242 4242",
+          cardExpiryMonth: "08",
+          cardExpiryYear: "2027",
+          cardCvc: "987",
+          cardholderName: "A Person",
+        },
       }),
     );
-    expect(input.label).toBe("08/27");
-    expect(input.allowedDomains).toEqual([]);
-    expect(input.secretFields).toEqual({ username: "A Person", password: "123", value: "4242" });
+    expect(input.label).toBe("Personal");
+    expect(input.allowedDomains).toEqual(["shop.com"]);
+    expect(input.secretFields).toEqual({
+      cardNumber: "4242 4242 4242 4242",
+      cardExpiryMonth: "08",
+      cardExpiryYear: "2027",
+      cardCvc: "987",
+      cardholderName: "A Person",
+    });
+  });
+
+  it("requires a complete expiry when either half is typed", () => {
+    const base = draft({
+      type: "card",
+      secrets: { ...draft().secrets, cardNumber: "4242" },
+    });
+    expect(vaultDraftProblem(base, "create")).toBeNull();
+    expect(
+      vaultDraftProblem({ ...base, secrets: { ...base.secrets, cardExpiryMonth: "08" } }, "create"),
+    ).toBe("Enter the full expiry (month and year).");
+    expect(
+      vaultDraftProblem(
+        {
+          ...base,
+          secrets: { ...base.secrets, cardExpiryMonth: "13", cardExpiryYear: "2027" },
+        },
+        "edit",
+      ),
+    ).toBe("Enter the full expiry (month and year).");
   });
 
   it("drops agents and domains from an ask policy", () => {
@@ -124,9 +162,22 @@ describe("vaultUpdateInput", () => {
     const saved = item("vault:1", "GitHub");
     const edited = {
       ...vaultDraftFromItem(saved),
-      secrets: { username: "", password: "new", totpSecret: "", value: "" },
+      secrets: { ...vaultDraftFromItem(null).secrets, password: "new" },
     };
     expect(vaultUpdateInput(saved.id, edited).secretFields).toEqual({ password: "new" });
+  });
+
+  it("sends only the card secrets that were typed", () => {
+    const saved = item("vault:2", "Visa", {
+      type: "card",
+      fields: ["cardNumber", "cardExpiry", "cardCvc", "cardholderName"],
+      cardLast4: "4242",
+    });
+    const edited = {
+      ...vaultDraftFromItem(saved),
+      secrets: { ...vaultDraftFromItem(saved).secrets, cardCvc: "111" },
+    };
+    expect(vaultUpdateInput(saved.id, edited).secretFields).toEqual({ cardCvc: "111" });
   });
 
   it("keeps the scope a saved item had", () => {
