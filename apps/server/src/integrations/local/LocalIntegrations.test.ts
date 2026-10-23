@@ -63,6 +63,7 @@ const testLayer = (
   format: "json" | "login" = "json",
   /** Lets a remote integration reach a mock server on loopback, as production never does. */
   allowLoopback = false,
+  runtimeMissing = false,
 ) => {
   // Replace the external package at the process boundary; exercise the real supervisor and gateway.
   const runner = Layer.effect(
@@ -75,7 +76,7 @@ const testLayer = (
           specs.push(spec);
           return actual.start({
             ...spec,
-            runtime: process.execPath,
+            runtime: runtimeMissing ? "uvx" : process.execPath,
             args: [fixture],
             portEnvironment: [...(spec.portEnvironment ?? []), "FIXTURE_PORT"],
             env: {
@@ -83,6 +84,7 @@ const testLayer = (
               FIXTURE_TRANSPORT: "http",
               FIXTURE_PORT: String(spec.port),
               FIXTURE_SECRET: "fake-client-secret",
+              ...(runtimeMissing ? { PATH: spec.directory } : {}),
             },
           });
         },
@@ -352,13 +354,15 @@ describe("managed Google integrations", () => {
   );
 
   it.live.each([
-    { missing: false, form: { preset: "google-workspace" } },
-    { missing: true, form: { preset: "google-workspace" } },
-    { missing: false, form: { catalogId: "google-workspace" } },
-    { missing: true, form: { catalogId: "google-workspace" } },
+    { missing: false, runtimeMissing: false, form: { preset: "google-workspace" } },
+    { missing: true, runtimeMissing: false, form: { preset: "google-workspace" } },
+    { missing: false, runtimeMissing: false, form: { catalogId: "google-workspace" } },
+    { missing: true, runtimeMissing: false, form: { catalogId: "google-workspace" } },
+    { missing: false, runtimeMissing: true, form: { preset: "google-workspace" } },
+    { missing: false, runtimeMissing: true, form: { catalogId: "google-workspace" } },
   ] as const)(
     "integration_add $form exposes a sign-in link or private vault instructions (missing client: $missing)",
-    ({ missing, form }) =>
+    ({ missing, runtimeMissing, form }) =>
       Effect.gen(function* () {
         yield* runMigrations();
         const dependencies = Layer.mergeAll(
@@ -394,6 +398,11 @@ describe("managed Google integrations", () => {
           );
           expect(reply.message).toContain("docs/user/integrations.md#connect-google");
           expect(reply.message).toContain("call integration_add again");
+        } else if (runtimeMissing) {
+          expect(replies.at(-1)?.result).toMatchObject({
+            code: "invalid_request",
+            message: expect.stringContaining("Install uv"),
+          });
         } else {
           expect(replies.at(-1)?.result).toMatchObject({
             integration: { transport: "local", displayName: "Google", accountLabel: "personal" },
@@ -405,7 +414,7 @@ describe("managed Google integrations", () => {
             },
           });
         }
-      }).pipe(Effect.scoped, Effect.provide(testLayer([], missing))),
+      }).pipe(Effect.scoped, Effect.provide(testLayer([], missing, "json", false, runtimeMissing))),
   );
 
   it.live("connects the Google catalog entry and hands back its sign-in link", () =>

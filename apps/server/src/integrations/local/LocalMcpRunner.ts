@@ -35,8 +35,8 @@ export class LocalMcpError extends Schema.TaggedError<LocalMcpError>()("LocalMcp
   override get message(): string {
     if (this.reason === "missing_runtime") {
       return this.runtime === "uvx"
-        ? "uvx is missing. Install uv with brew install uv (macOS) or curl -LsSf https://astral.sh/uv/install.sh | sh (Linux), then restart Cogenly."
-        : "npx is missing. Install Node.js LTS (https://nodejs.org), then restart Cogenly.";
+        ? "uvx is missing. Install uv with brew install uv (macOS) or curl -LsSf https://astral.sh/uv/install.sh | sh (Linux), then try connecting again."
+        : "npx is missing. Install Node.js LTS (https://nodejs.org), then try connecting again.";
     }
     return `Managed MCP server ${this.reason.replaceAll("_", " ")}.`;
   }
@@ -74,6 +74,7 @@ interface Account {
   readonly scope: Scope.Closeable;
   ready: Deferred.Deferred<Connection, LocalMcpError>;
   status: LocalMcpStatus;
+  supervising: boolean;
 }
 
 export class LocalMcpRunner extends Context.Service<
@@ -510,15 +511,8 @@ const make = (
       start: (spec) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
-            if (accounts.has(spec.id)) return;
-            const scope = yield* Scope.make();
-            const account: Account = {
-              spec,
-              scope,
-              ready: yield* Deferred.make<Connection, LocalMcpError>(),
-              status: { state: "starting", version: spec.version, stderrTail: "" },
-            };
-            accounts.set(spec.id, account);
+            const existing = accounts.get(spec.id);
+            if (existing?.supervising) return;
             const runtimeExists = yield* Effect.forEach(
               (spec.env.PATH ?? "").split(path.sep === "\\" ? ";" : ":"),
               (directory) =>
@@ -526,6 +520,21 @@ const make = (
                   path.isAbsolute(spec.runtime) ? spec.runtime : path.join(directory, spec.runtime),
                 ),
             ).pipe(Effect.map((found) => found.some(Boolean)));
+            if (existing && !runtimeExists && existing.status.state === "missing_runtime")
+              return yield* error(spec, "missing_runtime");
+            if (existing) {
+              accounts.delete(spec.id);
+              yield* Scope.close(existing.scope, Exit.void);
+            }
+            const scope = yield* Scope.make();
+            const account: Account = {
+              spec,
+              scope,
+              supervising: false,
+              ready: yield* Deferred.make<Connection, LocalMcpError>(),
+              status: { state: "starting", version: spec.version, stderrTail: "" },
+            };
+            accounts.set(spec.id, account);
             if (!runtimeExists) {
               const missing = error(spec, "missing_runtime");
               yield* changed(account, "missing_runtime", missing.message);
@@ -535,7 +544,18 @@ const make = (
             yield* fs.makeDirectory(spec.directory, { recursive: true, mode: 0o700 });
             yield* fs.chmod(spec.directory, 0o700);
             yield* reconcile(spec);
-            yield* Effect.forkIn(supervise(account).pipe(Effect.ignore), scope);
+            account.supervising = true;
+            yield* Effect.forkIn(
+              supervise(account).pipe(
+                Effect.ignore,
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    account.supervising = false;
+                  }),
+                ),
+              ),
+              scope,
+            );
           }).pipe(
             Effect.mapError((cause) =>
               isLocalMcpError(cause) ? cause : error(spec, "start_failed", cause),
@@ -544,6 +564,11 @@ const make = (
               Effect.gen(function* () {
                 const account = accounts.get(spec.id);
                 if (!account) return;
+                if (
+                  account.status.message === cause.message &&
+                  (account.status.state === "missing_runtime" || account.status.state === "failed")
+                )
+                  return;
                 yield* changed(
                   account,
                   cause.reason === "missing_runtime" ? "missing_runtime" : "failed",

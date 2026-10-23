@@ -122,7 +122,7 @@ export const VAULT_FIELD_LABEL: Readonly<Record<VaultField, string>> = {
 const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
   google_client_missing:
     "Store your Google OAuth client JSON in vault item google-oauth-client and allow accounts.google.com.",
-  local_runtime_missing: "Install uv (brew install uv on macOS), then restart Cogenly.",
+  local_runtime_missing: "Install uv (brew install uv on macOS), then try connecting again.",
   storage: "Cogenly could not read or save this integration.",
   not_found: "This integration no longer exists.",
   conflict: "Another integration already uses this name.",

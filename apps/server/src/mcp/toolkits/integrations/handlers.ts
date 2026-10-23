@@ -38,7 +38,7 @@ const AGENT_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
   disabled: "That integration is disabled.",
   google_client_missing: `Google needs the user's own OAuth client before an account can connect. Point the user to docs/user/integrations.md#connect-google to create one (a Web application client in Google Cloud). ${GOOGLE_CLIENT_HELP} Then call integration_add again.`,
   local_runtime_missing:
-    "uvx is missing. Install uv with brew install uv (macOS) or https://docs.astral.sh/uv/getting-started/installation/ (Linux), then restart Cogenly.",
+    "uvx is missing. Install uv with brew install uv (macOS) or https://docs.astral.sh/uv/getting-started/installation/ (Linux), then call integration_update with the saved account name to retry sign-in.",
 };
 const SERVER_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
   upstream_timeout:
@@ -116,10 +116,15 @@ const withSignIn = (integration: Integration, callbackOrigin?: string) =>
       return { integration };
     const service = yield* Integrations.Integrations;
     const { integrations } = yield* service.list().pipe(Effect.mapError(failure));
-    const status = integrations.find(
-      (summary) => summary.integration.id === integration.id,
-    )?.status;
-    if (status !== "needs_sign_in") return { integration };
+    const summary = integrations.find((entry) => entry.integration.id === integration.id);
+    if (summary?.managed?.state === "missing_runtime")
+      return yield* failure(
+        new IntegrationError({
+          operation: "connect local account",
+          reason: "local_runtime_missing",
+        }),
+      );
+    if (summary?.status !== "needs_sign_in") return { integration };
     const scope = yield* Invocation.McpInvocationContext;
     const signIn = yield* service
       .beginSignIn(integration.id, { origin: scope.httpOrigin, fromAgent: true, callbackOrigin })

@@ -128,6 +128,21 @@ describe("LocalMcpRunner", () => {
     }).pipe(Effect.scoped, Effect.provide(layer)),
   );
 
+  it.live("recovers a missing runtime on a later start without restarting the server", () =>
+    Effect.gen(function* () {
+      const runner = yield* Runner.LocalMcpRunner;
+      const spec = yield* specFor("stdio");
+      yield* runner
+        .start({ ...spec, runtime: "uvx", env: { PATH: spec.directory } })
+        .pipe(Effect.result);
+      expect((yield* runner.status(spec.id))?.state).toBe("missing_runtime");
+      yield* runner.start(spec);
+      expect(yield* runner.rpc(spec.id, "tools/list", {})).toMatchObject({
+        tools: [{ name: "echo" }],
+      });
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+
   it.live("terminates its process when the owning server layer shuts down", () =>
     Effect.gen(function* () {
       const pid = yield* Effect.gen(function* () {
