@@ -29,7 +29,7 @@ export const HubLinkRecord = Schema.Struct({
   scopes: Schema.Array(AuthPeerScope),
   pairedAt: Schema.DateTimeUtcFromString,
   /** The hub's last self report, so an offline hub still lists with its kind. */
-  hub: Schema.NullOr(MachineSelfReport),
+  hub: MachineSelfReport,
   lastSeenAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   /** Set when the hub refused the credential: it unpaired this machine. */
   revokedAt: Schema.NullOr(Schema.DateTimeUtcFromString),

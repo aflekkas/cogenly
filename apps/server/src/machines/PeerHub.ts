@@ -254,6 +254,9 @@ const make = Effect.gen(function* () {
   // The grant reached the spoke through an admin client signed in to both
   // servers. The nonce signature lets the spoke check it reached the hub that
   // client named, by the key it pins from then on.
+  // This hub's own name or kind changed: spokes list it too.
+  yield* identity.changes.pipe(Stream.runForEach(() => publishChange), Effect.forkScoped);
+
   const redeem: PeerHub["Service"]["redeem"] = Effect.fn("PeerHub.redeem")(function* (input) {
     const joinedHub = yield* withSecrets(readHubLink).pipe(Effect.mapError(storage("join")));
     if (Option.isSome(joinedHub)) {
