@@ -37,6 +37,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -314,6 +315,7 @@ const make = Effect.gen(function* () {
   const store = yield* ServerSecretStore.ServerSecretStore;
   const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const crypto = yield* Crypto.Crypto;
+  const notifyApprovals = (yield* ApprovalChanges.optional).notify;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const scrubCache = yield* Ref.make<ScrubCache>({
     version: 0,
@@ -742,6 +744,7 @@ const make = Effect.gen(function* () {
         // AgentWorkspaceService.approve's vault_use case, which grants the
         // item policy so a retry succeeds).
         let approvalId: string | null = null;
+        let declinedBefore = false;
         if (input.caller.kind === "agent" || input.caller.kind === "thread") {
           const callerKey =
             input.caller.kind === "agent" ? input.caller.agentId : input.caller.threadId;
@@ -755,24 +758,42 @@ const make = Effect.gen(function* () {
               threadId: callingThreadId ?? null,
             },
           });
-          approvalId = yield* Effect.gen(function* () {
-            const pending = yield* sql<{
+          const requested = yield* Effect.gen(function* () {
+            const latest = yield* sql<{
               id: string;
-            }>`SELECT id FROM agent_approvals WHERE status = 'pending' AND agent_id IS ${agentId} AND action_json = ${actionJson} ORDER BY requested_at LIMIT 1`;
-            if (pending[0]) return pending[0].id;
+              status: string;
+              decided_by: string | null;
+            }>`SELECT id, status, decided_by FROM agent_approvals WHERE agent_id IS ${agentId} AND action_json = ${actionJson} ORDER BY requested_at DESC, rowid DESC LIMIT 1`;
+            if (latest[0]?.status === "pending")
+              return { id: latest[0].id, created: false, declinedBefore: false };
             const id = `approval:vault:${row.id}:${callerKey}:${yield* crypto.randomUUIDv4()}`;
             yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${id}, ${agentId}, ${actionJson}, 'pending', ${yield* now}, ${null})`;
-            return id;
+            return {
+              id,
+              created: true,
+              declinedBefore: latest[0]?.status === "rejected" && latest[0].decided_by === "user",
+            };
           }).pipe(sql.withTransaction, Effect.mapError(wrap));
+          approvalId = requested.id;
+          declinedBefore = requested.declinedBefore;
+          if (requested.created) yield* notifyApprovals;
         }
         yield* record("approval_required");
+        // A thread's approval shows as a card in that thread; an agent's in its workspace.
+        const where =
+          input.caller.kind === "thread"
+            ? "The user sees an approval card in this thread."
+            : "The owner sees it in this agent's open items.";
         return {
           status: "approval_required",
           item,
           field: input.field,
           approvalId,
-          message:
-            "Waiting on you: this vault use needs owner approval. Ask again after it is approved.",
+          message: `Waiting on the user: this vault use needs their approval. ${where} ${
+            declinedBefore
+              ? "They declined the last request for this; don't retry unless they ask you to."
+              : "Wait for them to decide, then call again; it succeeds once they allow it."
+          }`,
         } as const;
       }
       if (decision === "deny") {

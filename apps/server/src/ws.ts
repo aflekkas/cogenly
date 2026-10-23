@@ -1679,6 +1679,7 @@ const makeWsRpcHandlers = (
         agentWorkspace.requestApproval(input.agentId, input.action),
       [WS_METHODS.agentsApprove]: (input) => agentWorkspace.approve(input.id, input.accountScope),
       [WS_METHODS.agentsReject]: (input) => agentWorkspace.reject(input.id),
+      [WS_METHODS.threadApprovalsSubscribe]: () => agentWorkspace.subscribeThreadApprovals,
       [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
       [WS_METHODS.integrationsList]: () => integrations.list(),

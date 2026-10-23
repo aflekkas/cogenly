@@ -9,6 +9,7 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import type * as Statement from "effect/sql/Statement";
@@ -17,6 +18,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -28,6 +30,7 @@ import { totp } from "./VaultTotp.ts";
 
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
+import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
 import * as Work from "../work/WorkHandoffService.ts";
@@ -279,6 +282,143 @@ describe("Vault service", () => {
         })).status,
       ).toBe("approval_required");
       expect((yield* vault.use({ ...request, domain: "evil.test" })).status).toBe("denied");
+    }).pipe(
+      Effect.provide(
+        Workspace.layer.pipe(
+          Layer.provideMerge(layer),
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(AgentStore.AgentStore)({}),
+              Layer.mock(Agents.AgentService)({}),
+              Layer.mock(Work.WorkHandoffService)({}),
+              Layer.mock(Schedules.ScheduledTaskService)({}),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("lists a thread's fill approvals for that thread only and streams decisions", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const workspace = yield* Workspace.AgentWorkspaceService;
+      const sql = yield* SqlClient.SqlClient;
+      const other = ThreadId.make("thread:other");
+      const settled = ThreadId.make("thread:settled");
+      for (const [id, payload] of [
+        [threadId, "{}"],
+        [other, "{}"],
+        [settled, '{"settledOverride":"settled"}'],
+      ] as const)
+        yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${id}, 'project:1', 'Thread', 'claude', 'full-access', 'default', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', ${payload})`;
+      const { item } = yield* vault.create({
+        name: "GitHub",
+        type: "login",
+        allowedDomains: ["github.com"],
+        secretFields: { password: "github-password" },
+      });
+      const fill = (caller: ThreadId) =>
+        vault.use({
+          itemId: item.id,
+          field: "password",
+          caller: { kind: "thread", threadId: caller },
+          threadId: caller,
+          domain: "github.com",
+          enforceAllowedDomains: true,
+          action: "fill",
+        });
+      const pendingIds = (thread?: ThreadId) =>
+        workspace
+          .listThreadApprovals(thread)
+          .pipe(Effect.map(({ approvals }) => approvals.map((approval) => approval.id)));
+
+      // The stream's first read is in before the fill, so its next value is the change.
+      const firstRead = yield* Deferred.make<void>();
+      const streamed = yield* workspace.subscribeThreadApprovals.pipe(
+        Stream.tap(() => Deferred.succeed(firstRead, undefined)),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* Deferred.await(firstRead);
+
+      const asked = yield* fill(threadId);
+      if (asked.status !== "approval_required" || !asked.approvalId)
+        throw new Error("Expected an approval");
+      expect(asked.message).toContain("approval card in this thread");
+      expect(yield* pendingIds(threadId)).toEqual([asked.approvalId]);
+      expect(yield* pendingIds(other)).toEqual([]);
+      const [before, after] = Array.from(yield* Fiber.join(streamed));
+      expect(before?.approvals).toEqual([]);
+      expect(after?.approvals.map((approval) => approval.id)).toEqual([asked.approvalId]);
+
+      // Denying keeps the fill refused; asking again raises a fresh card that says so.
+      yield* workspace.reject(asked.approvalId);
+      expect(yield* pendingIds(threadId)).toEqual([]);
+      const again = yield* fill(threadId);
+      if (again.status !== "approval_required" || !again.approvalId)
+        throw new Error("Expected a fresh approval");
+      expect(again.approvalId).not.toBe(asked.approvalId);
+      expect(again.message).toContain("declined");
+
+      yield* workspace.approve(again.approvalId);
+      expect(yield* pendingIds()).toEqual([]);
+      expect(yield* fill(threadId)).toMatchObject({ status: "allowed", value: "github-password" });
+      expect((yield* fill(other)).status).toBe("approval_required");
+      expect((yield* pendingIds(other)).length).toBe(1);
+
+      // A settled thread leaves no card behind.
+      expect((yield* fill(settled)).status).toBe("approval_required");
+      expect(yield* pendingIds(settled)).toEqual([]);
+    }).pipe(
+      Effect.provide(
+        Workspace.layer.pipe(
+          Layer.provideMerge(layer),
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(AgentStore.AgentStore)({}),
+              Layer.mock(Agents.AgentService)({}),
+              Layer.mock(Work.WorkHandoffService)({}),
+              Layer.mock(Schedules.ScheduledTaskService)({}),
+            ),
+          ),
+          Layer.provideMerge(ApprovalChanges.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("lists an owner thread's CLI token exposure approval", () =>
+    Effect.gen(function* () {
+      const workspace = yield* Workspace.AgentWorkspaceService;
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${threadId}, 'project:1', 'Thread', 'claude', 'full-access', 'default', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', '{}')`;
+      const exposure = {
+        actionKind: "vault_use",
+        payload: {
+          vaultItemId: "vault:token",
+          vaultItemName: "CLI token · GitHub",
+          field: "value",
+          domain: null,
+          threadId,
+          processExposure: {
+            accountId: "account:1",
+            credentialId: "credential:1",
+            credentialRevision: 1,
+            threadId,
+            projectKey: "repository:project:1",
+            message: "The agent and the commands it runs can read this token.",
+          },
+        },
+      };
+      const at = DateTime.formatIso(yield* DateTime.now);
+      yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES ('agent:1', 'thread:agent', '{}', 1, 10)`;
+      yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at) VALUES ('approval:account:1', NULL, ${JSON.stringify(exposure)}, 'pending', ${at})`;
+      yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at) VALUES ('approval:agent', 'agent:1', ${JSON.stringify(exposure)}, 'pending', ${at})`;
+      const { approvals } = yield* workspace.listThreadApprovals(threadId);
+      // An agent's own approval stays in its workspace.
+      expect(approvals.map((approval) => approval.id)).toEqual(["approval:account:1"]);
     }).pipe(
       Effect.provide(
         Workspace.layer.pipe(

@@ -30,6 +30,8 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Stream from "effect/Stream";
+import * as ApprovalChanges from "./ApprovalChanges.ts";
 import * as Store from "./AgentStore.ts";
 import * as Agents from "./AgentService.ts";
 import * as Work from "../work/WorkHandoffService.ts";
@@ -117,6 +119,19 @@ export class AgentWorkspaceService extends Context.Service<
     readonly listApprovals: (
       input: typeof AgentApprovalListInput.Type,
     ) => Effect.Effect<{ approvals: ReadonlyArray<AgentApproval> }, AgentError>;
+    /**
+     * Pending approvals raised by ordinary threads (no persistent agent): vault
+     * fills and CLI token exposure, keyed by the thread in their payload. A
+     * deleted, archived or settled thread's approvals are left out.
+     */
+    readonly listThreadApprovals: (
+      threadId?: ThreadId,
+    ) => Effect.Effect<{ approvals: ReadonlyArray<AgentApproval> }, AgentError>;
+    /** Every thread's `listThreadApprovals`, now and again after each approval change. */
+    readonly subscribeThreadApprovals: Stream.Stream<
+      { approvals: ReadonlyArray<AgentApproval> },
+      AgentError
+    >;
     readonly approve: (
       id: string,
       accountScope?: "thread" | "agent_project",
@@ -160,6 +175,8 @@ const make = Effect.gen(function* () {
   // Optional so workspaces built without the gateway (unit tests) still
   // approve other actions; an integration approval then fails clearly.
   const integrations = yield* Effect.serviceOption(Integrations.Integrations);
+  const approvalChanges = yield* ApprovalChanges.optional;
+  const notifyApprovals = approvalChanges.notify;
   const lock = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const uuid = (prefix: string) =>
@@ -276,10 +293,11 @@ const make = Effect.gen(function* () {
         now.pipe(
           Effect.flatMap(
             (at) =>
-              sql`UPDATE agent_approvals SET status = 'expired', decided_at = ${at}, decided_by = 'system' WHERE status = 'pending' AND requested_at < ${before}`,
+              sql`UPDATE agent_approvals SET status = 'expired', decided_at = ${at}, decided_by = 'system' WHERE status = 'pending' AND requested_at < ${before} RETURNING id`,
           ),
         ),
       ),
+      Effect.tap((expired) => (expired.length > 0 ? notifyApprovals : Effect.void)),
     );
   const getApproval = (id: string) =>
     Effect.gen(function* () {
@@ -326,6 +344,7 @@ const make = Effect.gen(function* () {
           if (actor) yield* logAction({ ...actor, agent }, "approval_requested", id);
         }),
       );
+      yield* notifyApprovals;
       return { approval: yield* getApproval(id) };
     }).pipe(Effect.mapError(wrap));
   const executeWork = (
@@ -411,8 +430,33 @@ const make = Effect.gen(function* () {
         ORDER BY c.updated_at DESC, c.id LIMIT 500`;
       return { commitments: yield* Effect.forEach(rows, (r) => getCommitment(r.id)) };
     }).pipe(Effect.mapError(wrap));
+  // Both the vault and the accounts kind carry the calling thread in payload.threadId.
+  const listThreadApprovals = (threadId?: ThreadId) =>
+    expireApprovals().pipe(
+      Effect.andThen(
+        sql`SELECT a.* FROM agent_approvals a JOIN orchestration_v2_projection_threads t ON t.thread_id = json_extract(a.action_json, '$.payload.threadId')
+          WHERE a.status = 'pending' AND a.agent_id IS NULL AND json_extract(a.action_json, '$.actionKind') = 'vault_use'
+            AND (${threadId ?? null} IS NULL OR t.thread_id = ${threadId ?? null})
+            AND t.deleted_at IS NULL AND t.archived_at IS NULL AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
+          ORDER BY a.requested_at, a.id LIMIT 200`,
+      ),
+      Effect.flatMap((rows) => Effect.forEach(rows, approvalFromRow)),
+      Effect.map((approvals) => ({ approvals })),
+      Effect.mapError(wrap),
+    );
+  const subscribeThreadApprovals = Stream.unwrap(
+    Effect.gen(function* () {
+      const changes = yield* approvalChanges.subscribe;
+      return Stream.concat(
+        Stream.fromEffect(listThreadApprovals()),
+        changes.pipe(Stream.mapEffect(() => listThreadApprovals())),
+      );
+    }),
+  );
   return AgentWorkspaceService.of({
     logAction,
+    listThreadApprovals,
+    subscribeThreadApprovals,
     requestApproval,
     startWork,
     listCommitments,
@@ -613,7 +657,10 @@ const make = Effect.gen(function* () {
             return { approval: yield* getApproval(id) };
           }),
         )
-        .pipe(Effect.mapError(wrap)),
+        .pipe(
+          Effect.tap(() => notifyApprovals),
+          Effect.mapError(wrap),
+        ),
     reject: (id) =>
       lock
         .withPermits(1)(
@@ -625,7 +672,10 @@ const make = Effect.gen(function* () {
             return { approval: yield* getApproval(id) };
           }),
         )
-        .pipe(Effect.mapError(wrap)),
+        .pipe(
+          Effect.tap(() => notifyApprovals),
+          Effect.mapError(wrap),
+        ),
     activity: (agentId) =>
       Effect.gen(function* () {
         const agent = yield* store.get(agentId);

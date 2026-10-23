@@ -559,6 +559,7 @@ export const WS_METHODS = {
   agentsRequestApproval: "agents.requestApproval",
   agentsApprove: "agents.approve",
   agentsReject: "agents.reject",
+  threadApprovalsSubscribe: "threadApprovals.subscribe",
   agentsStartWork: "agents.startWork",
   agentsActivity: "agents.activity",
   factsList: "facts.list",
@@ -2092,6 +2093,17 @@ const WsAgentsRejectRpc = Rpc.make(WS_METHODS.agentsReject, {
   success: AgentWorkspace.AgentApprovalResult,
   error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
 });
+/**
+ * Pending owner approvals raised by ordinary threads (no persistent agent),
+ * such as a vault fill or a CLI token exposure. Re-sent whole on every change;
+ * decide each through `agents.approve` / `agents.reject`.
+ */
+const WsThreadApprovalsSubscribeRpc = Rpc.make(WS_METHODS.threadApprovalsSubscribe, {
+  payload: Schema.Struct({}),
+  success: AgentWorkspace.AgentApprovalListResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+  stream: true,
+});
 const WsAgentsStartWorkRpc = Rpc.make(WS_METHODS.agentsStartWork, {
   payload: AgentWorkspace.AgentStartWorkInput,
   success: AgentWorkspace.AgentStartWorkResult,
@@ -2552,6 +2564,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAgentsRequestApprovalRpc,
   WsAgentsApproveRpc,
   WsAgentsRejectRpc,
+  WsThreadApprovalsSubscribeRpc,
   WsAgentsStartWorkRpc,
   WsAgentsActivityRpc,
   WsIntegrationsListRpc,

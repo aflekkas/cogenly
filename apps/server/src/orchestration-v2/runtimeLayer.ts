@@ -17,6 +17,7 @@ import * as ProjectHome from "../projectLabels/ProjectHome.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as WorkHandoff from "../work/WorkHandoffService.ts";
 import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
+import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
 import * as AgentMcpPolicy from "../agents/AgentMcpPolicy.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
@@ -350,9 +351,12 @@ const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
+// One signal shared by every writer of agent_approvals and both approval streams.
+const layerApprovalChanges = ApprovalChanges.layer;
 export const layerVaultProvided = Vault.layer.pipe(
   Layer.provide(ServerEnvironment.layerIdentity),
   Layer.provide(layerProjectFilesProvided),
+  Layer.provide(layerApprovalChanges),
 );
 const layerIntegrationsProvided = Integrations.layer.pipe(
   Layer.provide(IntegrationCredentials.layer.pipe(Layer.provide(layerVaultProvided))),
@@ -367,6 +371,7 @@ const layerAgentsProvided = Agents.layer.pipe(
       layerThreadManagementProvided,
       ProjectionStore.layer,
       layerEventSinkProvided,
+      layerApprovalChanges,
     ),
   ),
 );
@@ -402,6 +407,7 @@ const layerAccountAccessProvided = AccountAccess.layer.pipe(
       AgentStore.layer,
       layerThreadManagementProvided,
       layerProjectFilesProvided,
+      layerApprovalChanges,
     ).pipe(Layer.provideMerge(ServerEnvironment.layerIdentity)),
   ),
 );
@@ -432,6 +438,7 @@ const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
       layerAccountAccessProvided,
       layerScheduledTaskProvided,
       layerIntegrationsProvided,
+      layerApprovalChanges,
     ),
   ),
 );

@@ -118,6 +118,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.agentsRequestApproval]: "agents",
   [WS_METHODS.agentsApprove]: "agents",
   [WS_METHODS.agentsReject]: "agents",
+  [WS_METHODS.threadApprovalsSubscribe]: "agents",
   [WS_METHODS.agentsStartWork]: "agents",
   [WS_METHODS.agentsActivity]: "agents",
   [WS_METHODS.integrationsList]: "integrations",

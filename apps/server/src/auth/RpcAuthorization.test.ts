@@ -27,6 +27,7 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as RpcTest from "effect/rpc/RpcTest";
 
 import {
@@ -93,6 +94,7 @@ describe("RPC authorization scopes", () => {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
     for (const method of [
       WS_METHODS.agentsApprovalsList,
+      WS_METHODS.threadApprovalsSubscribe,
       WS_METHODS.agentsActivity,
       WS_METHODS.factsList,
       WS_METHODS.factsHistory,
@@ -596,6 +598,44 @@ it.effect("project folders do not let read-only clients move threads or change m
     expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.getThreadProjection)).toBe(
       AuthOrchestrationReadScope,
     );
+  }).pipe(Effect.scoped),
+);
+
+it.effect("lets a read-only client see a thread's pending approvals but not decide them", () =>
+  Effect.gen(function* () {
+    const tested = [WS_METHODS.threadApprovalsSubscribe, WS_METHODS.agentsApprove] as const;
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof tested)[number]> =>
+          !(tested as ReadonlyArray<string>).includes(tag),
+      ),
+    );
+    let decisions = 0;
+    const client = yield* RpcTest.makeClient(group).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          group.toLayerHandler(WS_METHODS.threadApprovalsSubscribe, () =>
+            Stream.make({ approvals: [] }),
+          ),
+          group.toLayerHandler(WS_METHODS.agentsApprove, () =>
+            Effect.sync(() => {
+              decisions += 1;
+            }).pipe(Effect.andThen(Effect.never)),
+          ),
+          RpcAuthorization.layer([AuthOrchestrationReadScope]),
+        ),
+      ),
+    );
+    expect(
+      yield* client[WS_METHODS.threadApprovalsSubscribe]({}).pipe(
+        Stream.take(1),
+        Stream.runCollect,
+      ),
+    ).toEqual([{ approvals: [] }]);
+    expect(
+      yield* client[WS_METHODS.agentsApprove]({ id: "approval:vault:test" }).pipe(Effect.flip),
+    ).toMatchObject({ requiredPermission: AuthOrchestrationOperateScope });
+    expect(decisions).toBe(0);
   }).pipe(Effect.scoped),
 );
 
