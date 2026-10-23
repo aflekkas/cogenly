@@ -2714,11 +2714,13 @@ const makeWsRpcHandlers = (
 type WsRpcs = RpcGroup.Rpcs<typeof ServerWsRpcGroup>;
 type WsRpcHandlersEffect = ReturnType<typeof makeWsRpcHandlers>;
 type WsRpcHandlers = Effect.Success<WsRpcHandlersEffect>;
-type WsRpcHandlerKeysA = Extract<keyof WsRpcHandlers, `p${string}` | `s${string}`>;
-/** Resolve in halves to stay within the RPC conditional type's instantiation budget. */
+type WsRpcHandlerKeysA = Extract<keyof WsRpcHandlers, `p${string}`>;
+type WsRpcHandlerKeysB = Extract<keyof WsRpcHandlers, `s${string}`>;
+/** Resolve in smaller groups to stay within the RPC conditional type's instantiation budget. */
 type WsRpcHandlerServices =
   | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysA>>
-  | RpcGroup.HandlersServices<WsRpcs, Omit<WsRpcHandlers, WsRpcHandlerKeysA>>;
+  | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysB>>
+  | RpcGroup.HandlersServices<WsRpcs, Omit<WsRpcHandlers, WsRpcHandlerKeysA | WsRpcHandlerKeysB>>;
 
 const layerWsRpc = (
   ...args: Parameters<typeof makeWsRpcHandlers>

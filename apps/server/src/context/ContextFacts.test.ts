@@ -78,8 +78,9 @@ describe("shared facts and scoped context", () => {
       );
       expect(aliases.map((n) => n.id).sort()).toEqual(["owner", "thread:evidence"]);
     }).pipe(
-      Effect.provide(NodeSqlite.layer({ filename: ":memory:" })),
-      Effect.provide(NodeServices.layer),
+      Effect.provide(
+        NodeSqlite.layer({ filename: ":memory:" }).pipe(Layer.provideMerge(NodeServices.layer)),
+      ),
     ),
   );
 

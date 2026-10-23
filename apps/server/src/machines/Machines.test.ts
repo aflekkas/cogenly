@@ -70,7 +70,6 @@ const startHttpObserver = (handler: NodeHttp.RequestListener) =>
       }),
   );
 
-
 describe("machines", () => {
   it("accepts only loopback sockets, with explicit Serve forwarding and no public proxy markers", () => {
     const config = { tailscaleServeEnabled: true };

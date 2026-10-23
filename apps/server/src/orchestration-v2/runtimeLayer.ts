@@ -393,17 +393,13 @@ const layerAccountAccessProvided = AccountAccess.layer.pipe(
       AgentStore.layer,
       layerThreadManagementProvided,
       layerProjectFilesProvided,
-      ServerEnvironment.layerIdentity,
-    ),
+    ).pipe(Layer.provideMerge(ServerEnvironment.layerIdentity)),
   ),
 );
 const layerCliCredentialsProvided = CliCredentials.layer.pipe(
   Layer.provide(
-    Layer.mergeAll(
-      layerAccountAccessProvided,
-      layerVaultProvided,
-      ProcessRunner.layer,
-      ServerEnvironment.layerIdentity,
+    Layer.mergeAll(layerAccountAccessProvided, layerVaultProvided, ProcessRunner.layer).pipe(
+      Layer.provideMerge(ServerEnvironment.layerIdentity),
     ),
   ),
 );
