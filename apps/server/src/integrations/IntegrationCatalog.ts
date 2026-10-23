@@ -121,6 +121,7 @@ export const resolveCatalogConnect = (
     readonly existingNames: ReadonlySet<string>;
     /** The origin the request reached; a public one becomes Google's callback origin. */
     readonly requestOrigin: string | undefined;
+    readonly fromAgent?: boolean | undefined;
   },
 ): CatalogResolution => {
   const entry = integrationCatalogEntry(request.catalogId);
@@ -138,7 +139,9 @@ export const resolveCatalogConnect = (
         message:
           'Pass accountLabel to name this Google account, e.g. "personal" or "work"; each Google account is its own integration.',
       };
-    const callbackOrigin = inputs.callbackOrigin ?? publicOrigin(context.requestOrigin);
+    const callbackOrigin = context.fromAgent
+      ? undefined
+      : (publicOrigin(context.requestOrigin) ?? inputs.callbackOrigin);
     return {
       _tag: "ready",
       signsIn: true,

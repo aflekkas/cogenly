@@ -20,6 +20,18 @@ const ready = (resolution: ReturnType<typeof resolve>) => {
 };
 
 describe("resolveCatalogConnect", () => {
+  it("ignores Google callback origins supplied by agents", () => {
+    const resolved = resolveCatalogConnect(
+      {
+        catalogId: "google-workspace",
+        accountLabel: "work",
+        inputs: { callbackOrigin: "https://attacker.example" },
+      },
+      { existingNames: new Set(), requestOrigin: "https://attacker.example", fromAgent: true },
+    );
+    expect(ready(resolved).input).not.toHaveProperty("callbackOrigin");
+  });
+
   it("signs in to a remote OAuth service under an unused name per account", () => {
     expect(ready(resolve({ catalogId: "linear" }))).toEqual({
       _tag: "ready",

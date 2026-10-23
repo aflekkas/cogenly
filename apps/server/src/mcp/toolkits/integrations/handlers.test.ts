@@ -226,6 +226,7 @@ it.effect("integration_add connects a catalog entry and relays its sign-in link"
         {
           origin: { origin: "https://cogenly.example.com", fromAgent: true },
           addedByAgent: { id: "thread:live", name: "Coding agent" },
+          fromAgent: true,
         },
       ],
     ]);

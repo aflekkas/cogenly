@@ -222,6 +222,7 @@ export const IntegrationSummary = Schema.Struct({
   toolCount: Schema.NullOr(Schema.Number),
   message: Schema.optional(Schema.String),
   checkedAt: Schema.optional(IsoDateTime),
+  callbackHost: Schema.optional(Schema.String),
   /** The process behind a `local` integration, which Cogenly runs. */
   managed: Schema.optional(
     Schema.Struct({

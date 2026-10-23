@@ -5,7 +5,6 @@ import {
   type Integration,
   type ProjectLabelId,
 } from "@t3tools/contracts";
-import { isLoopbackHost } from "@t3tools/shared/preview";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -187,6 +186,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
           .connectFromCatalog(catalogRequest({ ...input, catalogId: input.catalogId }), {
             origin: { origin: scope.httpOrigin, fromAgent: true },
             addedByAgent: yield* addedByAgent,
+            fromAgent: true,
           })
           .pipe(Effect.mapError(catalogFailure));
         // No link: its sign-in could not start, so ask again for the reason.
@@ -204,15 +204,8 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
             }),
         ),
       );
-      const request =
-        "preset" in decoded &&
-        decoded.callbackOrigin === undefined &&
-        scope.httpOrigin &&
-        !isLoopbackHost(new URL(scope.httpOrigin).hostname)
-          ? { ...decoded, callbackOrigin: scope.httpOrigin }
-          : decoded;
       const { integration } = yield* service
-        .create(request, { addedByAgent: yield* addedByAgent })
+        .create(decoded, { addedByAgent: yield* addedByAgent, fromAgent: true })
         .pipe(Effect.mapError(failure));
       return yield* withSignIn(integration, input.callbackOrigin);
     }),

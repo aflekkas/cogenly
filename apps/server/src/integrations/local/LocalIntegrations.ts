@@ -41,6 +41,7 @@ export class LocalIntegrations extends Context.Service<
   {
     readonly prepare: (
       input: GoogleWorkspaceAddInput,
+      source?: { readonly fromAgent?: boolean | undefined; readonly origin?: string | undefined },
     ) => Effect.Effect<IntegrationCreateInput, IntegrationError>;
     readonly start: (
       integration: Integration,
@@ -56,6 +57,7 @@ export class LocalIntegrations extends Context.Service<
     readonly status: (id: string) => Effect.Effect<Runner.LocalMcpStatus | undefined>;
     /** Whether the account's process holds a Google grant. */
     readonly signedIn: (id: string) => Effect.Effect<boolean, IntegrationError>;
+    readonly callbackHost: (integration: Integration) => Effect.Effect<string, IntegrationError>;
     readonly signInProvenance: (
       id: string,
     ) => Effect.Effect<Integration["provenance"], IntegrationError>;
@@ -117,7 +119,7 @@ const make = Effect.gen(function* () {
   const ownChanges = yield* PubSub.unbounded<void>();
   const changed = PubSub.publish(ownChanges, undefined).pipe(Effect.asVoid);
   const configuredOrigin = yield* Config.String("COGENLY_GOOGLE_CALLBACK_ORIGIN").pipe(
-    Config.withDefault(`http://localhost:${config.port}`),
+    Config.withDefault(""),
     Effect.orDie,
   );
   const environment = yield* Config.all({
@@ -226,6 +228,7 @@ const make = Effect.gen(function* () {
   const originFor = (integration: Integration) =>
     Effect.gen(function* () {
       return (
+        (configuredOrigin || undefined) ??
         activeOrigins.get(integration.id) ??
         (yield* readBrowserOrigin(integration.id)) ??
         integration.local!.callbackOrigin
@@ -387,11 +390,16 @@ const make = Effect.gen(function* () {
       return result;
     });
   return LocalIntegrations.of({
-    prepare: (input) =>
+    prepare: (input, source) =>
       Effect.gen(function* () {
-        const origin = yield* validOrigin(input.callbackOrigin ?? configuredOrigin);
+        const origin = yield* validOrigin(
+          configuredOrigin ||
+            (source?.fromAgent
+              ? `http://localhost:${config.port}`
+              : (source?.origin ?? input.callbackOrigin ?? `http://localhost:${config.port}`)),
+        );
         yield* client();
-        return googleWorkspaceInput(input, origin);
+        return googleWorkspaceInput({ ...input, callbackOrigin: origin }, origin);
       }),
     start,
     rpc,
@@ -419,6 +427,8 @@ const make = Effect.gen(function* () {
     status: (id) => runner.status(id).pipe(Effect.map((status) => status ?? failures.get(id))),
     signedIn,
     signInProvenance,
+    callbackHost: (integration) =>
+      originFor(integration).pipe(Effect.map((origin) => new URL(origin).host)),
     changes: Stream.merge(
       runner.changes.pipe(
         Stream.mapEffect((event) =>
@@ -457,11 +467,12 @@ const make = Effect.gen(function* () {
           const origin = yield* selectCallbackOrigin(
             {
               ...from,
+              callbackOrigin: undefined,
               origin: from?.fromAgent
-                ? from.origin
+                ? undefined
                 : (known ?? (publicConfigured ? configured : (from?.origin ?? configured))),
             },
-            known ?? (publicConfigured ? configured : undefined),
+            (configuredOrigin || undefined) ?? known ?? (publicConfigured ? configured : undefined),
           ).pipe(Effect.flatMap(validOrigin));
           const replaceCredentials = reauthenticate && (yield* hasCredentials(integration.id));
           activeOrigins.set(integration.id, origin);

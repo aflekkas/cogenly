@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { NodeCrypto, NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId, IntegrationName } from "@t3tools/contracts";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -268,6 +269,71 @@ describe("managed Google integrations", () => {
     15_000,
   );
 
+  it.live("ignores an agent's Google origin in both preset and full definitions", () => {
+    const specs: Array<Runner.LocalMcpSpec> = [];
+    return Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const first = yield* gateway.create(
+        {
+          preset: "google-workspace",
+          accountLabel: "work",
+          callbackOrigin: "https://attacker.example",
+        },
+        { fromAgent: true },
+      );
+      expect(first.integration.local?.callbackOrigin).not.toBe("https://attacker.example");
+      const next = yield* gateway.create(
+        {
+          ...first.integration,
+          name: IntegrationName.make("google-other"),
+          local: { ...first.integration.local!, callbackOrigin: "https://attacker.example" },
+        },
+        { fromAgent: true },
+      );
+      expect(next.integration.local?.callbackOrigin).not.toBe("https://attacker.example");
+      expect(
+        yield* gateway
+          .beginSignIn(first.integration.id, {
+            origin: "https://attacker.example",
+            callbackOrigin: "https://attacker.example",
+            fromAgent: true,
+          })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure" });
+    }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
+  });
+
+  it.live("uses the server's Google callback origin instead of an agent's input", () => {
+    const specs: Array<Runner.LocalMcpSpec> = [];
+    return Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const { integration } = yield* gateway.create(
+        {
+          preset: "google-workspace",
+          accountLabel: "work",
+          callbackOrigin: "https://attacker.example",
+        },
+        { fromAgent: true },
+      );
+      const link = yield* gateway.beginSignIn(integration.id, {
+        origin: "https://attacker.example",
+        callbackOrigin: "https://attacker.example",
+        fromAgent: true,
+      });
+      expect(link.redirectUri).toBe(`https://owner.example${GOOGLE_CALLBACK_PATH}`);
+      expect(specs[0]?.env.GOOGLE_OAUTH_REDIRECT_URI).toBe(link.redirectUri);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(testLayer(specs)),
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown({ COGENLY_GOOGLE_CALLBACK_ORIGIN: "https://owner.example" }),
+      ),
+    );
+  });
+
   it.live("remembers Google's successful browser origin privately across restarts", () => {
     const specs: Array<Runner.LocalMcpSpec> = [];
     return Effect.gen(function* () {
@@ -284,9 +350,7 @@ describe("managed Google integrations", () => {
         .pipe(Effect.result);
       expect(missing._tag).toBe("Failure");
       const link = yield* gateway.beginSignIn(integration.id, {
-        origin: "http://localhost:3000",
-        fromAgent: true,
-        callbackOrigin: "https://vps.example",
+        origin: "https://vps.example",
       });
       const auth = yield* local.authorize(
         new URL(link.authorizationUrl).searchParams.get("ticket")!,
@@ -420,13 +484,8 @@ describe("managed Google integrations", () => {
           });
         } else {
           expect(replies.at(-1)?.result).toMatchObject({
-            integration: { transport: "local", displayName: "Google", accountLabel: "personal" },
-            signIn: {
-              authorizationUrl: expect.stringContaining(
-                "https://cogenly.example.com/oauth/integrations/google/start?ticket=",
-              ),
-              redirectUri: `https://cogenly.example.com${GOOGLE_CALLBACK_PATH}`,
-            },
+            code: "invalid_request",
+            message: expect.stringContaining("Settings"),
           });
         }
       }).pipe(Effect.scoped, Effect.provide(testLayer([], missing, "json", false, runtimeMissing))),

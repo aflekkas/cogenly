@@ -1687,7 +1687,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.integrationsList]: () => integrations.list(),
       // The owner's own Settings writes approve the vault items their headers reference.
       [WS_METHODS.integrationsCreate]: (input) =>
-        integrations.create(input, { approveCredentials: true }),
+        integrations.create(input, { approveCredentials: true, ownerOrigin: requestOrigin }),
       [WS_METHODS.integrationsUpdate]: (input) =>
         integrations.update(input, { approveCredentials: true }),
       [WS_METHODS.integrationsDelete]: (input) => integrations.remove(input.id),

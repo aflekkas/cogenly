@@ -234,7 +234,8 @@ const make = Effect.gen(function* () {
                           ({ integration }) => integration.name,
                         ),
                   ),
-                  requestOrigin: scope.httpOrigin,
+                  requestOrigin: undefined,
+                  fromAgent: true,
                 });
           if (catalog?._tag === "needs") return yield* denied(catalog.message, "invalid_request");
           const payload =

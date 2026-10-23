@@ -477,6 +477,9 @@ function IntegrationAccountRow({
           }
         >
           {detail}
+          {integration.local
+            ? ` · Callback: ${summary.callbackHost ?? urlHost(integration.local.callbackOrigin)}`
+            : ""}
           {status.checkedAt ? ` · Checked ${formatRelativeTimeLabel(status.checkedAt)}` : ""}
           {integration.provenance?.addedByAgent
             ? ` · Added by ${integration.provenance.addedByAgent.name}`

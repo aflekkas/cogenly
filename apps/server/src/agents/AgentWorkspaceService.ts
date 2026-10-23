@@ -637,6 +637,7 @@ const make = Effect.gen(function* () {
                 yield* integrations.value
                   .create(action.payload, {
                     approveCredentials: true,
+                    fromAgent: true,
                     addedByAgent: { id: agent.id, name: agent.name },
                   })
                   .pipe(Effect.mapError((cause) => fail(cause.message)));

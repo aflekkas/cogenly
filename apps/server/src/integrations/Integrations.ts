@@ -263,6 +263,8 @@ interface CachedTools {
  */
 export interface IntegrationWriteOptions {
   readonly approveCredentials?: boolean;
+  readonly fromAgent?: boolean | undefined;
+  readonly ownerOrigin?: string | undefined;
   readonly addedByAgent?: { readonly id: string; readonly name: string } | undefined;
   readonly callerLabelId?: ProjectLabelId | null | undefined;
   readonly preserveScope?: boolean;
@@ -615,6 +617,9 @@ const make = (options: IntegrationsOptions = {}) =>
                 ...(message === undefined ? {} : { message }),
                 ...(current === undefined ? {} : { checkedAt: current.checkedAt as never }),
                 ...(managed === undefined ? {} : { managed: managed.process }),
+                ...(integration.transport === "local" && Option.isSome(local)
+                  ? { callbackHost: yield* local.value.callbackHost(integration) }
+                  : {}),
               } satisfies IntegrationSummary;
             }),
           ),
@@ -1206,10 +1211,13 @@ const make = (options: IntegrationsOptions = {}) =>
         ),
       create: (request, options) =>
         Effect.gen(function* () {
-          const input =
+          let input =
             "preset" in request
               ? Option.isSome(local)
-                ? yield* local.value.prepare(request)
+                ? yield* local.value.prepare(request, {
+                    fromAgent: options?.fromAgent,
+                    origin: options?.ownerOrigin,
+                  })
                 : yield* new IntegrationError({
                     operation: "connect Google",
                     reason: "upstream_unreachable",
@@ -1226,13 +1234,18 @@ const make = (options: IntegrationsOptions = {}) =>
           ) {
             return yield* new IntegrationError({ operation: "create", reason: "invalid_request" });
           }
-          // A full definition (e.g. an approved proposal) passes the same checks as the preset.
-          if (input.transport === "local" && input.local && Option.isSome(local))
-            yield* local.value.prepare({
-              preset: input.local.preset,
-              accountLabel: input.accountLabel?.trim() ?? "",
-              callbackOrigin: input.local.callbackOrigin,
-            });
+          // Definitions from MCP and approved proposals cannot supply a callback destination.
+          if (input.transport === "local" && input.local && Option.isSome(local)) {
+            const prepared = yield* local.value.prepare(
+              {
+                preset: input.local.preset,
+                accountLabel: input.accountLabel?.trim() ?? "",
+                callbackOrigin: input.local.callbackOrigin,
+              },
+              { fromAgent: options?.fromAgent, origin: options?.ownerOrigin },
+            );
+            input = { ...input, local: prepared.local };
+          }
           yield* validateUrl(input.url);
           yield* validateAuth(input.auth, "create");
           for (const template of Object.values(input.headers)) {
@@ -1781,6 +1794,7 @@ const make = (options: IntegrationsOptions = {}) =>
           const resolution = resolveCatalogConnect(request, {
             existingNames: new Set((yield* rows()).map((integration) => integration.name)),
             requestOrigin: options.origin.origin,
+            fromAgent: options.origin.fromAgent,
           });
           if (resolution._tag === "needs")
             return yield* new IntegrationError({
@@ -1788,7 +1802,11 @@ const make = (options: IntegrationsOptions = {}) =>
               reason: "invalid_request",
               cause: resolution.message,
             });
-          const { integration } = yield* service.create(resolution.input, options);
+          const { integration } = yield* service.create(resolution.input, {
+            ...options,
+            fromAgent: options.origin.fromAgent,
+            ownerOrigin: options.origin.fromAgent ? undefined : options.origin.origin,
+          });
           if (!resolution.signsIn) return { integration };
           const signIn = yield* service
             .beginSignIn(integration.id, {
