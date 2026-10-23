@@ -292,9 +292,13 @@ describe("managed Google integrations", () => {
         Local.LocalIntegrations,
       );
       yield* restarted.start(integration);
+      expect(
+        yield* restarted
+          .signInLink(integration, true, { origin: "http://localhost:3000", fromAgent: true })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
       const retry = yield* restarted.signInLink(integration, true, {
-        origin: "http://localhost:3000",
-        fromAgent: true,
+        origin: "https://vps.example",
       });
       expect(retry?.redirectUri).toBe(`https://vps.example${GOOGLE_CALLBACK_PATH}`);
       expect(specs.at(-1)?.env.GOOGLE_OAUTH_REDIRECT_URI).toBe(retry?.redirectUri);

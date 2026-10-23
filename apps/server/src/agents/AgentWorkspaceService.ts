@@ -635,7 +635,10 @@ const make = Effect.gen(function* () {
                   return yield* fail("Integrations are unavailable on this server.");
                 // The owner reviewed these headers, so their vault items are approved.
                 yield* integrations.value
-                  .create(action.payload, { approveCredentials: true })
+                  .create(action.payload, {
+                    approveCredentials: true,
+                    addedByAgent: { id: agent.id, name: agent.name },
+                  })
                   .pipe(Effect.mapError((cause) => fail(cause.message)));
                 break;
               }

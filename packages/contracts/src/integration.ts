@@ -83,9 +83,16 @@ const integrationFields = {
   auth: Schema.optional(IntegrationAuth),
 };
 
+export const IntegrationProvenance = Schema.Struct({
+  addedByAgent: Schema.optional(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  signedInAt: Schema.optional(IsoDateTime),
+  signedInViaAgent: Schema.optional(Schema.Boolean),
+});
+
 export const Integration = Schema.Struct({
   id: IntegrationId,
   ...integrationFields,
+  provenance: Schema.optional(IntegrationProvenance),
   /** Credential destination authorized by the owner; absent on legacy definitions. */
   credentialOrigin: Schema.optional(Schema.String),
   /**

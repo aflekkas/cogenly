@@ -1,5 +1,6 @@
 import {
   IntegrationError,
+  IntegrationProvenance,
   Integration,
   type GoogleWorkspaceAddInput,
   type IntegrationCreateInput,
@@ -10,6 +11,7 @@ import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -54,6 +56,9 @@ export class LocalIntegrations extends Context.Service<
     readonly status: (id: string) => Effect.Effect<Runner.LocalMcpStatus | undefined>;
     /** Whether the account's process holds a Google grant. */
     readonly signedIn: (id: string) => Effect.Effect<boolean, IntegrationError>;
+    readonly signInProvenance: (
+      id: string,
+    ) => Effect.Effect<Integration["provenance"], IntegrationError>;
     /** A capability link; explicit reauthentication replaces any stored grant. */
     readonly signInLink: (
       integration: Integration,
@@ -79,6 +84,10 @@ const decodeToken = Schema.decodeUnknownOption(
 const browserOriginJson = Schema.fromJsonString(Schema.String);
 const decodeBrowserOrigin = Schema.decodeUnknownEffect(browserOriginJson);
 const encodeBrowserOrigin = Schema.encodeEffect(browserOriginJson);
+const decodeSignInProvenance = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(IntegrationProvenance),
+);
+const encodeSignInProvenance = Schema.encodeEffect(Schema.fromJsonString(IntegrationProvenance));
 const AUTH_LIFETIME_MS = 10 * 60_000;
 const definitionKey = Schema.encodeSync(Schema.fromJsonString(Integration));
 const mapLocalError = (cause: Runner.LocalMcpError) =>
@@ -119,7 +128,7 @@ const make = Effect.gen(function* () {
   }).pipe(Effect.orDie);
   const tickets = new Map<
     string,
-    { readonly integration: Integration; readonly expires: number }
+    { readonly integration: Integration; readonly expires: number; readonly fromAgent: boolean }
   >();
   const states = new Map<
     string,
@@ -200,6 +209,12 @@ const make = Effect.gen(function* () {
       return { clientId: id.value, clientSecret: secret.value };
     });
   const browserOriginFile = (id: string) => path.join(directoryFor(id), "browser-origin.json");
+  const signInProvenance = (id: string) =>
+    Effect.gen(function* () {
+      const file = path.join(directoryFor(id), "sign-in.json");
+      if (!(yield* fs.exists(file))) return undefined;
+      return yield* fs.readFileString(file).pipe(Effect.flatMap(decodeSignInProvenance));
+    }).pipe(Effect.mapError(storageError));
   const activeOrigins = new Map<string, string>();
   const readBrowserOrigin = (id: string) =>
     Effect.gen(function* () {
@@ -403,6 +418,7 @@ const make = Effect.gen(function* () {
       ),
     status: (id) => runner.status(id).pipe(Effect.map((status) => status ?? failures.get(id))),
     signedIn,
+    signInProvenance,
     changes: Stream.merge(
       runner.changes.pipe(
         Stream.mapEffect((event) =>
@@ -424,6 +440,18 @@ const make = Effect.gen(function* () {
             return undefined;
           const previousOrigin = yield* originFor(integration);
           const known = yield* readBrowserOrigin(integration.id);
+          if (
+            from?.fromAgent &&
+            (known !== undefined ||
+              (yield* hasCredentials(integration.id)) ||
+              (yield* fs
+                .exists(`${credentialsFor(integration.id)}.previous`)
+                .pipe(Effect.mapError(storageError))))
+          )
+            return yield* new IntegrationError({
+              operation: "reauthorize Google from Settings",
+              reason: "approval_required",
+            });
           const configured = integration.local.callbackOrigin;
           const publicConfigured = !isLoopbackHost(new URL(configured).hostname);
           const origin = yield* selectCallbackOrigin(
@@ -467,7 +495,11 @@ const make = Effect.gen(function* () {
             if (entry.integration.id === integration.id) return link(ticket);
           if (tickets.size >= 1000) return undefined;
           const ticket = yield* crypto.randomUUIDv4().pipe(Effect.mapError(storageError));
-          tickets.set(ticket, { integration, expires: now + AUTH_LIFETIME_MS });
+          tickets.set(ticket, {
+            integration,
+            expires: now + AUTH_LIFETIME_MS,
+            fromAgent: from?.fromAgent === true,
+          });
           return link(ticket);
         }),
       ),
@@ -521,6 +553,20 @@ const make = Effect.gen(function* () {
           .pipe(Effect.mapError(mapLocalError));
         const connected = success && (yield* hasCredentials(entry.integration.id));
         if (connected) {
+          const initiated = [...tickets.values()].find(
+            (ticket) => ticket.integration.id === entry.integration.id,
+          );
+          const provenance = {
+            signedInAt: yield* DateTime.now.pipe(Effect.map(DateTime.formatIso)),
+            signedInViaAgent: initiated?.fromAgent === true,
+          };
+          yield* fs
+            .writeFileString(
+              path.join(directoryFor(entry.integration.id), "sign-in.json"),
+              yield* encodeSignInProvenance(provenance).pipe(Effect.mapError(storageError)),
+              { mode: 0o600 },
+            )
+            .pipe(Effect.mapError(storageError));
           const redirect = new URL(entry.url).searchParams.get("redirect_uri")!;
           yield* fs
             .writeFileString(

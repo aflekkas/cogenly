@@ -263,6 +263,7 @@ interface CachedTools {
  */
 export interface IntegrationWriteOptions {
   readonly approveCredentials?: boolean;
+  readonly addedByAgent?: { readonly id: string; readonly name: string } | undefined;
   readonly callerLabelId?: ProjectLabelId | null | undefined;
   readonly preserveScope?: boolean;
 }
@@ -460,6 +461,7 @@ const make = (options: IntegrationsOptions = {}) =>
         string,
         {
           readonly integrationId: IntegrationId;
+          readonly fromAgent: boolean;
           readonly url: string;
           readonly definition: string;
           readonly server: OAuth.OAuthServer;
@@ -597,8 +599,17 @@ const make = (options: IntegrationsOptions = {}) =>
               const message =
                 (managed?.status === "error" ? managed.process.message : undefined) ??
                 current?.message;
+              const localProvenance =
+                integration.transport === "local" && Option.isSome(local)
+                  ? yield* local.value.signInProvenance(integration.id)
+                  : undefined;
               return {
-                integration: redactIntegration(integration),
+                integration: redactIntegration({
+                  ...integration,
+                  ...(localProvenance === undefined
+                    ? {}
+                    : { provenance: { ...integration.provenance, ...localProvenance } }),
+                }),
                 status,
                 toolCount: status === "connected" && cached ? cached.result.tools.length : null,
                 ...(message === undefined ? {} : { message }),
@@ -636,6 +647,7 @@ const make = (options: IntegrationsOptions = {}) =>
       id: IntegrationId,
       update: (state: OAuthState | undefined) => OAuthState,
       browserOrigin?: string,
+      signIn?: { readonly signedInAt: string; readonly signedInViaAgent: boolean },
     ) =>
       Effect.gen(function* () {
         const current = yield* getById(id);
@@ -643,6 +655,7 @@ const make = (options: IntegrationsOptions = {}) =>
         yield* persist({
           ...current,
           oauthState: update(current.oauthState),
+          ...(signIn === undefined ? {} : { provenance: { ...current.provenance, ...signIn } }),
           ...(browserOrigin === undefined ? {} : { browserOrigin }),
         });
       }).pipe(sql.withTransaction, Effect.mapError(failure("sign in", "storage")));
@@ -1266,6 +1279,9 @@ const make = (options: IntegrationsOptions = {}) =>
             scope: input.scope,
             hint: input.hint,
             ...(accountLabel ? { accountLabel } : {}),
+            ...(options?.addedByAgent === undefined
+              ? {}
+              : { provenance: { addedByAgent: options.addedByAgent } }),
             ...(input.auth === undefined ? {} : { auth: input.auth }),
             createdAt: at,
             updatedAt: at,
@@ -1319,23 +1335,24 @@ const make = (options: IntegrationsOptions = {}) =>
                           ),
                   ).pipe(Effect.map(Object.fromEntries<string>)),
                 };
-          if (
-            options?.preserveCredentialDestination &&
-            integrationDestinationChanged(current, input)
-          ) {
-            return yield* new IntegrationError({ operation: "update", reason: "invalid_request" });
-          }
           const auth = input.auth === undefined ? current.auth : (input.auth ?? undefined);
           if (
             options?.holdStoredSecrets &&
             integrationDestinationChanged(current, input) &&
-            (headersKeepStoredSecrets(current, input.headers ?? current.headers) ||
+            (current.oauthState?.tokenItemId !== undefined ||
+              headersKeepStoredSecrets(current, input.headers ?? current.headers) ||
               credentialRefsIn(auth?.clientSecret ?? "").length > 0)
           ) {
             return yield* new IntegrationError({
               operation: "update",
               reason: "approval_required",
             });
+          }
+          if (
+            options?.preserveCredentialDestination &&
+            integrationDestinationChanged(current, input)
+          ) {
+            return yield* new IntegrationError({ operation: "update", reason: "invalid_request" });
           }
           if (input.url !== undefined) yield* validateUrl(input.url);
           yield* validateAuth(auth, "update");
@@ -1368,6 +1385,16 @@ const make = (options: IntegrationsOptions = {}) =>
             ...(accountLabel ? { accountLabel } : {}),
             ...(auth === undefined ? {} : { auth }),
             ...(keepSignIn && oauthState !== undefined ? { oauthState } : {}),
+            ...(current.provenance?.signedInAt === undefined &&
+            current.oauthState?.tokenItemId !== undefined
+              ? {
+                  provenance: {
+                    ...current.provenance,
+                    signedInAt: current.updatedAt,
+                    signedInViaAgent: false,
+                  },
+                }
+              : {}),
             updatedAt: yield* now,
             credentialOrigin,
             approvedCredentialItems,
@@ -1505,6 +1532,16 @@ const make = (options: IntegrationsOptions = {}) =>
       beginSignIn: (id, from) =>
         Effect.gen(function* () {
           const integration = yield* getById(id);
+          if (
+            from.fromAgent &&
+            (integration.provenance?.signedInAt !== undefined ||
+              integration.browserOrigin !== undefined ||
+              integration.oauthState?.tokenItemId !== undefined)
+          )
+            return yield* new IntegrationError({
+              operation: "reauthorize from Settings",
+              reason: "approval_required",
+            });
           if (!integration.enabled)
             return yield* new IntegrationError({ operation: "sign in", reason: "disabled" });
           // A managed account signs in through its own process, on its fixed callback origin.
@@ -1555,6 +1592,7 @@ const make = (options: IntegrationsOptions = {}) =>
             while (next.size >= MAX_PENDING_SIGN_INS) next.delete(next.keys().next().value!);
             return next.set(state, {
               integrationId: integration.id,
+              fromAgent: from.fromAgent === true,
               url: integration.url,
               definition: definitionKey(integration),
               server,
@@ -1697,6 +1735,7 @@ const make = (options: IntegrationsOptions = {}) =>
                   expiresAt: tokens.expiresAt,
                 }),
                 new URL(pending.redirectUri).origin,
+                { signedInAt: yield* now, signedInViaAgent: pending.fromAgent },
               ).pipe(
                 Effect.tapError(() =>
                   dropTokens({

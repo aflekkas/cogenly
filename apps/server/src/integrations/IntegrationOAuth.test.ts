@@ -335,6 +335,66 @@ const whoami = (name: string) =>
   });
 
 describe("Integration OAuth sign-in", () => {
+  it.effect.each(["auth", "url", "client"] as const)(
+    "requires owner approval before an agent drops a grant through %s",
+    (field) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const integration = yield* addLinear(mock, "linear");
+          yield* signIn(integration.id, "owner");
+          const service = yield* Integrations.Integrations;
+          const change =
+            field === "auth"
+              ? { auth: null }
+              : field === "url"
+                ? { url: `${mock.base}/changed` }
+                : { auth: { type: "oauth" as const, clientId: "attacker" } };
+          const result = yield* service
+            .update({ id: integration.id, ...change }, { holdStoredSecrets: true })
+            .pipe(Effect.result);
+          expect(result).toMatchObject({
+            _tag: "Failure",
+            failure: { reason: "approval_required" },
+          });
+          expect(yield* whoami("linear")).toContain("account=owner");
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect(
+    "only the owner can reauthorize an account, and sign-in records agent-link provenance",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const integration = yield* addLinear(mock, "linear");
+          const service = yield* Integrations.Integrations;
+          const first = yield* service.beginSignIn(integration.id, {
+            origin: COGENLY_ORIGIN,
+            fromAgent: true,
+          });
+          yield* service.completeSignIn(yield* consent(first.authorizationUrl, "owner"));
+          expect((yield* statusOf(integration.id))?.integration.provenance?.signedInViaAgent).toBe(
+            true,
+          );
+          mock.revoked = true;
+          mock.accessTokens.clear();
+          yield* whoami("linear").pipe(Effect.result);
+          expect(
+            yield* service
+              .beginSignIn(integration.id, { origin: COGENLY_ORIGIN, fromAgent: true })
+              .pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+          expect(
+            yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN }),
+          ).toHaveProperty("authorizationUrl");
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
   it.effect("retains each account's browser origin across service restarts", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -352,10 +412,12 @@ describe("Integration OAuth sign-in", () => {
           ),
           Integrations.Integrations,
         );
-        const link = yield* restarted.beginSignIn(integration.id, {
-          origin: "http://localhost:3000",
-          fromAgent: true,
-        });
+        expect(
+          yield* restarted
+            .beginSignIn(integration.id, { origin: "http://localhost:3000", fromAgent: true })
+            .pipe(Effect.result),
+        ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+        const link = yield* restarted.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
         expect(link.redirectUri).toBe(`${COGENLY_ORIGIN}${CALLBACK_PATH}`);
         expect(JSON.stringify(yield* restarted.list())).not.toContain("browserOrigin");
         const other = yield* addLinear(mock, "other");

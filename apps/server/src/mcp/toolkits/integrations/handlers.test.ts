@@ -67,7 +67,7 @@ const listTools = Effect.fn("test.listIntegrationTools")(function* (
           return { name, tools: [] };
         }),
     }),
-    Layer.mock(AgentStore.AgentStore)({}),
+    Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
   );
   const toolkit = yield* IntegrationsToolkit.pipe(
     Effect.provide(Access.HandlersLayer.layer(Handlers.layer).pipe(Layer.provide(dependencies))),
@@ -133,7 +133,7 @@ const addIntegration = Effect.fn("test.addIntegration")(function* (
           };
         }),
     }),
-    Layer.mock(AgentStore.AgentStore)({}),
+    Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
   );
   const toolkit = yield* IntegrationsToolkit.pipe(
     Effect.provide(Access.HandlersLayer.layer(Handlers.layer).pipe(Layer.provide(dependencies))),
@@ -182,7 +182,7 @@ const addFromCatalog = Effect.fn("test.addFromCatalog")(function* (
         return connect(...args);
       },
     }),
-    Layer.mock(AgentStore.AgentStore)({}),
+    Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
   );
   const toolkit = yield* IntegrationsToolkit.pipe(
     Effect.provide(Access.HandlersLayer.layer(Handlers.layer).pipe(Layer.provide(dependencies))),
@@ -223,7 +223,10 @@ it.effect("integration_add connects a catalog entry and relays its sign-in link"
     expect(requests).toEqual([
       [
         { catalogId: "notion", accountLabel: "work", inputs: { region: "default" } },
-        { origin: { origin: "https://cogenly.example.com", fromAgent: true } },
+        {
+          origin: { origin: "https://cogenly.example.com", fromAgent: true },
+          addedByAgent: { id: "thread:live", name: "Coding agent" },
+        },
       ],
     ]);
   }),

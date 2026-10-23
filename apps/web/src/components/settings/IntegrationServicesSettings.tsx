@@ -478,6 +478,12 @@ function IntegrationAccountRow({
         >
           {detail}
           {status.checkedAt ? ` · Checked ${formatRelativeTimeLabel(status.checkedAt)}` : ""}
+          {integration.provenance?.addedByAgent
+            ? ` · Added by ${integration.provenance.addedByAgent.name}`
+            : ""}
+          {integration.provenance?.signedInAt
+            ? ` · Signed in ${integration.provenance.signedInViaAgent ? "from an agent link" : "from Settings"}`
+            : ""}
         </div>
       </div>
       <div ref={statusNode} className="flex w-27 shrink-0 justify-end">

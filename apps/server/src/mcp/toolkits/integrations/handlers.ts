@@ -27,7 +27,7 @@ const AGENT_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
   approval_required:
     "This integration change needs owner approval: it widens access, or moves stored credentials to a new destination. Ask the owner to make it in Settings → Integrations.",
   sign_in_required:
-    "This integration needs the user to sign in (again). Call integration_update with just its name to get a sign-in link, and give it to the user to open in their browser.",
+    "This integration needs the user to sign in (again). The owner must reconnect this account from Settings → Integrations. Agents can obtain links only for accounts that have never signed in.",
   client_id_required:
     "This server does not register clients automatically. The user must create an OAuth app with the provider, store its client secret in the vault, and set auth.clientId and auth.clientSecret ({{credential:<item>.<field>}}), e.g. in Settings → Integrations.",
   credential_unresolved:
@@ -110,6 +110,15 @@ const byName = (name: string) =>
  * managed local account) and has no usable grant yet. A remote link returns
  * to the origin this MCP request reached; a local one to its callback origin.
  */
+const addedByAgent = Effect.gen(function* () {
+  const scope = yield* Invocation.McpInvocationContext;
+  if (scope.thread === undefined)
+    return { id: scope.requestNamespace, name: scope.client?.label ?? "MCP agent" };
+  const agents = yield* AgentStore.AgentStore;
+  const agent = yield* agents.forThread(scope.thread.threadId).pipe(Effect.mapError(failure));
+  return { id: agent?.id ?? scope.thread.threadId, name: agent?.name ?? "Coding agent" };
+});
+
 const withSignIn = (integration: Integration, callbackOrigin?: string) =>
   Effect.gen(function* () {
     if (integration.auth?.type !== "oauth" && integration.transport !== "local")
@@ -124,7 +133,8 @@ const withSignIn = (integration: Integration, callbackOrigin?: string) =>
           reason: "local_runtime_missing",
         }),
       );
-    if (summary?.status !== "needs_sign_in") return { integration };
+    if (summary?.status !== "needs_sign_in" || integration.provenance?.signedInAt !== undefined)
+      return { integration };
     const scope = yield* Invocation.McpInvocationContext;
     const signIn = yield* service
       .beginSignIn(integration.id, { origin: scope.httpOrigin, fromAgent: true, callbackOrigin })
@@ -176,6 +186,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
         const connected = yield* service
           .connectFromCatalog(catalogRequest({ ...input, catalogId: input.catalogId }), {
             origin: { origin: scope.httpOrigin, fromAgent: true },
+            addedByAgent: yield* addedByAgent,
           })
           .pipe(Effect.mapError(catalogFailure));
         // No link: its sign-in could not start, so ask again for the reason.
@@ -200,7 +211,9 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
         !isLoopbackHost(new URL(scope.httpOrigin).hostname)
           ? { ...decoded, callbackOrigin: scope.httpOrigin }
           : decoded;
-      const { integration } = yield* service.create(request).pipe(Effect.mapError(failure));
+      const { integration } = yield* service
+        .create(request, { addedByAgent: yield* addedByAgent })
+        .pipe(Effect.mapError(failure));
       return yield* withSignIn(integration, input.callbackOrigin);
     }),
   ),

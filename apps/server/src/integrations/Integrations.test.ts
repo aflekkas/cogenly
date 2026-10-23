@@ -684,6 +684,21 @@ describe("Integrations gateway", () => {
       ).pipe(Effect.provide(layerWith())),
   );
 
+  it.effect("records agent provenance without accepting it from the integration payload", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const { integration } = yield* service.create(
+        { ...createInput("https://example.com/mcp"), headers: {} },
+        { addedByAgent: { id: "agent:test", name: "Research" } },
+      );
+      expect(integration.provenance?.addedByAgent).toEqual({ id: "agent:test", name: "Research" });
+      expect((yield* service.list()).integrations[0]?.integration.provenance).toEqual(
+        integration.provenance,
+      );
+    }).pipe(Effect.provide(layerWith())),
+  );
+
   it.effect("gives additional unlabeled accounts a distinguishing default label", () =>
     Effect.gen(function* () {
       yield* runMigrations();
