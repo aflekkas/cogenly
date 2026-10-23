@@ -238,6 +238,46 @@ describe("Integrations gateway", () => {
       ),
   );
 
+  it.effect("an agent cannot move a stored literal header to a new destination", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const original = yield* fakeUpstream;
+        const other = yield* fakeUpstream;
+        const service = yield* Integrations.Integrations;
+        const { integration } = yield* service.create(
+          { ...createInput(original.url), headers: { authorization: "Bearer LITERAL-TOKEN" } },
+          { approveCredentials: true },
+        );
+        const hold = { holdStoredSecrets: true };
+        for (const change of [
+          { url: other.url },
+          { url: other.url, headers: { authorization: Integrations.HEADER_MASK } },
+          { headers: { authorization: Integrations.HEADER_MASK, host: "other.test" } },
+        ]) {
+          const result = yield* service
+            .update({ id: integration.id, ...change }, hold)
+            .pipe(Effect.flip);
+          expect(result.reason).toBe("approval_required");
+        }
+        yield* service.callTool(integration.name, "echo", {}, null);
+        expect(other.seen).toHaveLength(0);
+        expect(original.seen[0]?.authorization).toBe("Bearer LITERAL-TOKEN");
+
+        // A token the agent supplies itself may go wherever it points.
+        yield* service.update(
+          { id: integration.id, url: other.url, headers: { authorization: "Bearer AGENT-OWN" } },
+          hold,
+        );
+        yield* service.callTool(integration.name, "echo", {}, null);
+        expect(other.seen.map((request) => request.authorization)).not.toContain(
+          "Bearer LITERAL-TOKEN",
+        );
+        expect(other.seen[0]?.authorization).toBe("Bearer AGENT-OWN");
+      }).pipe(Effect.provide(layerWith())),
+    ),
+  );
+
   it.effect("never forwards custom secret headers to a redirect destination", () =>
     Effect.scoped(
       Effect.gen(function* () {

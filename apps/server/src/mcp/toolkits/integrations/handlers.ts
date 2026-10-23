@@ -24,7 +24,7 @@ const failure = (cause: unknown): OrchestratorMcpFailure =>
             : "orchestration_error",
         message:
           cause.reason === "approval_required"
-            ? "Widening integration access needs owner approval. Ask the owner to approve the scope in Settings → Integrations."
+            ? "This integration change needs owner approval: it widens access, or moves stored credentials to a new destination. Ask the owner to make it in Settings → Integrations."
             : cause.reason === "credential_unresolved"
               ? "An integration credential could not be resolved. Ask the owner to check the vault item named in its headers."
               : cause.reason === "credential_not_allowed"
@@ -140,6 +140,9 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
           },
           {
             preserveCredentialDestination: agent !== null,
+            // An agent never moves a stored token or vault credential to a new destination;
+            // the owner makes that change in Settings.
+            holdStoredSecrets: true,
             callerLabelId: label,
             preserveScope: true,
           },
