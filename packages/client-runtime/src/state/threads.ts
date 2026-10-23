@@ -42,6 +42,7 @@ import {
   EMPTY_THREAD_HISTORY_META,
   isActiveHistoryRequestCursor,
   mergeOlderHistoryIntoProjection,
+  shouldInstallTrimmedThreadWindow,
   type ThreadHistoryMeta,
 } from "./threadHistoryMerge.ts";
 import * as ThreadSnapshotLoader from "./threadSnapshotHttp.ts";
@@ -107,6 +108,12 @@ function snapshotToPersist(
   return { snapshotSequence, projection };
 }
 
+function threadHasActiveRun(thread: OrchestrationV2ThreadProjection): boolean {
+  return thread.runs.some(
+    (run) => run.status === "preparing" || run.status === "starting" || run.status === "running",
+  );
+}
+
 function shouldPersistThread(
   thread: OrchestrationV2ThreadProjection,
   history: ThreadHistoryMeta,
@@ -116,9 +123,7 @@ function shouldPersistThread(
   if (history.expanded) {
     return false;
   }
-  return !thread.runs.some(
-    (run) => run.status === "preparing" || run.status === "starting" || run.status === "running",
-  );
+  return !threadHasActiveRun(thread);
 }
 
 interface ThreadResumeSnapshot {
@@ -748,11 +753,67 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     );
   });
 
+  const trimToRecent = Effect.fn("EnvironmentThreadState.trimToRecent")(function* () {
+    const noop = { _tag: "noop" } satisfies ThreadHistoryController.ThreadHistoryLoadEarlierResult;
+    const current = yield* SubscriptionRef.get(state);
+    // Without paging, dropped rows could never come back.
+    if (
+      !canLoadHistory ||
+      current.status === "deleted" ||
+      Option.isNone(current.data) ||
+      current.history.loading ||
+      threadHasActiveRun(current.data.value)
+    ) {
+      return noop;
+    }
+    const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+    if (Option.isNone(prepared)) return noop;
+    // The server's bounded snapshot is the same recent window a cold open gets.
+    const result = yield* snapshotLoader.load(prepared.value, threadId);
+    if (result._tag !== "present" || result.history === undefined) return noop;
+    const history = result.history;
+    const snapshot = result.snapshot;
+    return yield* applyLock.withPermits(1)(
+      Effect.gen(function* () {
+        const latest = yield* SubscriptionRef.get(state);
+        if (
+          latest.status === "deleted" ||
+          Option.isNone(latest.data) ||
+          latest.history.loading ||
+          !shouldInstallTrimmedThreadWindow({
+            appliedSequence: yield* SubscriptionRef.get(lastSequence),
+            snapshotSequence: snapshot.snapshotSequence,
+            currentRowCount: latest.data.value.visibleTurnItems.length,
+            nextRowCount: snapshot.projection.visibleTurnItems.length,
+          })
+        ) {
+          return noop;
+        }
+        // Socket events at or below this sequence are already in the snapshot
+        // and are skipped by applyEventsLocked.
+        yield* SubscriptionRef.set(lastSequence, snapshot.snapshotSequence);
+        yield* setThread(snapshot.projection, {
+          history: {
+            historyCursor: history.historyCursor,
+            hasMoreHistory: history.hasMoreHistory,
+            loading: false,
+            error: null,
+            expanded: false,
+            latestLocalTurnOrdinal: history.latestLocalTurnOrdinal ?? null,
+          },
+        });
+        yield* remember;
+        return { _tag: "loaded" } satisfies ThreadHistoryController.ThreadHistoryLoadEarlierResult;
+      }),
+    );
+  });
+
   if (Option.isSome(historyController)) {
     const scope = yield* Scope.Scope;
     const registration = yield* historyController.value.register(environmentId, threadId, {
       loadEarlier: (throughEntryId) =>
         loadEarlier(throughEntryId).pipe(Effect.forkIn(scope), Effect.flatMap(Fiber.join)),
+      trimToRecent: () => trimToRecent().pipe(Effect.forkIn(scope), Effect.flatMap(Fiber.join)),
     });
     yield* Effect.addFinalizer(() => historyController.value.unregister(registration));
   }

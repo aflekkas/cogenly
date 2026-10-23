@@ -407,10 +407,11 @@ export function useHeroHeadlineMotion(
         return;
       }
       // One line holds the greeting and its tail at the heading's own size.
-      const line = `${greeting.textContent ?? ""}${
-        suffix.querySelector(SUFFIX_TEXT_SELECTOR)?.textContent ?? ""
-      }`;
+      const suffixText = suffix.querySelector(SUFFIX_TEXT_SELECTOR);
+      const line = `${greeting.textContent ?? ""}${suffixText?.textContent ?? ""}`;
       if (measure.textContent !== line) measure.textContent = line;
+      // The tail's folder icon is not text: its width and gap (HERO_INLINE_ICON_STYLE).
+      measure.style.paddingInlineEnd = suffixText?.querySelector("svg") ? "1.06em" : "";
       const hasTail = (suffix.querySelector(SUFFIX_TEXT_SELECTOR)?.textContent ?? "") !== "";
       const stacked = hasTail && measure.offsetWidth > heading.clientWidth;
       const wasStacked = heading.hasAttribute(STACKED_ATTRIBUTE);

@@ -6,6 +6,7 @@ import {
   type RunId,
   OrchestratorMcpFailure,
   type OrchestrationV2Command,
+  UsageLimitHandoffError,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -26,6 +27,7 @@ import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ScheduledTasks from "../../../scheduledTasks/ScheduledTaskService.ts";
 import { queuedRunsInDeliveryOrder } from "../../../orchestration-v2/QueuedRunOrder.ts";
 import { limitAutoResumeUpdate } from "../../../orchestration-v2/UsageLimitRecoveryWorker.ts";
+import * as UsageLimitHandoff from "../../../orchestration-v2/UsageLimitHandoff.ts";
 import { ThreadToolkit } from "./tools.ts";
 
 function queueEntry(
@@ -43,6 +45,12 @@ function queueEntry(
     truncated: characters.length > limit,
   };
 }
+const limitHandoffFailure = (error: UsageLimitHandoffError) =>
+  new OrchestratorMcpFailure({
+    code: error.reason === "dispatch-failed" ? "orchestration_error" : "invalid_request",
+    message: error.message,
+  });
+
 const dispatch = Effect.fn("mcp.dispatchThreadCommand")(function* (
   threadId: ThreadId | undefined,
   command: (common: { commandId: CommandId; threadId: ThreadId }) => OrchestrationV2Command,
@@ -205,6 +213,43 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         })
         .pipe(Effect.mapError(dispatchFailure));
       return { sequence: result.sequence };
+    }),
+  ),
+  t3_thread_limit_handoff_options: McpToolAccess.reads((input) =>
+    Effect.gen(function* () {
+      const { shell } = yield* readThread(input.threadId);
+      const handoff = yield* UsageLimitHandoff.UsageLimitHandoffService;
+      const recommendation = yield* handoff
+        .recommend(shell.id)
+        .pipe(Effect.mapError(limitHandoffFailure));
+      return { recommendation };
+    }),
+  ),
+  t3_thread_limit_handoff: writesThread((input) =>
+    Effect.gen(function* () {
+      const { shell } = yield* readThread(input.threadId);
+      if (shell.latestRunId === null) {
+        return yield* limitHandoffFailure(
+          new UsageLimitHandoffError({ threadId: shell.id, reason: "not-limited" }),
+        );
+      }
+      const handoff = yield* UsageLimitHandoff.UsageLimitHandoffService;
+      const result = yield* handoff
+        .accept({
+          threadId: shell.id,
+          runId: shell.latestRunId,
+          ...(input.providerInstanceId === undefined
+            ? {}
+            : { instanceId: input.providerInstanceId }),
+          ...(input.model === undefined ? {} : { model: input.model }),
+          createdBy: "agent",
+          creationSource: "mcp",
+        })
+        .pipe(Effect.mapError(limitHandoffFailure));
+      return {
+        ...result,
+        receipt: `Continuing on ${result.modelSelection.instanceId} (${result.modelSelection.model})`,
+      };
     }),
   ),
   t3_pending_request_list: McpToolAccess.reads((input) =>

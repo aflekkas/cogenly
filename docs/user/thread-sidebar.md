@@ -316,7 +316,10 @@ the project there or in the composer's project control, and the task moves to th
 project's most recently used repository, or to the project's folder when it has none.
 The repository menu lists only the project's own repositories (with **No project**,
 only repositories in no project); **No repository (project folder)** runs the task in
-the project's own folder instead.
+the project's own folder instead. Under **On GitHub** it also lists the project's GitHub
+repositories that aren't in the project yet: pick one to clone it in. A clone that fails or
+is cancelled adds nothing, and you can retry it from the same row. **Manage repositories…**
+opens the project's page, where you can remove a repository from the project.
 
 Manage projects in **Settings → Projects** (or **Open projects** in the command palette,
 or `mod+alt+4`). It shows every project as a card; open one for its page with its

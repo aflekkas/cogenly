@@ -14,6 +14,11 @@ export type ThreadHistoryLoadEarlierResult =
 
 export type ThreadHistoryHandler = {
   readonly loadEarlier: (throughEntryId?: string) => Effect.Effect<ThreadHistoryLoadEarlierResult>;
+  /**
+   * Drop older timeline rows from client state by reinstalling the server's
+   * recent window. Older history pages back in through `loadEarlier`.
+   */
+  readonly trimToRecent: () => Effect.Effect<ThreadHistoryLoadEarlierResult>;
 };
 
 /**
@@ -43,6 +48,10 @@ export class ThreadHistoryController extends Context.Service<
       environmentId: EnvironmentId,
       threadId: ThreadId,
       throughEntryId?: string,
+    ) => Effect.Effect<ThreadHistoryLoadEarlierResult>;
+    readonly trimToRecent: (
+      environmentId: EnvironmentId,
+      threadId: ThreadId,
     ) => Effect.Effect<ThreadHistoryLoadEarlierResult>;
   }
 >()("@t3tools/client-runtime/state/threadHistoryController") {}
@@ -87,6 +96,15 @@ export const layer: Layer.Layer<ThreadHistoryController> = Layer.effect(
               return Effect.succeed({ _tag: "noop" } satisfies ThreadHistoryLoadEarlierResult);
             }
             return handler.loadEarlier(throughEntryId);
+          }),
+        ),
+      trimToRecent: (environmentId, threadId) =>
+        Ref.get(handlers).pipe(
+          Effect.flatMap((current) => {
+            const handler = current.get(threadKey({ environmentId, threadId }));
+            return handler === undefined
+              ? Effect.succeed({ _tag: "noop" } satisfies ThreadHistoryLoadEarlierResult)
+              : handler.trimToRecent();
           }),
         ),
     });

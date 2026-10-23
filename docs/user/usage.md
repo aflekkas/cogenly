@@ -36,6 +36,20 @@ anything. The command is offered only for providers that appear under **Usage**.
 API-key accounts may not report subscription limits. This also applies to Claude connections
 using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 
+## Continue on another account when a limit hits
+
+When a turn stops on a usage limit and another provider account still has room, the notice above
+the composer offers **Continue on** that account. Cogenly suggests a second account of the same
+provider and model first, then another signed-in provider, preferring accounts with known headroom.
+One click switches the thread, hands it the conversation, and re-runs your last request, so there
+is nothing to retype. A resume scheduled for the reset is cancelled so the turn does not run twice.
+The arrow beside it lists the other accounts with how much each has left, and lets you stop
+suggesting for this limit.
+
+Agents see the same headroom: `orchestrator_capabilities` reports each account's remaining usage,
+so you can ask an agent to delegate to the account with room. An agent can also continue a stopped
+thread on another account when you ask it to.
+
 ## Connect a CLIProxyAPI hub
 
 To see pooled accounts, open **Settings → Providers → Usage providers → Add hub**. Choose the

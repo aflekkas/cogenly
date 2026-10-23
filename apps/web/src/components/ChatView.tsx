@@ -1,6 +1,7 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
+import { useUsageLimitHandoff } from "./chat/UsageLimitHandoffActions";
 import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveDraftHeroState,
@@ -103,12 +104,16 @@ import {
   presentPendingBackgroundWork,
   presentProviderGoal,
 } from "@t3tools/client-runtime/state/thread-execution";
-import { threadSupportsProviderHandoff } from "@t3tools/client-runtime/state/thread-workflows";
+import {
+  activeRunRefusesSteering,
+  threadSupportsProviderHandoff,
+} from "@t3tools/client-runtime/state/thread-workflows";
 import { resolvePendingHandoff } from "@t3tools/client-runtime/handoff";
 import { HandoffRow } from "./chat/V2LifecycleRow";
 import {
   codexFeedbackMessage,
   parseCodexFeedbackCommand,
+  shouldRequestThreadHistoryTrim,
   shouldShowLoadEarlierControl,
   submitCodexFeedback,
   type CodexFeedbackSubmission,
@@ -585,6 +590,8 @@ const EMPTY_FEEDBACK_SUBMISSIONS: ReadonlyArray<CodexFeedbackSubmission> = [];
 // (unread flips on run completions, which bypass the throttle), so one
 // watermark per interval is plenty.
 const VISIT_DISPATCH_THROTTLE_MS = 10_000;
+// How long the reader rests at the live end before older rows are shed.
+const THREAD_HISTORY_TRIM_IDLE_MS = 3_000;
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 /** Whether the open thread shows its Woke banner: woken after its last visit. */
@@ -1171,6 +1178,10 @@ export default function ChatView(props: ChatViewProps) {
     label: "load earlier thread history",
     reportFailure: false,
   });
+  const trimThreadHistory = useAtomCommand(threadEnvironment.trimHistory, {
+    label: "trim thread history",
+    reportFailure: false,
+  });
   const respondToThreadApproval = useOrchestrationCommand(threadEnvironment.respondToApproval, {
     reportFailure: false,
   });
@@ -1508,6 +1519,10 @@ export default function ChatView(props: ChatViewProps) {
   // composer never exposes rows that its expansion will cover.
   const [composerTimelineInset, setComposerTimelineInset] = useState(0);
   const composerTimelineInsetRef = useRef(0);
+  // Height of the panels stacked above the composer, and whether its last
+  // change should bring the timeline's end back into view.
+  const composerStackHeightRef = useRef<number | null>(null);
+  const pinTimelineEndAfterInsetRef = useRef(false);
   // False while a status bar stands in for the composer (a native subagent).
   const composerMountedRef = useRef(true);
   const [scrollToEndClearance, setScrollToEndClearance] = useState(0);
@@ -5033,10 +5048,6 @@ export default function ChatView(props: ChatViewProps) {
     const nextHeight = Math.ceil(height);
     if (nextHeight <= 0) return;
     const nextInset = nextHeight;
-    if (composerTimelineInsetRef.current !== nextInset) {
-      composerTimelineInsetRef.current = nextInset;
-      setComposerTimelineInset(nextInset);
-    }
     // A subagent thread's bar stands in for the composer and has no main
     // surface; its host is the edge then, or the stale cover from the last
     // composer would clip the timeline above the bar.
@@ -5044,6 +5055,33 @@ export default function ChatView(props: ChatViewProps) {
       composerOverlayElement?.querySelector<HTMLElement>(
         '[data-chat-composer-main-surface="true"]',
       ) ?? composerOverlayElement?.querySelector<HTMLElement>('[data-slot="composer-host"]');
+    if (composerTimelineInsetRef.current !== nextInset) {
+      // The panels stacked above the composer grew or shrank while the
+      // timeline sat at its end: keep the end in view above them. The list
+      // still holds the old inset here, so "at end" is read before the change.
+      // Only the stack counts; the composer's own growth keeps rows still.
+      const stackHeight =
+        composerOverlayElement && mainSurface
+          ? Math.round(
+              mainSurface.getBoundingClientRect().top -
+                composerOverlayElement.getBoundingClientRect().top,
+            )
+          : null;
+      const lastStackHeight = composerStackHeightRef.current;
+      composerStackHeightRef.current = stackHeight;
+      if (
+        stackHeight !== null &&
+        lastStackHeight !== null &&
+        stackHeight !== lastStackHeight &&
+        composerTimelineInsetRef.current > 0 &&
+        cancelSendGlideRef.current === null &&
+        isTimelineAtLogicalEnd()
+      ) {
+        pinTimelineEndAfterInsetRef.current = true;
+      }
+      composerTimelineInsetRef.current = nextInset;
+      setComposerTimelineInset(nextInset);
+    }
     // The backdrop starts at the composer's top edge and runs to the window
     // edge, so the timeline never shows below or beside the composer. The
     // timeline's bottom edge fade ends at that same edge (--chat-composer-cover)
@@ -5082,6 +5120,21 @@ export default function ChatView(props: ChatViewProps) {
     setScrollToEndClearance(clearance);
   };
   const publishComposerOverlayHeightStable = useStableCallback(publishComposerOverlayHeight);
+  // The footer already holds the new inset here. The list may size its content
+  // a frame later, so the end is pinned again then; both are plain scroll
+  // writes, so a stack that eases open is followed frame by frame.
+  useLayoutEffect(() => {
+    if (!pinTimelineEndAfterInsetRef.current) return;
+    pinTimelineEndAfterInsetRef.current = false;
+    const scrollNode = legendListRef.current?.getScrollableNode() as HTMLElement | undefined;
+    if (!scrollNode) return;
+    const pin = () => {
+      scrollNode.scrollTop = scrollNode.scrollHeight - scrollNode.clientHeight;
+    };
+    pin();
+    const frame = requestAnimationFrame(pin);
+    return () => cancelAnimationFrame(frame);
+  }, [composerTimelineInset]);
   // A held reservation belongs to the previous thread's draft. Rebuild it from
   // this thread's overlay so a tall draft elsewhere does not pad this one.
   useLayoutEffect(() => {
@@ -5825,11 +5878,23 @@ export default function ChatView(props: ChatViewProps) {
   // onResume is declared below and published here after commit; the banner only calls it from a click.
   const onResumeNowRef = useRef<(() => Promise<void>) | null>(null);
   const onResumeNowStable = useStableCallback(() => void onResumeNowRef.current?.());
+  const stoppedOnUsageLimit =
+    serverRuntime?.status === "failed" && serverRuntime.lastErrorClass === "usage_limit";
+  const usageLimitHandoff = useUsageLimitHandoff({
+    environmentId,
+    threadId: activeThreadShell?.id ?? null,
+    runId: stoppedOnUsageLimit ? (activeThreadShell?.latestRun?.runId ?? null) : null,
+    onAccepted: () => {
+      clearUsageLimitsFor(routeThreadKey);
+      scrollToEnd();
+    },
+  });
   const limitRecoveryBanner =
     serverRuntime?.status === "failed" &&
     serverRuntime.lastErrorClass === "usage_limit" &&
     activeThreadShell?.latestRun
       ? usageLimitRecoveryBannerItem({
+          handoff: usageLimitHandoff,
           stop: {
             runId: activeThreadShell.latestRun.runId,
             resetAt: serverRuntime.usageLimitResetAt ?? null,
@@ -5974,6 +6039,43 @@ export default function ChatView(props: ChatViewProps) {
   const openThreadFindStable = useStableCallback(openThreadFind);
   const closeThreadFind = () => threadFindControlsRef.current?.close();
   const closeThreadFindStable = useStableCallback(closeThreadFind);
+
+  // A long-open thread keeps every live row and loaded page in memory. Once the
+  // reader has rested at the live end of an idle thread, shed older rows back
+  // to the server's recent window; "Load earlier" and find page them back in.
+  const historyTrimRequestRef = useRef<{ key: string; rowCount: number } | null>(null);
+  const historyTrimRowCount = serverVisibleTurnItems?.length ?? 0;
+  const historyTrimAtEnd = timelineLiveFollowEnabled && !showScrollToBottom;
+  const historyTrimBusy = isWorking || isThreadFindActive || serverThreadHistory.loading;
+  const historyTrimEnvironmentId = routeThreadDetailRef?.environmentId ?? null;
+  const historyTrimThreadId = routeThreadDetailRef?.threadId ?? null;
+  useEffect(() => {
+    if (historyTrimEnvironmentId === null || historyTrimThreadId === null) return;
+    const key = `${historyTrimEnvironmentId}:${historyTrimThreadId}`;
+    const lastRequest = historyTrimRequestRef.current;
+    const wanted = shouldRequestThreadHistoryTrim({
+      rowCount: historyTrimRowCount,
+      lastRequestRowCount: lastRequest?.key === key ? lastRequest.rowCount : null,
+      atEnd: historyTrimAtEnd,
+      busy: historyTrimBusy,
+    });
+    if (!wanted) return;
+    const timer = window.setTimeout(() => {
+      historyTrimRequestRef.current = { key, rowCount: historyTrimRowCount };
+      void trimThreadHistory({
+        environmentId: historyTrimEnvironmentId,
+        input: { threadId: historyTrimThreadId },
+      });
+    }, THREAD_HISTORY_TRIM_IDLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    historyTrimAtEnd,
+    historyTrimBusy,
+    historyTrimEnvironmentId,
+    historyTrimRowCount,
+    historyTrimThreadId,
+    trimThreadHistory,
+  ]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
@@ -7188,10 +7290,21 @@ export default function ChatView(props: ChatViewProps) {
       resumeCompactionTokens !== null &&
       !keepFullHistory &&
       messageTextForSend.toLowerCase() !== "/compact";
-    const turnDispatchMode = compactBeforeSend || sendQueuesBehindSetup ? "queue" : dispatchMode;
+    // A running /compact or /logout turn takes no steering, so the server queues
+    // a steer behind it; show it in the queue rather than as a steer.
+    const steerQueuesBehindMaintenance =
+      phase === "running" &&
+      (dispatchMode === "steer" || dispatchMode === "auto") &&
+      serverProjection !== null &&
+      activeRunRefusesSteering(serverProjection);
+    const turnDispatchMode =
+      compactBeforeSend || sendQueuesBehindSetup || steerQueuesBehindMaintenance
+        ? "queue"
+        : dispatchMode;
     const shouldQueueBehindActiveRun =
       compactBeforeSend ||
       sendQueuesBehindSetup ||
+      steerQueuesBehindMaintenance ||
       (phase === "running" && dispatchMode === "queue");
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,

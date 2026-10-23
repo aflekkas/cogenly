@@ -388,6 +388,15 @@ function repositoryCloneUrls(
   return { nameWithOwner: raw.full_name, url: raw.html_url, sshUrl: raw.ssh_url };
 }
 
+/**
+ * The transport `gh config get git_protocol` names. gh answers "https" when
+ * nothing is set; a failed read (`null`) keeps SSH.
+ */
+export function parseGhGitProtocol(stdout: string | null): "https" | "ssh" {
+  if (stdout === null) return "ssh";
+  return stdout.trim().toLowerCase() === "ssh" ? "ssh" : "https";
+}
+
 const decodeViewerLogin = decodeJsonResult(Schema.Struct({ login: TrimmedNonEmptyString }));
 
 type PullRequestListState = "open" | "closed" | "merged" | "all";
@@ -1008,6 +1017,23 @@ export const make = Effect.gen(function* () {
           providerError("createChangeRequest", input.cwd, { reference: input.headSelector }),
         ),
       ),
+    // Follows `gh`'s own git protocol, which `gh auth login` sets up git
+    // credentials for: an HTTPS login with no SSH key would be refused over
+    // SSH. Without gh, SSH as before.
+    preferredCloneProtocol: (input) =>
+      process
+        .run({
+          operation: "GitHubSourceControlProvider.preferredCloneProtocol",
+          command: "gh",
+          args: ["config", "get", "git_protocol", "--host", input.host],
+          cwd: input.cwd,
+          allowNonZeroExit: true,
+          timeoutMs: 5_000,
+        })
+        .pipe(
+          Effect.map((result) => parseGhGitProtocol(result.exitCode === 0 ? result.stdout : null)),
+          Effect.orElseSucceed(() => "ssh" as const),
+        ),
     getRepositoryCloneUrls: (input) =>
       Effect.gen(function* () {
         const fallbackHost = (yield* resolveRepository(input).pipe(

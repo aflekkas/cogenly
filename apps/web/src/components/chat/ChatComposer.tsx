@@ -126,7 +126,7 @@ import { useComposerMultilinePrompt } from "./useComposerMultilinePrompt";
 import {
   ComposerTasksBadge,
   ComposerTasksContent,
-  ComposerTasksDrawer,
+  ComposerTasksPanel,
   type ComposerTaskStep,
   type ComposerTasksProgress,
 } from "./ComposerTasksBadge";
@@ -145,6 +145,7 @@ import {
   type ComposerBannerStackContent,
   type ComposerBannerStackItem,
 } from "./ComposerBannerStack";
+import { ComposerStackColumn } from "./ComposerStackColumn";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import {
   acceptComposerAttachmentFiles,
@@ -4442,9 +4443,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const toggleTasksDrawerStable = useStableCallback(toggleTasksDrawer);
   const hasBannerItems = props.bannerItems.length > 0;
   const hasBlockingComposerTopDrawer = pendingUserInputs.length > 0;
+  // The badge draws nothing without steps, which would leave an empty strip.
   const showInlineTasksBadge =
     activeTasksProgress !== null &&
     activeTaskSteps !== null &&
+    activeTasksProgress.totalSteps > 0 &&
     !isTasksDrawerOpen &&
     !hasBlockingComposerTopDrawer &&
     (hasBannerItems || showComposerTopDrawer || isComposerCollapsedMobile);
@@ -4790,7 +4793,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isTasksDrawerOpen &&
     !hasBlockingComposerTopDrawer &&
     activeTasksProgress !== null &&
-    activeTaskSteps !== null;
+    activeTaskSteps !== null &&
+    activeTasksProgress.totalSteps > 0;
   const activityStackContent = hasBannerItems ? (
     shownSyncPhase ? (
       <ComposerActivityRow phase={shownSyncPhase} />
@@ -5764,7 +5768,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           )
         : null}
       <ComposerBanner.Dock>
-        <ComposerBanner.Column>
+        <ComposerStackColumn>
           <ComposerBannerStack
             key={activeThreadId}
             className="relative z-0"
@@ -5782,6 +5786,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           <AttachmentPresence
             show={showComposerTopDrawer && (!isTasksDrawerOpen || hasBlockingComposerTopDrawer)}
             swapKey={pendingUserInputs.length > 0 ? "pending-user-input" : "plan-follow-up"}
+            // A question waiting on the user never shrinks or folds to fit the stack.
+            data-composer-stack-blocking={hasBlockingComposerTopDrawer || undefined}
           >
             <ComposerBanner.Root
               data-chat-composer-top-drawer="true"
@@ -5889,27 +5895,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               ) : null}
             </ComposerBanner.Root>
           </AttachmentPresence>
-          {/* The tab and the open task list share one surface that eases between them. */}
-          <AttachmentPresence
-            show={showTasksDrawer || showTasksTab}
-            swapKey={showTasksDrawer ? "tasks-drawer" : "tasks-tab"}
-          >
-            {showTasksDrawer ? (
-              <ComposerTasksDrawer
-                onCollapse={toggleTasksDrawerStable}
-                progress={activeTasksProgress}
-                steps={activeTaskSteps}
-              />
-            ) : showTasksTab ? (
-              <ComposerTasksBadge
-                expanded={false}
+          {/* The tab and the open task list share one surface; the list grows under it. */}
+          <AttachmentPresence show={showTasksDrawer || showTasksTab} swapKey="tasks">
+            {(showTasksDrawer || showTasksTab) && activeTasksProgress && activeTaskSteps ? (
+              <ComposerTasksPanel
+                expanded={showTasksDrawer}
                 onToggle={toggleTasksDrawerStable}
                 progress={activeTasksProgress}
                 steps={activeTaskSteps}
               />
             ) : null}
           </AttachmentPresence>
-        </ComposerBanner.Column>
+        </ComposerStackColumn>
       </ComposerBanner.Dock>
       <div className="relative">
         <ComposerSurface.Main

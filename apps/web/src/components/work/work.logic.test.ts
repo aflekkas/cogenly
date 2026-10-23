@@ -8,6 +8,7 @@ import {
   describeWorkStartFailure,
   deriveWorkHandoffStatus,
   deriveWorkRowStatus,
+  groupWorkChoicesByProject,
   NO_REPOSITORY,
   listWorkPickerChoices,
   listWorkRepositories,
@@ -76,6 +77,51 @@ describe("listWorkPickerChoices", () => {
         canRunWithoutRepository: false,
       }).map((choice) => choice.value),
     ).toEqual(["api", "web", ADD_REPOSITORY]);
+  });
+});
+
+describe("groupWorkChoicesByProject", () => {
+  const choices = listWorkPickerChoices({
+    repositories: [
+      project(envA, "api", "api"),
+      project(envA, "loose", "loose"),
+      project(envA, "web", "web"),
+    ],
+    sourceProjectId: null,
+    canRunWithoutRepository: true,
+  });
+  const acme = { key: "acme" };
+  const blog = { key: "blog" };
+  const empty = { key: "empty" };
+  const projectOf = (id: ProjectId) => (id === "api" ? acme : id === "web" ? blog : null);
+
+  it("files repositories under their projects, the chat's own project first, loose ones last", () => {
+    const groups = groupWorkChoicesByProject({
+      choices,
+      projects: [acme, blog, empty],
+      projectOf,
+      sourceProjectId: ProjectId.make("web"),
+    });
+    expect(groups.map((group) => [group.key, group.choices.map((choice) => choice.value)])).toEqual(
+      [
+        ["blog", ["web"]],
+        ["acme", ["api"]],
+        // A project with nothing cloned yet still lists, for its GitHub repositories.
+        ["empty", []],
+        [null, ["loose"]],
+      ],
+    );
+  });
+
+  it("keeps project order without a source repository", () => {
+    expect(
+      groupWorkChoicesByProject({
+        choices,
+        projects: [acme, blog],
+        projectOf,
+        sourceProjectId: null,
+      }).map((group) => group.key),
+    ).toEqual(["acme", "blog", null]);
   });
 });
 

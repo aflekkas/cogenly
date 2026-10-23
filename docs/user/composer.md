@@ -215,6 +215,8 @@ Provider commands must start the message to run. Cogenly commands such as
 
 Send `/compact` in an existing conversation to reduce context usage when the
 provider supports it. Web and desktop also offer compaction from the context meter.
+A compaction can't be steered, so messages you send while it runs wait in the
+queue and start when it finishes.
 
 ## Goals
 

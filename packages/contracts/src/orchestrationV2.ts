@@ -3456,6 +3456,8 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getThreadProjection: "orchestration.getThreadProjection",
   getWorkflowScript: "orchestration.getWorkflowScript",
   stopWorkflow: "orchestration.stopWorkflow",
+  recommendUsageLimitHandoff: "orchestration.recommendUsageLimitHandoff",
+  acceptUsageLimitHandoff: "orchestration.acceptUsageLimitHandoff",
   getTurnItem: "orchestration.getTurnItem",
   launchThread: "orchestration.launchThread",
   subscribeArchivedShell: "orchestration.subscribeArchivedShell",

@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import type { ComposerBannerStackItem } from "./ComposerBannerStack";
+import { UsageLimitHandoffActions, type UsageLimitHandoffOffer } from "./UsageLimitHandoffActions";
 import {
   resolveUsageLimitRecovery,
   usageLimitAutoResumeUpdate,
@@ -24,6 +25,8 @@ type RecoveryProps = {
   /** The composer's manual continuation; the banner offers it once waiting stops making sense. */
   onResumeNow: (() => void) | null;
   onChange: (recovery: OrchestrationV2LimitRecoveryUpdate) => Promise<void>;
+  /** Continuing on another provider instance, when one has headroom. */
+  handoff: UsageLimitHandoffOffer | null;
 };
 
 const STATE_ICONS: Record<UsageLimitRecoveryState["kind"], typeof ClockIcon> = {
@@ -58,7 +61,17 @@ export function usageLimitRecoveryBannerItem(props: RecoveryProps): ComposerBann
         {copy.description}
       </span>
     ),
-    actions: <RecoveryActions key={state.kind} state={state} {...props} />,
+    actions:
+      props.handoff === null || state.kind === "resuming" ? (
+        <RecoveryActions key={state.kind} state={state} {...props} />
+      ) : (
+        <span className="flex items-center gap-1">
+          <RecoveryActions key={state.kind} state={state} {...props} />
+          <span key={props.handoff.stopKey} className="swap-motion">
+            <UsageLimitHandoffActions offer={props.handoff} />
+          </span>
+        </span>
+      ),
   };
 }
 

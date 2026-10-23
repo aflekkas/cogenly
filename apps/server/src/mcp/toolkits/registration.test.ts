@@ -51,6 +51,7 @@ import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import * as ThreadLaunchService from "../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadSearch from "../../orchestration-v2/ThreadSearch.ts";
+import * as UsageLimitHandoff from "../../orchestration-v2/UsageLimitHandoff.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as SourceControlRepositoryService from "../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
@@ -203,6 +204,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
   Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+  Layer.mock(UsageLimitHandoff.UsageLimitHandoffService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({
     search: () =>
       Effect.succeed({
@@ -593,6 +595,8 @@ const smokeCases = [
       "t3_thread_configuration",
       "t3_thread_configure",
       "t3_thread_fork",
+      "t3_thread_limit_handoff",
+      "t3_thread_limit_handoff_options",
       "t3_thread_merge_back",
       "t3_thread_organize",
       "t3_thread_search",

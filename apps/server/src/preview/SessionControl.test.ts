@@ -40,6 +40,19 @@ describe("SessionControl", () => {
     expect(order).toEqual(["released viewer-1", "agent acted"]);
   });
 
+  it("runs a person's back or reload on a tab the agent drives, taking control first", async () => {
+    const control = new SessionControl("agent-1");
+    expect(control.agentDrives).toBe(true);
+    // A plain viewer action is refused while the agent drives.
+    expect(await reasonOf(control.human("viewer-1", async () => {}))).toBe("interrupted");
+
+    const result = await control.takeAndRun("viewer-1", async () => "went back");
+
+    expect(result).toBe("went back");
+    expect(control.controller).toBe("viewer-1");
+    expect(control.agentDrives).toBe(false);
+  });
+
   it("claims a person's own tab for whichever agent acts on it", async () => {
     const control = new SessionControl(null);
     await control.take("viewer-1");
@@ -109,6 +122,43 @@ describe("SessionControl", () => {
     expect(control.controller).toBe("viewer-2");
     expect(released).toEqual(["viewer-1"]);
     expect(await reasonOf(control.human("viewer-1", async () => {}))).toBe("interrupted");
+  });
+
+  it("hands a tab the person took back to the agent, releasing their held input first", async () => {
+    const order: Array<string> = [];
+    const control = new SessionControl("agent-1");
+    await control.take("viewer-1");
+    const handing = control.handBack("viewer-1", async () => {
+      order.push("released viewer-1");
+    });
+    // Control moves at once, so every viewer sees the agent driving again.
+    expect(control.controller).toBeNull();
+    expect(control.agentDrives).toBe(true);
+    expect(await handing).toBe(true);
+    expect(order).toEqual(["released viewer-1"]);
+    // The person's input no longer reaches the page.
+    expect(await reasonOf(control.human("viewer-1", async () => {}))).toBe("interrupted");
+  });
+
+  it("hands a person's own tab back only once an agent has used it", async () => {
+    const control = new SessionControl(null);
+    await control.take("viewer-1");
+    expect(control.agentInvolved).toBe(false);
+    expect(await control.handBack("viewer-1")).toBe(false);
+    expect(control.controller).toBe("viewer-1");
+
+    await control.agent("agent-1", async () => {});
+    await control.take("viewer-1");
+    expect(control.agentInvolved).toBe(true);
+    expect(await control.handBack("viewer-1")).toBe(true);
+    expect(control.agentDrives).toBe(true);
+  });
+
+  it("ignores a hand-back from a viewer who is not in control", async () => {
+    const control = new SessionControl("agent-1");
+    await control.take("viewer-1");
+    expect(await control.handBack("viewer-2")).toBe(false);
+    expect(control.controller).toBe("viewer-1");
   });
 
   it("still refuses an agent acting on another agent's tab", async () => {

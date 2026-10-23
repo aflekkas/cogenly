@@ -96,19 +96,21 @@ describe("preview stream pick protocol", () => {
     const { socket } = connect({
       onControl: (control: PreviewStreamControl) => controls.push(control),
     });
-    socket.serverMessage(controlMessage({ capabilities: { pick: true } }));
+    socket.serverMessage(controlMessage({ capabilities: { pick: true }, agentInvolved: true }));
     expect(controls).toEqual([
       {
         canOperate: true,
         controller: "agent",
+        agentInvolved: true,
         generation: 3,
         capabilities: { pick: true },
         dialog: null,
       },
     ]);
-    // Older servers omit capabilities; the flag reads as unsupported.
+    // Older servers omit capabilities and agentInvolved; both read as unsupported.
     socket.serverMessage(controlMessage({ capabilities: undefined }));
     expect(controls[1]).not.toHaveProperty("capabilities");
+    expect(controls[1]?.agentInvolved).toBe(false);
   });
 
   it("delivers hover, result, and error events", () => {
@@ -161,6 +163,24 @@ describe("preview stream pick protocol", () => {
       "pickHitTest",
       "pickCommit",
       "pickCommitRegion",
+    ]);
+  });
+
+  it("sends toolbar page commands while the agent drives, for the server to take control", () => {
+    const { client, socket } = connect();
+    socket.serverMessage(controlMessage());
+    expect(client.send({ type: "navigate", url: "https://example.com" })).toBe(true);
+    expect(client.send({ type: "history", delta: -1 })).toBe(true);
+    expect(client.send({ type: "reload" })).toBe(true);
+    // Handing back is only for the viewer in control.
+    expect(client.send({ type: "handBack" })).toBe(false);
+    socket.serverMessage(controlMessage({ controller: "you", agentInvolved: true }));
+    expect(client.send({ type: "handBack" })).toBe(true);
+    expect(socket.sent.map((message) => JSON.parse(message).type)).toEqual([
+      "navigate",
+      "history",
+      "reload",
+      "handBack",
     ]);
   });
 

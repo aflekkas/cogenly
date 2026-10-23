@@ -8,6 +8,7 @@ import { StopGlyph } from "../StopGlyph";
 import { Button } from "../ui/button";
 import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { ComposerBanner } from "./ComposerBanner";
+import { composerStackBodyProps, useComposerStackFold } from "./ComposerStackColumn";
 import { ThreadRunningAgentsList } from "./ThreadDetailsMenu";
 import { ThreadDetailsRow } from "./ThreadDetailsSection";
 import { THREAD_DETAILS_PANEL_ICON_CLASS } from "./threadDetailsPanelStyles";
@@ -18,6 +19,9 @@ const KIND_ICON = {
   monitor: ActivityIcon,
   background_task: BellRingIcon,
 } as const;
+
+const BACKGROUND_WORK_STACK_ID = "background-work";
+const BACKGROUND_WORK_STACK_RANK = 1;
 
 /**
  * The composer strip for work a thread still runs: "Waiting on 4 subagents".
@@ -35,7 +39,10 @@ export function BackgroundWorkBanner(props: {
   readonly onStop: () => void;
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [userOpen, setOpen] = useState(false);
+  // The stack folds this list first when it runs out of room.
+  const stackFold = useComposerStackFold(BACKGROUND_WORK_STACK_ID);
+  const open = userOpen && !stackFold.folded;
   const { presentation } = props;
   // Subagents with a thread of their own show as Lineage rows; the rest (and a
   // subagent the provider gave no thread) as plain rows.
@@ -66,7 +73,11 @@ export function BackgroundWorkBanner(props: {
           {expandable ? (
             // The trigger inherits the banner title's type from this wrapper.
             <span className="flex min-w-0 font-medium leading-7 sm:leading-6">
-              <DisclosureTrigger open={open} onClick={() => setOpen(!open)} className="min-w-0">
+              <DisclosureTrigger
+                open={open}
+                onClick={() => (userOpen && stackFold.folded ? stackFold.reveal() : setOpen(!open))}
+                className="min-w-0"
+              >
                 <span className="min-w-0 truncate">{presentation.title}</span>
               </DisclosureTrigger>
             </span>
@@ -101,34 +112,44 @@ export function BackgroundWorkBanner(props: {
         </ComposerBanner.Actions>
       </ComposerBanner.Row>
       {expandable ? (
-        <DisclosurePanel open={open}>
-          <ComposerBanner.Scroll className="max-h-[min(18rem,40dvh)]">
-            <div className="pb-1">
-              {hasSubagents ? (
-                <ThreadRunningAgentsList
-                  environmentId={props.environmentId}
-                  threadId={props.threadId}
-                  onOpenThread={(threadId) => props.onOpenThread(ThreadId.make(threadId))}
-                />
-              ) : null}
-              {otherWork.length > 0 ? (
-                <ul aria-label="Running work" className="m-0 list-none p-0">
-                  {otherWork.map((item) => {
-                    const Icon = KIND_ICON[item.kind];
-                    return (
-                      <li key={item.taskId} className="m-0 list-none p-0">
-                        <ThreadDetailsRow
-                          icon={<Icon aria-hidden className={THREAD_DETAILS_PANEL_ICON_CLASS} />}
-                          label={item.label}
-                        />
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : null}
-            </div>
-          </ComposerBanner.Scroll>
-        </DisclosurePanel>
+        <div
+          {...composerStackBodyProps(
+            BACKGROUND_WORK_STACK_ID,
+            BACKGROUND_WORK_STACK_RANK,
+            userOpen,
+          )}
+        >
+          <DisclosurePanel open={open}>
+            <ComposerBanner.Scroll className="[--composer-banner-scroll-max:min(18rem,40dvh)]">
+              {/* The banner's own block padding closes the list; the top inset
+                matches it so a hovered row has the same margin on every side. */}
+              <div className="pt-1">
+                {hasSubagents ? (
+                  <ThreadRunningAgentsList
+                    environmentId={props.environmentId}
+                    threadId={props.threadId}
+                    onOpenThread={(threadId) => props.onOpenThread(ThreadId.make(threadId))}
+                  />
+                ) : null}
+                {otherWork.length > 0 ? (
+                  <ul aria-label="Running work" className="m-0 list-none p-0">
+                    {otherWork.map((item) => {
+                      const Icon = KIND_ICON[item.kind];
+                      return (
+                        <li key={item.taskId} className="m-0 list-none p-0">
+                          <ThreadDetailsRow
+                            icon={<Icon aria-hidden className={THREAD_DETAILS_PANEL_ICON_CLASS} />}
+                            label={item.label}
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
+              </div>
+            </ComposerBanner.Scroll>
+          </DisclosurePanel>
+        </div>
       ) : null}
     </>
   );

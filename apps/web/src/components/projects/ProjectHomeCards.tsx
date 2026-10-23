@@ -48,7 +48,12 @@ import {
   projectSourceLinkLabel,
   sortProjectSourceLinks,
 } from "../../projectLabels/projectSourceLinks.logic";
+import { gitHubRepositoryOf } from "../../projectLabels/repositoryPicker.logic";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
+import {
+  useCanRemoveRepositoryFromProject,
+  useRemoveRepositoryFromProject,
+} from "../../projectLabels/useRemoveRepositoryFromProject";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -114,13 +119,8 @@ export function RepositoriesCard(props: {
   const canLink = useAtomValue(
     serverEnvironment.linkProjectLabelRepository.permissionAtom(environmentId),
   );
-  const canUnlink = useAtomValue(
-    serverEnvironment.unlinkProjectLabelRepository.permissionAtom(environmentId),
-  );
-  const unlink = useAtomCommand(serverEnvironment.unlinkProjectLabelRepository, {
-    label: "remove repository from project",
-    reportFailure: false,
-  });
+  const canUnlink = useCanRemoveRepositoryFromProject(environmentId);
+  const removeFromProject = useRemoveRepositoryFromProject();
   const { removing, run } = useRemoving();
   const arrived = useArrivedKeys(
     props.linkedRepositories.map((repository) => repository.id),
@@ -128,14 +128,7 @@ export function RepositoriesCard(props: {
   );
   const remove = (repositoryId: ProjectId, title: string) =>
     run(repositoryId, async () => {
-      const confirmed = await confirmRemoval(
-        `Remove ${title} from ${label.name}?\nThe repository stays on disk, and its Work leaves the project with it.`,
-      );
-      if (!confirmed) return;
-      const result = await unlink({ environmentId, input: { labelId: label.id, repositoryId } });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        reportProjectFolderFailure(`Could not remove ${title}`, result);
-      }
+      await removeFromProject({ project: props.folder, repositoryId, title });
     });
   return (
     <ProjectCard
@@ -160,6 +153,8 @@ export function RepositoriesCard(props: {
           key={repository.id}
           icon={<ProjectFavicon project={repository} />}
           title={repository.title}
+          // The GitHub repository it was cloned from, as the pickers mark it.
+          meta={gitHubRepositoryOf(repository.repositoryIdentity) ?? undefined}
           arrived={arrived.has(repository.id)}
           removing={removing.has(repository.id)}
           onOpen={() => props.onOpenRepository(repository.id)}

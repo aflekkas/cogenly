@@ -3,7 +3,6 @@
 import {
   createPreviewFramePainter,
   createPreviewStreamClient,
-  previewStreamControlLabel,
   previewStreamModifiers,
   type PreviewStreamClient,
   type PreviewStreamControl,
@@ -32,6 +31,7 @@ import {
   useEffect,
   useEffectEvent,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -44,9 +44,10 @@ import {
   type AgentSurfaceRect,
 } from "~/components/preview/agentBrowserCursorLogic";
 import { CommandBlock } from "~/components/CommandBlock";
+import { resolvePreviewControlBanner } from "~/components/preview/previewControlToggle";
 import { Button } from "~/components/ui/button";
-import { Spinner } from "~/components/ui/spinner";
-import { Bot, Eye, MousePointer2 } from "lucide-react";
+import { useLastPresent } from "~/components/ui/overlay-presence";
+import { Bot, Eye } from "lucide-react";
 import { Input } from "~/components/ui/input";
 import { toastManager } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
@@ -68,7 +69,10 @@ import {
   ServerBrowserPickLayer,
 } from "./ServerBrowserPickLayer";
 
-/** Chrome-row controls for a server tab; commands require current ownership. */
+/**
+ * Chrome-row controls for a server tab. Navigate, history, and reload take
+ * control first when someone else has it.
+ */
 export interface ServerBrowserHandle {
   readonly navigate: (url: string) => void;
   readonly history: (delta: -1 | 1) => void;
@@ -77,6 +81,8 @@ export interface ServerBrowserHandle {
   readonly canvas: () => HTMLCanvasElement | null;
   /** Claims the page for this viewer; the agent takes it back when it next acts. */
   readonly takeControl: () => void;
+  /** Gives the page back to the agent that was using it; only for the viewer in control. */
+  readonly handBack: () => void;
 }
 
 const RESIZE_THROTTLE_MS = 150;
@@ -192,8 +198,6 @@ export function ServerBrowserSurface(props: {
   readonly threadId: string;
   readonly tabId: string;
   readonly visible: boolean;
-  /** `none` leaves the control row to the host, which shows it in its own chrome. */
-  readonly controlPosition?: "top" | "bottom" | "none";
   readonly onFirstFrame?: () => void;
   readonly onViewport?: (viewport: PreviewStreamViewport) => void;
   readonly onControl?: (control: PreviewStreamControl | null) => void;
@@ -208,7 +212,6 @@ export function ServerBrowserSurface(props: {
     threadId,
     tabId,
     visible,
-    controlPosition = "top",
     onFirstFrame,
     onViewport,
     onControl,
@@ -542,6 +545,7 @@ export function ServerBrowserSurface(props: {
       viewport: (setting) => send({ type: "viewport", setting }),
       canvas: () => (hasFrameRef.current ? canvasRef.current : null),
       takeControl: () => send({ type: "takeControl" }),
+      handBack: () => send({ type: "handBack" }),
     }),
     [send],
   );
@@ -1028,30 +1032,6 @@ export function ServerBrowserSurface(props: {
       className={cn("relative flex flex-col overflow-hidden", className)}
       data-server-browser-surface={tabId}
     >
-      {controlPosition === "none" ? null : (
-        // One compact row of chrome: who drives the page, and a button to take it.
-        // h-8 is PREVIEW_MINI_PLAYER_CHROME_HEIGHT; the floating player adds it to its frame.
-        <div
-          className={cn(
-            "visible relative z-20 flex h-8 shrink-0 items-center justify-between gap-2 border-border bg-card pr-1.5 pl-2.5",
-            controlPosition === "bottom" ? "order-last border-t" : "border-b",
-          )}
-        >
-          <span
-            role="status"
-            className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
-          >
-            <ControlGlyph control={control} />
-            <span className="truncate">{previewStreamControlLabel(control)}</span>
-          </span>
-          {/* Nothing to hand back while you drive: the agent takes control when it next acts. */}
-          {control?.canOperate && control.controller !== "you" ? (
-            <Button variant="outline" size="xs" onClick={() => send({ type: "takeControl" })}>
-              Take control
-            </Button>
-          ) : null}
-        </div>
-      )}
       {/* The page well. The floating player sizes itself so the page fills it; while that
           size settles (a viewport change mid-stream) the page letterboxes onto this fill. */}
       <div ref={wellRef} className="relative min-h-0 flex-1 bg-muted">
@@ -1103,6 +1083,11 @@ export function ServerBrowserSurface(props: {
             controller={control?.controller === "agent" ? "agent" : "none"}
           />
         ) : null}
+        {/* Picking needs no control, so the banner steps aside while it runs. */}
+        <TakeControlBanner
+          control={pickActive ? null : control}
+          onTakeControl={() => send({ type: "takeControl" })}
+        />
         {/* Focus target for page keyboard input. Pinned top-left so focusing it never
           scrolls the surface; 16px keeps iOS from zooming the app on focus. */}
         <textarea
@@ -1244,17 +1229,52 @@ export function ServerBrowserSurface(props: {
   );
 }
 
-/** The glyph beside the control label: the same cursor-or-bot language as the panel's toggle. */
-function ControlGlyph({ control }: { readonly control: PreviewStreamControl | null }) {
-  if (!control) return <Spinner size="sm" tone="muted" />;
-  const Icon = !control.canOperate
-    ? Eye
-    : control.controller === "you"
-      ? MousePointer2
-      : control.controller === "another-viewer"
-        ? Eye
-        : Bot;
-  return <Icon aria-hidden className="size-3.5 shrink-0" />;
+/**
+ * Floats over the bottom of the page while someone else (or nobody) drives
+ * it: who drives, and one click to take control. It stays mounted and fades,
+ * so taking control dissolves it instead of snapping it away.
+ */
+function TakeControlBanner(props: {
+  readonly control: PreviewStreamControl | null;
+  readonly onTakeControl: () => void;
+}) {
+  const message = props.control ? resolvePreviewControlBanner(props.control) : null;
+  const agentDrives = props.control?.controller === "agent";
+  // Memoized so the last banner survives the fade-out with its own words and glyph.
+  const banner = useMemo(
+    () => (message === null ? null : { message, agentDrives }),
+    [message, agentDrives],
+  );
+  const shown = useLastPresent(banner);
+  if (!shown) return null;
+  const active = banner !== null;
+  const Glyph = shown.agentDrives ? Bot : Eye;
+  return (
+    <div
+      role="status"
+      aria-hidden={active ? undefined : true}
+      data-take-control-banner={active ? "" : undefined}
+      className={cn(
+        "absolute bottom-3 left-1/2 z-10 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-popover py-1 pr-1 pl-3 text-xs text-muted-foreground shadow-md transition-opacity duration-(--motion-duration-base) ease-out",
+        active ? "opacity-100" : "pointer-events-none opacity-0",
+      )}
+    >
+      <Glyph
+        aria-hidden
+        className={cn("size-3.5 shrink-0", shown.agentDrives && "text-brand-accent")}
+      />
+      <span className="truncate">{shown.message}</span>
+      <Button
+        variant="secondary"
+        size="xs"
+        onClick={props.onTakeControl}
+        disabled={!active}
+        className="shrink-0"
+      >
+        Take control
+      </Button>
+    </div>
+  );
 }
 
 interface AgentCursorPlacement {

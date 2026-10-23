@@ -25,6 +25,46 @@ export function resolveSelectionActionPosition(options: {
   };
 }
 
+type SelectionLineRect = { left: number; right: number; top: number; bottom: number };
+
+/**
+ * Top-left corner for a floating action that must never cover the selected
+ * text: centered under the selection's end, or above its start when the end
+ * sits too close to the bottom of `bounds`. The pointer is ignored, so the
+ * same selection always lands in the same place however it was made.
+ * Zero-width line rects (a paragraph selection's trailing newline) are skipped.
+ */
+export function resolveSelectionPillPosition(options: {
+  lines: ReadonlyArray<SelectionLineRect>;
+  /** Horizontal extent the pill stays within, such as the message column. */
+  column: { left: number; right: number };
+  /** Visible area the pill stays within, such as the scroll viewport. */
+  bounds: { top: number; bottom: number };
+  size: { width: number; height: number };
+  viewport: { width: number; height: number };
+  gap?: number;
+  margin?: number;
+}): SelectionActionPoint | null {
+  const { column, bounds, size, viewport, gap = 6, margin = 8 } = options;
+  const lines = options.lines.filter((line) => line.right - line.left > 0);
+  const first = lines[0];
+  const last = lines.at(-1);
+  if (!first || !last) return null;
+  const top = Math.max(bounds.top, 0) + margin;
+  const bottom = Math.min(bounds.bottom, viewport.height) - margin;
+
+  const below = last.bottom + gap;
+  const above = first.top - gap - size.height;
+  const placeBelow = below + size.height <= bottom || above < top;
+  const anchorX = placeBelow ? last.right : first.left;
+  const y = placeBelow ? Math.min(below, bottom - size.height) : above;
+
+  const minX = Math.max(column.left, margin);
+  const maxX = Math.min(column.right, viewport.width - margin) - size.width;
+  const x = Math.max(minX, Math.min(anchorX - size.width / 2, maxX));
+  return { x: Math.round(x), y: Math.round(Math.max(top, y)) };
+}
+
 /**
  * Opens selection actions after release, leaving multi-clicks time to finish.
  * DOM selections call selectionChanged; canvas selections can use their own

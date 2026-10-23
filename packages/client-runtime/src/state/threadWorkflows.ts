@@ -41,6 +41,21 @@ export function resolveActiveThreadRun(projection: Pick<Projection, "runs">): Ru
 }
 
 /**
+ * Whether the active run is a native /compact or /logout turn. Those take no
+ * steering, so the server queues input sent into them instead.
+ */
+export function activeRunRefusesSteering(projection: Pick<Projection, "runs" | "messages">) {
+  const activeRun = resolveActiveThreadRun(projection);
+  if (activeRun === null) return false;
+  const message = projection.messages.find((candidate) => candidate.id === activeRun.userMessageId);
+  return (
+    message !== undefined &&
+    message.attachments.length === 0 &&
+    ["/compact", "/logout"].includes(message.text.trim().toLowerCase())
+  );
+}
+
+/**
  * A successfully finished provider turn remains in `waiting` while its
  * checkpoint is captured. Keep that newest turn available for merge-back
  * instead of falling through to an older fully checkpointed run.
@@ -157,6 +172,7 @@ export function deriveThreadQueueWorkflowState(projection: Projection): ThreadQu
     canReorder: capabilities?.supportsQueuedMessages === true,
     canPromoteToSteer:
       hasSteerableProviderTurn &&
+      !activeRunRefusesSteering(projection) &&
       (capabilities?.supportsActiveSteering === true ||
         capabilities?.supportsSteeringByInterruptRestart === true),
   };

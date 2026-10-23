@@ -69,38 +69,6 @@ function Surface({
   );
 }
 
-// A peeking notice uses the first hidden notice's severity, never the attached row's.
-const peekBorder: Record<ComposerBannerVariant, string> = {
-  default: "border-(--chat-composer-attached-outline)",
-  error: "border-destructive/24",
-  info: "border-(--chat-composer-attached-outline)",
-  success: "border-(--chat-composer-attached-outline)",
-  warning: "border-warning/24",
-};
-
-function Peek({
-  className,
-  variant = "default",
-  ...props
-}: ComponentProps<"button"> & { variant?: ComposerBannerVariant }) {
-  return (
-    <button
-      type="button"
-      data-slot="composer-banner-peek"
-      className={cn(
-        surfaceColors,
-        neutralOutline,
-        "absolute inset-x-0 bottom-0 z-0 mx-auto h-3 w-[96%] cursor-pointer rounded-t-2xl border border-b-0 shadow-md",
-        "bg-(--chat-composer-attached-surface)",
-        "transition-opacity duration-150 ease-out focus-visible:outline-2 focus-visible:outline-ring",
-        peekBorder[variant],
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
 function Attachment({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
@@ -285,18 +253,28 @@ function Children({ className, render, ...props }: useRender.ComponentProps<"div
   });
 }
 
-/** Bounded banner content uses the app's scroll area and fades only overflowing edges. */
+/**
+ * Bounded banner content uses the app's scroll area and fades only overflowing
+ * edges. Set `--composer-banner-scroll-max` for a different own limit; inside
+ * the composer stack, `--composer-stack-list-max` (see ComposerStackColumn)
+ * shrinks it further while the stack is over its height budget.
+ */
 function Scroll({ className, children, ...props }: ComponentProps<typeof ScrollArea>) {
+  // The wrapper owns the limit and its easing; the scroll area inherits each frame.
   return (
-    <ScrollArea
-      radius="none"
-      scrollFade
-      className={cn("h-auto max-h-[min(24rem,40dvh)]", className)}
-      {...props}
+    <div
+      className={cn(
+        "flex min-h-0 flex-col",
+        "max-h-[min(var(--composer-banner-scroll-max,min(24rem,40dvh)),var(--composer-stack-list-max,100dvh))]",
+        "transition-[max-height] duration-(--motion-duration-base) ease-out motion-reduce:transition-none",
+        className,
+      )}
     >
-      {/* Clears the overlay scrollbar only once there is something to scroll. */}
-      <div className="[[data-has-overflow-y]>&]:pe-2">{children}</div>
-    </ScrollArea>
+      <ScrollArea radius="none" scrollFade className="h-auto max-h-[inherit]" {...props}>
+        {/* Clears the overlay scrollbar only once there is something to scroll. */}
+        <div className="[[data-has-overflow-y]>&]:pe-2">{children}</div>
+      </ScrollArea>
+    </div>
   );
 }
 
@@ -353,7 +331,6 @@ function Dismiss({ className, children, ...props }: ComponentProps<typeof Button
 
 export const ComposerBanner = {
   Surface,
-  Peek,
   Attachment,
   Dock,
   Column,

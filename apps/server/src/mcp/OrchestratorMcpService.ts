@@ -92,6 +92,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { limitRecoveryStatus } from "../orchestration-v2/UsageLimitRecoveryWorker.ts";
+import { providerUsageHeadroom } from "../orchestration-v2/UsageLimitHandoff.ts";
 import {
   clientRuntimeModeCeiling,
   type McpInvocationScope,
@@ -1903,6 +1904,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const { parent, limits } = yield* loadCaller(scope);
         const providers = yield* loadProviders;
+        const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
         const orchestrationCapableInstanceIds = yield* loadOrchestrationCapableInstanceIds();
         // Models the user hid from pickers stay out of the catalog agents choose from.
         const { modelPreferences, effortDefaults } = yield* serverSettings.getSettings.pipe(
@@ -1949,6 +1951,10 @@ const make = Effect.gen(function* () {
               canRunChildTask: constraints.length === 0,
               canRunCrossProviderChildTask: constraints.length === 0,
               constraints: [...constraints],
+              // Drivers without subscription usage omit it rather than report "unknown".
+              ...(provider.usageLimits === undefined
+                ? {}
+                : { usage: providerUsageHeadroom(provider.usageLimits, nowMs) }),
             };
           }),
           features: {

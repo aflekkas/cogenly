@@ -18,6 +18,8 @@ import {
   RunId,
   NonNegativeInt,
   ProjectId,
+  ProviderInstanceId,
+  UsageLimitHandoffRecommendation,
 } from "@t3tools/contracts";
 import { SNOOZE_PRESET_KEYS } from "@t3tools/shared/snooze";
 import * as Crypto from "effect/Crypto";
@@ -27,6 +29,7 @@ import { Tool, Toolkit } from "effect/ai";
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ScheduledTaskService from "../../../scheduledTasks/ScheduledTaskService.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as UsageLimitHandoff from "../../../orchestration-v2/UsageLimitHandoff.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
@@ -255,6 +258,35 @@ const ThreadConfigureTool = Tool.make("t3_thread_configure", {
   }),
 }).annotate(Tool.Destructive, true);
 
+const limitHandoffTool = {
+  ...commandTool,
+  dependencies: [...commandTool.dependencies, UsageLimitHandoff.UsageLimitHandoffService],
+};
+const ThreadLimitHandoffOptionsTool = Tool.make("t3_thread_limit_handoff_options", {
+  ...limitHandoffTool,
+  description:
+    "For a thread stopped on a usage limit (usageLimit in t3_thread_list or t3_thread_read), list the provider instances that could continue it, best first: known headroom before unknown, the same provider before another, the same model before a fallback. Each candidate carries its usage. recommendation is null when the thread is not stopped on a usage limit; an empty candidates list means nothing else can run it now. Omit threadId for this thread.",
+  parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
+  success: Schema.Struct({ recommendation: Schema.NullOr(UsageLimitHandoffRecommendation) }),
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
+const ThreadLimitHandoffTool = Tool.make("t3_thread_limit_handoff", {
+  ...limitHandoffTool,
+  description:
+    "Continue a thread stopped on a usage limit on another provider instance: switches the thread, hands its context over, and re-runs the stopped request, cancelling any resume scheduled for the reset. Omit providerInstanceId to take the top candidate from t3_thread_limit_handoff_options; model defaults to the candidate's. Switch only when the user asked you to manage usage or approved the switch.",
+  parameters: Schema.Struct({
+    threadId: Schema.optional(ThreadId),
+    providerInstanceId: Schema.optional(ProviderInstanceId),
+    model: Schema.optional(TrimmedNonEmptyString),
+  }),
+  success: Schema.Struct({
+    sequence: Schema.Number,
+    modelSelection: ModelSelection,
+    receipt: Schema.String,
+  }),
+}).annotate(Tool.Destructive, true);
+
 const transferResult = Schema.Struct({ sequence: NonNegativeInt, targetThreadId: ThreadId });
 const ThreadForkTool = Tool.make("t3_thread_fork", {
   ...commandTool,
@@ -339,6 +371,8 @@ export const ThreadToolkit = Toolkit.make(
   ThreadTransfersTool,
   ThreadConfigurationTool,
   ThreadConfigureTool,
+  ThreadLimitHandoffOptionsTool,
+  ThreadLimitHandoffTool,
   PendingRequestListTool,
   PendingRequestReadTool,
   PendingRequestRespondTool,

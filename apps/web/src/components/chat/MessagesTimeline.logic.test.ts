@@ -18,6 +18,7 @@ import {
   collapseRestartMarkers,
   collapseWorkEntryRuns,
   deriveMessagesTimelineRows,
+  turnFoldRowId,
   type MessagesTimelineRow,
   type TimelineLatestRun,
 } from "./MessagesTimeline.logic";
@@ -165,6 +166,41 @@ describe("a collapsing tool group keeps its details until they animate out", () 
       ["work-toggle", undefined],
       ["work", undefined],
     ]);
+  });
+
+  describe("a collapsing turn fold keeps the work it reveals until it animates out", () => {
+    const foldId = turnFoldRowId(runId);
+    const foldRows = (disclosure: {
+      expandedRunIds?: ReadonlySet<RunId>;
+      closingFoldIds?: ReadonlySet<string>;
+    }) =>
+      deriveMessagesTimelineRows({
+        timelineEntries: entries,
+        latestRun: completedRun,
+        isWorking: false,
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+        ...disclosure,
+      }).map((row) => [row.kind, "expanded" in row ? row.expanded : null, row.foldReveal ?? null]);
+
+    it("marks only the revealed work while the fold is open", () => {
+      expect(foldRows({ expandedRunIds: new Set([runId]) })).toEqual([
+        ["message", null, null],
+        ["turn-fold", true, null],
+        ["work-toggle", false, { foldId, closing: false }],
+        ["message", null, null],
+      ]);
+    });
+
+    it("reads collapsed while the revealed work stays, marked closing, then drops it", () => {
+      expect(foldRows({ closingFoldIds: new Set([foldId]) })).toEqual([
+        ["message", null, null],
+        ["turn-fold", false, null],
+        ["work-toggle", false, { foldId, closing: true }],
+        ["message", null, null],
+      ]);
+      expect(foldRows({}).map(([kind]) => kind)).toEqual(["message", "turn-fold", "message"]);
+    });
   });
 });
 

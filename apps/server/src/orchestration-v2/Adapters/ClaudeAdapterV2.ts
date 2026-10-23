@@ -1250,6 +1250,7 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__t3_pending_request_read",
   "mcp__cogenly__t3_thread_configuration",
   "mcp__cogenly__t3_thread_transfers",
+  "mcp__cogenly__t3_thread_limit_handoff_options",
   "mcp__cogenly__t3_worktree_status",
   "mcp__cogenly__t3_worktree_list",
   "mcp__cogenly__t3_project_list",

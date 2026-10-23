@@ -5,10 +5,8 @@ import {
   Bot,
   Camera,
   ExternalLink,
-  Eye,
   Globe,
   Lock,
-  MousePointer2,
   MousePointerClick,
 } from "lucide-react";
 import {
@@ -16,6 +14,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -27,56 +26,77 @@ import { useLastPresent } from "~/components/ui/overlay-presence";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
 
-import { resolvePreviewControlToggle } from "./previewControlToggle";
+import { type PreviewControlInput, resolvePreviewControlToggle } from "./previewControlToggle";
 
-/** Who drives a streamed (server) tab; the chrome shows it as one quiet toggle. */
-export interface PreviewControlState {
-  readonly controller: "agent" | "you" | "another-viewer" | "unclaimed";
-  readonly canOperate: boolean;
+/** Who drives a streamed (server) tab, and the two ways control changes hands. */
+export interface PreviewControlState extends PreviewControlInput {
   readonly onTakeControl: () => void;
+  readonly onHandBack: () => void;
 }
 
 /**
- * One cursor says who drives the page (previewControlToggle): a plain, inert
- * ghost button while you do, pressed while the agent (or anyone else, or
- * nobody) does. The words live in the tooltip and the accessible name; a
- * click only takes control, since the agent takes it back when it next acts.
+ * The agent toggle (previewControlToggle): pressed and accented while the
+ * agent drives, so a click takes control; released and muted while you drive
+ * a tab it was using, so a click hands it back. The page banner says the same
+ * thing where you would try to use the page. Once shown the toggle keeps its
+ * slot and fades, so the toolbar never shifts.
  */
 function PreviewControlToggle({ control }: { control: PreviewControlState }) {
-  const state = resolvePreviewControlToggle(control.controller);
-  if (!control.canOperate) {
+  const { controller, canOperate, agentInvolved } = control;
+  // Memoized: the last state must keep its identity to survive the fade-out.
+  const state = useMemo(
+    () => resolvePreviewControlToggle({ controller, canOperate, agentInvolved }),
+    [controller, canOperate, agentInvolved],
+  );
+  const agentState = state.kind === "agent" ? state : null;
+  const shown = useLastPresent(agentState);
+  if (state.kind === "readOnly") {
     return (
       <span role="status" className="shrink-0 px-1 text-xs text-muted-foreground">
-        Read-only
+        View only
       </span>
     );
   }
+  if (!shown) return null;
+  const active = agentState !== null;
   return (
     <Tooltip>
-      <TooltipTrigger render={<span className="flex shrink-0" />}>
+      <TooltipTrigger
+        render={
+          <span
+            aria-hidden={active ? undefined : true}
+            className={cn(
+              "flex shrink-0 transition-opacity duration-(--motion-duration-base) ease-out",
+              active ? "opacity-100" : "pointer-events-none opacity-0",
+            )}
+          />
+        }
+      >
         <Toggle
           size="sm"
           variant="ghost"
-          pressed={state.pressed}
-          onPressedChange={control.onTakeControl}
-          disabled={state.disabled}
-          aria-label={state.hint}
+          pressed={shown.pressed}
+          onPressedChange={() => {
+            if (shown.action === "take") control.onTakeControl();
+            else if (shown.action === "handBack") control.onHandBack();
+          }}
+          disabled={shown.disabled || !active}
+          aria-label={shown.hint}
           data-preview-control={control.controller}
         >
-          {control.controller === "agent" ? (
-            // Named, not just a robot: it says who drives, and the tooltip what a click does.
-            <span className="flex items-center gap-1 text-brand-accent">
-              <Bot />
-              <span className="text-xs font-medium">Agent</span>
-            </span>
-          ) : control.controller === "another-viewer" ? (
-            <Eye />
-          ) : (
-            <MousePointer2 />
-          )}
+          {/* Named, not just a robot: it says who drives, and the tooltip what a click does. */}
+          <span
+            className={cn(
+              "flex items-center gap-1 transition-colors duration-(--motion-duration-base) ease-out",
+              shown.pressed ? "text-brand-accent" : "text-muted-foreground",
+            )}
+          >
+            <Bot />
+            <span className="text-xs font-medium">Agent</span>
+          </span>
         </Toggle>
       </TooltipTrigger>
-      <TooltipPopup>{state.hint}</TooltipPopup>
+      <TooltipPopup>{shown.hint}</TooltipPopup>
     </Tooltip>
   );
 }
