@@ -115,7 +115,7 @@ export const resolveHeaderTemplates = (
           reason: "credential_unresolved",
         });
       }
-      let value = template;
+      const secrets = new Map<string, string>();
       for (const ref of credentialRefsIn(template)) {
         if (Credentials.parseCredentialRef(ref) === undefined) {
           return yield* new IntegrationError({
@@ -141,9 +141,14 @@ export const resolveHeaderTemplates = (
             reason: "credential_unresolved",
           });
         }
-        value = value.replaceAll(`{{credential:${ref}}}`, secret.value);
+        secrets.set(ref, secret.value);
       }
-      resolved[name] = value;
+      // One pass with a replacer: a secret is inserted literally, so `$&` in it
+      // is not a replacement pattern and a `{{credential:…}}` in it is not expanded.
+      resolved[name] = template.replace(
+        CREDENTIAL_REF,
+        (_match, ref: string) => secrets.get(ref.trim()) ?? "",
+      );
     }
     return resolved;
   });

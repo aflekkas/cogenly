@@ -181,6 +181,23 @@ describe("resolveHeaderTemplates", () => {
       expect(unknownTemplate._tag).toBe("Failure");
     }),
   );
+
+  it.effect("inserts a credential literally, even with replacement patterns in it", () =>
+    Effect.gen(function* () {
+      const literal = new Map([
+        ["a.value", "pa$&ss$'$`$1"],
+        ["b.value", "{{credential:a.value}}"],
+      ]);
+      const resolved = yield* Integrations.resolveHeaderTemplates(
+        { authorization: "Bearer {{credential:a.value}}", other: "{{credential:b.value}}" },
+        (ref) => Effect.succeed(Option.fromNullishOr(literal.get(ref))),
+      );
+      expect(resolved).toEqual({
+        authorization: "Bearer pa$&ss$'$`$1",
+        other: "{{credential:a.value}}",
+      });
+    }),
+  );
 });
 
 describe("Integrations gateway", () => {
