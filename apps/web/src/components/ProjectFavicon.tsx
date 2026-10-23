@@ -171,6 +171,11 @@ export function ProjectFallbackGlyphIcon({
   );
 }
 
+// Favicons that have loaded once. An icon that mounts again (a picked
+// repository, the heading of the draft a pick opens) shows its image at once,
+// instead of painting the fallback until the cached image reports in.
+const loadedFaviconSrcs = new Set<string>();
+
 function ProjectFaviconImage({
   src,
   className,
@@ -183,10 +188,11 @@ function ProjectFaviconImage({
   readonly fallback?: ReactNode;
 }) {
   const [displayedSrc, setDisplayedSrc] = useState<string | null>(() =>
-    src.startsWith("data:image/") ? src : null,
+    src.startsWith("data:image/") || loadedFaviconSrcs.has(src) ? src : null,
   );
   const isLoading = displayedSrc !== src;
   const handleLoadError = (failedSrc: string) => {
+    loadedFaviconSrcs.delete(failedSrc);
     setDisplayedSrc((currentSrc) => (currentSrc === failedSrc ? null : currentSrc));
   };
 
@@ -211,6 +217,7 @@ function ProjectFaviconImage({
           alt=""
           className="hidden"
           onLoad={() => {
+            loadedFaviconSrcs.add(src);
             setDisplayedSrc(src);
           }}
           onError={() => handleLoadError(src)}
