@@ -98,7 +98,10 @@ never logged; lengths and names are the most telemetry may carry. Card values
 are also scrubbed in the shapes a page echoes them: the number digits-only or
 grouped in fours, and the expiry as `MM/YYYY`; the CVC and `MM/YY` expiry are
 below the length floor, so they are scrubbed as whole tokens only (never
-inside a longer number).
+inside a longer number). TOTP codes for the current 30-second window and its
+neighbours are computed at scrub time and take the same whole-token pass.
+Scrubbing fails closed: when the secrets cannot be loaded, every string in the
+result is replaced by a withheld notice and the error is logged.
 
 Delivered process values and their base64, URL-encoded and JSON-escaped forms
 stay registered for the server lifetime, including old revisions after

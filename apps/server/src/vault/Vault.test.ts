@@ -13,11 +13,14 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Vault from "./Vault.ts";
+import { VAULT_WITHHELD } from "./VaultRedactor.ts";
+import { totp } from "./VaultTotp.ts";
 
 const memoryStore = () => {
   const values = new Map<string, Uint8Array>();
@@ -300,6 +303,40 @@ describe("Vault service", () => {
         .use({ itemId: item.id, field: "cardNumber", caller: { kind: "human" } })
         .pipe(Effect.flip);
       expect(missing.reason).toBe("field_missing");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("withholds tool output when the secrets to scrub cannot be loaded", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const sql = yield* SqlClient.SqlClient;
+      yield* vault.create({
+        name: "Token",
+        type: "api_key",
+        secretFields: { value: "token-value-123" },
+      });
+      yield* sql`ALTER TABLE vault_items RENAME TO vault_items_gone`;
+      expect(yield* vault.scrubText("leaked token-value-123")).toBe(VAULT_WITHHELD);
+      expect(yield* vault.scrubValue({ output: "leaked token-value-123", exitCode: 0 })).toEqual({
+        output: VAULT_WITHHELD,
+        exitCode: 0,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("scrubs the TOTP codes valid around now", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+      yield* vault.create({ name: "2FA", type: "login", secretFields: { totpSecret: secret } });
+      const atMs = 1_800_000_015_000;
+      yield* TestClock.setTime(atMs);
+      const [previous, current, next] = [-30_000, 0, 30_000].map((offset) =>
+        totp(secret, { atMs: atMs + offset }),
+      );
+      expect(yield* vault.scrubText(`codes ${previous} ${current} ${next}`)).toBe(
+        "codes [redacted vault secret] [redacted vault secret] [redacted vault secret]",
+      );
     }).pipe(Effect.provide(layer)),
   );
 

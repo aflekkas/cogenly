@@ -26,6 +26,7 @@ import {
   type VaultUpdateInput,
   type VaultUsageListInput,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -40,7 +41,14 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as VaultCrypto from "./VaultCrypto.ts";
 import { evaluateVaultPolicy, hostMatchesAnyDomain, type VaultUseCaller } from "./VaultPolicy.ts";
-import { redactShortSecrets, redactShortValue, redactText, redactValue } from "./VaultRedactor.ts";
+import {
+  VAULT_WITHHELD,
+  redactShortSecrets,
+  redactShortValue,
+  redactText,
+  redactValue,
+  withholdValue,
+} from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
 export interface VaultUseInput {
@@ -286,7 +294,13 @@ const make = Effect.gen(function* () {
     loaded: boolean;
     secrets: Set<string>;
     shortSecrets: Set<string>;
-  }>({ loaded: false, secrets: new Set<string>(), shortSecrets: new Set<string>() });
+    totpSecrets: ReadonlyArray<string>;
+  }>({
+    loaded: false,
+    secrets: new Set<string>(),
+    shortSecrets: new Set<string>(),
+    totpSecrets: [],
+  });
 
   const processSecrets = yield* Ref.make(new Set<string>());
   const environmentId = yield* identity.getEnvironmentId;
@@ -445,6 +459,7 @@ const make = Effect.gen(function* () {
     loaded: false,
     secrets: new Set<string>(),
     shortSecrets: new Set<string>(),
+    totpSecrets: [],
   });
 
   const ensureScrubSecrets = Effect.gen(function* () {
@@ -456,6 +471,7 @@ const make = Effect.gen(function* () {
       );
     const secrets = new Set<string>();
     const shortSecrets = new Set<string>();
+    const totpSecrets: Array<string> = [];
     for (const row of rows) {
       const stored = yield* decryptStored(row).pipe(Effect.option);
       if (Option.isNone(stored)) continue;
@@ -477,11 +493,40 @@ const make = Effect.gen(function* () {
         if (year.length === 4) secrets.add(`${expiry.slice(0, 3)}${year}`);
       }
       if (stored.value.cardCvc) shortSecrets.add(stored.value.cardCvc);
+      if (stored.value.totpSecret) totpSecrets.push(stored.value.totpSecret);
     }
-    const loaded = { loaded: true, secrets, shortSecrets };
+    const loaded = { loaded: true, secrets, shortSecrets, totpSecrets };
     yield* Ref.set(scrubCache, loaded);
     return loaded;
   });
+
+  /**
+   * The cached scrub set plus the TOTP codes valid now: a filled code can echo
+   * back in page text, and codes change every 30 seconds, so they are computed
+   * per scrub for the current window and its neighbours. Six digits is short
+   * enough to collide with ordinary numbers, so they take the whole-token pass.
+   */
+  const scrubSets = Effect.gen(function* () {
+    const { secrets, shortSecrets, totpSecrets } = yield* ensureScrubSecrets;
+    if (totpSecrets.length === 0) return { secrets, shortSecrets };
+    const nowMs = yield* Clock.currentTimeMillis;
+    const withCodes = new Set(shortSecrets);
+    for (const secret of totpSecrets)
+      for (const offset of [-30_000, 0, 30_000]) {
+        const code = Option.liftThrowable(totp)(secret, { atMs: nowMs + offset });
+        if (Option.isSome(code)) withCodes.add(code.value);
+      }
+    return { secrets, shortSecrets: withCodes };
+  });
+
+  /** Unscrubbed text never leaves: a scrub set that cannot load withholds the result. */
+  const withheldOnFailure = <A>(withheld: () => A) =>
+    Effect.catch((error: VaultError) =>
+      Effect.logError(
+        "Vault secrets could not be loaded for scrubbing; output withheld.",
+        error,
+      ).pipe(Effect.andThen(Effect.sync(withheld))),
+    );
 
   const cleanStored = (fields: VaultSecretFields): StoredFields => {
     const stored: StoredFields = {};
@@ -746,21 +791,21 @@ const make = Effect.gen(function* () {
         return next;
       }),
     scrubText: (text) =>
-      ensureScrubSecrets.pipe(
+      scrubSets.pipe(
         Effect.map(({ secrets, shortSecrets }) =>
           redactShortSecrets(redactText(text, secrets), shortSecrets),
         ),
-        Effect.orElseSucceed(() => text),
+        withheldOnFailure(() => VAULT_WITHHELD),
         Effect.flatMap((scrubbed) =>
           Ref.get(processSecrets).pipe(Effect.map((secrets) => redactText(scrubbed, secrets))),
         ),
       ),
     scrubValue: (value) =>
-      ensureScrubSecrets.pipe(
+      scrubSets.pipe(
         Effect.map(({ secrets, shortSecrets }) =>
           redactShortValue(redactValue(value, secrets), shortSecrets),
         ),
-        Effect.orElseSucceed(() => value),
+        withheldOnFailure(() => withholdValue(value)),
         Effect.flatMap((scrubbed) =>
           Ref.get(processSecrets).pipe(Effect.map((secrets) => redactValue(scrubbed, secrets))),
         ),
