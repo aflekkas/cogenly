@@ -12,6 +12,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import type * as Path from "effect/Path";
 
+import { normalizeRepositoryRemote } from "../project/RepositoryRemote.ts";
 import {
   repositoryDirectoryNameFromRemote,
   resolveProjectsRootDirectory,
@@ -159,8 +160,15 @@ export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.c
           .pipe(Effect.asVoid, Effect.ignoreCause({ log: true })),
     },
   );
+  // Record the remote now, while the clone is still running: if it fails or
+  // is cancelled and its project record survives, a later launch can clone
+  // the checkout in place from this remote instead of starting empty.
   yield* deps.labels
-    .linkRepository({ labelId: input.id, repositoryId: started.projectId })
+    .linkRepository({
+      labelId: input.id,
+      repositoryId: started.projectId,
+      remote: normalizeRepositoryRemote(started.remoteUrl),
+    })
     .pipe(Effect.ignoreCause({ log: true }));
   return started;
 });
