@@ -97,18 +97,19 @@ repository crumb.
 The Repository category, shown while a repository is selected, holds the repository's name, icon, actions,
 checkouts and removal. Actions belong to a repository: editing them creates the repository's own list
 on each selected environment, and reset returns to the environment's shared list. A repository's
-`t3.json` actions can be imported there.
+`cogenly.json` actions can be imported there.
 
-Settings a repository can also declare in `t3.json`, such as the workspace for new threads,
-resolve in one order: a repository override, then the environment setting, then `t3.json`, then the
-built-in default. Leave a setting on **Inherit** to let the next tier decide.
+Settings a repository can also declare in `cogenly.json`, such as the workspace for new threads,
+resolve in one order: a repository override, then the environment setting, then `cogenly.json`, then the
+built-in default. Leave a setting on **Inherit** to let the next tier decide. A repository that
+still has a `t3.json` and no `cogenly.json` is read the same way; rename the file when convenient.
 Browser access changes apply when an agent session next starts.
 
 New worktrees initialize git submodules recursively. If that step is slow because the repository
 declares many nested submodules, set **Submodules** in **Settings → General** (with the repository
 selected to override it there) to **Top level only** to stop at the ones the repository declares
 itself, or **Skip** to leave them for a setup script. It resolves in the same order as the
-workspace default: a `"worktreeSubmodules"` value in the `t3.json` of the branch being checked out
+workspace default: a `"worktreeSubmodules"` value in the `cogenly.json` of the branch being checked out
 applies when the repository and environment are both on **Inherit**.
 
 ## Worktree location

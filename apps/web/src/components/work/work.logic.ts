@@ -71,7 +71,7 @@ export function listWorkRepositories(
 
 /**
  * Work starts in its own worktree when nothing says otherwise. A project
- * override, a t3.json, or a machine-wide default still decides; only the
+ * override, a cogenly.json, or a machine-wide default still decides; only the
  * built-in "local" fallback gives way, and only for repositories (never the
  * scratch workspace).
  */

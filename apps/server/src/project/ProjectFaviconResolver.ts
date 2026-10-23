@@ -20,7 +20,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
-import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
+import * as ProjectConfigFileLoader from "./ProjectConfigFileLoader.ts";
 
 // Resolution probes ~40 well-known paths plus 7 source files per package
 // root, then the native icon paths and manifests, so a miss costs a few
@@ -302,7 +302,7 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
-  const projectFileLoader = yield* T3ProjectFileLoader.T3ProjectFileLoader;
+  const projectFileLoader = yield* ProjectConfigFileLoader.ProjectConfigFileLoader;
 
   const resolveIconHref = (packageRoot: string, href: string): ReadonlyArray<string> => {
     const clean = href.replace(/^\//, "");
@@ -590,7 +590,7 @@ export const make = Effect.gen(function* () {
       }
     }
 
-    // A t3.json iconPath takes precedence over the well-known locations.
+    // A cogenly.json iconPath takes precedence over the well-known locations.
     const projectFile = yield* projectFileLoader.load(projectCwd);
     if (Option.isSome(projectFile) && projectFile.value.iconPath !== undefined) {
       const existing = yield* findExistingFile(
