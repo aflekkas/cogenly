@@ -9,6 +9,7 @@ import {
   type OrchestrationV2ThreadProjection,
   isOrchestrationV2WorkActive,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -194,6 +195,11 @@ export const make = Effect.gen(function* () {
       continueAfterRestart: boolean,
     ) {
       const now = yield* DateTime.now;
+      // Scheduled agent jobs report an interrupted outcome rather than replaying
+      // their autonomous side effects. Ordinary conversation turns can resume.
+      const agentWork =
+        projection.thread.agent?.role === "work" ||
+        projection.thread.sourceAgentRunId !== undefined;
       const runs = [] as Array<OrchestrationV2ThreadProjection["runs"][number]>;
       const revivedRuns = [] as Array<OrchestrationV2ThreadProjection["runs"][number]>;
       for (const run of nonterminalRuns(projection)) {
@@ -201,7 +207,10 @@ export const make = Effect.gen(function* () {
         // cancelling it and chaining another continuation would only stack a
         // "resumed" marker for a turn that never ran. It is left alone and
         // restarted below instead, keeping the marker it already has.
-        if (isUnstartedRestartContinuation(run, projection.attempts, projection.providerTurns)) {
+        if (
+          !agentWork &&
+          isUnstartedRestartContinuation(run, projection.attempts, projection.providerTurns)
+        ) {
           revivedRuns.push(run);
           continue;
         }
@@ -319,6 +328,10 @@ export const make = Effect.gen(function* () {
       // Buffered wakes lost their output with the process. Durable queued messages
       // keep their execution identities and order until the user resumes them.
       for (const run of queuedRuns) {
+        if (agentWork) {
+          runs.push(run);
+          continue;
+        }
         if (bufferedMessageIds.has(run.userMessageId)) {
           runs.push(run);
           continue;
@@ -352,6 +365,8 @@ export const make = Effect.gen(function* () {
           },
         });
       }
+      let nextItemOrdinal =
+        projection.turnItems.reduce((max, item) => Math.max(max, item.ordinal), 0) + 1;
       for (const run of runs) {
         events.push({
           id: yield* allocateEventId(),
@@ -360,7 +375,46 @@ export const make = Effect.gen(function* () {
           runId: run.id,
           providerInstanceId: run.providerInstanceId,
           occurredAt: now,
-          payload: { ...run, status: "cancelled", queuePosition: null, completedAt: now },
+          payload: {
+            ...run,
+            status: agentWork ? "failed" : "cancelled",
+            queuePosition: null,
+            completedAt: now,
+          },
+        });
+        events.push({
+          id: yield* allocateEventId(),
+          type: "turn-item.updated",
+          threadId: projection.thread.id,
+          runId: run.id,
+          providerInstanceId: run.providerInstanceId,
+          occurredAt: now,
+          payload: {
+            id: TurnItemId.make(`server-restarted:${run.id}`),
+            type: "error",
+            threadId: projection.thread.id,
+            runId: run.id,
+            nodeId: run.rootNodeId,
+            providerThreadId: run.providerThreadId,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: nextItemOrdinal++,
+            status: "failed",
+            title: "Run interrupted",
+            failure: {
+              class: "transport_error",
+              code: "server_restarted",
+              message:
+                trigger === "startup"
+                  ? "Cogenly restarted during this run."
+                  : "Cogenly stopped during this run.",
+              retryable: true,
+            },
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+          },
         });
         for (const attempt of projection.attempts.filter(
           (candidate) =>
@@ -621,7 +675,7 @@ export const make = Effect.gen(function* () {
         });
       }
       const continuationRun =
-        continueAfterRestart && trigger === "startup"
+        !agentWork && continueAfterRestart && trigger === "startup"
           ? restartContinuationRun(projection, now)
           : undefined;
       const effects: Array<EffectOutbox.PendingOrchestrationEffectV2> = continuationRun

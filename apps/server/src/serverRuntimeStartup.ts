@@ -45,6 +45,7 @@ import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as Agents from "./agents/AgentService.ts";
 import * as SystemdWatchdog from "./scheduling/SystemdWatchdog.ts";
 import { forkParked, forkParkedFiber } from "./serverActivation.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
@@ -539,7 +540,13 @@ const make = (options?: StartupOptions) =>
             ),
           ),
         ),
-        recover: runStartupPhase("orchestration-v2.recovery", providerRuntimeRecovery.recover),
+        recover: runStartupPhase("orchestration-v2.recovery", providerRuntimeRecovery.recover).pipe(
+          Effect.tap(() =>
+            Effect.flatMap(Agents.AgentService, (agents) =>
+              agents.reconcile({ afterRestart: true }),
+            ),
+          ),
+        ),
         recoverDelegatedTasks: runStartupPhase(
           "orchestration-v2.delegated-tasks.recover",
           orchestrator.recoverDelegatedTasks,
