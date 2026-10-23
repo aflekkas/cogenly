@@ -11,6 +11,16 @@ Each item has a name, a type (login, API key, card, or note), the domains it
 may be used on, and its secret fields, such as a username, password, or
 one-time-code secret. Items can belong to one project or work everywhere.
 
+## Add an item
+
+Open **Settings → Vault** and choose **Add item**. Pick a type, give the item
+a name agents can ask for, and fill in its fields. For a login, list the
+sites it may be used on. Choose whether agents ask you first (the default)
+or which agents may use it without asking, optionally only on certain sites.
+
+Saved secrets cannot be viewed again, even by you. When you edit an item,
+leave a secret field blank to keep it, or type a new value to replace it.
+
 ## How agents use it
 
 - When an agent creates a credential, for example signing up for a service,
@@ -34,4 +44,4 @@ start yourself do not need approval.
 
 Every use is recorded: which item, which agent or chat, which site, and
 whether it was allowed, denied, or waited on approval. Settings → Vault
-shows items and this usage log.
+shows each item's uses and all activity across the vault.

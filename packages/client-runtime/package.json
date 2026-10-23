@@ -434,6 +434,10 @@
     "./state/agents": {
       "types": "./src/state/agents.ts",
       "default": "./src/state/agents.ts"
+    },
+    "./state/vault": {
+      "types": "./src/state/vault.ts",
+      "default": "./src/state/vault.ts"
     }
   },
   "scripts": {
