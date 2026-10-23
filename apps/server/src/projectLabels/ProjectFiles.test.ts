@@ -254,6 +254,58 @@ describe("project files", () => {
     }).pipe(Effect.provide(filesLayer("label-files-rebuild"))),
   );
 
+  it.effect("refuses to add anything through a Resources symlink that leaves the project", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const config = yield* ServerConfig.ServerConfig;
+      const files = yield* Files.ProjectFiles;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const label = labelRef("label:resources-escape", "Escape Me");
+      yield* seedLabel(label.id, label.name);
+      const { dir } = yield* folders.ensureForLabel(label);
+      const outsideDir = path.join(path.dirname(dir), "outside-resources");
+      yield* fs.makeDirectory(outsideDir, { recursive: true });
+      yield* fs.remove(path.join(dir, "Resources"), { recursive: true });
+      yield* fs.symlink(outsideDir, path.join(dir, "Resources"));
+
+      const attachmentId = createPendingAttachmentId(".txt");
+      const pendingPath = path.join(config.attachmentsDir, `${attachmentId}.txt`);
+      yield* fs.makeDirectory(config.attachmentsDir, { recursive: true });
+      yield* fs.writeFileString(pendingPath, "uploaded\n");
+      for (const resource of [
+        { kind: "note", title: "Ideas", text: "escaped" },
+        { kind: "link", name: "Spec", url: "https://example.com/spec" },
+        { kind: "upload", attachmentId, fileName: "hello.txt" },
+      ] as const) {
+        const refused = yield* files.createResource({ id: label.id, resource }).pipe(Effect.flip);
+        expect(refused.reason).toBe("invalid_path");
+      }
+      expect(yield* fs.readDirectory(outsideDir)).toEqual([]);
+      expect(yield* fs.exists(pendingPath)).toBe(true);
+    }).pipe(Effect.provide(filesLayer("label-files-resources-escape"))),
+  );
+
+  it.effect("never writes a note through a dangling symlink inside Resources", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const files = yield* Files.ProjectFiles;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const label = labelRef("label:dangling", "Dangle Me");
+      yield* seedLabel(label.id, label.name);
+      const { dir } = yield* folders.ensureForLabel(label);
+      const outsideFile = path.join(path.dirname(dir), "outside-note.md");
+      yield* fs.symlink(outsideFile, path.join(dir, "Resources", "Ideas.md"));
+      const note = yield* files.createResource({
+        id: label.id,
+        resource: { kind: "note", title: "Ideas", text: "kept inside" },
+      });
+      expect(note.resource.relativePath).toBe("Resources/Ideas (2).md");
+      expect(yield* fs.exists(outsideFile)).toBe(false);
+    }).pipe(Effect.provide(filesLayer("label-files-dangling"))),
+  );
+
   it.effect("refuses symlinks that escape the project folder and never indexes them", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
