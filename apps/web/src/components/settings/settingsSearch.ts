@@ -559,7 +559,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Services",
     to: "/settings/integrations",
     searchTerms: [
-      "integrations mcp servers connect remote gmail linear github tools vault credentials headers add",
+      "integrations mcp servers connect remote gmail google workspace calendar drive linear notion github atlassian jira confluence intercom slack wispr flow fathom figma catalog accounts sign in tools vault credentials headers add custom",
     ],
   },
   {

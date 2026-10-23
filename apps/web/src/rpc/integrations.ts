@@ -36,4 +36,9 @@ export const integrationsRpc = {
     label: "integrations:beginSignIn",
     tag: "integrations.beginSignIn",
   }),
+  /** Connects a default catalog entry; its sign-in link comes back like beginSignIn's. */
+  connectFromCatalog: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "integrations:connectFromCatalog",
+    tag: "integrations.connectFromCatalog",
+  }),
 };
