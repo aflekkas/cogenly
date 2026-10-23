@@ -25,6 +25,7 @@ import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 
 const IMAGE_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 const requestedUpstreams: string[] = [];
+const upstreamHeaders: Array<Record<string, string>> = [];
 
 // The upstream image host: answers any https URL with a PNG.
 const upstream = Layer.succeed(
@@ -32,6 +33,7 @@ const upstream = Layer.succeed(
   HttpClient.make((request) =>
     Effect.sync(() => {
       requestedUpstreams.push(request.url);
+      upstreamHeaders.push({ ...request.headers });
       return HttpClientResponse.fromWeb(
         request,
         new Response(IMAGE_BYTES, { headers: { "content-type": "image/png" } }),
@@ -89,6 +91,22 @@ describe("remote image routes", () => {
         IMAGE_BYTES,
       );
       assert.deepEqual(requestedUpstreams, ["https://cdn.test/photos/a.png"]);
+    }).pipe(Effect.provide(services)),
+  );
+
+  it.effect("fetches upstream like a browser would, with no credentials or referrer", () =>
+    Effect.gen(function* () {
+      upstreamHeaders.length = 0;
+      const { relativeUrl } = yield* issueAssetUrl({
+        resource: { _tag: "remote-image", url: "https://cdn.test/photos/a.png" },
+      });
+      yield* get(relativeUrl);
+      const [headers] = upstreamHeaders;
+      assert.match(headers?.["user-agent"] ?? "", /^Mozilla\/5\.0 .*Chrome\//);
+      assert.include(headers?.accept ?? "", "image/");
+      for (const name of ["referer", "cookie", "authorization"]) {
+        assert.isUndefined(headers?.[name]);
+      }
     }).pipe(Effect.provide(services)),
   );
 

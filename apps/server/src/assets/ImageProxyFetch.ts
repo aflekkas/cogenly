@@ -14,8 +14,18 @@ export const IMAGE_PROXY_PATH = "/api/image-proxy";
 export const MAX_PROXIED_IMAGE_BYTES = 10 * 1024 * 1024;
 /** A chain this long is not an image host answering with bytes. */
 const MAX_REDIRECTS = 3;
-/** Following redirects here is what re-validates every hop below. */
-const MANUAL_REDIRECT: RequestInit = { redirect: "manual" };
+/**
+ * Following redirects here is what re-validates every hop below. No Referer goes out on any hop:
+ * the chat origin is nothing an image host should learn, and hosts that block hotlinks key on it.
+ */
+const MANUAL_REDIRECT: RequestInit = { redirect: "manual", referrerPolicy: "no-referrer" };
+/** Some image hosts and CDNs refuse requests that do not look like a browser's. */
+export const IMAGE_PROXY_REQUEST_HEADERS = {
+  "user-agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+  accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+  "accept-encoding": "identity",
+} as const;
 /** Only pictures leave this origin, decided from the upstream content type. */
 const IMAGE_CONTENT_TYPE_PATTERN = /^image\/[\w!#$&^.+-]+$/i;
 const SVG_CONTENT_TYPE = "image/svg+xml";
@@ -158,10 +168,7 @@ const fetchFollowingRedirects = Effect.fn("ImageProxyFetch.fetchFollowingRedirec
     const response: HttpClientResponse.HttpClientResponse = yield* httpClient
       .execute(
         HttpClientRequest.get(target).pipe(
-          HttpClientRequest.setHeaders({
-            "accept-encoding": "identity",
-            accept: "image/*",
-          }),
+          HttpClientRequest.setHeaders(IMAGE_PROXY_REQUEST_HEADERS),
         ),
       )
       .pipe(Effect.provideService(FetchHttpClient.RequestInit, MANUAL_REDIRECT));
