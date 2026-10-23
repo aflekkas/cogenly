@@ -1,3 +1,4 @@
+import * as Vault from "../vault/Vault.ts";
 import type { CredentialDelivery } from "../accounts/CliCredentials.ts";
 import type { AccountError } from "@t3tools/contracts";
 /**
@@ -339,6 +340,7 @@ interface TerminalSessionState {
   pid: number | null;
   history: BoundedTerminalHistory;
   pendingHistoryControlSequence: string;
+  redactVaultOutput?: (chunk: string, final?: boolean) => Effect.Effect<string>;
   pendingProcessEvents: Array<PendingProcessEvent>;
   pendingProcessEventIndex: number;
   processEventDrainRunning: boolean;
@@ -365,10 +367,11 @@ interface PersistHistoryRequest {
 }
 
 type PendingProcessEvent =
-  | { type: "output"; data: string }
+  | { type: "output"; data: string; final?: boolean }
   | { type: "exit"; event: PtyAdapter.PtyExitEvent };
 
 type DrainProcessEventAction =
+  | { readonly type: "skip" }
   | { type: "idle" }
   | {
       type: "output";
@@ -1495,6 +1498,7 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.fn("TerminalManager.make")(function* () {
+  yield* Vault.Vault;
   const { terminalLogsDir } = yield* ServerConfig.ServerConfig;
   const ptyAdapter = yield* PtyAdapter.PtyAdapter;
   const portDiscovery = yield* PortScanner.PortDiscovery;
@@ -1528,6 +1532,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
 export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(function* (
   options: TerminalManagerOptions,
 ) {
+  const vault = yield* Effect.serviceOption(Vault.Vault);
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
@@ -2117,12 +2122,12 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     expectedPid: number,
   ) {
     while (true) {
-      const action: DrainProcessEventAction = yield* Effect.sync(() => {
+      const queued = yield* Effect.sync(() => {
         if (session.pid !== expectedPid || !session.process || session.status !== "running") {
           session.pendingProcessEvents = [];
           session.pendingProcessEventIndex = 0;
           session.processEventDrainRunning = false;
-          return { type: "idle" } as const;
+          return undefined;
         }
 
         const nextEvent = session.pendingProcessEvents[session.pendingProcessEventIndex];
@@ -2130,7 +2135,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           session.pendingProcessEvents = [];
           session.pendingProcessEventIndex = 0;
           session.processEventDrainRunning = false;
-          return { type: "idle" } as const;
+          return undefined;
         }
 
         session.pendingProcessEventIndex += 1;
@@ -2139,7 +2144,21 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           session.pendingProcessEventIndex = 0;
         }
 
+        return nextEvent;
+      });
+      if (queued === undefined) return;
+      const data =
+        queued.type === "output" && session.redactVaultOutput
+          ? yield* session.redactVaultOutput(queued.data, queued.final)
+          : queued.type === "output"
+            ? queued.data
+            : "";
+      const nextEvent = queued.type === "output" ? { ...queued, data } : queued;
+      const action: DrainProcessEventAction = yield* Effect.sync(() => {
+        if (session.pid !== expectedPid || !session.process || session.status !== "running")
+          return { type: "idle" } as const;
         if (nextEvent.type === "output") {
+          if (!nextEvent.data) return { type: "skip" } as const;
           const sanitized = sanitizeTerminalHistoryChunk(
             session.pendingHistoryControlSequence,
             nextEvent.data,
@@ -2191,6 +2210,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         } as const;
       });
 
+      if (action.type === "skip") continue;
       if (action.type === "idle") {
         return;
       }
@@ -2354,6 +2374,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       return [undefined, state] as const;
     });
 
+    session.redactVaultOutput = Option.isSome(vault)
+      ? yield* vault.value.makeOutputRedactor()
+      : undefined;
+
     let ptyProcess: PtyAdapter.PtyProcess | null = null;
     let startedShell: string | null = null;
 
@@ -2404,11 +2428,19 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               });
               session.unsubscribeExit = spawnResult.process.onExit((event) => {
                 const tail = session.agent?.redactOutput?.("", true);
-                if (tail) enqueueProcessEvent(session, processPid, { type: "output", data: tail });
-                if (!enqueueProcessEvent(session, processPid, { type: "exit", event })) {
-                  return;
-                }
-                if (eventsActivated) runFork(drainProcessEvents(session, processPid));
+                let shouldDrain = tail
+                  ? enqueueProcessEvent(session, processPid, { type: "output", data: tail })
+                  : false;
+                shouldDrain =
+                  enqueueProcessEvent(session, processPid, {
+                    type: "output",
+                    data: "",
+                    final: true,
+                  }) || shouldDrain;
+                shouldDrain =
+                  enqueueProcessEvent(session, processPid, { type: "exit", event }) || shouldDrain;
+                if (eventsActivated && shouldDrain)
+                  runFork(drainProcessEvents(session, processPid));
               });
               eventStamp = advanceEventSequence(session);
               return [undefined, state] as const;

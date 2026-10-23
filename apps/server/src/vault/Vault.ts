@@ -44,6 +44,7 @@ import * as VaultCrypto from "./VaultCrypto.ts";
 import { evaluateVaultPolicy, hostMatchesAnyDomain, type VaultUseCaller } from "./VaultPolicy.ts";
 import {
   VAULT_WITHHELD,
+  processOutputRedactor,
   redactShortSecrets,
   redactShortValue,
   redactText,
@@ -285,6 +286,9 @@ export class Vault extends Context.Service<
     }) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
     /** Retained through server lifetime: descendants and retained output may outlive a PTY. */
     readonly registerProcessSecrets: (values: ReadonlyArray<string>) => Effect.Effect<void>;
+    readonly makeOutputRedactor: () => Effect.Effect<
+      (chunk: string, final?: boolean) => Effect.Effect<string>
+    >;
     readonly scrubText: (text: string) => Effect.Effect<string>;
     readonly scrubValue: <A>(value: A) => Effect.Effect<A>;
   }
@@ -827,6 +831,24 @@ const make = Effect.gen(function* () {
           next.add(JSON.stringify(value).slice(1, -1));
         }
         return next;
+      }),
+    makeOutputRedactor: () =>
+      Effect.sync(() => {
+        let values: Array<string> = [];
+        let redact = processOutputRedactor(() => values);
+        return (chunk, final = false) =>
+          Effect.gen(function* () {
+            const { secrets, shortSecrets } = yield* scrubSets;
+            const delivered = yield* Ref.get(processSecrets);
+            values = [...secrets, ...shortSecrets, ...delivered];
+            return redact(chunk, final);
+          }).pipe(
+            withheldOnFailure(() => {
+              // Discard any held prefix too: it cannot be released unchecked.
+              redact = processOutputRedactor(() => values);
+              return VAULT_WITHHELD;
+            }),
+          );
       }),
     scrubText: (text) =>
       scrubSets.pipe(

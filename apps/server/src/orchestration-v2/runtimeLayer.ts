@@ -350,7 +350,7 @@ const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
-const layerVaultProvided = Vault.layer.pipe(
+export const layerVaultProvided = Vault.layer.pipe(
   Layer.provide(ServerEnvironment.layerIdentity),
   Layer.provide(layerProjectFilesProvided),
 );

@@ -1,3 +1,9 @@
+import { EnvironmentId } from "@t3tools/contracts";
+import * as Vault from "../vault/Vault.ts";
+import * as Sqlite from "../persistence/Sqlite.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as Option from "effect/Option";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -322,5 +328,65 @@ it.effect("an evicted finished run replays its persisted log on attach without s
           .pipe(Effect.flip))._tag,
       ).toBe("TerminalSessionLookupError");
     }),
+  ),
+);
+
+it.effect("vault redaction precedes terminal events, history and disk across chunks", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, process, manager } = yield* make;
+      const vault = yield* Vault.Vault;
+      const fs = yield* FileSystem.FileSystem;
+      const exited = yield* Deferred.make<void>();
+      let events = "";
+      yield* manager.subscribe((event) => {
+        if (event.type === "output") events += event.data;
+        return event.type === "exited"
+          ? Deferred.succeed(exited, undefined).pipe(Effect.asVoid)
+          : Effect.void;
+      });
+      const started = yield* manager.runAgent({
+        threadId: "A",
+        command: "echo",
+        cwd,
+        background: true,
+      });
+      yield* vault.create({
+        name: "after-start",
+        type: "login",
+        secretFields: { password: "vault-secret-123" },
+      });
+      process.output("before vault-sec");
+      process.output("ret-123 after");
+      process.finish(0);
+      yield* Deferred.await(exited);
+      const result = yield* manager.readAgent({ threadId: "A", terminalId: started.terminalId });
+      expect(result.output).toBe("before [redacted vault secret] after");
+      expect(events).toBe(result.output);
+      yield* manager.close({ threadId: "A", terminalId: started.terminalId });
+      const logs = yield* fs.readDirectory(cwd);
+      const disk = yield* Effect.forEach(
+        logs.filter((name) => name.endsWith(".log")),
+        (name) => fs.readFileString(`${cwd}/${name}`),
+      );
+      expect(disk.join("")).toBe(result.output);
+    }).pipe(
+      Effect.provide(
+        Vault.layer.pipe(
+          Layer.provideMerge(Sqlite.layerMemory),
+          Layer.provide(
+            Layer.mock(ServerSecretStore.ServerSecretStore)({
+              get: () => Effect.succeed(Option.none()),
+              create: () => Effect.void,
+            }),
+          ),
+          Layer.provide(
+            Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+              getEnvironmentId: Effect.succeed(EnvironmentId.make("test")),
+            }),
+          ),
+        ),
+      ),
+    ),
   ),
 );

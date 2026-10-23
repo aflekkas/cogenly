@@ -80,10 +80,10 @@ export const redactShortValue = <A>(value: A, secrets: Iterable<string>): A => {
 
 /** A PTY may split a token across data callbacks. Hold only a possible secret
  * prefix so raw values never enter terminal events, history or disk logs. */
-export const processOutputRedactor = (values: Iterable<string>) => {
-  const secrets = orderedSecrets(values);
+export const processOutputRedactor = (values: Iterable<string> | (() => Iterable<string>)) => {
   let pending = "";
   return (chunk: string, final = false): string => {
+    const secrets = orderedSecrets(typeof values === "function" ? values() : values);
     const input = pending + chunk;
     pending = "";
     let output = "";

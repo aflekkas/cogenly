@@ -108,7 +108,7 @@ result is replaced by a withheld notice and the error is logged.
 Delivered process values and their base64, URL-encoded and JSON-escaped forms
 stay registered for the server lifetime, including old revisions after
 replacement/deletion. This deliberately outlives a PTY: descendants and retained
-output may outlive it. Account terminals also redact across PTY chunk boundaries
+output may outlive it. All terminals also redact against the vault across PTY chunk boundaries
 before output enters events or persisted history. Tokens are resolved after
 provider environment configuration and overlay only the selected terminal's
 environment; they never enter settings or launch arguments. Provider-native
