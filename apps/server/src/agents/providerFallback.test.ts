@@ -1,5 +1,5 @@
 import { ProviderInstanceId, type Agent, type ModelSelection } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@effect/vitest";
 import {
   advanceFallback,
   chainIndexOf,
@@ -104,7 +104,8 @@ describe("decideFallback / advanceFallback", () => {
       resetAt: null,
       nowMs: NOW,
     });
-    expect(advance!.until).toBe(new Date(NOW + FALLBACK_COOLDOWN_MS).toISOString());
+    expect(advance!.until).toBe("2026-01-01T01:00:00.000Z");
+    expect(Date.parse(advance!.until) - NOW).toBe(FALLBACK_COOLDOWN_MS);
     expect(advance!.resetAt).toBeNull();
     expect(
       advanceFallback({

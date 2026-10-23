@@ -191,7 +191,9 @@ const make = Effect.gen(function* () {
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (r) =>
           Effect.gen(function* () {
-            const usedSelection = yield* decodeSelectionJson(r.model_selection_json ?? null);
+            const usedSelection = yield* decodeSelectionJson(
+              typeof r.model_selection_json === "string" ? r.model_selection_json : null,
+            );
             return yield* decodeRun({
               id: r.run_id,
               agentId: r.agent_id,
@@ -209,7 +211,9 @@ const make = Effect.gen(function* () {
               summary: r.summary,
               posted: r.posted === 1,
               ...(usedSelection === undefined ? {} : { modelSelection: usedSelection }),
-              ...(r.fallback_reason == null ? {} : { fallbackReason: r.fallback_reason }),
+              ...(typeof r.fallback_reason !== "string"
+                ? {}
+                : { fallbackReason: r.fallback_reason as AgentFallbackReason }),
               ...(!("fallback_reset_at" in r) ? {} : { fallbackResetAt: r.fallback_reset_at }),
             });
           }),

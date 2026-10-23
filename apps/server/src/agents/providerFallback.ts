@@ -4,6 +4,7 @@ import type {
   ModelSelection,
   OrchestrationV2ProviderFailure,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 
 /**
  * Provider fallback chains for persistent agents.
@@ -73,12 +74,13 @@ export const decideFallback = (
 ): FallbackDecision => {
   const chain = fallbackChainOf(agent);
   const primary = chain[0]!;
-  if (chain.length < 2 || agent.fallbackIndex <= 0)
+  const storedIndex = agent.fallbackIndex ?? 0;
+  if (chain.length < 2 || storedIndex <= 0)
     return { index: 0, selection: primary, reason: null, restored: false };
   const untilMs = agent.fallbackUntil == null ? null : Date.parse(agent.fallbackUntil);
   if (untilMs !== null && Number.isFinite(untilMs) && nowMs >= untilMs)
     return { index: 0, selection: primary, reason: null, restored: true };
-  const index = Math.min(agent.fallbackIndex, chain.length - 1);
+  const index = Math.min(storedIndex, chain.length - 1);
   return { index, selection: chain[index]!, reason: agent.fallbackReason ?? null, restored: false };
 };
 
@@ -110,8 +112,8 @@ export const advanceFallback = (input: {
   return {
     index: Math.min(input.failedIndex + 1, input.chainLength - 1),
     reason: input.reason,
-    until: new Date(untilMs).toISOString(),
-    resetAt: hasReset ? new Date(resetMs).toISOString() : null,
+    until: DateTime.formatIso(DateTime.makeUnsafe(untilMs)),
+    resetAt: hasReset ? DateTime.formatIso(DateTime.makeUnsafe(resetMs)) : null,
   };
 };
 

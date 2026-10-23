@@ -44,6 +44,15 @@ messages. Facts that must survive should be remembered explicitly.
 Autonomous job reservations are transactional, limited to one active job per agent,
 and capped per UTC day. Agents cannot be paused: failure backoff starts at one minute and
 doubles up to one hour, but never disables an agent, since nothing could turn it back on.
+An agent may also carry an ordered `fallbackChain` of provider instance + model pairs
+after its primary `modelSelection`. When a background run's normalized provider failure
+classifies as `usage_limit` or as a sign-in problem (`providerFallback.ts` reuses the
+adapters' `OrchestrationV2ProviderFailure` classification; Muse only exposes sign-in
+failures in message text), the reconciler advances the stored chain index instead of only
+backing off: the next run uses the next entry, recorded on its `agent_work_runs` row with
+the reason and any reported reset time. The primary entry returns at the reported reset,
+or one hour after the failure when no reset is known. Other failures keep the backoff
+above, and an agent with no chain behaves exactly as before.
 Migration 072 re-enabled agents paused before this. The `agents.enabled` column now only
 fences reservations while deletion stops active work. Owner conversation turns bypass
 backoff and caps. Fixed-time triggers attached to an agent catch up once, then

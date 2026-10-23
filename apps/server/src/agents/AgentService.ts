@@ -428,10 +428,23 @@ const make = Effect.gen(function* () {
           yield* fileConversation(conversationThreadId, input.projectFolderId);
         const { kickoff: _kickoff, projectFolderId: _projectFolderId, ...profile } = input;
         // Editing the primary or the chain restarts fallback from the primary.
+        const sameSelection = (a: Agent["modelSelection"], b: Agent["modelSelection"]) => {
+          const aOptions = Object.entries(a.options ?? {});
+          const bOptions = new Map(Object.entries(b.options ?? {}));
+          return (
+            a.instanceId === b.instanceId &&
+            a.model === b.model &&
+            aOptions.length === bOptions.size &&
+            aOptions.every(([key, value]) => bOptions.get(key) === value)
+          );
+        };
         const chainChanged =
           existing !== null &&
-          JSON.stringify([input.modelSelection, input.fallbackChain ?? []]) !==
-            JSON.stringify([existing.modelSelection, existing.fallbackChain ?? []]);
+          (!sameSelection(input.modelSelection, existing.modelSelection) ||
+            (input.fallbackChain ?? []).length !== (existing.fallbackChain ?? []).length ||
+            (input.fallbackChain ?? []).some(
+              (entry, index) => !sameSelection(entry, (existing.fallbackChain ?? [])[index]!),
+            ));
         const agent = yield* store.save({
           ...profile,
           fallbackChain: input.fallbackChain ?? existing?.fallbackChain ?? [],

@@ -100,7 +100,7 @@ const EventTrigger = Tool.make("propose_event_trigger", {
 const UpdateProfile = Tool.make("update_own_profile", {
   ...shared,
   description:
-    "Update your own agent profile: name, face, responsibility, or standing instructions. Applies immediately.",
+    "Update your own agent profile: name, face, responsibility, standing instructions, model, or fallbackChain (ordered provider instance + model pairs used when the primary hits a usage limit or is signed out). Applies immediately.",
   parameters: AgentOwnProfileUpdateInput,
   success: AgentMutationResult,
 });
@@ -200,6 +200,8 @@ export const handlers = Access.toLayer(toolkit, {
           : { avatar: { ...agent.avatar, ...face, seed: face.seed ?? agent.avatar.seed } }),
         ...(input.responsibility === undefined ? {} : { responsibility: input.responsibility }),
         ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
+        ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
+        ...(input.fallbackChain === undefined ? {} : { fallbackChain: input.fallbackChain }),
       });
     }).pipe(Effect.mapError(unavailable)),
   ),
