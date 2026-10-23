@@ -4,6 +4,7 @@ import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as Settings from "../../../serverSettings.ts";
+import * as MachineSecurity from "../../../security/MachineSecurity.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { readCaller, unavailable } from "../../threadAccess.ts";
@@ -58,6 +59,9 @@ export const addEnvironmentFailure = (error: DesktopAppControl.DesktopAppControl
   });
 
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
+  machine_security_status: McpToolAccess.reads(() =>
+    MachineSecurity.MachineSecurity.pipe(Effect.flatMap((security) => security.status)),
+  ),
   environment_read: McpToolAccess.reads(() =>
     Effect.gen(function* () {
       const { descriptor, settings } = yield* access;

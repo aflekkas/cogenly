@@ -247,6 +247,8 @@ export const make = Effect.fn("SshDeviceHost.make")(function* (
             "-o",
             "ServerAliveCountMax=3",
             "-N",
+            "-o",
+            "GatewayPorts=no",
             "-L",
             `127.0.0.1:${hubPort}:127.0.0.1:${remote.hubPort}`,
             ...(remote.daemonPort === undefined

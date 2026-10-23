@@ -101,6 +101,12 @@ const resolveLanAdvertisedHost = (
   return null;
 };
 
+/** Warning for the Network access mode's 0.0.0.0 bind; the advertised LAN address is not the bind. */
+export const desktopWideBindWarning = (bindHost: string): string | null =>
+  bindHost === DESKTOP_LOOPBACK_HOST
+    ? null
+    : `Desktop Network access binds ${bindHost}, not only the advertised LAN address. A public interface or router port-forward can expose it; this is reported in the machine security status.`;
+
 const resolveDesktopServerExposure = (input: {
   readonly mode: DesktopServerExposureMode;
   readonly port: number;
@@ -455,6 +461,9 @@ export const make = Effect.gen(function* () {
         advertisedHostOverride: config.desktopLanHostOverride,
       });
       yield* Ref.set(stateRef, resolved.state);
+      const wideBind = desktopWideBindWarning(resolved.state.bindHost);
+      if (wideBind !== null)
+        yield* Effect.logWarning(wideBind, { bindHost: resolved.state.bindHost });
       return toContractState(resolved.state);
     },
   );

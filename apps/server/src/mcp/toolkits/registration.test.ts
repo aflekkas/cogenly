@@ -550,7 +550,12 @@ const smokeCases = [
   },
   {
     toolkit: "environment",
-    names: ["environment_add", "environment_preferences_update", "environment_read"],
+    names: [
+      "environment_add",
+      "environment_preferences_update",
+      "environment_read",
+      "machine_security_status",
+    ],
     tool: "environment_read",
     args: {},
     expected: {

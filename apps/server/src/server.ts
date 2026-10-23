@@ -39,6 +39,7 @@ import * as Health from "./health.ts";
 import * as HubLink from "./machines/HubLink.ts";
 import * as MachineIdentity from "./machines/MachineIdentity.ts";
 import * as Machines from "./machines/Machines.ts";
+import * as MachineSecurity from "./security/MachineSecurity.ts";
 import * as PeerChannels from "./machines/PeerChannels.ts";
 import * as PeerHttp from "./machines/peerHttp.ts";
 import * as PeerHub from "./machines/PeerHub.ts";
@@ -283,6 +284,9 @@ const layerRelayClient = Layer.unwrap(
 const layerHttpServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
+    const wideBind = MachineSecurity.wideBindWarning(config.host ?? "127.0.0.1");
+    if (wideBind !== null)
+      yield* Effect.logWarning(wideBind, { host: config.host, port: config.port });
     return NodeHttpServer.layer(() => guardHttpResponseWriteErrors(NodeHttp.createServer()), {
       host: config.host ?? "127.0.0.1",
       port: config.port,
@@ -561,6 +565,7 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
 
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
+  MachineSecurity.layer,
   layerMachines,
   // Asks Cogenly Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,

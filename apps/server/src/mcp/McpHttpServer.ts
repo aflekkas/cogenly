@@ -38,6 +38,7 @@ import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
 import * as PreviewControlsHandlers from "./toolkits/previewControls/handlers.ts";
 import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
 import * as DesktopAppControl from "../environment/DesktopAppControl.ts";
+import * as MachineSecurity from "../security/MachineSecurity.ts";
 import * as EnvironmentHandlers from "./toolkits/environment/handlers.ts";
 import { ProjectToolkit } from "./toolkits/project/tools.ts";
 import * as ProjectHandlers from "./toolkits/project/handlers.ts";
@@ -943,7 +944,11 @@ const layerPreviewControlsRegistration = toolkitRegistration(
 export const layerEnvironmentToolkit = toolkitRegistration(
   EnvironmentToolkit,
   EnvironmentHandlers.layer,
-).pipe(Layer.provide(ThreadCommandExecutor.layer), Layer.provide(DesktopAppControl.layer));
+).pipe(
+  Layer.provide(ThreadCommandExecutor.layer),
+  Layer.provide(DesktopAppControl.layer),
+  Layer.provide(MachineSecurity.layer),
+);
 
 const layerProjectLabelsRegistration = toolkitRegistration(
   ProjectLabelsToolkit,

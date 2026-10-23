@@ -643,7 +643,15 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
   // Security-wise this is acceptable for the local-only WSL backend:
   // the network it exposes on is the WSL-vEthernet network, not the
   // LAN; the primary owns LAN exposure when the user opts in.
+  // Reported, not narrowed: binding 127.0.0.1 broke the readiness probe on
+  // some Windows hosts (see above), and in mirrored networking mode WSL can
+  // be LAN-reachable, so this wide bind is surfaced in the security status
+  // rather than silently assumed private.
   const wslBindHost = "0.0.0.0";
+  yield* Effect.logWarning(
+    "WSL backend binds 0.0.0.0 inside WSL. It is expected to stay on the WSL virtual network, but mirrored networking can make it LAN-reachable; check it in the machine security status.",
+    { wslBindHost },
+  );
 
   const bootstrap = {
     mode: "desktop" as const,

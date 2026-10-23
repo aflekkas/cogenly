@@ -4,12 +4,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { McpSchema, McpServer } from "effect/ai";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Settings from "../../../serverSettings.ts";
+import * as MachineSecurity from "../../../security/MachineSecurity.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { liveThreadShell } from "../../McpToolAccess.testkit.ts";
@@ -75,6 +77,10 @@ const makeServer = (
         Layer.mock(Settings.ServerSettingsService)({}),
         Layer.mock(ThreadCommandExecutor.ThreadCommandExecutor)({}),
         Layer.succeed(DesktopAppControl.DesktopAppControl, { addEnvironment }),
+        Layer.succeed(MachineSecurity.MachineSecurity, {
+          status: Effect.die("machine_security_status is not exercised here"),
+        }),
+        Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
       ),
     ),
   );

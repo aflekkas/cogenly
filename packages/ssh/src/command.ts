@@ -115,6 +115,19 @@ export function baseSshArgs(
   ];
 }
 
+/** Args for a local forward that can only ever listen on loopback, even if ssh_config sets GatewayPorts=yes. */
+export function buildLocalForwardArgs(input: {
+  readonly localPort: number;
+  readonly remotePort: number;
+}): string[] {
+  return [
+    "-o",
+    "GatewayPorts=no",
+    "-L",
+    `127.0.0.1:${input.localPort}:127.0.0.1:${input.remotePort}`,
+  ];
+}
+
 export function getLastNonEmptyOutputLine(stdout: string): string | null {
   return (
     stdout

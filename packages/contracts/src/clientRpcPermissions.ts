@@ -84,6 +84,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.integrationsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsTestConnection]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machineSecurityStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesList]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesUpdate]: AuthSettingsWriteScope,

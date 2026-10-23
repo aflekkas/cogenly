@@ -27,6 +27,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as SshAuth from "./auth.ts";
 import {
   baseSshArgs,
+  buildLocalForwardArgs,
   buildSshHostSpecEffect,
   collectProcessOutput,
   getLastNonEmptyOutputLine,
@@ -1274,8 +1275,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     "ServerAliveCountMax=3",
     "-n",
     "-N",
-    "-L",
-    `${input.localPort}:127.0.0.1:${input.remotePort}`,
+    ...buildLocalForwardArgs({ localPort: input.localPort, remotePort: input.remotePort }),
     hostSpec,
   ];
   const sshCommand = yield* resolveSshCommand;
