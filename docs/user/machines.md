@@ -33,11 +33,13 @@ On the computer joining, prepare its key:
 cogenly machines prepare
 ```
 
-On the hub, use the spoke key fingerprint that command reports:
+On the hub, run the command it prints, with the spoke key fingerprint:
 
 ```sh
-cogenly machines pair --spoke-key <fingerprint>
+cogenly machines pair --spoke-key=<fingerprint>
 ```
+
+Keep the `=`: a fingerprint can start with `-`.
 
 Copy the complete `cogenly-join:` code it prints. The code expires after ten
 minutes, works once, and can be redeemed only with the prepared machine's key.

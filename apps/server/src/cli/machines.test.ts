@@ -6,6 +6,7 @@ import { EnvironmentId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import { Command } from "effect/cli";
 import * as Stdio from "effect/Stdio";
 import * as Stream from "effect/Stream";
@@ -15,6 +16,7 @@ import {
   encodeJoinCode,
   readMachineJoinCode,
   machinesCommand,
+  pairCommandHint,
 } from "./machines.ts";
 
 it.layer(Layer.merge(NodeServices.layer, NetService.layer))("machine join codes", (it) => {
@@ -79,6 +81,20 @@ it.layer(Layer.merge(NodeServices.layer, NetService.layer))("machine join codes"
         })(argv).pipe(Effect.exit);
         assert.isTrue(Exit.isFailure(exit));
       }
+    }),
+  );
+
+  it.effect("prints a pair command that parses a fingerprint starting with '-'", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped();
+      const argv = pairCommandHint("-cUSt8zWd8ZVdkR4AwqENryufw9tdVjUlXqxyFXp66Y").split(" ");
+      const error = yield* Command.runWith(machinesCommand, {
+        version: "test",
+        renderErrors: false,
+      })([...argv.slice(2), "--base-dir", baseDir]).pipe(Effect.flip);
+      // Parsing succeeded: the handler ran and found no server in the empty home.
+      assert.include(error.message, "isn't running");
     }),
   );
 
