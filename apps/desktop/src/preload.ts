@@ -59,7 +59,10 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
   return result as Awaited<ReturnType<DesktopBridge["ensureSshEnvironment"]>>;
 }
 
-contextBridge.exposeInMainWorld("desktopBridge", {
+// Only the main frame gets the bridge: a subframe must never reach desktop IPC.
+const isMainFrame = (process as NodeJS.Process & { isMainFrame?: boolean }).isMainFrame === true;
+
+const desktopBridge = {
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_APP_BRANDING_CHANNEL);
     if (typeof result !== "object" || result === null) {
@@ -420,4 +423,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         ipcRenderer.removeListener(IpcChannels.PREVIEW_OPEN_LINK_CHANNEL, wrappedListener);
     },
   },
-} satisfies DesktopBridge);
+} satisfies DesktopBridge;
+
+if (isMainFrame) {
+  contextBridge.exposeInMainWorld("desktopBridge", desktopBridge);
+}

@@ -315,6 +315,7 @@ const make = Effect.gen(function* () {
       FROM project_resource_files WHERE label_id = ${labelId}
     `.pipe(Effect.mapError(storage("scan")));
     for (const row of rows) known.set(row.relative_path, row);
+    const realRoot = (yield* realPathOrNull(dir)) ?? path.resolve(dir);
     const entries: Array<ScannedEntry> = [];
     let truncated = false;
     const top = yield* fileSystem.readDirectory(dir).pipe(
@@ -341,6 +342,10 @@ const make = Effect.gen(function* () {
         .stat(current.full)
         .pipe(Effect.catch(() => Effect.succeed(null)));
       if (stat === null) continue;
+      // A symlink (or a path through one) that resolves outside the project
+      // folder is not a resource: never walk or index its content.
+      const realTarget = yield* realPathOrNull(current.full);
+      if (realTarget === null || !isWithinRoot(realRoot, realTarget)) continue;
       if (stat.type !== "File" && stat.type !== "Directory") continue;
       // Only top-level entries exclude git work trees; deeper content,
       // including anything under Resources/, is always a resource.
@@ -496,14 +501,24 @@ const make = Effect.gen(function* () {
     return yield* readIndex(labelId);
   });
 
+  const isWithinRoot = (realRoot: string, realTarget: string): boolean =>
+    realTarget === realRoot || realTarget.startsWith(`${realRoot}${path.sep}`);
+
+  const realPathOrNull = (target: string) =>
+    fileSystem.realPath(target).pipe(Effect.catch(() => Effect.succeed<string | null>(null)));
+
   // A relative path that stays inside the project directory. Absolute paths,
   // drive prefixes, backslashes-as-separators, and `.`/`..` segments are
-  // rejected; the resolved path is containment-checked against the dir.
+  // rejected; the resolved path is containment-checked against the dir, and
+  // the real (symlink-resolved) path must stay inside the real root too.
   const resolveResourcePath = (
     operation: string,
     dir: string,
     relativePath: string,
-  ): Effect.Effect<{ readonly full: string; readonly relative: string }, ProjectLabelError> =>
+  ): Effect.Effect<
+    { readonly full: string; readonly resolvedFull: string; readonly relative: string },
+    ProjectLabelError
+  > =>
     Effect.gen(function* () {
       const relative = toPosix(relativePath).trim().replace(/\/+/g, "/").replace(/^\//, "");
       const segments = relative.split("/");
@@ -519,7 +534,12 @@ const make = Effect.gen(function* () {
       if (full !== root && !full.startsWith(`${root}${path.sep}`)) {
         return yield* invalidPath(operation);
       }
-      return { full, relative };
+      const realRoot = (yield* realPathOrNull(root)) ?? root;
+      const realTarget = yield* realPathOrNull(full);
+      if (realTarget !== null && !isWithinRoot(realRoot, realTarget)) {
+        return yield* invalidPath(operation);
+      }
+      return { full, resolvedFull: realTarget ?? full, relative };
     });
 
   // Membership mirrors the scan: the id file and git work trees are not
@@ -567,7 +587,11 @@ const make = Effect.gen(function* () {
   ) {
     const label = yield* requireLabel(input.id);
     const { dir } = yield* folders.dirForLabel(label).pipe(Effect.mapError(storage("read")));
-    const { full, relative } = yield* resolveResourcePath("read", dir, input.relativePath);
+    const { resolvedFull: full, relative } = yield* resolveResourcePath(
+      "read",
+      dir,
+      input.relativePath,
+    );
     yield* requireMember("read", dir, relative, full);
     const stat = yield* fileSystem
       .stat(full)

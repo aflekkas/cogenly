@@ -67,6 +67,17 @@ export class SharedState extends Context.Service<
   }
 >()("cogenly-server/sync/SharedState") {}
 
+/**
+ * Fields a machine may change on an agent or schedule it does not own.
+ * Everything else — permissions, instructions, prompt, provider/model,
+ * runtime mode and trigger fields — is owner-only, so a paired machine
+ * cannot rewrite another machine's autonomous work.
+ */
+const NON_OWNER_EDITABLE_FIELDS: Readonly<Record<"agent" | "schedule", ReadonlySet<string>>> = {
+  agent: new Set(["name"]),
+  schedule: new Set(["title", "enabled"]),
+};
+
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const storage = (cause: unknown) =>
   Schema.is(SharedStateError)(cause) ? cause : new SharedStateError({ reason: "storage", cause });
@@ -134,6 +145,20 @@ const make = Effect.gen(function* () {
       (!ownerClock || compareClock(change.clocks.ownerMachine!, ownerClock) > 0)
     )
       return yield* new SharedStateError({ reason: "owner-change" });
+    // An existing agent or schedule may only be rewritten by its owner
+    // machine. The author is `updatedBy`, which a hub relay preserves, so a
+    // relayed change is still checked against its original author. Creation
+    // (no current document) is exempt: a spoke may create a hub-owned agent.
+    if (
+      current &&
+      (change.kind === "agent" || change.kind === "schedule") &&
+      typeof owner === "string" &&
+      owner !== change.updatedBy
+    ) {
+      const editable = NON_OWNER_EDITABLE_FIELDS[change.kind];
+      if (Object.keys(change.fields).some((key) => !editable.has(key)))
+        return yield* new SharedStateError({ reason: "owner-change" });
+    }
     const merged = mergeDocument(current, change);
     if (merged.kind === "schedule" && typeof merged.fields.agentId === "string") {
       const agent = yield* get("agent", merged.fields.agentId);

@@ -19,6 +19,7 @@ import {
   sanitizePathSegment,
 } from "../project/ProjectsRoot.ts";
 import type * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
+import type * as SourceControlRepositoryService from "../sourceControl/SourceControlRepositoryService.ts";
 import type * as ProjectService from "../project/ProjectService.ts";
 import type * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import type * as ServerSettings from "../serverSettings.ts";
@@ -56,6 +57,7 @@ export interface ProjectLabelCloneDeps {
 export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.clone")(function* (
   input: ProjectLabelCloneRepositoryInput,
   deps: ProjectLabelCloneDeps,
+  options?: { readonly caller?: SourceControlRepositoryService.CloneCaller },
 ) {
   // Before cloning: the link at the end is best-effort, so an archived
   // project must refuse here rather than leave an unfiled clone.
@@ -159,6 +161,7 @@ export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.c
           })
           .pipe(Effect.asVoid, Effect.ignoreCause({ log: true })),
     },
+    { cloneCaller: options?.caller ?? "owner" },
   );
   // Record the remote now, while the clone is still running: if it fails or
   // is cancelled and its project record survives, a later launch can clone

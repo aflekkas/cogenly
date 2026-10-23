@@ -231,6 +231,9 @@ const make = Effect.gen(function* () {
                 Effect.ignoreCause({ log: true }),
               ),
           },
+          // Server-initiated re-clone of a stored remote: local remotes that
+          // came from a previous clone or the repository's own config are allowed.
+          { cloneCaller: "owner" },
         )
         .pipe(
           Effect.mapError(

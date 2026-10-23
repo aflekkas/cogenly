@@ -29,7 +29,10 @@ Only the three declared document kinds cross these channels. The receiver
 rejects unknown fields, malformed values, oversized documents/batches, cursor
 gaps, implausibly future clocks, forged authorship and ownership changes.
 V1 ownership is fixed after creation: transferring execution needs a separate
-handoff protocol. Existing jobs are backfilled to the local machine before
+handoff protocol. Only the owner machine may change an existing agent's or
+schedule's sensitive fields (permissions, instructions, prompt, provider/model,
+runtime mode, triggers); other machines may only rename an agent, or rename and
+enable/disable a schedule, and deletes still retire work everywhere. Existing jobs are backfilled to the local machine before
 scheduling starts; new jobs default to the paired hub. An agent's triggers must
 have the same owner. Reservations, due-work dispatch, event dispatch, webhooks
 and reconciliation enforce ownership. Being offline does not grant another

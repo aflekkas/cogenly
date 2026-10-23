@@ -254,6 +254,39 @@ describe("project files", () => {
     }).pipe(Effect.provide(filesLayer("label-files-rebuild"))),
   );
 
+  it.effect("refuses symlinks that escape the project folder and never indexes them", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const files = yield* Files.ProjectFiles;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const label = labelRef("label:symlink", "Symlink Me");
+      yield* seedLabel(label.id, label.name);
+      const { dir } = yield* folders.ensureForLabel(label);
+      const outsideDir = path.join(path.dirname(dir), "outside-secret");
+      yield* fs.makeDirectory(outsideDir, { recursive: true });
+      yield* fs.writeFileString(path.join(outsideDir, "secret.txt"), "secretoutside\n");
+      yield* fs.symlink(path.join(outsideDir, "secret.txt"), path.join(dir, "escape.txt"));
+      yield* fs.symlink(outsideDir, path.join(dir, "escape-dir"));
+      yield* fs.writeFileString(path.join(dir, "kept.txt"), "kept\n");
+      const read = yield* files
+        .readResource({ id: label.id, relativePath: "escape.txt" })
+        .pipe(Effect.flip);
+      expect(read.reason).toBe("invalid_path");
+      const readDir = yield* files
+        .readResource({ id: label.id, relativePath: "escape-dir/secret.txt" })
+        .pipe(Effect.flip);
+      expect(readDir.reason).toBe("invalid_path");
+      const { resources } = yield* files.listResources(label.id);
+      const paths = resources.map((resource) => resource.relativePath);
+      expect(paths).toContain("kept.txt");
+      expect(paths).not.toContain("escape.txt");
+      expect(paths.some((p) => p === "escape-dir" || p.startsWith("escape-dir/"))).toBe(false);
+      const recall = yield* files.searchResources({ labelId: label.id, query: "secretoutside" });
+      expect(recall.matches).toEqual([]);
+    }).pipe(Effect.provide(filesLayer("label-files-symlink"))),
+  );
+
   // Live clock: the debounced file watcher runs on real time, like the PTY and
   // tail-following tests elsewhere in the repo.
   it.live("pushes fresh lists when files change on disk", () =>
