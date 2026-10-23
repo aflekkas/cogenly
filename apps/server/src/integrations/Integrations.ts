@@ -1236,6 +1236,17 @@ const make = (options: IntegrationsOptions = {}) =>
           if (existing.some((integration) => integration.name === input.name)) {
             return yield* new IntegrationError({ operation: "create", reason: "conflict" });
           }
+          const accounts = existing.filter(
+            (entry) =>
+              entry.transport === input.transport &&
+              entry.url.replace(/\/+$/, "") === input.url.replace(/\/+$/, ""),
+          );
+          let accountLabel = input.accountLabel?.trim();
+          if (!accountLabel && accounts.length > 0) {
+            let ordinal = Math.max(2, accounts.length + 1);
+            while (accounts.some((entry) => entry.accountLabel === `#${ordinal}`)) ordinal++;
+            accountLabel = `#${ordinal}`;
+          }
           const at = yield* now;
           const integration: Integration = {
             id: IntegrationId.make(
@@ -1254,7 +1265,7 @@ const make = (options: IntegrationsOptions = {}) =>
             enabled: input.enabled ?? true,
             scope: input.scope,
             hint: input.hint,
-            ...(input.accountLabel?.trim() ? { accountLabel: input.accountLabel.trim() } : {}),
+            ...(accountLabel ? { accountLabel } : {}),
             ...(input.auth === undefined ? {} : { auth: input.auth }),
             createdAt: at,
             updatedAt: at,

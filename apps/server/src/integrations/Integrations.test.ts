@@ -683,6 +683,32 @@ describe("Integrations gateway", () => {
       ).pipe(Effect.provide(layerWith())),
   );
 
+  it.effect("gives additional unlabeled accounts a distinguishing default label", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const first = yield* service.create({
+        ...createInput("https://mcp.linear.app/mcp", "linear"),
+        headers: {},
+        displayName: "Linear",
+      });
+      const second = yield* service.create({
+        ...createInput("https://mcp.linear.app/mcp", "linear-2"),
+        headers: {},
+        displayName: "Linear",
+      });
+      const third = yield* service.create({
+        ...createInput("https://mcp.linear.app/mcp", "linear-3"),
+        headers: {},
+        displayName: "Linear",
+      });
+      expect(first.integration.accountLabel).toBeUndefined();
+      expect(second.integration.accountLabel).toBe("#2");
+      expect(third.integration.accountLabel).toBe("#3");
+      expect(Integrations.integrationTitle(second.integration)).toBe("Linear · #2");
+    }).pipe(Effect.provide(layerWith())),
+  );
+
   it.effect("context reports account health and reserves disabled catalog services", () =>
     Effect.scoped(
       Effect.gen(function* () {
