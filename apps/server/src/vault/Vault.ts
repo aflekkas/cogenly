@@ -37,6 +37,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as VaultCrypto from "./VaultCrypto.ts";
@@ -237,6 +238,7 @@ export class Vault extends Context.Service<
   {
     readonly list: (
       input: VaultListInput,
+      threadId?: ThreadId,
     ) => Effect.Effect<{ items: ReadonlyArray<VaultItemMetadata> }, VaultError>;
     readonly getMetadata: (itemId: VaultItemId) => Effect.Effect<VaultItemMetadata, VaultError>;
     readonly create: (
@@ -247,6 +249,7 @@ export class Vault extends Context.Service<
     ) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
     readonly delete: (
       input: VaultDeleteInput,
+      threadId?: ThreadId,
     ) => Effect.Effect<{ id: VaultItemId; deleted: boolean }, VaultError>;
     readonly listUsage: (
       input: VaultUsageListInput,
@@ -308,6 +311,17 @@ const make = Effect.gen(function* () {
   });
 
   const processSecrets = yield* Ref.make(new Set<string>());
+  const projectFiles = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
+  const projectForThread = (threadId: ThreadId | undefined) =>
+    threadId === undefined || Option.isNone(projectFiles)
+      ? Effect.succeed(null)
+      : projectFiles.value.folderForThread(threadId).pipe(
+          Effect.map((folder) => folder?.labelId ?? null),
+          Effect.mapError(wrap),
+        );
+  const visibleIn = (row: VaultRow, scope: string | null | undefined) =>
+    scope === undefined || row.scope_project_id === null || row.scope_project_id === scope;
+
   const environmentId = yield* identity.getEnvironmentId;
 
   // VaultMachineKeyStore (file-backed today; Keychain replaces this on macOS).
@@ -384,16 +398,17 @@ const make = Effect.gen(function* () {
     scopeProjectId?: string | null | undefined;
   }) =>
     Effect.gen(function* () {
-      if (input.itemId) return yield* loadRow(input.itemId);
+      if (input.itemId) {
+        const row = yield* loadRow(input.itemId);
+        if (!visibleIn(row, input.scopeProjectId))
+          return yield* new VaultError({ reason: "not_found" });
+        return row;
+      }
       if (!input.name) return yield* new VaultError({ reason: "invalid_input" });
       const rows =
         yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE name = ${input.name} AND deleted_at IS NULL ORDER BY updated_at DESC`;
-      if (rows.length === 0) return yield* new VaultError({ reason: "not_found" });
-      if (rows.length === 1) return rows[0]!;
-      const scoped = rows.filter(
-        (row) =>
-          row.scope_project_id === (input.scopeProjectId ?? null) || row.scope_project_id === null,
-      );
+      const scoped = rows.filter((row) => visibleIn(row, input.scopeProjectId));
+      if (scoped.length === 0) return yield* new VaultError({ reason: "not_found" });
       if (scoped.length === 1) return scoped[0]!;
       return yield* new VaultError({ reason: "ambiguous_name" });
     });
@@ -566,13 +581,15 @@ const make = Effect.gen(function* () {
       return { item: metadataOf(row, stored) };
     }).pipe(Effect.mapError(wrap));
 
-  const list: Vault["Service"]["list"] = (input) =>
+  const list: Vault["Service"]["list"] = (input, threadId) =>
     Effect.gen(function* () {
+      const scope =
+        threadId === undefined ? input.scopeProjectId : yield* projectForThread(threadId);
       const rows =
-        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL AND (${input.scopeProjectId ?? null} IS NULL OR scope_project_id IS NULL OR scope_project_id = ${input.scopeProjectId ?? null}) ORDER BY name`.pipe(
+        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL ORDER BY name`.pipe(
           Effect.mapError(wrap),
         );
-      return { items: rows.map((row) => metadataOf(row)) };
+      return { items: rows.filter((row) => visibleIn(row, scope)).map((row) => metadataOf(row)) };
     });
 
   const update: Vault["Service"]["update"] = (input) =>
@@ -617,10 +634,18 @@ const make = Effect.gen(function* () {
 
   const use: Vault["Service"]["use"] = (input) =>
     Effect.gen(function* () {
+      const scope =
+        input.caller.kind === "agent" || input.caller.kind === "thread"
+          ? yield* projectForThread(
+              input.caller.kind === "thread"
+                ? ThreadId.make(input.caller.threadId)
+                : input.threadId,
+            )
+          : input.scopeProjectId;
       const row = yield* findRow({
         itemId: input.itemId,
         name: input.name,
-        scopeProjectId: input.scopeProjectId,
+        scopeProjectId: scope,
       });
       if (
         input.expectedRevision !== undefined &&
@@ -713,8 +738,10 @@ const make = Effect.gen(function* () {
       ),
     create,
     update,
-    delete: (input) =>
+    delete: (input, threadId) =>
       Effect.gen(function* () {
+        if (threadId !== undefined)
+          yield* findRow({ itemId: input.id, scopeProjectId: yield* projectForThread(threadId) });
         const rows =
           yield* sql`UPDATE vault_items SET deleted_at = ${yield* now}, ciphertext = '', wrapped_keys_json = '[]', updated_at = ${yield* now} WHERE id = ${input.id} AND deleted_at IS NULL RETURNING id`.pipe(
             Effect.mapError(wrap),

@@ -1,6 +1,7 @@
 import {
   AgentId,
   EnvironmentId,
+  ProjectLabelId,
   ThreadId,
   VaultItemMetadata,
   VaultSecretFields,
@@ -22,6 +23,7 @@ import * as Vault from "./Vault.ts";
 import { VAULT_WITHHELD } from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
@@ -171,6 +173,74 @@ describe("Vault service", () => {
         .pipe(Effect.flip);
       expect(afterDelete.reason).toBe("not_found");
     }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("thread project scope filters lists and both id and name use", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const project = ProjectLabelId.make("project:a");
+      const other = ProjectLabelId.make("project:b");
+      const policy = { mode: "allow" as const, allowedAgentIds: [], allowedDomains: [] };
+      const { item: hidden } = yield* vault.create({
+        name: "Hidden",
+        type: "api_key",
+        scopeProjectId: other,
+        policy,
+        secretFields: { value: "hidden-secret" },
+      });
+      yield* vault.create({
+        name: "Visible",
+        type: "api_key",
+        scopeProjectId: project,
+        policy,
+        secretFields: { value: "visible-secret" },
+      });
+      yield* vault.create({
+        name: "Shared",
+        type: "api_key",
+        policy,
+        secretFields: { value: "shared-secret" },
+      });
+      expect(
+        (yield* vault.list({ scopeProjectId: other }, threadId)).items.map((i) => i.name),
+      ).toEqual(["Shared", "Visible"]);
+      expect((yield* vault.list({}, ThreadId.make("unfiled"))).items.map((i) => i.name)).toEqual([
+        "Shared",
+      ]);
+      for (const lookup of [{ itemId: hidden.id }, { name: hidden.name }]) {
+        const error = yield* vault
+          .use({
+            ...lookup,
+            field: "value",
+            caller: { kind: "thread", threadId },
+            threadId,
+            scopeProjectId: other,
+          })
+          .pipe(Effect.flip);
+        expect(error.reason).toBe("not_found");
+      }
+      expect(
+        (yield* vault.use({
+          name: "Visible",
+          field: "value",
+          caller: { kind: "thread", threadId },
+          threadId,
+        })).status,
+      ).toBe("allowed");
+    }).pipe(
+      Effect.provide(
+        layer.pipe(
+          Layer.provide(
+            Layer.mock(ProjectFiles.ProjectFiles)({
+              folderForThread: (id) =>
+                Effect.succeed(
+                  id === threadId ? ({ labelId: ProjectLabelId.make("project:a") } as never) : null,
+                ),
+            }),
+          ),
+        ),
+      ),
+    ),
   );
 
   it.effect("thread fills ask the owner and approval grants only that thread", () =>

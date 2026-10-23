@@ -30,7 +30,10 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
   vault_list: McpToolAccess.readsAsCaller((input) =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;
-      return yield* vault.list(input ?? {}).pipe(Effect.mapError(toFailure));
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      return yield* vault
+        .list(input ?? {}, scope.thread?.threadId)
+        .pipe(Effect.mapError(toFailure));
     }),
   ),
   vault_save: McpToolAccess.actsAsCaller((input) =>
@@ -133,7 +136,8 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
   vault_delete: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;
-      return yield* vault.delete(input).pipe(Effect.mapError(toFailure));
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      return yield* vault.delete(input, scope.thread?.threadId).pipe(Effect.mapError(toFailure));
     }),
   ),
 });

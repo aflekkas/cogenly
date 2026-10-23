@@ -11,7 +11,8 @@ Each item has a name, a type (login, API key, card, or note), the domains it
 may be used on, and its secret fields, such as a username, password, or
 one-time-code secret. A card stores its number, expiry, CVC, and the name on
 the card as secret fields; only its label and the last 4 digits of the number
-are shown in lists. Items can belong to one project or work everywhere.
+are shown in lists. Items can belong to one project or work everywhere. Agents can list and use
+only items for their thread’s project, plus items that work everywhere.
 
 ## Add an item
 
