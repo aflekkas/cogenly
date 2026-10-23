@@ -409,6 +409,58 @@ describe("SharedState", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect.each(["agent", "schedule"] as const)(
+    "re-pairing accepts identical and stale non-owner %s history without authorizing new edits",
+    (kind) =>
+      Effect.gen(function* () {
+        const state = yield* SharedState.SharedState;
+        const sql = yield* SqlClient.SqlClient;
+        const oldHub = EnvironmentId.make("old-hub");
+        const editable = kind === "agent" ? "name" : "title";
+        const sensitive = kind === "agent" ? "instructions" : "prompt";
+        const created: SharedDocumentChange = {
+          ...change({ ownerMachine: oldHub, [editable]: "Original", [sensitive]: "Original work" }),
+          kind,
+          id: `${kind}:repaired`,
+        };
+        // The document already arrived through the former hub; the direct peer cursor is new.
+        yield* state.receive(batch([created]), oldHub, true);
+        expect(yield* state.receive(batch([created]), peer, false)).toEqual({ acknowledged: 1 });
+        expect((yield* state.cursors(peer)).received).toBe(1);
+        expect(yield* state.get(kind, created.id)).toEqual(created);
+        expect((yield* sql`SELECT * FROM shared_changes`).length).toBe(1);
+        const ownerEdit: SharedDocumentChange = {
+          ...created,
+          fields: { [sensitive]: "New owner work" },
+          clocks: { [sensitive]: { wall: 20, logical: 0, node: oldHub } },
+          updatedBy: oldHub,
+        };
+        yield* state.receive(batch([ownerEdit], 1), oldHub, false);
+        // Stale sensitive values may accompany a new display edit in a replayed record.
+        const replay = {
+          ...created,
+          fields: { ...created.fields, [editable]: "Renamed" },
+          clocks: { ...created.clocks, [editable]: { wall: 30, logical: 0, node: peer } },
+        };
+        yield* state.receive(batch([replay], 1), peer, false);
+        expect((yield* state.get(kind, created.id))?.fields).toEqual({
+          ownerMachine: oldHub,
+          [editable]: "Renamed",
+          [sensitive]: "New owner work",
+        });
+        expect((yield* state.cursors(peer)).received).toBe(2);
+        const attack = {
+          ...created,
+          fields: { [sensitive]: "Unauthorized" },
+          clocks: { [sensitive]: { wall: 40, logical: 0, node: peer } },
+        };
+        const rejected = yield* Effect.result(state.receive(batch([attack], 2), peer, false));
+        expect(rejected._tag).toBe("Failure");
+        if (rejected._tag === "Failure") expect(rejected.failure.reason).toBe("owner-change");
+        expect((yield* state.cursors(peer)).received).toBe(2);
+        expect((yield* state.get(kind, created.id))?.fields[sensitive]).toBe("New owner work");
+      }).pipe(Effect.provide(layer)),
+  );
   it.effect("accepts sensitive edits from the owner machine, including via the hub relay", () =>
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;

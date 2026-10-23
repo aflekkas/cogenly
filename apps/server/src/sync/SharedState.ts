@@ -190,7 +190,15 @@ const make = Effect.gen(function* () {
       owner !== change.updatedBy
     ) {
       const editable = NON_OWNER_EDITABLE_FIELDS[change.kind];
-      if (Object.keys(change.fields).some((key) => !editable.has(key)))
+      // Re-pairing replays original creation records through a new peer cursor.
+      // Only fields that would advance the document require edit authority.
+      if (
+        Object.entries(change.clocks).some(
+          ([key, clock]) =>
+            !editable.has(key) &&
+            (!current.clocks[key] || compareClock(clock, current.clocks[key]) > 0),
+        )
+      )
         return yield* new SharedStateError({ reason: "owner-change" });
     }
     const merged = mergeDocument(current, change);
