@@ -103,3 +103,17 @@ asking for a fresh link does not kill a pending sign-in.
 
 Clients have no RPC for an integration's tool list; only agents see tools,
 through `integration_tools`.
+
+## Default catalog
+
+The catalog ([integrationCatalog.ts](../../packages/contracts/src/integrationCatalog.ts))
+is static data shared by the server, Settings and the context line. Connecting
+an entry resolves it, in one pure function
+([IntegrationCatalog.ts](../../apps/server/src/integrations/IntegrationCatalog.ts)),
+into an ordinary integration definition; nothing records which entry it came
+from. Settings groups accounts by matching the endpoint (or the local preset),
+so hand-added integrations for a catalog URL group too, and a persistent
+agent's catalog request is proposed as the resolved definition, so the owner
+approves exactly what gets created. A request that lacks an input fails
+`invalid_request` with the agent's next step as its cause, so agents learn
+what to collect without a new error reason per service.
