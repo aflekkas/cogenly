@@ -18,6 +18,7 @@ import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import {
   GitActionProgressEvent,
@@ -35,6 +36,7 @@ import {
   type VcsStatusRemoteResult,
   VcsStatusResult,
   ModelSelection,
+  ProjectLabelId,
   type ProjectId,
   SourceControlProviderError,
   type SourceControlWritingStyleSettings,
@@ -68,6 +70,12 @@ import {
 } from "@t3tools/shared/threadPullRequests";
 
 import { GitManagerError, GitPullRequestMaterializationError } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+
+import * as ServerConfig from "../config.ts";
+import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
+import { resolveProjectsRootDirectory, sanitizePathSegment } from "../project/ProjectsRoot.ts";
+import { resolveWorktreeParentDirectory } from "../worktreesDirectory.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import {
   conventionalCommitsTextGenerationPolicy,
@@ -734,6 +742,12 @@ export const make = Effect.gen(function* () {
   const serverSettingsService = yield* ServerSettings.ServerSettingsService;
   const threads = yield* ProjectionStore.ProjectionStoreV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
+  // Optional so settings-only callers keep the old default location: without
+  // the database or server config there is no project folder to resolve.
+  const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+  const serverConfig = yield* Effect.serviceOption(ServerConfig.ServerConfig);
+  const labelFolders = yield* Effect.serviceOption(ProjectLabelFolders.ProjectLabelFolders);
+  const home = yield* HostProcess.HomeDirectory;
   /** Environment settings with the acting project's overrides applied. */
   const projectSettingsFor = Effect.fnUntraced(function* (input: {
     readonly cwd: string;
@@ -758,6 +772,57 @@ export const make = Effect.gen(function* () {
     Effect.map((settings) => settings.worktreesDirectory),
     Effect.orElseSucceed(() => ""),
   );
+  // New worktrees live beside their repository: inside its project folder
+  // when the repository belongs to a project, or beside an unfiled
+  // repository under the projects root. An explicit worktreesDirectory
+  // setting wins; anything unresolvable keeps the driver's default.
+  const resolveLocalWorktreeParent = Effect.fnUntraced(function* (cwd: string) {
+    if (Option.isNone(sql) || Option.isNone(serverConfig)) return undefined;
+    const settings = yield* serverSettingsService.getSettings.pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    if (settings === null || settings.worktreesDirectory.trim() !== "") return undefined;
+    const config = serverConfig.value;
+    const projectsRoot = resolveProjectsRootDirectory(
+      settings.projectsRoot,
+      home,
+      config.baseDir,
+      path,
+    );
+    let projectDir: string | null = null;
+    const project = yield* projects.findActiveByWorkspaceRoot(path.resolve(cwd)).pipe(
+      Effect.map(Option.getOrNull),
+      Effect.orElseSucceed(() => null),
+    );
+    if (project !== null) {
+      const rows = yield* sql.value<{ labelId: string; name: string }>`
+        SELECT l.label_id AS "labelId", l.name AS name
+        FROM label_repositories r JOIN project_labels l ON l.label_id = r.label_id
+        WHERE r.repository_id = ${project.projectId}
+      `.pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<{ labelId: string; name: string }>));
+      const label = rows[0];
+      if (label !== undefined) {
+        const ref = { id: ProjectLabelId.make(label.labelId), name: label.name };
+        projectDir = Option.isSome(labelFolders)
+          ? yield* labelFolders.value.dirForLabel(ref).pipe(
+              Effect.map((folder) => folder.dir),
+              Effect.orElseSucceed(() => null),
+            )
+          : path.join(projectsRoot, sanitizePathSegment(label.name, "project"));
+      }
+    }
+    return (
+      resolveWorktreeParentDirectory({
+        setting: "",
+        defaultDir: config.worktreesDir,
+        repoCwd: cwd,
+        projectDir,
+        projectsRoot,
+        path,
+        home,
+      }) ?? undefined
+    );
+  });
   const createWorktree: GitManager["Service"]["createWorktree"] = Effect.fn(
     "GitManager.createWorktree",
   )(function* (input, options) {
@@ -769,7 +834,15 @@ export const make = Effect.gen(function* () {
             Effect.orElseSucceed(() => null),
           );
     const worktreesDirectory = yield* readWorktreesDirectory;
-    return yield* gitCore.createWorktree(input, { worktreesDirectory, ...options, submodules });
+    const worktreeParentDirectory =
+      options?.worktreeParentDirectory ??
+      (input.path == null ? yield* resolveLocalWorktreeParent(input.cwd) : undefined);
+    return yield* gitCore.createWorktree(input, {
+      worktreesDirectory,
+      ...options,
+      ...(worktreeParentDirectory === undefined ? {} : { worktreeParentDirectory }),
+      submodules,
+    });
   });
 
   const readRepositoryInstructions = (cwd: string, fileName: string) =>
@@ -2921,14 +2994,13 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      const worktree = yield* gitCore.createWorktree(
+      const worktree = yield* createWorktree(
         {
           cwd: input.cwd,
           refName: localPullRequestBranch,
           path: null,
         },
         {
-          worktreesDirectory: yield* readWorktreesDirectory,
           // Best effort: a settings read failure falls back to the checkout's t3.json.
           submodules: yield* projectSettingsFor(input).pipe(
             Effect.map(({ settings }) => settings.worktreeSubmodules),

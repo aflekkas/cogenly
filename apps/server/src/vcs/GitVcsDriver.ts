@@ -158,6 +158,12 @@ export interface CreateWorktreeOptions {
   readonly submodules?: WorktreeSubmodules | null;
   /** The `worktreesDirectory` setting, used when the input has no explicit path. */
   readonly worktreesDirectory?: string;
+  /**
+   * The already-resolved project-local parent (`<project>/worktrees`), used
+   * when the input has no explicit path. Wins over `worktreesDirectory`;
+   * callers only set it when no explicit setting applies.
+   */
+  readonly worktreeParentDirectory?: string;
 }
 
 export interface GitCommitProgress {

@@ -37,14 +37,19 @@ machine's setting. Every other provider setting stays per machine.
 
 ## Worktree branch names
 
+New worktree branches are named when the worktree is created: a short slug
+from your first message under a `c/` prefix, such as `c/fix-login-redirect`.
+The worktree folder is named by that slug and never moves.
+
 In **Settings → Source Control → Worktree branch naming**, choose a static prefix,
 a model-selected semantic prefix such as `feat/` or `fix/`, or custom instructions
-for the complete name. The static prefix defaults to `t3/`; a trailing slash is
+for the complete name. The static prefix defaults to `c/`; a trailing slash is
 optional, and an empty prefix adds nothing. Invalid characters in a static prefix
 are replaced with hyphens. Custom instructions are appended to
 the naming prompt and can specify issue IDs, namespaces, and casing.
 
-These settings apply to automatically named new worktree branches. Select a repository
+These settings apply when a client names a worktree branch with a temporary
+name and Cogenly renames it. Select a repository
 to override its environment defaults. Worktree directories keep their original names.
 If generation fails, or a custom name is invalid or already taken, the temporary
 branch name remains.

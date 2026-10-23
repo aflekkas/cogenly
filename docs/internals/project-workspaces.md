@@ -11,16 +11,35 @@ it does not own a copy.
   Spawn Partners/               the project directory
     platform/                   a repository (any git work tree)
     server/                     another repository
+    worktrees/                  reserved: worktrees of the project's repositories
+      platform/
+        fix-login-redirect/     the worktree for branch c/fix-login-redirect
     Resources/                  project files: anything the user drops here
       brief.pdf
       notes/
     .cogenly-project.json       project id, so a renamed folder keeps its identity
+  Repositories/                 repositories no project holds
+    acme/                       an unfiled repository
+    worktrees/                  reserved: worktrees of the unfiled repositories
+      acme/
+        fix-login-redirect/
 ```
 
 - Repositories are git work trees directly inside the project directory.
   Everything else at the top level, and anything under `Resources/`, is a
   project resource. Adding a file from the UI writes it into the folder; adding
   it in Finder is equivalent. A watcher keeps the index current.
+- Worktrees live inside the project: `<project>/worktrees/<repo>/<slug>/`,
+  where the slug is the branch name without its `c/` prefix. The branch is
+  decided before the worktree is created (a deterministic slug from the
+  request), so the folder never moves and provider sessions keyed by cwd
+  keep resuming. `worktrees/` is a reserved name: project files, the
+  watcher and folder reconcile all ignore it, and it is never listed as a
+  resource or a repository. Repositories outside any project but under the
+  projects root (under `Repositories/`) get a sibling `worktrees/` the same
+  way; repositories elsewhere, and any repository when the user sets an
+  explicit worktrees directory in Settings, keep the configured location.
+  Existing worktrees never move.
 - Links and notes are files too (`.url` / `.md`), so the folder stays complete
   without the database.
 - A chat in a project runs with the project directory as its working directory.
