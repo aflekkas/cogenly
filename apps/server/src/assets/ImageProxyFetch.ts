@@ -159,6 +159,7 @@ export const imageProxyResponseHeaders = (contentType: string): Record<string, s
 /** Follows redirects manually so every hop is re-validated as a proxy target. */
 const fetchFollowingRedirects = Effect.fn("ImageProxyFetch.fetchFollowingRedirects")(function* (
   url: string,
+  method: "GET" | "HEAD" = "GET",
 ) {
   const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
   let target = url;
@@ -167,7 +168,7 @@ const fetchFollowingRedirects = Effect.fn("ImageProxyFetch.fetchFollowingRedirec
     // cookies cross-origin, and nothing here sets Cookie or Authorization.
     const response: HttpClientResponse.HttpClientResponse = yield* httpClient
       .execute(
-        HttpClientRequest.get(target).pipe(
+        HttpClientRequest.make(method)(target).pipe(
           HttpClientRequest.setHeaders(IMAGE_PROXY_REQUEST_HEADERS),
         ),
       )
@@ -180,6 +181,35 @@ const fetchFollowingRedirects = Effect.fn("ImageProxyFetch.fetchFollowingRedirec
     if (!("url" in parsed)) return null;
     target = parsed.url;
   }
+});
+
+const PROBE_TIMEOUT = "4 seconds";
+
+/**
+ * Whether the proxy would serve this URL as an image, asked with a bounded HEAD through the same
+ * validated redirect chain. A host that cannot answer HEAD (405/501) gets the benefit of the
+ * doubt; a refusal, a non-image, an over-limit declared size, or silence does not.
+ */
+export const probeImageUrl = Effect.fn("ImageProxyFetch.probeImageUrl")(function* (url: string) {
+  const parsed = parseImageProxyTarget(url);
+  if (!("url" in parsed)) return false;
+  const response = yield* fetchFollowingRedirects(parsed.url, "HEAD").pipe(
+    Effect.timeout(PROBE_TIMEOUT),
+    Effect.orElseSucceed(() => null),
+    Effect.scoped,
+  );
+  if (response === null) return false;
+  if (response.status === 405 || response.status === 501) return true;
+  if (response.status >= 400) return false;
+  const declaredLength = Number(response.headers["content-length"]);
+  return (
+    selectProxiedImageResponse({
+      status: response.status,
+      contentType: response.headers["content-type"],
+      declaredLength: Number.isInteger(declaredLength) ? declaredLength : undefined,
+      bodyLength: 0,
+    }).status === 200
+  );
 });
 
 /**
