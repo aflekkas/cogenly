@@ -56,8 +56,10 @@ is the state database, plus `settings.json`, `secrets/`, `logs/`, and
 
 ### Reach it
 
-The server binds loopback by default. Prefer Tailscale; use a reverse proxy
-for public access.
+The server binds loopback by default. Use Tailscale first: it keeps Cogenly
+private to your tailnet with no open ports. A public reverse proxy is an
+explicit public-mode option, not the default path — only choose it when you
+want Cogenly reachable from the internet.
 
 Tailscale Serve (HTTPS on your tailnet, no open ports):
 
@@ -65,7 +67,8 @@ Tailscale Serve (HTTPS on your tailnet, no open ports):
 cogenly serve --tailscale-serve   # or once: cogenly pair --tailscale
 ```
 
-Reverse proxy (Caddy example; the server stays on loopback):
+Public mode — reverse proxy (Caddy example; the server stays on loopback,
+but the proxy makes it internet-facing):
 
 ```caddy
 cogenly.example.com {

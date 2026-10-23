@@ -268,6 +268,22 @@ only reports what it would change.
 The browser always runs in Chrome's sandbox. Where you cannot change the host,
 set `COGENLY_SERVER_BROWSER_SANDBOX=0` for the environment to run without it.
 
+## Check your machine's security
+
+Ask the machine itself how exposed it is:
+
+```sh
+cogenly security status          # or --json
+```
+
+You can also ask your agent for `machine_security_status`. The check is
+read-only and needs no root: it reports Cogenly's bind address, sockets
+listening beyond loopback, SSH password/root settings when readable,
+Tailscale Serve and Funnel, and the host firewall when readable. Anything it
+cannot observe is reported as unknown, never as safe. Listening on a public
+address is reported separately from being reachable from the internet, which
+the machine cannot prove by itself.
+
 ## Connect an outside agent
 
 Claude Code, Codex, ChatGPT and other agents Cogenly did not start can drive
