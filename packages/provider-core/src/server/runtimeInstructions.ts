@@ -93,7 +93,7 @@ export function buildProjectManifest(input: {
       ? "(no project files yet)"
       : shown.map((resource) => `- ${toSingleLine(resource)}`).join("\n");
   const more = input.total - shown.length;
-  const manifest = `<project_manifest>The thread's project folder is "${toSingleLine(input.name)}" at ${toSingleLine(input.directory)}. Project files:\n${files}${more > 0 ? `\n+${more} more` : ""}\nUse project_recall to search these files and project_file_read to read one.</project_manifest>`;
+  const manifest = `<project_manifest>The thread's project folder is "${toSingleLine(input.name)}" at ${toSingleLine(input.directory)}. Project files:\n${files}${more > 0 ? `\n+${more} more` : ""}\nUse project_recall to search these files and project_file_read to read one. To add a repository to a project, use project_label_clone_repository (it clones into the project folder and registers it); do not git clone by hand.</project_manifest>`;
   const instructions = input.instructions?.trim() ?? "";
   const integrationsLine = buildIntegrationsContextLine(input.integrations ?? []);
   return [
