@@ -14,6 +14,7 @@ import * as AgentStore from "../../../agents/AgentStore.ts";
 import * as ProjectFiles from "../../../projectLabels/ProjectFiles.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
+import { catalogRequest } from "../../../integrations/IntegrationCatalog.ts";
 import { GOOGLE_CLIENT_HELP } from "../../../integrations/local/GoogleWorkspace.ts";
 import { IntegrationsToolkit } from "./tools.ts";
 
@@ -34,7 +35,7 @@ const AGENT_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
     "A vault item in this integration's headers isn't allowed for its server. Ask the owner to add the server to the item's allowed domains, or to save the integration in Settings → Integrations to approve it.",
   not_found: "No connected integration with that name is available in this project.",
   disabled: "That integration is disabled.",
-  google_client_missing: GOOGLE_CLIENT_HELP,
+  google_client_missing: `Google needs the user's own OAuth client before an account can connect. Point the user to docs/user/integrations.md#connect-google to create one (a Web application client in Google Cloud). ${GOOGLE_CLIENT_HELP} Then call integration_add again.`,
   local_runtime_missing:
     "uvx is missing. Install uv with brew install uv (macOS) or https://docs.astral.sh/uv/getting-started/installation/ (Linux), then restart Cogenly.",
 };
@@ -61,6 +62,12 @@ const failure = (cause: unknown): OrchestratorMcpFailure => {
       "The integration request could not be completed.",
   });
 };
+
+/** A catalog request's next step (a region, a vault reference) is the agent's message. */
+const catalogFailure = (cause: unknown): OrchestratorMcpFailure =>
+  isIntegrationError(cause) && cause.reason === "invalid_request" && typeof cause.cause === "string"
+    ? new OrchestratorMcpFailure({ code: "invalid_request", message: cause.cause })
+    : failure(cause);
 
 /**
  * The caller's project scope: a thread caller sees integrations for its
@@ -159,6 +166,17 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
       const scope = yield* Invocation.McpInvocationContext;
+      if (input.catalogId !== undefined) {
+        const connected = yield* service
+          .connectFromCatalog(catalogRequest({ ...input, catalogId: input.catalogId }), {
+            origin: { origin: scope.httpOrigin, fromAgent: true },
+          })
+          .pipe(Effect.mapError(catalogFailure));
+        // No link: its sign-in could not start, so ask again for the reason.
+        return connected.signIn === undefined
+          ? yield* withSignIn(connected.integration)
+          : connected;
+      }
       const decoded = yield* decodeAdd(input).pipe(
         Effect.mapError(
           () =>

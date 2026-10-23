@@ -6,6 +6,7 @@ import {
   OrchestratorMcpFailure,
   OrchestratorMcpScheduleTaskInput,
   IntegrationAddInput,
+  IntegrationAddToolInput,
   IntegrationUpdateByNameInput,
   type AgentPermissions,
 } from "@t3tools/contracts";
@@ -23,11 +24,13 @@ import { resolveRuntimeMode } from "../mcp/OrchestratorMcpService.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as Option from "effect/Option";
 import * as Integrations from "../integrations/Integrations.ts";
+import { catalogRequest, resolveCatalogConnect } from "../integrations/IntegrationCatalog.ts";
 
 const decodeWorkStart = Schema.decodeUnknownEffect(WorkStartInput);
 const decodeStartWork = Schema.decodeUnknownEffect(AgentStartWorkInput);
 const decodeSchedule = Schema.decodeUnknownEffect(OrchestratorMcpScheduleTaskInput);
 const decodeIntegrationAdd = Schema.decodeUnknownEffect(IntegrationAddInput);
+const decodeIntegrationAddTool = Schema.decodeUnknownEffect(IntegrationAddToolInput);
 const decodeIntegrationUpdate = Schema.decodeUnknownEffect(IntegrationUpdateByNameInput);
 const decodeAction = Schema.decodeUnknownEffect(AgentApprovalAction);
 const isMcpFailure = Schema.is(OrchestratorMcpFailure);
@@ -217,7 +220,25 @@ const make = Effect.gen(function* () {
         // (approving creates it). The owner's own turns are not agents here:
         // actor is null for them and they fall through to the tool.
         if (name === "integration_add") {
-          const payload = yield* decodeIntegrationAdd(input);
+          // A catalog entry is proposed as the definition it resolves to, so
+          // the owner reviews (and approving creates) exactly that.
+          const tool = yield* decodeIntegrationAddTool(input);
+          const catalog =
+            tool.catalogId === undefined
+              ? undefined
+              : resolveCatalogConnect(catalogRequest({ ...tool, catalogId: tool.catalogId }), {
+                  existingNames: new Set(
+                    integrations._tag === "None"
+                      ? []
+                      : (yield* integrations.value.list()).integrations.map(
+                          ({ integration }) => integration.name,
+                        ),
+                  ),
+                  requestOrigin: scope.httpOrigin,
+                });
+          if (catalog?._tag === "needs") return yield* denied(catalog.message, "invalid_request");
+          const payload =
+            catalog === undefined ? yield* decodeIntegrationAdd(input) : catalog.input;
           const action = yield* decodeAction({
             actionKind: "integration_add",
             payload,

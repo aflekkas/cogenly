@@ -136,6 +136,50 @@ describe("integration_add approval gating", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("proposes a catalog entry as the definition it resolves to", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, ${JSON.stringify(agent)}, 1, 2)`;
+      const policy = yield* AgentMcpPolicy.AgentMcpPolicy;
+
+      proposals.length = 0;
+      const denied = yield* policy
+        .beforeTool(
+          scopeFor(true),
+          "integration_add",
+          { catalogId: "intercom", region: "eu", accountLabel: "Support" },
+          false,
+        )
+        .pipe(Effect.result);
+      expect(denied).toMatchObject({
+        _tag: "Failure",
+        failure: { code: "agent_approval_required" },
+      });
+      expect(proposals).toEqual([
+        {
+          actionKind: "integration_add",
+          payload: expect.objectContaining({
+            name: "intercom-support",
+            url: "https://mcp.eu.intercom.com/mcp",
+            accountLabel: "Support",
+            auth: { type: "oauth" },
+          }),
+        },
+      ]);
+
+      // A missing input is the agent's next step, not a proposal.
+      const missing = yield* policy
+        .beforeTool(scopeFor(true), "integration_add", { catalogId: "intercom" }, false)
+        .pipe(Effect.result);
+      expect(missing).toMatchObject({
+        _tag: "Failure",
+        failure: { code: "invalid_request", message: expect.stringContaining("region") },
+      });
+      expect(proposals).toHaveLength(1);
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect(
     "requires a fresh approval for destinations and credential attachments, but not metadata",
     () =>

@@ -253,9 +253,14 @@ describe("managed Google integrations", () => {
     15_000,
   );
 
-  it.live.each([false, true])(
-    "integration_add exposes a sign-in link or private vault instructions (missing client: %s)",
-    (missing) =>
+  it.live.each([
+    { missing: false, form: { preset: "google-workspace" } },
+    { missing: true, form: { preset: "google-workspace" } },
+    { missing: false, form: { catalogId: "google-workspace" } },
+    { missing: true, form: { catalogId: "google-workspace" } },
+  ] as const)(
+    "integration_add $form exposes a sign-in link or private vault instructions (missing client: $missing)",
+    ({ missing, form }) =>
       Effect.gen(function* () {
         yield* runMigrations();
         const dependencies = Layer.mergeAll(
@@ -277,16 +282,20 @@ describe("managed Google integrations", () => {
         );
         const replies = yield* toolkit
           .handle("integration_add", {
-            preset: "google-workspace",
+            ...form,
             accountLabel: "personal",
             callbackOrigin: "https://cogenly.example.com",
           })
           .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
         if (missing) {
-          expect(replies.at(-1)?.result).toMatchObject({
-            code: "invalid_request",
-            message: expect.stringContaining("request_secret with saveToVault"),
-          });
+          // The agent collects the client privately, points to the docs, then retries.
+          const reply = replies.at(-1)?.result as { code: string; message: string };
+          expect(reply.code).toBe("invalid_request");
+          expect(reply.message).toContain(
+            'request_secret with saveToVault: {name: "google-oauth-client"',
+          );
+          expect(reply.message).toContain("docs/user/integrations.md#connect-google");
+          expect(reply.message).toContain("call integration_add again");
         } else {
           expect(replies.at(-1)?.result).toMatchObject({
             integration: { transport: "local", displayName: "Google", accountLabel: "personal" },

@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
+  IntegrationError,
   IntegrationId,
   IntegrationName,
   ProviderInstanceId,
@@ -159,6 +160,89 @@ it.effect("integration_add hands an agent the sign-in link for an OAuth server",
     const plain = yield* addIntegration({});
     expect(plain.result).not.toHaveProperty("signIn");
     expect(plain.signIns).toHaveLength(0);
+  }),
+);
+
+/** integration_add with a catalogId, against a gateway that answers `connect`. */
+const addFromCatalog = Effect.fn("test.addFromCatalog")(function* (
+  input: Record<string, unknown>,
+  connect: Integrations.Integrations["Service"]["connectFromCatalog"],
+) {
+  const requests: Array<Parameters<typeof connect>> = [];
+  const scope = { ...threadScope(liveId), httpOrigin: "https://cogenly.example.com" };
+  const dependencies = Layer.mergeAll(
+    Layer.succeed(Invocation.McpInvocationContext, scope),
+    Layer.mock(Threads.ThreadManagementService)({
+      getThreadShell: (id) => Effect.succeed(shells.get(id) ?? null),
+    }),
+    Layer.mock(Integrations.Integrations)({
+      connectFromCatalog: (...args) => {
+        requests.push(args);
+        return connect(...args);
+      },
+    }),
+    Layer.mock(AgentStore.AgentStore)({}),
+  );
+  const toolkit = yield* IntegrationsToolkit.pipe(
+    Effect.provide(Access.HandlersLayer.layer(Handlers.layer).pipe(Layer.provide(dependencies))),
+  );
+  const results = yield* toolkit
+    .handle("integration_add", input as never)
+    .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+  return { result: results.at(-1)?.result, requests };
+});
+
+it.effect("integration_add connects a catalog entry and relays its sign-in link", () =>
+  Effect.gen(function* () {
+    const integration = {
+      id: IntegrationId.make("integration:notion"),
+      name: IntegrationName.make("notion-work"),
+      displayName: "Notion",
+      transport: "http" as const,
+      url: "https://mcp.notion.com/mcp",
+      headers: {},
+      enabled: true,
+      scope: { type: "all" as const },
+      hint: "",
+      accountLabel: "work",
+      auth: { type: "oauth" as const },
+      createdAt: "2026-10-23T00:00:00.000Z" as Integration["createdAt"],
+      updatedAt: "2026-10-23T00:00:00.000Z" as Integration["updatedAt"],
+      deletedAt: null,
+    };
+    const signIn = {
+      authorizationUrl: "https://mcp.notion.com/authorize?state=s",
+      redirectUri: "https://cogenly.example.com/oauth/integrations/callback",
+    };
+    const { result, requests } = yield* addFromCatalog(
+      { catalogId: "notion", accountLabel: " work ", region: "default" },
+      () => Effect.succeed({ integration, signIn }),
+    );
+    expect(result).toEqual({ integration, signIn });
+    expect(requests).toEqual([
+      [
+        { catalogId: "notion", accountLabel: "work", inputs: { region: "default" } },
+        { origin: { origin: "https://cogenly.example.com", fromAgent: true } },
+      ],
+    ]);
+  }),
+);
+
+it.effect("integration_add tells the agent the next step a catalog entry needs", () =>
+  Effect.gen(function* () {
+    const { result } = yield* addFromCatalog({ catalogId: "intercom" }, () =>
+      Effect.fail(
+        new IntegrationError({
+          operation: "connect from catalog",
+          reason: "invalid_request",
+          cause: 'Ask the user where their Intercom workspace is hosted, then pass region: "us".',
+        }),
+      ),
+    );
+    expect(result).toMatchObject({
+      code: "invalid_request",
+      message: 'Ask the user where their Intercom workspace is hosted, then pass region: "us".',
+    });
   }),
 );
 

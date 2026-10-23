@@ -2,9 +2,11 @@ import {
   IntegrationName,
   integrationCatalogEntry,
   type IntegrationAddInput,
+  type IntegrationAddToolInput,
   type IntegrationCatalogAuthKind,
   type IntegrationCatalogConnectInput,
   type IntegrationCatalogEntry,
+  type IntegrationCatalogId,
 } from "@t3tools/contracts";
 import { isLoopbackHost } from "@t3tools/shared/preview";
 
@@ -74,6 +76,25 @@ const inputsHelp = (
   const host = entry.tokenHost ?? new URL(entry.regions[0].url).hostname;
   return `${entry.name} needs an OAuth app the user creates with ${entry.name}. Ask for its client ID and pass it as clientId; for its client secret: ${storeHint(`${entry.id}-client-secret`, host, "clientSecret")} ${docs}`;
 };
+
+/**
+ * The flat `integration_add` arguments as a catalog request, for the MCP tool
+ * and for a persistent agent's proposal alike.
+ */
+export const catalogRequest = (
+  input: IntegrationAddToolInput & { readonly catalogId: IntegrationCatalogId },
+): IntegrationCatalogConnectInput => ({
+  catalogId: input.catalogId,
+  ...(input.accountLabel?.trim() ? { accountLabel: input.accountLabel.trim() } : {}),
+  inputs: {
+    ...(input.region === undefined ? {} : { region: input.region }),
+    ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+    ...(input.clientId === undefined ? {} : { clientId: input.clientId }),
+    ...(input.clientSecret === undefined ? {} : { clientSecret: input.clientSecret }),
+    ...(input.callbackOrigin === undefined ? {} : { callbackOrigin: input.callbackOrigin }),
+  },
+  ...(input.scope === undefined ? {} : { scope: input.scope }),
+});
 
 export const resolveCatalogConnect = (
   request: IntegrationCatalogConnectInput,
