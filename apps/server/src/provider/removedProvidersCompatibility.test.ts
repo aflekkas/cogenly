@@ -13,15 +13,7 @@ import { BUILT_IN_DRIVERS } from "./builtInDrivers.ts";
 import { deriveProviderInstanceConfigMap } from "./ProviderInstanceRegistryHydration.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistry.ts";
 
-const removedDrivers = [
-  "cursor",
-  "grok",
-  "opencode",
-  "antigravity",
-  "pi",
-  "acp",
-  "acpRegistry",
-] as const;
+const removedDrivers = ["cursor", "opencode", "antigravity", "pi", "acp", "acpRegistry"] as const;
 const now = "2026-10-16T12:00:00.000Z";
 const decodeSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeSession = Schema.decodeUnknownSync(ProviderSession);
@@ -34,7 +26,9 @@ describe("retired provider history", () => {
       "codex",
       "claudeAgent",
       "muse",
+      "grok",
     ]);
+    // Grok runs only once the user adds it, so it has no implicit instance.
     expect(Object.keys(deriveProviderInstanceConfigMap(decodeSettings({})))).toEqual([
       "codex",
       "claudeAgent",

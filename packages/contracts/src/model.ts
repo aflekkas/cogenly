@@ -146,6 +146,10 @@ export type CustomModelSetting = typeof CustomModelSetting.Type;
 const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
 const MUSE_DRIVER_KIND = ProviderDriverKind.make("muse");
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
+const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
+
+/** Grok Build's documented model, until a session reports its own list. */
+export const GROK_DEFAULT_MODEL = "grok-4.7";
 
 /** Let Muse choose the account default; never send this sentinel as a native model ID. */
 export const MUSE_DEFAULT_MODEL = "default";
@@ -177,6 +181,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-fable-5-1",
   [MUSE_DRIVER_KIND]: MUSE_DEFAULT_MODEL,
+  [GROK_DRIVER_KIND]: GROK_DEFAULT_MODEL,
 };
 
 /**
@@ -190,6 +195,7 @@ export const DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   [CODEX_DRIVER_KIND]: DEFAULT_TEXT_GENERATION_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-haiku-5-5",
   [MUSE_DRIVER_KIND]: MUSE_DEFAULT_MODEL,
+  [GROK_DRIVER_KIND]: GROK_DEFAULT_MODEL,
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
@@ -217,4 +223,5 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CODEX_DRIVER_KIND]: "Codex",
   [CLAUDE_DRIVER_KIND]: "Claude",
   [MUSE_DRIVER_KIND]: "Muse Code",
+  [GROK_DRIVER_KIND]: "Grok",
 };

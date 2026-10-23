@@ -23,11 +23,12 @@ describe("providerClients", () => {
     }
   });
 
-  it("keeps presentation order Codex, Claude, Muse Code", () => {
+  it("keeps presentation order Codex, Claude, Muse Code, Grok", () => {
     expect(providerClients.definitions.map((definition) => definition.driverKind)).toEqual([
       ProviderDriverKind.make("codex"),
       ProviderDriverKind.make("claudeAgent"),
       ProviderDriverKind.make("muse"),
+      ProviderDriverKind.make("grok"),
     ]);
   });
 

@@ -7,7 +7,7 @@ instead of spreading provider checks through orchestration and clients.
 
 A driver kind identifies an integration; an instance identifies one configuration and account
 lifecycle. Route work by instance, so two accounts using the same driver do not share mutable
-session or catalog state. Cogenly ships Claude, Codex, and Muse Code. Keep unknown driver slugs decodable for stored history; the runtime registry marks their instances unavailable.
+session or catalog state. Cogenly ships Claude, Codex, Muse Code, and Grok (off until added). Keep unknown driver slugs decodable for stored history; the runtime registry marks their instances unavailable.
 
 ## Adding a provider
 

@@ -18,8 +18,9 @@ import { BUILT_IN_DRIVERS, BUILT_IN_USAGE_DRIVERS } from "./builtInDrivers.ts";
 
 describe("built-in usage drivers", () => {
   it("scans Muse transcripts alongside Claude and Codex", () => {
-    const usageProviders = BUILT_IN_USAGE_DRIVERS.map((driver) =>
-      driver.usage?.kind === "transcripts" ? driver.usage.provider : null,
+    // Grok keeps no readable transcript usage, so it has no reader.
+    const usageProviders = BUILT_IN_USAGE_DRIVERS.flatMap((driver) =>
+      driver.usage?.kind === "transcripts" ? [driver.usage.provider] : [],
     );
     expect(usageProviders).toEqual(["claude", "codex", "muse"]);
   });

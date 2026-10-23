@@ -1,3 +1,4 @@
+import { grokClient } from "@t3tools/provider-grok/client";
 import { museClient } from "@t3tools/provider-muse/client";
 import {
   ClaudeSettings,
@@ -87,4 +88,9 @@ export const claudeClient = defineProviderClient({
  * `BUILT_IN_DRIVERS`); every picker, settings list, usage colour, and
  * onboarding flow reads from this registry.
  */
-export const providerClients = makeProviderClientRegistry([codexClient, claudeClient, museClient]);
+export const providerClients = makeProviderClientRegistry([
+  codexClient,
+  claudeClient,
+  museClient,
+  grokClient,
+]);

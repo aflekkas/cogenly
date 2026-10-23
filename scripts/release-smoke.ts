@@ -25,6 +25,7 @@ const workspaceFiles = [
   "packages/ssh/package.json",
   "packages/tailscale/package.json",
   "packages/provider-core/package.json",
+  "packages/provider-grok/package.json",
   "packages/provider-muse/package.json",
   "packages/provider-testing/package.json",
   "packages/source-control-core/package.json",
