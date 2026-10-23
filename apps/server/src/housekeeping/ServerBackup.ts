@@ -16,6 +16,7 @@
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -56,7 +57,8 @@ export interface BackupRunResult {
 }
 
 /** Directory name for a backup taken at `now`; sorts chronologically. */
-export const backupDirectoryName = (now: Date): string => now.toISOString().replaceAll(":", "-");
+export const backupDirectoryName = (now: DateTime.Utc): string =>
+  DateTime.formatIso(now).replaceAll(":", "-");
 
 /**
  * Pure retention plan: of the given entry names in the backups directory,
@@ -153,7 +155,7 @@ const make = Effect.gen(function* () {
   const pruneOldBackups = Effect.fn("ServerBackup.pruneOldBackups")(function* (
     keep: number,
   ): Effect.fn.Return<ReadonlyArray<string>, ServerBackupError> {
-    if (!(yield* fs.exists(backupsDirectory))) return [];
+    if (!(yield* fs.exists(backupsDirectory).pipe(Effect.orElseSucceed(() => false)))) return [];
     const names = yield* fs
       .readDirectory(backupsDirectory)
       .pipe(
@@ -177,16 +179,13 @@ const make = Effect.gen(function* () {
     return plan.remove;
   });
 
-  const backupNow = Effect.fn("ServerBackup.backupNow")(function* () {
+  const backupNowImpl = Effect.fn("ServerBackup.backupNow")(function* () {
     const settings = yield* settingsService.getSettings.pipe(
       Effect.mapError(
         (cause) => new ServerBackupError({ operation: "list", path: config.settingsPath, cause }),
       ),
     );
-    const directory = path.join(
-      backupsDirectory,
-      backupDirectoryName(new Date(yield* Clock.currentTimeMillis)),
-    );
+    const directory = path.join(backupsDirectory, backupDirectoryName(yield* DateTime.now));
     yield* fs
       .makeDirectory(directory, { recursive: true, mode: 0o700 })
       .pipe(
@@ -204,7 +203,7 @@ const make = Effect.gen(function* () {
     );
     yield* fs.chmod(snapshotPath, 0o600).pipe(Effect.orElseSucceed(() => undefined));
 
-    if (yield* fs.exists(config.settingsPath)) {
+    if (yield* fs.exists(config.settingsPath).pipe(Effect.orElseSucceed(() => false))) {
       const settingsCopy = path.join(directory, "settings.json");
       const bytes = yield* fs
         .readFile(config.settingsPath)
@@ -224,7 +223,7 @@ const make = Effect.gen(function* () {
       yield* fs.chmod(settingsCopy, 0o600).pipe(Effect.orElseSucceed(() => undefined));
     }
 
-    if (yield* fs.exists(config.secretsDir)) {
+    if (yield* fs.exists(config.secretsDir).pipe(Effect.orElseSucceed(() => false))) {
       yield* copyTreePrivate(config.secretsDir, path.join(directory, "secrets"));
     }
 
@@ -232,6 +231,13 @@ const make = Effect.gen(function* () {
     yield* Effect.logInfo("Server backup written", { directory, pruned: pruned.length });
     return { directory, pruned } satisfies BackupRunResult;
   });
+
+  // `backupDatabase` reads FileSystem/Path from the environment; bind the
+  // instances this layer was built with so callers need neither.
+  const backupNow = backupNowImpl().pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+  );
 
   const latestBackupAt = Effect.gen(function* () {
     if (!(yield* fs.exists(backupsDirectory))) return null;
@@ -248,7 +254,7 @@ const make = Effect.gen(function* () {
     if (!settings.automaticBackups.enabled) return;
     const now = yield* Clock.currentTimeMillis;
     if (!isBackupDue(yield* latestBackupAt, now)) return;
-    yield* backupNow().pipe(
+    yield* backupNow.pipe(
       Effect.catch((cause) => Effect.logWarning("Nightly server backup failed", { cause })),
     );
   });

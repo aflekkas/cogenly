@@ -1,8 +1,10 @@
+// @effect-diagnostics nodeBuiltinImport:off - tests assert real file modes and read snapshots directly.
 import * as NodeFS from "node:fs";
 import * as NodeSqlite from "node:sqlite";
 
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as TestClock from "effect/testing/TestClock";
@@ -63,8 +65,8 @@ describe("isBackupDue", () => {
 
 describe("backupDirectoryName", () => {
   it("sorts chronologically as plain text", () => {
-    const earlier = backupDirectoryName(new Date("2026-10-11T02:00:00.000Z"));
-    const later = backupDirectoryName(new Date("2026-10-12T02:00:00.000Z"));
+    const earlier = backupDirectoryName(DateTime.makeUnsafe("2026-10-11T02:00:00.000Z"));
+    const later = backupDirectoryName(DateTime.makeUnsafe("2026-10-12T02:00:00.000Z"));
     expect(earlier < later).toBe(true);
   });
 });
@@ -107,8 +109,10 @@ describe("ServerBackup.backupNow", () => {
       }
 
       const backup = yield* ServerBackup;
-      yield* TestClock.setTime(new Date("2026-10-12T02:00:00.000Z").getTime());
-      const result = yield* backup.backupNow();
+      yield* TestClock.setTime(
+        DateTime.toEpochMillis(DateTime.makeUnsafe("2026-10-12T02:00:00.000Z")),
+      );
+      const result = yield* backup.backupNow;
 
       expect(result.directory.startsWith(backupsDir)).toBe(true);
       expect(result.pruned).toEqual(["2026-10-10T02-00-00.000Z"]);
