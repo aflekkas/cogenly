@@ -1362,12 +1362,12 @@ const make = (options: IntegrationsOptions = {}) =>
           if (current === undefined) return { deleted: false };
           if (!integrationVisibleTo({ ...current, enabled: true }, options?.callerLabelId))
             return yield* new IntegrationError({ operation: "delete", reason: "not_found" });
+          if (current.transport === "local" && Option.isSome(local)) yield* local.value.stop(id);
           const at = yield* now;
           const { oauthState: _, ...rest } = current;
           yield* persist({ ...rest, deletedAt: at, updatedAt: at });
           yield* dropTokens(current);
           yield* invalidate(id);
-          if (current.transport === "local" && Option.isSome(local)) yield* local.value.stop(id);
           yield* notify;
           return { deleted: true };
         }).pipe(integrationLock(id).withPermits(1), Effect.mapError(failure("delete", "storage"))),

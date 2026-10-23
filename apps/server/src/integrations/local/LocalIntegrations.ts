@@ -50,7 +50,7 @@ export class LocalIntegrations extends Context.Service<
       params: unknown,
       labelId?: ProjectLabelId | null,
     ) => Effect.Effect<unknown, IntegrationError>;
-    readonly stop: (id: string, replacement?: Integration) => Effect.Effect<void>;
+    readonly stop: (id: string, replacement?: Integration) => Effect.Effect<void, IntegrationError>;
     readonly status: (id: string) => Effect.Effect<Runner.LocalMcpStatus | undefined>;
     /** Whether the account's process holds a Google grant. */
     readonly signedIn: (id: string) => Effect.Effect<boolean, IntegrationError>;
@@ -76,6 +76,9 @@ const decodeAuthResult = Schema.decodeUnknownOption(AuthResult);
 const decodeToken = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ refresh_token: Schema.String })),
 );
+const browserOriginJson = Schema.fromJsonString(Schema.String);
+const decodeBrowserOrigin = Schema.decodeUnknownEffect(browserOriginJson);
+const encodeBrowserOrigin = Schema.encodeEffect(browserOriginJson);
 const AUTH_LIFETIME_MS = 10 * 60_000;
 const definitionKey = Schema.encodeSync(Schema.fromJsonString(Integration));
 const mapLocalError = (cause: Runner.LocalMcpError) =>
@@ -201,7 +204,7 @@ const make = Effect.gen(function* () {
       if (!(yield* fs.exists(browserOriginFile(id)))) return undefined;
       return yield* fs
         .readFileString(browserOriginFile(id))
-        .pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.String))));
+        .pipe(Effect.flatMap(decodeBrowserOrigin));
     }).pipe(Effect.mapError(storageError));
   const originFor = (integration: Integration) =>
     Effect.gen(function* () {
@@ -386,6 +389,13 @@ const make = Effect.gen(function* () {
               if (ticket.integration.id === id) tickets.delete(key);
             for (const [key, state] of states) if (state.integration.id === id) states.delete(key);
             yield* runner.stop(id);
+            if (replacement === undefined) {
+              yield* fs
+                .remove(directoryFor(id), { recursive: true, force: true })
+                .pipe(Effect.mapError(storageError));
+              activeOrigins.delete(id);
+              rejectedGrants.delete(id);
+            }
           }),
         ),
       ),
@@ -513,9 +523,9 @@ const make = Effect.gen(function* () {
           yield* fs
             .writeFileString(
               browserOriginFile(entry.integration.id),
-              yield* Schema.encodeEffect(Schema.fromJsonString(Schema.String))(
-                new URL(redirect).origin,
-              ).pipe(Effect.mapError(storageError)),
+              yield* encodeBrowserOrigin(new URL(redirect).origin).pipe(
+                Effect.mapError(storageError),
+              ),
               { mode: 0o600 },
             )
             .pipe(Effect.mapError(storageError));

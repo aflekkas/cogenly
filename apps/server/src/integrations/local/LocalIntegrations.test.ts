@@ -417,6 +417,37 @@ describe("managed Google integrations", () => {
       }).pipe(Effect.scoped, Effect.provide(testLayer([], missing, "json", false, runtimeMissing))),
   );
 
+  it.live("removing an account erases its grants while disabling preserves them", () => {
+    const specs: Array<Runner.LocalMcpSpec> = [];
+    return Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const fs = yield* FileSystem.FileSystem;
+      const { integration } = yield* gateway.create({
+        preset: "google-workspace",
+        accountLabel: "work",
+        callbackOrigin: "https://cogenly.example.com",
+      });
+      const directory = specs[0]!.directory;
+      const credentials = specs[0]!.env.WORKSPACE_MCP_CREDENTIALS_DIR!;
+      yield* fs.writeFileString(
+        `${credentials}/work.json`,
+        JSON.stringify({ refresh_token: "private-grant" }),
+      );
+      yield* fs.makeDirectory(`${credentials}.previous`);
+      yield* fs.writeFileString(
+        `${credentials}.previous/work.json`,
+        JSON.stringify({ refresh_token: "previous-grant" }),
+      );
+      yield* gateway.update({ id: integration.id, enabled: false });
+      expect(yield* fs.exists(`${credentials}/work.json`)).toBe(true);
+      expect(yield* fs.exists(`${credentials}.previous/work.json`)).toBe(true);
+      yield* gateway.remove(integration.id);
+      expect(yield* fs.exists(directory)).toBe(false);
+      expect((yield* gateway.remove(integration.id)).deleted).toBe(false);
+    }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
+  });
+
   it.live("connects the Google catalog entry and hands back its sign-in link", () =>
     Effect.gen(function* () {
       yield* runMigrations();
