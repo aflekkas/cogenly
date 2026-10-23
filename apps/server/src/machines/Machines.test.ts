@@ -266,6 +266,8 @@ describe("machines", () => {
       { ...serve, "cf-connecting-ip": "203.0.113.1" },
       { ...serve, "tailscale-funnel-request": "?1" },
       { ...serve, "x-forwarded-for": "203.0.113.1" },
+      { ...serve, "x-forwarded-for": "abc:.ts.net" },
+      { ...serve, "x-forwarded-for": "100.64..2" },
       { ...serve, "x-forwarded-for": "100.64.0.2, 203.0.113.1" },
       { ...serve, forwarded: "for=203.0.113.1" },
       { ...serve, "x-forwarded-proto": "http" },
@@ -369,6 +371,51 @@ describe("machines", () => {
         // Neither preflight spent the grant; the intended hub still accepts it.
         yield* spoke.machines.joinHub({ hubUrls: [hub.url], code });
         yield* awaitLinkState(spoke, (state) => state.status === "online");
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.live(
+    "checks saved routes and the pinned hub before sending a reconnect token",
+    () =>
+      Effect.gen(function* () {
+        for (const unsafeRoutes of [true, false]) {
+          const hub = yield* startMachine("hub", "cloud-server");
+          const spoke = yield* startMachine("spoke", "computer");
+          const proxy = yield* startProxy(hub);
+          yield* pair(hub, spoke, proxy.url);
+          const received: {
+            path: string;
+            authorization: string | undefined;
+            dpop: string | string[] | undefined;
+          }[] = [];
+          const observer = yield* startHttpObserver((request, response) => {
+            received.push({
+              path: request.url!,
+              authorization: request.headers.authorization,
+              dpop: request.headers.dpop,
+            });
+            response.writeHead(200, { "content-type": "application/json" });
+            response.end(
+              JSON.stringify({ hubEnvironmentId: hub.environmentId, signature: "wrong" }),
+            );
+          });
+          const link = yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow));
+          yield* spoke.run(
+            writeHubLink({
+              ...link,
+              routes: unsafeRoutes ? ["https://hub.example/", observer.url] : [observer.url],
+            }),
+          );
+          yield* proxy.dropAll;
+          yield* awaitLinkState(spoke, (state) => state.status === "untrusted");
+          assert.deepStrictEqual(
+            received,
+            unsafeRoutes
+              ? []
+              : [{ path: "/peer/identity", authorization: undefined, dpop: undefined }],
+          );
+        }
       }).pipe(Effect.scoped),
     30_000,
   );

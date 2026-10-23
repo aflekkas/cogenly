@@ -14,8 +14,9 @@ or launch work remotely. Provider reports contain status, never login tokens.
 An admin-connected client calls `machines.prepareJoin` on the spoke, passes its
 key thumbprint to `machines.createPeerGrant` on the hub, and hands the resulting
 join code to `machines.joinHub` on the spoke. Only the spoke server redeems it.
-The hub grant expires after ten minutes and can be spent once. The CLI follows the same prepare → grant → join exchange: grants always bind
-the intended spoke key before issuance, and old unbound grants are refused.
+The hub grant expires after ten minutes and can be spent once. The CLI follows
+the same prepare → grant → join exchange: grants always bind the intended spoke
+key before issuance, and old unbound grants are refused.
 Transfer the code privately. The CLI reads it through a hidden prompt or
 `--code-stdin`, never a positional argument or a suggested command line.
 
@@ -37,8 +38,8 @@ forwarding safe.
 The spoke pins the hub environment ID and Ed25519 public key from the admin's
 join code. Before join and each reconnect, a secret-free `/peer/identity` challenge
 checks that pin before sending any grant or peer token. Join and the socket
-hello also sign fresh nonces with both environment IDs. The hub pins the spoke environment ID to its proof-bound
-session and checks subsequent self reports against it. Keep the environment ID,
+hello also sign fresh nonces with both environment IDs. The hub pins the spoke
+environment ID to its proof-bound session and checks subsequent self reports against it. Keep the environment ID,
 environment key, and peer secrets together across restarts. Key replacement
 requires unpairing and pairing again.
 

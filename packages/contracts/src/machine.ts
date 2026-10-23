@@ -124,14 +124,14 @@ export const MachineJoinCode = Schema.Struct({
   hubName: TrimmedNonEmptyString,
   /** SPKI PEM of the hub's Ed25519 environment key. */
   hubPublicKey: TrimmedNonEmptyString,
-  /** Addresses the hub knows it answers on; the joiner's own come first. */
+  /** Advertised addresses, used only when the joiner supplies no explicit routes. */
   routes: Schema.Array(TrimmedNonEmptyString),
   expiresAt: Schema.DateTimeUtc,
 });
 export type MachineJoinCode = typeof MachineJoinCode.Type;
 
 export const MachineJoinHubInput = Schema.Struct({
-  /** Routes to try first, in order, such as the URL the broker reached the hub on. */
+  /** Explicit routes in order; when present, replace advertised alternatives. */
   hubUrls: Schema.Array(TrimmedNonEmptyString),
   code: MachineJoinCode,
 });
