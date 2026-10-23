@@ -153,7 +153,8 @@ export function renderBootServiceUnit(
     "",
     "[Service]",
     "Type=notify",
-    // The server sends through systemd-notify, beneath the service launcher.
+    // The service launcher owns sd_notify (it is alive while idle, during
+    // update handoffs, backups and migrations); the server child also pings.
     "NotifyAccess=all",
     "WatchdogSec=60",
     "TimeoutStartSec=180",
