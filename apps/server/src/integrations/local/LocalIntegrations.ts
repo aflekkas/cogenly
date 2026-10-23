@@ -1,7 +1,7 @@
 import {
   IntegrationError,
+  Integration,
   type GoogleWorkspaceAddInput,
-  type Integration,
   type IntegrationCreateInput,
   type ProjectLabelId,
 } from "@t3tools/contracts";
@@ -44,7 +44,7 @@ export class LocalIntegrations extends Context.Service<
       params: unknown,
       labelId?: ProjectLabelId | null,
     ) => Effect.Effect<unknown, IntegrationError>;
-    readonly stop: (id: string) => Effect.Effect<void>;
+    readonly stop: (id: string, replacement?: Integration) => Effect.Effect<void>;
     readonly status: (id: string) => Effect.Effect<Runner.LocalMcpStatus | undefined>;
     readonly signInLink: (
       integration: Integration,
@@ -64,6 +64,7 @@ const decodeToken = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ refresh_token: Schema.String })),
 );
 const AUTH_LIFETIME_MS = 10 * 60_000;
+const definitionKey = Schema.encodeSync(Schema.fromJsonString(Integration));
 const mapLocalError = (cause: Runner.LocalMcpError) =>
   new IntegrationError({
     operation: "run local server",
@@ -100,6 +101,12 @@ const make = Effect.gen(function* () {
     { readonly integration: Integration; readonly expires: number; readonly url: string }
   >();
   const active = new Set<string>();
+  // In-flight requests may still hold an old definition after a committed edit or deletion.
+  // Only the replacement supplied by that mutation may start the account again.
+  const replacements = new Map<string, string | null>();
+  const isCurrent = (integration: Integration) =>
+    !replacements.has(integration.id) ||
+    replacements.get(integration.id) === definitionKey(integration);
   const directoryFor = (id: string) =>
     path.join(config.stateDir, "integrations", "local", encodeURIComponent(id));
   const credentialsFor = (id: string) => path.join(directoryFor(id), "credentials");
@@ -185,6 +192,11 @@ const make = Effect.gen(function* () {
   const start = (integration: Integration, labelId?: ProjectLabelId | null) =>
     lock.withPermits(1)(
       Effect.gen(function* () {
+        if (!isCurrent(integration))
+          return yield* new IntegrationError({
+            operation: "start retired local integration",
+            reason: "not_found",
+          });
         if (
           !integration.enabled ||
           integration.deletedAt !== null ||
@@ -228,6 +240,7 @@ const make = Effect.gen(function* () {
       }).pipe(
         Effect.tapError((error) =>
           Effect.sync(() => {
+            if (!isCurrent(integration)) return;
             failures.set(integration.id, {
               state: "failed",
               version: integration.local?.version ?? GOOGLE_WORKSPACE_VERSION,
@@ -241,6 +254,7 @@ const make = Effect.gen(function* () {
     );
   const rememberAuth = (integration: Integration, result: unknown) =>
     Effect.gen(function* () {
+      if (!isCurrent(integration)) return;
       const decoded = decodeAuthResult(result);
       if (decoded._tag === "None") return;
       const now = yield* Clock.currentTimeMillis;
@@ -285,22 +299,26 @@ const make = Effect.gen(function* () {
       }),
     start,
     rpc,
-    stop: (id) =>
-      lock.withPermits(1)(
-        Effect.gen(function* () {
-          active.delete(id);
-          failures.delete(id);
-          for (const [key, ticket] of tickets)
-            if (ticket.integration.id === id) tickets.delete(key);
-          for (const [key, state] of states) if (state.integration.id === id) states.delete(key);
-          yield* runner.stop(id);
-        }),
+    stop: (id, replacement) =>
+      authLock.withPermits(1)(
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            replacements.set(id, replacement ? definitionKey(replacement) : null);
+            active.delete(id);
+            failures.delete(id);
+            for (const [key, ticket] of tickets)
+              if (ticket.integration.id === id) tickets.delete(key);
+            for (const [key, state] of states) if (state.integration.id === id) states.delete(key);
+            yield* runner.stop(id);
+          }),
+        ),
       ),
     status: (id) => runner.status(id).pipe(Effect.map((status) => status ?? failures.get(id))),
     signInLink: (integration) =>
       authLock.withPermits(1)(
         Effect.gen(function* () {
           if (
+            !isCurrent(integration) ||
             !integration.enabled ||
             integration.deletedAt !== null ||
             !integration.local ||

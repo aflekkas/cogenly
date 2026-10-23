@@ -805,10 +805,16 @@ const make = (options: IntegrationsOptions = {}) =>
           };
           yield* persist(integration);
           yield* invalidate(integration.id);
-          if (current.transport === "local" && Option.isSome(local))
-            yield* local.value.stop(current.id);
           return { integration: redactIntegration(integration) };
-        }).pipe(sql.withTransaction, Effect.mapError(failure("update", "storage"))),
+        }).pipe(
+          sql.withTransaction,
+          Effect.tap(({ integration }) =>
+            integration.transport === "local" && Option.isSome(local)
+              ? local.value.stop(integration.id, integration)
+              : Effect.void,
+          ),
+          Effect.mapError(failure("update", "storage")),
+        ),
       remove: (id, options) =>
         Effect.gen(function* () {
           const current = yield* getById(id).pipe(

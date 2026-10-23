@@ -90,7 +90,8 @@ preset. Each account has its own integration, such as “Google · personal” o
    also pass `callbackOrigin: "https://cogenly.example.com"`, matching step 4.
    Open the returned sign-in link in your usual browser, choose the intended
    Google account, and grant the requested permissions. Repeat with another
-   account label for each account you want to connect.
+   account label for each account you want to connect. Google tools may ask
+   for `user_google_email`; give the agent the email address you signed in with.
 
 On a VPS, the callback goes through Cogenly's HTTPS origin to the account's
 private local server; your browser never needs to reach localhost on the VPS.

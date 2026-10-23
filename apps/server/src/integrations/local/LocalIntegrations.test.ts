@@ -190,6 +190,11 @@ describe("managed Google integrations", () => {
         expect(yield* local.signInLink(work.integration)).toBeDefined();
         yield* gateway.update({ id: personal.integration.id, enabled: false });
         expect(yield* local.status(personal.integration.id)).toBeUndefined();
+        // A tool request which read the enabled definition before the update must not resurrect it.
+        expect(
+          (yield* local.rpc(personal.integration, "tools/list", {}).pipe(Effect.result))._tag,
+        ).toBe("Failure");
+        expect(yield* local.status(personal.integration.id)).toBeUndefined();
         expect(
           (yield* gateway.listTools(personal.integration.name, undefined).pipe(Effect.result))._tag,
         ).toBe("Failure");
@@ -200,6 +205,10 @@ describe("managed Google integrations", () => {
         expect(yield* local.signInLink(personal.integration)).toBeUndefined();
         yield* gateway.remove(personal.integration.id);
         yield* gateway.remove(work.integration.id);
+        expect(
+          (yield* local.rpc(work.integration, "tools/list", {}).pipe(Effect.result))._tag,
+        ).toBe("Failure");
+        expect(yield* local.signInLink(work.integration)).toBeUndefined();
         expect(yield* local.status(work.integration.id)).toBeUndefined();
         expect((yield* gateway.list()).integrations).toHaveLength(0);
       }).pipe(Effect.scoped, Effect.provide(testLayer(specs, false, format)));
