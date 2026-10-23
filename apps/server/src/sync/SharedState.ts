@@ -78,6 +78,45 @@ const NON_OWNER_EDITABLE_FIELDS: Readonly<Record<"agent" | "schedule", ReadonlyS
   schedule: new Set(["title", "enabled"]),
 };
 
+/** How far ahead of this machine a peer's hybrid clock may run before it is clamped. */
+export const MAX_CLOCK_SKEW_MS = 5 * 60_000;
+export const MAX_LOGICAL_CLOCK = 1_000_000_000;
+
+/**
+ * Bounds one hybrid clock to what this machine can safely observe: a wall
+ * more than the skew allowance ahead is pulled back to the allowance (the
+ * sender's machine clock is wrong, not its change), and an absurd logical
+ * counter is capped. Returns whether anything moved.
+ */
+export function clampClock(
+  clock: HybridClock,
+  now: number,
+): { readonly clock: HybridClock; readonly clamped: boolean } {
+  const wall = Math.min(clock.wall, now + MAX_CLOCK_SKEW_MS);
+  const logical = Math.min(clock.logical, MAX_LOGICAL_CLOCK);
+  return wall === clock.wall && logical === clock.logical
+    ? { clock, clamped: false }
+    : { clock: { ...clock, wall, logical }, clamped: true };
+}
+
+/** Clamps every clock a change carries; applied before persist and observe. */
+export function clampChangeClocks(
+  change: SharedDocumentChange,
+  now: number,
+): { readonly change: SharedDocumentChange; readonly clamped: boolean } {
+  let clamped = false;
+  const clocks = Object.fromEntries(
+    Object.entries(change.clocks).map(([key, clock]) => {
+      const result = clampClock(clock, now);
+      clamped = clamped || result.clamped;
+      return [key, result.clock];
+    }),
+  );
+  const tombstone = change.tombstone ? clampClock(change.tombstone, now).clock : change.tombstone;
+  if (change.tombstone) clamped = clamped || tombstone !== change.tombstone;
+  return { change: { ...change, clocks, tombstone }, clamped };
+}
+
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const storage = (cause: unknown) =>
   Schema.is(SharedStateError)(cause) ? cause : new SharedStateError({ reason: "storage", cause });
@@ -315,7 +354,7 @@ const make = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.gen(function* () {
-          const batch = yield* Schema.decodeUnknownEffect(SharedChangeBatch)(input, {
+          let batch = yield* Schema.decodeUnknownEffect(SharedChangeBatch)(input, {
             onExcessProperty: "error",
           });
           if (
@@ -328,18 +367,25 @@ const make = Effect.gen(function* () {
           )
             return yield* new SharedStateError({ reason: "invalid-cursor" });
           const now = yield* Clock.currentTimeMillis;
+          // A peer whose clock runs ahead must not stall the stream: its
+          // changes are accepted with their clocks clamped to the skew
+          // allowance (which also keeps the local hybrid clock from being
+          // poisoned by observing them), and the skew is logged so the
+          // misconfigured machine is visible in the server log.
+          const accepted: SharedDocumentChange[] = [];
           for (const change of batch.changes) {
             yield* validateChange(change);
             if (!trustedRelay && change.updatedBy !== source)
               return yield* new SharedStateError({ reason: "invalid-document" });
-            if (
-              [
-                ...Object.values(change.clocks),
-                ...(change.tombstone ? [change.tombstone] : []),
-              ].some((clock) => clock.wall > now + 5 * 60_000 || clock.logical > 1_000_000_000)
-            )
-              return yield* new SharedStateError({ reason: "invalid-document" });
+            const { change: clampedChange, clamped } = clampChangeClocks(change, now);
+            if (clamped)
+              yield* Effect.logWarning(
+                "Clamped shared change clocks from a machine ahead of this one",
+                { source, kind: change.kind, id: change.id },
+              );
+            accepted.push(clampedChange);
           }
+          batch = { ...batch, changes: accepted };
           const previous = (yield* cursors(source)).received;
           if (batch.cursor <= previous) return { acknowledged: previous, changed: false };
           if (batch.after > previous)

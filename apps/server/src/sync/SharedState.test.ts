@@ -409,7 +409,6 @@ describe("SharedState", () => {
           repositories: [{ remote: "github.com/org/repo", directoryName: "../../escape" }],
         }),
         change({ sourceLinks: [{ kind: "github-owner", owner: "valid", path: "/tmp" }] }),
-        change({ name: "future" }, Number.MAX_SAFE_INTEGER),
         { ...change({ name: "x" }), clocks: {} },
         change({ instructions: "x".repeat(100_000) }),
       ];
@@ -423,6 +422,31 @@ describe("SharedState", () => {
       expect((yield* Effect.result(state.acknowledge(peer, 99)))._tag).toBe("Failure");
     }).pipe(Effect.provide(layer)),
   );
+  it.effect("accepts a batch from a machine over 5 minutes ahead, clamping its clocks", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      // TestClock starts at 0, so a wall an hour out is far beyond the skew bound.
+      const future = change({ name: "future" }, 60 * 60_000);
+      const received = yield* state.receive(batch([future]), peer, false);
+      expect(received.acknowledged).toBe(1);
+      const stored = yield* state.get("project", "label:peer");
+      expect(stored?.fields.name).toBe("future");
+      // Clamped to now + 5 minutes, not the sender's hour-ahead wall.
+      expect(stored?.clocks.name?.wall).toBeLessThanOrEqual(5 * 60_000);
+      // The stream never stalls: the peer's next batch (still ahead, still
+      // clamped) applies once time has moved, instead of being rejected.
+      yield* TestClock.adjust("1 second");
+      yield* state.receive(batch([change({ name: "after" }, 60 * 60_000 + 1_000)], 1), peer, false);
+      expect((yield* state.get("project", "label:peer"))?.fields.name).toBe("after");
+      // The local clock was not poisoned by the future wall.
+      yield* state.write("project", "label:local", project);
+      const replay = yield* state.readBatch(0, peer, false);
+      for (const replayed of replay.changes)
+        for (const clock of Object.values(replayed.clocks))
+          expect(clock.wall).toBeLessThan(60 * 60_000);
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("bounds replay batches by count and bytes", () =>
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;
