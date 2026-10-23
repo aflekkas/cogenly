@@ -119,7 +119,7 @@ it.layer(NodeServices.layer)("Muse status", (it) => {
         const host = makeHost(metaCatalog);
         const snapshot = yield* checkMuseProviderStatus(
           settings({ enabled: true, binaryPath, customModels: ["muse-custom"] }),
-          undefined,
+          { ...process.env, MUSE_AUTH_PATH: "/definitely-missing/muse/auth.json" },
           undefined,
           async () => host,
         );
@@ -364,6 +364,31 @@ it.layer(NodeServices.layer)("Muse status", (it) => {
         expect(snapshot.usageLimits?.unavailable?.message).toBe(
           "Muse hasn't reported limits yet. They'll show up after your next Muse Code message.",
         );
+      }),
+    ),
+  );
+
+  it.effect("names the signed-in account from Muse's credential file", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const binaryPath = yield* fakeCli();
+        const configHome = yield* fs.makeTempDirectoryScoped({ prefix: "muse-auth-test-" });
+        yield* fs.makeDirectory(`${configHome}/muse`);
+        yield* fs.writeFileString(
+          `${configHome}/muse/auth.json`,
+          JSON.stringify({
+            schema_version: 1,
+            providers: { meta: { subs_active: true, user_email: " someone@example.com " } },
+          }),
+        );
+        const snapshot = yield* checkMuseProviderStatus(
+          settings({ enabled: true, binaryPath }),
+          { ...process.env, MUSE_AUTH_PATH: undefined, XDG_CONFIG_HOME: configHome },
+          undefined,
+          async () => makeHost(metaCatalog),
+        );
+        expect(snapshot.auth).toEqual({ status: "unknown", email: "someone@example.com" });
       }),
     ),
   );

@@ -1,3 +1,4 @@
+import { readMuseAccountEmail } from "./auth.ts";
 import { readMuseUsageLimits } from "./usageLimits.ts";
 import type { MuseLimitsBumpController } from "./limitsBump.ts";
 import { ServerProviderModel } from "@t3tools/contracts";
@@ -147,12 +148,14 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
     models,
     bump,
   );
+  // Not proof of a working login, but it names the account the limits belong to.
+  const email = yield* readMuseAccountEmail(museEnvironment);
   return {
     ...snapshot(
       {
         installed: true,
         version,
-        auth: { status: "unknown" },
+        auth: { status: "unknown", ...(email ? { email } : {}) },
         ...(models.length > 0
           ? { status: "ready" }
           : {

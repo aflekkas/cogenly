@@ -185,6 +185,46 @@ describe("pools", () => {
     expect(accounts[0]?.limits.windows[0]?.usedPercent).toBe(55);
   });
 
+  it("shows one Muse login read by two environments as one column per window", () => {
+    // Muse has no auth signal, only the email from its credential file.
+    const muse = provider({
+      driver: ProviderDriverKind.make("muse"),
+      instanceId: ProviderInstanceId.make("muse"),
+      displayName: "Muse Code",
+      auth: { status: "unknown", email: "someone@example.com" },
+      usageLimits: {
+        checkedAt,
+        windows: [
+          { ...window, id: "window", usedPercent: 0 },
+          { ...weekly, id: "weekly", usedPercent: 43 },
+        ],
+      },
+    });
+    const environments = (providers: readonly ServerProvider[]) =>
+      new Map([
+        [EnvironmentId.make("env-a"), { ...laptop, serverConfig: { providers } }],
+        [
+          EnvironmentId.make("env-b"),
+          { entry: { target: { label: "Dev" } }, serverConfig: { providers } },
+        ],
+      ]);
+
+    const [pool] = collectLimitPools(collectLimitAccounts(environments([muse])), now);
+    expect(pool?.windows.map((pooled) => [pooled.kind, pooled.columns.length])).toEqual([
+      ["session", 1],
+      ["weekly", 1],
+    ]);
+    expect(pool?.accounts[0]?.environments.map((environment) => environment.label)).toEqual([
+      "Laptop",
+      "Dev",
+    ]);
+
+    // Without an account identity the two reads cannot be told apart from two logins.
+    const anonymous = { ...muse, auth: { status: "unknown" as const } };
+    const [split] = collectLimitPools(collectLimitAccounts(environments([anonymous])), now);
+    expect(split?.windows[0]?.columns).toHaveLength(2);
+  });
+
   it("takes windows from a fresher hub read but credits and redeem from the native instance", () => {
     const native = provider({
       driver: claude,
