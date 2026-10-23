@@ -39,7 +39,7 @@ const refuse = (status: number, code: string) =>
  * Link methods need `sync:replicate`, which every paired machine holds.
  * `peer.call` is checked per channel against the channel's own scope.
  */
-export const peerScopeAuthorizationLayer = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
+const peerScopeAuthorizationLayer = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
   Layer.succeed(PeerScopeAuthorization)((effect, { rpc }) =>
     rpc._tag === PEER_METHODS.call || scopes.includes(AuthSyncReplicateScope)
       ? effect
