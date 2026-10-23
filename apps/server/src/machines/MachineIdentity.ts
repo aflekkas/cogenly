@@ -13,10 +13,12 @@ import {
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ProcessRunner from "../processRunner.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
@@ -41,10 +43,14 @@ const make = Effect.gen(function* () {
   const providers = yield* ProviderRegistry.ProviderRegistry;
   const descriptor = yield* environment.getDescriptor;
   const hostname = yield* HostProcess.Hostname;
-  const facts = yield* detectMachineFacts({
-    platform: descriptor.platform.os,
-    detectedKind: descriptor.platform.machine ?? null,
-  });
+  // Probes can take seconds (pmset, reverse DNS); run them on first use, not at startup.
+  const probeContext = yield* Effect.context<FileSystem.FileSystem | ProcessRunner.ProcessRunner>();
+  const detectFacts = yield* Effect.cached(
+    detectMachineFacts({
+      platform: descriptor.platform.os,
+      detectedKind: descriptor.platform.machine ?? null,
+    }).pipe(Effect.provideContext(probeContext)),
+  );
 
   const providerStatus = providers.getProviders.pipe(
     Effect.map((snapshots) =>
@@ -58,6 +64,7 @@ const make = Effect.gen(function* () {
   );
 
   const self: MachineIdentity["Service"]["self"] = Effect.gen(function* () {
+    const facts = yield* detectFacts;
     const current = yield* settings.getSettings.pipe(Effect.option);
     const configured = current._tag === "Some" ? current.value : undefined;
     const role = configured?.machineRole ?? facts.role;
