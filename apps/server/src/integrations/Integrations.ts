@@ -804,6 +804,27 @@ const make = (options: IntegrationsOptions = {}) =>
         }),
       );
 
+    /** A streamable-HTTP JSON-RPC message to the integration, with its resolved headers. */
+    const upstreamRequest = (
+      integration: Integration,
+      headers: Record<string, string>,
+      body: unknown,
+      sessionId: string | undefined,
+    ) => {
+      let request = HttpClientRequest.post(integration.url).pipe(
+        HttpClientRequest.setHeader("content-type", "application/json"),
+        HttpClientRequest.setHeader("accept", "application/json, text/event-stream"),
+        HttpClientRequest.bodyJsonUnsafe(body),
+      );
+      for (const [name, value] of Object.entries(headers)) {
+        request = HttpClientRequest.setHeader(request, name, value);
+      }
+      if (sessionId !== undefined) {
+        request = HttpClientRequest.setHeader(request, "mcp-session-id", sessionId);
+      }
+      return request;
+    };
+
     const post = (
       integration: Integration,
       headers: Record<string, string>,
@@ -813,22 +834,12 @@ const make = (options: IntegrationsOptions = {}) =>
     ) =>
       Effect.gen(function* () {
         const id = yield* Ref.updateAndGet(requestIds, (value) => value + 1);
-        let request = HttpClientRequest.post(integration.url).pipe(
-          HttpClientRequest.setHeader("content-type", "application/json"),
-          HttpClientRequest.setHeader("accept", "application/json, text/event-stream"),
-          HttpClientRequest.bodyJsonUnsafe({
-            jsonrpc: "2.0",
-            id,
-            method,
-            params,
-          }),
+        const request = upstreamRequest(
+          integration,
+          headers,
+          { jsonrpc: "2.0", id, method, params },
+          sessionId,
         );
-        for (const [name, value] of Object.entries(headers)) {
-          request = HttpClientRequest.setHeader(request, name, value);
-        }
-        if (sessionId !== undefined) {
-          request = HttpClientRequest.setHeader(request, "mcp-session-id", sessionId);
-        }
         const response = yield* client.execute(request).pipe(
           // Fetch otherwise forwards custom secret headers across redirects.
           Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
@@ -1013,6 +1024,27 @@ const make = (options: IntegrationsOptions = {}) =>
           },
           undefined,
         ).pipe(Effect.catch(() => Effect.succeed(undefined)));
+        // The lifecycle requires this before any request; stateful servers refuse requests without it.
+        if (initialized !== undefined) {
+          yield* client
+            .execute(
+              upstreamRequest(
+                integration,
+                headers,
+                { jsonrpc: "2.0", method: "notifications/initialized" },
+                initialized.sessionId,
+              ),
+            )
+            .pipe(
+              Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+              (effect) =>
+                withPublicEndpoint(integration.url, effect).pipe(
+                  Effect.provideService(IntegrationEndpointPolicy, endpointPolicy),
+                ),
+              Effect.timeout(Duration.millis(timeoutMs)),
+              Effect.ignore,
+            );
+        }
         return yield* post(integration, headers, method, params, initialized?.sessionId).pipe(
           Effect.map((response) => response.result),
         );
