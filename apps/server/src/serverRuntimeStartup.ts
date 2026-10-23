@@ -45,6 +45,7 @@ import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as SystemdWatchdog from "./scheduling/SystemdWatchdog.ts";
 import { forkParked, forkParkedFiber } from "./serverActivation.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -676,6 +677,7 @@ const make = (options?: StartupOptions) =>
         }),
       );
       yield* Effect.logDebug("startup phase: complete");
+      yield* Effect.flatMap(SystemdWatchdog.SystemdWatchdog, (watchdog) => watchdog.start);
       yield* flushCompileCache;
     }).pipe(
       Effect.withSpan("server.startup", {
@@ -717,6 +719,6 @@ const make = (options?: StartupOptions) =>
   });
 
 export const layerWithOptions = (options?: StartupOptions) =>
-  Layer.effect(ServerRuntimeStartup, make(options));
+  Layer.effect(ServerRuntimeStartup, make(options)).pipe(Layer.provide(SystemdWatchdog.layer));
 
 const layer = layerWithOptions();
