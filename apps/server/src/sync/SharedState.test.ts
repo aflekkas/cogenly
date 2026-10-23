@@ -5,6 +5,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import { agentFixture } from "../agents/agent.testkit.ts";
@@ -47,6 +50,48 @@ const batch = (changes: SharedDocumentChange[], after = 0) => ({
   changes,
 });
 describe("SharedState", () => {
+  it.effect("no-op writes, captures and replayed batches do not notify client streams", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const live = yield* state.changes.pipe(Stream.toQueue({ capacity: 16 }));
+      yield* state.write("project", "label:noop", project);
+      yield* Queue.take(live);
+      yield* state.write("project", "label:noop", project);
+      yield* state.capture("project", "label:noop");
+      yield* TestClock.adjust(0);
+      expect(yield* Queue.size(live)).toBe(0);
+      const incoming = batch([change(project)]);
+      yield* state.receive(incoming, peer, false);
+      yield* Queue.take(live);
+      yield* state.receive(incoming, peer, false);
+      yield* state.receive(batch([change({ name: "stale" }, 1)], 1), peer, false);
+      yield* TestClock.adjust(0);
+      expect(yield* Queue.size(live)).toBe(0);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+  it.effect("bootstrap is persisted across restarts and scoped to the pairing", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      yield* state.bootstrap();
+      yield* sql`INSERT INTO project_labels(label_id,name,created_at,updated_at) VALUES ('label:late','Late',${project.createdAt},${project.createdAt})`;
+      const context = yield* Layer.build(
+        Layer.fresh(SharedState.layer).pipe(
+          Layer.provide(
+            Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+              getEnvironmentId: Effect.succeed(local),
+            }),
+          ),
+        ),
+      );
+      const restarted = yield* SharedState.SharedState.pipe(Effect.provideContext(context));
+      yield* restarted.bootstrap();
+      expect(yield* restarted.get("project", "label:late")).toBeUndefined();
+      yield* restarted.setHub(peer);
+      yield* restarted.bootstrap();
+      expect((yield* restarted.get("project", "label:late"))?.fields.name).toBe("Late");
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
   it.effect("pairing never changes the default execution owner from the creating machine", () =>
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;
@@ -93,7 +138,7 @@ describe("SharedState", () => {
         ["label:good", "Good"],
       ])
         yield* sql`INSERT INTO project_labels(label_id,name,created_at,updated_at) VALUES (${id},${name},${project.createdAt},${project.createdAt})`;
-      yield* state.bootstrap;
+      yield* state.bootstrap();
       expect((yield* state.get("project", "label:good"))?.fields.name).toBe("Good");
       expect(yield* state.get("project", "label:bad")).toBeUndefined();
     }).pipe(Effect.provide(layer)),
@@ -272,7 +317,7 @@ describe("SharedState", () => {
           ),
         );
         const state = yield* SharedState.SharedState.pipe(Effect.provideContext(restarted));
-        yield* state.bootstrap;
+        yield* state.bootstrap();
         const doc = yield* state.get("agent", fixture.id);
         expect(doc?.fields.ownerMachine).toBe(local);
         expect(doc?.fields.fallbackChain).toEqual([]);

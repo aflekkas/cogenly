@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
@@ -66,7 +67,10 @@ const make = Effect.gen(function* () {
       )
         return;
       yield* state.setHub(spoke && view.link._tag === "spoke" ? view.link.hubEnvironmentId : null);
-      yield* state.bootstrap;
+      const paired = view.machines.find((machine) => machine.environmentId === peer);
+      yield* state.bootstrap(
+        `${peer}:${paired?.pairedAt ? DateTime.toEpochMillis(paired.pairedAt) : 0}`,
+      );
       // A busy link yields after 64 bounded batches; its durable cursor resumes next tick.
       for (let count = 0; count < 64; count++) {
         const cursors = yield* state.cursors(peer);
