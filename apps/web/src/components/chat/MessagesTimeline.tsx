@@ -1992,17 +1992,17 @@ function TimelineHistoryControl(props: MessagesTimelineHistoryControls) {
   }
   return (
     <div className="messages-timeline-row-frame">
-      <div className="chat-content-lane flex flex-col gap-1.5 pb-2">
+      <div className="chat-content-lane flex flex-col items-center gap-1.5 pt-1 pb-3">
         {props.hasMoreHistory ? (
-          <button
-            type="button"
+          <Button
+            size="xs"
+            variant="outline"
             disabled={props.loading}
             aria-label="Load earlier turns"
             onClick={() => props.onLoadEarlier()}
-            className="w-full py-1.5 text-xs text-muted-foreground/60 hover:text-foreground disabled:cursor-default"
           >
             {props.loading ? "Loading earlier turns…" : "Load earlier turns"}
-          </button>
+          </Button>
         ) : null}
         {props.error !== null ? (
           <p role="status" className="text-center text-muted-foreground text-xs">

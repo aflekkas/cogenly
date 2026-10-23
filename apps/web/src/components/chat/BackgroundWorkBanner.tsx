@@ -101,7 +101,7 @@ export function BackgroundWorkBanner(props: {
         <ComposerBanner.Actions>
           <Button
             size="xs"
-            variant="outline"
+            variant="destructive-outline"
             aria-label={props.stopping ? undefined : "Stop background work"}
             disabled={!props.canStop || props.stopping}
             onClick={props.onStop}
