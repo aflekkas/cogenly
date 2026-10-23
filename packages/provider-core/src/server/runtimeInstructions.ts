@@ -13,6 +13,8 @@ export const HOW_COGENLY_WORKS_INSTRUCTIONS = `<how_cogenly_works>Cogenly has th
  * Shared runtime context; omit model and effort when the harness manages them dynamically.
  * `modelName` is the display name users see in the model picker; `model` is the slug.
  */
+const VAULT_INSTRUCTIONS = `<vault>Cogenly has a vault for logins, API keys, cards and notes. Save credentials you create (e.g. a signup password) with vault_save, and log in with vault_fill, which types the value into the page without showing it to you. List items with vault_list (metadata only). Never ask for secrets in chat: use request_secret, with saveToVault when the value should be kept as a vault item. If vault_fill says approval_required, the owner has been asked; tell them it is waiting on them and ask again after they approve.</vault>`;
+
 export function buildRuntimeInstructions(runtime: {
   readonly harness: string;
   readonly model?: string | undefined;
@@ -27,7 +29,7 @@ export function buildRuntimeInstructions(runtime: {
     modelName && modelName !== model ? `${modelName} (model slug: ${model})` : model;
   const modelInfo = model && model !== "auto" && model !== "default" ? `, as ${modelLabel}` : "";
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
-  return `<runtime_info>In case you're asked: you are running in Cogenly through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${HOW_COGENLY_WORKS_INSTRUCTIONS}`;
+  return `<runtime_info>In case you're asked: you are running in Cogenly through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${HOW_COGENLY_WORKS_INSTRUCTIONS}\n\n${VAULT_INSTRUCTIONS}`;
 }
 
 function toSingleLine(value: string): string {
