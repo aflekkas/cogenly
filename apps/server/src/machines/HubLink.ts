@@ -2,9 +2,10 @@
  * The spoke side of the machine link. A spoke redeems a peer grant at the hub
  * once, then keeps a WebSocket to the hub's `/peer` endpoint open over the
  * first route that works, reconnecting with backoff. Every connection starts
- * with `peer.hello`, whose nonce the hub signs with the environment key this
- * spoke pinned at join, so a different server answering on a route is never
- * trusted. Spokes dial the hub so nothing ever has to reach into a laptop.
+ * with a challenge and mutually authenticated hello. The pinned hub key and
+ * spoke proof key bind fresh ephemeral keys, reports and credentials into the
+ * session; every later RPC frame is MACed. Spokes dial the hub so nothing ever
+ * has to reach into a laptop.
  */
 import {
   type MachineInfo,
@@ -13,6 +14,7 @@ import {
   type MachinePeerIdentity,
   type MachineSelfReport,
   PEER_JOIN_PATH,
+  PEER_PROTOCOL_VERSION,
   PEER_IDENTITY_PATH,
   PeerIdentityRequest,
   PeerIdentityResult,
@@ -53,8 +55,19 @@ import {
   createPeerDpopProof,
   getOrCreatePeerDpopKey,
   removePeerDpopKey,
-  verifyPeerHello,
+  verifyPeerTranscript,
+  signPeerProof,
+  peerDigest,
+  peerIdentityTranscript,
+  peerJoinProofTranscript,
+  peerJoinTranscript,
+  peerHelloProofTranscript,
+  peerHelloTranscript,
+  createPeerEphemeral,
+  derivePeerSessionKey,
 } from "./peerCrypto.ts";
+
+import { PeerFrameCodec } from "./peerFrames.ts";
 
 import { normalizePeerRoutes } from "./peerRoutes.ts";
 
@@ -158,7 +171,7 @@ const make = Effect.gen(function* () {
     lastError: null,
     machines: [],
   });
-  let active: HubClient | undefined;
+  let active: { readonly client: HubClient; readonly failed: Deferred.Deferred<void> } | undefined;
 
   const withSecrets = <A, E>(effect: Effect.Effect<A, E, ServerSecretStore.ServerSecretStore>) =>
     Effect.provideService(effect, ServerSecretStore.ServerSecretStore, secrets);
@@ -207,12 +220,15 @@ const make = Effect.gen(function* () {
       );
       if (
         result.hubEnvironmentId !== pin.hubEnvironmentId ||
-        !verifyPeerHello({
-          ...pin,
-          spokeEnvironmentId: self.environmentId,
-          nonce,
-          signature: result.signature,
-        })
+        !verifyPeerTranscript(
+          pin.hubPublicKey,
+          peerIdentityTranscript({
+            hubEnvironmentId: pin.hubEnvironmentId,
+            spokeEnvironmentId: self.environmentId,
+            nonce,
+          }),
+          result.signature,
+        )
       )
         return yield* new HubAttemptError({ reason: "untrusted" });
     });
@@ -251,7 +267,23 @@ const make = Effect.gen(function* () {
       );
       const request = yield* encodeJoinRequest(
         HttpClientRequest.post(url).pipe(HttpClientRequest.setHeader("dpop", proof)),
-        { grant: code.grant, nonce, spoke: self },
+        {
+          grant: code.grant,
+          nonce,
+          spoke: self,
+          proofKey: key.publicJwk,
+          proof: signPeerProof(
+            key,
+            peerJoinProofTranscript({
+              hubPublicKey: code.hubPublicKey,
+              hubEnvironmentId: code.hubEnvironmentId,
+              spokeKeyThumbprint: key.thumbprint,
+              spoke: self,
+              nonce,
+              grantHash: peerDigest(code.grant),
+            }),
+          ),
+        },
       ).pipe(Effect.orDie);
       const response = yield* post(url, request).pipe(Effect.option);
       if (Option.isNone(response)) continue;
@@ -266,13 +298,23 @@ const make = Effect.gen(function* () {
       const joined = result.value;
       const trusted =
         joined.hubEnvironmentId === code.hubEnvironmentId &&
-        verifyPeerHello({
-          hubPublicKey: code.hubPublicKey,
-          hubEnvironmentId: code.hubEnvironmentId,
-          spokeEnvironmentId: self.environmentId,
-          nonce,
-          signature: joined.signature,
-        });
+        joined.hub.environmentId === code.hubEnvironmentId &&
+        verifyPeerTranscript(
+          code.hubPublicKey,
+          peerJoinTranscript({
+            hubPublicKey: code.hubPublicKey,
+            hubEnvironmentId: code.hubEnvironmentId,
+            spokeKeyThumbprint: key.thumbprint,
+            spoke: self,
+            nonce,
+            grantHash: peerDigest(code.grant),
+            accessTokenHash: peerDigest(joined.accessToken),
+            scopes: joined.scopes,
+            expiresAt: DateTime.formatIso(joined.expiresAt),
+            hub: joined.hub,
+          }),
+          joined.signature,
+        );
       if (!trusted) {
         return yield* new MachineError({ operation: "join", reason: "hub-identity-mismatch" });
       }
@@ -315,7 +357,10 @@ const make = Effect.gen(function* () {
     // Best effort: an offline hub still lists this machine until it unpairs
     // it too, but its credential is useless without the key forgotten here.
     if (active !== undefined) {
-      yield* active[PEER_METHODS.leave]({}).pipe(Effect.timeout(REQUEST_TIMEOUT), Effect.ignore);
+      yield* active.client[PEER_METHODS.leave]({}).pipe(
+        Effect.timeout(REQUEST_TIMEOUT),
+        Effect.ignore,
+      );
     }
     yield* forget.pipe(Effect.mapError(storage("unpair")));
     return true;
@@ -330,12 +375,12 @@ const make = Effect.gen(function* () {
 
   const callHub: HubLink["Service"]["callHub"] = (channel, payload) =>
     Effect.gen(function* () {
-      const client = active;
-      if (client === undefined) {
+      const connection = active;
+      if (connection === undefined) {
         return yield* new PeerCallError({ channel: channel.name, reason: "offline" });
       }
       const encoded = yield* encodePeerPayload(channel, payload);
-      const value = yield* client[PEER_METHODS.call]({
+      const value = yield* connection.client[PEER_METHODS.call]({
         channel: channel.name,
         payload: encoded,
       }).pipe(
@@ -348,6 +393,13 @@ const make = Effect.gen(function* () {
           RpcClientError: () =>
             Effect.fail(new PeerCallError({ channel: channel.name, reason: "disconnected" })),
         }),
+        // RPC scope teardown can interrupt pending entries before the decoder
+        // reports its error. Authentication failure still has a typed outcome.
+        Effect.catchCause((cause) =>
+          Deferred.isDoneUnsafe(connection.failed)
+            ? Effect.fail(new PeerCallError({ channel: channel.name, reason: "disconnected" }))
+            : Effect.failCause(cause),
+        ),
       );
       return yield* decodePeerResult(channel, value);
     }).pipe(Effect.withSpan("HubLink.callHub", { attributes: { channel: channel.name } }));
@@ -420,6 +472,7 @@ const make = Effect.gen(function* () {
           Effect.mapError((cause) => new HubAttemptError({ reason: "unreachable", cause })),
         );
 
+        const frames = new PeerFrameCodec("spoke");
         const opened = yield* Deferred.make<void>();
         const closed = yield* Deferred.make<void>();
         const protocol = yield* Layer.build(
@@ -432,7 +485,7 @@ const make = Effect.gen(function* () {
                 Socket.layerWebSocket(socketUrl(route, ticket)).pipe(
                   Layer.provide(Layer.succeed(Socket.WebSocketConstructor, webSocketConstructor)),
                 ),
-                RpcSerialization.layerJson,
+                Layer.succeed(RpcSerialization.RpcSerialization, frames.serialization),
                 Layer.succeed(RpcClient.ConnectionHooks, {
                   onConnect: Deferred.succeed(opened, undefined).pipe(Effect.asVoid),
                   onDisconnect: Deferred.succeed(closed, undefined).pipe(Effect.asVoid),
@@ -448,20 +501,72 @@ const make = Effect.gen(function* () {
 
         const self = yield* identity.self;
         const nonce = yield* randomNonce;
-        const hello = yield* client[PEER_METHODS.hello]({ nonce, spoke: self }).pipe(
+        const challenge = yield* client[PEER_METHODS.challenge]({
+          version: PEER_PROTOCOL_VERSION,
+        }).pipe(
           Effect.timeout(REQUEST_TIMEOUT),
-          Effect.mapError((cause) => new HubAttemptError({ reason: "unreachable", cause })),
+          Effect.mapError((cause) => new HubAttemptError({ reason: "untrusted", cause })),
         );
+        if (challenge.version !== PEER_PROTOCOL_VERSION)
+          return yield* new HubAttemptError({ reason: "untrusted" });
+        const ephemeral = createPeerEphemeral();
+        const hello = yield* client[PEER_METHODS.hello]({
+          version: PEER_PROTOCOL_VERSION,
+          nonce,
+          spoke: self,
+          accessToken: link.accessToken,
+          proofKey: key.publicJwk,
+          spokeEphemeralKey: ephemeral.publicKey,
+          proof: signPeerProof(
+            key,
+            peerHelloProofTranscript({
+              hubPublicKey: link.hubPublicKey,
+              hubEnvironmentId: link.hubEnvironmentId,
+              spokeKeyThumbprint: key.thumbprint,
+              spoke: self,
+              nonce,
+              accessTokenHash: peerDigest(link.accessToken),
+              challenge,
+              spokeEphemeralKey: ephemeral.publicKey,
+            }),
+          ),
+        }).pipe(
+          Effect.timeout(REQUEST_TIMEOUT),
+          Effect.mapError((cause) => new HubAttemptError({ reason: "untrusted", cause })),
+        );
+        const helloTranscript = peerHelloTranscript({
+          hubPublicKey: link.hubPublicKey,
+          hubEnvironmentId: link.hubEnvironmentId,
+          spokeKeyThumbprint: key.thumbprint,
+          spoke: self,
+          nonce,
+          accessTokenHash: peerDigest(link.accessToken),
+          challenge,
+          spokeEphemeralKey: ephemeral.publicKey,
+          scopes: hello.scopes,
+          expiresAt: DateTime.formatIso(hello.expiresAt),
+          hub: hello.hub,
+        });
         const trusted =
           hello.hubEnvironmentId === link.hubEnvironmentId &&
-          verifyPeerHello({
-            hubPublicKey: link.hubPublicKey,
-            hubEnvironmentId: link.hubEnvironmentId,
-            spokeEnvironmentId: self.environmentId,
-            nonce,
-            signature: hello.signature,
-          });
+          hello.hub.environmentId === link.hubEnvironmentId &&
+          DateTime.formatIso(hello.expiresAt) === DateTime.formatIso(link.expiresAt) &&
+          hello.scopes.length === link.scopes.length &&
+          hello.scopes.every((scope, i) => scope === link.scopes[i]) &&
+          verifyPeerTranscript(link.hubPublicKey, helloTranscript, hello.signature);
         if (!trusted) return yield* new HubAttemptError({ reason: "untrusted" });
+        yield* Effect.try({
+          try: () =>
+            frames.establish(
+              challenge.connectionId,
+              derivePeerSessionKey(
+                ephemeral.privateKey,
+                challenge.hubEphemeralKey,
+                helloTranscript,
+              ),
+            ),
+          catch: (cause) => new HubAttemptError({ reason: "untrusted", cause }),
+        });
 
         const now = yield* DateTime.now;
         yield* withSecrets(
@@ -473,7 +578,7 @@ const make = Effect.gen(function* () {
             routes: [route, ...link.routes.filter((entry) => entry !== route)],
           }),
         ).pipe(Effect.ignore({ log: true }));
-        active = client;
+        active = { client, failed: frames.failed };
         yield* Effect.addFinalizer(() => Effect.sync(() => (active = undefined)));
         yield* setState({ status: "online", route, lastError: null });
 
@@ -495,7 +600,7 @@ const make = Effect.gen(function* () {
           Stream.runForEach(() => identity.self.pipe(Effect.flatMap(ping))),
           Effect.forkScoped,
         );
-        yield* Deferred.await(closed);
+        yield* Effect.raceFirst(Deferred.await(closed), Deferred.await(frames.failed));
         return yield* new HubAttemptError({ reason: "dropped" });
       }),
     );

@@ -1,13 +1,13 @@
-/**
- * The two keys of the peer link. A spoke signs DPoP proofs with its own P-256
- * key, so its peer token is useless without that key. A hub signs each
- * `peer.hello` nonce with its environment Ed25519 key, which the spoke pinned
- * when it joined.
- */
+/** Handshake transcripts, endpoint proofs and ephemeral peer-session keys. */
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no key generation or signing.
 import * as NodeCrypto from "node:crypto";
 
-import { peerHelloSigningInput } from "@t3tools/contracts";
+import {
+  type MachineSelfReport,
+  type AuthPeerScope,
+  type PeerChallengeResult,
+  PEER_PROTOCOL_VERSION,
+} from "@t3tools/contracts";
 import {
   computeDpopAccessTokenHash,
   computeDpopJwkThumbprint,
@@ -148,36 +148,182 @@ export const hubPublicKey = ServerSecretStore.ServerSecretStore.pipe(
   Effect.map((pair) => pair.publicKey.trim()),
 );
 
-export const signPeerHello = Effect.fn("signPeerHello")(function* (input: {
+/** Sorted object keys, preserved array order, UTF-8 JSON; never delimiter concatenation. */
+export function canonicalPeerJson(value: unknown): string {
+  const sort = (json: Schema.Json): Schema.Json =>
+    Array.isArray(json)
+      ? json.map(sort)
+      : json !== null && typeof json === "object"
+        ? Object.fromEntries(
+            Object.entries(json)
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+              .map(([key, value]) => [key, sort(value)]),
+          )
+        : json;
+  return JSON.stringify(
+    sort(Schema.decodeUnknownSync(Schema.Json)(JSON.parse(JSON.stringify(value)))),
+  );
+}
+
+export const peerDigest = (value: string) =>
+  NodeCrypto.createHash("sha256").update(value).digest("base64url");
+
+const transcript = (purpose: string, fields: unknown) =>
+  canonicalPeerJson({ domain: `cogenly-peer-${purpose}`, version: PEER_PROTOCOL_VERSION, fields });
+
+export const peerIdentityTranscript = (input: {
   readonly hubEnvironmentId: string;
   readonly spokeEnvironmentId: string;
   readonly nonce: string;
-}) {
+}) =>
+  transcript("identity", {
+    hubEnvironmentId: input.hubEnvironmentId,
+    spokeEnvironmentId: input.spokeEnvironmentId,
+    nonce: input.nonce,
+  });
+
+export interface PeerJoinProofFields {
+  readonly hubPublicKey: string;
+  readonly hubEnvironmentId: string;
+  readonly spokeKeyThumbprint: string;
+  readonly spoke: MachineSelfReport;
+  readonly nonce: string;
+  readonly grantHash: string;
+}
+
+export const peerJoinProofTranscript = (input: PeerJoinProofFields) =>
+  transcript("join-proof", input);
+
+export interface PeerHandshakeFields {
+  readonly hubPublicKey: string;
+  readonly hubEnvironmentId: string;
+  readonly spokeKeyThumbprint: string;
+  readonly spoke: MachineSelfReport;
+  readonly nonce: string;
+  readonly accessTokenHash: string;
+  readonly scopes: ReadonlyArray<AuthPeerScope>;
+  readonly expiresAt: string;
+  readonly hub: MachineSelfReport;
+}
+
+export const peerJoinTranscript = (input: PeerHandshakeFields & { readonly grantHash: string }) =>
+  transcript("join", input);
+
+export interface PeerHelloProofFields {
+  readonly hubPublicKey: string;
+  readonly hubEnvironmentId: string;
+  readonly spokeKeyThumbprint: string;
+  readonly spoke: MachineSelfReport;
+  readonly nonce: string;
+  readonly accessTokenHash: string;
+  readonly challenge: PeerChallengeResult;
+  readonly spokeEphemeralKey: string;
+}
+
+export const peerHelloProofTranscript = (input: PeerHelloProofFields) =>
+  transcript("hello-proof", input);
+export const peerHelloTranscript = (
+  input: PeerHandshakeFields & {
+    readonly challenge: PeerChallengeResult;
+    readonly spokeEphemeralKey: string;
+  },
+) => transcript("hello", input);
+
+export const signPeerTranscript = Effect.fn("signPeerTranscript")(function* (input: string) {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const pair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(secrets);
   return NodeCrypto.sign(
     null,
-    Buffer.from(peerHelloSigningInput(input)),
+    Buffer.from(input),
     NodeCrypto.createPrivateKey(pair.privateKey),
   ).toString("base64url");
 });
 
-/** True only when `signature` is the pinned hub key's signature over this hello. */
-export function verifyPeerHello(input: {
-  readonly hubPublicKey: string;
-  readonly hubEnvironmentId: string;
-  readonly spokeEnvironmentId: string;
-  readonly nonce: string;
-  readonly signature: string;
-}): boolean {
+export function verifyPeerTranscript(
+  hubPublicKey: string,
+  input: string,
+  signature: string,
+): boolean {
   try {
     return NodeCrypto.verify(
       null,
-      Buffer.from(peerHelloSigningInput(input)),
-      NodeCrypto.createPublicKey(input.hubPublicKey),
-      Buffer.from(input.signature, "base64url"),
+      Buffer.from(input),
+      NodeCrypto.createPublicKey(hubPublicKey),
+      Buffer.from(signature, "base64url"),
     );
   } catch {
     return false;
   }
+}
+
+export const signPeerProof = (key: PeerDpopKey, input: string) =>
+  NodeCrypto.sign("sha256", Buffer.from(input), {
+    key: key.privateKey,
+    dsaEncoding: "ieee-p1363",
+  }).toString("base64url");
+
+export function verifyPeerProof(
+  publicJwk: DpopPublicJwk,
+  thumbprint: string,
+  input: string,
+  proof: string,
+): boolean {
+  try {
+    return (
+      computeDpopJwkThumbprint(publicJwk) === thumbprint &&
+      NodeCrypto.verify(
+        "sha256",
+        Buffer.from(input),
+        {
+          key: NodeCrypto.createPublicKey({ key: publicJwk, format: "jwk" }),
+          dsaEncoding: "ieee-p1363",
+        },
+        Buffer.from(proof, "base64url"),
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Both ephemeral keys are authenticated by the hello transcript and the spoke proof. */
+export const createPeerEphemeral = () => {
+  const key = NodeCrypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+  return {
+    privateKey: key.privateKey,
+    publicKey: key.publicKey.export({ format: "der", type: "spki" }).toString("base64url"),
+  };
+};
+
+export function derivePeerSessionKey(
+  privateKey: NodeCrypto.KeyObject,
+  publicKey: string,
+  helloTranscript: string,
+): Buffer {
+  const remote = NodeCrypto.createPublicKey({
+    key: Buffer.from(publicKey, "base64url"),
+    format: "der",
+    type: "spki",
+  });
+  if (remote.asymmetricKeyType !== "ec" || remote.asymmetricKeyDetails?.namedCurve !== "prime256v1")
+    throw new Error("Invalid peer ECDH key");
+  const shared = NodeCrypto.diffieHellman({ privateKey, publicKey: remote });
+  return Buffer.from(
+    NodeCrypto.hkdfSync(
+      "sha256",
+      shared,
+      Buffer.from(peerDigest(helloTranscript), "base64url"),
+      "cogenly-peer-session:v2",
+      32,
+    ),
+  );
+}
+
+export const peerMac = (key: Buffer, input: unknown) =>
+  NodeCrypto.createHmac("sha256", key).update(canonicalPeerJson(input)).digest("base64url");
+
+export function verifyPeerMac(key: Buffer, input: unknown, mac: string): boolean {
+  const expected = Buffer.from(peerMac(key, input), "base64url");
+  const actual = Buffer.from(mac, "base64url");
+  return actual.length === expected.length && NodeCrypto.timingSafeEqual(actual, expected);
 }

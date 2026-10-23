@@ -15,6 +15,9 @@ import {
   type PeerCallInput,
   type PeerChannel,
   type PeerHelloInput,
+  type PeerChallengeResult,
+  type PeerJoinRequest,
+  PEER_PROTOCOL_VERSION,
   type PeerIdentityRequest,
   type PeerHelloResult,
   type PeerJoinResult,
@@ -47,7 +50,20 @@ import * as MachineIdentity from "./MachineIdentity.ts";
 import { toMachineInfo } from "./machineInfo.ts";
 import * as PeerChannels from "./PeerChannels.ts";
 import { decodePeerResult, encodePeerPayload } from "./PeerChannels.ts";
-import { signPeerHello } from "./peerCrypto.ts";
+import {
+  signPeerTranscript,
+  verifyPeerProof,
+  hubPublicKey,
+  peerDigest,
+  peerIdentityTranscript,
+  peerJoinProofTranscript,
+  peerJoinTranscript,
+  peerHelloProofTranscript,
+  peerHelloTranscript,
+  createPeerEphemeral,
+  derivePeerSessionKey,
+} from "./peerCrypto.ts";
+import { PeerFrameCodec } from "./peerFrames.ts";
 
 export class PeerJoinRefusedError extends Schema.TaggedError<PeerJoinRefusedError>()(
   "PeerJoinRefusedError",
@@ -65,6 +81,10 @@ export class PeerJoinRefusedError extends Schema.TaggedError<PeerJoinRefusedErro
 
 /** The handlers of one open `/peer` socket, served by peerHttp.ts. */
 export interface PeerHubConnection {
+  readonly frames: PeerFrameCodec;
+  readonly challenge: (input: {
+    readonly version: number;
+  }) => Effect.Effect<PeerChallengeResult, PeerProtocolError>;
   readonly hello: (input: PeerHelloInput) => Effect.Effect<PeerHelloResult, PeerProtocolError>;
   readonly ping: (input: {
     readonly spoke?: MachineSelfReport;
@@ -98,6 +118,8 @@ export class PeerHub extends Context.Service<
     >;
     /** Spend a peer grant presented by a spoke whose proof key was verified. */
     readonly redeem: (input: {
+      readonly proofKey: PeerJoinRequest["proofKey"];
+      readonly proof: string;
       readonly grant: string;
       readonly nonce: string;
       readonly proofKeyThumbprint: string;
@@ -173,11 +195,13 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const self = yield* identity.self;
       const signature = yield* withSecrets(
-        signPeerHello({
-          hubEnvironmentId: self.environmentId,
-          spokeEnvironmentId: input.spokeEnvironmentId,
-          nonce: input.nonce,
-        }),
+        signPeerTranscript(
+          peerIdentityTranscript({
+            hubEnvironmentId: self.environmentId,
+            spokeEnvironmentId: input.spokeEnvironmentId,
+            nonce: input.nonce,
+          }),
+        ),
       ).pipe(Effect.mapError(storage("join")));
       return { hubEnvironmentId: self.environmentId, signature };
     });
@@ -280,9 +304,6 @@ const make = Effect.gen(function* () {
       return false;
     });
 
-  // The grant reached the spoke through an admin client signed in to both
-  // servers. The nonce signature lets the spoke check it reached the hub that
-  // client named, by the key it pins from then on.
   // This hub's own name or kind changed: spokes list it too.
   yield* identity.changes.pipe(
     Stream.runForEach(() => publishChange),
@@ -298,6 +319,23 @@ const make = Effect.gen(function* () {
     if (input.spoke.environmentId === self.environmentId) {
       return yield* new PeerJoinRefusedError({ reason: "grant-rejected" });
     }
+    const publicKey = yield* withSecrets(hubPublicKey).pipe(Effect.mapError(storage("join")));
+    if (
+      !verifyPeerProof(
+        input.proofKey,
+        input.proofKeyThumbprint,
+        peerJoinProofTranscript({
+          hubPublicKey: publicKey,
+          hubEnvironmentId: self.environmentId,
+          spokeKeyThumbprint: input.proofKeyThumbprint,
+          spoke: input.spoke,
+          nonce: input.nonce,
+          grantHash: peerDigest(input.grant),
+        }),
+        input.proof,
+      )
+    )
+      return yield* new PeerJoinRefusedError({ reason: "grant-rejected" });
     const issued = yield* auth
       .redeemPeerGrant({
         credential: input.grant,
@@ -333,18 +371,28 @@ const make = Effect.gen(function* () {
         paired_at = excluded.paired_at,
         last_seen_at = excluded.last_seen_at`.pipe(Effect.mapError(storage("join")));
     yield* publishChange;
+    const grantedScopes = issued.session.scopes.filter(isAuthPeerScope);
     const signature = yield* withSecrets(
-      signPeerHello({
-        hubEnvironmentId: self.environmentId,
-        spokeEnvironmentId: input.spoke.environmentId,
-        nonce: input.nonce,
-      }),
+      signPeerTranscript(
+        peerJoinTranscript({
+          hubPublicKey: publicKey,
+          hubEnvironmentId: self.environmentId,
+          spokeKeyThumbprint: input.proofKeyThumbprint,
+          spoke: input.spoke,
+          nonce: input.nonce,
+          grantHash: peerDigest(input.grant),
+          accessTokenHash: peerDigest(issued.token),
+          expiresAt: DateTime.formatIso(issued.expiresAt),
+          scopes: grantedScopes,
+          hub: self,
+        }),
+      ),
     ).pipe(Effect.mapError(storage("join")));
     return {
       accessToken: issued.token,
       expiresAt: issued.expiresAt,
       hubEnvironmentId: self.environmentId,
-      scopes: issued.session.scopes.filter(isAuthPeerScope),
+      scopes: grantedScopes,
       signature,
       hub: self,
     } satisfies PeerJoinResult;
@@ -416,6 +464,23 @@ const make = Effect.gen(function* () {
   const connect: PeerHub["Service"]["connect"] = (session) =>
     Effect.gen(function* () {
       const scope = yield* Effect.scope;
+      const frames = new PeerFrameCodec("hub");
+      const ephemeral = createPeerEphemeral();
+      const challengeResult: PeerChallengeResult = {
+        version: PEER_PROTOCOL_VERSION,
+        connectionId: yield* crypto.randomUUIDv4().pipe(Effect.orDie),
+        hubEphemeralKey: ephemeral.publicKey,
+      };
+      let challenged = false;
+      let helloStarted = false;
+      const challenge: PeerHubConnection["challenge"] = (input) =>
+        Effect.suspend(() => {
+          if (input.version !== PEER_PROTOCOL_VERSION)
+            return Effect.fail(new PeerProtocolError({ reason: "version-mismatch" }));
+          if (challenged) return Effect.fail(new PeerProtocolError({ reason: "invalid-proof" }));
+          challenged = true;
+          return Effect.succeed(challengeResult);
+        });
       const scopes = session.scopes.filter(isAuthPeerScope);
       const closed = yield* Deferred.make<void>();
       const inboxDone = yield* Deferred.make<void>();
@@ -452,14 +517,63 @@ const make = Effect.gen(function* () {
           if (row.environmentId !== input.spoke.environmentId) {
             return yield* new PeerProtocolError({ reason: "machine-mismatch" });
           }
+          if (input.version !== PEER_PROTOCOL_VERSION)
+            return yield* new PeerProtocolError({ reason: "version-mismatch" });
+          if (!challenged || helloStarted)
+            return yield* new PeerProtocolError({ reason: "invalid-proof" });
+          helloStarted = true;
+          // A socket ticket selects the session; it is not proof of key possession.
+          const credential = yield* sessions
+            .verify(input.accessToken)
+            .pipe(Effect.mapError(() => new PeerProtocolError({ reason: "invalid-proof" })));
           const self = yield* identity.self;
-          const signature = yield* withSecrets(
-            signPeerHello({
-              hubEnvironmentId: self.environmentId,
-              spokeEnvironmentId: row.environmentId,
-              nonce: input.nonce,
-            }),
-          ).pipe(Effect.orDie);
+          const publicKey = yield* withSecrets(hubPublicKey).pipe(Effect.orDie);
+          if (
+            credential.sessionId !== session.sessionId ||
+            credential.subject !== "peer" ||
+            credential.method !== "dpop-access-token" ||
+            credential.proofKeyThumbprint === undefined ||
+            credential.expiresAt === undefined ||
+            !verifyPeerProof(
+              input.proofKey,
+              credential.proofKeyThumbprint,
+              peerHelloProofTranscript({
+                hubPublicKey: publicKey,
+                hubEnvironmentId: self.environmentId,
+                spokeKeyThumbprint: credential.proofKeyThumbprint,
+                spoke: input.spoke,
+                nonce: input.nonce,
+                accessTokenHash: peerDigest(input.accessToken),
+                challenge: challengeResult,
+                spokeEphemeralKey: input.spokeEphemeralKey,
+              }),
+              input.proof,
+            )
+          )
+            return yield* new PeerProtocolError({ reason: "invalid-proof" });
+          const expiresAt = DateTime.toUtc(credential.expiresAt);
+          const helloTranscript = peerHelloTranscript({
+            hubPublicKey: publicKey,
+            hubEnvironmentId: self.environmentId,
+            spokeKeyThumbprint: credential.proofKeyThumbprint,
+            spoke: input.spoke,
+            nonce: input.nonce,
+            accessTokenHash: peerDigest(input.accessToken),
+            challenge: challengeResult,
+            spokeEphemeralKey: input.spokeEphemeralKey,
+            scopes,
+            expiresAt: DateTime.formatIso(expiresAt),
+            hub: self,
+          });
+          const sessionKey = yield* Effect.try({
+            try: () =>
+              derivePeerSessionKey(ephemeral.privateKey, input.spokeEphemeralKey, helloTranscript),
+            catch: () => new PeerProtocolError({ reason: "invalid-proof" }),
+          });
+          const signature = yield* withSecrets(signPeerTranscript(helloTranscript)).pipe(
+            Effect.orDie,
+          );
+          frames.establish(challengeResult.connectionId, sessionKey);
           if (current === undefined) {
             const connection: LiveConnection = {
               id: nextConnectionId++,
@@ -489,7 +603,7 @@ const make = Effect.gen(function* () {
           yield* Queue.offer(heartbeat, undefined);
           yield* touch(row.environmentId, input.spoke);
           yield* publishChange;
-          return { hubEnvironmentId: self.environmentId, signature, hub: self };
+          return { hubEnvironmentId: self.environmentId, signature, hub: self, scopes, expiresAt };
         }).pipe(Effect.withSpan("PeerHub.hello"));
 
       const ping: PeerHubConnection["ping"] = (input) =>
@@ -576,6 +690,8 @@ const make = Effect.gen(function* () {
       );
 
       return {
+        frames,
+        challenge,
         hello,
         ping,
         machines,
