@@ -1,3 +1,4 @@
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -117,10 +118,27 @@ const RpcResponse = Schema.Struct({
 });
 const decodeResponse = Schema.decodeUnknownOption(Schema.fromJsonString(RpcResponse));
 
+const ProcessOwner = Schema.Struct({
+  pid: Schema.Int.check(Schema.isGreaterThan(1)),
+  identity: Schema.String.check(Schema.isMinLength(1)),
+  port: Schema.Int,
+});
+const decodeOwner = Schema.decodeUnknownEffect(Schema.fromJsonString(ProcessOwner));
+
+// stdin is an OS liveness pipe. The watchdog survives SIGKILL of Cogenly and
+// signals only the recorded process group after verifying its start identity.
+const parentWatchScript = `
+  IFS= read -r ignored
+  current=$(LC_ALL=C TZ=UTC ps -p "$1" -o lstart= -o comm=)
+  [ "$current" = "$2" ] && kill -KILL -"$1"
+  exit 0
+`;
+
 const make = (
   options: { readonly restartDelayMs?: number; readonly requestTimeoutMs?: number } = {},
 ) =>
   Effect.gen(function* () {
+    const platform = yield* HostProcess.Platform;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -143,6 +161,61 @@ const make = (
         };
         yield* PubSub.publish(updates, { id: account.spec.id, status: account.status });
       });
+    const ownerFile = (spec: LocalMcpSpec) => path.join(spec.directory, "process.json");
+    const identityOf = (pid: number) =>
+      spawner
+        .string(
+          ChildProcess.make(
+            platform === "win32" ? "powershell.exe" : "ps",
+            platform === "win32"
+              ? [
+                  "-NoProfile",
+                  "-NonInteractive",
+                  "-Command",
+                  `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`,
+                ]
+              : ["-p", String(pid), "-o", "lstart=", "-o", "comm="],
+            { env: { LC_ALL: "C", TZ: "UTC" }, extendEnv: true },
+          ),
+        )
+        .pipe(
+          Effect.map((text) => text.trim()),
+          Effect.timeout("2 seconds"),
+        );
+    const reconcile = (spec: LocalMcpSpec) =>
+      Effect.gen(function* () {
+        if (!(yield* fs.exists(ownerFile(spec)))) return;
+        const previous = yield* fs
+          .readFileString(ownerFile(spec))
+          .pipe(Effect.flatMap(decodeOwner), Effect.option);
+        if (previous._tag === "Some") {
+          const owner = previous.value;
+          const identity = yield* identityOf(owner.pid).pipe(Effect.option);
+          if (identity._tag === "Some" && identity.value === owner.identity) {
+            if (platform === "win32")
+              yield* spawner.exitCode(
+                ChildProcess.make("taskkill", ["/PID", String(owner.pid), "/T", "/F"]),
+              );
+            else yield* Effect.try(() => process.kill(-owner.pid, "SIGKILL"));
+          }
+        }
+        yield* fs.remove(ownerFile(spec), { force: true });
+      });
+    const watchParent = (pid: number, identity: string) =>
+      spawner.spawn(
+        ChildProcess.make(
+          platform === "win32" ? "powershell.exe" : "/bin/sh",
+          platform === "win32"
+            ? [
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                `$null = [Console]::In.ReadToEnd(); $p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p -and $p.StartTime.ToUniversalTime().ToString('o') -eq '${identity}') { taskkill /PID ${pid} /T /F }`,
+              ]
+            : ["-c", parentWatchScript, "cogenly-mcp-parent", String(pid), identity],
+          { stdin: "pipe", stdout: "ignore", stderr: "ignore" },
+        ),
+      );
     const stop = (id: string) =>
       lock.withPermits(1)(
         Effect.gen(function* () {
@@ -151,6 +224,7 @@ const make = (
           accounts.delete(id);
           yield* Deferred.fail(account.ready, error(account.spec, "not_running"));
           yield* Scope.close(account.scope, Exit.void);
+          yield* fs.remove(ownerFile(account.spec), { force: true }).pipe(Effect.ignore);
           yield* changed(account, "stopped");
         }),
       );
@@ -237,6 +311,20 @@ const make = (
                   }),
                 )
                 .pipe(Effect.mapError((cause) => error(spec, "start_failed", cause)));
+              const identity = yield* identityOf(child.pid).pipe(
+                Effect.mapError((cause) => error(spec, "start_failed", cause)),
+              );
+              if (!identity) return yield* error(spec, "start_failed");
+              yield* fs
+                .writeFileString(
+                  ownerFile(spec),
+                  encodeJson({ pid: child.pid, identity, port: spec.port }),
+                  { mode: 0o600 },
+                )
+                .pipe(Effect.mapError((cause) => error(spec, "start_failed", cause)));
+              yield* watchParent(child.pid, identity).pipe(
+                Effect.mapError((cause) => error(spec, "start_failed", cause)),
+              );
               const output = (stream: typeof child.stderr) => {
                 const redactor = createOutputRedactor(spec.secrets);
                 const retain = (text: string) =>
@@ -423,6 +511,7 @@ const make = (
             }
             yield* fs.makeDirectory(spec.directory, { recursive: true, mode: 0o700 });
             yield* fs.chmod(spec.directory, 0o700);
+            yield* reconcile(spec);
             yield* Effect.forkIn(supervise(account).pipe(Effect.ignore), scope);
           }).pipe(
             Effect.mapError((cause) =>

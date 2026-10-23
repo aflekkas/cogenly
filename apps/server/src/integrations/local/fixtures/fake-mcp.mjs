@@ -1,7 +1,12 @@
+import * as NodeNet from "node:net";
 import * as NodeHttp from "node:http";
 import * as NodeReadline from "node:readline";
 import * as NodeFS from "node:fs";
 import * as NodeCrypto from "node:crypto";
+
+if (process.env.FIXTURE_LIVENESS_PORT) {
+  NodeNet.connect(Number(process.env.FIXTURE_LIVENESS_PORT), "127.0.0.1");
+}
 
 let initialized = false;
 let authCount = 0;

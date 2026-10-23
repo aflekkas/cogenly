@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -8,6 +9,9 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient } from "effect/http";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as NodeNet from "node:net";
 import * as Runner from "./LocalMcpRunner.ts";
 
 const layer = Runner.layerWith({ restartDelayMs: 10, requestTimeoutMs: 1000 }).pipe(
@@ -129,6 +133,113 @@ describe("LocalMcpRunner", () => {
       }).pipe(Effect.scoped, Effect.provide(layer));
       expect(() => process.kill(pid, 0)).toThrow();
     }),
+  );
+
+  it.live("the liveness pipe terminates the managed child after its server is killed", () =>
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const spec = yield* specFor("stdio");
+      const disconnected = yield* Deferred.make<void>();
+      const listener = NodeNet.createServer();
+      yield* Effect.acquireRelease(
+        Effect.callback<number>((resume) => {
+          listener.listen(0, "127.0.0.1");
+          listener.once("listening", () =>
+            resume(Effect.succeed((listener.address() as NodeNet.AddressInfo).port)),
+          );
+        }),
+        () => Effect.sync(() => listener.close()),
+      );
+      const port = (listener.address() as NodeNet.AddressInfo).port;
+      // The fixture's connection closes on process death, giving the test an
+      // observable milestone without polling for a PID or waiting on a sleep.
+      const closed = Effect.callback<void>((resume) => {
+        listener.once("connection", (socket) => {
+          socket.once("close", () =>
+            resume(Deferred.succeed(disconnected, undefined).pipe(Effect.asVoid)),
+          );
+          socket.resume();
+        });
+      });
+      const closeWaiter = yield* closed.pipe(Effect.forkScoped);
+      const script = `
+        import * as Effect from "effect/Effect";
+        import * as Layer from "effect/Layer";
+        import * as NodeServices from "@effect/platform-node/NodeServices";
+        import { FetchHttpClient } from "effect/http";
+        import * as Runner from ${JSON.stringify(new URL("./LocalMcpRunner.ts", import.meta.url).href)};
+        const layer = Runner.layer.pipe(Layer.provide(FetchHttpClient.layer), Layer.provide(NodeServices.layer));
+        await Effect.runPromise(Effect.gen(function* () {
+          const runner = yield* Runner.LocalMcpRunner;
+          yield* runner.start(${JSON.stringify({ ...spec, env: { ...spec.env, FIXTURE_LIVENESS_PORT: String(port) } })});
+          yield* runner.rpc("account", "tools/list", {});
+          console.log("ready");
+          yield* Effect.never;
+        }).pipe(Effect.scoped, Effect.provide(layer)));
+      `;
+      const parent = yield* spawner.spawn(
+        ChildProcess.make(process.execPath, ["--input-type=module", "-e", script], {
+          cwd: new URL("../../../", import.meta.url).pathname,
+          stderr: "inherit",
+        }),
+      );
+      yield* parent.stdout.pipe(
+        Stream.decodeText(),
+        Stream.splitLines,
+        Stream.filter((line) => line === "ready"),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      yield* parent.kill({ killSignal: "SIGKILL" });
+      yield* Fiber.join(closeWaiter);
+      expect(yield* Deferred.isDone(disconnected)).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+
+  it.live.each([true, false])(
+    "reconciles a persisted owner only when its identity matches (%s)",
+    (matches) =>
+      Effect.gen(function* () {
+        const runner = yield* Runner.LocalMcpRunner;
+        const fs = yield* FileSystem.FileSystem;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const spec = yield* specFor("stdio");
+        const old = yield* spawner.spawn(
+          ChildProcess.make(spec.runtime, [...spec.args], {
+            cwd: spec.directory,
+            env: spec.env,
+            extendEnv: false,
+            stdin: "pipe",
+          }),
+        );
+        const identity = (yield* spawner.string(
+          ChildProcess.make("ps", ["-p", String(old.pid), "-o", "lstart=", "-o", "comm="], {
+            env: { LC_ALL: "C", TZ: "UTC" },
+            extendEnv: true,
+          }),
+        )).trim();
+        yield* fs.writeFileString(
+          `${spec.directory}/process.json`,
+          JSON.stringify({
+            pid: old.pid,
+            identity: matches ? identity : "another process",
+            port: spec.port,
+          }),
+        );
+        yield* runner.start(spec);
+        yield* runner.rpc(spec.id, "tools/list", {});
+        expect(yield* old.isRunning).toBe(!matches);
+        const owner = yield* Schema.decodeUnknownEffect(
+          Schema.fromJsonString(
+            Schema.Struct({ pid: Schema.Number, identity: Schema.String, port: Schema.Number }),
+          ),
+        )(yield* fs.readFileString(`${spec.directory}/process.json`));
+        expect(owner.pid).not.toBe(old.pid);
+        expect(owner.port).toBe(spec.port);
+        expect(owner.identity).not.toBe("");
+        yield* runner.stop(spec.id);
+        expect(yield* fs.exists(`${spec.directory}/process.json`)).toBe(false);
+      }).pipe(Effect.scoped, Effect.provide(layer)),
   );
 
   it.live("fails calls immediately after a state directory cannot be created", () =>
